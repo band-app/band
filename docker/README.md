@@ -46,8 +46,10 @@ For a real server deployment use `deploy/compose/` instead.
 
 ## Add a project
 
-The container **auto-creates and registers a `sample` project** at
-`/data/projects/sample` on first boot, so there's always something to open.
+With `BAND_LOCAL_HOST=on` the container **auto-creates and registers a
+`sample` project** at `/data/projects/sample` on first boot. The image default
+is `off`: workspaces run on workers and no sample project is created. Set
+`BAND_LOCAL_HOST=on` to run workspaces in the container.
 To add more, note: a "project" is just a directory the server can see (a git
 repo, or a plain folder — plain folders get a single implicit workspace).
 

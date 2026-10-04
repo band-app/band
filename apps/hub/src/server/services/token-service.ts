@@ -21,6 +21,7 @@ import {
   TokenQueries,
   type TokenRow,
 } from "../infra/db/queries/tokens";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 
 const log = createLogger("token-service");
 
@@ -65,6 +66,8 @@ export interface HostView {
   createdAt: number;
   /** What the worker reported when it connected (os, arch, roots, capabilities), or null before it has. */
   info: HostRow["info"];
+  /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
+  usable: boolean;
 }
 
 /** Why `exchangeBootstrap` refused. The link only ever shows the worker a generic reason. */
@@ -300,6 +303,7 @@ export class TokenService {
       version: h.version,
       createdAt: h.createdAt,
       info: h.info,
+      usable: h.id !== "local" || isLocalHostEnabled(),
     }));
   }
 

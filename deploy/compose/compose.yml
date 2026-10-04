@@ -23,12 +23,17 @@ services:
     environment:
       # Empty means the hub mints an admin token on the first run and prints it once.
       BAND_ADMIN_TOKEN: ${BAND_ADMIN_TOKEN:-}
+      # off: every workspace runs on a worker and no sample project is created.
+      # Set to on to also run workspaces inside this container.
+      BAND_LOCAL_HOST: ${BAND_LOCAL_HOST:-off}
+      # The worker id that new workspaces use when none is chosen (default: the only online worker).
+      BAND_DEFAULT_HOST: ${BAND_DEFAULT_HOST:-}
       # Set to false to run the hub as an API only (the UI is hosted elsewhere).
       BAND_SERVE_UI: ${BAND_SERVE_UI:-true}
       # Comma-separated origins of a UI hosted elsewhere (CORS and WebSocket check).
       BAND_ALLOWED_ORIGINS: ${BAND_ALLOWED_ORIGINS:-}
     volumes:
-      # BAND_HOME: database, settings, tokens, sample project.
+      # BAND_HOME: database, settings, tokens.
       - band-data:/data
       # Mount a repo to register it as a project:
       # - /srv/repos/myrepo:/projects/myrepo

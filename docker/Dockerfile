@@ -81,6 +81,7 @@ RUN chmod +x /usr/local/bin/band-entrypoint.sh
 # prints it once, or takes BAND_ADMIN_TOKEN from the environment.
 ENV NODE_ENV=production \
     PORT=3456 \
+    BAND_LOCAL_HOST=off \
     HOME=/data
 EXPOSE 3456
 ENTRYPOINT ["/usr/local/bin/band-entrypoint.sh"]

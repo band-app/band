@@ -606,6 +606,9 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' $base/api/health)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" $base/)" = 200
           curl -s -H "$auth" "$base/trpc/projects.list" | grep -q '"result"'
+          # Local workspaces are off by default, so there is no sample project.
+          if curl -s -H "$auth" "$base/trpc/projects.list" | grep -q sample; then echo 'sample project registered'; exit 1; fi
+          curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"usable":false'
 
       - name: Compose keeps data across a recreate
         working-directory: deploy/compose
@@ -615,8 +618,7 @@ jobs:
           BAND_ADMIN_TOKEN: ci-compose-token
         run: |
           auth='Authorization: Bearer ci-compose-token'
-          # The sample project is registered on every boot, so add one the
-          # entrypoint knows nothing about.
+          # Add a project the entrypoint knows nothing about.
           docker compose exec -T band sh -c 'mkdir -p /data/projects/persisted && cd /data/projects/persisted && git init -q && git commit -q --allow-empty -m init'
           docker compose exec -T band band projects add /data/projects/persisted
           curl -s -H "$auth" http://127.0.0.1:3466/trpc/projects.list | grep -q persisted
