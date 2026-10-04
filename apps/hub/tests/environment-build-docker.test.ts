@@ -2,8 +2,8 @@
 // The stubbed flow is covered in `environment-build.test.ts`. This file checks
 // what the stub cannot: that the commands the builder constructs work, that the
 // worker layer and the result of `install` end up in the image, and that a second
-// build is a cache hit. It skips, with the reason in the test name, when no Docker
-// daemon answers or the base image cannot be pulled.
+// build is a cache hit. It skips when no Docker daemon answers or the base image cannot be pulled,
+// except on Linux CI (`CI=true`), where that is a failure.
 //
 // Real production server, real git repo, real SQLite, temp BAND_HOME, real docker.
 
@@ -44,6 +44,14 @@ function dockerReady(): boolean {
 }
 
 const available = dockerReady();
+// The Linux CI runners have Docker, so a missing daemon there is a broken job and
+// the test must fail, not skip. Elsewhere (a laptop, the macOS runners) it skips.
+const mustRun = process.env.CI === "true" && process.platform === "linux";
+if (mustRun && !available) {
+  throw new Error(
+    `CI on Linux requires a Docker daemon with ${BASE} for environment-build-docker.test.ts, but none answered`,
+  );
+}
 const suite = available ? describe : describe.skip;
 
 let home: string;
