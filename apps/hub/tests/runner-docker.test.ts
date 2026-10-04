@@ -6,7 +6,10 @@
 // It needs a docker daemon, the worker image (docker/worker.Dockerfile) and a
 // container that can reach this machine's loopback (`--network host` on Linux,
 // which is what the CI docker job has). Set BAND_DOCKER_TEST_IMAGE to the image
-// name to run it; without it the file is skipped. On a machine whose docker runs
+// name to run it; without it the file is skipped, except on Linux CI (`CI=true`),
+// where a missing image or daemon is a failure. The CI `docker` job builds the
+// image and runs this file. The jobs that run the whole hub suite set
+// BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB=1, which skips it there. On a machine whose docker runs
 // in a VM (colima, Docker Desktop), an ssh -R tunnel can put the hub and the git
 // daemon on the VM's loopback. BAND_DOCKER_TEST_PORT and BAND_DOCKER_TEST_GIT_PORT
 // fix the ports they listen on here, and BAND_DOCKER_TEST_HUB_URL and
@@ -138,6 +141,27 @@ const containerOf = (hostId: string) => {
   const id = docker("ps", "--quiet", "--filter", `label=band.worker=${hostId}`);
   return id.split("\n").filter(Boolean);
 };
+
+function dockerHas(image: string): boolean {
+  try {
+    docker("image", "inspect", image);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Linux CI has docker, so a missing image or daemon there is a broken job, not a reason to skip.
+const mustRun =
+  process.env.CI === "true" &&
+  process.platform === "linux" &&
+  !process.env.BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB;
+if (mustRun && !(IMAGE && dockerHas(IMAGE))) {
+  throw new Error(
+    "CI on Linux requires runner-docker.test.ts to run: set BAND_DOCKER_TEST_IMAGE to a worker image " +
+      `a docker daemon has (got "${IMAGE}"), or set BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB=1 in a job that does not build it`,
+  );
+}
 
 describe.skipIf(!IMAGE)("the docker hook", () => {
   beforeAll(async () => {

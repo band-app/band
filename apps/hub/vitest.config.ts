@@ -18,6 +18,10 @@ export default defineConfig({
     env: {
       BAND_TEST_ACP_AGENT: resolve(import.meta.dirname, "tests/fixtures/acp-stub-agent.mjs"),
     },
-    exclude: ["**/node_modules/**"],
+    exclude: [
+      "**/node_modules/**",
+      // Needs the worker image, which only the CI `docker` job builds and runs it from.
+      ...(process.env.BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB ? ["tests/runner-docker.test.ts"] : []),
+    ],
   },
 });

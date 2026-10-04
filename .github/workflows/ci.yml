@@ -59,6 +59,8 @@ jobs:
 
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
 
     steps:
       - name: Checkout
@@ -328,6 +330,7 @@ jobs:
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       BAND_TEST_HOST: remote-loopback
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
       BAND_WORKER_USE_DIST: "1"
     steps:
       - name: Checkout
