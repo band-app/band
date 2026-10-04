@@ -228,8 +228,9 @@ export class TokenService {
    */
   authenticate = (hello: Hello): AuthResult => {
     for (const candidate of [hello.token, hello.sessionToken]) {
+      if (!candidate) continue;
       const row = this.live(candidate, "worker_session");
-      if (row && row.hostId === hello.workerId && candidate) {
+      if (row && row.hostId === hello.workerId) {
         this.touch(row);
         this.queries.markHostSeen(hello.workerId, this.now());
         return { ok: true, sessionToken: candidate };

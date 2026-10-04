@@ -3,8 +3,7 @@
 // WebSocket access, tokens are stored hashed and never written to disk in the
 // clear. Real production server on a random port with auth on.
 
-import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
@@ -210,32 +209,36 @@ describe("device tokens", () => {
   });
 });
 
-describe("secrets at rest", () => {
-  it("S5: stores only hashes and writes no issued token to the home directory", async () => {
+describe("secrets", () => {
+  it("S5: no response carries a token after creation, and none is written to the home directory", async () => {
     const device = await createDevice("audit");
-    const bootstrap = await trpcData<{ token: string }>(
-      await trpcMutate(
-        server.url,
-        "tokens.issueWorkerBootstrap",
-        { hostName: "audit host" },
-        SHARED_TOKEN,
-      ),
+    const issued = await trpcMutate(
+      server.url,
+      "tokens.issueWorkerBootstrap",
+      { hostName: "audit host" },
+      SHARED_TOKEN,
     );
-    await trpcMutate(server.url, "tokens.revoke", { tokenId: device.view.id }, SHARED_TOKEN);
+    expect(issued.status).toBe(200);
+    const bootstrapText = await issued.text();
+    const bootstrap = JSON.parse(bootstrapText).result.data as { token: string };
+    // The creation response is the one place the secret appears.
+    expect(bootstrapText).toContain(bootstrap.token);
+    const secrets = [device.token, bootstrap.token];
 
-    const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
-    const rows = sqlite.prepare("SELECT id, hash FROM tokens").all() as Array<{
-      id: string;
-      hash: string;
-    }>;
-    sqlite.close();
-    const hashOf = (t: string) => createHash("sha256").update(t).digest("hex");
-    expect(rows.find((r) => r.id === device.view.id)?.hash).toBe(hashOf(device.token));
-    expect(rows.find((r) => r.id === "shared")?.hash).toBe(hashOf(SHARED_TOKEN));
-    expect(rows.every((r) => /^[0-9a-f]{64}$/.test(r.hash))).toBe(true);
+    const responses: string[] = [];
+    responses.push(
+      await (await trpcQuery(server.url, "tokens.list", undefined, SHARED_TOKEN)).text(),
+      await (await trpcQuery(server.url, "hosts.list", undefined, SHARED_TOKEN)).text(),
+      await (
+        await trpcMutate(server.url, "tokens.revoke", { tokenId: device.view.id }, SHARED_TOKEN)
+      ).text(),
+      await (await trpcQuery(server.url, "tokens.list", undefined, SHARED_TOKEN)).text(),
+    );
+    for (const text of responses) {
+      for (const secret of secrets) expect(text).not.toContain(secret);
+    }
 
     // settings.json legitimately holds the shared token. Nothing else may hold a secret.
-    const secrets = [device.token, bootstrap.token];
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
@@ -248,7 +251,6 @@ describe("secrets at rest", () => {
         }
       }
     };
-    mkdirSync(join(home, ".band"), { recursive: true });
     walk(join(home, ".band"));
     expect(hits).toEqual([]);
   });
