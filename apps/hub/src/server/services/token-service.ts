@@ -65,6 +65,40 @@ export interface HostView {
   createdAt: number;
   /** What the worker reported when it connected (os, arch, roots, capabilities), or null before it has. */
   info: HostRow["info"];
+  /** Coding agents the worker can launch, from its hello. Empty before it has connected. */
+  agents: string[];
+  /** Directories the worker serves workspaces from. */
+  roots: string[];
+  /** What the worker can do: `git`, `gh`, `pty`, `acp` and so on. */
+  capabilities: string[];
+  /** The worker's home directory, or null when it has not said. */
+  home: string | null;
+}
+
+/** Why `removeHost` refused. */
+export class HostRemoveError extends Error {
+  constructor(
+    readonly reason: "not-found" | "local" | "online" | "has-workspaces",
+    message: string,
+  ) {
+    super(message);
+    this.name = "HostRemoveError";
+  }
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** Capabilities are stored as `{ git: true, ... }` (host info) or `["git", ...]` (hello). Returns the enabled names. */
+function capabilityNames(value: unknown): string[] {
+  if (Array.isArray(value)) return stringList(value);
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([, on]) => on === true)
+      .map(([name]) => name);
+  }
+  return [];
 }
 
 /** Why `exchangeBootstrap` refused. The link only ever shows the worker a generic reason. */
@@ -300,7 +334,39 @@ export class TokenService {
       version: h.version,
       createdAt: h.createdAt,
       info: h.info,
+      agents: stringList(h.info?.agents),
+      roots: stringList(h.info?.roots),
+      capabilities: capabilityNames(h.info?.capabilities),
+      home: typeof h.info?.home === "string" ? h.info.home : null,
     }));
+  }
+
+  /**
+   * Removes a worker host: only an offline one with no workspaces. Revokes its
+   * live tokens first (which cuts any link still open), then deletes the row.
+   * Returns the removed host's id.
+   */
+  removeHost(id: string): string {
+    const host = this.queries.findHost(id);
+    if (!host) throw new HostRemoveError("not-found", `No host "${id}"`);
+    if (id === "local") throw new HostRemoveError("local", "The local host cannot be removed");
+    if (host.status === "online" || host.status === "lost") {
+      throw new HostRemoveError(
+        "online",
+        `Host "${host.name}" is ${host.status}. Stop its worker and wait until it is offline before removing it.`,
+      );
+    }
+    const workspaces = this.queries.countWorkspacesOnHost(id);
+    if (workspaces > 0) {
+      throw new HostRemoveError(
+        "has-workspaces",
+        `Host "${host.name}" still has ${workspaces} workspace${workspaces === 1 ? "" : "s"}. Remove them first.`,
+      );
+    }
+    for (const token of this.queries.listLiveTokensForHost(id)) this.revoke(token.id);
+    this.queries.deleteHost(id);
+    log.info(`removed host ${id}`);
+    return id;
   }
 
   /** Revokes a token and closes the sockets it opened. Revoking a revoked token is a no-op. */

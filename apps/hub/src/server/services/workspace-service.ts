@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { join, posix } from "node:path";
 import { resumeCliInvocation } from "@band-app/coding-agent";
-import { type Host, HostOfflineError } from "@band-app/host-api";
+import { type Host, HostOfflineError, HostPathDeniedError } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX } from "@band-app/host-local/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "@band-app/host-local/git/git-refusals";
 import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
@@ -288,6 +288,35 @@ async function pullRebase(execGit: CommandRun, cwd: string): Promise<GitOpResult
   return { ok: true };
 }
 
+/** " Roots: /a, /b" for an error message, or nothing when the host serves any path. */
+function rootsHint(roots: string[]): string {
+  return roots.length > 0 ? ` Allowed roots: ${roots.join(", ")}.` : "";
+}
+
+/**
+ * A path the user typed for a remote host. A leading `~` means the host's home
+ * directory (the worker reports it), not the hub's. Anything else must be
+ * absolute, because the hub can't resolve a relative path on another machine.
+ */
+export function expandHome(given: string, home: string | undefined, hostId: string): string {
+  const path = given.trim();
+  if (path === "~" || path.startsWith("~/")) {
+    if (!home) {
+      throw new Error(
+        `Host "${hostId}" did not report its home directory, so "${path}" cannot be expanded. Use an absolute path.`,
+      );
+    }
+    return path === "~" ? home : posix.join(home, path.slice(2));
+  }
+  if (path.startsWith("~")) {
+    throw new Error(`"${path}" is not supported. Use an absolute path on host "${hostId}".`);
+  }
+  if (!posix.isAbsolute(path) && !/^[A-Za-z]:[\\/]/.test(path)) {
+    throw new Error(`"${path}" is relative. Use an absolute path on host "${hostId}".`);
+  }
+  return path;
+}
+
 export class WorkspaceService {
   private readonly pendingRemovals = new PendingRemovalQueries();
 
@@ -347,8 +376,14 @@ export class WorkspaceService {
     given: string | undefined,
   ): Promise<string> {
     if (given !== undefined) {
-      const resolved = await host.fs.realpath(given).catch(() => {
-        throw new Error(`Host "${host.id}" has no directory ${given}`);
+      const info = await host.info();
+      const where = rootsHint(info.roots);
+      const path = expandHome(given, info.home, host.id);
+      const resolved = await host.fs.realpath(path).catch((err: unknown) => {
+        if (err instanceof HostPathDeniedError) {
+          throw new Error(`${path} is outside the directories host "${host.id}" serves.${where}`);
+        }
+        throw new Error(`Host "${host.id}" has no directory ${path}.${where}`);
       });
       hostRegistry.setProjectPathOn(projectName, host.id, resolved);
       return resolved;

@@ -138,12 +138,17 @@ export class WorkerLinkService {
     }
     // The worker may have dropped while we asked.
     if (this.server.getSession(workerId) !== session || !session.attached) return;
-    this.queries.markHostOnline(workerId, at, {
-      info: info
-        ? ({ ...info, agents: hello.agents, mode: hello.mode } as Record<string, unknown>)
-        : null,
-      version: hello.buildId,
-    });
+    // The hello alone says what the worker offers, so a failed `host.info` call
+    // still leaves the host row with its agents, roots and capabilities.
+    const stored: Record<string, unknown> = {
+      ...(info ?? {}),
+      roots: info?.roots ?? hello.roots,
+      capabilities: info?.capabilities ?? hello.capabilities,
+      labels: info?.labels ?? Object.entries(hello.labels).map(([k, v]) => `${k}=${v}`),
+      agents: hello.agents,
+      mode: hello.mode,
+    };
+    this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
     this.publish(workerId, "online");
     // Workspaces removed while the worker was away still have a checkout on it.

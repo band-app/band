@@ -191,7 +191,15 @@ Stops the remote tunnel.
 band hosts list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`.
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`.
+
+### Remove a worker host
+
+```sh
+band hosts remove <id>
+```
+
+Removes an offline worker host that has no workspaces and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with workspaces are refused.
 
 ### List, create and revoke the hub's tokens
 

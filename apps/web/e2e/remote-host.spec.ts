@@ -148,6 +148,57 @@ test("creates a workspace on the worker from the New Workspace dialog", async ({
     .toBe(hostId);
 });
 
+test("the Hosts screen shows what the worker offers and removes it once offline", async ({
+  page,
+}) => {
+  const { hostId, root, handle } = await joinWorker();
+  worker = handle;
+
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+  await expect(settingsPage.hostAgents(hostId)).toContainText("claude-code");
+  await expect(settingsPage.hostRoots(hostId)).toContainText(root);
+
+  // An online host cannot be removed.
+  await expect(settingsPage.hostRemoveButton(hostId)).toBeDisabled();
+
+  await worker.kill();
+  await expect(settingsPage.hostRow(hostId)).toHaveAttribute("data-status", "offline", {
+    timeout: 20_000,
+  });
+  await settingsPage.removeHost(hostId);
+  await expect(settingsPage.hostRow(hostId)).toHaveCount(0);
+});
+
+test("the New Workspace dialog lists the worker's roots and explains a bad path", async ({
+  page,
+}) => {
+  const { hostId, root, handle } = await joinWorker();
+  worker = handle;
+
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await workspacePage.goto(`${PROJECT}-main`);
+  await workspacePage.waitForReady();
+  await workspacePage.fillNewWorkspaceOnHost({
+    project: PROJECT,
+    hostId,
+    hostProjectPath: "~/not-here",
+    branch: "bad-path",
+  });
+  await expect(workspacePage.newWorkspaceHostRoots).toContainText(root);
+
+  // `~` is the worker's home, which is not under its root, so the error names the root.
+  await workspacePage.submitNewWorkspace();
+  await expect(workspacePage.newWorkspaceError).toContainText("not-here");
+  await expect(workspacePage.newWorkspaceError).toContainText(root);
+
+  // A relative path is refused with the instruction to use an absolute one.
+  await workspacePage.newWorkspaceHostPathInput.fill("proj");
+  await workspacePage.submitNewWorkspace();
+  await expect(workspacePage.newWorkspaceError).toContainText("absolute path");
+});
+
 /** Issues a bootstrap token through the API and starts a worker with it. */
 async function joinWorker() {
   const res = await fetch(`${server.url}/trpc/tokens.issueWorkerBootstrap`, {

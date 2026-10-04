@@ -45,6 +45,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   // A host that went offline since it was picked falls back to local.
   const hostId = hostChoices.some((h) => h.id === chosenHostId) ? chosenHostId : LOCAL_HOST_ID;
   const remote = hostId !== LOCAL_HOST_ID;
+  const hostRoots = hostChoices.find((h) => h.id === hostId)?.roots ?? [];
 
   const slug = slugifyBranchName(branch);
 
@@ -62,13 +63,18 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!slug || slugError) return;
-    await createWorkspaceMutation.mutateAsync({
-      project: projectName,
-      branch: slug,
-      base: base.trim() || undefined,
-      prompt: prompt.trim() || undefined,
-      host: remote ? { hostId, hostProjectPath: hostProjectPath.trim() || undefined } : undefined,
-    });
+    try {
+      await createWorkspaceMutation.mutateAsync({
+        project: projectName,
+        branch: slug,
+        base: base.trim() || undefined,
+        prompt: prompt.trim() || undefined,
+        host: remote ? { hostId, hostProjectPath: hostProjectPath.trim() || undefined } : undefined,
+      });
+    } catch {
+      // The error shows in the dialog, which stays open.
+      return;
+    }
     setBranch("");
     setBase("");
     setPrompt("");
@@ -119,6 +125,15 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
                   autoCorrect="off"
                   spellCheck={false}
                 />
+                {hostRoots.length > 0 && (
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-testid="new-workspace-form__host-roots"
+                  >
+                    Must be inside: {hostRoots.join(", ")}. Use an absolute path; ~ means the host's
+                    home directory.
+                  </p>
+                )}
               </>
             )}
             <Label htmlFor="branch-name">Branch name</Label>
@@ -138,6 +153,15 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               </p>
             )}
             {slugError && <p className="text-xs text-destructive">{slugError}</p>}
+            {createWorkspaceMutation.error && (
+              <p
+                role="alert"
+                className="text-xs text-destructive"
+                data-testid="new-workspace-form__error"
+              >
+                {createWorkspaceMutation.error.message}
+              </p>
+            )}
             <Label htmlFor="base-branch">Base branch (optional)</Label>
             <Input
               id="base-branch"

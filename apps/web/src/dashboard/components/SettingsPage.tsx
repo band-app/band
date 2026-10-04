@@ -22,9 +22,11 @@ import {
   SelectValue,
   Switch,
 } from "@band-app/ui";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isDesktop } from "../../lib/is-desktop";
+import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
@@ -170,6 +172,19 @@ export function SettingsPage({ open, onOpenChange }: Props) {
 
   const adapter = useAdapter();
 
+  // Which hosts can start each agent. A refresh runs on the host chosen here,
+  // by default the one the open workspace is on, else Local.
+  const activeWorkspaceId = /^\/workspace\/([^/]+)/.exec(window.location.pathname)?.[1];
+  const availability = useQuery({
+    queryKey: ["models.availability", activeWorkspaceId ?? null],
+    queryFn: () =>
+      trpc.models.availability.query({
+        workspaceId: activeWorkspaceId ? decodeURIComponent(activeWorkspaceId) : undefined,
+      }),
+  });
+  const [chosenRefreshHostId, setRefreshHostId] = useState<string | null>(null);
+  const refreshHostId = chosenRefreshHostId ?? availability.data?.defaultHostId ?? "local";
+
   // Merge a partial patch into the per-agent state entry, keyed by
   // `agentId`. Each call site only spells the fields it actually changes;
   // the helper carries forward the rest. Avoids the
@@ -293,7 +308,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       if (!adapter.refreshModels) return;
       mergeAgentModels(agentId, { isRefreshing: true, error: undefined });
       try {
-        const data = await adapter.refreshModels(agentId);
+        const data = await adapter.refreshModels(agentId, refreshHostId);
         // Strict find — a missing result is a server contract bug and
         // should be surfaced as an error rather than silently applying
         // someone else's model list. The previous `?? data.results[0]`
@@ -320,7 +335,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
         });
       }
     },
-    [adapter, mergeAgentModels],
+    [adapter, mergeAgentModels, refreshHostId],
   );
 
   const isDirty = useMemo(() => {
@@ -842,6 +857,21 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                               <Label className="text-xs text-muted-foreground">
                                 Models {models.length > 0 && `(${models.length})`}
                               </Label>
+                              {(availability.data?.hosts.length ?? 0) > 1 && (
+                                <select
+                                  aria-label={`Host to refresh ${known.label} on`}
+                                  data-testid={`settings-page__refresh-host-${agent.id}`}
+                                  value={refreshHostId}
+                                  onChange={(e) => setRefreshHostId(e.target.value)}
+                                  className="ml-auto h-6 rounded-md border border-input bg-transparent px-1 text-xs"
+                                >
+                                  {availability.data?.hosts.map((h) => (
+                                    <option key={h.id} value={h.id}>
+                                      {h.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -858,6 +888,29 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                                 {isRefreshing ? "Refreshing…" : "Refresh"}
                               </Button>
                             </div>
+                            {(() => {
+                              const row = availability.data?.agents.find(
+                                (a) => a.agentId === agent.id,
+                              );
+                              if (!row || row.hosts.length < 2) return null;
+                              return (
+                                <ul
+                                  className="text-[11px] text-muted-foreground"
+                                  data-testid={`settings-page__agent-hosts-${agent.id}`}
+                                >
+                                  {row.hosts.map((h) => (
+                                    <li
+                                      key={h.hostId}
+                                      data-host-id={h.hostId}
+                                      data-available={h.available}
+                                    >
+                                      {h.hostName}:{" "}
+                                      {h.available ? "available" : `not available (${h.reason})`}
+                                    </li>
+                                  ))}
+                                </ul>
+                              );
+                            })()}
                             {models.length > 0 ? (
                               <ul
                                 className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs"

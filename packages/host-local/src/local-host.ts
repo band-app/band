@@ -14,7 +14,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { getUsageReader } from "@band-app/coding-agent";
 import type {
@@ -166,6 +166,7 @@ export class LocalHost implements Host {
       os: process.platform,
       arch: process.arch,
       hostname: hostname(),
+      home: homedir(),
       labels: [],
       roots: [],
       versions,

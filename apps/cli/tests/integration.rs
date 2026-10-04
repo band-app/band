@@ -1634,6 +1634,64 @@ fn hosts_list_shows_the_local_host_and_new_workers() {
     assert!(text.contains("online"), "text: {text}");
 }
 
+#[test]
+fn hosts_remove_deletes_an_offline_worker_and_refuses_local() {
+    let env = TestEnv::new();
+
+    // The CLI cannot register a worker, so the test asks the hub as the UI does.
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
+    )
+    .expect("settings json");
+    let port = settings["webServerPort"].as_u64().expect("port");
+    let token = settings["tokenSecret"].as_str().expect("token");
+    let issued: serde_json::Value = ureq::post(format!(
+        "http://127.0.0.1:{port}/trpc/tokens.issueWorkerBootstrap"
+    ))
+    .header("Authorization", format!("Bearer {token}"))
+    .send_json(serde_json::json!({"hostName": "Retired box", "labels": []}))
+    .expect("issue bootstrap")
+    .body_mut()
+    .read_json()
+    .expect("json");
+    let host_id = issued["result"]["data"]["hostId"]
+        .as_str()
+        .expect("hostId")
+        .to_string();
+
+    let hosts_before = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    assert!(
+        hosts_before["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["id"] == host_id.as_str()),
+        "hosts: {hosts_before}"
+    );
+
+    let local = env.band(&["hosts", "remove", "local"]);
+    assert!(!local.status.success());
+    assert!(
+        stderr(&local).contains("local host"),
+        "stderr: {}",
+        stderr(&local)
+    );
+
+    let removed = env.band(&["hosts", "remove", &host_id, "--output", "json"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    assert_eq!(json_of(&removed)["id"], host_id.as_str());
+
+    let hosts_after = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    assert!(
+        !hosts_after["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["id"] == host_id.as_str()),
+        "hosts: {hosts_after}"
+    );
+}
+
 // --- Tokens tests ---
 
 #[test]

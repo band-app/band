@@ -531,8 +531,13 @@ enum SubscriptionsCmd {
 
 #[derive(Subcommand)]
 enum HostsCmd {
-    /// List hosts with their status, labels and last contact
+    /// List hosts with their status, labels, agents, roots and last contact
     List,
+    /// Remove an offline worker host that has no workspaces, and revoke its tokens
+    Remove {
+        /// Host ID (from `band hosts list`)
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -807,6 +812,7 @@ fn main() {
         },
         Commands::Hosts { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
+            HostsCmd::Remove { id } => cmd_hosts_remove(&id),
         },
         Commands::Tokens { cmd } => match cmd {
             TokensCmd::List => cmd_tokens_list(),
@@ -2959,7 +2965,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
         .cloned()
         .unwrap_or_default();
 
-    let rows: Vec<[String; 5]> = hosts
+    let rows: Vec<[String; 7]> = hosts
         .iter()
         .map(|host| {
             let text = |key: &str| host.get(key).and_then(|v| v.as_str()).unwrap_or("");
@@ -2980,19 +2986,53 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
                     || "never".to_string(),
                     |at| format!("{} ago", format_span(now_ms().saturating_sub(at))),
                 );
+            let list = |key: &str| {
+                host.get(key)
+                    .and_then(|v| v.as_array())
+                    .map(|l| {
+                        l.iter()
+                            .filter_map(|x| x.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .filter(|joined| !joined.is_empty())
+                    .unwrap_or_else(|| "-".to_string())
+            };
             [
                 text("id").to_string(),
                 text("name").to_string(),
                 text("status").to_string(),
                 labels,
+                list("agents"),
+                list("roots"),
                 last_seen,
             ]
         })
         .collect();
 
     Ok(CommandResult {
-        text: format_table(&["ID", "NAME", "STATUS", "LABELS", "LAST SEEN"], &rows),
+        text: format_table(
+            &[
+                "ID",
+                "NAME",
+                "STATUS",
+                "LABELS",
+                "AGENTS",
+                "ROOTS",
+                "LAST SEEN",
+            ],
+            &rows,
+        ),
         json: serde_json::json!({"hosts": hosts}),
+    })
+}
+
+fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("hosts.remove", &serde_json::json!({"hostId": id}))?;
+    Ok(CommandResult {
+        text: format!("Host {id} removed\n"),
+        json: serde_json::json!({"ok": true, "id": id}),
     })
 }
 
@@ -3685,7 +3725,15 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "hosts list",
             "description": "List the hosts workspaces can run on",
             "parameters": [],
-            "notes": "Text output: `ID  NAME  STATUS  LABELS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed.\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"lastSeenAt\": null}]}`."
+            "notes": "Text output: `ID  NAME  STATUS  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. AGENTS are the coding agents the host can start, ROOTS the directories it serves workspaces from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null}]}`."
+        }),
+        serde_json::json!({
+            "name": "hosts remove",
+            "description": "Remove an offline worker host that has no workspaces, and revoke its tokens",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Host ID (from `band hosts list`)"},
+            ],
+            "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has workspaces."
         }),
         serde_json::json!({
             "name": "tokens list",
