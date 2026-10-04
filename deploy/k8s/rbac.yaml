@@ -1,0 +1,54 @@
+# What the k8s runner hook may do. The hub runs `kubectl` as the band-hub service account, and this
+# Role is the whole of that account's access: pods and secrets in the band-workers namespace.
+#
+#   kubectl apply -f deploy/k8s/rbac.yaml
+#   deploy/k8s/check-rbac.sh        # `kubectl auth can-i` checks of what follows
+#
+# - pods: create the worker, delete it, and get/list/watch it (spawn.sh looks for a leftover pod of a
+#   waking worker, and `delete --wait` watches the deletion).
+# - secrets: create only. The hook never reads or deletes a Secret: `kubectl delete` reads the object
+#   first, so a delete rule would need get as well. The Secret is owned by its Pod, and the garbage
+#   collector deletes it with the Pod. A compromised hub token cannot read the bootstrap tokens of
+#   other workers through this Role.
+# Nothing is granted outside the namespace, and nothing on nodes, services, configmaps, or the
+# service account tokens of other pods. For BAND_K8S_KIND=job or sandbox, add the rules at the end.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: band-hub
+  namespace: band
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: band-runner
+  namespace: band-workers
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  # BAND_K8S_KIND=job:
+  # - apiGroups: ["batch"]
+  #   resources: ["jobs"]
+  #   verbs: ["create", "delete", "get", "list", "watch"]
+  # BAND_K8S_KIND=sandbox (kubernetes-sigs/agent-sandbox installed):
+  # - apiGroups: ["agents.x-k8s.io"]
+  #   resources: ["sandboxes"]
+  #   verbs: ["create", "delete", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: band-runner
+  namespace: band-workers
+subjects:
+  - kind: ServiceAccount
+    name: band-hub
+    namespace: band
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: band-runner

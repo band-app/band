@@ -1,0 +1,79 @@
+# A hub that starts its workers as pods in band-workers. Apply namespace.yaml and rbac.yaml first.
+#
+# Build and push the image (deploy/k8s/Dockerfile.hub), then set it below and apply:
+#
+#   kubectl apply -f deploy/k8s/hub.yaml
+#   kubectl -n band logs deploy/band-hub        # the first run prints the admin token once
+#
+# Then add a runner to settings.json (docs/runner-hooks.md, "k8s"). The settings file is in the
+# band-data volume at /data/.band/settings.json.
+#
+# A worker takes plain http only for a loopback hub, so a pod cannot dial the band-hub Service over
+# http. Put the hub behind TLS (an Ingress or Gateway with a certificate the pods trust) and set the
+# runner's BAND_HUB_URL to that https URL. The Service below is for the Ingress to point at.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: band-data
+  namespace: band
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: band-hub
+  namespace: band
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # one hub owns the SQLite database in band-data
+  selector:
+    matchLabels:
+      app: band-hub
+  template:
+    metadata:
+      labels:
+        app: band-hub
+    spec:
+      serviceAccountName: band-hub # kubectl uses its token, in-cluster
+      containers:
+        - name: hub
+          image: registry.example.com/band-hub:k8s
+          ports:
+            - containerPort: 3456
+          env:
+            - name: BAND_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: band-hub
+                  key: admin-token
+                  optional: true # without it the first run mints a token and prints it
+            - name: BAND_PUBLIC_URL
+              value: https://band.example.com
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: 3456
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: band-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: band-hub
+  namespace: band
+spec:
+  selector:
+    app: band-hub
+  ports:
+    - port: 80
+      targetPort: 3456
