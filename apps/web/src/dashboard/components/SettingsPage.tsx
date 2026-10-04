@@ -35,6 +35,7 @@ import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } f
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
+import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsSection } from "./settings/SettingsSection";
@@ -586,6 +587,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 />
               </SettingsRow>
               <BrowserProfilesSettings />
+            </SettingsSection>
+
+            {/* ── Hosts ──────────────────────────────────────── */}
+            <SettingsSection title="Hosts">
+              <HostsSettings />
             </SettingsSection>
 
             {/* ── Labels ─────────────────────────────────────── */}

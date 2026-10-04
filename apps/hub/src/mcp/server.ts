@@ -34,6 +34,10 @@ function discoverProcedures(): ProcedureInfo[] {
     // Skip subscriptions — they stream and are not request/response
     if (type === "subscription") continue;
 
+    // Credentials and the hosts they register stay out of agent reach: an agent
+    // holding a device token must not be able to mint or list others.
+    if (path.startsWith("tokens.") || path.startsWith("hosts.")) continue;
+
     const toolName = `band_${path.replace(/\./g, "_")}`;
 
     // tRPC stores input validators in _def.inputs as an array of parsers.

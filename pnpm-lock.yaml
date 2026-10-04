@@ -105,6 +105,9 @@ importers:
       '@band-app/host-local':
         specifier: workspace:^
         version: link:../../packages/host-local
+      '@band-app/link':
+        specifier: workspace:^
+        version: link:../../packages/link
       '@band-app/logger':
         specifier: workspace:^
         version: link:../../packages/logger

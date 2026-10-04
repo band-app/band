@@ -1616,6 +1616,124 @@ fn chat_send_while_agent_runs_queues_the_message() {
 
 // --- Cronjobs tests ---
 
+// --- Hosts tests ---
+
+#[test]
+fn hosts_list_shows_the_local_host_and_new_workers() {
+    let env = TestEnv::new();
+
+    let listed = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let hosts = listed["hosts"].as_array().expect("hosts");
+    assert_eq!(hosts.len(), 1, "hosts: {listed}");
+    assert_eq!(hosts[0]["id"], "local");
+    assert_eq!(hosts[0]["status"], "online");
+
+    let text = stdout(&env.band(&["hosts", "list"]));
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("Local"), "text: {text}");
+    assert!(text.contains("online"), "text: {text}");
+}
+
+// --- Tokens tests ---
+
+#[test]
+fn tokens_create_list_revoke() {
+    let env = TestEnv::new();
+
+    // The shared token from settings.json is listed as an active device token.
+    let listed = json_of(&env.band(&["tokens", "list", "--output", "json"]));
+    let tokens = listed["tokens"].as_array().expect("tokens");
+    let shared = tokens
+        .iter()
+        .find(|t| t["id"] == "shared")
+        .expect("shared token");
+    assert_eq!(shared["kind"], "device");
+    assert_eq!(shared["state"], "active");
+
+    // `create-device` prints the token once, and the list never shows it.
+    let created = env.band(&[
+        "tokens",
+        "create-device",
+        "--label",
+        "ci box",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let created = json_of(&created);
+    let secret = created["token"].as_str().expect("token").to_string();
+    let id = created["id"].as_str().expect("id").to_string();
+    assert!(secret.starts_with("bdt_"), "token: {secret}");
+    let listed = env.band(&["tokens", "list", "--output", "json"]);
+    assert!(!stdout(&listed).contains(&secret));
+    let listed = json_of(&listed);
+    let row = listed["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id.as_str())
+        .expect("created token listed");
+    assert_eq!(row["label"], "ci box");
+    assert_eq!(row["state"], "active");
+
+    let text = env.band(&["tokens", "list"]);
+    let text = stdout(&text);
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("ci box"), "text: {text}");
+
+    // A device token is not an admin one unless asked, and `create-device --admin` says so.
+    assert_eq!(created["admin"], false);
+    let admin = json_of(&env.band(&[
+        "tokens",
+        "create-device",
+        "--label",
+        "ops",
+        "--admin",
+        "--output",
+        "json",
+    ]));
+    assert_eq!(admin["admin"], true);
+    let listed = json_of(&env.band(&["tokens", "list", "--output", "json"]));
+    let flags: Vec<(String, bool)> = listed["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["id"] == id.as_str() || t["id"] == admin["id"])
+        .map(|t| {
+            (
+                t["label"].as_str().unwrap().to_string(),
+                t["admin"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        flags.contains(&("ci box".to_string(), false)),
+        "flags: {flags:?}"
+    );
+    assert!(
+        flags.contains(&("ops".to_string(), true)),
+        "flags: {flags:?}"
+    );
+
+    // `revoke` takes it out of service.
+    let revoked = env.band(&["tokens", "revoke", &id]);
+    assert!(revoked.status.success(), "stderr: {}", stderr(&revoked));
+    let listed = json_of(&env.band(&["tokens", "list", "--output", "json"]));
+    let row = listed["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(row["state"], "revoked");
+
+    // The shared token cannot be revoked, and an unknown id is an error.
+    let shared = env.band(&["tokens", "revoke", "shared"]);
+    assert!(!shared.status.success());
+    let unknown = env.band(&["tokens", "revoke", "nope"]);
+    assert!(!unknown.status.success());
+}
+
 // --- Subscriptions tests ---
 
 /// A workspace with one chat, and the environment an agent in that chat has.
@@ -3122,6 +3240,13 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"cronjobs trigger"), "missing: {names:?}");
     assert!(names.contains(&"notify"), "missing: {names:?}");
     assert!(names.contains(&"schema"), "missing: {names:?}");
+    assert!(names.contains(&"hosts list"), "missing: {names:?}");
+    assert!(names.contains(&"tokens list"), "missing: {names:?}");
+    assert!(
+        names.contains(&"tokens create-device"),
+        "missing: {names:?}"
+    );
+    assert!(names.contains(&"tokens revoke"), "missing: {names:?}");
 }
 
 #[test]

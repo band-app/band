@@ -12,6 +12,9 @@ export function parseCookies(req: IncomingMessage): Record<string, string> {
   return cookies;
 }
 
+/** Whether a presented token is accepted. An empty or missing token never is. */
+export type TokenCheck = (candidate: string | undefined) => boolean;
+
 /** First subprotocol a browser offers; the hub echoes it so the handshake succeeds. */
 export const WS_BASE_PROTOCOL = "band";
 /** Subprotocol carrying the token: `band-token.<token>`. Browsers can't set headers on a WebSocket. */
@@ -39,18 +42,47 @@ export function bearerToken(req: IncomingMessage): string | undefined {
  */
 export function isAuthorizedUpgrade(
   req: IncomingMessage,
-  expected: string,
+  accepts: TokenCheck,
   opts: { allowCookie?: boolean } = {},
 ): boolean {
-  if (opts.allowCookie !== false && tokensEqual(parseCookies(req).band_token, expected)) {
-    return true;
-  }
-  if (tokensEqual(bearerToken(req), expected)) return true;
+  if (opts.allowCookie !== false && accepts(parseCookies(req).band_token)) return true;
+  if (accepts(bearerToken(req))) return true;
   return wsProtocols(req).some(
     (p) =>
-      p.startsWith(WS_TOKEN_PROTOCOL_PREFIX) &&
-      tokensEqual(p.slice(WS_TOKEN_PROTOCOL_PREFIX.length), expected),
+      p.startsWith(WS_TOKEN_PROTOCOL_PREFIX) && accepts(p.slice(WS_TOKEN_PROTOCOL_PREFIX.length)),
   );
+}
+
+/**
+ * The credential `resolve` accepts for a request, checking the sources in the
+ * order the auth middleware does: `?token=`, Bearer header, cookie, then the
+ * `band-token.<token>` subprotocol. Null when none resolves.
+ */
+export function authenticatedCredential<T>(
+  req: IncomingMessage,
+  resolve: (candidate: string | undefined) => T | null,
+  opts: { allowCookie?: boolean } = {},
+): T | null {
+  const candidates: Array<string | undefined> = [];
+  try {
+    candidates.push(
+      new URL(req.url ?? "/", "http://localhost").searchParams.get("token") ?? undefined,
+    );
+  } catch {
+    // An unparseable URL has no query token.
+  }
+  candidates.push(bearerToken(req));
+  if (opts.allowCookie !== false) candidates.push(parseCookies(req).band_token);
+  for (const protocol of wsProtocols(req)) {
+    if (protocol.startsWith(WS_TOKEN_PROTOCOL_PREFIX)) {
+      candidates.push(protocol.slice(WS_TOKEN_PROTOCOL_PREFIX.length));
+    }
+  }
+  for (const candidate of candidates) {
+    const found = candidate ? resolve(candidate) : null;
+    if (found) return found;
+  }
+  return null;
 }
 
 /** `ws` `handleProtocols` hook: select `band`, never echo the token protocol. */
@@ -79,8 +111,14 @@ function buildCookieHeader(token: string, secure: boolean): string {
   return parts.join("; ");
 }
 
-export function createAuthMiddleware(token: string | undefined) {
+/**
+ * `token` turns auth on (none means dev mode). `accepts` decides which
+ * presented tokens pass; by default only `token` itself does. The hub passes
+ * the token service's check so any live device token is accepted.
+ */
+export function createAuthMiddleware(token: string | undefined, accepts?: TokenCheck) {
   const expectedToken = token || null;
+  const accepted: TokenCheck = accepts ?? ((candidate) => tokensEqual(candidate, token ?? ""));
 
   /**
    * Returns true if the request was handled (auth endpoint or rejection).
@@ -98,12 +136,12 @@ export function createAuthMiddleware(token: string | undefined) {
 
     // Health check endpoint (auth-protected)
     if (url.pathname === "/api/health" && req.method === "GET") {
-      const queryToken = url.searchParams.get("token");
+      const queryToken = url.searchParams.get("token") ?? undefined;
       const cookies = parseCookies(req);
       if (
-        tokensEqual(queryToken, expectedToken) ||
-        tokensEqual(bearerToken(req), expectedToken) ||
-        (cookieAllowed && tokensEqual(cookies.band_token, expectedToken))
+        accepted(queryToken) ||
+        accepted(bearerToken(req)) ||
+        (cookieAllowed && accepted(cookies.band_token))
       ) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -121,22 +159,22 @@ export function createAuthMiddleware(token: string | undefined) {
     }
 
     // Check token in query param
-    const queryToken = url.searchParams.get("token");
-    if (queryToken && tokensEqual(queryToken, expectedToken)) {
+    const queryToken = url.searchParams.get("token") ?? undefined;
+    if (queryToken && accepted(queryToken)) {
       // Set cookie and continue to normal handler (no redirect — tunnel
       // proxies follow redirects internally and lose the Set-Cookie).
-      res.setHeader("Set-Cookie", buildCookieHeader(expectedToken, isSecureRequest(req)));
+      res.setHeader("Set-Cookie", buildCookieHeader(queryToken, isSecureRequest(req)));
       return false;
     }
 
     // Check Authorization: Bearer header
-    if (tokensEqual(bearerToken(req), expectedToken)) {
+    if (accepted(bearerToken(req))) {
       return false; // Authenticated — continue to normal handler
     }
 
     // Check cookie
     const cookies = parseCookies(req);
-    if (cookieAllowed && tokensEqual(cookies.band_token, expectedToken)) {
+    if (cookieAllowed && accepted(cookies.band_token)) {
       return false; // Authenticated — continue to normal handler
     }
 

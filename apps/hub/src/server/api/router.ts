@@ -53,6 +53,7 @@ import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
+import { hostsRouter } from "./hosts/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
@@ -69,6 +70,7 @@ import { subscriptionsRouter } from "./subscriptions/router";
 import { systemRouter } from "./system/router";
 import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
+import { tokensRouter } from "./tokens/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
 import { workspaceRouter } from "./workspace/router";
@@ -94,6 +96,8 @@ export const appRouter = t.router({
   cli: cliRouter,
   hooks: hooksRouter,
   host: hostRouter,
+  hosts: hostsRouter,
+  tokens: tokensRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,
   tunnel: tunnelRouter,

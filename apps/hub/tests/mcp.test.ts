@@ -234,6 +234,9 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).not.toContain("band_tasks_stream");
     expect(toolNames).not.toContain("band_status_stream");
     expect(toolNames).not.toContain("band_queue_stream");
+
+    // Credentials stay out of agent reach
+    expect(toolNames.filter((n) => /^band_(tokens|hosts)_/.test(n))).toEqual([]);
   });
 
   it("calls band_projects_list tool and gets results", async () => {

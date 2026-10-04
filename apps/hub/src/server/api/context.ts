@@ -18,11 +18,15 @@ function readHeader(headers: HeaderBag | undefined, name: string): string | unde
  * it runs in (headers `x-band-chat-id` and `x-band-workspace-id`, from the
  * agent's `BAND_CHAT_ID` and `BAND_WORKSPACE_ID`), so procedures like
  * `subscriptions.create` can default to them. Calls from the UI carry neither.
+ *
+ * `admin` says whether the token that authenticated the call is an admin
+ * device token (or auth is off, in dev). The MCP endpoint never sets it.
  */
-export function createContext(opts?: { req?: { headers: HeaderBag } }) {
+export function createContext(opts?: { req?: { headers: HeaderBag }; admin?: boolean }) {
   return {
     chatId: readHeader(opts?.req?.headers, CHAT_ID_HEADER),
     workspaceId: readHeader(opts?.req?.headers, WORKSPACE_ID_HEADER),
+    admin: opts?.admin === true,
   };
 }
 

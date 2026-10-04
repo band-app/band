@@ -63,11 +63,11 @@ test("settings dialog renders every section in a single scrolling list", async (
   await settingsPage.openDialog();
 
   // Every section is now rendered at once — there is no master/detail
-  // navigation. We expect nine SettingsSection cards to be present and
+  // navigation. We expect ten SettingsSection cards to be present and
   // every section's first row to be visible (after scrolling, if needed).
-  // The nine sections are: Appearance, General, Browser, Labels, Coding
-  // Agents, Notifications, Web Server, Usage report, Terminal.
-  await expect(settingsPage.sectionCards()).toHaveCount(9);
+  // The ten sections are: Appearance, General, Browser, Hosts, Labels,
+  // Coding Agents, Notifications, Web Server, Usage report, Terminal.
+  await expect(settingsPage.sectionCards()).toHaveCount(10);
 
   // Appearance — Theme dropdown rendered by SettingsRow.
   await expect(settingsPage.themeSelect()).toBeVisible();
@@ -81,6 +81,7 @@ test("settings dialog renders every section in a single scrolling list", async (
     settingsPage.worktreesFolderInput(),
     settingsPage.lspSwitch(),
     settingsPage.webBrowserCdpSwitch(),
+    settingsPage.hostRow("local"),
     settingsPage.addLabelButton().first(),
     settingsPage.soundOnNeedsAttentionSwitch(),
     settingsPage.webServerPortInput(),

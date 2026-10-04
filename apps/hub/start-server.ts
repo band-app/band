@@ -16,7 +16,12 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
-import { createAuthMiddleware, isAuthorizedUpgrade, selectWsProtocol } from "./auth.ts";
+import {
+  authenticatedCredential,
+  createAuthMiddleware,
+  isAuthorizedUpgrade,
+  selectWsProtocol,
+} from "./auth.ts";
 import { classifyOrigin, createCorsMiddleware, parseOriginList } from "./cors.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatHistory } from "./src/api/chat-history.ts";
@@ -68,6 +73,7 @@ import {
 import { subscriptionService } from "./src/server/services/subscription-service.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
+import { tokenService } from "./src/server/services/token-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
@@ -246,7 +252,13 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 // dist/start-server.mjs`) enforces the cookie as before.
 const isDev = process.env.NODE_ENV === "development";
 const persistedToken = getOrCreateToken();
-const { handleAuth, expectedToken } = createAuthMiddleware(isDev ? undefined : persistedToken);
+// The shared token is an admin device token (`tokenService.ensureSharedToken`,
+// called in `main()` once the `tokens` table exists). Any live device token
+// passes auth, and `tokens.revoke` takes one away.
+const { handleAuth, expectedToken } = createAuthMiddleware(
+  isDev ? undefined : persistedToken,
+  tokenService.acceptsDevice,
+);
 
 // Origins that may call the hub from another origin: `corsAllowedOrigins` in
 // settings plus `BAND_CORS_ORIGINS`. Read on every request so an edit applies
@@ -258,6 +270,18 @@ function allowedOrigins(): string[] {
   ];
 }
 const handleCors = createCorsMiddleware(allowedOrigins);
+
+/**
+ * Whether the device token that authenticated this request is an admin
+ * token. With auth off (dev) every caller is an admin.
+ */
+function requestIsAdmin(req: IncomingMessage): boolean {
+  if (!expectedToken) return true;
+  const token = authenticatedCredential(req, (c) => tokenService.resolveDevice(c), {
+    allowCookie: req.headers.origin !== "null",
+  });
+  return token?.admin === true;
+}
 
 // `sirv` calls `totalist` (which calls `readdirSync`) eagerly at construction
 // time to build its asset map. The dev server runs from source where
@@ -651,6 +675,9 @@ async function main() {
   // cold cache and saves the boot path one synchronous SQL pass.
   // -----------------------------------------------------------------------
   runMigrations();
+  // The shared `tokenSecret` becomes the admin device token. This needs the
+  // `tokens` table, so it runs after the migrations.
+  tokenService.ensureSharedToken(persistedToken);
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -993,7 +1020,8 @@ async function main() {
         endpoint: "/trpc",
         req: request,
         router: appRouter,
-        createContext: ({ req }) => createContext({ req }),
+        createContext: ({ req: webRequest }) =>
+          createContext({ req: webRequest, admin: requestIsAdmin(req) }),
       });
       pipeWebResponseToNodeRes(response, res);
       return;
@@ -1110,7 +1138,11 @@ async function main() {
   // WebSocket server for tRPC subscriptions
   // ---------------------------------------------------------------------------
   const wss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
-  const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
+  const wssHandler = applyWSSHandler({
+    wss,
+    router: appRouter,
+    createContext: ({ req }) => createContext({ req, admin: requestIsAdmin(req) }),
+  });
 
   // ---------------------------------------------------------------------------
   // WebSocket server for terminal connections
@@ -1156,9 +1188,25 @@ async function main() {
     // An opaque (`null`) origin is a file:// page or a sandboxed frame on any
     // site, so the ambient cookie doesn't count for it: it must send the token.
     const allowCookie = req.headers.origin !== "null";
-    if (expectedToken && !isAuthorizedUpgrade(req, expectedToken, { allowCookie })) {
-      socket.destroy();
-      return;
+    if (expectedToken) {
+      // `accepts` runs synchronously inside `isAuthorizedUpgrade`, so the id
+      // it records is this request's.
+      let tokenId: string | undefined;
+      const accepted = isAuthorizedUpgrade(
+        req,
+        (candidate) => {
+          const row = tokenService.resolveDevice(candidate);
+          if (row) tokenId = row.id;
+          return row !== null;
+        },
+        { allowCookie },
+      );
+      if (!accepted || !tokenId) {
+        socket.destroy();
+        return;
+      }
+      // Revoking the token closes the sockets it opened.
+      tokenService.trackSocket(tokenId, socket);
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);

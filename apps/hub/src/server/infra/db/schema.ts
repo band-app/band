@@ -12,22 +12,26 @@ import {
 // A machine Band can run workspaces on. The `local` row is seeded by the
 // migration and is the only one until remote hosts are registered. `host_id`
 // columns elsewhere default to it, so existing rows need no backfill.
-export const hosts = sqliteTable("hosts", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  mode: text("mode", { enum: ["attached", "ephemeral"] })
-    .notNull()
-    .default("attached"),
-  runner: text("runner"),
-  labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
-  status: text("status", { enum: ["online", "offline", "lost", "disposed"] })
-    .notNull()
-    .default("online"),
-  lastSeenAt: integer("last_seen_at"),
-  info: text("info", { mode: "json" }).$type<Record<string, unknown>>(),
-  version: text("version"),
-  createdAt: integer("created_at").notNull(),
-});
+export const hosts = sqliteTable(
+  "hosts",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    mode: text("mode", { enum: ["attached", "ephemeral"] })
+      .notNull()
+      .default("attached"),
+    runner: text("runner"),
+    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    status: text("status", { enum: ["online", "offline", "lost", "disposed"] })
+      .notNull()
+      .default("online"),
+    lastSeenAt: integer("last_seen_at"),
+    info: text("info", { mode: "json" }).$type<Record<string, unknown>>(),
+    version: text("version"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("hosts_created_at_idx").on(t.createdAt)],
+);
 
 const hostId = () => text("host_id").notNull().default("local");
 
@@ -475,3 +479,31 @@ export const pushedShas = sqliteTable("pushed_shas", {
   workspaceId: text("workspace_id").notNull(),
   pushedAt: integer("pushed_at").notNull(),
 });
+
+// Revocable credentials, stored as a SHA-256 hash (hex) of the token, never
+// the token. `device` tokens are for UIs and the CLI. A `worker_bootstrap`
+// token is shown once, valid once, and exchanged for a `worker_session`
+// token. For the two worker kinds `host_id` is the worker's id, which is also
+// its `hosts` row. The shared `settings.tokenSecret` is the row with id
+// `shared`, kept in step with settings at boot.
+export const tokens = sqliteTable(
+  "tokens",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: ["device", "worker_bootstrap", "worker_session"] }).notNull(),
+    hash: text("hash").notNull(),
+    hostId: text("host_id").references(() => hosts.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    // Only an admin device token may call `tokens.*`. The shared token is one.
+    admin: integer("admin", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at"),
+    lastUsedAt: integer("last_used_at"),
+    revokedAt: integer("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("tokens_hash_idx").on(t.hash),
+    index("tokens_host_idx").on(t.hostId),
+    index("tokens_created_at_idx").on(t.createdAt),
+  ],
+);

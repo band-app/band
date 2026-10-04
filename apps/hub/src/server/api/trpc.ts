@@ -1,4 +1,4 @@
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import type { Context } from "./context";
 
 /**
@@ -13,3 +13,14 @@ import type { Context } from "./context";
 export const t = initTRPC.context<Context>().create();
 
 export const publicProcedure = t.procedure;
+
+/** For procedures that manage credentials: only an admin device token passes. */
+export const adminProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.admin) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "This token cannot manage tokens. Use an admin token.",
+    });
+  }
+  return next();
+});

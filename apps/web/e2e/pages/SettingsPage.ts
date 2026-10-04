@@ -356,6 +356,87 @@ export class SettingsPage {
     });
   }
 
+  /** One row per host in the Hosts section, the local one included.
+   *  `data-testid` set in `HostsSettings.tsx`. */
+  hostRows(): Locator {
+    return this.dialog.getByTestId("settings__host");
+  }
+
+  /** The row of one host by id, matched on the id the row prints. */
+  hostRow(hostId: string): Locator {
+    return this.hostRows().filter({
+      has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+    });
+  }
+
+  /** One row per token in the Hosts section's Tokens list. */
+  tokenRows(): Locator {
+    return this.dialog.getByTestId("settings__token");
+  }
+
+  /** The notice shown instead of the token list when the token isn't an admin one. */
+  tokensDenied(): Locator {
+    return this.dialog.getByTestId("settings__tokens-denied");
+  }
+
+  /** The row of the token with this label. */
+  tokenRow(label: string): Locator {
+    return this.tokenRows().filter({ hasText: label });
+  }
+
+  /** The "Add worker" button in the Hosts section, before the form opens. */
+  addWorkerButton(): Locator {
+    return this.dialog.getByTestId("settings__add-worker");
+  }
+
+  /** Fills the add-worker form and creates the bootstrap token. */
+  async addWorker(hostName: string, labels: string): Promise<void> {
+    await test.step(`Add worker "${hostName}"`, async () => {
+      await this.expectRowVisible(this.addWorkerButton());
+      await this.addWorkerButton().click();
+      await this.dialog.getByRole("textbox", { name: "Host name" }).fill(hostName);
+      await this.dialog.getByRole("textbox", { name: "Labels" }).fill(labels);
+      await this.dialog.getByRole("button", { name: "Create token" }).click();
+    });
+  }
+
+  /** The one-time token shown after "Create token". */
+  bootstrapToken(): Locator {
+    return this.dialog.getByTestId("settings__bootstrap-token");
+  }
+
+  /** The `band-worker` command line shown after "Create token". */
+  workerCommand(): Locator {
+    return this.dialog.getByTestId("settings__worker-command");
+  }
+
+  /** The bootstrap token's text. */
+  async readBootstrapToken(): Promise<string> {
+    return this.bootstrapToken().inputValue();
+  }
+
+  /** The `band-worker` command line's text. */
+  async readWorkerCommand(): Promise<string> {
+    return this.workerCommand().inputValue();
+  }
+
+  /** Closes the add-worker result panel. */
+  async finishAddWorker(): Promise<void> {
+    await this.dialog.getByRole("button", { name: "Done" }).click();
+  }
+
+  /** Clicks Revoke on the token row with this label. */
+  async revokeToken(label: string): Promise<void> {
+    await test.step(`Revoke token "${label}"`, async () => {
+      await this.revokeTokenButton(label).click();
+    });
+  }
+
+  /** Revoke button of a token row. `aria-label="Revoke token <label>"` is set in `HostsSettings.tsx`. */
+  revokeTokenButton(label: string): Locator {
+    return this.dialog.getByRole("button", { name: `Revoke token ${label}` });
+  }
+
   /** One row per Band browser profile in the Browser section (the built-in
    *  Default row is not included). `data-testid` set in
    *  `BrowserProfilesSettings.tsx`. */
