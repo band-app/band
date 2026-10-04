@@ -700,7 +700,11 @@ export class RunnerService {
       timeoutMs: STATUS_TIMEOUT_MS,
       runLog: null,
       onStdout: (line) => {
-        const handle = line.trim().split(/\s+/)[0];
+        // A line is a handle, or `BAND_MACHINE_HANDLE=<id> key=value ...` like the VM hooks print.
+        const handle = line
+          .trim()
+          .split(/\s+/)[0]
+          ?.replace(/^BAND_MACHINE_HANDLE=/, "");
         if (handle && handle.length <= 200 && /^[A-Za-z0-9_][A-Za-z0-9_.:/-]*$/.test(handle)) {
           handles.push(handle);
         }

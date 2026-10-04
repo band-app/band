@@ -89,7 +89,7 @@ A hook must:
 
 `destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`, plus `BAND_MACHINE_HANDLE`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo. For a machine the hub has no record of (an orphan), the hub sets `BAND_MACHINE_HANDLE` and `BAND_RUNNER_ID` and leaves `BAND_WORKER_ID` and the request variables unset, so a `destroy` must be able to work from the handle alone. It must check that the handle is one of its own machines before it kills anything.
 
-`status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, and `#` starts a comment), and exits 0. It must list only this runner's machines.
+`status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, with or without a `BAND_MACHINE_HANDLE=` prefix; the VM hooks print `BAND_MACHINE_HANDLE=<id> worker=... state=...`), and exits 0. It must list only this runner's machines.
 
 ## What the hub does
 
