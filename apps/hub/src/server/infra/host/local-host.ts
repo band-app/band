@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createReadStream, watch as fsWatch } from "node:fs";
 import {
   cp,
