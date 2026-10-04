@@ -27,7 +27,15 @@
  * rather than read from `process.cwd()` / `import.meta.dirname`.
  */
 
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -81,8 +89,17 @@ describe("findCliBinaryAt in packaged Electron layout", () => {
     mkdirSync(distDir, { recursive: true });
     writeFileSync(join(distDir, "start-server.mjs"), "// stub bundled server\n", "utf-8");
 
-    const result = findCliBinaryAt({ cwd: webDir, dirname: distDir });
-    expect(result).toBeNull();
+    // The PATH and BAND_CLI_PATH strategies would find the developer's own
+    // `band`, so empty both for this case.
+    const saved = { cli: process.env.BAND_CLI_PATH, path: process.env.PATH };
+    delete process.env.BAND_CLI_PATH;
+    process.env.PATH = "";
+    try {
+      expect(findCliBinaryAt({ cwd: webDir, dirname: distDir })).toBeNull();
+    } finally {
+      if (saved.cli !== undefined) process.env.BAND_CLI_PATH = saved.cli;
+      process.env.PATH = saved.path;
+    }
   });
 
   it("resolves via the dirname-based candidate when the cwd path misses", () => {
@@ -136,5 +153,45 @@ describe("noBinaryError", () => {
     // A truthy check would mis-route to the reinstall message.
     const err = noBinaryError({ BAND_PACKAGED: "0" });
     expect(err.message).toMatch(/cargo build --release -p band-cli/);
+  });
+});
+
+describe("findCliBinaryAt with BAND_CLI_PATH or band on PATH", () => {
+  let tmp: string;
+  const saved = { cli: process.env.BAND_CLI_PATH, path: process.env.PATH };
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-cli-env-")));
+  });
+
+  afterEach(() => {
+    if (saved.cli === undefined) delete process.env.BAND_CLI_PATH;
+    else process.env.BAND_CLI_PATH = saved.cli;
+    process.env.PATH = saved.path;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("returns BAND_CLI_PATH when the file exists", () => {
+    const bin = join(tmp, "opt-band");
+    writeFileSync(bin, "#!/bin/sh\n", "utf-8");
+    chmodSync(bin, 0o755);
+    process.env.BAND_CLI_PATH = bin;
+    expect(findCliBinaryAt({ cwd: join(tmp, "nowhere"), dirname: join(tmp, "nowhere") })).toBe(bin);
+  });
+
+  it("resolves a band symlink on PATH to its target", () => {
+    const exe = process.platform === "win32" ? "band.exe" : "band";
+    const target = join(tmp, "real", exe);
+    mkdirSync(join(tmp, "real"), { recursive: true });
+    writeFileSync(target, "#!/bin/sh\n", "utf-8");
+    chmodSync(target, 0o755);
+    const bindir = join(tmp, "bin");
+    mkdirSync(bindir);
+    symlinkSync(target, join(bindir, exe));
+    delete process.env.BAND_CLI_PATH;
+    process.env.PATH = bindir;
+    expect(findCliBinaryAt({ cwd: join(tmp, "nowhere"), dirname: join(tmp, "nowhere") })).toBe(
+      target,
+    );
   });
 });

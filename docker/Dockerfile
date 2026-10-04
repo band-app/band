@@ -82,6 +82,7 @@ RUN chmod +x /usr/local/bin/band-entrypoint.sh
 ENV NODE_ENV=production \
     PORT=3456 \
     BAND_LOCAL_HOST=off \
+    BAND_CLI_PATH=/opt/band/binaries/band \
     HOME=/data
 EXPOSE 3456
 ENTRYPOINT ["/usr/local/bin/band-entrypoint.sh"]

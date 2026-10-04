@@ -731,6 +731,18 @@ jobs:
             exit 1
           fi
 
+      - name: Hub serves the band CLI to the worker
+        run: |
+          for i in $(seq 1 30); do
+            docker logs compose-band-1 2>&1 | grep -q 'sending the band CLI' && break
+            sleep 2
+          done
+          docker logs compose-band-1 2>&1 | grep -q 'sending the band CLI'
+          if docker logs band-worker-ci 2>&1 | grep -q 'the hub has no band CLI'; then
+            docker logs band-worker-ci >&2
+            exit 1
+          fi
+
       - name: Worker logs
         if: failure()
         run: docker logs band-worker-ci || true
