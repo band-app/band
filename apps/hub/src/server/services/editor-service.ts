@@ -89,8 +89,9 @@ export class EditorService {
     return hostRegistry.hostFor(workspaceId).lsp.killWorkspace(workspaceId);
   }
 
-  killAllLspServers(): Promise<void> {
-    return hostRegistry.local.lsp.killAll();
+  /** Stops every language server on every host, local and remote. One host failing does not stop the rest. */
+  async killAllLspServers(): Promise<void> {
+    await Promise.allSettled(hostRegistry.all().map((host) => host.lsp.killAll()));
   }
 
   // -------------------------------------------------------------------------

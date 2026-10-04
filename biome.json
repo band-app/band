@@ -104,7 +104,7 @@
         "apps/hub/src/server/services/cli-service.ts",
         "apps/hub/src/server/services/project-avatar-service.ts",
         "apps/hub/src/server/services/_utils/upload-utils.ts",
-        "apps/hub/src/server/services/task-service.ts",
+        "apps/hub/src/server/services/_utils/shared-dir.ts",
         "apps/hub/src/server/services/workspace-service.ts",
         "apps/hub/src/server/api/web-app-manifest.ts",
         "apps/hub/src/server/api/queue/router.ts",

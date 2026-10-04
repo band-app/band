@@ -110,23 +110,45 @@ export class SystemService {
   }
 
   /**
-   * Enumerate git worktrees for a project. Thin façade over the project's host
-   * so the system router (and any future API-tier caller that needs the
-   * porcelain output) doesn't reach into `infra/git/` directly.
+   * Enumerate git worktrees for a project: the local checkout's, then those on
+   * each remote host that has a checkout of it. Each entry says which host it
+   * is on (`hostId` is absent for local ones). A host that cannot answer, for
+   * example an offline worker, adds nothing.
    */
-  async listWorktrees(project: string, repoPath: string): Promise<WorktreeInfo[]> {
-    return hostRegistry.hostForProject(project).worktree.list(repoPath);
+  async listWorktrees(
+    project: string,
+    repoPath: string,
+  ): Promise<Array<WorktreeInfo & { hostId?: string }>> {
+    const local = await hostRegistry.hostForProject(project).worktree.list(repoPath);
+    const remote = await Promise.all(
+      hostRegistry
+        .all()
+        .filter((host) => host.id !== hostRegistry.local.id)
+        .map(async (host) => {
+          const path = hostRegistry.projectPathOn(project, host.id, repoPath);
+          if (!path) return [];
+          try {
+            const list = await host.worktree.list(path);
+            return list.map((wt) => ({ ...wt, hostId: host.id }));
+          } catch {
+            return [];
+          }
+        }),
+    );
+    return [...local, ...remote.flat()];
   }
 
   /**
    * Run `du -sk PATH` and return the allocated byte total, gated by the
-   * process-wide concurrency cap above. The shell-out runs on the
-   * project's host (`host.fs.du`); this method is just the rate-limit wrapper.
+   * process-wide concurrency cap above. The shell-out runs on the host the
+   * path is on (`host.fs.du`), the project's own host unless `hostId` names
+   * another; this method is just the rate-limit wrapper.
    */
-  async duBytes(project: string, path: string): Promise<number> {
+  async duBytes(project: string, path: string, hostId?: string): Promise<number> {
+    const host = hostId ? hostRegistry.hostById(hostId) : hostRegistry.hostForProject(project);
     const release = await acquireDuSlot();
     try {
-      return await hostRegistry.hostForProject(project).fs.du(path);
+      return await host.fs.du(path);
     } finally {
       release();
     }

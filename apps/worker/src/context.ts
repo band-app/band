@@ -1,4 +1,5 @@
-import type { Host, HostInfo } from "@band-app/host-api";
+import { join } from "node:path";
+import type { Host, HostDirs, HostInfo } from "@band-app/host-api";
 import type { LinkSession } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
@@ -21,6 +22,7 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
     ...info,
     labels: Object.entries(ctx.labels).map(([k, v]) => `${k}=${v}`),
     roots: ctx.policy.rootPaths,
+    dirs: hostDirs(ctx.policy.rootPaths),
   };
 }
 
@@ -59,4 +61,14 @@ export class Registrar {
       }
     });
   }
+}
+
+/**
+ * Where the hub keeps workspace files on this worker: beside the worktrees, in
+ * the first root, so the path policy already allows them.
+ */
+export function hostDirs(roots: string[]): HostDirs | undefined {
+  const root = roots[0];
+  if (root === undefined) return undefined;
+  return { uploads: join(root, ".band-uploads"), shared: join(root, ".band-shared") };
 }

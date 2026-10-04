@@ -1,12 +1,10 @@
-import { readdirSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import { computeCost } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
 import { WorkspaceNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
+import { hostRegistry } from "../infra/host/registry";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
   hasQueuedMessages,
@@ -14,11 +12,11 @@ import {
   pushQueuedMessage,
   removeQueuedMessage,
 } from "./_utils/queued-message-store";
+import { openSharedDir } from "./_utils/shared-dir";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import {
   acknowledgeWorkspaceAttention,
-  bandHome,
   chatStatusSource,
   setWorkspaceSourceStatus,
   type WorkspaceStatus,
@@ -155,14 +153,6 @@ function persistTask(task: InternalTask): void {
   }
 }
 
-function listFiles(dir: string): Set<string> {
-  try {
-    return new Set(readdirSync(dir));
-  } catch {
-    return new Set();
-  }
-}
-
 function toTaskInfo(task: InternalTask): TaskInfo {
   const { attachments: _attachments, cancelRequested: _cancel, ...info } = task;
   return info;
@@ -200,7 +190,8 @@ async function promptBlocks(
     const name = file.filename ?? file.path.split("/").pop() ?? file.path;
     if (caps.image && file.mediaType.startsWith("image/")) {
       try {
-        const data = (await readFile(file.path)).toString("base64");
+        const host = hostRegistry.hostFor(task.workspaceId);
+        const data = Buffer.from(await host.fs.readFile(file.path)).toString("base64");
         blocks.push({ type: "image", mimeType: file.mediaType, data, uri: fileUri(file.path) });
         continue;
       } catch (err) {
@@ -404,19 +395,11 @@ async function runTask(task: InternalTask): Promise<void> {
   if (task.mode) await applyTurnChoice(chatId, "mode", task.mode);
 
   // Per-workspace shared directory: files the agent drops here become
-  // download cards in the chat.
-  const sharedDir = join(bandHome(), "shared", task.workspaceId);
-  await mkdir(sharedDir, { recursive: true });
-  const seenShared = listFiles(sharedDir);
-  const unsubscribe = agentSessionService.subscribe(chatId, (event: ChatEvent) => {
-    if (
-      event.type !== "update" ||
-      event.update.sessionUpdate !== "tool_call_update" ||
-      event.update.status !== "completed"
-    ) {
-      return;
-    }
-    for (const filename of listFiles(sharedDir)) {
+  // download cards in the chat. A remote workspace's directory is on its worker.
+  const shared = await openSharedDir(task.workspaceId);
+  const seenShared = new Set(await shared.list());
+  const announce = (names: Iterable<string>) => {
+    for (const filename of names) {
       if (seenShared.has(filename)) continue;
       seenShared.add(filename);
       agentSessionService.record(chatId, {
@@ -426,6 +409,26 @@ async function runTask(task: InternalTask): Promise<void> {
         filename,
       });
     }
+  };
+  // Scans of a remote directory run one after another, so a file is announced once.
+  let remoteScan: Promise<void> = Promise.resolve();
+  const unsubscribe = agentSessionService.subscribe(chatId, (event: ChatEvent) => {
+    if (
+      event.type !== "update" ||
+      event.update.sessionUpdate !== "tool_call_update" ||
+      event.update.status !== "completed"
+    ) {
+      return;
+    }
+    const names = shared.list();
+    if (names instanceof Set) {
+      announce(names);
+      return;
+    }
+    remoteScan = remoteScan
+      .then(() => names)
+      .then(announce)
+      .catch((err) => log.warn({ chatId, err }, "could not list the shared directory"));
   });
 
   const previousCost = agentSessionService.sessionCostUsd(chatId);
@@ -448,7 +451,7 @@ async function runTask(task: InternalTask): Promise<void> {
   agentSessionService.record(chatId, { type: "turn-started", taskId: task.id });
 
   try {
-    const blocks = await promptBlocks(task, firstTurn, sharedDir);
+    const blocks = await promptBlocks(task, firstTurn, shared.path);
     // Checked right before the request goes out: from here on a Stop
     // reaches the agent as `session/cancel`.
     const res = task.cancelRequested

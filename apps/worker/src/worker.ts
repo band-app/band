@@ -13,6 +13,7 @@ import { Registrar, type WorkerContext } from "./context.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
+import { registerRelayMethods } from "./relay.ts";
 import {
   ensureStateDir,
   loadOrCreateWorkerId,
@@ -117,6 +118,7 @@ export class Worker {
     const registrar = new Registrar(ctx);
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
+    worker.disposers.push(registerRelayMethods(registrar, ctx));
     worker.wire(ctx);
 
     try {

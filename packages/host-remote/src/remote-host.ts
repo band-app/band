@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { UsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
@@ -19,6 +20,7 @@ import type {
   HostGit,
   HostInfo,
   HostLsp,
+  HostRelay,
   HostScripts,
   HostSearch,
   HostWorktree,
@@ -31,7 +33,13 @@ import type {
   Worktree,
   WorktreeInfo,
 } from "@band-app/host-api";
-import type { Channel, LinkSession } from "@band-app/link";
+import {
+  type Channel,
+  type LinkSession,
+  METHOD_RELAY_REGISTER,
+  METHOD_RELAY_REVOKE,
+  type RelayRegisterReply,
+} from "@band-app/link";
 import { RemoteTerminalBackend } from "./pty";
 import { channelBytes, channelJsonLines, RemoteRpc } from "./rpc";
 
@@ -179,6 +187,25 @@ export class RemoteHost implements Host {
     prepare: (workspace) => this.prepareScript(workspace),
     copyFiles: (projectPath, worktreePath) =>
       this.rpc.call("scripts.copyFiles", { projectPath, worktreePath }),
+  };
+
+  readonly relay: HostRelay = {
+    issue: async (scope) => {
+      const token = `brt_${randomBytes(24).toString("base64url")}`;
+      const reply = await this.rpc.call<RelayRegisterReply>(METHOD_RELAY_REGISTER, {
+        ...scope,
+        token,
+      });
+      let revoked = false;
+      return {
+        env: { BAND_SERVER_URL: reply.url, BAND_TOKEN: token },
+        revoke: async () => {
+          if (revoked) return;
+          revoked = true;
+          await this.rpc.call(METHOD_RELAY_REVOKE, { token }).catch(() => undefined);
+        },
+      };
+    },
   };
 
   readonly agentEnv: HostAgentEnv = {

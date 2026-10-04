@@ -146,6 +146,25 @@ export const worktrees = sqliteTable("worktrees", {
   hostId: hostId(),
 });
 
+// Worktrees on a remote host whose workspace was removed while the host was
+// offline. The workspace is gone from the hub at once; the worker deletes the
+// checkout the next time it connects (`WorkspaceService.finishPendingRemovals`).
+export const pendingRemovals = sqliteTable(
+  "pending_removals",
+  {
+    hostId: text("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    worktreePath: text("worktree_path").notNull(),
+    // The project's checkout on that host, which git runs the removal from.
+    repoPath: text("repo_path").notNull(),
+    // The branch to delete after the worktree, or null when there is none to delete.
+    branch: text("branch"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.hostId, t.worktreePath] })],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

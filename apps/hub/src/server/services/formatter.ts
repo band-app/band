@@ -57,8 +57,8 @@ interface FormatFileOptions {
   configOverride?: prettier.Options | null;
   /**
    * The file system of the host the worktree lives on, for the containment
-   * check and the `.prettierignore` lookup. Defaults to the local host.
-   * Prettier itself still reads config files from the hub's disk.
+   * check, the `.prettierignore` lookup and (for a remote host) the config
+   * lookup. Defaults to the local host.
    */
   fs?: HostFs;
 }
@@ -83,6 +83,7 @@ export async function formatFile(
   options: FormatFileOptions = {},
 ): Promise<FormatFileResult> {
   const fs = options.fs ?? hostRegistry.local.fs;
+  const onHub = fs === hostRegistry.local.fs;
   const absFile = isAbsolute(filePath) ? filePath : resolvePath(worktreePath, filePath);
 
   if (!(await isInsideWorktree(fs, absFile, worktreePath))) {
@@ -113,7 +114,8 @@ export async function formatFile(
   // soft-skip path would never fire.
   const ignorePath = resolvePath(worktreePath, ".prettierignore");
   const info = await prettier.getFileInfo(absFile, {
-    resolveConfig: true,
+    // A remote file's config is on its worker, out of reach of Prettier's own lookup.
+    resolveConfig: onHub,
     ignorePath: (await pathExists(fs, ignorePath)) ? ignorePath : undefined,
   });
   // Order matters: `.prettierignore` matches set both `ignored: true` and
@@ -139,7 +141,9 @@ export async function formatFile(
   const config =
     options.configOverride !== undefined
       ? options.configOverride
-      : await prettier.resolveConfig(absFile);
+      : onHub
+        ? await prettier.resolveConfig(absFile)
+        : await resolveConfigOnHost(fs, absFile, worktreePath);
 
   let formatted: string;
   try {
@@ -178,6 +182,57 @@ export async function formatFile(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Config files `resolveConfigOnHost` reads. They must be JSON, because the config is read here and not run on the host. */
+const JSON_CONFIGS = [".prettierrc", ".prettierrc.json"];
+
+/**
+ * Finds the Prettier config for a file on a remote host: the nearest JSON
+ * `.prettierrc`, `.prettierrc.json` or `package.json` with a `prettier` key,
+ * from the file's directory up to the worktree root. A project that keeps its
+ * config in YAML or JavaScript gets Prettier's defaults.
+ */
+async function resolveConfigOnHost(
+  fs: HostFs,
+  absFile: string,
+  worktreePath: string,
+): Promise<prettier.Options | null> {
+  const root = resolvePath(worktreePath);
+  let dir = dirname(absFile);
+  for (;;) {
+    for (const name of JSON_CONFIGS) {
+      const parsed = await readJson(fs, join(dir, name));
+      if (parsed && typeof parsed === "object") return withoutPlugins(parsed as prettier.Options);
+    }
+    const pkg = (await readJson(fs, join(dir, "package.json"))) as { prettier?: unknown } | null;
+    if (pkg && typeof pkg.prettier === "object" && pkg.prettier !== null) {
+      return withoutPlugins(pkg.prettier as prettier.Options);
+    }
+    if (dir === root || dirname(dir) === dir) return null;
+    dir = dirname(dir);
+  }
+}
+
+/** A worker's config must not make the hub load code, so its `plugins` are dropped. */
+function withoutPlugins(config: prettier.Options): prettier.Options {
+  const { plugins: _plugins, ...rest } = config;
+  if (Array.isArray(rest.overrides)) {
+    rest.overrides = rest.overrides.map((entry) => {
+      if (!entry || typeof entry !== "object" || !entry.options) return entry;
+      const { plugins: _p, ...options } = entry.options;
+      return { ...entry, options };
+    });
+  }
+  return rest;
+}
+
+async function readJson(fs: HostFs, path: string): Promise<unknown> {
+  try {
+    return JSON.parse(Buffer.from(await fs.readFile(path)).toString("utf8"));
+  } catch {
+    return null;
+  }
+}
 
 async function pathExists(fs: HostFs, path: string): Promise<boolean> {
   return fs.stat(path, { followSymlinks: true }).then(
