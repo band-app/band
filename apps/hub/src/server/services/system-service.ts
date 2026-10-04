@@ -1,7 +1,7 @@
 import type { WorktreeInfo } from "@band-app/host-api";
+import { brewInstall } from "@band-app/host-local/process/install";
+import { shellPath, whichBinary } from "@band-app/host-local/process/path";
 import { hostRegistry } from "../infra/host/registry";
-import { brewInstall } from "../infra/process/install";
-import { shellPath, whichBinary } from "../infra/process/path";
 
 export type { WorktreeInfo };
 
@@ -24,7 +24,7 @@ export type { WorktreeInfo };
  *     parallel `du` instances we'll tolerate), not an infra concern.
  *
  * Reorganised in issue #535, follow-up 3 — the `execFile` callouts that
- * previously lived inline here moved into `server/infra/process/`.
+ * previously lived inline here moved into `packages/host-local/src/process/`.
  */
 
 /**

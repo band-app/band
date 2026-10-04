@@ -1,4 +1,4 @@
-import type { PullRequestSummary, RepoInfo } from "../../infra/git/git-client";
+import type { PullRequestSummary, RepoInfo } from "@band-app/host-local/git/git-client";
 
 export interface CIStatus {
   state: string;

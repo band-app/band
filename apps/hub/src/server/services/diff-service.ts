@@ -11,9 +11,9 @@
 import { existsSync } from "node:fs";
 import { readFile, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
-import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import {
   workspaceService as defaultWorkspaceService,
   type WorkspaceService,

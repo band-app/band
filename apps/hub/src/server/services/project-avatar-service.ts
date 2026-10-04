@@ -1,12 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { getRepoInfo } from "@band-app/host-local/git/git-client";
+import { gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import { ProjectQueries, type ProjectState } from "../infra/db/queries/projects";
 import { bandHome } from "../infra/db/queries/settings";
-import { getRepoInfo } from "../infra/git/git-client";
 import { GitHubClient } from "../infra/github/github-client";
 import { type GitHubRepoRef, githubRepoRef } from "../infra/github/github-repo-ref";
-import { gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
 
 const log = createLogger("project-avatars");

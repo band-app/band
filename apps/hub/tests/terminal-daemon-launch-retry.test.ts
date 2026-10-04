@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import {
   DaemonTerminalBackend,
   TerminalDaemonUnavailableError,
-} from "@/server/infra/terminals/daemon/daemon-backend";
+} from "@band-app/host-local/terminals/daemon/daemon-backend";
+import { afterEach, describe, expect, it } from "vitest";
 import { createTmpHome } from "./helpers/server";
 import { isAlive, startDaemonOfBuild, stopTerminalDaemon } from "./helpers/terminal-daemon";
 

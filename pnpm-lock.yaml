@@ -83,15 +83,6 @@ importers:
       '@vscode/ripgrep':
         specifier: ^1.18.0
         version: 1.18.0
-      '@xterm/addon-serialize':
-        specifier: 0.15.0-beta.300
-        version: 0.15.0-beta.300(patch_hash=851eac3d75e6d8c013b9f4c053e61d824b23965cb19ecc28e335e05059f3a294)(@xterm/xterm@6.1.0-beta.303)
-      '@xterm/addon-unicode11':
-        specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
-      '@xterm/headless':
-        specifier: 6.1.0-beta.302
-        version: 6.1.0-beta.302
       fzf:
         specifier: 0.5.2
         version: 0.5.2
@@ -111,6 +102,9 @@ importers:
       '@band-app/host-api':
         specifier: workspace:^
         version: link:../../packages/host-api
+      '@band-app/host-local':
+        specifier: workspace:^
+        version: link:../../packages/host-local
       '@band-app/link':
         specifier: workspace:^
         version: link:../../packages/link
@@ -147,6 +141,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.0
         version: 8.18.1
+      '@xterm/headless':
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
       croner:
         specifier: ^10.0.1
         version: 10.0.1
@@ -473,6 +470,58 @@ importers:
       '@types/node':
         specifier: ^22.19.13
         version: 22.19.13
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/host-local:
+    dependencies:
+      '@agentclientprotocol/claude-agent-acp':
+        specifier: 0.81.2
+        version: 0.81.2(@anthropic-ai/sdk@0.81.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+      '@agentclientprotocol/codex-acp':
+        specifier: 1.13.1
+        version: 1.13.1
+      '@band-app/coding-agent':
+        specifier: workspace:^
+        version: link:../coding-agent
+      '@band-app/host-api':
+        specifier: workspace:^
+        version: link:../host-api
+      '@band-app/logger':
+        specifier: workspace:^
+        version: link:../logger
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../shared
+      '@vscode/ripgrep':
+        specifier: ^1.18.0
+        version: 1.18.0
+      '@xterm/addon-serialize':
+        specifier: 0.15.0-beta.300
+        version: 0.15.0-beta.300(patch_hash=851eac3d75e6d8c013b9f4c053e61d824b23965cb19ecc28e335e05059f3a294)(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/addon-unicode11':
+        specifier: 0.10.0-beta.300
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/headless':
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      typescript-language-server:
+        specifier: ^5.1.3
+        version: 5.1.3
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

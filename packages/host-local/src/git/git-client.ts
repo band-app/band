@@ -6,8 +6,7 @@ import { execFileOffThread } from "../process/exec-file-worker";
 import { prependBinDirs } from "../process/path";
 
 /**
- * Git infrastructure client — Phase 2 of the 3-tier refactor
- * (`docs/web-architecture.md`).
+ * Git infrastructure client.
  *
  * Wraps every shell-out to `git` that the web server needs so the rest of
  * the codebase (services, routers, sync loops) can depend on a typed,

@@ -1,5 +1,5 @@
+import { parseGitRemoteUrl } from "@band-app/host-local/git/git-client";
 import { describe, expect, it } from "vitest";
-import { parseGitRemoteUrl } from "../src/server/infra/git/git-client";
 import {
   buildBatchedCIQuery,
   parseBatchedCIResponse,

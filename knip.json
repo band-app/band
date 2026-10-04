@@ -43,6 +43,16 @@
         "typescript-language-server",
         "esbuild",
         "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp",
+        "@vscode/ripgrep",
+        "node-pty"
+      ]
+    },
+    "packages/host-local": {
+      "project": ["src/**/*.ts", "tests/**/*.ts"],
+      "ignoreDependencies": [
+        "typescript-language-server",
+        "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp"
       ]
     },

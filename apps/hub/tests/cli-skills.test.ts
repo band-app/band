@@ -9,10 +9,11 @@
  *   - the canonical `~/.agents/skills/<name>/SKILL.md` files
  *   - the per-agent symlinks at `<agent>/skills/<name> → ../../.agents/...`
  *
- * No mocks — the test relies on a real `band` binary being reachable through
- * `findBandBinary` (the symlink at /usr/local/bin/band, the desktop sidecar,
- * or a cargo build output). When no binary can be located the suite is
- * skipped rather than failing, so CI nodes without a built CLI don't go red.
+ * No mocks. The test exercises the CLI built from this checkout (found by
+ * `findCliBinary`: the cargo output or the desktop sidecar) and hands it to
+ * the service through `BAND_CLI_BIN`, so a `band` installed globally on the
+ * machine never takes part. When no built CLI exists the suite is skipped
+ * rather than failing.
  */
 
 import { execFileSync } from "node:child_process";
@@ -31,9 +32,25 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { findBandBinary } from "../src/server/infra/agents/skills-install";
+import { findBandBinary } from "@band-app/host-local/agents/skills-install";
+import { findCliBinary } from "@band-app/host-local/process/cli-binary";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
+
+// The CLI build under test. Resolved from the checkout, never from PATH or
+// /usr/local/bin, which may hold an older global install.
+const builtCli = findCliBinary();
+let originalCliBin: string | undefined;
+
+beforeAll(() => {
+  originalCliBin = process.env.BAND_CLI_BIN;
+  if (builtCli) process.env.BAND_CLI_BIN = builtCli;
+});
+
+afterAll(() => {
+  if (originalCliBin !== undefined) process.env.BAND_CLI_BIN = originalCliBin;
+  else delete process.env.BAND_CLI_BIN;
+});
 
 const SKILL_NAMES = [
   "band",
@@ -46,11 +63,8 @@ const SKILL_NAMES = [
 ] as const;
 
 /**
- * Reuse the same resolver the production code uses so we exercise the real
- * binary (the symlink at /usr/local/bin/band, the desktop sidecar, or the
- * cargo build output — in that order). We can't just rely on PATH because
- * `pnpm exec vitest` prepends `node_modules/.bin/`, where the workspace
- * `band` shim refuses to run if the cargo build hasn't been produced.
+ * The binary the service resolves. With `BAND_CLI_BIN` set to the built CLI
+ * this is that build, whatever else is on PATH.
  */
 let bandBinary: string | null = null;
 
@@ -65,8 +79,14 @@ let bandBinary: string | null = null;
 let expectedSkills: Map<(typeof SKILL_NAMES)[number], Buffer> | null = null;
 
 beforeAll(async () => {
+  // No built CLI: the suite is skipped, so there is nothing to set up.
+  if (!builtCli) return;
   bandBinary = await findBandBinary();
   if (!bandBinary) return;
+  // Guard the hermetic setup: the service must resolve the built CLI.
+  if (realpathSync(bandBinary) !== realpathSync(builtCli)) {
+    throw new Error(`expected the built CLI ${builtCli}, resolved ${bandBinary}`);
+  }
   // Staging home with no agent config dirs → install writes the shared
   // `<home>/.agents/skills/<name>/SKILL.md` files and creates no symlinks.
   const stagingHome = mkdtempSync(join(tmpdir(), "band-skills-expected-"));
@@ -98,35 +118,8 @@ beforeAll(async () => {
 });
 
 // `describe.skipIf` is evaluated when the test file is imported, before
-// `beforeAll` resolves `bandBinary`. Probe synchronously here using the same
-// `/usr/local/bin/band` shortcut that `findBandBinary` tries first, plus a
-// look at the cargo build output. If neither is present we skip the suite —
-// running on a CI node without a built CLI shouldn't go red.
-function bandBinaryReachable(): boolean {
-  try {
-    statSync("/usr/local/bin/band");
-    return true;
-  } catch {
-    // Fall through.
-  }
-  // apps/cli/target/{release,debug}/band — the cargo build output. The
-  // resolver in cli.ts walks several roots; we only check the most likely
-  // one here since this is just a "should we run?" gate.
-  const repoCandidates = [
-    join(import.meta.dirname, "..", "..", "cli", "target", "release", "band"),
-    join(import.meta.dirname, "..", "..", "cli", "target", "debug", "band"),
-  ];
-  return repoCandidates.some((p) => {
-    try {
-      statSync(p);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-}
-
-describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)", () => {
+// `beforeAll` runs, so the gate is the built CLI resolved above.
+describe.skipIf(!builtCli)("CLI skills sync (ensureSkillsInstalled)", () => {
   let tmp: string;
   let originalBandHome: string | undefined;
   let originalHome: string | undefined;

@@ -1,6 +1,6 @@
+import { execGit } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
 import { SubscriptionQueries } from "../infra/db/queries/subscriptions";
-import { execGit } from "../infra/git/git-client";
 
 const log = createLogger("pushed-sha");
 
