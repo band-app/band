@@ -60,6 +60,8 @@ export interface HostInfo {
   /** CPU architecture, as `process.arch` reports it. */
   arch: string;
   hostname: string;
+  /** The home directory of the user the host runs as. A `~` in a path the user types means this. */
+  home?: string;
   /** Free-form tags used for placement (`gpu`, `epic-approved`). */
   labels: string[];
   /** Directories workspaces may live under. Empty means unrestricted. */

@@ -127,7 +127,10 @@ export interface DashboardAdapter {
    * per agent so the UI can update without a follow-up `listModels`
    * round-trip.
    */
-  refreshModels?(agentId?: string): Promise<{
+  refreshModels?(
+    agentId?: string,
+    hostId?: string,
+  ): Promise<{
     results: {
       agentId: string;
       models: { id: string; name: string; description?: string; contextWindow?: number }[];

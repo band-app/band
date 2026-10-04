@@ -53,11 +53,19 @@ export const modelsRouter = t.router({
    * so the HTTP response returns immediately.
    */
   refresh: publicProcedure
-    .input(z.object({ agentId: z.string().optional() }))
+    .input(z.object({ agentId: z.string().optional(), hostId: z.string().optional() }))
     .mutation(async ({ input }) => {
-      const results = await modelRefreshService.refreshOneOrAll(input.agentId);
+      const results = await modelRefreshService.refreshOneOrAll(input.agentId, input.hostId);
       return { results };
     }),
+
+  /**
+   * Whether each configured agent can start on each host that is up. The
+   * Settings page shows it per host and picks the host a refresh runs on.
+   */
+  availability: publicProcedure
+    .input(z.object({ workspaceId: z.string().optional() }).default({}))
+    .query(({ input }) => modelRefreshService.availability(input.workspaceId)),
 });
 
 export type ModelsRouter = typeof modelsRouter;

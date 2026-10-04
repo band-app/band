@@ -25,13 +25,16 @@
  * `*FromSnapshot` variants.
  */
 
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type {
   CachedAgentModel,
   CodingAgentDefinition,
   Settings,
 } from "../infra/db/queries/settings";
-import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
+import { bandHome, resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
+import { TokenQueries } from "../infra/db/queries/tokens";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import {
   agentSessionService,
@@ -61,8 +64,92 @@ export interface AgentModelsEntry {
   defaultModel?: string;
 }
 
+/** Whether one agent can start on one host. */
+export interface HostAgentAvailability {
+  hostId: string;
+  hostName: string;
+  available: boolean;
+  /** Why the agent cannot start there, when it cannot. */
+  reason?: string;
+}
+
+export interface AgentAvailabilityEntry {
+  agentId: string;
+  agentType: string;
+  hosts: HostAgentAvailability[];
+}
+
 export class ModelRefreshService {
-  constructor(private readonly queries: SettingsQueries = new SettingsQueries()) {}
+  constructor(
+    private readonly queries: SettingsQueries = new SettingsQueries(),
+    private readonly hostQueries: TokenQueries = new TokenQueries(),
+  ) {}
+
+  /**
+   * The host a refresh runs on. An explicit `hostId` wins. Without one, the
+   * local host is used when it can start the agent, else the first online
+   * worker that can. A hub whose own machine has no agents (the Docker image)
+   * therefore refreshes on a worker instead of failing.
+   */
+  async hostForAgent(def: CodingAgentDefinition, hostId?: string): Promise<Host> {
+    if (hostId) return hostRegistry.hostById(hostId);
+    // `BAND_LOCAL_HOST=off` keeps work off the hub's own machine, agents included.
+    const candidates = [
+      ...(isLocalHostEnabled() ? [hostRegistry.local] : []),
+      ...hostRegistry.all().filter((h) => h.id !== "local"),
+    ];
+    for (const host of candidates) {
+      if (host.id !== "local" && this.hostQueries.findHost(host.id)?.status !== "online") continue;
+      if (await canLaunch(host, def)) return host;
+    }
+    return hostRegistry.local;
+  }
+
+  /**
+   * Whether each configured agent can start on each host that is up (the local
+   * host, and workers that are online). The Settings page shows it per host.
+   */
+  async availability(workspaceId?: string): Promise<{
+    hosts: { id: string; name: string }[];
+    /** The host a refresh runs on by default: the one the workspace is on, else Local. */
+    defaultHostId: string;
+    agents: AgentAvailabilityEntry[];
+  }> {
+    const settings = this.queries.load();
+    const hosts = hostRegistry.all().flatMap((host) => {
+      if (host.id === "local") return [{ host, name: "Local", up: isLocalHostEnabled() }];
+      const row = this.hostQueries.findHost(host.id);
+      return [{ host, name: row?.name ?? host.id, up: row?.status === "online" }];
+    });
+    const agents: AgentAvailabilityEntry[] = [];
+    for (const def of settings.codingAgents ?? []) {
+      const perHost = await Promise.all(
+        hosts.map(async ({ host, name, up }): Promise<HostAgentAvailability> => {
+          if (!up)
+            return { hostId: host.id, hostName: name, available: false, reason: "host offline" };
+          const reason = await launchProblem(host, def);
+          return reason === null
+            ? { hostId: host.id, hostName: name, available: true }
+            : { hostId: host.id, hostName: name, available: false, reason };
+        }),
+      );
+      agents.push({ agentId: def.id, agentType: def.type, hosts: perHost });
+    }
+    let defaultHostId = hosts.find((h) => h.up)?.host.id ?? hostRegistry.local.id;
+    if (workspaceId) {
+      try {
+        const id = hostRegistry.hostFor(workspaceId).id;
+        if (hosts.some((h) => h.host.id === id && h.up)) defaultHostId = id;
+      } catch {
+        // An unknown workspace or host falls back to Local.
+      }
+    }
+    return {
+      hosts: hosts.filter((h) => h.up).map(({ host, name }) => ({ id: host.id, name })),
+      defaultHostId,
+      agents,
+    };
+  }
 
   /**
    * Read the cached model list for one agent, falling back to what this
@@ -136,7 +223,7 @@ export class ModelRefreshService {
    * the default agent's subprocess, so we reject it up front with an
    * explicit error instead.
    */
-  async refresh(agentId: string): Promise<ModelRefreshResult> {
+  async refresh(agentId: string, hostId?: string): Promise<ModelRefreshResult> {
     const now = Date.now();
     let fresh: CachedAgentModel[] | undefined;
     let error: string | undefined;
@@ -162,7 +249,8 @@ export class ModelRefreshService {
       // Start the agent in a scratch ACP session and read the model option
       // it offers (issue #648).
       const def = resolveAgentDefinition(settings, agentId);
-      fresh = modelsFromCatalog(await agentSessionService.probe(def, hostRegistry.local));
+      const host = await this.hostForAgent(def, hostId);
+      fresh = modelsFromCatalog(await agentSessionService.probe(def, host, await probeCwd(host)));
     } catch (err) {
       // Surface only a sanitized classification to the tRPC response —
       // raw error messages from the agent can include filesystem paths,
@@ -224,12 +312,12 @@ export class ModelRefreshService {
    * agents sequentially to avoid racing the settings.json read/write
    * cycle (see file-level comment).
    */
-  async refreshAll(): Promise<ModelRefreshResult[]> {
+  async refreshAll(hostId?: string): Promise<ModelRefreshResult[]> {
     const settings = this.queries.load();
     const agents = settings.codingAgents ?? [];
     const results: ModelRefreshResult[] = [];
     for (const def of agents) {
-      results.push(await this.refresh(def.id));
+      results.push(await this.refresh(def.id, hostId));
     }
     return results;
   }
@@ -240,11 +328,11 @@ export class ModelRefreshService {
    * branch so the `models.refresh` tRPC router stays a pure delegate
    * (validate → call service → return).
    */
-  async refreshOneOrAll(agentId?: string): Promise<ModelRefreshResult[]> {
+  async refreshOneOrAll(agentId?: string, hostId?: string): Promise<ModelRefreshResult[]> {
     if (agentId) {
-      return [await this.refresh(agentId)];
+      return [await this.refresh(agentId, hostId)];
     }
-    return this.refreshAll();
+    return this.refreshAll(hostId);
   }
 
   /**
@@ -332,6 +420,34 @@ export class ModelRefreshService {
     this.queries.save(patch);
     return true;
   }
+}
+
+/** Why an agent cannot start on a host, or null when it can. */
+async function launchProblem(host: Host, def: CodingAgentDefinition): Promise<string | null> {
+  try {
+    const launch = await host.acp.resolveLaunch({
+      type: def.type,
+      label: def.label,
+      command: def.command,
+    });
+    return typeof launch === "string" ? launch : null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function canLaunch(host: Host, def: CodingAgentDefinition): Promise<boolean> {
+  return (await launchProblem(host, def)) === null;
+}
+
+/**
+ * Where a probe runs. The hub's own directory means nothing on a worker, so a
+ * remote host probes from its first root (workers refuse paths outside them).
+ */
+async function probeCwd(host: Host): Promise<string> {
+  if (host.id === "local") return bandHome();
+  const info = await host.info();
+  return info.roots[0] ?? info.home ?? bandHome();
 }
 
 /**

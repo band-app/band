@@ -854,6 +854,7 @@ A test that cannot run on a worker passes `remoteHost: false` to `startServer`. 
 - `terminal-restart-daemon`, `terminal-daemon-restart`, `terminal-daemon-build-mismatch` and `terminal-cold-restore` drive the hub's own terminal daemon. A worker runs terminals in its process (`BAND_TERMINAL_DAEMON=0`).
 - `workspace-remove-locked` and `workspace-sync-half-created-worktree` restart the hub and watch its boot-time worktree sync. On loopback the hub and the worker see the same repository path, so the hub's local sync adds a second row for a worktree that is already registered on the worker. A real worker has its own checkout path.
 - `remote-relay` keeps the hub's own workspace local and starts its own workers.
+- `host-capabilities` starts its own worker with a different `HOME`, and needs the hub's own machine to lack an agent that the worker has.
 - `tokens-auth` counts the hub's host rows, and the worker adds one.
 - The "disabled GitHub plugin" cases in `pr-checks` and `branch-status-pr` count calls to the `gh` stub. A worker probes `gh --version` itself when it starts.
 

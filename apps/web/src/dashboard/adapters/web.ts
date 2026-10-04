@@ -204,7 +204,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     };
   }
 
-  async refreshModels(agentId?: string): Promise<{
+  async refreshModels(
+    agentId?: string,
+    hostId?: string,
+  ): Promise<{
     results: {
       agentId: string;
       models: { id: string; name: string; description?: string; contextWindow?: number }[];
@@ -212,7 +215,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
       error?: string;
     }[];
   }> {
-    const data = await this.trpc.models.refresh.mutate({ agentId });
+    const data = await this.trpc.models.refresh.mutate({ agentId, hostId });
     return data as {
       results: {
         agentId: string;

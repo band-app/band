@@ -4,15 +4,15 @@
  * NULL`), so two callers racing for one row can't both win.
  */
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "../connection";
-import { hosts, tokens } from "../schema";
+import { hosts, tokens, worktrees } from "../schema";
 
 export type TokenRow = typeof tokens.$inferSelect;
 export type TokenKind = TokenRow["kind"];
 export type HostRow = typeof hosts.$inferSelect;
 
-type Db = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
+type Db = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "delete">;
 
 export class TokenQueries {
   constructor(private readonly db: () => Db = getDb) {}
@@ -112,6 +112,30 @@ export class TokenQueries {
       .set(lastSeenAt === undefined ? { status } : { status, lastSeenAt })
       .where(eq(hosts.id, id))
       .run();
+  }
+
+  /** How many workspaces (worktree rows) live on a host. */
+  countWorkspacesOnHost(id: string): number {
+    const row = this.db()
+      .select({ n: count() })
+      .from(worktrees)
+      .where(eq(worktrees.hostId, id))
+      .get();
+    return row?.n ?? 0;
+  }
+
+  /** Live tokens bound to a host. */
+  listLiveTokensForHost(id: string): TokenRow[] {
+    return this.db()
+      .select()
+      .from(tokens)
+      .where(and(eq(tokens.hostId, id), isNull(tokens.revokedAt)))
+      .all();
+  }
+
+  /** Deletes a host row. Its tokens, project paths and pending removals go with it (cascade). */
+  deleteHost(id: string): void {
+    this.db().delete(hosts).where(eq(hosts.id, id)).run();
   }
 
   insertHost(row: HostRow): void {

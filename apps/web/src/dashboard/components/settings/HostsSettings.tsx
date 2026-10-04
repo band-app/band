@@ -119,6 +119,16 @@ export function HostsSettings() {
     await refresh();
   };
 
+  const removeHost = async (host: HostList[number]) => {
+    setError(null);
+    try {
+      await trpc.hosts.remove.mutate({ hostId: host.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+    await refresh();
+  };
+
   const closeAdd = () => {
     setAdding(false);
     setIssued(null);
@@ -151,13 +161,34 @@ export function HostsSettings() {
                   {" · "}
                   Last seen {formatTime(host.lastSeenAt)}
                 </div>
+                <div className="text-xs text-muted-foreground">
+                  <span data-testid="settings__host-agents">
+                    Agents: {host.agents.length > 0 ? host.agents.join(", ") : "none found"}
+                  </span>
+                  {" · "}
+                  <span data-testid="settings__host-roots">
+                    Roots: {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
+                  </span>
+                </div>
               </div>
-              <span
-                data-testid="settings__host-status"
-                className="shrink-0 text-xs text-muted-foreground"
-              >
-                {host.status}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span data-testid="settings__host-status" className="text-xs text-muted-foreground">
+                  {host.status}
+                </span>
+                {host.id !== "local" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Remove host ${host.name}`}
+                    data-testid="settings__host-remove"
+                    disabled={host.status === "online" || host.status === "lost"}
+                    onClick={() => void removeHost(host)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
             </li>
           ))}
         </ul>

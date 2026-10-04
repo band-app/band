@@ -344,6 +344,38 @@ export class WorkspacePage {
     return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-path");
   }
 
+  /** The roots of the chosen remote host, listed under the path field. */
+  get newWorkspaceHostRoots(): Locator {
+    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-roots");
+  }
+
+  /** The error the dialog shows when creating the workspace is refused. */
+  get newWorkspaceError(): Locator {
+    return this.newWorkspaceDialog.getByTestId("new-workspace-form__error");
+  }
+
+  /** Opens the New Workspace dialog, picks a remote host and fills the path and branch, without submitting. */
+  async fillNewWorkspaceOnHost(opts: {
+    project: string;
+    hostId: string;
+    hostProjectPath: string;
+    branch: string;
+  }): Promise<void> {
+    await test.step(`Fill the New Workspace dialog for host ${opts.hostId}`, async () => {
+      await this.openProjectContextMenu(opts.project);
+      await this.addWorkspaceMenuItem.click();
+      await expect(this.newWorkspaceDialog).toBeVisible();
+      await this.newWorkspaceHostSelect.selectOption(opts.hostId);
+      await this.newWorkspaceHostPathInput.fill(opts.hostProjectPath);
+      await this.newWorkspaceDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+    });
+  }
+
+  /** Clicks Create in the New Workspace dialog. */
+  async submitNewWorkspace(): Promise<void> {
+    await this.newWorkspaceDialog.getByRole("button", { name: "Create" }).click();
+  }
+
   /** Opens the New Workspace dialog from the project's context menu, picks a host and creates the workspace. */
   async createWorkspaceOnHost(opts: {
     project: string;

@@ -369,6 +369,28 @@ export class SettingsPage {
     });
   }
 
+  /** The agents line of a host row. `data-testid` set in `HostsSettings.tsx`. */
+  hostAgents(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-agents");
+  }
+
+  /** The roots line of a host row. */
+  hostRoots(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-roots");
+  }
+
+  /** Clicks Remove on a host row. */
+  async removeHost(hostId: string): Promise<void> {
+    await test.step(`Remove host ${hostId}`, async () => {
+      await this.hostRow(hostId).getByTestId("settings__host-remove").click();
+    });
+  }
+
+  /** The Remove button of a host row. */
+  hostRemoveButton(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-remove");
+  }
+
   /** One row per token in the Hosts section's Tokens list. */
   tokenRows(): Locator {
     return this.dialog.getByTestId("settings__token");

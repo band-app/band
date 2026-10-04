@@ -23,6 +23,11 @@ export class HostRegistry {
     this.hosts.set(host.id, host);
   }
 
+  /** Forgets a host that was removed. The local host cannot be removed. */
+  unregister(hostId: string): void {
+    if (hostId !== this.local.id) this.hosts.delete(hostId);
+  }
+
   hostById(hostId: string): Host {
     const host = this.hosts.get(hostId);
     if (!host) throw new Error(`Unknown host "${hostId}"`);
