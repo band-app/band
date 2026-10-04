@@ -203,6 +203,14 @@ band hosts remove <id>
 
 Removes an offline worker host that has no workspaces and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with workspaces are refused.
 
+### Validate a repository's environment file
+
+```sh
+band env validate [path]
+```
+
+Checks `.band/environment.json` in the repository at `path` (default: the current directory), or the file itself. The path must exist on the hub's machine. Prints `OK <file>` and exits 0, or prints each problem with its key path and exits 1. With `--output json` it prints the parsed environment and the issues. Needs an admin token.
+
 ### List, create and revoke the hub's tokens
 
 ```sh

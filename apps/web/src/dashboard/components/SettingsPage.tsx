@@ -37,6 +37,7 @@ import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } f
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
+import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { SettingsRow } from "./settings/SettingsRow";
@@ -607,6 +608,14 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Hosts ──────────────────────────────────────── */}
             <SettingsSection title="Hosts">
               <HostsSettings />
+            </SettingsSection>
+
+            {/* ── Environment ────────────────────────────────── */}
+            <SettingsSection
+              title="Environment"
+              description="Each project's .band/environment.json, checked against the hosts."
+            >
+              <EnvironmentSettings />
             </SettingsSection>
 
             {/* ── Labels ─────────────────────────────────────── */}

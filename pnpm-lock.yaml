@@ -99,6 +99,9 @@ importers:
       '@band-app/coding-agent':
         specifier: workspace:^
         version: link:../../packages/coding-agent
+      '@band-app/environment':
+        specifier: workspace:^
+        version: link:../../packages/environment
       '@band-app/host-api':
         specifier: workspace:^
         version: link:../../packages/host-api
@@ -534,11 +537,27 @@ importers:
         specifier: workspace:^
         version: link:../logger
 
+  packages/environment:
+    dependencies:
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/host-api:
     dependencies:
       '@band-app/coding-agent':
         specifier: workspace:^
         version: link:../coding-agent
+      '@band-app/environment':
+        specifier: workspace:^
+        version: link:../environment
     devDependencies:
       '@types/node':
         specifier: ^22.19.13
@@ -558,6 +577,9 @@ importers:
       '@band-app/coding-agent':
         specifier: workspace:^
         version: link:../coding-agent
+      '@band-app/environment':
+        specifier: workspace:^
+        version: link:../environment
       '@band-app/host-api':
         specifier: workspace:^
         version: link:../host-api

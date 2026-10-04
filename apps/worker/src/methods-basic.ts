@@ -167,6 +167,7 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   r.json("scripts.command", async (a) =>
     host.scripts.command({ ...(await workspacePaths(a)), label: label(a) }),
   );
+  r.json("scripts.environment", async (a) => host.scripts.environment(await workspacePaths(a)));
   r.json("scripts.runHidden", async (a) =>
     host.scripts.runHidden(str(a, "script"), await path(a, "cwd"), optNum(a, "timeoutMs")),
   );

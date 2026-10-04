@@ -67,6 +67,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: HostsCmd,
     },
+    /// Check a repository's .band/environment.json
+    Env {
+        #[command(subcommand)]
+        cmd: EnvCmd,
+    },
     /// Manage the hub's device and worker tokens
     Tokens {
         #[command(subcommand)]
@@ -558,6 +563,15 @@ enum HostsCmd {
 }
 
 #[derive(Subcommand)]
+enum EnvCmd {
+    /// Validate .band/environment.json, printing OK or each problem with its path
+    Validate {
+        /// Repository directory, or the environment.json file (default: the current directory)
+        path: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum TokensCmd {
     /// List tokens (never their secrets)
     List,
@@ -635,6 +649,15 @@ fn main() {
     } = cli.command
     {
         let exit_code = handle_chats_watch(chat_id.as_deref());
+        process::exit(exit_code);
+    }
+
+    // env validate exits non-zero on a problem, with the problems as its output
+    if let Commands::Env {
+        cmd: EnvCmd::Validate { ref path },
+    } = cli.command
+    {
+        let exit_code = handle_env_validate(path.as_deref(), json_output);
         process::exit(exit_code);
     }
 
@@ -837,6 +860,7 @@ fn main() {
             }),
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
+        Commands::Env { .. } => unreachable!("handled before the match"),
         Commands::Hosts { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
@@ -3114,6 +3138,85 @@ fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Env commands ---
+
+/// Ask the hub to validate the environment file under `path`. Prints OK, or
+/// each problem as `<path>: <message>`, and returns the exit code: 0 when the
+/// file is valid, 1 when it has problems or does not exist.
+fn handle_env_validate(path: Option<&str>, json_output: bool) -> i32 {
+    match cmd_env_validate(path) {
+        Ok((ok, text, json)) => {
+            if json_output {
+                println!("{}", serde_json::to_string(&json).unwrap());
+            } else if ok {
+                print!("{text}");
+            } else {
+                eprint!("{text}");
+            }
+            i32::from(!ok)
+        }
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
+fn cmd_env_validate(path: Option<&str>) -> Result<(bool, String, serde_json::Value), String> {
+    let given = path.unwrap_or(".");
+    validate::validate_path(given, "path")?;
+    let absolute = std::fs::canonicalize(given)
+        .map_err(|e| format!("Cannot read {given}: {e}"))?
+        .to_string_lossy()
+        .into_owned();
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query(
+        "environment.validate",
+        &serde_json::json!({"path": absolute}),
+    )?;
+
+    let source = data.get("source").and_then(|v| v.as_str());
+    let issues = data
+        .get("issues")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let Some(source) = source else {
+        let text = format!("No .band/environment.json found in {absolute}\n");
+        let json = serde_json::json!({"ok": false, "source": null, "issues": []});
+        return Ok((false, text, json));
+    };
+
+    let ok = issues.is_empty();
+    let text = if ok {
+        format!("OK {source}\n")
+    } else {
+        use std::fmt::Write as _;
+        let mut text = format!(
+            "{source} has {} problem{}:\n",
+            issues.len(),
+            if issues.len() == 1 { "" } else { "s" }
+        );
+        for issue in &issues {
+            let issue_path = issue.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let message = issue.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            if issue_path.is_empty() {
+                let _ = writeln!(text, "  {message}");
+            } else {
+                let _ = writeln!(text, "  {issue_path}: {message}");
+            }
+        }
+        text
+    };
+    let json = serde_json::json!({"ok": ok, "source": source, "issues": issues});
+    Ok((ok, text, json))
+}
+
 // --- Tokens commands ---
 
 fn cmd_tokens_list() -> Result<CommandResult, String> {
@@ -3798,6 +3901,14 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Subscription ID"},
             ]
+        }),
+        serde_json::json!({
+            "name": "env validate",
+            "description": "Validate .band/environment.json, printing OK or each problem with its path",
+            "parameters": [
+                {"name": "path", "type": "string", "required": false, "positional": true, "description": "Repository directory, or the environment.json file (default: the current directory)"},
+            ],
+            "notes": "The hub reads the file, so the path must exist on the hub's machine. Exits 0 when the file is valid and 1 when it has problems or does not exist. Text output: `OK <file>`, or `<file> has N problems:` followed by `  <key path>: <message>` lines on stderr.\nJSON output: `{\"ok\": false, \"source\": \"/repo/.band/environment.json\", \"issues\": [{\"path\": \"isolation\", \"message\": \"...\"}]}`."
         }),
         serde_json::json!({
             "name": "hosts list",

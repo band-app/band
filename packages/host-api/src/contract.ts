@@ -86,6 +86,12 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       assert.ok(info.versions.node);
     });
 
+    it("reports the tool versions on its PATH", async () => {
+      const { tools } = await host.info();
+      assert.match(tools.node ?? "", /^\d+\.\d+\.\d+$/);
+      assert.match(tools.git ?? "", /^\d+\.\d+\.\d+$/);
+    });
+
     it("runs git and reports its failures", async () => {
       const { stdout } = await host.git.exec(["rev-parse", "--is-inside-work-tree"], repo);
       assert.equal(stdout.trim(), "true");
@@ -514,6 +520,90 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       assert.ok(plan);
       assert.match(plan.command, /bash/);
       plan.dispose();
+    });
+
+    describe("environment.json", () => {
+      async function project(name: string, files: Record<string, string>) {
+        const dir = join(fixture.workDir, name);
+        await host.fs.mkdir(join(dir, ".band"), { recursive: true });
+        for (const [file, text] of Object.entries(files)) {
+          await host.fs.mkdir(join(dir, file, ".."), { recursive: true });
+          await host.fs.writeFile(join(dir, file), text);
+        }
+        return { projectPath: dir, worktreePath: dir };
+      }
+
+      it("reports no file for a project without one", async () => {
+        const workspace = await project("env-none", {});
+        assert.deepEqual(await host.scripts.environment(workspace), {
+          source: null,
+          environment: null,
+          issues: [],
+        });
+      });
+
+      it("parses a valid file and checks the devcontainer it names", async () => {
+        const workspace = await project("env-valid", {
+          ".band/environment.json": JSON.stringify({
+            build: { devcontainer: ".devcontainer/devcontainer.json" },
+            install: "echo install",
+            terminals: [{ name: "dev", command: "echo dev" }],
+            requires: { node: ">=1" },
+          }),
+          ".devcontainer/devcontainer.json": "{}",
+        });
+        const report = await host.scripts.environment(workspace);
+        assert.equal(report.source, join(workspace.projectPath, ".band", "environment.json"));
+        assert.deepEqual(report.issues, []);
+        assert.equal(report.environment?.install, "echo install");
+        assert.deepEqual(report.environment?.terminals, [{ name: "dev", command: "echo dev" }]);
+      });
+
+      it("reports each problem with its path", async () => {
+        const workspace = await project("env-bad", {
+          ".band/environment.json": JSON.stringify({ isolation: "docker", instal: "x" }),
+        });
+        const report = await host.scripts.environment(workspace);
+        assert.equal(report.environment, null);
+        assert.deepEqual(report.issues.map((i) => i.path).sort(), ["instal", "isolation"]);
+      });
+
+      it("names a devcontainer file that is missing", async () => {
+        const workspace = await project("env-no-devcontainer", {
+          ".band/environment.json": JSON.stringify({
+            build: { devcontainer: ".devcontainer/missing.json" },
+          }),
+        });
+        const report = await host.scripts.environment(workspace);
+        assert.equal(report.environment, null);
+        assert.deepEqual(
+          report.issues.map((i) => i.path),
+          ["build.devcontainer"],
+        );
+      });
+
+      it("prefers environment.json for setup and teardown, and falls back per script", async () => {
+        const workspace = await project("env-supersede", {
+          ".band/environment.json": JSON.stringify({ install: "echo i", start: "echo s" }),
+          ".band/config.json": JSON.stringify({ setup: "echo old", teardown: "echo old-bye" }),
+        });
+        assert.equal(
+          await host.scripts.command({ ...workspace, label: "setup" }),
+          "{\necho i\n} && {\necho s\n}",
+        );
+        assert.equal(
+          await host.scripts.command({ ...workspace, label: "teardown" }),
+          "echo old-bye",
+        );
+      });
+
+      it("falls back to config.json when environment.json has problems", async () => {
+        const workspace = await project("env-broken", {
+          ".band/environment.json": "{ nope",
+          ".band/config.json": JSON.stringify({ setup: "echo old" }),
+        });
+        assert.equal(await host.scripts.command({ ...workspace, label: "setup" }), "echo old");
+      });
     });
   });
 }

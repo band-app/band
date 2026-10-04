@@ -50,6 +50,7 @@ export const hostsRouter = t.router({
             .filter(([, on]) => on)
             .map(([name]) => name);
           local.agents = await agentTypesOn(hostRegistry.local);
+          local.tools = info.tools;
         }
       }
       return { hosts };

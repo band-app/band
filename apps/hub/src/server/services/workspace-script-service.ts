@@ -27,7 +27,8 @@ export type ScriptOutcome =
   | { kind: "error"; message: string };
 
 /**
- * Runs a workspace's `.band/config.json` `setup` and `teardown` commands in
+ * Runs a workspace's `setup` and `teardown` commands (from
+ * `.band/environment.json`, else `.band/config.json`) in
  * a terminal tab of that workspace, so the user can watch the output, see a
  * failure, and interact with a prompt the script raises.
  *
@@ -67,14 +68,38 @@ export class WorkspaceScriptService {
 
   /**
    * Start the workspace's `setup` command in a new terminal tab, if it has
-   * one. Returns straight away; nothing waits on the result.
+   * one, then open the `terminals` its `.band/environment.json` declares (a
+   * failed setup leaves them closed). Returns straight away; nothing waits on
+   * the result.
    */
   startSetup(workspaceId: string, worktreePath: string, projectPath: string): void {
     void (async () => {
       const workspace = { worktreePath, projectPath };
-      if (!(await this.getCommand(workspaceId, "setup", workspace))) return;
-      await this.run(workspaceId, "setup", workspace);
+      if (await this.getCommand(workspaceId, "setup", workspace)) {
+        const outcome = await this.run(workspaceId, "setup", workspace);
+        if (outcome.kind !== "exited" || outcome.code !== 0) return;
+      }
+      await this.openDeclaredTerminals(workspaceId, workspace);
     })().catch((err) => log.error({ err, workspaceId }, "could not start the setup script"));
+  }
+
+  /** Opens one terminal per entry of the workspace's `.band/environment.json` `terminals`. */
+  private async openDeclaredTerminals(
+    workspaceId: string,
+    workspace: ScriptWorkspace,
+  ): Promise<void> {
+    const report = await hostRegistry.hostFor(workspaceId).scripts.environment(workspace);
+    for (const { name, command } of report.environment?.terminals ?? []) {
+      // The workspace may have been removed while setup ran.
+      if (!workspaceService.resolve(workspaceId)) return;
+      const terminalId = randomUUID();
+      try {
+        await terminalService.spawn(workspaceId, terminalId, { command });
+        emit({ kind: "terminal-created", workspaceId, terminalId });
+      } catch (err) {
+        log.warn({ err, workspaceId, name }, "could not open a terminal from the environment");
+      }
+    }
   }
 
   /**

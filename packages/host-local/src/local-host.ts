@@ -60,11 +60,15 @@ import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorkspaceServers } from "./lsp/lsp-manager";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
+import { probeTools } from "./process/tools";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
-import { loadProjectConfig } from "./setup/project-config";
+import { loadEnvironment, loadScriptCommand } from "./setup/project-config";
 import { prepareScriptRun } from "./setup/script-run";
 import { copyWorkspaceFiles } from "./setup/workspace-files";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
+
+/** How long `info()` keeps the tool versions it probed. */
+const TOOLS_TTL_MS = 60_000;
 
 /** Same cap `execFile` callers in the hub use for command output. */
 const EXEC_MAX_BUFFER = 50 * 1024 * 1024;
@@ -115,6 +119,8 @@ export class LocalHost implements Host {
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
     prepare: (workspace) => prepareScript(this, workspace),
     copyFiles: (projectPath, worktreePath) => copyWorkspaceFiles(this, projectPath, worktreePath),
+    environment: (workspace) =>
+      loadEnvironment(this, workspace.worktreePath, workspace.projectPath),
   };
   readonly agentEnv: HostAgentEnv = {
     claudeDefaults: async (cwd, cli): Promise<ClaudeDefaults> => {
@@ -139,10 +145,38 @@ export class LocalHost implements Host {
     installHooks: () => installHooks(),
   };
 
-  constructor(private readonly options: LocalHostOptions) {}
+  constructor(private readonly options: LocalHostOptions) {
+    // The first probe takes about half a second (seven processes). Starting it
+    // now keeps the first `hosts.list` after boot from waiting on it.
+    void this.toolVersions();
+  }
 
   get pty(): TerminalBackend {
     return this.options.terminalBackend();
+  }
+
+  /**
+   * Probing runs seven processes. `info()` returns the last answer at once and
+   * refreshes it in the background once it is older than `TOOLS_TTL_MS`.
+   */
+  private tools: { at: number; value: Promise<Record<string, string>> } | null = null;
+  private toolsRefreshing = false;
+
+  private toolVersions(): Promise<Record<string, string>> {
+    const now = Date.now();
+    if (!this.tools) {
+      this.tools = { at: now, value: probeTools() };
+    } else if (now - this.tools.at > TOOLS_TTL_MS && !this.toolsRefreshing) {
+      this.toolsRefreshing = true;
+      void probeTools()
+        .then((value) => {
+          this.tools = { at: Date.now(), value: Promise.resolve(value) };
+        })
+        .finally(() => {
+          this.toolsRefreshing = false;
+        });
+    }
+    return this.tools.value;
   }
 
   async info(): Promise<HostInfo> {
@@ -170,6 +204,7 @@ export class LocalHost implements Host {
       labels: [],
       roots: [],
       versions,
+      tools: await this.toolVersions(),
       capabilities: {
         git: "git" in versions,
         gh,
@@ -356,10 +391,7 @@ async function scriptCommand(
     label: ScriptLabel;
   },
 ): Promise<string | null> {
-  const value = (await loadProjectConfig(host, workspace.worktreePath, workspace.projectPath))?.[
-    workspace.label
-  ];
-  return typeof value === "string" && value.trim() !== "" ? value : null;
+  return loadScriptCommand(host, workspace.worktreePath, workspace.projectPath, workspace.label);
 }
 
 /**

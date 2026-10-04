@@ -56,6 +56,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "tokens create-device": "token management is admin only",
   "hosts list": "lists every host, which a worker has no need to see",
   "hosts remove": "admin only, removes a host",
+  "env validate": "admin only, reads a path on the hub's machine",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
   "terminals attach":
     "streams over a WebSocket, which the relay does not carry yet (follow-up in the PR)",
