@@ -12,7 +12,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
+import { type CommandRun, gitRunner } from "@band-app/host-api";
 import { WorkspaceNotFoundError } from "../errors";
 import { assertWorktreeRelative } from "./diff-service";
 import {
