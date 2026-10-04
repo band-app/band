@@ -108,7 +108,8 @@ describe("upgrading with the shared token", () => {
     const shared = (await listTokens()).find((t) => t.id === "shared");
     expect(shared).toMatchObject({ kind: "device", state: "active" });
     const projects = await trpcQuery(server.url, "projects.list", undefined, SHARED_TOKEN);
-    expect(JSON.stringify(await projects.json())).toContain("old");
+    const { projects: listed } = await trpcData<{ projects: Array<{ name: string }> }>(projects);
+    expect(listed.map((p) => p.name)).toContain("old");
   });
 
   it("refuses to revoke the shared token", async () => {
