@@ -1,7 +1,7 @@
 // Entry point of the terminal daemon: the detached process that owns every
 // terminal's PTY so shells survive a web-server restart. Bundled to
 // `dist/terminal-daemon.mjs` by `scripts/build-server.sh`; launched by the
-// web server (`src/server/infra/terminals/daemon/launch.ts`), never by hand.
+// web server (`packages/host-local/src/terminals/daemon/launch.ts`), never by hand.
 //
 //   terminal-daemon.mjs --run-dir <~/.band/run> --build-id <id> [--supersede <dev>:<ino>]
 //
@@ -13,9 +13,9 @@
 
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { runDaemon } from "@band-app/host-local/terminals/daemon/daemon-server";
+import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
 import { createLogger } from "@band-app/logger";
-import { runDaemon } from "./src/server/infra/terminals/daemon/daemon-server.ts";
-import { daemonPaths } from "./src/server/infra/terminals/daemon/protocol.ts";
 
 const log = createLogger("terminal-daemon");
 

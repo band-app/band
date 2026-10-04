@@ -3,6 +3,10 @@ import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { resumeCliInvocation } from "@band-app/coding-agent";
 import type { Host } from "@band-app/host-api";
+import { DETACHED_BRANCH_PREFIX } from "@band-app/host-local/git/git-client";
+import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "@band-app/host-local/git/git-refusals";
+import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
+import { scriptInvocation } from "@band-app/host-local/process/path";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
@@ -13,11 +17,7 @@ import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { DETACHED_BRANCH_PREFIX } from "../infra/git/git-client";
-import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
-import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
-import { scriptInvocation } from "../infra/process/path";
 import { formatShellCommand } from "./_utils/format-shell-command";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
 // back from this file. Safe only while `agentLaunchService` is used inside

@@ -1,8 +1,8 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TerminalPool } from "@band-app/host-local/terminals/terminal-pool";
 import { afterEach, describe, expect, it } from "vitest";
-import { TerminalPool } from "../src/server/infra/terminals/terminal-pool.ts";
 
 // Regression for band-app/band#617: a single terminal is created via TWO
 // concurrent server paths — the WebSocket handler (spawn-on-`getSession`-miss)

@@ -1,6 +1,6 @@
 import { tmpdir } from "node:os";
+import { execGh } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
-import { execGh } from "../infra/git/git-client";
 import {
   aggregateChecks,
   CHECK_RUNS_PER_PAGE,

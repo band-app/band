@@ -1,3 +1,5 @@
+import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "@band-app/host-local/git/git-client";
+import { gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import type {
   MergeMethod,
@@ -8,8 +10,6 @@ import type {
   WorkspaceReview,
 } from "@band-app/plugin-api";
 import { WorkspaceNotFoundError } from "../errors";
-import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "../infra/git/git-client";
-import { gitRunner } from "../infra/host/git-run";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
 import { type WorkspaceService, workspaceService } from "./workspace-service";
 

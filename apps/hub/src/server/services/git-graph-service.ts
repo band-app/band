@@ -12,8 +12,8 @@
  */
 
 import { createHash } from "node:crypto";
+import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
 import { WorkspaceNotFoundError } from "../errors";
-import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { assertWorktreeRelative } from "./diff-service";
 import {
   workspaceService as defaultWorkspaceService,

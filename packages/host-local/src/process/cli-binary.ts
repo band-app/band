@@ -23,14 +23,12 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     resolve(cwd, ".."),
     // cwd = project root (fallback)
     resolve(cwd, "apps"),
-    // From this source file in dev (apps/hub/src/server/services/ → apps/)
-    resolve(dirname, "..", "..", "..", ".."),
-    // From this source file in dev (apps/hub/src/server/infra/process/ → apps/)
-    resolve(dirname, "..", "..", "..", "..", ".."),
+    // From this source file in dev (packages/host-local/src/process/ → apps/)
+    resolve(dirname, "..", "..", "..", "..", "apps"),
     // From bundled `dist/` file (<Resources>/web/dist/ → <Resources>/) only
-    // — in dev mode this resolves to `apps/hub/src/`, which has no
-    // `cli/target/<profile>/band` and is harmless; the four-level walk
-    // above is the actual dev-mode path. Included so a future cargo-target
+    // — in dev mode this resolves to `packages/host-local/`, which has no
+    // `cli/target/<profile>/band` and is harmless; the walk above is the
+    // actual dev-mode path. Included so a future cargo-target
     // layout under <Resources>/cli/ would still resolve. Today's Electron
     // bundle ships the binary under `binaries/` (handled by Strategy B),
     // so this strategy never hits in production either.

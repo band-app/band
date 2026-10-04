@@ -1,7 +1,7 @@
 import type { WorktreeInfo } from "@band-app/host-api";
+import { brewInstall } from "@band-app/host-local/process/install";
+import { shellPath, whichBinary } from "@band-app/host-local/process/path";
 import { hostRegistry } from "../infra/host/registry";
-import { brewInstall } from "../infra/process/install";
-import { shellPath, whichBinary } from "../infra/process/path";
 
 export type { WorktreeInfo };
 

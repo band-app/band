@@ -10,9 +10,9 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DaemonClient } from "@/server/infra/terminals/daemon/client";
-import { launchDaemon } from "@/server/infra/terminals/daemon/launch";
-import { daemonPaths } from "@/server/infra/terminals/daemon/protocol";
+import { DaemonClient } from "@band-app/host-local/terminals/daemon/client";
+import { launchDaemon } from "@band-app/host-local/terminals/daemon/launch";
+import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
 
 const STOP_TIMEOUT_MS = 5_000;
 

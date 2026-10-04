@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { findCliBinary, findCliBinaryAt } from "../infra/process/cli-binary";
+import { findCliBinary, findCliBinaryAt } from "@band-app/host-local/process/cli-binary";
 
 export { findCliBinaryAt };
 

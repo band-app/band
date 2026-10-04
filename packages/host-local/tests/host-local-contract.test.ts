@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHostContract } from "@band-app/host-api/contract";
 import { afterAll, beforeAll, describe, it } from "vitest";
-import { LocalHost } from "../src/server/infra/host/local-host";
-import { InProcessTerminalBackend } from "../src/server/infra/terminals/in-process-backend";
+import { LocalHost } from "../src/local-host";
+import { InProcessTerminalBackend } from "../src/terminals/in-process-backend";
 
 // Real git, real files, a real PTY and a real agent process (the scripted ACP
-// stub, which `vitest.config.ts` sets in BAND_TEST_ACP_AGENT) in a temp dir.
+// stub, which the package vitest config sets in BAND_TEST_ACP_AGENT) in a temp dir.
 runHostContract("LocalHost", {
   api: { describe, it, beforeAll, afterAll },
   async create() {

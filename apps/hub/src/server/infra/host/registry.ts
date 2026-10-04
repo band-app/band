@@ -1,6 +1,6 @@
 import type { Host, TerminalBackend } from "@band-app/host-api";
+import { LocalHost } from "@band-app/host-local";
 import { WorkspaceQueries } from "../db/queries/workspaces";
-import { LocalHost } from "./local-host";
 
 const workspaceQueries = new WorkspaceQueries();
 
