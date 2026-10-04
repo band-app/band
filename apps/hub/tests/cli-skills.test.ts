@@ -40,8 +40,12 @@ import { findCliBinary } from "../src/server/infra/process/cli-binary";
 // The CLI build under test. Resolved from the checkout, never from PATH or
 // /usr/local/bin, which may hold an older global install.
 const builtCli = findCliBinary();
-const originalCliBin = process.env.BAND_CLI_BIN;
-if (builtCli) process.env.BAND_CLI_BIN = builtCli;
+let originalCliBin: string | undefined;
+
+beforeAll(() => {
+  originalCliBin = process.env.BAND_CLI_BIN;
+  if (builtCli) process.env.BAND_CLI_BIN = builtCli;
+});
 
 afterAll(() => {
   if (originalCliBin !== undefined) process.env.BAND_CLI_BIN = originalCliBin;
