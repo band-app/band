@@ -5,9 +5,13 @@ One multiplexed WebSocket between a worker and the hub. Nothing in the hub or a 
 It carries four things on one socket: a versioned handshake, JSON-RPC 2.0 calls in both directions, numbered byte channels with credit-based flow control, and heartbeats. After a dropped socket the client dials again and resumes where each channel stopped.
 
 ```ts
+import { createHash, timingSafeEqual } from "node:crypto";
+
 // hub
-// Compare tokens in constant time in real code (crypto.timingSafeEqual on SHA-256 digests).
-const server = new LinkServer({ authenticate: (hello) => ({ ok: hello.token === expected }) });
+const digest = (t: string) => createHash("sha256").update(t).digest();
+const server = new LinkServer({
+  authenticate: (hello) => ({ ok: timingSafeEqual(digest(hello.token), digest(expected)) }),
+});
 server.on("session", (s) => s.handle("ping", () => "pong"));
 await server.listen(8080); // or call server.handleConnection(ws) from your own ws server, created with maxPayload set (MAX_MESSAGE_BYTES). Use wss:// for any non-loopback hub, because the hello carries the token.
 

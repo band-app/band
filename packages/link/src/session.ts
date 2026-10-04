@@ -295,7 +295,7 @@ export class LinkSession extends EventEmitter implements ChannelHost {
         );
       }
     }
-    for (const id of [...this.tombstones.keys()]) {
+    for (const id of this.tombstones.keys()) {
       if (peer[id] === undefined) this.tombstones.delete(id);
     }
   }

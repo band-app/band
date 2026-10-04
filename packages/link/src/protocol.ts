@@ -56,6 +56,40 @@ export type HandshakeReply = Ready | Mismatch | Rejected;
 /** The `hello` fields a client chooses, without the ones the client fills in. */
 export type HelloInfo = Omit<Hello, "type" | "protocol" | "token" | "resume">;
 
+const isStringArray = (v: unknown): boolean =>
+  Array.isArray(v) && v.every((x) => typeof x === "string");
+
+/** Checks a parsed `hello` field by field and returns the first problem, or null. */
+export function validateHello(h: Hello): string | null {
+  if (typeof h.token !== "string") return "token must be a string";
+  if (typeof h.buildId !== "string") return "buildId must be a string";
+  if (h.mode !== "attached" && h.mode !== "ephemeral") return "mode must be attached or ephemeral";
+  if (!isStringArray(h.capabilities)) return "capabilities must be a string array";
+  if (!isStringArray(h.roots)) return "roots must be a string array";
+  if (!isStringArray(h.agents)) return "agents must be a string array";
+  const labels = h.labels as unknown;
+  if (
+    typeof labels !== "object" ||
+    labels === null ||
+    Array.isArray(labels) ||
+    !Object.values(labels).every((v) => typeof v === "string")
+  ) {
+    return "labels must map strings to strings";
+  }
+  if (h.resume !== undefined) {
+    const resume = h.resume as unknown;
+    if (typeof resume !== "object" || resume === null || Array.isArray(resume)) {
+      return "resume must be an object";
+    }
+    for (const v of Object.values(resume)) {
+      if (!Number.isInteger(v) || (v as number) < 0 || (v as number) > 0xffffffff) {
+        return "resume values must be integers from 0 to 4294967295";
+      }
+    }
+  }
+  return null;
+}
+
 // ---- JSON-RPC 2.0 -------------------------------------------------------
 
 export interface RpcRequest {
@@ -143,7 +177,7 @@ export function encodeFrame(frame: Frame): Buffer {
 export function decodeFrame(buf: Buffer): Frame {
   if (buf.length < FRAME_HEADER_BYTES) throw new Error("frame shorter than its header");
   const kind = CODE_KIND[buf.readUInt8(0)];
-  if (!kind) throw new Error(`unknown frame kind ${buf.readUInt8(0)}`);
+  if (kind === undefined) throw new Error(`unknown frame kind ${buf.readUInt8(0)}`);
   return {
     kind,
     chan: buf.readUInt32BE(1),

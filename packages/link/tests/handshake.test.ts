@@ -73,4 +73,37 @@ describe("handshake (S1)", () => {
     ws.send("not json");
     assert.equal((await reply).type, "rejected");
   });
+
+  it("rejects a hello whose fields have the wrong shape", async () => {
+    const { server, url } = await startServer();
+    cleanups.push(() => server.close());
+    const bad = [
+      { labels: { os: 1 } },
+      { roots: "/work" },
+      { mode: "weird" },
+      { resume: { "1": -5 } },
+      { resume: { "1": 1.5 } },
+      { token: 42 },
+    ];
+    for (const patch of bad) {
+      const ws = new WebSocket(url);
+      const reply = new Promise<{ type: string; reason?: string }>((resolve) =>
+        ws.once("message", (d) => resolve(JSON.parse(d.toString()))),
+      );
+      await once(ws, "open");
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          protocol: PROTOCOL_VERSION,
+          ...HELLO,
+          token: TOKEN,
+          ...patch,
+        }),
+      );
+      const r = await reply;
+      assert.equal(r.type, "rejected", JSON.stringify(patch));
+      assert.match(r.reason ?? "", /malformed hello/);
+    }
+    assert.equal(server.getSession(HELLO.workerId), undefined);
+  });
 });

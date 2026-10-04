@@ -9,6 +9,7 @@ import {
   type Hello,
   MAX_MESSAGE_BYTES,
   PROTOCOL_VERSION,
+  validateHello,
 } from "./protocol.ts";
 import { LinkSession, type SessionOptions } from "./session.ts";
 
@@ -144,6 +145,11 @@ export class LinkServer extends EventEmitter {
     }
     if (hello.protocol !== PROTOCOL_VERSION) {
       this.reply(ws, { type: "mismatch", need: PROTOCOL_VERSION }, true);
+      return;
+    }
+    const invalid = validateHello(hello);
+    if (invalid) {
+      this.reply(ws, { type: "rejected", reason: `malformed hello: ${invalid}` }, true);
       return;
     }
     let auth: AuthResult;

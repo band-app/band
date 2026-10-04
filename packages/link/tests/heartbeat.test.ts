@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { WebSocket, WebSocketServer } from "ws";
 import { PROTOCOL_VERSION } from "../src/protocol.ts";
-import { HELLO, makeClient, once, startServer, TOKEN } from "./helpers.ts";
+import { HELLO, makeClient, once, startServer, TOKEN, waitFor } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -62,8 +62,6 @@ describe("heartbeat (S5)", () => {
     const lost = once(client, "lost");
     await client.connect();
     await lost;
-    const deadline = Date.now() + 3000;
-    while (connections < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-    assert.ok(connections >= 2, "the client did not redial after losing the hub");
+    await waitFor(() => connections >= 2, 3000, "client to redial after losing the hub");
   });
 });
