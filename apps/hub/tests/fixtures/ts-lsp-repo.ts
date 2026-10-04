@@ -1,7 +1,7 @@
 /**
  * A TypeScript git repo whose workspace can run a real language server.
  *
- * Band's LSP manager (`src/server/infra/lsp/lsp-manager.ts`) spawns
+ * Band's LSP manager (`packages/host-local/src/lsp/lsp-manager.ts`) spawns
  * `typescript-language-server` from `<worktree>/node_modules/.bin` (or the
  * shell PATH), and the server loads `typescript` from the project. The repo's
  * `node_modules` links both to the packages this app already installs, so a

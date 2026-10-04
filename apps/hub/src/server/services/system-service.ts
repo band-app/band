@@ -24,7 +24,7 @@ export type { WorktreeInfo };
  *     parallel `du` instances we'll tolerate), not an infra concern.
  *
  * Reorganised in issue #535, follow-up 3 — the `execFile` callouts that
- * previously lived inline here moved into `server/infra/process/`.
+ * previously lived inline here moved into `packages/host-local/src/process/`.
  */
 
 /**

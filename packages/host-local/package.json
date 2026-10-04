@@ -10,7 +10,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.13",
-    "typescript": "^5.7.0",
-    "vitest": "^4.0.18"
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
   }
 }
