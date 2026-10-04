@@ -190,6 +190,9 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     // can't list them, so a sync must not drop them.
     const isRemote = (wt: WorktreeState) => wt.hostId !== undefined && wt.hostId !== "local";
     remoteWorktrees = project.worktrees.filter(isRemote);
+    // A path tracked as a remote worktree is not a local one, even when this
+    // machine's git can see it (a worker that shares the hub's disk).
+    const remotePaths = new Set(remoteWorktrees.map((wt) => wt.path));
     const existingByPath = new Map(
       project.worktrees.filter((wt) => !isRemote(wt)).map((wt) => [wt.path, wt]),
     );
@@ -200,6 +203,7 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
       .filter(
         (wt) =>
           !wt.isBare &&
+          !remotePaths.has(wt.path) &&
           (!removingWorktrees.has(wt.path) ||
             (existingByPath.has(wt.path) && !removedWorktrees.has(wt.path))),
       )

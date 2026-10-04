@@ -244,6 +244,11 @@ describe("git for a workspace runs on the workspace's host", () => {
         },
         { timeoutMs: 15_000, label: "sync stores the live branch" },
       );
+      // The hub's own git can see a worker's worktree on loopback. Sync must
+      // not add it a second time as a local workspace.
+      expect(
+        readDb<{ name: string }>(tmpHome, "SELECT name FROM worktrees WHERE path = ?", worktree),
+      ).toEqual([{ name: WORKSPACE }]);
     } finally {
       stream.close();
     }
