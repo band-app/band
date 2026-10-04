@@ -34,9 +34,9 @@ function discoverProcedures(): ProcedureInfo[] {
     // Skip subscriptions — they stream and are not request/response
     if (type === "subscription") continue;
 
-    // Credentials stay out of agent reach: an agent holding a device token must
-    // not be able to mint or list others.
-    if (path.startsWith("tokens.")) continue;
+    // Credentials and the hosts they register stay out of agent reach: an agent
+    // holding a device token must not be able to mint or list others.
+    if (path.startsWith("tokens.") || path.startsWith("hosts.")) continue;
 
     const toolName = `band_${path.replace(/\./g, "_")}`;
 

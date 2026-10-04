@@ -408,6 +408,13 @@ export class SettingsPage {
     await this.dialog.getByRole("button", { name: "Done" }).click();
   }
 
+  /** Clicks Revoke on the token row with this label. */
+  async revokeToken(label: string): Promise<void> {
+    await test.step(`Revoke token "${label}"`, async () => {
+      await this.revokeTokenButton(label).click();
+    });
+  }
+
   /** Revoke button of a token row. `aria-label="Revoke token <label>"` is set in `HostsSettings.tsx`. */
   revokeTokenButton(label: string): Locator {
     return this.dialog.getByRole("button", { name: `Revoke token ${label}` });

@@ -145,7 +145,13 @@ describe("device tokens", () => {
       live.on("open", () => resolve());
       live.on("error", reject);
     });
-    const closed = new Promise<void>((resolve) => live.on("close", () => resolve()));
+    const closed = new Promise<void>((resolve, reject) => {
+      live.on("close", () => resolve());
+      setTimeout(
+        () => reject(new Error("socket was not closed within 5 s of the revoke")),
+        5_000,
+      ).unref();
+    });
 
     const res = await trpcMutate(server.url, "tokens.revoke", { tokenId: view.id }, SHARED_TOKEN);
     expect(res.status).toBe(200);

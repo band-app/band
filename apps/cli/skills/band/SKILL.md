@@ -185,6 +185,14 @@ band tunnel stop
 
 Stops the remote tunnel.
 
+### List the hosts workspaces can run on
+
+```sh
+band hosts list
+```
+
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`.
+
 ### List, create and revoke the hub's tokens
 
 ```sh

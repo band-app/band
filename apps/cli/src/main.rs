@@ -62,6 +62,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
+    /// List the hosts workspaces can run on
+    Hosts {
+        #[command(subcommand)]
+        cmd: HostsCmd,
+    },
     /// Manage the hub's device and worker tokens
     Tokens {
         #[command(subcommand)]
@@ -525,6 +530,12 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
+enum HostsCmd {
+    /// List hosts with their status, labels and last contact
+    List,
+}
+
+#[derive(Subcommand)]
 enum TokensCmd {
     /// List tokens (never their secrets)
     List,
@@ -789,6 +800,9 @@ fn main() {
                 coalesce,
             }),
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
+        },
+        Commands::Hosts { cmd } => match cmd {
+            HostsCmd::List => cmd_hosts_list(),
         },
         Commands::Tokens { cmd } => match cmd {
             TokensCmd::List => cmd_tokens_list(),
@@ -2930,6 +2944,54 @@ fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Hosts commands ---
+
+fn cmd_hosts_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("hosts.list", &serde_json::json!({}))?;
+    let hosts = data
+        .get("hosts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let rows: Vec<[String; 5]> = hosts
+        .iter()
+        .map(|host| {
+            let text = |key: &str| host.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let labels = host
+                .get("labels")
+                .and_then(|v| v.as_array())
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            let last_seen = host
+                .get("lastSeenAt")
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(
+                    || "never".to_string(),
+                    |at| format!("{} ago", format_span(now_ms().saturating_sub(at))),
+                );
+            [
+                text("id").to_string(),
+                text("name").to_string(),
+                text("status").to_string(),
+                labels,
+                last_seen,
+            ]
+        })
+        .collect();
+
+    Ok(CommandResult {
+        text: format_table(&["ID", "NAME", "STATUS", "LABELS", "LAST SEEN"], &rows),
+        json: serde_json::json!({"hosts": hosts}),
+    })
+}
+
 // --- Tokens commands ---
 
 fn cmd_tokens_list() -> Result<CommandResult, String> {
@@ -3610,6 +3672,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Subscription ID"},
             ]
+        }),
+        serde_json::json!({
+            "name": "hosts list",
+            "description": "List the hosts workspaces can run on",
+            "parameters": [],
+            "notes": "Text output: `ID  NAME  STATUS  LABELS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed.\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"lastSeenAt\": null}]}`."
         }),
         serde_json::json!({
             "name": "tokens list",

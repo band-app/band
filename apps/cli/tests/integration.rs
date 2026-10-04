@@ -1616,6 +1616,24 @@ fn chat_send_while_agent_runs_queues_the_message() {
 
 // --- Cronjobs tests ---
 
+// --- Hosts tests ---
+
+#[test]
+fn hosts_list_shows_the_local_host_and_new_workers() {
+    let env = TestEnv::new();
+
+    let listed = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let hosts = listed["hosts"].as_array().expect("hosts");
+    assert_eq!(hosts.len(), 1, "hosts: {listed}");
+    assert_eq!(hosts[0]["id"], "local");
+    assert_eq!(hosts[0]["status"], "online");
+
+    let text = stdout(&env.band(&["hosts", "list"]));
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("Local"), "text: {text}");
+    assert!(text.contains("online"), "text: {text}");
+}
+
 // --- Tokens tests ---
 
 #[test]
@@ -3188,6 +3206,7 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"cronjobs trigger"), "missing: {names:?}");
     assert!(names.contains(&"notify"), "missing: {names:?}");
     assert!(names.contains(&"schema"), "missing: {names:?}");
+    assert!(names.contains(&"hosts list"), "missing: {names:?}");
     assert!(names.contains(&"tokens list"), "missing: {names:?}");
     assert!(
         names.contains(&"tokens create-device"),

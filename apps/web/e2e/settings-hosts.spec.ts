@@ -113,7 +113,7 @@ test("revokes a device token, which then gets 401", async ({ page }) => {
   const row = settingsPage.tokenRow("e2e phone");
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-state", "active");
-  await settingsPage.revokeTokenButton("e2e phone").click();
+  await settingsPage.revokeToken("e2e phone");
   await expect(row).toHaveAttribute("data-state", "revoked");
   await expect(settingsPage.revokeTokenButton("e2e phone")).toBeDisabled();
 
