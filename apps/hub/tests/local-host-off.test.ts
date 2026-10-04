@@ -83,6 +83,8 @@ beforeAll(async () => {
   server = await startServer({
     tmpHome: hubHome,
     env: { BAND_LOCAL_HOST: "off", BAND_SERVE_UI: "false" },
+    // The test starts its own worker, and "the only online worker" needs exactly one.
+    remoteHost: false,
   });
 
   const issued = await trpcData<{ token: string; hostId: string }>(
