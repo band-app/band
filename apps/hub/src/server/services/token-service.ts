@@ -78,7 +78,6 @@ export interface HostView {
   usable: boolean;
 }
 
-
 /** Why `removeHost` refused. */
 export class HostRemoveError extends Error {
   constructor(
