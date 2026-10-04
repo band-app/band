@@ -65,6 +65,12 @@ interface Meta {
   versions: Record<string, number>;
   /** Entry ids with a local change not yet on the server. */
   pending: string[];
+  /**
+   * Base version of each write sent and not yet answered. A page that closes
+   * mid-request never learns whether the write landed; the next load compares
+   * the server's version with this to tell its own write from another device's.
+   */
+  sent: Record<string, number>;
 }
 
 function entryId(scope: ClientStateScope, key: string): string {
@@ -156,7 +162,7 @@ class ClientStateStore {
 
   private getMeta(): Meta {
     if (this.meta) return this.meta;
-    let meta: Meta = { versions: {}, pending: [] };
+    let meta: Meta = { versions: {}, pending: [], sent: {} };
     try {
       const raw = localStorage.getItem(META_KEY);
       if (raw) {
@@ -164,6 +170,7 @@ class ClientStateStore {
         meta = {
           versions: parsed.versions && typeof parsed.versions === "object" ? parsed.versions : {},
           pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+          sent: parsed.sent && typeof parsed.sent === "object" ? parsed.sent : {},
         };
       }
     } catch {}
@@ -260,6 +267,8 @@ class ClientStateStore {
     }
 
     this.inflight.add(id);
+    this.getMeta().sent[id] = baseVersion;
+    this.saveMeta();
     let result: ClientStateWriteResult;
     try {
       const common = { key, scope, baseVersion, clientId: this.clientId };
@@ -273,15 +282,18 @@ class ClientStateStore {
     } catch (err) {
       this.inflight.delete(id);
       this.dirtyAgain.delete(id);
+      // The request may have reached the server; keep `sent` for the next load.
       if (isNetworkError(err)) {
         this.scheduleRetry();
       } else {
         console.warn("[client-state] server refused write for", key, err);
+        delete this.getMeta().sent[id];
         this.setPending(id, false);
       }
       return;
     }
     this.inflight.delete(id);
+    delete this.getMeta().sent[id];
     this.retryDelay = 0;
 
     if (result.ok) {
@@ -404,9 +416,15 @@ class ClientStateStore {
       const id = entryId(entry.scope, entry.key);
       onServer.add(id);
       const pending = meta.pending.includes(id);
-      if (pending && (meta.versions[id] ?? 0) === entry.version) {
+      // A write this device sent just before the page closed landed on the
+      // server, and the local value is newer than it.
+      const sentBase = meta.sent[id];
+      const ownWrite = sentBase !== undefined && entry.version === sentBase + 1;
+      delete meta.sent[id];
+      if (pending && (ownWrite || (meta.versions[id] ?? 0) === entry.version)) {
         // Changed offline, and no other device wrote since: push it.
         this.confirmed.set(id, entry.value);
+        meta.versions[id] = entry.version;
         continue;
       }
       this.apply(entry, "hydrate");
@@ -423,6 +441,13 @@ class ClientStateStore {
         this.confirmed.delete(id);
         meta.versions[id] = 0;
         if (part.pick(readLocal(key)) != null && !meta.pending.includes(id)) meta.pending.push(id);
+      }
+    }
+    // A sent write the server doesn't have never landed.
+    for (const id of Object.keys(meta.sent)) {
+      const matched = matchKey(parseEntryId(id).key);
+      if (matched && groupOf(matched.workspaceId) === group && !onServer.has(id)) {
+        delete meta.sent[id];
       }
     }
     // Pending entries whose key is gone locally and unknown to the server.
