@@ -29,9 +29,10 @@ on:
 # the queue's temporary branch, a push checks out the pushed commit.
 #
 # One run per PR: a new push to the PR cancels the run for the old merge ref.
-# Pushes to main and merge groups are keyed by commit, so each is tested.
+# A new push to main cancels the previous in-progress main run. Merge groups
+# are keyed by commit, so each queued entry is tested.
 concurrency:
-  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
