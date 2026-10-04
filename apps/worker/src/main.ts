@@ -21,7 +21,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 try {
-  worker = await Worker.start(parseConfig(argv));
+  const config = parseConfig(argv);
+  // Agents and terminals inherit this process's environment, so the worker's token must not stay in it.
+  delete process.env.BAND_WORKER_TOKEN;
+  delete process.env.BAND_BOOTSTRAP_TOKEN;
+  worker = await Worker.start(config);
 } catch (err) {
   if (err instanceof ConfigError) {
     process.stderr.write(`band-worker: ${err.message}\n\n${usage()}`);

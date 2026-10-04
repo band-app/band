@@ -1,6 +1,7 @@
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { AgentStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
+import { shellPath } from "@band-app/host-local/process/path";
 import type { Channel } from "@band-app/link";
 import type { Registrar, WorkerContext } from "./context.ts";
 import {
@@ -119,10 +120,14 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   // Stdio is one channel (hub writes stdin, worker writes stdout) and stderr is another.
   // The hub ending its side closes stdin. Resetting the stdio channel kills the agent.
   r.raw("acp.spawn", async (a) => {
+    const env = strRecord(a, "env");
+    // The hub's `band` CLI goes first, so an agent's shell tool finds it.
+    const cliDir = await ctx.cli?.dir();
+    if (cliDir) env.PATH = [cliDir, env.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
     const launch = {
       command: str(a, "command"),
       args: strArray(a, "args"),
-      env: strRecord(a, "env"),
+      env,
     };
     const stdio = await host.acp.spawn(launch, await path(a, "cwd"));
     const agentId = `a-${stdio.pid ?? "x"}-${agents.size}-${Date.now().toString(36)}`;
@@ -156,11 +161,18 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.json("pty.spawn", async (a) => {
     const workspaceRoot = await path(a, "workspaceRoot");
     const o = optObj(a, "options");
-    const options: SpawnOptions | undefined = o && {
+    let options: SpawnOptions | undefined = o && {
       command: optStr(o, "command"),
       cwd: optStr(o, "cwd"),
       env: o.env === undefined ? undefined : strRecord(o, "env"),
     };
+    // The hub's `band` CLI goes first. A PATH in `options.env` would replace the pool's
+    // login-shell PATH, so this starts from that PATH unless the hub set one.
+    const cliDir = await ctx.cli?.dir();
+    if (cliDir) {
+      const base = options?.env?.PATH ?? (await shellPath());
+      options = { ...options, env: { ...options?.env, PATH: [cliDir, base].join(delimiter) } };
+    }
     // The pool resolves `cwd` inside the workspace root, so check where that lands.
     if (options?.cwd !== undefined) await policy.resolve(resolve(workspaceRoot, options.cwd));
     return pty.spawn({

@@ -8,6 +8,7 @@ import { type Channel, LinkClient, type LinkClientOptions, type Ready } from "@b
 import { createLogger } from "@band-app/logger";
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
+import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
@@ -114,6 +115,7 @@ export class Worker {
       activity: new ActivityTracker(),
       log,
       labels: config.labels,
+      cli: new CliCache(client.session, config.stateDir, log),
     };
     const registrar = new Registrar(ctx);
     worker.disposers.push(registerBasicMethods(registrar, ctx));
@@ -159,6 +161,7 @@ export class Worker {
     client.on("connected", (ready: Ready, resumed: boolean) => {
       disconnectedSince = null;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
+      void ctx.cli?.sync();
       // The hub rotates the session token on every handshake. Keep the newest one.
       this.tokenSaved = this.tokenSaved
         .then(() => writeSessionToken(this.stateDir, ready.sessionToken))

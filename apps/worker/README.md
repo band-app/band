@@ -58,6 +58,12 @@ Exit codes: 0 after a signal or an idle exit, 1 when the hub rejects the worker 
 
 The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/exchange` with `{ token, workerId?, name? }`, answered by `{ sessionToken, workerId }`. The hub binds the token to the host id it issued it for, and the worker adopts that id and saves it as `worker-id`. A session token lives until it is revoked. Restarting with the same bootstrap token reuses the saved one. Tokens are never logged.
 
+## The band CLI
+
+On every connect the worker asks the hub for the `band` CLI built for its platform and keeps it in `<state dir>/bin/band`, replacing it when the SHA-256 differs. It runs `band skills install` with that binary, and puts the directory first on the PATH of every agent and terminal it starts. Those processes call the hub through the relay with their own token.
+
+The hub answers from `$BAND_CLI_BINARIES_DIR/band-<platform>-<arch>` (for example `band-linux-x64`, `band-linux-arm64`, `band-darwin-arm64`), then from its own CLI when the worker has the hub's platform and architecture. A hub on macOS serving a Linux worker needs the Linux binaries in that directory. With none available the worker logs a warning and runs without `band`.
+
 ## Path policy
 
 Every path in a call must be absolute and, once `..` and symlinks are resolved, inside a declared root. The check follows a symlink at the end of the path only when the call does (`readFile`, `writeFile`, `list`), so `rm` and `rename` of a link act on the link. A write through a dangling link is checked against where it would land. A root itself can't be removed or renamed. A rejected call fails with code `-32010` and `data.path`.
