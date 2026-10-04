@@ -483,6 +483,10 @@ class ClientStateStore {
       const matched = matchKey(parseEntryId(id).key);
       return !matched || groupOf(matched.workspaceId) !== group;
     });
+    for (const id of Object.keys(meta.sent)) {
+      const matched = matchKey(parseEntryId(id).key);
+      if (matched && groupOf(matched.workspaceId) === group) delete meta.sent[id];
+    }
     this.saveMeta();
     this.hydrated.delete(group);
   }
