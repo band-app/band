@@ -405,6 +405,16 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__worker-command");
   }
 
+  /** The bootstrap token's text. */
+  async readBootstrapToken(): Promise<string> {
+    return this.bootstrapToken().inputValue();
+  }
+
+  /** The `band-worker` command line's text. */
+  async readWorkerCommand(): Promise<string> {
+    return this.workerCommand().inputValue();
+  }
+
   /** Closes the add-worker result panel. */
   async finishAddWorker(): Promise<void> {
     await this.dialog.getByRole("button", { name: "Done" }).click();

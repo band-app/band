@@ -67,9 +67,9 @@ test("creates a worker bootstrap token that is shown once", async ({ page }) => 
 
   await settingsPage.addWorker("build-box", "os=linux, gpu");
 
-  const token = await settingsPage.bootstrapToken().inputValue();
+  const token = await settingsPage.readBootstrapToken();
   expect(token).toMatch(/^bwb_/);
-  const command = await settingsPage.workerCommand().inputValue();
+  const command = await settingsPage.readWorkerCommand();
   expect(command).toContain(`BAND_BOOTSTRAP_TOKEN=${token}`);
   expect(command).toContain(`BAND_HUB_URL=${server.url}`);
   expect(command).toMatch(/BAND_WORKER_ID=h-[0-9a-f]+/);
