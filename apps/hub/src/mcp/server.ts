@@ -37,6 +37,8 @@ function discoverProcedures(): ProcedureInfo[] {
     // Credentials and the hosts they register stay out of agent reach: an agent
     // holding a device token must not be able to mint or list others.
     if (path.startsWith("tokens.") || path.startsWith("hosts.")) continue;
+    // `environment.validate` reads a directory the caller names on the hub's disk.
+    if (path === "environment.validate") continue;
 
     const toolName = `band_${path.replace(/\./g, "_")}`;
 

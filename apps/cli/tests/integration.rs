@@ -1634,6 +1634,120 @@ fn hosts_list_shows_the_local_host_and_new_workers() {
     assert!(text.contains("online"), "text: {text}");
 }
 
+// --- Env tests ---
+
+fn write_environment(repo: &Path, json: &str) {
+    fs::create_dir_all(repo.join(".band")).unwrap();
+    fs::write(repo.join(".band").join("environment.json"), json).unwrap();
+}
+
+#[test]
+fn env_validate_prints_ok_for_a_valid_file() {
+    let env = TestEnv::new();
+    write_environment(
+        &env.repo_path,
+        r#"{"install": "echo hi", "isolation": "container", "requires": {"node": ">=24"}}"#,
+    );
+
+    let out = env.band_in(&env.repo_path, &["env", "validate"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.starts_with("OK "), "stdout: {text}");
+    assert!(text.ends_with(".band/environment.json"), "stdout: {text}");
+
+    let json = json_of(&env.band_in(&env.repo_path, &["env", "validate", "--output", "json"]));
+    assert_eq!(json["ok"], true, "json: {json}");
+    assert_eq!(json["issues"].as_array().unwrap().len(), 0, "json: {json}");
+}
+
+#[test]
+fn env_validate_names_each_problem_and_exits_non_zero() {
+    let env = TestEnv::new();
+    write_environment(
+        &env.repo_path,
+        r#"{"isolation": "docker", "instal": "x", "terminals": [{"name": "dev"}]}"#,
+    );
+
+    let out = env.band_in(&env.repo_path, &["env", "validate"]);
+    assert!(!out.status.success());
+    let text = stderr(&out);
+    assert!(text.contains("has 3 problems"), "stderr: {text}");
+    assert!(text.contains("  instal: unknown key"), "stderr: {text}");
+    assert!(
+        text.contains("  isolation: must be one of"),
+        "stderr: {text}"
+    );
+    assert!(
+        text.contains("  terminals[0].command: is required"),
+        "stderr: {text}"
+    );
+
+    let json_out = env.band_in(&env.repo_path, &["env", "validate", "--output", "json"]);
+    assert!(!json_out.status.success());
+    let json = json_of(&json_out);
+    assert_eq!(json["ok"], false, "json: {json}");
+    let paths: Vec<&str> = json["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["path"].as_str().unwrap())
+        .collect();
+    assert!(paths.contains(&"instal"), "json: {json}");
+}
+
+#[test]
+fn env_validate_reports_a_missing_devcontainer_and_takes_a_path() {
+    let env = TestEnv::new();
+    write_environment(
+        &env.repo_path,
+        r#"{"build": {"devcontainer": ".devcontainer/devcontainer.json"}}"#,
+    );
+
+    // A path argument: the repository directory, and the file itself.
+    let repo = env.repo_path.to_string_lossy().to_string();
+    let file = env
+        .repo_path
+        .join(".band")
+        .join("environment.json")
+        .to_string_lossy()
+        .to_string();
+    for target in [repo, file] {
+        let out = env.band(&["env", "validate", &target]);
+        assert!(!out.status.success());
+        let text = stderr(&out);
+        assert!(
+            text.contains(
+                "build.devcontainer: file \".devcontainer/devcontainer.json\" does not exist"
+            ),
+            "stderr: {text}"
+        );
+    }
+
+    // Once the file exists the same environment is valid.
+    fs::create_dir_all(env.repo_path.join(".devcontainer")).unwrap();
+    fs::write(
+        env.repo_path
+            .join(".devcontainer")
+            .join("devcontainer.json"),
+        "{}",
+    )
+    .unwrap();
+    let out = env.band_in(&env.repo_path, &["env", "validate"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn env_validate_fails_when_the_repository_has_no_file() {
+    let env = TestEnv::new();
+    let out = env.band_in(&env.repo_path, &["env", "validate"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("No .band/environment.json found"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
 #[test]
 fn hosts_remove_deletes_an_offline_worker_and_refuses_local() {
     let env = TestEnv::new();

@@ -1,4 +1,5 @@
 import type { UsageReader } from "@band-app/coding-agent";
+import type { Environment, EnvironmentIssue } from "@band-app/environment";
 import type { TerminalBackend } from "./pty";
 
 /**
@@ -68,6 +69,12 @@ export interface HostInfo {
   roots: string[];
   /** Tool versions found on the host (`node`, `git`). */
   versions: Record<string, string>;
+  /**
+   * Toolchain versions the host has on its PATH, as `x.y.z` (`node`, `python`,
+   * `go`, `pnpm`, `uv`, `docker`, `git`). A tool that is not installed is left
+   * out. A project's `requires` in `.band/environment.json` is checked against it.
+   */
+  tools: Record<string, string>;
   capabilities: HostCapabilities;
   /**
    * Directories the host keeps for hub files that belong to workspaces
@@ -353,8 +360,10 @@ export interface ScriptWorkspace {
 
 export interface HostScripts {
   /**
-   * The workspace's `setup` or `teardown` command as written in
-   * `.band/config.json`, or `null` when it declares none.
+   * The workspace's `setup` or `teardown` command, or `null` when it declares
+   * none. A valid `.band/environment.json` supplies it first (setup is its
+   * `install` then `start`, teardown is its `teardown`). Otherwise it is read
+   * from `.band/config.json`.
    */
   command(workspace: ScriptWorkspace & { label: ScriptLabel }): Promise<string | null>;
   /**
@@ -374,6 +383,21 @@ export interface HostScripts {
   }): Promise<ScriptPlan | null>;
   /** Copies the project's `copyFiles` and `.worktreeinclude` files into the worktree. Returns the relative paths copied. */
   copyFiles(projectPath: string, worktreePath: string): Promise<string[]>;
+  /**
+   * Reads and validates the workspace's `.band/environment.json` (worktree
+   * first, then the project checkout). Never rejects: a missing file gives
+   * `source: null`, and a bad one gives its `issues`.
+   */
+  environment(workspace: ScriptWorkspace): Promise<EnvironmentReport>;
+}
+
+/** What a host found when it read a workspace's `.band/environment.json`. */
+export interface EnvironmentReport {
+  /** The file that was read, or `null` when the workspace has none. */
+  source: string | null;
+  /** The parsed file, or `null` when there is none or it has problems. */
+  environment: Environment | null;
+  issues: EnvironmentIssue[];
 }
 
 // ---------------------------------------------------------------------------

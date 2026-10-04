@@ -46,6 +46,11 @@ export class ProjectService {
     private readonly avatars: ProjectAvatarService = projectAvatarService,
   ) {}
 
+  /** Where a project's main checkout is on the hub's machine, or `undefined` for an unknown project. */
+  findPath(name: string): string | undefined {
+    return this.queries.findLocation(name)?.path;
+  }
+
   /**
    * Snapshot of the projects table joined with the dashboard-facing
    * extras: `labels` from settings and per-worktree `workspaceId` /

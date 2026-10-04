@@ -187,6 +187,7 @@ export class RemoteHost implements Host {
     prepare: (workspace) => this.prepareScript(workspace),
     copyFiles: (projectPath, worktreePath) =>
       this.rpc.call("scripts.copyFiles", { projectPath, worktreePath }),
+    environment: (workspace) => this.rpc.call("scripts.environment", workspace),
   };
 
   readonly relay: HostRelay = {

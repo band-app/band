@@ -104,6 +104,7 @@ export class Worker {
         labels: config.labels,
         roots: policy.rootPaths,
         agents: await findAgents(host),
+        tools: info.tools,
       },
     });
     const worker = new Worker(client, workerId, policy.rootPaths, config, config.stateDir);

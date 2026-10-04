@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import type { Host } from "@band-app/host-api";
+import {
+  ENVIRONMENT_FILE,
+  type EnvironmentScript,
+  scriptFor,
+  validateEnvironment,
+} from "@band-app/environment";
+import type { EnvironmentReport, Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 
@@ -26,6 +32,60 @@ export async function loadProjectConfig(
     }
   }
   return null;
+}
+
+/**
+ * Read and validate `.band/environment.json`, trying the worktree first and
+ * then the project checkout (the file may be untracked or ignored, like
+ * `config.json`). The first copy that exists is the one reported, even when it
+ * has problems, so a broken file in the worktree is not hidden by a good one
+ * in the project.
+ */
+export async function loadEnvironment(
+  host: Host,
+  worktreePath: string,
+  projectPath: string,
+): Promise<EnvironmentReport> {
+  for (const base of [worktreePath, projectPath]) {
+    const file = join(base, ENVIRONMENT_FILE);
+    const text = await readConfig(host, file);
+    if (text === null) continue;
+    const exists = (relative: string) =>
+      host.fs.stat(join(base, relative)).then(
+        () => true,
+        () => false,
+      );
+    const result = await validateEnvironment(text, exists);
+    return result.ok
+      ? { source: file, environment: result.environment, issues: [] }
+      : { source: file, environment: null, issues: result.issues };
+  }
+  return { source: null, environment: null, issues: [] };
+}
+
+/**
+ * The command a workspace runs for `label`. A valid `.band/environment.json`
+ * that has one wins. A file with problems is logged and skipped, and
+ * `.band/config.json` answers instead.
+ */
+export async function loadScriptCommand(
+  host: Host,
+  worktreePath: string,
+  projectPath: string,
+  label: EnvironmentScript,
+): Promise<string | null> {
+  const report = await loadEnvironment(host, worktreePath, projectPath);
+  if (report.environment) {
+    const fromEnvironment = scriptFor(report.environment, label);
+    if (fromEnvironment !== null) return fromEnvironment;
+  } else if (report.source !== null) {
+    log.warn(
+      { source: report.source, issues: report.issues },
+      "ignoring invalid .band/environment.json",
+    );
+  }
+  const value = (await loadProjectConfig(host, worktreePath, projectPath))?.[label];
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 /** The file's text, or `null` when it does not exist (or cannot be read). */

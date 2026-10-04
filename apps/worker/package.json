@@ -45,6 +45,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@band-app/environment": "workspace:^",
     "@band-app/host-api": "workspace:^",
     "@band-app/host-local": "workspace:^",
     "@band-app/host-remote": "workspace:^",

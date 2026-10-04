@@ -148,6 +148,7 @@ export class WorkerLinkService {
       capabilities: info?.capabilities ?? hello.capabilities,
       labels: info?.labels ?? Object.entries(hello.labels).map(([k, v]) => `${k}=${v}`),
       agents: hello.agents,
+      tools: info?.tools ?? hello.tools ?? {},
       mode: hello.mode,
     };
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });

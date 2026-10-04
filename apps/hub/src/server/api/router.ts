@@ -51,6 +51,7 @@ import { cliRouter } from "./cli/router";
 import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
+import { environmentRouter } from "./environment/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { hostsRouter } from "./hosts/router";
@@ -97,6 +98,7 @@ export const appRouter = t.router({
   hooks: hooksRouter,
   host: hostRouter,
   hosts: hostsRouter,
+  environment: environmentRouter,
   tokens: tokensRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,
