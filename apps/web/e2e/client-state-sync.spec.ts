@@ -99,6 +99,44 @@ test.describe("client state kept on the server", () => {
     }
   });
 
+  test("a change made while its predecessor's push was unanswered is kept, not replaced by the server copy", async ({
+    browser,
+  }) => {
+    const contexts = await newContexts(browser, [DESKTOP, DESKTOP]);
+    try {
+      // The server holds version 1 of the collapsed sidebar.
+      const first = new WorkspacePage(await contexts[0].newPage(), server.url, TOKEN);
+      await first.seedLocalStorageBeforeLoad({ "band:sidebar-collapsed": "1" });
+      await first.goto(WORKSPACE);
+      await first.waitForReady();
+      await expect
+        .poll(() => first.readServerClientState(null, "band:sidebar-collapsed"))
+        .toBe("1");
+
+      // A page that sent a write on top of version 0 and closed before the
+      // answer: the server has that write (version 1), and the user changed
+      // the value again afterwards. The newer local value must win.
+      const entry = "desktop|band:sidebar-collapsed";
+      const reopened = new WorkspacePage(await contexts[1].newPage(), server.url, TOKEN);
+      await reopened.seedLocalStorageBeforeLoad({
+        "band:sidebar-collapsed": "0",
+        "band:client-state:v1": JSON.stringify({
+          versions: {},
+          pending: [entry],
+          sent: { [entry]: 0 },
+        }),
+      });
+      await reopened.goto(WORKSPACE);
+      await reopened.waitForReady();
+      await expect
+        .poll(() => reopened.readServerClientState(null, "band:sidebar-collapsed"))
+        .toBe("0");
+      expect(await reopened.readSidebarCollapsed()).toBe(false);
+    } finally {
+      for (const context of contexts) await context.close();
+    }
+  });
+
   test("localStorage kept before the upgrade is uploaded, per device type", async ({ browser }) => {
     const contexts = await newContexts(browser, [DESKTOP, DESKTOP, PHONE]);
     try {
