@@ -701,7 +701,9 @@ export class RunnerService {
       runLog: null,
       onStdout: (line) => {
         const handle = line.trim().split(/\s+/)[0];
-        if (handle && !handle.startsWith("#")) handles.push(handle);
+        if (handle && handle.length <= 200 && /^[A-Za-z0-9_][A-Za-z0-9_.:/-]*$/.test(handle)) {
+          handles.push(handle);
+        }
       },
       onStderr: (line) => {
         if (errors.length < 5) errors.push(line.slice(0, 300));

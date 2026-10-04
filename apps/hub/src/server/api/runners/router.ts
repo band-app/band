@@ -1,6 +1,6 @@
 /**
  * `runners.*`: the configured runner hooks and what they are doing (plan step
- * 3.4). Read-only, admin tokens only. A runner is configured in `settings.json` (`runners`), and
+ * 3.4). Admin tokens only; `destroyMachine` destroys a machine a runner started. A runner is configured in `settings.json` (`runners`), and
  * the hub runs them itself. The MCP endpoint and the worker relay leave this
  * router out, like `hosts.*`.
  */

@@ -449,10 +449,25 @@ export class SettingsPage {
     return machine.getByTestId("settings__machine-state");
   }
 
+  /** The note on a machine row, which says why it was destroyed. */
+  machineNote(machine: Locator): Locator {
+    return machine.getByTestId("settings__machine-note");
+  }
+
+  /** The Destroy button of a machine row. Absent once the machine is destroyed. */
+  machineDestroyButton(machine: Locator): Locator {
+    return machine.getByTestId("settings__machine-destroy");
+  }
+
+  /** The age of a machine row. */
+  machineAge(machine: Locator): Locator {
+    return machine.getByTestId("settings__machine-age");
+  }
+
   /** Clicks Destroy on a machine row. */
   async destroyMachine(machine: Locator): Promise<void> {
     await test.step("Destroy the machine", async () => {
-      await machine.getByTestId("settings__machine-destroy").click();
+      await this.machineDestroyButton(machine).click();
     });
   }
 

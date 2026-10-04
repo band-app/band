@@ -112,10 +112,14 @@ export class RunnerReaperService {
   // ---- views -----------------------------------------------------------------
 
   list(): MachineView[] {
-    return this.machines.list(LIST_LIMIT).map((m) => this.view(m));
+    const counts = ephemeralLifecycleService.workspaceCountsByHost();
+    return this.machines.list(LIST_LIMIT).map((m) => this.view(m, counts.get(m.workerId) ?? 0));
   }
 
-  private view(m: RunnerMachineRow): MachineView {
+  private view(
+    m: RunnerMachineRow,
+    workspaces = ephemeralLifecycleService.workspaceCount(m.workerId),
+  ): MachineView {
     return {
       id: m.id,
       runnerId: m.runnerId,
@@ -129,7 +133,7 @@ export class RunnerReaperService {
       destroyedAt: m.destroyedAt,
       note: m.error,
       hostStatus: tokenService.hostStatus(m.workerId),
-      workspaces: ephemeralLifecycleService.workspaceCount(m.workerId),
+      workspaces,
     };
   }
 
@@ -183,7 +187,13 @@ export class RunnerReaperService {
   private async reap(machine: RunnerMachineRow, now: number): Promise<void> {
     const runner = this.runners.findRunner(machine.runnerId);
     // Without the runner's settings there is no destroy hook to run.
-    if (!runner) return;
+    if (!runner) {
+      this.note(
+        machine,
+        `runner ${machine.runnerId} is no longer configured, so it cannot be destroyed`,
+      );
+      return;
+    }
     const host = tokenService.hostSeen(machine.workerId);
     const online = host?.status === "online";
 
@@ -253,7 +263,10 @@ export class RunnerReaperService {
       await this.guarded(machine, reason, deadline, now);
       return;
     }
-    if (ephemeralLifecycleService.workspaceCount(machine.workerId) === 0) {
+    if (
+      ephemeralLifecycleService.workspaceCount(machine.workerId) === 0 &&
+      ephemeralLifecycleService.isStored(machine.workerId)
+    ) {
       await this.destroyNow(machine, `${reason}; it holds no workspaces`);
       return;
     }
@@ -372,6 +385,11 @@ export class RunnerReaperService {
     );
     for (const runner of this.runnerConfigs()) {
       if (!runner.status || !runner.destroy) continue;
+      // A live machine with no recorded handle (its spawn printed none) could be any listed
+      // handle, so nothing can be called an orphan.
+      if (this.machines.listLive().some((m) => m.runnerId === runner.id && m.handle === null)) {
+        continue;
+      }
       // A spawn in flight may have printed its handle before the hub recorded it.
       if (this.runners.hasAttemptInFlight(runner.id)) continue;
       let handles: string[] | null;

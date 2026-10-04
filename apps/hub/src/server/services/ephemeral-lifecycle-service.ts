@@ -166,6 +166,8 @@ export class EphemeralLifecycleService {
 
   /** Whether the host's workspaces are all stored (`workspace_sleep` rows), so its machine can go. */
   isStored(hostId: string): boolean {
+    // A workspace being created on the host is not tracked yet, and nothing of it is stored.
+    if (this.requests.listAwaitingHost().some((r) => r.hostId === hostId)) return false;
     const stored = new Set(this.sleeps.listByHost(hostId).map((r) => r.workspaceId));
     return this.workspacesOn(hostId).every((w) => stored.has(w.workspaceId));
   }
@@ -173,6 +175,17 @@ export class EphemeralLifecycleService {
   /** How many workspaces the hub tracks on a host. */
   workspaceCount(hostId: string): number {
     return this.workspacesOn(hostId).length;
+  }
+
+  /** Workspace counts for every host, from one read of the state. */
+  workspaceCountsByHost(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const project of loadState().projects) {
+      for (const wt of project.worktrees) {
+        if (wt.hostId) counts.set(wt.hostId, (counts.get(wt.hostId) ?? 0) + 1);
+      }
+    }
+    return counts;
   }
 
   /** Whether the host's worker is ephemeral, so it can hand its workspaces over. */

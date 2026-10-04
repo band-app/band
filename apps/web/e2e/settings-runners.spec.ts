@@ -130,14 +130,15 @@ test("lists a machine the runner started, and an admin destroys it", async ({ pa
 
   const machine = settingsPage.runnerMachines("ghost-runner");
   await expect(machine).toHaveCount(1, { timeout: 30_000 });
-  await expect(settingsPage.machineState(machine)).toHaveText("spawning");
+  await expect(machine).toHaveAttribute("data-state", "spawning");
+  await expect(settingsPage.machineAge(machine)).toBeVisible();
   await expect(machine).toContainText("ghost-h-");
 
   await settingsPage.destroyMachine(machine);
-  await expect(settingsPage.machineState(machine)).toHaveText("destroyed", { timeout: 15_000 });
-  await expect(machine.getByTestId("settings__machine-note")).toHaveText("destroyed by an admin");
+  await expect(machine).toHaveAttribute("data-state", "destroyed", { timeout: 15_000 });
+  await expect(settingsPage.machineNote(machine)).toHaveText("destroyed by an admin");
   expect(existsSync(destroyMarker)).toBe(true);
   expect(readFileSync(destroyMarker, "utf8")).toMatch(/^ghost-h-[0-9a-f]{12}$/m);
   // A destroyed machine has nothing left to destroy.
-  await expect(machine.getByTestId("settings__machine-destroy")).toHaveCount(0);
+  await expect(settingsPage.machineDestroyButton(machine)).toHaveCount(0);
 });
