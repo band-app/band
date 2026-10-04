@@ -106,4 +106,102 @@ describe("handshake (S1)", () => {
     }
     assert.equal(server.getSession(HELLO.workerId), undefined);
   });
+
+  it("rejects a workerId that is empty, too long or uses unsafe characters", async () => {
+    const { server, url } = await startServer();
+    cleanups.push(() => server.close());
+    const ids = [
+      "",
+      "a".repeat(257),
+      "../etc/passwd",
+      "has space",
+      "emoji-\u{1F600}",
+      "semi;colon",
+    ];
+    for (const workerId of ids) {
+      const ws = new WebSocket(url);
+      const reply = new Promise<{ type: string; reason?: string }>((resolve) =>
+        ws.once("message", (d) => resolve(JSON.parse(d.toString()))),
+      );
+      await once(ws, "open");
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          protocol: PROTOCOL_VERSION,
+          ...HELLO,
+          token: TOKEN,
+          workerId,
+        }),
+      );
+      const r = await reply;
+      assert.equal(r.type, "rejected", JSON.stringify(workerId));
+      assert.match(r.reason ?? "", /workerId/);
+    }
+    const ok = makeClient(url, { hello: { ...HELLO, workerId: "a".repeat(256) } });
+    cleanups.push(() => ok.close());
+    await ok.connect();
+  });
+
+  it("does not let a second credential take over a registered workerId", async () => {
+    const { server, url } = await startServer({
+      authenticate: (hello) =>
+        hello.token === "token-a" || hello.token === "token-b"
+          ? { ok: true }
+          : { ok: false, reason: "bad token" },
+    });
+    const a = makeClient(url, { token: "token-a" });
+    cleanups.push(
+      () => a.close(),
+      () => server.close(),
+    );
+    await a.connect();
+    const sessionA = server.getSession(HELLO.workerId);
+    assert.ok(sessionA);
+
+    // B holds a valid credential of its own and claims A's workerId, with and without resume.
+    for (const resume of [undefined, {}]) {
+      const ws = new WebSocket(url);
+      const reply = new Promise<{ type: string; reason?: string }>((resolve) =>
+        ws.once("message", (d) => resolve(JSON.parse(d.toString()))),
+      );
+      await once(ws, "open");
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          protocol: PROTOCOL_VERSION,
+          ...HELLO,
+          token: "token-b",
+          resume,
+        }),
+      );
+      const r = await reply;
+      assert.equal(r.type, "rejected");
+      assert.match(r.reason ?? "", /another credential/);
+    }
+    assert.equal(server.getSession(HELLO.workerId), sessionA, "A's session was replaced");
+    assert.ok(sessionA.attached, "A was disconnected by the takeover attempt");
+
+    // A itself can still reconnect, with its session token and resume.
+    const reconnected = once<{ resumed: boolean }>(a, "connected");
+    sessionA.dropConnection();
+    assert.equal((await reconnected).resumed, true);
+  });
+
+  it("returns the same promise for concurrent connect() calls and dials once", async () => {
+    const { server, url } = await startServer();
+    const client = makeClient(url);
+    cleanups.push(
+      () => client.close(),
+      () => server.close(),
+    );
+    let connections = 0;
+    server.on("connected", () => connections++);
+    const first = client.connect();
+    const second = client.connect();
+    assert.equal(first, second);
+    await Promise.all([first, second]);
+    await client.connect(); // already up
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(connections, 1);
+  });
 });

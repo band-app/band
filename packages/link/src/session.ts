@@ -115,7 +115,8 @@ export class LinkSession extends EventEmitter implements ChannelHost {
 
   request<T = unknown>(method: string, params?: unknown, opts: CallOptions = {}): Promise<T> {
     if (!this.attached) return Promise.reject(new LinkClosedError());
-    const id = this.nextRpcId++;
+    const id = this.nextRpcId;
+    this.nextRpcId = this.nextRpcId >= 0x7fffffff ? 1 : this.nextRpcId + 1;
     const timeoutMs = opts.timeoutMs ?? this.requestTimeoutMs;
     return new Promise<T>((resolve, reject) => {
       const entry: Pending = { method, resolve: resolve as (v: unknown) => void, reject };

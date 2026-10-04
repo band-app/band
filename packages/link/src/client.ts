@@ -61,14 +61,31 @@ export class LinkClient extends EventEmitter {
     this.session.on("lost", () => this.emit("lost"));
   }
 
-  /** Resolves on the first `ready`. Rejects on `rejected` or `mismatch`. Later drops reconnect on their own. */
+  /**
+   * Resolves on the first `ready`. Rejects on `rejected` or `mismatch`. Later
+   * drops reconnect on their own. A repeated or concurrent call returns the
+   * same promise while the first is pending, and resolves at once when the
+   * link is up.
+   */
   connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+    if (this.connecting) return this.connecting;
+    if (this.session.attached) return Promise.resolve();
+    const attempt = new Promise<void>((resolve, reject) => {
       this.firstReady = { resolve, reject };
       this.stopped = false;
       this.dial();
     });
+    this.connecting = attempt;
+    const clear = () => {
+      if (this.connecting === attempt) this.connecting = null;
+    };
+    attempt.then(clear, clear);
+    return attempt;
   }
+
+  private connecting: Promise<void> | null = null;
+  /** The `sessionToken` of the last `ready`, sent on later hellos as proof of ownership. */
+  private lastSessionToken: string | undefined;
 
   async close(): Promise<void> {
     this.stopped = true;
@@ -106,6 +123,7 @@ export class LinkClient extends EventEmitter {
         type: "hello",
         protocol: PROTOCOL_VERSION,
         token: this.currentToken,
+        sessionToken: this.lastSessionToken,
         ...this.opts.hello,
         resume: this.sessionStarted ? this.session.resumeMap() : undefined,
       };
@@ -151,6 +169,7 @@ export class LinkClient extends EventEmitter {
     this.attempt = 0;
     if (this.opts.useSessionToken) this.currentToken = ready.sessionToken;
     this.sessionStarted = true;
+    this.lastSessionToken = ready.sessionToken;
     this.session.attach(ws, {
       heartbeatMs: ready.heartbeatMs,
       peerResume: ready.resume,

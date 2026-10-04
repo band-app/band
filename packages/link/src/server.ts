@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer, type Server as HttpServer } from "node:http";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
@@ -16,7 +16,16 @@ import { LinkSession, type SessionOptions } from "./session.ts";
 export type AuthResult = { ok: true; sessionToken?: string } | { ok: false; reason: string };
 
 export interface LinkServerOptions {
-  /** Decides whether a `hello` may connect. Called for every connection, including resumes. `existing` is the live session for the same workerId, so the hub can refuse a credential that does not own it. */
+  /**
+   * Decides whether a `hello` may connect. Called for every connection, resumes
+   * included, after the hello's shape is validated. It must compare
+   * `hello.token` in constant time and should tie the token to `hello.workerId`.
+   * `existing` is the session already registered for that workerId, if any.
+   * Whatever this returns, the server also refuses a hello for a registered
+   * workerId unless it proves ownership: `hello.sessionToken` equals the token
+   * issued in the last `ready`, or `hello.token` equals the token that created
+   * the session.
+   */
   authenticate: (hello: Hello, existing?: ServerSession) => AuthResult | Promise<AuthResult>;
   /** Largest WebSocket message accepted in `listen()`. A hub calling `handleConnection` sets it on its own server. */
   maxPayload?: number;
@@ -34,8 +43,11 @@ export class ServerSession extends LinkSession {
   readonly workerId: string;
   hello: Hello;
   sessionToken: string;
+  /** The `hello.token` that last authenticated this session. */
+  credential: string;
   constructor(hello: Hello, sessionToken: string, opts: SessionOptions) {
     super(opts);
+    this.credential = hello.token;
     this.workerId = hello.workerId;
     this.hello = hello;
     this.sessionToken = sessionToken;
@@ -166,6 +178,14 @@ export class LinkServer extends EventEmitter {
 
     const sessionToken = auth.sessionToken ?? randomBytes(24).toString("base64url");
     let session = this.sessions.get(hello.workerId);
+    if (session && !ownsSession(session, hello)) {
+      this.reply(
+        ws,
+        { type: "rejected", reason: "workerId is in use by another credential" },
+        true,
+      );
+      return;
+    }
     const wantsResume = hello.resume !== undefined;
     if (session && !wantsResume) {
       // The worker restarted and has no channels. Whatever the old session held is gone.
@@ -186,6 +206,7 @@ export class LinkServer extends EventEmitter {
     }
     session.hello = hello;
     session.sessionToken = sessionToken;
+    session.credential = hello.token;
     clearTimeout(this.expiry.get(hello.workerId));
     this.expiry.delete(hello.workerId);
 
@@ -231,4 +252,14 @@ export class LinkServer extends EventEmitter {
     if (this.sessions.get(session.workerId) === session) this.sessions.delete(session.workerId);
     session.destroy(reason);
   }
+}
+
+const digest = (v: string) => createHash("sha256").update(v).digest();
+const sameSecret = (a: string, b: string) => timingSafeEqual(digest(a), digest(b));
+
+/** A hello owns a session if it holds the session token from `ready` or the token that created it. */
+function ownsSession(session: ServerSession, hello: Hello): boolean {
+  if (hello.sessionToken !== undefined && sameSecret(hello.sessionToken, session.sessionToken))
+    return true;
+  return sameSecret(hello.token, session.credential);
 }

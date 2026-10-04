@@ -30,7 +30,7 @@ The first frame from the client is `hello`. The server answers with exactly one 
 
 | Message | Direction | Fields |
 | --- | --- | --- |
-| `hello` | client to server | `protocol`, `workerId`, `token`, `buildId`, `mode` (`attached` or `ephemeral`), `capabilities`, `labels`, `roots`, `agents`, optional `resume` |
+| `hello` | client to server | `protocol`, `workerId`, `token`, optional `sessionToken`, `buildId`, `mode` (`attached` or `ephemeral`), `capabilities`, `labels`, `roots`, `agents`, optional `resume` |
 | `ready` | server to client | `sessionToken`, `heartbeatMs`, `resumed`, optional `resume` |
 | `mismatch` | server to client | `need`: the protocol version the server speaks |
 | `rejected` | server to client | `reason` |

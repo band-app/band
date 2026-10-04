@@ -21,6 +21,8 @@ export interface Hello {
   protocol: number;
   workerId: string;
   token: string;
+  /** The `sessionToken` from the last `ready` this client received. Proves it owns the session on a reconnect. */
+  sessionToken?: string;
   buildId: string;
   mode: WorkerMode;
   capabilities: string[];
@@ -56,11 +58,19 @@ export type HandshakeReply = Ready | Mismatch | Rejected;
 /** The `hello` fields a client chooses, without the ones the client fills in. */
 export type HelloInfo = Omit<Hello, "type" | "protocol" | "token" | "resume">;
 
+export const WORKER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
+
 const isStringArray = (v: unknown): boolean =>
   Array.isArray(v) && v.every((x) => typeof x === "string");
 
 /** Checks a parsed `hello` field by field and returns the first problem, or null. */
 export function validateHello(h: Hello): string | null {
+  if (typeof h.workerId !== "string" || !WORKER_ID_PATTERN.test(h.workerId)) {
+    return "workerId must be 1 to 256 characters from A-Z a-z 0-9 . _ : -";
+  }
+  if (h.sessionToken !== undefined && typeof h.sessionToken !== "string") {
+    return "sessionToken must be a string";
+  }
   if (typeof h.token !== "string") return "token must be a string";
   if (typeof h.buildId !== "string") return "buildId must be a string";
   if (h.mode !== "attached" && h.mode !== "ephemeral") return "mode must be attached or ephemeral";
