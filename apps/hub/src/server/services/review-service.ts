@@ -1,5 +1,6 @@
+import { tmpdir } from "node:os";
+import { gitRunner } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "@band-app/host-local/git/git-client";
-import { gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import type {
   MergeMethod,
@@ -10,6 +11,7 @@ import type {
   WorkspaceReview,
 } from "@band-app/plugin-api";
 import { WorkspaceNotFoundError } from "../errors";
+import { hostRegistry } from "../infra/host/registry";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
 import { type WorkspaceService, workspaceService } from "./workspace-service";
 
@@ -109,7 +111,9 @@ export class ReviewService {
     if (worktree.branch.startsWith(DETACHED_BRANCH_PREFIX)) {
       return unavailable("detached-head", "The workspace is not on a branch.");
     }
-    const repo = await getRepoInfo(project.path, gitRunner(host));
+    // A remote workspace's repository is the worker's checkout, not the hub's copy.
+    const checkout = hostRegistry.projectPathOn(project.name, host.id, project.path);
+    const repo = await getRepoInfo(checkout ?? worktree.path, gitRunner(host));
     if (!repo) {
       return unavailable("no-remote", "The project has no origin remote.");
     }
@@ -121,7 +125,12 @@ export class ReviewService {
       ok: true,
       repo,
       branch: worktree.branch,
-      ctx: { cwd: worktree.path, defaultBranch: project.defaultBranch },
+      // The provider's `gh` calls name the repository, so they need no checkout. They
+      // run on the hub, where a remote workspace's path does not exist.
+      ctx: {
+        cwd: host.id === hostRegistry.local.id ? worktree.path : tmpdir(),
+        defaultBranch: project.defaultBranch,
+      },
       provider,
     };
   }

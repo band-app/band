@@ -1,4 +1,4 @@
-import { execGit } from "@band-app/host-local/git/git-client";
+import { gitRunner, type Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { SubscriptionQueries } from "../infra/db/queries/subscriptions";
 
@@ -11,9 +11,13 @@ const queries = new SubscriptionQueries();
  * so subscriptions can tell Band's own pushes from a human's. Never throws:
  * a missing record only means a later CI failure is treated as a human's.
  */
-export async function recordPushedHead(workspaceId: string, cwd: string): Promise<void> {
+export async function recordPushedHead(
+  host: Host,
+  workspaceId: string,
+  cwd: string,
+): Promise<void> {
   try {
-    const sha = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+    const sha = (await gitRunner(host)(["rev-parse", "HEAD"], cwd)).trim();
     if (/^[0-9a-f]{7,64}$/i.test(sha)) queries.recordPushedSha(sha, workspaceId, Date.now());
   } catch (err) {
     log.warn({ err, workspaceId }, "could not record the pushed commit");

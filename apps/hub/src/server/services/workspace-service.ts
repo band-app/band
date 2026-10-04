@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { join, posix } from "node:path";
 import { resumeCliInvocation } from "@band-app/coding-agent";
-import { type Host, HostOfflineError } from "@band-app/host-api";
+import { type CommandRun, gitRunner, type Host, HostOfflineError } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX } from "@band-app/host-local/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "@band-app/host-local/git/git-refusals";
-import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
 import { scriptInvocation } from "@band-app/host-local/process/path";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
@@ -1125,7 +1124,7 @@ export class WorkspaceService {
       // after a branch switch they differ, and we push the current checkout.
       await execGit(["push", "--set-upstream", "origin", workspace.worktree.branch], cwd);
     }
-    await recordPushedHead(workspaceId, cwd);
+    await recordPushedHead(workspace.host, workspaceId, cwd);
     return { ok: true };
   }
 
@@ -1193,7 +1192,7 @@ export class WorkspaceService {
       // unchanged, carrying its captured stderr.
       await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
     }
-    await recordPushedHead(workspaceId, cwd);
+    await recordPushedHead(workspace.host, workspaceId, cwd);
     return { ok: true };
   }
 
