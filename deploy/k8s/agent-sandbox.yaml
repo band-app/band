@@ -1,0 +1,43 @@
+# What BAND_K8S_KIND=sandbox creates, for kubernetes-sigs/agent-sandbox. Install that project's CRDs
+# and controller first (https://github.com/kubernetes-sigs/agent-sandbox), and add the sandboxes rule
+# from rbac.yaml. The hook renders this object itself, with the real worker id, hub URL and image.
+# This file shows its shape. It is not applied as is.
+#
+# The pod template is the same one the Pod kind uses, so the hardening is the same, and a runtime
+# class (kata, gvisor) set with BAND_K8S_RUNTIME_CLASS lands in spec.podTemplate.spec.runtimeClassName.
+# The hook creates the token Secret `band-h-0123456789ab` after this object, owned by it.
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: band-h-0123456789ab
+  namespace: band-workers
+  labels:
+    band.runner: k8s
+    band.request: example-request
+    band.worker: h-0123456789ab
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        band.runner: k8s
+        band.request: example-request
+        band.worker: h-0123456789ab
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: band-worker
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # command, env and volumeMounts: see the Pod kind (runners/k8s/render.mjs).
