@@ -2,7 +2,7 @@
 
 A runner is a pair of scripts the hub runs to get a machine for a workspace that has none. When `workspaces.create` carries a `placement` that no online host satisfies, the hub records a host request. `RunnerService` (`apps/hub/src/server/services/runner-service.ts`) takes that request, runs the runner's `spawn` script, and completes the request once the worker that script started says hello.
 
-The hub ships three hooks in `runners/`: `local`, `ssh` and `docker`. Any executable can be a hook.
+The hub ships five hooks in `runners/`: `local`, `ssh`, `docker`, `hetzner` and `contabo`. The last two start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). Any executable can be a hook.
 
 ## Configure a runner
 
@@ -190,6 +190,87 @@ On a separate docker host, with a hub that has a public `https` URL (set `BAND_P
 The hub runs the docker CLI, which reaches the daemon over ssh with the hub user's keys (`HOME` and `SSH_AUTH_SOCK` are passed through). The container, its `/work` volume and the image all live on that host.
 
 A `workspaces.create` call picks this runner with `placement: { labels: { pool: "docker" }, environment: { isolation: "container" } }`. `band workspaces create --isolation container --labels pool=docker` does the same from the CLI.
+
+## VM hooks: hetzner and contabo
+
+Both hooks create a machine whose cloud-init installs the worker, starts it as `band-worker --ephemeral` under systemd and powers the machine off when the worker exits. Set `"isolation": "vm"` on the runner, so a request that asks for `vm` isolation can use it (see [Isolation levels](#isolation-levels)). The hooks print `BAND_MACHINE_HANDLE=<id>` (the provider's id for the machine) and, when the project has a clone URL, `BAND_HOST_PROJECT_PATH`.
+
+Each hook has `spawn`, `destroy` and `status` (`runners/<name>/{spawn,destroy,status}.sh`). `status` prints one line per machine the runner knows: `BAND_MACHINE_HANDLE=<id> worker=<worker id> request=<request id> state=<provider state>`. `destroy` finds its machine by the worker id, so it works without the handle, and it succeeds when the machine is gone already.
+
+### The cloud-init
+
+`runners/_shared/cloud-init.mjs` renders the same user data for both providers. It writes `/etc/band-worker.env` (mode 0600, the contract's variables), a `band-worker.service` unit and a bootstrap script, then runs the script. The unit has `Restart=no`, `RuntimeMaxSec` (12 hours, set it with `BAND_VM_MAX_HOURS`) and `ExecStopPost=+/usr/sbin/poweroff`. A bootstrap step that fails also powers the machine off, because a machine with no worker only costs money. The image must be Debian or Ubuntu (the script uses `apt`).
+
+Settings (`env`, for both hooks):
+
+| Variable | Meaning |
+| --- | --- |
+| `BAND_VM_WORKER` | `npm` (default) installs Node 22 from NodeSource and runs `npm install -g $BAND_VM_WORKER_PACKAGE`. `docker` installs `docker.io` and runs `BAND_VM_WORKER_IMAGE` with the same hardening flags as the `docker` hook. |
+| `BAND_VM_WORKER_PACKAGE` | The npm package with `band-worker`. Default `@band-app/worker`. |
+| `BAND_VM_WORKER_IMAGE` | The worker image. Required in `docker` mode. |
+| `BAND_VM_MAX_HOURS` | Hours until the worker is stopped and the machine powers off. Default 12. |
+| `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
+
+The clone happens on the machine, so the project needs a URL it can reach. A project with only a local path on the hub's machine is not cloned. The machine must reach `BAND_HUB_URL`, and a worker takes plain `http` only for a loopback hub, so use an `https` URL.
+
+### Token handling
+
+The bootstrap token is in the user data, which the provider stores and the machine keeps. It is single use and spent when the worker exchanges it, and the bootstrap script deletes `/etc/band-worker.env` and cloud-init's copies of the user data once the unit has started. The provider's metadata service keeps serving the user data for the life of the machine, so any process on it can still read the token. Single use is what makes that harmless once the worker has connected. Anyone who can read the machine's user data through your provider account before then can read the token, so keep the provider token to people who may run workspaces. The token is in no command line of the hook and no hook log line. The hooks read provider credentials from their own environment and never print them. The runner's `env` is stored in `~/.band/settings.json`, which any device token can read, so for a shared hub write a small wrapper script that exports the credentials and then runs the bundled hook (`exec /path/to/band/runners/hetzner/spawn.sh`), and set `spawn` and `destroy` to the wrapper's absolute path. Putting them in `env` is fine for a hub only you use.
+
+### hetzner
+
+Creates a Hetzner Cloud server per request with the labels `band.runner`, `band.request` and `band.worker`. A spawn for a worker id that already has a server deletes the old one first, since a woken worker comes back on a clean machine. `destroy` deletes the server. Billing is hourly, so a server costs what it runs: cx22 is a few euro cents per hour.
+
+| Variable | Meaning |
+| --- | --- |
+| `HCLOUD_TOKEN` | A project API token with read and write access. Required. |
+| `HCLOUD_SERVER_TYPE` | Default `cx22`. |
+| `HCLOUD_IMAGE` | Default `ubuntu-24.04`. |
+| `HCLOUD_LOCATION` | Default `fsn1`. |
+| `HCLOUD_SSH_KEYS` | Comma-separated key names or ids, to log in for debugging. Optional. |
+| `HCLOUD_FIREWALLS` | Comma-separated firewall ids. Optional. The worker needs outbound access only. |
+
+```json
+{
+  "id": "hetzner",
+  "spawn": "bundled:hetzner",
+  "destroy": "bundled:hetzner",
+  "labels": { "pool": "vm" },
+  "isolation": "vm",
+  "maxConcurrent": 4,
+  "timeoutSec": 420,
+  "env": { "HCLOUD_TOKEN": "...", "BAND_HUB_URL": "https://hub.example.com" }
+}
+```
+
+Allow several minutes in `timeoutSec`: the machine boots, installs Node and the worker, and clones before the worker says hello.
+
+### contabo
+
+Contabo instances are billed monthly, so deleting one does not stop the charge. The hook has two modes.
+
+- `pool` (default). `CONTABO_POOL` lists instance ids you already pay for. `spawn` takes one that is idle, renames it `band-busy-<worker id>` and reinstalls it with the user data. `destroy` reinstalls it with no user data, which leaves a clean disk without the token, and renames it `band-idle`. An instance that is still installing is not offered, so a request that arrives right after a release can fail with "no idle instance". Two spawns of one runner take the pool one at a time, through a lock in `BAND_RUNNER_DIR`. Listing an instance in `CONTABO_POOL` authorises the hook to wipe it, including a first spawn on an instance that was never named `band-idle`. Instances in the pool must be used by this runner only, because Contabo has no way to claim one atomically across runners.
+- `new` (`CONTABO_MODE=new`). `spawn` buys an instance (`CONTABO_PRODUCT_ID`, one month). `destroy` cancels it. Contabo ends the contract at the end of the billing period, so each request costs a month. Use it only when you accept that.
+
+| Variable | Meaning |
+| --- | --- |
+| `CONTABO_CLIENT_ID`, `CONTABO_CLIENT_SECRET`, `CONTABO_API_USER`, `CONTABO_API_PASSWORD` | The API credentials from the Contabo customer panel (OAuth password grant). Required. |
+| `CONTABO_IMAGE_ID` | The id of the OS image to install, a Debian or Ubuntu one. Required. |
+| `CONTABO_POOL` | Comma-separated instance ids. Required in `pool` mode. |
+| `CONTABO_PRODUCT_ID` | The product to buy, like `V92`. Required in `new` mode. |
+| `CONTABO_REGION` | Default `EU`. `new` mode only. |
+| `CONTABO_SSH_KEYS` | Comma-separated secret ids of ssh keys to install. Optional. |
+| `CONTABO_LOCK_WAIT` | Seconds a spawn waits for the pool lock. Default 60. |
+
+Contabo has no per-instance labels in this hook, so `status` identifies a machine by its display name and does not report the request id. A reinstall takes a few minutes, so allow the same `timeoutSec` as for Hetzner or more.
+
+### Tests
+
+`apps/hub/tests/runner-vm-hooks.test.ts` runs each hook as the hub would, against Express stubs of the Hetzner and Contabo APIs (`fixtures/hetzner-stub.ts`, `fixtures/contabo-stub.ts`, reached through `HCLOUD_API_URL`, `CONTABO_AUTH_URL` and `CONTABO_API_URL`), and checks the cloud-config it sends. It runs `cloud-init schema` on the user data when `cloud-init` is installed, and otherwise checks the document's shape. CI calls no real cloud. A live test creates and deletes one Hetzner server when `BAND_LIVE_HCLOUD_TOKEN` is set, and is skipped without it:
+
+```sh
+BAND_LIVE_HCLOUD_TOKEN=... pnpm --filter @band-app/server exec vitest run tests/runner-vm-hooks.test.ts
+```
 
 ## Writing a hook
 
