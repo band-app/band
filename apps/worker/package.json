@@ -1,0 +1,30 @@
+{
+  "name": "@band-app/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "band-worker": "./bin/band-worker.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node bin/band-worker.mjs",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@band-app/host-api": "workspace:^",
+    "@band-app/host-local": "workspace:^",
+    "@band-app/link": "workspace:^",
+    "@band-app/logger": "workspace:^",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.7.0",
+    "ws": "^8.18.0"
+  }
+}
