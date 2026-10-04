@@ -93,8 +93,11 @@ test.describe("Chat Listening pill", () => {
     await chatPane.goto(WORKSPACE);
     await chatPane.waitForReady();
 
-    // No subscriptions yet: no pill.
+    // No subscriptions yet: no pill. The prompt is visible once the chat view
+    // has mounted, and the pill's list query runs on mount against the real
+    // server, so give it a moment to settle before asserting absence.
     await expect(chatPane.promptInput).toBeVisible();
+    await expect.poll(listSubscriptions).toEqual([]);
     await expect(chatPane.listeningPill).toHaveCount(0);
 
     // An agent subscribes while the page is open. The pill appears on its own.
@@ -112,15 +115,22 @@ test.describe("Chat Listening pill", () => {
 
     await chatPane.openListening();
     await expect(chatPane.listeningItems).toHaveCount(2);
-    await expect(chatPane.listeningList).toContainText("cron 0 9 * * *");
-    await expect(chatPane.listeningList).toContainText("0/10 wakeups");
-    await expect(chatPane.listeningList).toContainText("expires in");
 
     const before = await listSubscriptions();
     expect(before).toHaveLength(2);
     const timer = before.find((s) => s.source === "timer");
     const hook = before.find((s) => s.source === "webhook");
     if (!timer || !hook) throw new Error("expected a timer and a webhook subscription");
+
+    // Each row carries its data as attributes, so nothing here asserts on copy.
+    const timerRow = chatPane.listeningItem(timer.id);
+    await expect(timerRow).toHaveAttribute("data-source", "timer");
+    await expect(timerRow).toHaveAttribute("data-cron", "0 9 * * *");
+    await expect(timerRow).toHaveAttribute("data-wakeups", "0");
+    await expect(timerRow).toHaveAttribute("data-max-wakeups", "10");
+    const expiresAt = Number(await timerRow.getAttribute("data-expires-at"));
+    expect(expiresAt).toBeGreaterThan(Date.now());
+    await expect(chatPane.listeningItem(hook.id)).toHaveAttribute("data-source", "webhook");
 
     // Remove the timer: its row leaves the list and the backend drops it.
     await chatPane.removeListening(timer.id);

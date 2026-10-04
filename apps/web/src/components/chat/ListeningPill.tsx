@@ -32,7 +32,7 @@ function describeWatch(sub: ChatSubscription): { source: string; watches: string
     return { source: "Timer", watches: "timer" };
   }
   if (sub.source === "webhook") {
-    return { source: "Webhook", watches: sub.webhook ? "webhook" : `/api/hooks/${sub.id}` };
+    return { source: "Webhook", watches: `/api/hooks/${sub.id}` };
   }
   return { source: sub.source, watches: sub.filterKey };
 }
@@ -110,6 +110,11 @@ export function ListeningPill({ chatId }: { chatId: string }) {
               <li
                 key={sub.id}
                 data-testid={`listening-pill__item--${sub.id}`}
+                data-source={sub.source}
+                data-cron={sub.cron}
+                data-wakeups={sub.wakeups}
+                data-max-wakeups={sub.maxWakeups}
+                data-expires-at={sub.expiresAt}
                 className="flex items-start gap-2 px-3 py-2"
               >
                 <div className="min-w-0 flex-1">

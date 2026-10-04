@@ -1745,7 +1745,9 @@ fn subscriptions_create_list_remove_use_the_agents_chat() {
         .iter()
         .map(|s| s["id"].as_str().unwrap())
         .collect();
-    assert_eq!(after_ids, vec![created_ids[1]]);
+    // Only the one that was not removed is left.
+    let survivor = created_ids[1];
+    assert_eq!(after_ids, vec![survivor]);
 
     // Removing it again fails.
     let again = env.band_with_env(&["subscriptions", "remove", doomed], &agent_env);

@@ -2699,7 +2699,7 @@ fn describe_subscription(sub: &serde_json::Value) -> String {
         }
         "webhook" => {
             let id = sub.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            format!("POST /api/hooks/{id}")
+            format!("/api/hooks/{id}")
         }
         _ => key.to_string(),
     }

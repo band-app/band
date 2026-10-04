@@ -81,7 +81,8 @@ beforeAll(async () => {
         // The resolved binary is reachable but doesn't install one of the
         // expected SKILL.md files — almost always means a stale build is
         // sitting on the host. Treat this exactly like "no binary found"
-        // so the suite skips cleanly instead of the whole test file
+        // so the suite skips cleanly (zero assertions run, it does not fail)
+        // instead of the whole test file
         // failing in the module-level beforeAll. The next CI run that
         // rebuilds the CLI will populate expectedSkills correctly and
         // exercise the assertions.
