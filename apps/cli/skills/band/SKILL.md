@@ -211,6 +211,15 @@ band env validate [path]
 
 Checks `.band/environment.json` in the repository at `path` (default: the current directory), or the file itself. The path must exist on the hub's machine. Prints `OK <file>` and exits 0, or prints each problem with its key path and exits 1. With `--output json` it prints the parsed environment and the issues. Needs an admin token.
 
+### Build a project's environment image
+
+```sh
+band env build <project> [--force] [--no-wait]
+band env status <project>
+```
+
+Builds the image for the project's `.band/environment.json` at the default branch: the worker base, the toolchain from `build`, then the result of `install`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused and reported as a cache hit. `build` follows the log and exits 0 for a ready image or a cache hit, 1 for a failed build. `--no-wait` returns once the build has started. `status` prints the current image (the newest ready build; a failed build never replaces it) and the latest build with its log. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine). `build` needs an admin token.
+
 ### List, create and revoke the hub's tokens
 
 ```sh

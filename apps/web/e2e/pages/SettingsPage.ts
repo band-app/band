@@ -626,6 +626,32 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__environment-host");
   }
 
+  /** The image section of the open environment. `data-testid` set in
+   *  `EnvironmentSettings.tsx`. Present only when the file has a `build`. */
+  environmentImage(): Locator {
+    return this.dialog.getByTestId("settings__environment-image");
+  }
+
+  /** Click "Build image" in the open environment, and wait for the build to finish. */
+  async buildEnvironmentImage(): Promise<void> {
+    await test.step("Build the environment image", async () => {
+      const button = this.dialog.getByTestId("settings__environment-image-build");
+      await button.click();
+      await expect(button).toBeEnabled({ timeout: 30_000 });
+      await expect(this.environmentImage()).not.toHaveAttribute("data-status", "building");
+    });
+  }
+
+  /** The log of the latest image build. */
+  environmentImageLog(): Locator {
+    return this.dialog.getByTestId("settings__environment-image-log");
+  }
+
+  /** An error from starting an image build. */
+  environmentImageError(): Locator {
+    return this.dialog.getByTestId("settings__environment-image-error");
+  }
+
   /** Click Save. */
   async save(): Promise<void> {
     await test.step("Click Save", async () => {

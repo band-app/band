@@ -1748,6 +1748,115 @@ fn env_validate_fails_when_the_repository_has_no_file() {
     );
 }
 
+/// A server whose builder runs the docker stub (`apps/hub/tests/fixtures/docker-stub-bin.mjs`),
+/// with the worker base image present, and a committed environment that has a `build`.
+/// Returns the env and the directory that holds the stub's state file.
+fn docker_stub_env(dockerfile: &str) -> (TestEnv, tempfile::TempDir) {
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let state = stub_dir.path().join("state.json");
+    fs::write(
+        &state,
+        r#"{"images": {"band-worker:latest": "sha256:worker"}}"#,
+    )
+    .unwrap();
+    let stub = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../hub/tests/fixtures/docker-stub-bin.mjs")
+        .canonicalize()
+        .expect("docker stub");
+    let env = TestEnv::with_server_env(&[
+        ("BAND_DOCKER_BIN", stub.to_str().unwrap()),
+        ("STUB_DOCKER_STATE", state.to_str().unwrap()),
+    ]);
+    write_environment(
+        &env.repo_path,
+        r#"{"build": {"dockerfile": "Dockerfile"}, "install": "echo installed"}"#,
+    );
+    fs::write(env.repo_path.join("Dockerfile"), dockerfile).unwrap();
+    git(&env.repo_path, &["add", "."]);
+    git(&env.repo_path, &["commit", "-m", "add environment"]);
+    (env, stub_dir)
+}
+
+#[test]
+fn env_build_builds_an_image_and_the_second_build_is_a_cache_hit() {
+    let (env, _stub) = docker_stub_env("FROM busybox\n");
+
+    let out = env.band(&["env", "build", "my-project"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("$ docker build"), "stdout: {text}");
+    let last = text.lines().last().unwrap_or_default();
+    assert!(
+        last.starts_with("ready band-env/my-project:"),
+        "last line: {last}"
+    );
+
+    let again = env.band(&["env", "build", "my-project"]);
+    assert!(again.status.success(), "stderr: {}", stderr(&again));
+    assert!(
+        stdout(&again).starts_with("Cache hit: ready band-env/my-project:"),
+        "stdout: {}",
+        stdout(&again)
+    );
+
+    let json = json_of(&env.band(&["env", "build", "my-project", "--output", "json"]));
+    assert_eq!(json["cacheHit"], true, "json: {json}");
+    assert_eq!(json["build"]["status"], "ready", "json: {json}");
+
+    let status = env.band(&["env", "status", "my-project"]);
+    assert!(status.status.success(), "stderr: {}", stderr(&status));
+    assert!(
+        stdout(&status).contains("Current image: ready band-env/my-project:"),
+        "stdout: {}",
+        stdout(&status)
+    );
+    let status_json = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]));
+    assert_eq!(status_json["builds"].as_array().unwrap().len(), 1);
+    assert_eq!(status_json["current"]["status"], "ready");
+}
+
+#[test]
+fn env_build_exits_non_zero_with_the_log_and_keeps_the_current_image() {
+    let (env, _stub) = docker_stub_env("FROM busybox\n");
+    let ok = env.band(&["env", "build", "my-project"]);
+    assert!(ok.status.success(), "stderr: {}", stderr(&ok));
+    let good = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]))["current"]
+        ["image"]
+        .clone();
+
+    fs::write(
+        env.repo_path.join("Dockerfile"),
+        "FROM busybox\nRUN FAIL_BUILD\n",
+    )
+    .unwrap();
+    git(&env.repo_path, &["commit", "-am", "break the toolchain"]);
+
+    let failed = env.band(&["env", "build", "my-project"]);
+    assert_eq!(failed.status.code(), Some(1));
+    let text = stdout(&failed);
+    assert!(text.contains("FAIL_BUILD"), "stdout: {text}");
+    assert!(
+        text.lines()
+            .last()
+            .unwrap_or_default()
+            .starts_with("failed"),
+        "stdout: {text}"
+    );
+
+    let status = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]));
+    assert_eq!(status["current"]["image"], good, "status: {status}");
+    assert_eq!(status["latest"]["status"], "failed", "status: {status}");
+}
+
+#[test]
+fn env_build_says_why_a_project_cannot_build() {
+    let env = TestEnv::new();
+    let out = env.band(&["env", "build", "my-project"]);
+    assert_eq!(out.status.code(), Some(1));
+    // No Docker on this server, or no environment file: either way the reason is on stderr.
+    assert!(!stderr(&out).is_empty());
+}
+
 #[test]
 fn hosts_remove_deletes_an_offline_worker_and_refuses_local() {
     let env = TestEnv::new();

@@ -164,6 +164,18 @@ export interface Settings {
     [key: string]: unknown;
   };
   /**
+   * Where and how environment images are built (plan step 3.2). `hostId` is
+   * the host that runs docker (default `local`, the hub's machine), `registry`
+   * a registry prefix to push to, and `workerImage` the worker base image the
+   * final layer copies from (default `band-worker:latest`).
+   */
+  environmentBuilder?: {
+    hostId?: string;
+    registry?: string;
+    workerImage?: string;
+    [key: string]: unknown;
+  };
+  /**
    * Bundled plugins (`plugins/<id>/`). A plugin whose id is in `disabled`
    * never activates and its UI is hidden. Read once at boot.
    */

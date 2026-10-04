@@ -40,6 +40,8 @@ function discoverProcedures(): ProcedureInfo[] {
       continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
+    // `environment.build` runs commands from the repository on the builder host.
+    if (path === "environment.build") continue;
 
     const toolName = `band_${path.replace(/\./g, "_")}`;
 

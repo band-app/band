@@ -57,6 +57,8 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "hosts list": "lists every host, which a worker has no need to see",
   "hosts remove": "admin only, removes a host",
   "env validate": "admin only, reads a path on the hub's machine",
+  "env build": "admin only, runs repository commands on the builder host",
+  "env status": "reads a project's image builds, which a worker has no need to see",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
   "terminals attach":
     "streams over a WebSocket, which the relay does not carry yet (follow-up in the PR)",

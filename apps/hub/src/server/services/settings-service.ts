@@ -114,6 +114,21 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // Where environment images are built (plan step 3.2).
+    environmentBuilder: z
+      .object({
+        hostId: z.string().min(1).optional(),
+        registry: z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, "not a registry name")
+          .optional(),
+        workerImage: z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, "not an image reference")
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 

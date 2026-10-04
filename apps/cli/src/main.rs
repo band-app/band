@@ -569,6 +569,22 @@ enum EnvCmd {
         /// Repository directory, or the environment.json file (default: the current directory)
         path: Option<String>,
     },
+    /// Build the project's environment image at its default branch, or report a cache hit
+    Build {
+        /// Project name (from `band projects list`)
+        project: String,
+        /// Build again even when an image for the same key exists
+        #[arg(long)]
+        force: bool,
+        /// Return once the build has started instead of waiting for it to finish
+        #[arg(long)]
+        no_wait: bool,
+    },
+    /// Show a project's current environment image and its latest build, with the log
+    Status {
+        /// Project name (from `band projects list`)
+        project: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -652,12 +668,17 @@ fn main() {
         process::exit(exit_code);
     }
 
-    // env validate exits non-zero on a problem, with the problems as its output
-    if let Commands::Env {
-        cmd: EnvCmd::Validate { ref path },
-    } = cli.command
-    {
-        let exit_code = handle_env_validate(path.as_deref(), json_output);
+    // env commands exit non-zero on a problem or a failed build, with the details as their output
+    if let Commands::Env { ref cmd } = cli.command {
+        let exit_code = match cmd {
+            EnvCmd::Validate { path } => handle_env_validate(path.as_deref(), json_output),
+            EnvCmd::Build {
+                project,
+                force,
+                no_wait,
+            } => handle_env_build(project, *force, *no_wait, json_output),
+            EnvCmd::Status { project } => handle_env_status(project, json_output),
+        };
         process::exit(exit_code);
     }
 
@@ -3217,6 +3238,171 @@ fn cmd_env_validate(path: Option<&str>) -> Result<(bool, String, serde_json::Val
     Ok((ok, text, json))
 }
 
+/// Prints a build's one-line summary, e.g. `ready band-env/api:0123abcd (key 0123abcd)`.
+fn env_build_summary(build: &serde_json::Value) -> String {
+    let text = |key: &str| build.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let status = text("status");
+    let key: String = text("key").chars().take(12).collect();
+    match status {
+        "ready" => format!("ready {} (key {key})", text("image")),
+        "failed" => format!("failed (key {key}): {}", text("error")),
+        _ => format!("{status} (key {key})"),
+    }
+}
+
+/// The log of the latest build, or an empty string.
+fn env_latest_log(status: &serde_json::Value) -> String {
+    status
+        .get("latest")
+        .and_then(|l| l.get("log"))
+        .and_then(|l| l.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Start a build (or find it cached or running) and, unless `no_wait`, follow
+/// its log until it ends. Exit code 0 for a ready image, 1 for a failure.
+fn handle_env_build(project: &str, force: bool, no_wait: bool, json_output: bool) -> i32 {
+    match cmd_env_build(project, force, no_wait, json_output) {
+        Ok(code) => code,
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
+fn cmd_env_build(
+    project: &str,
+    force: bool,
+    no_wait: bool,
+    json_output: bool,
+) -> Result<i32, String> {
+    let client = api::ApiClient::from_settings()?;
+    let started = client.trpc_mutate(
+        "environment.build",
+        &serde_json::json!({"projectName": project, "force": force}),
+    )?;
+    let build = started.get("build").cloned().unwrap_or_default();
+    let cache_hit = started
+        .get("cacheHit")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let build_id = build
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if cache_hit && !json_output {
+        println!("Cache hit: {}", env_build_summary(&build));
+    }
+    if cache_hit || (no_wait && build.get("status").and_then(|v| v.as_str()) != Some("failed")) {
+        if json_output {
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "cacheHit": cache_hit,
+                    "build": build,
+                }))
+                .unwrap()
+            );
+        } else if !cache_hit {
+            println!("Build started: {}", env_build_summary(&build));
+        }
+        return Ok(0);
+    }
+
+    // Follow the build: print the log as it grows.
+    let mut printed = 0usize;
+    loop {
+        let status = client.trpc_query(
+            "environment.imageStatus",
+            &serde_json::json!({"projectName": project}),
+        )?;
+        let latest = status.get("latest").cloned().unwrap_or_default();
+        let same_build = latest.get("id").and_then(|v| v.as_str()) == Some(build_id.as_str());
+        if !same_build {
+            return Err("The build disappeared from the build list".to_string());
+        }
+        let log = env_latest_log(&status);
+        if !json_output {
+            // The hub drops the head of a log past its cap, which shifts
+            // every offset. Resync to the end instead of printing garbage.
+            let dropped = printed > 0 && log.starts_with("[earlier output dropped]");
+            if dropped || log.len() < printed {
+                println!("\n[log truncated by the hub]");
+                printed = log.len();
+            } else if log.len() > printed {
+                if let Some(rest) = log.get(printed..) {
+                    print!("{rest}");
+                    printed = log.len();
+                } else {
+                    printed = log.len();
+                }
+            }
+        }
+        let state = latest.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if state != "building" {
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "cacheHit": false,
+                        "build": latest,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("{}", env_build_summary(&latest));
+            }
+            return Ok(i32::from(state != "ready"));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn handle_env_status(project: &str, json_output: bool) -> i32 {
+    let result = api::ApiClient::from_settings().and_then(|client| {
+        client.trpc_query(
+            "environment.imageStatus",
+            &serde_json::json!({"projectName": project}),
+        )
+    });
+    match result {
+        Ok(status) => {
+            if json_output {
+                println!("{}", serde_json::to_string(&status).unwrap());
+                return 0;
+            }
+            match status.get("current").filter(|c| !c.is_null()) {
+                Some(current) => println!("Current image: {}", env_build_summary(current)),
+                None => println!("Current image: none (no build has finished)"),
+            }
+            if let Some(latest) = status.get("latest").filter(|l| !l.is_null()) {
+                println!("Latest build: {}", env_build_summary(latest));
+                let log = env_latest_log(&status);
+                if !log.is_empty() {
+                    println!("\n{log}");
+                }
+            }
+            0
+        }
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
 // --- Tokens commands ---
 
 fn cmd_tokens_list() -> Result<CommandResult, String> {
@@ -3909,6 +4095,24 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "path", "type": "string", "required": false, "positional": true, "description": "Repository directory, or the environment.json file (default: the current directory)"},
             ],
             "notes": "The hub reads the file, so the path must exist on the hub's machine. Exits 0 when the file is valid and 1 when it has problems or does not exist. Text output: `OK <file>`, or `<file> has N problems:` followed by `  <key path>: <message>` lines on stderr.\nJSON output: `{\"ok\": false, \"source\": \"/repo/.band/environment.json\", \"issues\": [{\"path\": \"isolation\", \"message\": \"...\"}]}`."
+        }),
+        serde_json::json!({
+            "name": "env build",
+            "description": "Build the project's environment image at its default branch, or report a cache hit",
+            "parameters": [
+                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name (from `band projects list`)"},
+                {"name": "force", "type": "boolean", "required": false, "description": "Build again even when an image for the same key exists"},
+                {"name": "no-wait", "type": "boolean", "required": false, "description": "Return once the build has started instead of waiting for it to finish"},
+            ],
+            "notes": "Admin only. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine), from the default branch's `.band/environment.json`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused. Text output follows the build log, then `ready <image>` or `failed: <reason>`. Exits 0 for a ready image or a cache hit, 1 for a failed build.\nJSON output: `{\"cacheHit\": false, \"build\": {\"id\": \"...\", \"status\": \"ready\", \"image\": \"band-env/api:0123456789abcdef\", \"key\": \"...\"}}`."
+        }),
+        serde_json::json!({
+            "name": "env status",
+            "description": "Show a project's current environment image and its latest build, with the log",
+            "parameters": [
+                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name (from `band projects list`)"},
+            ],
+            "notes": "The current image is the newest ready build. A failed build never replaces it.\nJSON output: `{\"builder\": {...}, \"current\": {...} | null, \"latest\": {..., \"log\": \"...\"} | null, \"builds\": [...]}`."
         }),
         serde_json::json!({
             "name": "hosts list",
