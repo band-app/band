@@ -27,8 +27,15 @@ git config --global init.defaultBranch main >/dev/null 2>&1 || true
 # A ready-to-use sample project on the persisted volume. A registered project
 # whose directory doesn't exist on disk fails to spawn terminals, so we always
 # provide at least one valid one.
+# With BAND_LOCAL_HOST=off (the image default) workspaces run on workers, so the
+# sample project would land in the container and is skipped.
+export BAND_LOCAL_HOST="${BAND_LOCAL_HOST:-off}"
 SAMPLE="$HOME/projects/sample"
-if [ ! -d "$SAMPLE/.git" ]; then
+LOCAL_WORKSPACES=true
+case "$(printf '%s' "$BAND_LOCAL_HOST" | tr '[:upper:]' '[:lower:]')" in
+  off|false|0) LOCAL_WORKSPACES=false ;;
+esac
+if [ "$LOCAL_WORKSPACES" = true ] && [ ! -d "$SAMPLE/.git" ]; then
   mkdir -p "$SAMPLE"
   ( cd "$SAMPLE" \
     && git init -q \
@@ -42,7 +49,11 @@ echo "────────────────────────�
 echo " Band hub listening on container port ${PORT}"
 echo " Open:  http://localhost:${HOST_PORT}/ (sign in with the admin token)"
 echo " State: ${BAND_DIR} (mounted volume)"
-echo " Sample project: ${SAMPLE} (auto-registered once the server is up)"
+if [ "$LOCAL_WORKSPACES" = true ]; then
+  echo " Sample project: ${SAMPLE} (auto-registered once the server is up)"
+else
+  echo " Local workspaces are off (BAND_LOCAL_HOST=off): add a worker to run workspaces"
+fi
 echo "──────────────────────────────────────────────────────────────"
 
 # Run the server in the background so we can register the sample project once
@@ -55,6 +66,7 @@ SERVER_PID=$!
 # Register the sample project once the server responds (idempotent, non-fatal).
 # `band projects list` doubles as the readiness probe — it talks to the local
 # server using the token from settings.json.
+if [ "$LOCAL_WORKSPACES" = true ]; then
 (
   i=0
   while [ "$i" -lt 40 ]; do
@@ -66,5 +78,6 @@ SERVER_PID=$!
     sleep 0.5
   done
 ) &
+fi
 
 wait "$SERVER_PID"

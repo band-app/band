@@ -323,6 +323,22 @@ export class WorkspacePage {
     return this.newWorkspaceDialog.getByTestId("new-workspace-form__host");
   }
 
+  /** The host ids the picker offers, in order. */
+  async newWorkspaceHostOptionValues(): Promise<string[]> {
+    return this.newWorkspaceHostSelect
+      .locator("option")
+      .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+  }
+
+  /** Opens the New Workspace dialog from the project's context menu. */
+  async openNewWorkspaceDialog(project: string): Promise<void> {
+    await test.step(`Open the New Workspace dialog for ${project}`, async () => {
+      await this.openProjectContextMenu(project);
+      await this.addWorkspaceMenuItem.click();
+      await expect(this.newWorkspaceDialog).toBeVisible();
+    });
+  }
+
   /** Repository path on the chosen remote host, asked the first time a project is used there. */
   get newWorkspaceHostPathInput(): Locator {
     return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-path");

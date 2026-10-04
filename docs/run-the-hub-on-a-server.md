@@ -67,6 +67,12 @@ By default the hub serves the UI at `/`. Two settings change that.
 
 The desktop app has its own copy of the UI, so it needs neither setting.
 
+## Workspaces run on workers
+
+The image sets `BAND_LOCAL_HOST=off`, so the hub does not run workspaces in its own container. Every workspace runs on a worker, and the entrypoint creates no sample project. The host picker lists only workers, and `workspaces.create` for the `local` host is refused.
+
+A workspace created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run workspaces in the container again.
+
 ## Add a project
 
 Mount a repository into the container in `compose.yml` and register its container path:
@@ -81,7 +87,7 @@ Mount a repository into the container in `compose.yml` and register its containe
 docker compose exec band band projects add /projects/myrepo
 ```
 
-The image has no coding agent installed. Terminals, git worktrees and setup scripts work. Worker machines are a separate step.
+The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, terminals, git worktrees and setup scripts work in the container. With it off, the repository must also exist on the worker that runs the workspace.
 
 ## Upgrade
 
@@ -111,6 +117,8 @@ The volume name starts with the Compose project name, which is the directory nam
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `BAND_ADMIN_TOKEN` | empty | Sets the admin token. Empty makes the first run create and print one. |
+| `BAND_LOCAL_HOST` | `off` | `on` allows workspaces on the hub's own machine and creates the sample project. |
+| `BAND_DEFAULT_HOST` | empty | Worker id used when a workspace names no host. Empty uses the only online worker. |
 | `BAND_SERVE_UI` | `true` | `false` serves the API only. |
 | `BAND_ALLOWED_ORIGINS` | empty | Origins of a UI hosted elsewhere. |
 | `BAND_PORT` | `3456` | Host port. |
