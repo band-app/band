@@ -441,7 +441,7 @@ jobs:
           # Docker: the image builds the Rust CLI, the hub and the UI, so it
           # depends on the Dockerfile, the build scripts, every app, the
           # packages and plugins, the lockfile and this workflow file.
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|deploy/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "docker=true" >> "$GITHUB_OUTPUT"
           else
             echo "docker=false" >> "$GITHUB_OUTPUT"
@@ -487,6 +487,118 @@ jobs:
       - name: Container logs
         if: failure()
         run: docker logs band-smoke || true
+
+      # The headless deploy (plan step 2.7): the compose file in deploy/compose
+      # runs the image just built, keeps its data in a volume and can serve the
+      # hub as an API only.
+      - name: Remove the smoke container
+        if: always()
+        run: docker rm -f band-smoke || true
+
+      - name: Compose up
+        working-directory: deploy/compose
+        env:
+          BAND_IMAGE: band-check
+          BAND_PORT: "3466"
+          BAND_ADMIN_TOKEN: ci-compose-token
+        run: |
+          docker compose up -d --no-build
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+
+      - name: Compose health, auth and UI
+        run: |
+          base=http://127.0.0.1:3466
+          auth='Authorization: Bearer ci-compose-token'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" $base/api/health)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' $base/api/health)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" $base/)" = 200
+          curl -s -H "$auth" "$base/trpc/projects.list" | grep -q '"result"'
+
+      - name: Compose keeps data across a recreate
+        working-directory: deploy/compose
+        env:
+          BAND_IMAGE: band-check
+          BAND_PORT: "3466"
+          BAND_ADMIN_TOKEN: ci-compose-token
+        run: |
+          auth='Authorization: Bearer ci-compose-token'
+          # The sample project is registered on every boot, so add one the
+          # entrypoint knows nothing about.
+          docker compose exec -T band sh -c 'mkdir -p /data/projects/persisted && cd /data/projects/persisted && git init -q && git commit -q --allow-empty -m init'
+          docker compose exec -T band band projects add /data/projects/persisted
+          curl -s -H "$auth" http://127.0.0.1:3466/trpc/projects.list | grep -q persisted
+          docker compose down
+          docker compose up -d --no-build
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+          curl -s -H "$auth" http://127.0.0.1:3466/trpc/projects.list | grep -q persisted
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" http://127.0.0.1:3466/api/health)" = 200
+
+      - name: Compose with BAND_SERVE_UI=false
+        working-directory: deploy/compose
+        env:
+          BAND_IMAGE: band-check
+          BAND_PORT: "3466"
+          BAND_ADMIN_TOKEN: ci-compose-token
+          BAND_SERVE_UI: "false"
+        run: |
+          docker compose up -d --no-build --force-recreate
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+          auth='Authorization: Bearer ci-compose-token'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" http://127.0.0.1:3466/)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" http://127.0.0.1:3466/api/health)" = 200
+
+      - name: First run prints the admin token once
+        working-directory: deploy/compose
+        env:
+          BAND_IMAGE: band-check
+          BAND_PORT: "3466"
+        run: |
+          docker compose down -v
+          docker compose up -d --no-build
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+          token=$(docker compose logs band | grep -A1 'First run: admin token' | tail -1 | awk '{print $NF}')
+          test -n "$token"
+          test "$(docker compose logs band | grep -c "$token")" = 1
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" http://127.0.0.1:3466/api/health)" = 200
+          docker compose restart band
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+          test "$(docker compose logs band | grep -c "$token")" = 1
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" http://127.0.0.1:3466/api/health)" = 200
+
+      - name: Compose logs
+        if: failure()
+        working-directory: deploy/compose
+        run: docker compose logs || true
+
+      - name: Compose down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose down -v || true
 
   cli-macos:
     name: CLI Integration Tests (macOS)

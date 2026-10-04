@@ -77,13 +77,10 @@ COPY --from=web-builder /app/apps/web/dist/client ./dist/client
 COPY docker/entrypoint.sh /usr/local/bin/band-entrypoint.sh
 RUN chmod +x /usr/local/bin/band-entrypoint.sh
 
-# BAND_ACCESS_TOKEN is a convenience default for the ?token= access URL of
-# this LOCAL test harness only — it is NOT a real credential and this image
-# must never be published. In a real deployment the server generates a random
-# tokenSecret via getOrCreateToken(); this default never reaches one.
+# No token is baked in. The hub mints an admin token on the first run and
+# prints it once, or takes BAND_ADMIN_TOKEN from the environment.
 ENV NODE_ENV=production \
     PORT=3456 \
-    HOME=/data \
-    BAND_ACCESS_TOKEN=band-local
+    HOME=/data
 EXPOSE 3456
 ENTRYPOINT ["/usr/local/bin/band-entrypoint.sh"]

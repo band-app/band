@@ -1,0 +1,5 @@
+# Caddy gets and renews the certificate for $BAND_DOMAIN and proxies to the
+# hub. WebSocket upgrades (terminals, subscriptions) pass through unchanged.
+{$BAND_DOMAIN} {
+	reverse_proxy band:3456
+}

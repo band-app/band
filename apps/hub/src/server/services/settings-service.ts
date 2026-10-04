@@ -286,6 +286,11 @@ export class SettingsService {
   getOrCreateToken(): string {
     return this.queries.getOrCreateToken();
   }
+
+  /** See `SettingsQueries.resolveAdminToken`. */
+  resolveAdminToken(envToken?: string): { token: string; generated: boolean } {
+    return this.queries.resolveAdminToken(envToken);
+  }
 }
 
 /**

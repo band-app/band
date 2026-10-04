@@ -1,0 +1,71 @@
+# Run the Band hub on a server. From this directory:
+#
+#   cp .env.example .env     # optional: pick a port, set BAND_ADMIN_TOKEN
+#   docker compose up -d     # builds the image from the repo on first run
+#   docker compose logs band # the first run prints an admin token once
+#
+# With HTTPS through Caddy (set BAND_DOMAIN in .env first):
+#
+#   docker compose --profile tls up -d
+#
+# Full guide: docs/run-the-hub-on-a-server.md
+services:
+  band:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: ${BAND_IMAGE:-band-hub:local}
+    restart: unless-stopped
+    # Bound to localhost. Caddy or your own reverse proxy is the public side.
+    # Set BAND_BIND=0.0.0.0 only on a trusted network.
+    ports:
+      - "${BAND_BIND:-127.0.0.1}:${BAND_PORT:-3456}:3456"
+    environment:
+      # Empty means the hub mints an admin token on the first run and prints it once.
+      BAND_ADMIN_TOKEN: ${BAND_ADMIN_TOKEN:-}
+      # Set to false to run the hub as an API only (the UI is hosted elsewhere).
+      BAND_SERVE_UI: ${BAND_SERVE_UI:-true}
+      # Comma-separated origins of a UI hosted elsewhere (CORS and WebSocket check).
+      BAND_ALLOWED_ORIGINS: ${BAND_ALLOWED_ORIGINS:-}
+    volumes:
+      # BAND_HOME: database, settings, tokens, sample project.
+      - band-data:/data
+      # Mount a repo to register it as a project:
+      # - /srv/repos/myrepo:/projects/myrepo
+    healthcheck:
+      # /api/health needs the token, so read it from the settings file.
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          const t = require('/data/.band/settings.json').tokenSecret;
+          fetch('http://127.0.0.1:3456/api/health', { headers: { Authorization: 'Bearer ' + t } })
+            .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1));
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 15s
+
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      band:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      BAND_DOMAIN: ${BAND_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  band-data:
+  caddy-data:
+  caddy-config:

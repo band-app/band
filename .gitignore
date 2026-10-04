@@ -9,6 +9,7 @@ band
 .DS_Store
 .env
 .env.*
+!.env.example
 __pycache__/
 target/
 *.vsix
