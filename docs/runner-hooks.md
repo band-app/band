@@ -174,7 +174,7 @@ Settings (`env`):
 | `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
 | `DOCKER_HOST` | A remote docker daemon, such as `ssh://user@build-host`. |
 
-A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
+A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already. `spawn` prints the container id as `BAND_MACHINE_HANDLE`. `status` lists the ids of the containers with the label `band.runner=<runner id>`, and `destroy` called with only a handle removes that container when it carries the runner's label.
 
 A worker takes plain `http` only for a loopback hub, and a container on the `bridge` network cannot reach the hub's loopback. So the hub URL must be `https`, or on Linux the runner uses `"BAND_DOCKER_NETWORK": "host"` with the default `http://127.0.0.1:<port>`.
 
