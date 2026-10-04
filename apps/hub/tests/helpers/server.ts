@@ -29,7 +29,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./server-runtime";
 import { stopTerminalDaemon } from "./terminal-daemon";
-import { isRemoteLoopback, moveSeededWorkspacesToHost, startLoopbackWorker } from "./test-host";
+import {
+  assertNoWorkerPathAccess,
+  isRemoteLoopback,
+  settleWorkspacesOnHost,
+  startLoopbackWorker,
+  workerGuardEnv,
+} from "./test-host";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -211,8 +217,12 @@ export const LISTENING_BANNER = /Web server listening on http:\/\/[^\s:]+:(\d+)/
  * process-group teardown already used by `apps/web/e2e/helpers/server.ts`.
  */
 export async function startServer(opts: StartServerOptions): Promise<ServerHandle> {
-  const handle = await startHubServer(opts);
-  if (!isRemoteLoopback || opts.remoteHost === false) return handle;
+  if (!isRemoteLoopback || opts.remoteHost === false) return startHubServer(opts);
+
+  const handle = await startHubServer({
+    ...opts,
+    env: { ...opts.env, ...workerGuardEnv(opts.tmpHome, opts.env?.NODE_OPTIONS) },
+  });
 
   let worker: Awaited<ReturnType<typeof startLoopbackWorker>>;
   try {
@@ -221,12 +231,14 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     await handle.close();
     throw err;
   }
-  moveSeededWorkspacesToHost(handle.home, worker.hostId);
+  await settleWorkspacesOnHost(handle.home, worker.hostId);
   return {
     ...handle,
     close: async (closeOpts) => {
       await worker.close();
       await handle.close(closeOpts);
+      // Teardown is done by now, so a violation fails the test without leaking the worker or the hub.
+      assertNoWorkerPathAccess(handle.home);
     },
   };
 }

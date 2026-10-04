@@ -9,7 +9,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -32,6 +33,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { isRemoteLoopback } from "./helpers/test-host";
 
 const TOKEN = "pr-checks-test-token";
 
@@ -42,6 +44,15 @@ const gitEnv = {
   GIT_COMMITTER_NAME: "Test",
   GIT_COMMITTER_EMAIL: "test@test.com",
 };
+
+/**
+ * Where the plugin's `gh` runs. For a workspace on a worker the hub has no
+ * checkout to run in, and the calls name the repository, so it uses a dir of
+ * its own. Locally it is the worktree.
+ */
+function ghCwd(worktree: string): string {
+  return isRemoteLoopback ? realpathSync(tmpdir()) : worktree;
+}
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
@@ -291,7 +302,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
       ref: `refs/heads/${PR_BRANCH}`,
     });
     expect(requests[0].flags).toEqual({});
-    expect(requests[0].cwd).toBe(prWorktree);
+    expect(requests[0].cwd).toBe(ghCwd(prWorktree));
     expect(requests[0].env).toEqual({ GH_PROMPT_DISABLED: "1" });
     expect(stub.requests).toContainEqual(requests[0]);
   });
@@ -439,7 +450,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
         positional: ["pr", "merge", "801"],
         fields: {},
         flags: { squash: true, repo: "github.com/acme/widgets" },
-        cwd: mergeWorktree,
+        cwd: ghCwd(mergeWorktree),
         env: { GH_PROMPT_DISABLED: "1" },
       },
     ]);
