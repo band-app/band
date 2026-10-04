@@ -76,6 +76,8 @@ export interface GhStub {
     sha: string,
     runs: CheckRunStub[] | (() => CheckRunStub[]),
   ) => void;
+  /** Answer `gh api user` (the authenticated account) with this login. */
+  setAuthUser: (login: string) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
     number: number,
@@ -184,6 +186,11 @@ export const ghStub = {
           res.json({
             stdout: JSON.stringify({ total_count: list.length, check_runs: slice }),
           });
+        });
+      },
+      setAuthUser(login) {
+        app.post("/api/user", (_req, res) => {
+          res.json({ stdout: JSON.stringify({ login }) });
         });
       },
       setPrMerge(number, opts) {
