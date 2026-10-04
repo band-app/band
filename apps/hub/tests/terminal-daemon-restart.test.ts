@@ -76,7 +76,7 @@ describe("terminal daemon — shells survive a server restart", () => {
     });
     seedSettings(tmpHome, { tokenSecret: TOKEN });
     port = await getRandomPort();
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
   });
 
   afterAll(async () => {
@@ -109,7 +109,7 @@ describe("terminal daemon — shells survive a server restart", () => {
 
     // Restart on the same home and port, leaving the daemon running.
     await server.close({ keepTerminalDaemon: true });
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
 
     // Same shell: listed with the pid it was created with.
     expect(await listTerminals(server)).toEqual([
@@ -198,7 +198,7 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     });
     seedSettings(tmpHome, { tokenSecret: TOKEN });
     port = await getRandomPort();
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
   });
 
   afterAll(async () => {
@@ -233,7 +233,7 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     await server.close({ keepTerminalDaemon: true });
     git(repo, ["worktree", "remove", "--force", join(tmpHome, `${PROJ}-offline-delete`)]);
     deleteWorktree(tmpHome, PROJ, "offline-delete");
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
 
     await waitFor(async () => (isAlive(gonePid) ? undefined : true), { label: "orphan exit" });
     // Only the deleted workspace's shell goes; the live workspace keeps its own.
@@ -266,7 +266,7 @@ describe("terminal daemon — when it exits on its own", () => {
       ],
     });
     seedSettings(tmpHome, { tokenSecret: TOKEN });
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
   });
 
   afterAll(async () => {
@@ -297,7 +297,7 @@ describe("terminal daemon — when it exits on its own", () => {
       label: "daemon exit",
       timeoutMs: 5_000,
     });
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
   });
 
   it("a daemon that loses its socket keeps serving its shells, then exits", async () => {

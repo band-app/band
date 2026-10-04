@@ -160,7 +160,7 @@ describe("terminal daemon — a daemon from another build", () => {
     });
 
     const port = await getRandomPort();
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
 
     // A new terminal lands on a new daemon, not the old one.
     const created = await createTerminal();
@@ -190,7 +190,7 @@ describe("terminal daemon — a daemon from another build", () => {
 
     // A restarted server reaches it too, though the endpoint is the new daemon's now.
     await server.close({ keepTerminalDaemon: true });
-    server = await startServer({ tmpHome, port });
+    server = await startServer({ remoteHost: false, tmpHome, port });
     expect(await listTerminals()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ terminalId: oldTerminalId, pid: oldShell }),
@@ -235,7 +235,7 @@ describe("terminal daemon — a daemon from another build", () => {
     });
     rmSync(entryCopyDir, { recursive: true, force: true });
 
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
 
     const created = await createTerminal();
     const newDaemon = parentPid(created.pid);

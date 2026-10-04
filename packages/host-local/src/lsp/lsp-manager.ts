@@ -115,12 +115,18 @@ async function getOrSpawnServer(
   // two levels to reach packages/host-local/, then into node_modules/.bin
   // (the package depends on typescript-language-server). In the bundled DMG,
   // __dirname is dist/ so we need ./node_modules/.bin instead. Use both so
-  // it works in either environment.
+  // it works in either environment, and in the worker package.
   const appBin = resolve(__dirname, "../../node_modules/.bin");
   const bundledBin = resolve(__dirname, "node_modules/.bin");
+  // The worker bundle is `<package>/dist/band-worker.mjs`. Its dependencies
+  // install in `<package>/node_modules`, or beside the package when hoisted.
+  const workerBin = resolve(__dirname, "../node_modules/.bin");
+  const hoistedBin = resolve(__dirname, "../../../.bin");
   const workspaceBin = join(cwd, "node_modules/.bin");
   const pathSep = process.platform === "win32" ? ";" : ":";
-  const combinedPath = [bundledBin, appBin, workspaceBin, resolvedPath].join(pathSep);
+  const combinedPath = [bundledBin, appBin, workerBin, hoistedBin, workspaceBin, resolvedPath].join(
+    pathSep,
+  );
 
   log.debug("Spawning %s language server in %s for workspace %s", lang, cwd, workspaceId);
 

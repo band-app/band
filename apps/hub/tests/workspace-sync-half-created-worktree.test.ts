@@ -100,7 +100,7 @@ describe("worktree sync during git worktree add", () => {
       ],
     });
     seedSettings(tmpHome, { tokenSecret: TOKEN });
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
   }, 30_000);
 
   afterAll(async () => {
@@ -127,7 +127,7 @@ describe("worktree sync during git worktree add", () => {
     rmSync(adminLock);
     // A restart runs the poller's first tick, and its sync, again.
     await server.close();
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     await syncThroughPoller(server, toWorkspaceId(PROJECT, "feat/half"));
 
     expect(listWorktreeNames(tmpHome, PROJECT)).toEqual(["feat/half", "main"]);

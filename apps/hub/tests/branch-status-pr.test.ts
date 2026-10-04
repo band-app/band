@@ -347,7 +347,8 @@ describe("with the GitHub plugin disabled", () => {
 
     stub = await ghStub.start();
     stub.setBranchStatusQuery(FAKE_REPO, (branch) => REPOSITORIES[branch]);
-    server = await startServer({ tmpHome, env: stub.env });
+    // A worker probes `gh --version` itself when it starts, which this test counts as a call.
+    server = await startServer({ tmpHome, env: stub.env, remoteHost: false });
     stream = await openStatusStream(server.url);
   }, 60_000);
 

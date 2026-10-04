@@ -838,6 +838,28 @@ Conventional tags:
 
 ---
 
+## 13a. Host modes: `BAND_TEST_HOST=local|remote-loopback`
+
+The hub suite under `apps/hub/tests/` runs in two modes. `local` (the default) puts workspaces on the hub's own machine. With `BAND_TEST_HOST=remote-loopback`, `startServer` (`tests/helpers/server.ts`) also starts the real `apps/worker/bin/band-worker.mjs` against the test server, registers it through `tokens.issueWorkerBootstrap`, waits for `hosts.list` to show it online, and moves every worktree row and project path in the test's database onto that host (`tests/helpers/test-host.ts`). The same assertions then run through `RemoteHost`, the link and the worker. The worker shares the machine's disk, so its root is the OS temp dir and the test can still read what the worker wrote. It gets the test's `env` and the hub's `HOME`, so a stub agent or a seeded `~/.claude` behaves the same on both sides.
+
+```sh
+pnpm --filter @band-app/server build
+BAND_TEST_HOST=remote-loopback pnpm --filter @band-app/server exec vitest run
+```
+
+CI runs the second command as the job "Test (remote-loopback)". The host contract suite itself (`packages/host-local`, `apps/worker/tests/host-remote-contract.test.ts`) already runs against `LocalHost` and `RemoteHost`.
+
+A test that cannot run on a worker passes `remoteHost: false` to `startServer`. The current list:
+
+- `terminal-restart-daemon`, `terminal-daemon-restart`, `terminal-daemon-build-mismatch` and `terminal-cold-restore` drive the hub's own terminal daemon. A worker runs terminals in its process (`BAND_TERMINAL_DAEMON=0`).
+- `workspace-remove-locked` and `workspace-sync-half-created-worktree` restart the hub and watch its boot-time worktree sync. On loopback the hub and the worker see the same repository path, so the hub's local sync adds a second row for a worktree that is already registered on the worker. A real worker has its own checkout path.
+- `tokens-auth` counts the hub's host rows, and the worker adds one.
+- The "disabled GitHub plugin" cases in `pr-checks` and `branch-status-pr` count calls to the `gh` stub. A worker probes `gh --version` itself when it starts.
+
+Test files that start the server with their own inline helper, instead of `helpers/server.ts`, always run local. That is about 40 files, most of them the older ones. New tests use the shared helper.
+
+---
+
 ## 14. Key Rules (cheat sheet)
 
 ### Hard constraints — never violate

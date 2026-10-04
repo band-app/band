@@ -85,7 +85,7 @@ describe("terminal cold restore", () => {
   }
 
   it("restores scrollback and cwd when a terminal is reopened after the daemon restarts", async () => {
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     const terminalId = randomUUID();
     const created = await createTerminal({ id: terminalId, cwd: "subdir" });
 
@@ -125,7 +125,7 @@ describe("terminal cold restore", () => {
   });
 
   it("relaunches a resumable Claude Code session after the daemon restarts", async () => {
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     const terminalId = randomUUID();
     const claudeCwd = `${worktree}/subdir`;
 
@@ -176,7 +176,7 @@ describe("terminal cold restore", () => {
   });
 
   it("does not restore scrollback for a terminalId that was explicitly killed", async () => {
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     const terminalId = randomUUID();
     await createTerminal({ id: terminalId });
 

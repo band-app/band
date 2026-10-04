@@ -311,6 +311,94 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
+  # The hub suite again, with every workspace on a real band-worker over
+  # loopback (plan step 2.6; docs/integration-testing.md, "Host modes"). It runs
+  # beside `check` so the existing jobs don't get longer. The worker runs from
+  # its bundle, so the packed package is what the hub talks to.
+  test-remote-loopback:
+    name: Test (remote-loopback)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+      BAND_TEST_HOST: remote-loopback
+      BAND_WORKER_USE_DIST: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Restore only. The `check` job saves these caches.
+      - name: Restore Cargo registry cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Restore CLI target cache
+        uses: actions/cache/restore@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: cargo-cli-${{ runner.os }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      # Some hub tests shell out to a `band` on PATH.
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Install node-gyp
+        run: npm install -g node-gyp
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web and hub (needed by tests)
+        run: pnpm build:web
+
+      - name: Build worker
+        run: pnpm --filter @band-app/worker build
+
+      # Installs the packed tarball into an empty directory, runs
+      # `band-worker --help` and starts a PTY from that install.
+      - name: Worker package smoke
+        run: pnpm --filter @band-app/worker pack:smoke
+
+      - name: Test hub (remote-loopback)
+        run: pnpm --filter @band-app/server exec vitest run
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
+
   # ---------------------------------------------------------------------------
   # macOS jobs.
   #
@@ -589,6 +677,65 @@ jobs:
           test "$status" = healthy
           test "$(docker compose logs band | grep -c "$token")" = 1
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" http://127.0.0.1:3466/api/health)" = 200
+
+      # The worker image (plan step 2.6) against a hub container: a bootstrap
+      # token from the hub's API, the image started with `--network host` (a
+      # worker takes plain http only for a loopback hub), and the host listed
+      # online through the API.
+      - name: Build worker image
+        run: docker build -f docker/worker.Dockerfile -t band-worker-check .
+
+      - name: Worker image runs as a non-root user
+        run: |
+          test "$(docker run --rm --entrypoint id band-worker-check -u)" = 10001
+          docker run --rm band-worker-check --help | grep -q -- '--hub <url>'
+
+      - name: Hub for the worker
+        working-directory: deploy/compose
+        env:
+          BAND_IMAGE: band-check
+          BAND_PORT: "3466"
+          BAND_ADMIN_TOKEN: ci-worker-hub-token
+        run: |
+          docker compose down -v
+          docker compose up -d --no-build
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' compose-band-1 2>/dev/null || true)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          test "$status" = healthy
+
+      - name: Worker image shows online in the hub
+        run: |
+          base=http://127.0.0.1:3466
+          auth='Authorization: Bearer ci-worker-hub-token'
+          issued=$(curl -sf -X POST -H "$auth" -H 'content-type: application/json' \
+            -d '{"hostName":"CI worker image"}' "$base/trpc/tokens.issueWorkerBootstrap")
+          token=$(echo "$issued" | jq -r '.result.data.token')
+          host_id=$(echo "$issued" | jq -r '.result.data.hostId')
+          test -n "$token" && test "$token" != null
+          docker run -d --name band-worker-ci --network host \
+            -e BAND_HUB_URL="$base" -e BAND_WORKER_TOKEN="$token" band-worker-check
+          for i in $(seq 1 60); do
+            status=$(curl -sf -H "$auth" "$base/trpc/hosts.list" \
+              | jq -r --arg id "$host_id" '.result.data.hosts[] | select(.id == $id) | .status')
+            [ "$status" = online ] && break
+            sleep 2
+          done
+          if [ "$status" != online ]; then
+            echo "host $host_id is '$status'" >&2
+            docker logs band-worker-ci >&2
+            exit 1
+          fi
+
+      - name: Worker logs
+        if: failure()
+        run: docker logs band-worker-ci || true
+
+      - name: Remove the worker container
+        if: always()
+        run: docker rm -f band-worker-ci || true
 
       - name: Compose logs
         if: failure()

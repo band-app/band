@@ -57,8 +57,21 @@
       ]
     },
     "apps/worker": {
-      "entry": ["src/main.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts", "bin/*.mjs"]
+      "entry": ["src/main.ts", "tests/**/*.test.ts", "scripts/*.mjs"],
+      "project": ["src/**/*.ts", "tests/**/*.ts", "bin/*.mjs", "scripts/*.mjs"],
+      "ignoreDependencies": [
+        "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp",
+        "@agentclientprotocol/sdk",
+        "@vscode/ripgrep",
+        "@xterm/addon-serialize",
+        "@xterm/addon-unicode11",
+        "@xterm/headless",
+        "node-pty",
+        "pino",
+        "typescript-language-server",
+        "zod"
+      ]
     },
     "apps/desktop": {
       "entry": [

@@ -2,6 +2,34 @@
 
 `band-worker` is the process that runs on a machine and serves it to a Band hub. It dials the hub over `@band-app/link`, completes the handshake, and answers the hub's calls with `@band-app/host-local`: files, git, processes, terminals, language servers, agent processes and the agent environment. The hub reaches it through `RemoteHost` (`packages/host-remote`) and its `/api/workers/connect` endpoint. The tests here use a link server of their own.
 
+## Install
+
+The package is `@band-app/worker` and its binary is `band-worker`. It needs Node 22.5 or newer, and `git` on the machine for workspaces. `node-pty` compiles on Linux during the install, so a C++ toolchain, Python and `make` have to be present there (macOS and the container image need none).
+
+```sh
+npm install -g @band-app/worker
+band-worker --hub https://hub.example.com --token "$BAND_WORKER_TOKEN" --root ~/code
+```
+
+`pnpm --filter @band-app/worker build` bundles the package into `dist/band-worker.mjs`. The `@band-app/*` packages are inlined and every third-party package stays a dependency, so the native modules (`node-pty`, `@vscode/ripgrep`) install for the machine the worker runs on. `scripts/pack-smoke.sh` packs the worker, installs the tarball into an empty directory, runs `band-worker --help` and starts a PTY from that install. CI runs it.
+
+A checkout runs `src/` through `tsx`. Set `BAND_WORKER_USE_DIST=1` to run the bundle from a checkout.
+
+Release automation does not publish this package yet.
+
+## Container image
+
+`docker/worker.Dockerfile` builds a `node:22-bookworm-slim` image with the packed worker, `git`, `ssh`, `curl`, `jq` and `bash`. It runs as uid 10001 (`worker`) and keeps workspaces in the `/work` volume and the worker id and session token in `/home/worker/.band/worker`.
+
+```sh
+docker build -f docker/worker.Dockerfile -t band-worker .
+docker run -d -v band-work:/work -v band-worker-state:/home/worker/.band/worker \
+  -e BAND_HUB_URL=https://hub.example.com \
+  -e BAND_WORKER_TOKEN=bwb_... band-worker
+```
+
+The worker takes plain `http` only for a loopback hub. For a hub on the same Docker host, add `--network host` and use `http://127.0.0.1:<port>`; otherwise put the hub behind HTTPS.
+
 ## Run it
 
 ```sh

@@ -54,7 +54,7 @@ beforeAll(async () => {
   );
   sqlite.close();
 
-  server = await startServer({ tmpHome: home });
+  server = await startServer({ remoteHost: false, tmpHome: home });
 }, 60_000);
 
 afterAll(async () => {

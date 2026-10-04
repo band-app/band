@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./server-runtime";
 import { stopTerminalDaemon } from "./terminal-daemon";
+import { isRemoteLoopback, moveSeededWorkspacesToHost, startLoopbackWorker } from "./test-host";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -149,6 +150,12 @@ export interface StartServerOptions {
   port?: number;
   /** Extra command-line arguments for the server, e.g. `--ui-dir <path>`. */
   args?: string[];
+  /**
+   * With `BAND_TEST_HOST=remote-loopback`, a real `band-worker` joins the server
+   * and the seeded workspaces move onto it (see `test-host.ts`). Pass `false` for
+   * a test that is about the hub's own machine. No effect in `local` mode.
+   */
+  remoteHost?: boolean;
 }
 
 /**
@@ -204,6 +211,27 @@ export const LISTENING_BANNER = /Web server listening on http:\/\/[^\s:]+:(\d+)/
  * process-group teardown already used by `apps/web/e2e/helpers/server.ts`.
  */
 export async function startServer(opts: StartServerOptions): Promise<ServerHandle> {
+  const handle = await startHubServer(opts);
+  if (!isRemoteLoopback || opts.remoteHost === false) return handle;
+
+  let worker: Awaited<ReturnType<typeof startLoopbackWorker>>;
+  try {
+    worker = await startLoopbackWorker({ ...handle, env: opts.env });
+  } catch (err) {
+    await handle.close();
+    throw err;
+  }
+  moveSeededWorkspacesToHost(handle.home, worker.hostId);
+  return {
+    ...handle,
+    close: async (closeOpts) => {
+      await worker.close();
+      await handle.close(closeOpts);
+    },
+  };
+}
+
+async function startHubServer(opts: StartServerOptions): Promise<ServerHandle> {
   const { tmpHome, env: extraEnv } = opts;
   const port = opts.port ?? (await getRandomPort());
 
