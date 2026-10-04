@@ -33,7 +33,6 @@ import {
   type HostGit,
   type HostInfo,
   type HostLsp,
-  HostNotImplementedError,
   type HostScripts,
   type HostSearch,
   type HostWorktree,
@@ -55,6 +54,8 @@ import {
   findClaudeCliArgs,
   reportedClaudeDefaults,
 } from "../agents/claude-defaults";
+import { checkHooks, installHooks } from "../agents/hooks-install";
+import { installSkills } from "../agents/skills-install";
 import { execGh, execGit, listWorktrees } from "../git/git-client";
 import { connectLspServer, killAllServers, killWorkspaceServers } from "../lsp/lsp-manager";
 import { duBytes } from "../process/du";
@@ -133,12 +134,9 @@ export class LocalHost implements Host {
     latestClaudeSession: async (cwd) => findLatestClaudeSessionId(cwd),
     usageReader: async (agent: AgentDescriptor) =>
       getUsageReader(agent.agentType, { command: agent.command }),
-    // Skills install through the `band` CLI and hook install through the hooks
-    // service, both above the infra tier. Nothing calls them through the host yet.
-    installSkills: () =>
-      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installSkills")),
-    installHooks: () =>
-      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installHooks")),
+    installSkills: (options) => installSkills(options),
+    hooksStatus: () => checkHooks(),
+    installHooks: () => installHooks(),
   };
 
   constructor(private readonly options: LocalHostOptions) {}

@@ -1,14 +1,11 @@
-import {
-  getUsageReader,
-  type SessionUsageSnapshot,
-  type UsageReader,
-} from "@band-app/coding-agent";
+import type { SessionUsageSnapshot, UsageReader } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { ProjectQueries } from "../db/queries/projects";
 import { SettingsQueries } from "../db/queries/settings";
 import { UsageEventQueries } from "../db/queries/usage-events";
 import { UsageScanStateQueries } from "../db/queries/usage-scan-state";
+import { hostRegistry } from "../host/registry";
 
 /** Hour in milliseconds — bucket size for the Reports usage table. */
 const HOUR_MS = 60 * 60 * 1000;
@@ -156,14 +153,14 @@ export interface UsageScannerDeps {
   /** Override for tests — defaults to enumerating settings.codingAgents.
    *  `command` is the definition's configured binary, if any. */
   listAgents?: () => Array<{ agentId: string; agentType: string; command?: string }>;
-  /** Override for tests — defaults to `getUsageReader` from
-   *  `@band-app/coding-agent`. Returns `undefined` for agents with no
+  /** Override for tests — defaults to the local host's
+   *  `agentEnv.usageReader`. Returns `undefined` for agents with no
    *  on-disk usage data. */
   getUsageReader?: (agent: {
     agentId: string;
     agentType: string;
     command?: string;
-  }) => UsageReader | undefined;
+  }) => UsageReader | undefined | Promise<UsageReader | undefined>;
   /** Wall-clock — overridable for tests. */
   now?: () => number;
   /** Per-(workspace, agent) cap on sessions processed each tick.
@@ -366,7 +363,7 @@ export class UsageScannerService {
   ): Promise<number> {
     let reader: UsageReader | undefined;
     try {
-      reader = this.getUsageReader(a);
+      reader = await this.getUsageReader(a);
     } catch (err) {
       // Broken config — log debug and bail; next tick will retry. We
       // don't punish all workspaces for one bad agent.
@@ -517,13 +514,13 @@ function defaultListAgents(): ReturnType<NonNullable<UsageScannerDeps["listAgent
   }));
 }
 
-/** Default reader lookup — the per-agent-type readers from
- *  `@band-app/coding-agent`, with the definition's configured binary. */
+/** Default reader lookup, through the local host's agent environment. */
 function defaultGetUsageReader(agent: {
+  agentId: string;
   agentType: string;
   command?: string;
-}): UsageReader | undefined {
-  return getUsageReader(agent.agentType, { command: agent.command });
+}): Promise<UsageReader | undefined> {
+  return hostRegistry.local.agentEnv.usageReader(agent);
 }
 
 /**

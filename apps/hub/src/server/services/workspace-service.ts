@@ -45,6 +45,7 @@ import { clientStateService } from "./client-state-service";
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
 import { panelFocusService } from "./panel-focus-service";
+import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
@@ -985,6 +986,7 @@ export class WorkspaceService {
       // after a branch switch they differ, and we push the current checkout.
       await execGit(["push", "--set-upstream", "origin", workspace.worktree.branch], cwd);
     }
+    await recordPushedHead(workspaceId, cwd);
     return { ok: true };
   }
 
@@ -1052,6 +1054,7 @@ export class WorkspaceService {
       // unchanged, carrying its captured stderr.
       await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
     }
+    await recordPushedHead(workspaceId, cwd);
     return { ok: true };
   }
 

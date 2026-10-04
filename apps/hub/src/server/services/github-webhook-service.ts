@@ -14,6 +14,7 @@ import {
   readWebhookSecret,
   verifyGithubSignature,
 } from "../infra/subscriptions/github";
+import { isBandPushed } from "./pushed-sha-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
 import { tunnelService } from "./tunnel-service";
 
@@ -103,7 +104,11 @@ export class GithubWebhookService {
     if (parsed.type === "events") {
       for (const event of parsed.events) {
         try {
-          subscriptionService.ingest(event);
+          // A push (or PR update) that put a commit Band pushed on the branch
+          // is the agent's own doing; it must not wake the agent again.
+          subscriptionService.ingest(
+            event.sha && isBandPushed(event.sha) ? { ...event, self: true } : event,
+          );
         } catch (err) {
           log.error({ err, eventType, delivery }, "could not ingest github event");
         }
@@ -150,8 +155,24 @@ export class GithubWebhookService {
       checks.push(...runs);
       if (runs.length < CHECK_RUNS_PER_PAGE) break;
     }
-    const event = aggregateChecks(checks, trigger);
+    const event = aggregateChecks(checks, trigger, Date.now(), isBandPushed(trigger.sha));
     if (event) subscriptionService.ingest(event);
+  }
+
+  /**
+   * Who may wake a PR subscription with a comment or review when the caller
+   * names nobody: the repo owner and the authenticated gh user. The `gh`
+   * lookup is best effort; without it only the owner is allowed.
+   */
+  async defaultSenders(repo: string): Promise<string[]> {
+    const senders = [repo.split("/")[0]];
+    try {
+      const login = (JSON.parse(await ghApi(["user"])) as { login?: unknown }).login;
+      if (typeof login === "string" && login) senders.push(login);
+    } catch (err) {
+      log.warn({ err }, "could not look up the authenticated gh user");
+    }
+    return senders;
   }
 
   /**

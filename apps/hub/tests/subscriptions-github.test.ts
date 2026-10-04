@@ -72,7 +72,8 @@ async function deliver(
   });
 }
 
-const sender = { login: "reviewer" };
+// The repo owner, so the default sender allowlist lets these events through.
+const sender = { login: "acme" };
 const repository = { full_name: FULL };
 
 function review(number: number, text: string) {

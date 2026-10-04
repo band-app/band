@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import {
   type ChecksProvider,
@@ -8,14 +8,12 @@ import {
   type RepoInfo,
   type ReviewProvider,
 } from "@band-app/plugin-api";
-import type { BandServerApi, ExecResult, ServerPlugin } from "@band-app/plugin-api/server";
-import { prependBinDirs } from "../infra/process/path";
+import type { BandServerApi, ServerPlugin } from "@band-app/plugin-api/server";
+import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
 import { loadSettings } from "./state";
 
 const log = createLogger("plugin-host");
-
-const EXEC_MAX_BUFFER = 50 * 1024 * 1024;
 
 export type PluginStatus = "inactive" | "active" | "disabled" | "errored";
 
@@ -49,7 +47,11 @@ export class PluginHost {
   private reviewProviders: ReviewProvider[] = [];
   private checksProviders: ChecksProvider[] = [];
 
-  constructor(private readonly bundled: BundledPlugin[]) {}
+  constructor(
+    private readonly bundled: BundledPlugin[],
+    /** The host a plugin's `exec` runs on. Plugin calls carry a path, not a workspace, so it is the local host until plugins are bound to a workspace's host. */
+    private readonly host: () => Host = () => hostRegistry.local,
+  ) {}
 
   /** Activate the plugins that ask for `onStartup`. Called once at boot. */
   async start(): Promise<void> {
@@ -170,23 +172,7 @@ export class PluginHost {
         warn: (message, ...args) => pluginLog.warn(message, ...(args as never[])),
         error: (message, ...args) => pluginLog.error(message, ...(args as never[])),
       },
-      exec: (bin, args, options) =>
-        new Promise<ExecResult>((resolve, reject) => {
-          const env = { ...process.env, ...options.env };
-          env.PATH = prependBinDirs(process.env.PATH);
-          execFile(
-            bin,
-            args,
-            { cwd: options.cwd, env, maxBuffer: EXEC_MAX_BUFFER, timeout: options.timeoutMs },
-            (err, stdout, stderr) => {
-              if (err) {
-                reject(new Error(stderr.trim() || err.message));
-                return;
-              }
-              resolve({ stdout, stderr });
-            },
-          );
-        }),
+      exec: (bin, args, options) => this.host().exec(bin, args, options),
       providers: {
         // Stored as given, not copied, so a provider written as a class
         // keeps its prototype methods. Its id must be the plugin's id, which
