@@ -109,6 +109,15 @@ The hub authenticates with revocable tokens in the `tokens` table (`services/tok
 - Worker tokens: `tokens.issueWorkerBootstrap` creates a `hosts` row (`h-<12 hex>`, offline) and a one-time bootstrap token (`bwb_…`, 1 hour by default, 7 days at most) whose `host_id` is the worker id. `TokenService.authenticate` has the shape `LinkServer` takes: a live session token (`bws_…`) for the hello's workerId passes as `token` or `sessionToken`, anything else must be a bootstrap token for that workerId, which is exchanged once (the update that spends it is guarded in SQL) for a session token. A wrong workerId doesn't spend the token. Refusals reach the worker as one generic reason. No endpoint calls it yet, so nothing in this repo tests the exchange or `authenticate`; step 2.3 covers them through `/api/workers/connect`. Session tokens aren't rotated yet.
 - `tokens.*` is left out of the MCP endpoint (`src/mcp/server.ts`), so an agent can't mint or list tokens, and neither is `hosts.*`. The UI is Settings > Hosts (`HostsSettings.tsx`) and the CLI is `band tokens list | create-device | revoke`.
 
+## Architecture: headless hub deploy
+
+`deploy/compose/compose.yml` runs the hub image with a `band-data` volume for BAND_HOME, a healthcheck that reads the token from `settings.json`, and an optional Caddy `tls` profile. The guide is `docs/run-the-hub-on-a-server.md`, and the CI `docker` job runs the compose file.
+
+- `BAND_ADMIN_TOKEN` sets the shared admin token (`SettingsQueries.resolveAdminToken`) and replaces a stored secret that differs. With none set, the first boot mints one and, when `BAND_PRINT_ADMIN_TOKEN` is true (the Docker entrypoint sets it), prints it once in `start-server.ts`. `BAND_ACCESS_TOKEN` is the entrypoint's older name for `BAND_ADMIN_TOKEN`. The image bakes in no token.
+- `BAND_SERVE_UI=false` skips sirv and the shell, so every non-API path answers 404 and a missing UI build doesn't stop the boot. Dev mode ignores it.
+- `BAND_ALLOWED_ORIGINS` adds to `BAND_CORS_ORIGINS` and `corsAllowedOrigins`, for both CORS and the WebSocket origin check.
+- Tests: `apps/hub/tests/headless-hub.test.ts`.
+
 ## Architecture: machine access lives in host-local
 
 Code that touches a machine (git and `gh`, the exec worker, ripgrep, the LSP manager, ACP launch and spawn, the terminal pool and daemon backend, setup scripts, the Claude environment readers and installers) lives in `packages/host-local` (`@band-app/host-local`). `LocalHost` implements the `Host` interface from `packages/host-api`. The hub imports it through `HostRegistry` (`apps/hub/src/server/infra/host/registry.ts`) and a few helpers by subpath (`@band-app/host-local/git/git-client`). The package has its own host contract test and its own dependencies (node-pty, ripgrep, xterm, the ACP adapters, typescript-language-server). `apps/hub` still lists node-pty, ripgrep, the adapters and the language server, because its build script copies them into `dist/`.

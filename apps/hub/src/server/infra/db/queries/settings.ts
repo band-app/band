@@ -94,7 +94,7 @@ export interface Settings {
   /**
    * Extra browser origins allowed to call the hub from another origin (the
    * UI on a static host or another port). Same-origin, `app://local` and
-   * `app://h-<12 hex>` are always allowed. `file://` and `null` need an entry. `BAND_CORS_ORIGINS` (comma-separated) adds to this list.
+   * `app://h-<12 hex>` are always allowed. `file://` and `null` need an entry. `BAND_CORS_ORIGINS` and `BAND_ALLOWED_ORIGINS` (comma-separated) add to this list.
    */
   corsAllowedOrigins?: string[];
   autoStartTunnel?: boolean;
@@ -364,5 +364,22 @@ export class SettingsQueries {
     // between our `load` above and this `save` survive.
     this.save({ tokenSecret: token });
     return token;
+  }
+
+  /**
+   * The shared admin token for this boot. `envToken` (`BAND_ADMIN_TOKEN`)
+   * wins and replaces a stored secret that differs. Without it the stored
+   * secret is kept, and a first boot with none mints one. `generated` is true
+   * only for that mint, so the caller can print the token exactly once.
+   */
+  resolveAdminToken(envToken?: string): { token: string; generated: boolean } {
+    const wanted = envToken?.trim();
+    const stored = this.load().tokenSecret;
+    if (wanted) {
+      if (stored !== wanted) this.save({ tokenSecret: wanted });
+      return { token: wanted, generated: false };
+    }
+    if (stored) return { token: stored, generated: false };
+    return { token: this.getOrCreateToken(), generated: true };
   }
 }

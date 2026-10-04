@@ -1,7 +1,9 @@
 # Run the standalone Band web server on Linux (issue #594) — no desktop app.
 #
 #   docker compose up --build
-#   → open the http://localhost:3456/?token=... URL printed on startup
+#   → open http://localhost:3457/?token=band-local
+#
+# To run the hub on a server, see deploy/compose/ and docs/run-the-hub-on-a-server.md.
 #
 # The image is a stock Debian host with NO zsh and NO Homebrew, so it
 # exercises the cross-platform shell/PATH fallbacks. State (SQLite DB,
@@ -21,7 +23,7 @@ services:
       - "3457:3456"
     environment:
       # Token for the ?token= access URL. Change it for anything shared.
-      BAND_ACCESS_TOKEN: band-local
+      BAND_ADMIN_TOKEN: band-local
       # Host-side port (must match the left side of `ports` above) — used only
       # for the access URL printed on startup.
       BAND_HOST_PORT: "3457"
