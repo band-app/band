@@ -39,7 +39,7 @@ import {
   startUsageEventPruneScheduler,
   stopUsageEventPruneScheduler,
 } from "./src/server/infra/db/queries/usage-events.ts";
-import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
+import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
@@ -54,6 +54,7 @@ import { branchStatusPoller } from "./src/server/services/branch-status-poller.t
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
@@ -421,6 +422,42 @@ async function serveWorkspaceFile(
 
 const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 
+const MAX_GITHUB_HOOK_BODY_BYTES = 2 * 1024 * 1024;
+
+/** `POST /api/hooks/github`: GitHub's signed deliveries (plan step S.3). */
+async function handleGithubWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const send = (status: number, body: Record<string, unknown>) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (declared > MAX_GITHUB_HOOK_BODY_BYTES) {
+    send(413, { error: "Request body too large" });
+    req.destroy();
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).byteLength;
+    if (size > MAX_GITHUB_HOOK_BODY_BYTES) {
+      send(413, { error: "Request body too large" });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const verdict = githubWebhookService.handleDelivery(req.headers, Buffer.concat(chunks));
+    if (verdict === "unauthorized") return send(401, { error: "Invalid signature" });
+  } catch (err) {
+    // Log the error only: the request carries the signature and the payload.
+    console.error("github webhook delivery failed", err);
+    return send(500, { error: "Delivery failed" });
+  }
+  send(202, { ok: true });
+}
+
 async function handleSubscriptionWebhook(
   req: IncomingMessage,
   res: ServerResponse,
@@ -709,6 +746,10 @@ async function main() {
     // Generic webhook source: POST /api/hooks/<subscriptionId>. Before the
     // server's auth check, because senders outside Band can't hold its token;
     // the subscription's own secret authenticates the request.
+    if (req.method === "POST" && req.url?.match(/^\/api\/hooks\/github(?:\?|$)/)) {
+      await handleGithubWebhook(req, res);
+      return;
+    }
     const hookMatch = req.url?.match(/^\/api\/hooks\/([^/?]+)(?:\?|$)/);
     if (hookMatch && req.method === "POST") {
       let subscriptionId: string;
@@ -1373,7 +1414,9 @@ async function main() {
     await terminalService.close().catch((err) => {
       console.error("Failed to close terminal backend:", err);
     });
-    killAllServers();
+    await hostRegistry.local.lsp.killAll().catch((err) => {
+      console.error("Failed to stop language servers:", err);
+    });
 
     // Wait for any still-in-flight Phase B work to settle so we don't
     // tear down the DB / sockets out from under it. `runFirstTimeSetup`

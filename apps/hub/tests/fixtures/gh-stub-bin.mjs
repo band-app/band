@@ -7,8 +7,8 @@
  *
  * The request goes to `POST /<command>/<subcommand>` (`/api/graphql`,
  * `/pr/merge`) with the parsed arguments:
- *   { args, positional, fields, flags, cwd, env: { GH_PROMPT_DISABLED } }
- * `-f key=value` pairs land in `fields`; `--flag value` and bare `--flag`
+ *   { args, positional, fields, flags, input, cwd, env: { GH_PROMPT_DISABLED } }
+ * `-f key=value` pairs land in `fields` (`key[]` pairs collect into an array); `--flag value` and bare `--flag`
  * land in `flags`. The stub replies `{ stdout, stderr?, exitCode? }`. A
  * command the test registered no route for exits 1.
  */
@@ -23,12 +23,30 @@ const args = process.argv.slice(2);
 const positional = [];
 const fields = {};
 const flags = {};
+let input;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "-f" || arg === "-F" || arg === "--field" || arg === "--raw-field") {
     const pair = args[++i] ?? "";
     const eq = pair.indexOf("=");
-    fields[pair.slice(0, eq)] = pair.slice(eq + 1);
+    const key = pair.slice(0, eq);
+    const value = pair.slice(eq + 1);
+    // `-f events[]=a -f events[]=b` builds an array, as it does in gh.
+    if (key.endsWith("[]")) (fields[key] ??= []).push(value);
+    else fields[key] = value;
+  } else if (arg === "--input") {
+    // `--input -` reads the request body from stdin; it is forwarded as `input`.
+    const source = args[++i];
+    if (source === "-") {
+      const chunks = [];
+      for await (const chunk of process.stdin) chunks.push(chunk);
+      const text = Buffer.concat(chunks).toString("utf8");
+      try {
+        input = JSON.parse(text);
+      } catch {
+        input = text;
+      }
+    }
   } else if (arg.startsWith("--")) {
     const next = args[i + 1];
     if (next !== undefined && !next.startsWith("-")) {
@@ -51,6 +69,7 @@ const res = await fetch(new URL(path, url), {
     positional,
     fields,
     flags,
+    input,
     cwd: process.cwd(),
     env: { GH_PROMPT_DISABLED: process.env.GH_PROMPT_DISABLED ?? null },
   }),

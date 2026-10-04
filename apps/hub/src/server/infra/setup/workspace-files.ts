@@ -1,22 +1,9 @@
-import { execFile } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  globSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { promisify } from "node:util";
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
-import { gitCmd } from "../git/git-client";
 import { getCopyFiles } from "./project-config";
 
 const log = createLogger("workspace-files");
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Upper bounds on Option-A (`workspace.copyFiles`) expansion. `copyFiles`
@@ -59,12 +46,11 @@ const MAX_COPY_FILES_MATCHES = 500;
  *
  * Async so the two `git ls-files` spawns in Option B don't block the
  * shared event loop (SSE / streaming connections live on it) while the
- * create path waits on git. The per-file copy fan-out itself stays
- * synchronous — it's a handful of `copyFileSync` calls bounded by
- * `MAX_COPY_FILES_MATCHES`, dominated by the git work, not worth the
- * overhead of going async per file.
+ * create path waits on git. The per-file copy fan-out is async too, through
+ * `host.fs`, and bounded by `MAX_COPY_FILES_MATCHES`.
  */
 export async function copyWorkspaceFiles(
+  host: Host,
   projectPath: string,
   worktreePath: string,
 ): Promise<string[]> {
@@ -77,12 +63,12 @@ export async function copyWorkspaceFiles(
   const byAbs = new Map<string, "config.json" | ".worktreeinclude">();
   const missingFromConfig: string[] = [];
 
-  const fromConfig = resolveFromConfig(projectPath, missingFromConfig);
+  const fromConfig = await resolveFromConfig(host, projectPath, missingFromConfig);
   for (const abs of fromConfig) {
     if (!byAbs.has(abs)) byAbs.set(abs, "config.json");
   }
 
-  const fromInclude = await resolveFromWorktreeInclude(projectPath);
+  const fromInclude = await resolveFromWorktreeInclude(host, projectPath);
   for (const abs of fromInclude) {
     if (!byAbs.has(abs)) byAbs.set(abs, ".worktreeinclude");
   }
@@ -106,7 +92,7 @@ export async function copyWorkspaceFiles(
   const copied: string[] = [];
   let canonicalProjectRoot: string;
   try {
-    canonicalProjectRoot = realpathSync(projectPath);
+    canonicalProjectRoot = await host.fs.realpath(projectPath);
   } catch (err) {
     // If the project root itself can't be canonicalised, every
     // per-file `realpathSync` comparison below would mismatch and
@@ -145,7 +131,7 @@ export async function copyWorkspaceFiles(
       // `ENOENT` if the source disappeared between resolution and copy
       // (a Option-B git pass racing a delete, a vanished Option-A
       // literal) — handled as "source file disappeared" in the catch.
-      const canonicalSource = realpathSync(absSource);
+      const canonicalSource = await host.fs.realpath(absSource);
       const insideRoot =
         canonicalSource === canonicalProjectRoot ||
         canonicalSource.startsWith(canonicalProjectRoot + sep);
@@ -157,8 +143,8 @@ export async function copyWorkspaceFiles(
         continue;
       }
 
-      mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(absSource, dest);
+      await host.fs.mkdir(dirname(dest), { recursive: true });
+      await host.fs.copy(absSource, dest);
       log.debug({ source, file: rel }, "copied workspace file");
       copied.push(rel);
     } catch (err) {
@@ -188,8 +174,12 @@ export async function copyWorkspaceFiles(
  * no matches) are pushed onto `missing` so the caller can emit a warning per
  * entry.
  */
-function resolveFromConfig(projectPath: string, missing: string[]): string[] {
-  const entries = getCopyFiles(projectPath);
+async function resolveFromConfig(
+  host: Host,
+  projectPath: string,
+  missing: string[],
+): Promise<string[]> {
+  const entries = await getCopyFiles(host, projectPath);
   if (!entries || entries.length === 0) return [];
 
   // Cap the number of declared entries we'll process so a runaway config
@@ -233,7 +223,7 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
       // `globSync` honours its `cwd` for resolution and returns paths
       // relative to it. Convert to absolute for the de-dup key. Set
       // `withFileTypes: false` (the default) so we get string paths.
-      const matches = globSync(entry, { cwd: projectPath });
+      const matches = await host.fs.glob(entry, projectPath);
       if (matches.length === 0) {
         missing.push(entry);
         continue;
@@ -252,7 +242,7 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
         // wants every file under `config/` should write `config/*` or
         // `config/**`.
         try {
-          if (statSync(abs).isFile()) {
+          if (await isFile(host, abs)) {
             out.push(abs);
           }
         } catch {
@@ -266,7 +256,7 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
       // miss; a directory or non-regular entry stats fine but fails
       // `isFile()` and is ignored silently (the spec only covers files).
       try {
-        if (statSync(abs).isFile()) {
+        if (await isFile(host, abs)) {
           out.push(abs);
         }
       } catch {
@@ -300,22 +290,23 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
  * Falls back to an empty list if `git` isn't available or the project isn't
  * a git repo — Option B is a no-op in that case (Option A still works).
  */
-async function resolveFromWorktreeInclude(projectPath: string): Promise<string[]> {
+async function resolveFromWorktreeInclude(host: Host, projectPath: string): Promise<string[]> {
   const includePath = join(projectPath, ".worktreeinclude");
-  if (!existsSync(includePath)) return [];
+  let includeContent: string;
+  try {
+    includeContent = new TextDecoder().decode(await host.fs.readFile(includePath));
+  } catch {
+    return [];
+  }
 
   // Read the file just to check it's non-empty after stripping
   // comments/blank lines — git tolerates an empty patterns file but the
   // semantics are the same as "no Option B."
-  const includeContent = readFileSync(includePath, "utf-8");
   const hasPatterns = includeContent.split(/\r?\n/).some((line) => {
     const trimmed = line.trim();
     return trimmed.length > 0 && !trimmed.startsWith("#");
   });
   if (!hasPatterns) return [];
-
-  const { command, env } = gitCmd();
-  const opts = { cwd: projectPath, env, encoding: "utf-8" as const };
 
   let matchingWorktreeInclude: string[];
   let gitignoredStandard: string[];
@@ -323,8 +314,8 @@ async function resolveFromWorktreeInclude(projectPath: string): Promise<string[]
     // The two `ls-files` calls are independent, so run them concurrently
     // and let the event loop service other work while git is spawning.
     const [matching, standard] = await Promise.all([
-      execFileAsync(command, ["ls-files", "--others", "--ignored", `-X`, includePath], opts),
-      execFileAsync(command, ["ls-files", "--others", "--ignored", "--exclude-standard"], opts),
+      host.git.exec(["ls-files", "--others", "--ignored", `-X`, includePath], projectPath),
+      host.git.exec(["ls-files", "--others", "--ignored", "--exclude-standard"], projectPath),
     ]);
     matchingWorktreeInclude = matching.stdout.split("\n").filter(Boolean);
     gitignoredStandard = standard.stdout.split("\n").filter(Boolean);
@@ -342,6 +333,11 @@ async function resolveFromWorktreeInclude(projectPath: string): Promise<string[]
     out.push(resolve(projectPath, rel));
   }
   return out;
+}
+
+/** Follows symlinks, like `statSync(path).isFile()`; rejects when the path is missing. */
+async function isFile(host: Host, path: string): Promise<boolean> {
+  return (await host.fs.stat(await host.fs.realpath(path))).kind === "file";
 }
 
 /**

@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, screen, shell } from "electron";
+import { type HubFallbackAction, hubFallbackAction } from "./hub-unreachable.js";
 import { resolveAppIcon } from "./icon.js";
 import { decideNavigation, decideOpen } from "./navigation-guard.js";
 import { createLogger } from "./services/log.js";
@@ -101,6 +102,8 @@ function trackWindowState(win: BrowserWindow): void {
 export interface CreateMainWindowOptions {
   /** Initial URL to load. */
   url: string;
+  /** Called when the "hub unreachable" page's Retry or Use local link is clicked. */
+  onHubFallbackAction?: (action: HubFallbackAction) => void;
 }
 
 export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
@@ -153,6 +156,12 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   // The window stays on the bundled UI. A link to a web page opens in the
   // browser; any other navigation, and any new window, is dropped.
   const guardNavigation = (event: Electron.Event, url: string) => {
+    const action = hubFallbackAction(win.webContents.getURL(), url);
+    if (action) {
+      event.preventDefault();
+      opts.onHubFallbackAction?.(action);
+      return;
+    }
     const decision = decideNavigation(win.webContents.getURL(), url);
     if (decision === "allow") return;
     event.preventDefault();

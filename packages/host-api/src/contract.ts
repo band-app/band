@@ -81,6 +81,7 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       assert.equal(info.id, host.id);
       assert.equal(info.capabilities.git, true);
       assert.equal(info.capabilities.pty, true);
+      assert.equal(info.capabilities.lsp, true);
       assert.ok(info.os);
       assert.ok(info.versions.node);
     });
@@ -160,6 +161,21 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       await host.fs.rm(join(dir, "moved"), { recursive: true });
       await assert.rejects(host.fs.rm(join(dir, "moved")));
       await host.fs.rm(join(dir, "moved"), { force: true });
+    });
+
+    it("globs, resolves real paths and makes private temp dirs", async () => {
+      const root = join(fixture.workDir, "globbed");
+      await host.fs.mkdir(join(root, "sub"), { recursive: true });
+      await host.fs.writeFile(join(root, "sub", "a.txt"), "a", { mode: 0o600 });
+      await host.fs.writeFile(join(root, "b.md"), "b");
+      assert.deepEqual(await host.fs.glob("sub/*.txt", root), [join("sub", "a.txt")]);
+      assert.equal(
+        await host.fs.realpath(join(root, "sub", "..", "b.md")),
+        await host.fs.realpath(join(root, "b.md")),
+      );
+      const tmp = await host.fs.mkdtemp("band-contract-");
+      assert.equal((await host.fs.stat(tmp)).kind, "directory");
+      await host.fs.rm(tmp, { recursive: true });
     });
 
     it("follows symlinks on request, resolves real paths and refuses exclusive overwrites", async () => {
@@ -325,6 +341,80 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       }
     });
 
+    it("connects to a language server and stops it with the workspace", async () => {
+      const spec = { workspaceId: "contract-lsp", lang: "typescript", root: repo };
+      await assert.rejects(host.lsp.connect({ ...spec, lang: "no-such-language" }));
+
+      const first = await host.lsp.connect(spec);
+      const second = await host.lsp.connect(spec);
+      try {
+        const frameFor = (id: number) => {
+          const request = JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "initialize",
+            params: { processId: null, rootUri: null, capabilities: {} },
+          });
+          return `Content-Length: ${new TextEncoder().encode(request).byteLength}\r\n\r\n${request}`;
+        };
+
+        /** Reads one connection's output until the response with `id` has arrived. */
+        const readResponse = async (connection: typeof first, id: number) => {
+          let received = "";
+          for await (const chunk of connection.output) {
+            received += text(chunk);
+            if (
+              new RegExp(`"id":\\s*${id}\\b`).test(received) &&
+              received.includes('"capabilities"')
+            ) {
+              break;
+            }
+          }
+          return received;
+        };
+
+        first.write(frameFor(1));
+        // The server's output reaches every connection to it.
+        const [onFirst, onSecond] = await Promise.all([
+          readResponse(first, 1),
+          readResponse(second, 1),
+        ]);
+        assert.match(onFirst, /^Content-Length: \d+/);
+        assert.match(onSecond, /"capabilities"/);
+
+        // Closing one connection leaves the server and the other connection up.
+        first.close();
+        second.write(frameFor(2));
+        assert.match(await readResponse(second, 2), /"capabilities"/);
+
+        // Stopping the workspace ends the remaining connection's output.
+        const ended = (async () => {
+          for await (const _chunk of second.output) {
+            // drain until the server exits
+          }
+        })();
+        await host.lsp.killWorkspace(spec.workspaceId);
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([
+            ended,
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("output did not end after killWorkspace")),
+                TIMEOUT_MS,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      } finally {
+        first.close();
+        second.close();
+        await host.lsp.killWorkspace(spec.workspaceId);
+      }
+    });
+
     it("resolves an agent launch and runs the agent process", async () => {
       const launch = await host.acp.resolveLaunch({ type: "claude-code" });
       if (typeof launch === "string") {
@@ -395,6 +485,18 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         await host.scripts.prepare({ projectPath: repo, worktreePath: repo, label: "setup" }),
         null,
       );
+    });
+
+    it("reads a script's command from the config", async () => {
+      const project = join(fixture.workDir, "commanded");
+      await host.fs.mkdir(join(project, ".band"), { recursive: true });
+      await host.fs.writeFile(
+        join(project, ".band", "config.json"),
+        JSON.stringify({ teardown: "echo bye" }),
+      );
+      const workspace = { projectPath: project, worktreePath: project };
+      assert.equal(await host.scripts.command({ ...workspace, label: "teardown" }), "echo bye");
+      assert.equal(await host.scripts.command({ ...workspace, label: "setup" }), null);
     });
 
     it("prepares a project's setup script", async () => {

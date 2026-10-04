@@ -32,6 +32,10 @@ export interface SubscriptionConfig {
   at?: number;
   /** Recurring timer: cron expression, seconds field optional. */
   cron?: string;
+  /** GitHub source: the `owner/name` repository the subscription watches. */
+  repo?: string;
+  /** GitHub source: whether the repo's webhook exists (see `GithubWebhookService`). */
+  webhook?: { status: "registered" | "waiting-for-url" | "failed"; error?: string };
 }
 
 export interface SubscriptionEventRecord {
@@ -81,6 +85,14 @@ export class SubscriptionQueries {
   find(id: string): SubscriptionRecord | undefined {
     const row = getDb().select().from(subscriptions).where(eq(subscriptions.id, id)).get();
     return row ? toRecord(row) : undefined;
+  }
+
+  setConfig(id: string, config: SubscriptionConfig): void {
+    getDb()
+      .update(subscriptions)
+      .set({ config: JSON.stringify(config) })
+      .where(eq(subscriptions.id, id))
+      .run();
   }
 
   setWakeups(id: string, wakeups: number): void {

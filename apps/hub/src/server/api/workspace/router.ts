@@ -112,8 +112,8 @@ const commitShaSchema = z
 export const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => {
-      return { config: terminalService.getWorkspaceConfig(input.workspaceId) };
+    .query(async ({ input }) => {
+      return { config: await terminalService.getWorkspaceConfig(input.workspaceId) };
     }),
 
   /**

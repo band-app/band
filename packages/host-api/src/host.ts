@@ -174,13 +174,18 @@ export interface HostFs {
   readStream(path: string): Stream<Uint8Array>;
   /**
    * Creates the file or replaces its content. The parent directory must
-   * exist. With `exclusive`, rejects when the path already exists.
+   * exist. With `exclusive`, rejects when the path already exists. `mode`
+   * sets the permissions of a new file.
    */
   writeFile(
     path: string,
     data: string | Uint8Array,
-    options?: { exclusive?: boolean },
+    options?: { exclusive?: boolean; mode?: number },
   ): Promise<void>;
+  /** Paths under `cwd` matching the glob `pattern`, relative to `cwd`. */
+  glob(pattern: string, cwd: string): Promise<string[]>;
+  /** Creates a private (mode 0700) directory in the host's temp dir, named from `prefix`, and returns its path. */
+  mkdtemp(prefix: string): Promise<string>;
   list(path: string): Promise<FsEntry[]>;
   /** Rejects when the directory already exists, unless `recursive` is set. */
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
@@ -233,7 +238,11 @@ export interface HostSearch {
 // lsp and acp
 // ---------------------------------------------------------------------------
 
-/** A byte pipe to a process on the host. */
+/**
+ * A byte pipe to a process on the host. Writes and output are raw bytes, with
+ * whatever framing the process speaks. Writes after the process ends or the
+ * pipe closes are dropped.
+ */
 export interface Duplex {
   write(chunk: Uint8Array | string): void;
   readonly output: Stream<Uint8Array>;
@@ -242,8 +251,21 @@ export interface Duplex {
 }
 
 export interface HostLsp {
-  /** Opens a stdio connection to the language server for `lang` in the workspace. */
+  /**
+   * Opens a stdio connection to the language server for `lang` in the
+   * workspace, starting it in `root` if it isn't running. Every connection to
+   * one workspace and language shares the server and receives all its output.
+   * `output` ends when the server exits or the connection closes. Rejects when
+   * `lang` has no server or the server cannot start.
+   */
   connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
+  /**
+   * Signals the workspace's language servers to stop. Resolves without waiting
+   * for them to exit. Each connection's output ends once its server has.
+   */
+  killWorkspace(workspaceId: string): Promise<void>;
+  /** Stops every language server on the host. */
+  killAll(): Promise<void>;
 }
 
 /** What it takes to start an agent's ACP adapter. */
@@ -301,7 +323,23 @@ export interface ScriptPlan {
   dispose(): void;
 }
 
+/** Where a workspace's `.band/config.json` lives. */
+export interface ScriptWorkspace {
+  projectPath: string;
+  worktreePath: string;
+}
+
 export interface HostScripts {
+  /**
+   * The workspace's `setup` or `teardown` command as written in
+   * `.band/config.json`, or `null` when it declares none.
+   */
+  command(workspace: ScriptWorkspace & { label: ScriptLabel }): Promise<string | null>;
+  /**
+   * Runs `script` in `cwd` without a terminal (the Windows path, through
+   * `cmd.exe`). Resolves with its exit code, or `null` when `timeoutMs` passes.
+   */
+  runHidden(script: string, cwd: string, timeoutMs?: number): Promise<number | null>;
   /**
    * Reads the workspace's `.band/config.json` (worktree first, then the
    * project checkout) and prepares its `setup` or `teardown` script. Resolves

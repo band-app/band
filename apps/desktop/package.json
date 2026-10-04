@@ -11,6 +11,7 @@
     "dev": "pnpm build && electron .",
     "test": "node --experimental-strip-types --import ./tests/register-loader.mjs --test 'tests/**/*.test.ts' 'tests/**/*.test.mjs'",
     "package": "electron-builder build --config electron-builder.yml",
+    "package:dir": "electron-builder build --config electron-builder.yml --dir --publish never",
     "clean": "rm -rf dist dist-builder"
   },
   "engines": {

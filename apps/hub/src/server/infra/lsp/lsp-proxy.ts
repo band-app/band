@@ -1,7 +1,11 @@
 import type { IncomingMessage } from "node:http";
+import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import { getOrSpawnServer, type LspServerSession } from "./lsp-manager";
+import { WorkspaceQueries } from "../db/queries/workspaces";
+import { hostRegistry } from "../host/registry";
+
+const workspaceQueries = new WorkspaceQueries();
 
 const log = createLogger("lsp-proxy");
 
@@ -75,6 +79,14 @@ function didCloseMessage(uri: string): string {
   });
 }
 
+/**
+ * How many connections hold each document open, per language server
+ * (`${workspaceId}:${lang}`). Every WebSocket for a workspace and language
+ * shares the server, so only the first `didOpen` and the last `didClose` of a
+ * URI reach it.
+ */
+const serverDocuments = new Map<string, Map<string, number>>();
+
 export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
@@ -94,9 +106,17 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     pendingMessages.push(data.toString());
   });
 
-  let session: LspServerSession;
+  let connection: Duplex;
   try {
-    session = await getOrSpawnServer(workspaceId, lang);
+    // Direct infra-tier DB read: the proxy is in the infra tier and cannot
+    // depend on `WorkspaceService.resolve` (issue #535).
+    const workspace = workspaceQueries.findIdentity(workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${workspaceId}`);
+    }
+    connection = await hostRegistry
+      .hostFor(workspaceId)
+      .lsp.connect({ workspaceId, lang, root: workspace.worktreePath });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(
@@ -109,10 +129,9 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     return;
   }
 
-  const { process: lspProcess } = session;
-
-  if (!lspProcess.stdin || !lspProcess.stdout) {
-    ws.close(4002, "Language server stdio not available");
+  // The socket closed while the server was starting: no close handler exists yet.
+  if (ws.readyState !== ws.OPEN) {
+    connection.close();
     return;
   }
 
@@ -134,10 +153,21 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // other's edits are applied to that text, which drifts when the two
   // buffers differed.
   const openDocuments = new Set<string>();
-  const { openDocuments: sessionDocuments } = session;
+  const serverId = `${workspaceId}:${lang}`;
+
+  /** Looked up on every use: `release` may delete an empty map another connection still needs. */
+  function documentCounts(): Map<string, number> {
+    let counts = serverDocuments.get(serverId);
+    if (!counts) {
+      counts = new Map<string, number>();
+      serverDocuments.set(serverId, counts);
+    }
+    return counts;
+  }
 
   /** Count an open or close and say whether to forward it to the server. */
   function trackDocument(method: string | undefined, uri: string): boolean {
+    const sessionDocuments = documentCounts();
     const count = sessionDocuments.get(uri) ?? 0;
     if (method === "textDocument/didOpen") {
       if (openDocuments.has(uri)) return true;
@@ -211,17 +241,32 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     }
   });
 
-  const onStdoutData = (chunk: Buffer) => parseFrame(chunk);
-  lspProcess.stdout.on("data", onStdoutData);
+  /** Drop this connection's documents, telling the server if it is still there. */
+  let released = false;
+  function release(): void {
+    if (released) return;
+    released = true;
+    // Copied first: `forwardToStdin` removes each URI from `openDocuments`.
+    for (const uri of [...openDocuments]) forwardToStdin(didCloseMessage(uri));
+    if (serverDocuments.get(serverId)?.size === 0) serverDocuments.delete(serverId);
+  }
 
-  // Server exit -> close WebSocket
-  const onExit = (code: number | null) => {
-    log.debug("LSP server exited (code %s), closing WebSocket", String(code));
+  // Server output -> WebSocket. The stream ends when the server exits or
+  // this connection closes.
+  void (async () => {
+    try {
+      for await (const chunk of connection.output)
+        parseFrame(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    } catch (err) {
+      log.warn("LSP output stream failed [%s/%s]: %s", workspaceId, lang, String(err));
+    }
+    // Server exit -> close WebSocket
+    release();
     if (ws.readyState === ws.OPEN) {
+      log.debug("LSP server exited, closing WebSocket");
       ws.close(1000, "Language server exited");
     }
-  };
-  lspProcess.on("exit", onExit);
+  })();
 
   // Helper: forward a JSON message from the client to the language server
   function forwardToStdin(json: string): void {
@@ -260,9 +305,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   }
 
   function writeToStdin(json: string): void {
-    if (lspProcess.stdin?.writable) {
-      lspProcess.stdin.write(frameMessage(json));
-    }
+    connection.write(frameMessage(json));
   }
 
   // Replace the buffering handler with the real forwarding handler.
@@ -280,10 +323,8 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
 
   // WebSocket close -> detach listeners, keep server alive
   ws.on("close", () => {
-    lspProcess.stdout?.off("data", onStdoutData);
-    lspProcess.off("exit", onExit);
-    // Copied first: `forwardToStdin` removes each URI from `openDocuments`.
-    for (const uri of [...openDocuments]) forwardToStdin(didCloseMessage(uri));
+    release();
+    connection.close();
     log.debug("LSP client disconnected: %s/%s (server kept alive)", workspaceId, lang);
   });
 }

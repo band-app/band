@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { ScriptPlan, ScriptWorkspace } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
-import { loadProjectConfig } from "../infra/setup/project-config";
-import { prepareScriptRun, runScriptHidden, type ScriptRun } from "../infra/setup/script-run";
+import { hostRegistry } from "../infra/host/registry";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 // FRAGILE: ESM cycle leg — `./workspace-service` imports
@@ -56,13 +56,13 @@ export class WorkspaceScriptService {
   }
 
   /** The workspace's `setup` or `teardown` command, if it declares one. */
-  getCommand(
+  async getCommand(
+    workspaceId: string,
     script: WorkspaceScript,
-    worktreePath: string,
-    projectPath: string,
-  ): string | undefined {
-    const value = loadProjectConfig(worktreePath, projectPath)?.[script];
-    return typeof value === "string" && value.trim() !== "" ? value : undefined;
+    workspace: ScriptWorkspace,
+  ): Promise<string | undefined> {
+    const host = hostRegistry.hostFor(workspaceId);
+    return (await host.scripts.command({ ...workspace, label: script })) ?? undefined;
   }
 
   /**
@@ -70,13 +70,15 @@ export class WorkspaceScriptService {
    * one. Returns straight away; nothing waits on the result.
    */
   startSetup(workspaceId: string, worktreePath: string, projectPath: string): void {
-    const command = this.getCommand("setup", worktreePath, projectPath);
-    if (!command) return;
-    void this.run(workspaceId, "setup", command);
+    void (async () => {
+      const workspace = { worktreePath, projectPath };
+      if (!(await this.getCommand(workspaceId, "setup", workspace))) return;
+      await this.run(workspaceId, "setup", workspace);
+    })().catch((err) => log.error({ err, workspaceId }, "could not start the setup script"));
   }
 
   /**
-   * Run `command` in a new terminal tab of the workspace and resolve once it
+   * Run the workspace's `script` in a new terminal tab and resolve once it
    * finishes, its terminal goes away, or `timeoutMs` passes. Never rejects.
    * A second call for the same workspace and script while one is running
    * resolves `closed` without starting another.
@@ -84,7 +86,7 @@ export class WorkspaceScriptService {
   async run(
     workspaceId: string,
     script: WorkspaceScript,
-    command: string,
+    workspace: ScriptWorkspace,
     timeoutMs?: number,
   ): Promise<ScriptOutcome> {
     const key = `${workspaceId}\0${script}`;
@@ -100,17 +102,20 @@ export class WorkspaceScriptService {
         workspaceId,
         script,
         key,
-        await runHidden(workspaceId, command, timeoutMs),
+        await runHidden(workspaceId, script, workspace, timeoutMs),
       );
     }
 
     const terminalId = randomUUID();
-    let prepared: ScriptRun | undefined;
+    let prepared: ScriptPlan | undefined;
     let unsubscribeExit = () => {};
     let timer: NodeJS.Timeout | undefined;
     let outcome: ScriptOutcome;
     try {
-      prepared = await prepareScriptRun(command, script);
+      const host = hostRegistry.hostFor(workspaceId);
+      const plan = await host.scripts.prepare({ ...workspace, label: script });
+      if (!plan) throw new Error(`The workspace has no ${script} script`);
+      prepared = plan;
       const { exited } = prepared;
       // Subscribe before the spawn so an exit during it still counts.
       const closed = new Promise<ScriptOutcome>((resolve) => {
@@ -174,13 +179,20 @@ export class WorkspaceScriptService {
  */
 async function runHidden(
   workspaceId: string,
-  command: string,
+  script: WorkspaceScript,
+  paths: ScriptWorkspace,
   timeoutMs: number | undefined,
 ): Promise<ScriptOutcome> {
   const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) return { kind: "error", message: `Workspace not found: ${workspaceId}` };
   try {
-    const code = await runScriptHidden(command, workspace.worktree.path, timeoutMs);
+    const command = await workspace.host.scripts.command({ ...paths, label: script });
+    if (command === null) throw new Error(`The workspace has no ${script} script`);
+    const code = await workspace.host.scripts.runHidden(
+      command,
+      workspace.worktree.path,
+      timeoutMs,
+    );
     return code === null ? { kind: "timeout" } : { kind: "exited", code };
   } catch (err) {
     return { kind: "error", message: err instanceof Error ? err.message : String(err) };

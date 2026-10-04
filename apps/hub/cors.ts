@@ -7,9 +7,16 @@ const ALLOWED_HEADER_NAMES = new Set(["authorization", "content-type", "last-eve
 
 export type OriginVerdict = "none" | "same" | "allowed" | "denied";
 
-/** Origins the Electron shell loads the bundled UI from. `file://` pages send `null`. */
+/**
+ * Origins the Electron shell loads the bundled UI from: `app://local` for the
+ * bundled hub and `app://h-<12 hex>` for a remote one. Any other `app://` host,
+ * `file://` and `null` are not built in; `null` can be added to the configured
+ * origins.
+ */
+const BUILTIN_ORIGIN = /^app:\/\/(local|h-[0-9a-f]{12})$/;
+
 function isBuiltinOrigin(origin: string): boolean {
-  return origin.startsWith("app://") || origin === "file://" || origin === "null";
+  return BUILTIN_ORIGIN.test(origin);
 }
 
 export function parseOriginList(raw: string | undefined): string[] {
@@ -41,6 +48,7 @@ export function classifyOrigin(
   const origin = req.headers.origin;
   if (typeof origin !== "string" || !origin) return "none";
   if (isBuiltinOrigin(origin)) return "allowed";
+  if (origin === "null") return getAllowed().includes("null") ? "allowed" : "denied";
   let originHost: string;
   try {
     originHost = new URL(origin).host;

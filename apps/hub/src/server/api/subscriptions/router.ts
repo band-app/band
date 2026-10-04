@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { chatService } from "../../services/chat-service";
+import { githubWebhookService } from "../../services/github-webhook-service";
 import {
   InvalidTimerError,
   type Subscription,
@@ -16,6 +17,8 @@ function present(sub: Subscription) {
     ...rest,
     ...(config.at !== undefined && { at: config.at }),
     ...(config.cron && { cron: config.cron }),
+    ...(config.repo && { repo: config.repo }),
+    ...(config.webhook && { webhook: config.webhook }),
   };
 }
 
@@ -27,7 +30,7 @@ const agentTarget = {
 // One flat object rather than a union: the MCP endpoint turns each input
 // schema into tool parameters and needs an object.
 const createInput = z.object({
-  source: z.enum(["webhook", "timer"]),
+  source: z.enum(["webhook", "timer", "github"]),
   ...agentTarget,
   coalesceSeconds: z.number().int().min(0).max(3600).optional(),
   maxWakeups: z.number().int().min(1).optional(),
@@ -41,6 +44,12 @@ const createInput = z.object({
    * A cron timer ends after `maxWakeups` fires (default 10).
    */
   cron: z.string().min(1).optional(),
+  /** GitHub only: `owner/name`. With `pr` it watches that pull request, with `branch` its CI. */
+  repo: z.string().min(1).optional(),
+  /** GitHub only: pull request number (comments, reviews, review comments, lifecycle). */
+  pr: z.number().int().min(1).optional(),
+  /** GitHub only: branch whose CI result is delivered once per commit, after every check completes. */
+  branch: z.string().min(1).optional(),
 });
 
 /**
@@ -49,7 +58,7 @@ const createInput = z.object({
  * and `x-band-workspace-id` headers), so an agent only names the source.
  */
 export const subscriptionsRouter = t.router({
-  create: publicProcedure.input(createInput).mutation(({ input, ctx }) => {
+  create: publicProcedure.input(createInput).mutation(async ({ input, ctx }) => {
     const chatId = input.chatId ?? ctx.chatId;
     if (!chatId) {
       throw new TRPCError({
@@ -63,7 +72,38 @@ export const subscriptionsRouter = t.router({
       throw new TRPCError({ code: "NOT_FOUND", message: `Chat ${chatId} not found` });
     }
     try {
-      const { source, at, cron, ...common } = input;
+      const { source, at, cron, repo, pr, branch, ...common } = input;
+      if (source !== "github" && (repo !== undefined || pr !== undefined || branch !== undefined)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "`repo`, `pr` and `branch` apply to the github source only",
+        });
+      }
+      if (source === "github") {
+        if (at !== undefined || cron !== undefined) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "`at` and `cron` apply to timers only",
+          });
+        }
+        if (!repo || (pr === undefined) === (branch === undefined)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A github subscription needs `repo` and exactly one of `pr` and `branch`",
+          });
+        }
+        const base = { ...common, chatId, workspaceId, repo };
+        const subscription =
+          pr !== undefined
+            ? subscriptionService.createGithubPr({ ...base, number: pr })
+            : subscriptionService.createGithubCi({ ...base, branch: branch as string });
+        // Registers the repo webhook (or records that it waits for a public URL).
+        await githubWebhookService.ensureRegistered(subscription);
+        return present(
+          subscriptionService.list({ chatId }).find((s) => s.id === subscription.id) ??
+            subscription,
+        );
+      }
       if (source === "webhook") {
         if (at !== undefined || cron !== undefined) {
           throw new TRPCError({

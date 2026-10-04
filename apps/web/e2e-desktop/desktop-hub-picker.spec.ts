@@ -15,9 +15,11 @@
  *   - No tRPC mocking and no `page.route()`. The UI is driven through page
  *     objects.
  *
- * What it does not cover: the macOS shell (folder picker), terminals and
- * browser panes (`<webview>`), and the auto-updater. They need a packaged app
- * or real macOS dialogs.
+ * Set `BAND_DESKTOP_EXECUTABLE` to run the same specs against the packaged app
+ * (electron-builder output) instead of the dev tree.
+ *
+ * What it does not cover: the native folder picker sheet (the IPC is called
+ * with a stubbed `dialog.showOpenDialog`) and the auto-updater.
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -34,9 +36,10 @@ import {
   seedState,
   startServer,
 } from "../e2e/helpers/server";
-import { type LaunchedDesktop, launchDesktop } from "./helpers/desktop-app";
+import { isPackagedRun, type LaunchedDesktop, launchDesktop } from "./helpers/desktop-app";
 import { DesktopDashboardPage } from "./pages/DesktopDashboardPage";
 import { HubPickerPage } from "./pages/HubPickerPage";
+import { HubUnreachablePage } from "./pages/HubUnreachablePage";
 
 const LOCAL_TOKEN = "desktop-e2e-local-token";
 const REMOTE_TOKEN = "desktop-e2e-remote-token";
@@ -135,6 +138,8 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
 
     // The window loads the bundled UI, not the hub's URL.
     expect(dashboard.url()).toMatch(/^app:\/\/local\//);
+    // Under BAND_DESKTOP_EXECUTABLE the app is the electron-builder output.
+    expect(await app.isPackaged()).toBe(isPackagedRun());
 
     // The local hub was spawned and answers with the token.
     await expect.poll(() => localHubAnswers(hub.port, LOCAL_TOKEN), { timeout: 30_000 }).toBe(true);
@@ -142,10 +147,13 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     await dashboard.expectProjectListed("localproj");
     await dashboard.openWorkspace(LOCAL_WORKSPACE);
 
-    await dashboard.chat.typeMessage("hello from the desktop app");
-    await dashboard.chat.submit();
-    await expect(dashboard.chat.userMessage("hello from the desktop app")).toBeVisible();
-    await expect(dashboard.chat.assistantMessage(LOCAL_REPLY)).toBeVisible({ timeout: 30_000 });
+    // The scripted agent can't run in a packaged app (see `launchDesktop`).
+    if (!isPackagedRun()) {
+      await dashboard.chat.typeMessage("hello from the desktop app");
+      await dashboard.chat.submit();
+      await expect(dashboard.chat.userMessage("hello from the desktop app")).toBeVisible();
+      await expect(dashboard.chat.assistantMessage(LOCAL_REPLY)).toBeVisible({ timeout: 30_000 });
+    }
 
     // S3: a reload and a deep link keep the route.
     const route = new URL(dashboard.url()).pathname;
@@ -185,6 +193,40 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     // Nothing listens on the local hub's port, and it never wrote a server log.
     expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(false);
     expect(existsSync(join(hub.home, ".band", "server.log"))).toBe(false);
+    expect(app.cspViolations).toEqual([]);
+  });
+
+  test("a saved remote hub that is down offers Retry and Use local, and Use local starts the local hub", async () => {
+    const hub = await seedHome("localproj", LOCAL_REPLY, LOCAL_TOKEN);
+    homes.push(hub.home);
+    // Nothing listens on this port: the saved hub is down.
+    const deadPort = await getRandomPort();
+    writeFileSync(
+      join(hub.home, ".band", "desktop-hub.json"),
+      JSON.stringify({ mode: "remote", url: `http://127.0.0.1:${deadPort}`, token: REMOTE_TOKEN }),
+    );
+    const app = await launchDesktop({
+      home: hub.home,
+      hubPort: hub.port,
+      firstPage: "unreachable",
+      env: acpStubEnv(hub.home, { turns: [{ steps: [{ say: LOCAL_REPLY }] }] }),
+    });
+    desktop = app;
+    const unreachable = new HubUnreachablePage(app.window);
+    await unreachable.expectShown();
+    // No local hub yet: the window shows the choice instead of a blank page.
+    expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(false);
+
+    // Retry against the same dead hub keeps the page and says why.
+    await unreachable.clickRetry();
+    await unreachable.expectShown();
+    await unreachable.expectReasonShown();
+
+    await unreachable.clickUseLocal();
+    const dashboard = new DesktopDashboardPage(app.window);
+    await expect.poll(() => dashboard.url(), { timeout: 60_000 }).toMatch(/^app:\/\/local\//);
+    await dashboard.expectProjectListed("localproj");
+    expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(true);
     expect(app.cspViolations).toEqual([]);
   });
 
@@ -253,5 +295,28 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     await dashboard.openBrowserTab();
     expect(await dashboard.expectBrowserGuestAttached()).toBeGreaterThan(0);
     expect(app.cspViolations).toEqual([]);
+  });
+
+  test("a terminal opens under app:// and runs a command", async () => {
+    const { app } = await launchLocal();
+    const dashboard = new DesktopDashboardPage(app.window);
+    await dashboard.expectProjectListed("localproj");
+    const terminal = await dashboard.openTerminal(LOCAL_WORKSPACE);
+    // The sum is computed by the shell, so the result line can't be the echoed command.
+    await terminal.typeLine("echo band-e2e-$((40 + 2))");
+    await expect
+      .poll(() => terminal.readScreenText(), { timeout: 30_000 })
+      .toMatch(/^band-e2e-42$/m);
+    expect(app.cspViolations).toEqual([]);
+  });
+
+  test("the folder picker IPC returns the path of a stubbed dialog result", async () => {
+    const { app, hub } = await launchLocal();
+    const dashboard = new DesktopDashboardPage(app.window);
+    await dashboard.expectProjectListed("localproj");
+    const folder = join(hub.home, "repo");
+    // The real dialog is a native macOS sheet nobody can click in CI.
+    await app.stubOpenDialog([folder]);
+    expect(await dashboard.pickFolderViaIpc()).toBe(folder);
   });
 });
