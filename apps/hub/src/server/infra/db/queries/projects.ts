@@ -231,6 +231,8 @@ export class ProjectQueries {
             .run();
         }
 
+        // TODO(phase-2): preserve non-local project_hosts rows. The project delete
+        // above cascades to them, and only the local row is re-inserted here.
         tx.insert(projectHostsTable)
           .values({ projectName: project.name, hostId: "local", path: project.path })
           .run();

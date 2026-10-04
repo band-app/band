@@ -103,13 +103,18 @@ export class WorkspaceQueries {
    */
   findHostId(workspaceId: string): string | null {
     const row = getDb()
-      .select({ hostId: worktreesTable.hostId })
+      .select({
+        project: worktreesTable.projectName,
+        name: worktreesTable.name,
+        hostId: worktreesTable.hostId,
+      })
       .from(worktreesTable)
       .where(
         sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${workspaceId}`,
       )
       .get();
-    return row?.hostId ?? null;
+    // Same sanity check as `findIdentity`.
+    return row && toWorkspaceId(row.project, row.name) === workspaceId ? row.hostId : null;
   }
 
   /**

@@ -59,6 +59,8 @@ describe("hosts migration", () => {
     ]) {
       expect(one(`SELECT host_id FROM ${table}`), table).toEqual([{ host_id: "local" }]);
     }
+    expect(one("SELECT id, name FROM cronjobs")).toEqual([{ id: "c1", name: "n" }]);
+    expect(one("SELECT task_id FROM usage_events")).toEqual([{ task_id: "t1" }]);
     expect(one("SELECT id, name, mode, status FROM hosts")).toEqual([
       { id: "local", name: "Local", mode: "attached", status: "online" },
     ]);

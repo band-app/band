@@ -85,5 +85,6 @@ describe("host registry", () => {
     const state = loadState();
     saveState(state);
     expect(registry.hostFor("proj-feat")).toBe(remote);
+    expect(registry.hostFor("proj-main")).toBe(hostRegistry.local);
   });
 });

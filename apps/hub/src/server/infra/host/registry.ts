@@ -28,6 +28,8 @@ export class HostRegistry {
   }
 
   hostFor(workspaceId: string): Host {
+    // With only the local host there is nothing to look up.
+    if (this.hosts.size === 1) return this.local;
     return this.hostById(workspaceQueries.findHostId(workspaceId) ?? this.local.id);
   }
 
