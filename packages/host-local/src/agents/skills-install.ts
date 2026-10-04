@@ -127,7 +127,9 @@ async function runBandSkillsInstall(bandPath: string, home: string): Promise<str
  * available or the subprocess fails — non-fatal, matching the rest of the
  * idempotent setup pipeline.
  */
-export async function installSkills(opts: { home?: string } = {}): Promise<InstallSkillsResult> {
+export async function installSkills(
+  opts: { home?: string; bandPath?: string } = {},
+): Promise<InstallSkillsResult> {
   const result: InstallSkillsResult = {
     written: [],
     updated: [],
@@ -148,7 +150,7 @@ export async function installSkills(opts: { home?: string } = {}): Promise<Insta
     }
   };
 
-  const bandPath = await findBandBinary();
+  const bandPath = opts.bandPath ?? (await findBandBinary());
   if (!bandPath) {
     result.warnings.push(
       "Skipping CLI skills sync — band binary not found (no symlink, not on PATH, no bundled sidecar)",

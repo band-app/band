@@ -597,6 +597,110 @@ describe("the band CLI through the relay (S2)", () => {
   );
 });
 
+describe("the band CLI on a worker", () => {
+  const cli = findCliBinary();
+  const cached = (w: Worker) => join(w.state, "bin", "band");
+
+  it.skipIf(!cli)(
+    "caches the hub's CLI in the worker's state dir and installs the skills",
+    async () => {
+      await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
+        label: "worker caches the band CLI",
+        timeoutMs: 30_000,
+      });
+      // The same bytes the hub has, saved with the owner-only directory around it.
+      expect(readFileSync(cached(a)).equals(readFileSync(cli as string))).toBe(true);
+      await waitFor(
+        async () => (existsSync(join(a.home, ".agents/skills/band/SKILL.md")) ? true : undefined),
+        { label: "worker installs the band skills", timeoutMs: 30_000 },
+      );
+    },
+  );
+
+  it.skipIf(!cli)("finds band in a terminal and runs it through the relay (S1, S3)", async () => {
+    await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
+      label: "worker caches the band CLI",
+      timeoutMs: 30_000,
+    });
+    const created = await m<{ terminalId: string }>("terminal.create", {
+      workspaceId: "proj-relay-a",
+    });
+    const socket = await TerminalSocket.open(server, {
+      workspaceId: "proj-relay-a",
+      terminalId: created.terminalId,
+      token: TEST_TOKEN,
+    });
+    try {
+      socket.type("echo found=$(command -v band)\r");
+      await socket.waitForOutput(`found=${cached(a)}`);
+
+      socket.type("band chats list proj-relay-a --output json >/dev/null; echo own=$?\r");
+      await socket.waitForOutput("own=0");
+
+      // The credential is scoped: another worker's workspace, the hub's own, and admin procedures are refused.
+      socket.type("band chats list proj-relay-b --output json >/dev/null 2>&1; echo other=$?\r");
+      await socket.waitForOutput("other=1");
+      socket.type("band chats list proj-main --output json >/dev/null 2>&1; echo hub=$?\r");
+      await socket.waitForOutput("hub=1");
+      socket.type(
+        `curl -s -o /dev/null -w 'admin=%{http_code}\\n' "$BAND_SERVER_URL/trpc/tokens.list" -H "Cookie: band_token=$BAND_TOKEN"\r`,
+      );
+      await socket.waitForOutput("admin=403");
+
+      // The worker's session token never reaches the shell.
+      socket.type("echo ws=$BAND_WORKSPACE_ID\r");
+      await socket.waitForOutput("ws=proj-relay-a");
+      socket.type(`echo leak=$(env | grep -c -e '${TEST_TOKEN}' -e 'bws_')\r`);
+      await socket.waitForOutput("leak=0");
+    } finally {
+      await socket.close();
+    }
+  });
+
+  it.skipIf(!cli)("gives the agent process band on its PATH (S2)", async () => {
+    await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
+      label: "worker caches the band CLI",
+      timeoutMs: 30_000,
+    });
+    // Starts an agent after the CLI is cached, so its environment carries the PATH.
+    await submit("proj-relay-a", "path-probe");
+    const env = readFileSync(a.stubLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            env: {
+              PATH?: string;
+              BAND_SERVER_URL?: string;
+              BAND_TOKEN?: string;
+              BAND_WORKSPACE_ID?: string;
+              LEAK?: boolean;
+            };
+          },
+      )
+      .reverse()
+      .find((r) => r.env.BAND_TOKEN)?.env;
+    expect(env?.PATH?.split(":")[0]).toBe(join(a.state, "bin"));
+    expect(env?.BAND_WORKSPACE_ID).toBe("proj-relay-a");
+    expect(env?.LEAK).toBe(false);
+    const out = execFileSync(
+      "sh",
+      ["-c", "command -v band && band chats list proj-relay-a --output json"],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: env?.PATH,
+          HOME: tmp("band-relay-agent-home-"),
+          BAND_SERVER_URL: env?.BAND_SERVER_URL,
+          BAND_TOKEN: env?.BAND_TOKEN,
+        },
+      },
+    );
+    expect(out.split("\n")[0]).toBe(cached(a));
+  });
+});
+
 describe("hooks through the relay (S3)", () => {
   it("delivers a hook sent from a terminal on the worker to the hub", async () => {
     // The chats that ran before ask for attention, which outranks a hook's `working` until it is cleared.

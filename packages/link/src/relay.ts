@@ -54,3 +54,23 @@ export interface RelayHttpReply {
   /** The channel the body comes down. The hub ends it after the last chunk. */
   chan: number;
 }
+
+/**
+ * Worker to hub: `CliFetchParams` in, `CliFetchReply` out. The worker asks for
+ * the `band` CLI binary built for its own platform, so agents and terminals it
+ * starts can run `band` (plan step 2.8).
+ */
+export const METHOD_CLI_FETCH = "cli.fetch";
+
+export interface CliFetchParams {
+  /** `process.platform` of the worker, such as `linux` or `darwin`. */
+  platform: string;
+  /** `process.arch` of the worker, such as `x64` or `arm64`. */
+  arch: string;
+  /** SHA-256 of the binary the worker already holds. The hub answers without a body when it matches. */
+  have?: string;
+}
+
+export type CliFetchReply =
+  | { available: false; reason: string }
+  | { available: true; sha256: string; size: number; chan?: number };
