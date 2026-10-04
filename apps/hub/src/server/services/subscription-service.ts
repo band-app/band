@@ -357,6 +357,12 @@ export class SubscriptionService {
     };
     this.queries.insert(record);
     this.rebuildIndex();
+    emit({
+      kind: "subscription-created",
+      subscriptionId: id,
+      chatId: record.chatId,
+      workspaceId: record.workspaceId,
+    });
     return record;
   }
 

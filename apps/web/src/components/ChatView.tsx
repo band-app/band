@@ -56,6 +56,7 @@ import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { withResolvedDefaults } from "./chat/claude-default-labels";
+import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
 import { groupEntries } from "./chat/tool-summary";
@@ -724,6 +725,7 @@ export function ChatView({
             onClose={find.close}
           />
         )}
+        <ListeningPill chatId={chatId} />
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
           {/* Absolutely positioned so it never shifts content while an older
               page loads (issue #572). */}

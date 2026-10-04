@@ -99,6 +99,7 @@ export interface StatusEvent {
     | "agent-session-updated"
     | "agent-session-ended"
     | "client-state-changed"
+    | "subscription-created"
     | "subscription-delivered"
     | "subscription-removed"
     | "open-file";

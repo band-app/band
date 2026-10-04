@@ -183,7 +183,7 @@ Terminal PTYs do not live in the web server. They live in the **terminal daemon*
 
 ## Band CLI Skills
 
-The Band CLI ships **six domain-specific skills**, each authored directly as `apps/cli/skills/<name>/SKILL.md` — that file is the single source of truth and is baked into the Rust binary via `include_str!`:
+The Band CLI ships **seven domain-specific skills**, each authored directly as `apps/cli/skills/<name>/SKILL.md` — that file is the single source of truth and is baked into the Rust binary via `include_str!`:
 
 - `band/SKILL.md` — workspaces, projects, agents, cronjobs, tunnel, settings, schema, notify, skills install.
 - `band-chat/SKILL.md` — chat panes (`band chats ...`).
@@ -191,6 +191,7 @@ The Band CLI ships **six domain-specific skills**, each authored directly as `ap
 - `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
 - `band-start/SKILL.md` — kickoff flow: create a workspace and submit the first agent task (`band workspaces create --prompt ...`) with Jira/GitHub ticket auto-detection and branch-name generation.
 - `band-loop/SKILL.md` — schedule a recurring agent prompt against a workspace via `band cronjobs`, with an optional self-deleting "stop when criteria is met" wrapper. Native answer for users who would otherwise reach for Claude Code's `/loop`.
+- `band-subscribe/SKILL.md` — wait for events instead of polling (`band subscriptions ...`): when to subscribe (after opening a PR, after asking a question), how to call the CLI or the MCP tool, and to unsubscribe when the wait is over.
 
 Each `SKILL.md` is self-contained: the per-skill `## Commands` reference is written out in the file itself, not rendered from the CLI schema. (Earlier these were generated from the live schema by a `band generate-skills` command via a `<!-- COMMANDS -->` placeholder + `commands:` frontmatter; that command and the whole rendering pipeline were removed in favour of authoring the files directly — issue #331.) The split into one skill per task type improves trigger precision and keeps each SKILL.md scoped to one domain. When you change the CLI surface, update the affected skill's `## Commands` section by hand so it stays accurate.
 
@@ -225,7 +226,7 @@ The list of supported agents lives in `packages/coding-agent/src/install-skills.
 
 ### Install
 
-- `band skills install` — write the six embedded SKILL.md files into `~/.agents/skills/`, then symlink each detected coding agent's skills directory. Idempotent. Useful for users running the CLI outside the Band dashboard, or for forcing a re-sync without rebooting the web server. The Band web server invokes this same subcommand on every boot from `runFirstTimeSetup`, so most users never need to call it directly.
+- `band skills install` — write the seven embedded SKILL.md files into `~/.agents/skills/`, then symlink each detected coding agent's skills directory. Idempotent. Useful for users running the CLI outside the Band dashboard, or for forcing a re-sync without rebooting the web server. The Band web server invokes this same subcommand on every boot from `runFirstTimeSetup`, so most users never need to call it directly.
 
 To change a skill's content, edit `apps/cli/skills/<name>/SKILL.md` directly and rebuild the CLI — there is no generation step.
 

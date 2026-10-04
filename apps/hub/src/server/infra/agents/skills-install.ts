@@ -7,7 +7,7 @@ import type { InstallSkillsResult } from "@band-app/host-api";
 import { findCliBinary } from "../process/cli-binary";
 import { whichBinary } from "../process/path";
 
-/** The six skills the `band` CLI installs. */
+/** The seven skills the `band` CLI installs. */
 export const BAND_SKILL_NAMES = [
   "band",
   "band-chat",
@@ -15,6 +15,7 @@ export const BAND_SKILL_NAMES = [
   "band-browser",
   "band-start",
   "band-loop",
+  "band-subscribe",
 ] as const;
 
 const SKILL_FILE = "SKILL.md";
