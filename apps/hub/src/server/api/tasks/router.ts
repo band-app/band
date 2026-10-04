@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { WorkspaceNotFoundError } from "../../errors";
 import { sessionIdSchema } from "../../services/_utils/session-id";
-import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
+import { saveWorkspaceUploads } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
 import { type TaskAttachment, TaskConflictError, taskService } from "../../services/task-service";
@@ -144,8 +144,8 @@ export const tasksRouter = t.router({
       // `/api/uploads/<storedName>` URL.
       let attachments: TaskAttachment[] = [];
       if (input.files && input.files.length > 0) {
-        const savedFiles = await saveUploadedFilesDetailed(input.files);
-        // `saveUploadedFilesDetailed` skips malformed data URLs; say so
+        const savedFiles = await saveWorkspaceUploads(input.workspaceId, input.files);
+        // `saveWorkspaceUploads` skips malformed data URLs; say so
         // rather than drop them silently.
         if (savedFiles.length !== input.files.length) {
           log.warn(
@@ -156,7 +156,7 @@ export const tasksRouter = t.router({
         attachments = savedFiles.map((s) => ({
           path: s.path,
           mediaType: s.mediaType,
-          url: `/api/uploads/${s.storedName}`,
+          url: s.url,
           filename: s.originalName,
         }));
       }

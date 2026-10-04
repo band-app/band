@@ -24,7 +24,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import type { AcpAgentDefinition, ClaudeCliArgs, ClaudeDefaults, Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
@@ -52,6 +51,7 @@ import {
 import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
+import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { workspaceService } from "./workspace-service";
 
@@ -610,18 +610,32 @@ async function ensureProcess(
     const host = hostRegistry.hostFor(rt.workspaceId);
     const launch = await host.acp.resolveLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
+    // An agent on a remote host reaches the hub through the worker's relay,
+    // with a token that works for this chat's host only.
+    const grant = await host.relay?.issue({ workspaceId: rt.workspaceId, chatId: rt.chatId });
     // Lets the agent say which chat it runs in, for `subscriptions.create`.
     const withChat = {
       ...launch,
-      env: { ...launch.env, BAND_CHAT_ID: rt.chatId, BAND_WORKSPACE_ID: rt.workspaceId },
+      env: {
+        ...launch.env,
+        ...grant?.env,
+        BAND_CHAT_ID: rt.chatId,
+        BAND_WORKSPACE_ID: rt.workspaceId,
+      },
     };
-    const proc = await AcpAgentProcess.start(
-      host.acp,
-      withChat,
-      cwd,
-      def.label,
-      handlersFor(rt, generation),
-    );
+    const handlers = handlersFor(rt, generation);
+    const exited = handlers.onExit;
+    handlers.onExit = (code, stderr) => {
+      void grant?.revoke();
+      exited?.(code, stderr);
+    };
+    let proc: AcpAgentProcess;
+    try {
+      proc = await AcpAgentProcess.start(host.acp, withChat, cwd, def.label, handlers);
+    } catch (err) {
+      await grant?.revoke();
+      throw err;
+    }
     remember(def, { agentName: proc.agentName, canList: proc.canList });
     return proc;
   })();
@@ -730,10 +744,7 @@ async function attachNew(
   rt.buffered = [];
   let attached: AttachedSession;
   try {
-    attached = await proc.newSession(cwd, [
-      join(bandHome(), "uploads"),
-      join(bandHome(), "shared"),
-    ]);
+    attached = await proc.newSession(cwd, await agentExtraDirs(rt.workspaceId));
   } catch (err) {
     rt.routing = "log";
     throw err;

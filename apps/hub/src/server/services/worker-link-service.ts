@@ -26,6 +26,8 @@ import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
+import { workerRelayService } from "./worker-relay-service";
+import { workspaceService } from "./workspace-service";
 
 const log = createLogger("worker-link");
 
@@ -120,6 +122,7 @@ export class WorkerLinkService {
 
   private onSession(session: ServerSession): void {
     this.remoteHost(session.workerId).attachSession(session);
+    workerRelayService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {
@@ -143,6 +146,10 @@ export class WorkerLinkService {
     });
     log.info(`worker ${workerId} is online`);
     this.publish(workerId, "online");
+    // Workspaces removed while the worker was away still have a checkout on it.
+    void workspaceService.finishPendingRemovals(workerId).catch((err) => {
+      log.warn(`pending removals on ${workerId}: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   private setStatus(workerId: string, status: HostRow["status"], lastSeenAt?: number): void {

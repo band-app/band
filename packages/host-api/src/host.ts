@@ -29,6 +29,12 @@ export interface Host {
   /** Runs a binary on the host with `PATH` extended to the usual tool directories. */
   exec(bin: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   readonly agentEnv: HostAgentEnv;
+  /**
+   * How a process on the host reaches the hub. A host that runs in the hub
+   * process (`LocalHost`) has none, because its processes use the hub's own
+   * URL and token. A remote host's processes go through the worker's relay.
+   */
+  readonly relay?: HostRelay;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +67,20 @@ export interface HostInfo {
   /** Tool versions found on the host (`node`, `git`). */
   versions: Record<string, string>;
   capabilities: HostCapabilities;
+  /**
+   * Directories the host keeps for hub files that belong to workspaces
+   * (chat uploads, files an agent shares). A remote host declares them, under
+   * one of its roots. A local host leaves this out, and the hub uses its own
+   * `BAND_HOME`.
+   */
+  dirs?: HostDirs;
+}
+
+export interface HostDirs {
+  /** Chat uploads go in `<uploads>/<workspaceId>/`. */
+  uploads: string;
+  /** Files an agent shares go in `<shared>/<workspaceId>/`. */
+  shared: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -440,4 +460,32 @@ export interface HostAgentEnv {
   hooksStatus(): Promise<HooksStatus>;
   /** Installs Band's agent hooks into the host's Claude Code settings. Rejects when the host has no `band` CLI. */
   installHooks(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// relay
+// ---------------------------------------------------------------------------
+
+/** What a process started on the host may call on the hub. */
+export interface RelayScope {
+  workspaceId: string;
+  /** The chat the process belongs to, when it is an agent behind a chat. */
+  chatId?: string;
+}
+
+/** A credential for one process, with the environment that hands it over. */
+export interface RelayGrant {
+  /** `BAND_SERVER_URL` (the relay's address on the host) and `BAND_TOKEN`. */
+  env: Record<string, string>;
+  /** Ends the credential. Never rejects. */
+  revoke(): Promise<void>;
+}
+
+export interface HostRelay {
+  /**
+   * Issues a token for one process and returns the environment to start it
+   * with. Calls made with the token reach the hub through the host's relay,
+   * limited to the host's own workspaces. Rejects when the host is offline.
+   */
+  issue(scope: RelayScope): Promise<RelayGrant>;
 }

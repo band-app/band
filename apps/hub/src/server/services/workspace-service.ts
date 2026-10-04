@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { join, posix } from "node:path";
 import { resumeCliInvocation } from "@band-app/coding-agent";
-import type { Host } from "@band-app/host-api";
+import { type Host, HostOfflineError } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX } from "@band-app/host-local/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "@band-app/host-local/git/git-refusals";
 import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
@@ -13,6 +13,7 @@ import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { z } from "zod";
 import { WorkspaceNotFoundError } from "../errors";
+import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
@@ -288,6 +289,8 @@ async function pullRebase(execGit: CommandRun, cwd: string): Promise<GitOpResult
 }
 
 export class WorkspaceService {
+  private readonly pendingRemovals = new PendingRemovalQueries();
+
   constructor(
     private readonly queries: WorkspaceQueries = new WorkspaceQueries(),
     private readonly usageEventQueries: UsageEventQueries = new UsageEventQueries(),
@@ -711,17 +714,31 @@ export class WorkspaceService {
     const wtHostId = wtRow.hostId ?? hostRegistry.local.id;
     const checkoutPath =
       hostRegistry.projectPathOn(project.name, wtHostId, project.path) ?? project.path;
-    const worktrees = await (wtHostId === hostRegistry.local.id
-      ? hostRegistry.hostForProject(project.name)
-      : hostRegistry.hostById(wtHostId)
-    ).worktree.list(checkoutPath);
+    const workspaceId = toWorkspaceId(input.project, input.name);
+    let worktrees: Awaited<ReturnType<Host["worktree"]["list"]>>;
+    try {
+      worktrees = await (wtHostId === hostRegistry.local.id
+        ? hostRegistry.hostForProject(project.name)
+        : hostRegistry.hostById(wtHostId)
+      ).worktree.list(checkoutPath);
+    } catch (err) {
+      // A worker that is offline can't be asked. Take the workspace off the
+      // hub now and delete the checkout when the worker reconnects.
+      if (wtHostId !== hostRegistry.local.id && err instanceof HostOfflineError) {
+        log.info(
+          { workspaceId, hostId: wtHostId },
+          "host offline; removal will finish on reconnect",
+        );
+        return this.removeNow(input, workspaceId, wtRow.path, currentBranch, currentBranch, true);
+      }
+      throw err;
+    }
     const match = worktrees.find((wt) => wt.branch === currentBranch);
     if (!match) {
       throw new WorkspaceNotFoundError(input.name);
     }
     const worktreePath = match.path;
 
-    const workspaceId = toWorkspaceId(input.project, input.name);
     const teardownScript = { worktreePath, projectPath: checkoutPath };
     if (!(await workspaceScriptService.getCommand(workspaceId, "teardown", teardownScript))) {
       return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
@@ -756,6 +773,7 @@ export class WorkspaceService {
     worktreePath: string,
     currentBranch: string,
     matchedBranch: string,
+    deferCleanup = false,
   ): Promise<{ ok: true }> {
     // Until git no longer lists the worktree, a sync would add it back.
     const removal = await syncService.beginWorktreeRemoval(worktreePath);
@@ -768,6 +786,7 @@ export class WorkspaceService {
         currentBranch,
         matchedBranch,
         removal,
+        deferCleanup,
       );
       cleanupScheduled = true;
       return result;
@@ -783,6 +802,7 @@ export class WorkspaceService {
     currentBranch: string,
     matchedBranch: string,
     removal: WorktreeRemoval,
+    deferCleanup: boolean,
   ): { ok: true } {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
@@ -893,64 +913,123 @@ export class WorkspaceService {
     // call up front keeps the background logs free of noise that's hard
     // to distinguish from a genuine problem.
     const branchToDelete = matchedBranch.startsWith(DETACHED_BRANCH_PREFIX) ? null : currentBranch;
+    if (deferCleanup) {
+      this.pendingRemovals.add({
+        hostId: host.id,
+        repoPath: projPath,
+        worktreePath,
+        branch: branchToDelete,
+      });
+      removal.end();
+      return { ok: true };
+    }
     setImmediate(() => {
-      (async () => {
-        // Unlock the worktree first. External tooling (e.g. `supacode`)
-        // locks Band's worktrees — visible as a `locked "{...}"` line in
-        // `git worktree list --porcelain` — most likely to stop `git gc` /
-        // auto-prune from reclaiming a worktree while an agent is mid-flight.
-        // A locked worktree is refused by a single `git worktree remove
-        // --force` ("cannot remove a locked working tree") AND is skipped by
-        // `git worktree prune`, so without this unlock the admin record in
-        // `.git/worktrees/<id>/` survives and `syncWorktrees` re-adds the
-        // workspace on the next tick (issue: locked worktrees resurrect
-        // forever). Best-effort: swallow "not locked" and any other error.
-        try {
-          // Unlocks first (best-effort), then removes.
-          await host.worktree.remove({ repoPath: projPath, path: worktreePath });
-        } catch {
-          // Worktree may be corrupted (e.g. missing .git file) or still
-          // refused. Manually remove the directory and prune stale entries.
-          try {
-            await host.fs.rm(worktreePath, { recursive: true, force: true });
-          } catch (err) {
-            // Permission errors / EBUSY here leave the directory on disk;
-            // log so a stale worktree path is traceable, then still try
-            // `git worktree prune` to at least clean the index — matches
-            // the existing best-effort pattern used for prune/branch -D.
-            log.warn({ err, workspaceId, worktreePath }, "manual worktree rm failed");
-          }
-          // Re-run the unlock: `git worktree prune` skips LOCKED entries, so
-          // a still-locked admin record (whose working dir we just `rm`'d)
-          // would otherwise survive the prune and resurrect on sync. Unlock
-          // resolves the entry by its recorded path even when the dir is gone.
-          try {
-            await host.git.exec(["worktree", "unlock", worktreePath], projPath);
-          } catch {
-            // Already unlocked or entry gone — prune below handles the rest.
-          }
-          try {
-            await host.git.exec(["worktree", "prune"], projPath);
-          } catch (err) {
-            log.warn({ err, workspaceId }, "git worktree prune failed");
-          }
-        }
-
-        if (branchToDelete) {
-          try {
-            await host.git.exec(["branch", "-D", branchToDelete], projPath);
-          } catch {
-            // Branch may already be deleted
-          }
-        }
-      })()
+      this.cleanupWorktree(host, projPath, worktreePath, branchToDelete, workspaceId)
         .catch((err) => {
+          if (err instanceof HostOfflineError) {
+            // The host dropped after the workspace left the hub. The worker finishes the job on reconnect.
+            log.info(
+              { workspaceId, hostId: host.id },
+              "host went offline; cleanup will finish on reconnect",
+            );
+            this.pendingRemovals.add({
+              hostId: host.id,
+              repoPath: projPath,
+              worktreePath,
+              branch: branchToDelete,
+            });
+            return;
+          }
           log.error({ err, workspaceId }, "background workspace cleanup failed");
         })
         .finally(removal.end);
     });
 
     return { ok: true };
+  }
+
+  /**
+   * Deletes a removed workspace's checkout on its host: the git worktree, then
+   * its branch. Rejects with `HostOfflineError` when the host can't be reached,
+   * so the caller can try again later.
+   */
+  private async cleanupWorktree(
+    host: Host,
+    projPath: string,
+    worktreePath: string,
+    branchToDelete: string | null,
+    workspaceId: string,
+  ): Promise<void> {
+    // Unlock the worktree first. External tooling (e.g. `supacode`)
+    // locks Band's worktrees — visible as a `locked "{...}"` line in
+    // `git worktree list --porcelain` — most likely to stop `git gc` /
+    // auto-prune from reclaiming a worktree while an agent is mid-flight.
+    // A locked worktree is refused by a single `git worktree remove
+    // --force` ("cannot remove a locked working tree") AND is skipped by
+    // `git worktree prune`, so without this unlock the admin record in
+    // `.git/worktrees/<id>/` survives and `syncWorktrees` re-adds the
+    // workspace on the next tick (issue: locked worktrees resurrect
+    // forever). Best-effort: swallow "not locked" and any other error.
+    try {
+      // Unlocks first (best-effort), then removes.
+      await host.worktree.remove({ repoPath: projPath, path: worktreePath });
+    } catch (err) {
+      if (err instanceof HostOfflineError) throw err;
+      // Worktree may be corrupted (e.g. missing .git file) or still
+      // refused. Manually remove the directory and prune stale entries.
+      try {
+        await host.fs.rm(worktreePath, { recursive: true, force: true });
+      } catch (rmErr) {
+        if (rmErr instanceof HostOfflineError) throw rmErr;
+        // Permission errors / EBUSY here leave the directory on disk;
+        // log so a stale worktree path is traceable, then still try
+        // `git worktree prune` to at least clean the index — matches
+        // the existing best-effort pattern used for prune/branch -D.
+        log.warn({ err: rmErr, workspaceId, worktreePath }, "manual worktree rm failed");
+      }
+      // Re-run the unlock: `git worktree prune` skips LOCKED entries, so
+      // a still-locked admin record (whose working dir we just `rm`'d)
+      // would otherwise survive the prune and resurrect on sync. Unlock
+      // resolves the entry by its recorded path even when the dir is gone.
+      try {
+        await host.git.exec(["worktree", "unlock", worktreePath], projPath);
+      } catch {
+        // Already unlocked or entry gone — prune below handles the rest.
+      }
+      try {
+        await host.git.exec(["worktree", "prune"], projPath);
+      } catch (pruneErr) {
+        if (pruneErr instanceof HostOfflineError) throw pruneErr;
+        log.warn({ err: pruneErr, workspaceId }, "git worktree prune failed");
+      }
+    }
+
+    if (branchToDelete) {
+      try {
+        await host.git.exec(["branch", "-D", branchToDelete], projPath);
+      } catch {
+        // Branch may already be deleted
+      }
+    }
+  }
+
+  /**
+   * Deletes the checkouts of workspaces that were removed while `hostId` was
+   * offline. Called when its worker connects. A removal that fails stays
+   * recorded for the next connect.
+   */
+  async finishPendingRemovals(hostId: string): Promise<void> {
+    const host = hostRegistry.hostById(hostId);
+    for (const row of this.pendingRemovals.listForHost(hostId)) {
+      try {
+        await this.cleanupWorktree(host, row.repoPath, row.worktreePath, row.branch, hostId);
+        this.pendingRemovals.delete(hostId, row.worktreePath);
+        log.info({ hostId, worktreePath: row.worktreePath }, "finished a pending removal");
+      } catch (err) {
+        log.warn({ hostId, worktreePath: row.worktreePath, err }, "pending removal not finished");
+        if (err instanceof HostOfflineError) return;
+      }
+    }
   }
 
   /**

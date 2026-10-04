@@ -119,7 +119,7 @@ export const systemRouter = t.router({
             // label and gets counted in the disk accounting.
             const worktrees = list
               .filter((wt) => !wt.isBare)
-              .map((wt) => ({ branch: wt.branch, path: wt.path }));
+              .map((wt) => ({ branch: wt.branch, path: wt.path, hostId: wt.hostId }));
             return {
               project: project.name,
               path: project.path,
@@ -130,7 +130,7 @@ export const systemRouter = t.router({
             return {
               project: project.name,
               path: project.path,
-              worktrees: [] as { branch: string; path: string }[],
+              worktrees: [] as { branch: string; path: string; hostId?: string }[],
               error: err instanceof Error ? err.message : String(err),
             };
           }
@@ -156,14 +156,14 @@ export const systemRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
       }
 
-      let worktreePaths: { branch: string; path: string }[];
+      let worktreePaths: { branch: string; path: string; hostId?: string }[];
       try {
         const list = await systemService.listWorktrees(project.name, project.path);
         // See `resourcesProjects` above — `listWorktrees` already
         // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list
           .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path }));
+          .map((wt) => ({ branch: wt.branch, path: wt.path, hostId: wt.hostId }));
       } catch (err) {
         return {
           project: project.name,
@@ -181,8 +181,8 @@ export const systemRouter = t.router({
       const worktrees = await Promise.all(
         worktreePaths.map(async (wt) => {
           try {
-            const sizeBytes = await systemService.duBytes(project.name, wt.path);
-            return { branch: wt.branch, path: wt.path, sizeBytes };
+            const sizeBytes = await systemService.duBytes(project.name, wt.path, wt.hostId);
+            return { branch: wt.branch, path: wt.path, hostId: wt.hostId, sizeBytes };
           } catch (err) {
             return {
               branch: wt.branch,

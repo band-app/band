@@ -65,6 +65,18 @@
  *                                           outside any turn, the way an
  *                                           agent-started turn (a wakeup, a
  *                                           task notification) streams
+ *   { "writeFile": { "path", "content" } }  write a file in this process, as
+ *                                           an agent copying a file into the
+ *                                           shared directory does. `{{sharedDir}}`
+ *                                           is the directory the first turn's
+ *                                           prompt names.
+ *   { "http": { "name", "path", "method"?, "body"?, "auth"?, "headers"? } }
+ *                                           call BAND_SERVER_URL the way the
+ *                                           `band` CLI does (cookie
+ *                                           `band_token=$BAND_TOKEN`, unless
+ *                                           `auth` is "none") and append
+ *                                           `{ name, status, body }` to the
+ *                                           file in BAND_TEST_ACP_HTTP_LOG.
  *   { "asyncTask": { ...update } }          an AIR `async_task_*` update
  *                                           (`sessionUpdate` defaults to
  *                                           `async_task_spawned`), sent only
@@ -105,6 +117,7 @@ function logRequest(method, params) {
       env: {
         BAND_DISPATCH: env.BAND_DISPATCH,
         BAND_SERVER_URL: env.BAND_SERVER_URL,
+        BAND_TOKEN: env.BAND_TOKEN,
         BAND_CHAT_ID: env.BAND_CHAT_ID,
         BAND_WORKSPACE_ID: env.BAND_WORKSPACE_ID,
       },
@@ -202,7 +215,10 @@ function newSessionId() {
 
 function fill(value, vars) {
   if (typeof value === "string") {
-    return value.replaceAll("{{prompt}}", vars.prompt).replaceAll("{{model}}", vars.model);
+    return value
+      .replaceAll("{{prompt}}", vars.prompt)
+      .replaceAll("{{model}}", vars.model)
+      .replaceAll("{{sharedDir}}", vars.sharedDir ?? "");
   }
   if (Array.isArray(value)) return value.map((v) => fill(v, vars));
   if (value && typeof value === "object") {
@@ -258,6 +274,24 @@ async function runSteps(cx, sessionId, steps, signal, record) {
           .finally(() => save(sessionId));
       }, step.afterMs ?? 0);
       t.unref?.();
+    } else if (step.writeFile) {
+      writeFileSync(step.writeFile.path, step.writeFile.content);
+    } else if (step.http) {
+      const { name, path, method = "GET", body, auth, headers: extra } = step.http;
+      const headers = { "content-type": "application/json", ...extra };
+      if (auth !== "none" && env.BAND_TOKEN) headers.cookie = `band_token=${env.BAND_TOKEN}`;
+      let line;
+      try {
+        const res = await fetch(`${env.BAND_SERVER_URL}${path}`, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        line = { name, status: res.status, body: (await res.text()).slice(0, 20000) };
+      } catch (err) {
+        line = { name, status: 0, body: String(err) };
+      }
+      appendFileSync(env.BAND_TEST_ACP_HTTP_LOG, `${JSON.stringify(line)}\n`);
     } else if (step.tool) {
       await notify({ sessionUpdate: "tool_call", ...step.tool });
     } else if (step.toolUpdate) {
@@ -398,9 +432,11 @@ acp
       }
     };
     const turn = scenario.turns.find((t) => !t.match || new RegExp(t.match).test(text));
+    const allText = prompt.map((b) => (b.type === "text" ? b.text : "")).join("\n");
     const steps = fill(turn?.steps ?? [{ say: 'Heard "{{prompt}}" on {{model}}.' }], {
       prompt: first,
       model: s.model,
+      sharedDir: /write or copy it to (.+?)\/ and/.exec(allText)?.[1],
     });
     try {
       const out = await runSteps(ctx.client, sessionId, steps, controller.signal, record);

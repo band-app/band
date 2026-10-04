@@ -1,4 +1,4 @@
-import { type Host, HostOfflineError, HostTimeoutError } from "@band-app/host-api";
+import { type Host, HostOfflineError, HostTimeoutError, type RelayGrant } from "@band-app/host-api";
 import { loadProjectConfig } from "@band-app/host-local/setup/project-config";
 import { TerminalDaemonUnavailableError } from "@band-app/host-local/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
@@ -119,6 +119,8 @@ export class TerminalService {
   >();
   /** terminalId -> the host it lives on. Filled by spawn, info, attach and listings. */
   private readonly terminalHosts = new Map<string, Host>();
+  /** Relay credentials of terminals on remote hosts, ended with the terminal. */
+  private readonly relayGrants = new Map<string, RelayGrant>();
   /** terminalId -> exit listeners, so an exit only reaches its own viewers. */
   private readonly exitListeners = new Map<string, Set<(event: TerminalExitEvent) => void>>();
   /** Tab titles for every open terminal, from one shared poll of every host's backend. */
@@ -243,20 +245,30 @@ export class TerminalService {
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);
     }
+    const host = this.hostOfWorkspace(workspaceId);
+    const known = this.terminalHosts.get(terminalId);
+    if (known && known.id !== host.id) {
+      throw new Error(`Terminal ${terminalId} already runs on another host`);
+    }
+    // A shell on a remote host calls the hub through the worker's relay. The
+    // token goes only into this spawn's env, never into the saved layout.
+    const grant = await host.relay?.issue({ workspaceId });
     const request = {
       workspaceId,
       terminalId,
       workspaceRoot: workspace.worktree.path,
-      options,
+      options: grant ? { ...options, env: { ...options?.env, ...grant.env } } : options,
       cleanupOnExit: opts?.cleanupOnExit,
     };
-    const host = this.hostOfWorkspace(workspaceId);
     const backend = this.ptyOf(host);
     let entry: TerminalListEntry;
     try {
       entry = await backend.spawn(request);
     } catch (err) {
-      if (!(err instanceof TerminalDaemonUnavailableError)) throw err;
+      if (!(err instanceof TerminalDaemonUnavailableError)) {
+        await grant?.revoke();
+        throw err;
+      }
       // A terminal that dies with the server beats no terminal. Swap only
       // once: concurrent spawns that failed together must land on the same
       // replacement.
@@ -267,9 +279,20 @@ export class TerminalService {
         );
         this.setBackend(new InProcessTerminalBackend());
       }
-      entry = await this.ptyOf(host).spawn(request);
+      try {
+        entry = await this.ptyOf(host).spawn(request);
+      } catch (retryErr) {
+        await grant?.revoke();
+        throw retryErr;
+      }
     }
     this.terminalHosts.set(terminalId, host);
+    if (grant) {
+      // The pool hands back the live shell for a repeated spawn, and that shell
+      // still holds the earlier token. Keep the earlier grant and drop this one.
+      if (this.relayGrants.has(terminalId)) void grant.revoke();
+      else this.relayGrants.set(terminalId, grant);
+    }
 
     // The workspace can be removed while the spawn is in flight (e.g.
     // `band workspaces create --prompt` spawns fire-and-forget and a quick
@@ -297,6 +320,11 @@ export class TerminalService {
     return entry;
   }
 
+  /** The id of the host a terminal runs on, or null when this service does not know the terminal. */
+  hostIdOf(terminalId: string): string | null {
+    return this.terminalHosts.get(terminalId)?.id ?? null;
+  }
+
   /**
    * Kill a single terminal. Removes it from the saved dockview layout and
    * emits `terminal-killed` so the dashboard's status stream prunes the
@@ -307,6 +335,7 @@ export class TerminalService {
     if (!located) return;
     const killed = await located.backend.kill(terminalId);
     this.terminalHosts.delete(terminalId);
+    this.releaseRelay(terminalId);
     if (killed) {
       this.emitRemoved(killed.workspaceId, terminalId);
     }
@@ -324,6 +353,13 @@ export class TerminalService {
     emit({ kind: "terminal-killed", workspaceId, terminalId });
   }
 
+  /** Revokes the relay token a terminal's shell was started with. */
+  private releaseRelay(terminalId: string): void {
+    const grant = this.relayGrants.get(terminalId);
+    this.relayGrants.delete(terminalId);
+    void grant?.revoke();
+  }
+
   /**
    * A shell that exits on its own after being spawned with `cleanupOnExit`
    * gets the same teardown as an explicit kill. An explicit kill already ran
@@ -331,6 +367,7 @@ export class TerminalService {
    */
   private handleExit(event: TerminalExitEvent): void {
     this.terminalHosts.delete(event.terminalId);
+    this.releaseRelay(event.terminalId);
     if (event.cleanupOnExit && !event.killed) {
       this.emitRemoved(event.workspaceId, event.terminalId);
     }
@@ -352,7 +389,10 @@ export class TerminalService {
     const backend = this.ptyOf(this.hostOfWorkspace(workspaceId));
     const entries = await backend.list(workspaceId);
     await backend.killWorkspace(workspaceId);
-    for (const entry of entries) this.terminalHosts.delete(entry.terminalId);
+    for (const entry of entries) {
+      this.terminalHosts.delete(entry.terminalId);
+      this.releaseRelay(entry.terminalId);
+    }
   }
 
   /**

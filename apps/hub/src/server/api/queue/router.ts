@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
+import { hostRegistry } from "../../infra/host/registry";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -14,7 +15,11 @@ import {
   toWireQueuedMessages,
   updateQueuedMessage,
 } from "../../services/_utils/queued-message-store";
-import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
+import {
+  isWithinUploads,
+  saveWorkspaceUploads,
+  uploadPathFromUrl,
+} from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { bandHome } from "../../services/state";
 import { publicProcedure, t } from "../trpc";
@@ -120,9 +125,11 @@ function isPathWithinUploadDir(p: string): boolean {
  */
 async function resolveQueuedFiles(
   chatId: string,
+  workspaceId: string,
   files: QueuedFileInput[] | undefined,
 ): Promise<{ mediaType: string; url: string; path: string; filename?: string }[] | undefined> {
   if (!files || files.length === 0) return undefined;
+  const remote = hostRegistry.hostFor(workspaceId).id !== hostRegistry.local.id;
 
   const resolved: { mediaType: string; url: string; path: string; filename?: string }[] = [];
   const needsSave: QueuedFileInput[] = [];
@@ -136,15 +143,17 @@ async function resolveQueuedFiles(
     // `url: "/api/uploads/<storedName>"`. Reconstructing the path
     // server-side keeps the wire small AND prevents a malicious
     // client from spoofing a path that doesn't match its URL.
-    const uploadsUrlMatch = file.url.match(/^\/api\/uploads\/(.+)$/);
-    const derivedPath =
-      file.path ?? (uploadsUrlMatch ? join(bandHome(), "uploads", uploadsUrlMatch[1]) : undefined);
+    const derivedPath = file.path ?? (await uploadPathFromUrl(workspaceId, file.url)) ?? undefined;
 
     if (derivedPath) {
       // Containment check — never trust a client-supplied path, even
       // a derived one (an attacker could send
       // `url: "/api/uploads/../../etc/passwd"`).
-      if (!isPathWithinUploadDir(derivedPath)) {
+      // A remote workspace's uploads are on its worker, so only a string check can run here.
+      const inside = remote
+        ? await isWithinUploads(workspaceId, derivedPath)
+        : isPathWithinUploadDir(derivedPath);
+      if (!inside) {
         log.warn(
           { chatId, path: derivedPath, filename: file.filename },
           "queue: dropping file with path outside uploads directory",
@@ -182,7 +191,7 @@ async function resolveQueuedFiles(
   }
 
   if (needsSave.length > 0) {
-    const saved = await saveUploadedFilesDetailed(needsSave);
+    const saved = await saveWorkspaceUploads(workspaceId, needsSave);
     // The splicing loop below is index-aligned: `saved[k]` MUST
     // correspond to `needsSave[k]`. `saveUploadedFilesDetailed` skips
     // entries that fail its data-URL regex (compacted output) and
@@ -206,7 +215,7 @@ async function resolveQueuedFiles(
         const target = needsSaveIdx[k];
         resolved[target] = {
           mediaType: saved[k].mediaType,
-          url: `/api/uploads/${saved[k].storedName}`,
+          url: saved[k].url,
           path: saved[k].path,
           ...(saved[k].originalName !== undefined && { filename: saved[k].originalName }),
         };
@@ -238,7 +247,7 @@ export const queueRouter = t.router({
       // the text actually survived.
       let files: Awaited<ReturnType<typeof resolveQueuedFiles>>;
       try {
-        files = await resolveQueuedFiles(chatId, input.files);
+        files = await resolveQueuedFiles(chatId, input.workspaceId, input.files);
       } catch (err) {
         log.error(
           { chatId, err: err instanceof Error ? err.message : err },
@@ -282,7 +291,7 @@ export const queueRouter = t.router({
             return {
               ...(m.id !== undefined && { id: m.id }),
               text: m.text,
-              files: await resolveQueuedFiles(chatId, m.files),
+              files: await resolveQueuedFiles(chatId, input.workspaceId, m.files),
             };
           } catch (err) {
             log.error(

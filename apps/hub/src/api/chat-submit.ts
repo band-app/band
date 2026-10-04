@@ -14,7 +14,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
-import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
+import { saveWorkspaceUploads } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
   type TaskAttachment,
@@ -77,8 +77,8 @@ export async function handleChatSubmit(
 
   let attachments: TaskAttachment[] = [];
   if (files && files.length > 0) {
-    const saved = await saveUploadedFilesDetailed(files);
-    // `saveUploadedFilesDetailed` skips entries that aren't
+    const saved = await saveWorkspaceUploads(workspaceId, files);
+    // `saveWorkspaceUploads` skips entries that aren't
     // `data:<mime>;base64,...` URLs; say so rather than drop them silently.
     if (saved.length !== files.length) {
       log.warn(
@@ -89,7 +89,7 @@ export async function handleChatSubmit(
     attachments = saved.map((s) => ({
       path: s.path,
       mediaType: s.mediaType,
-      url: `/api/uploads/${s.storedName}`,
+      url: s.url,
       filename: s.originalName,
     }));
   }

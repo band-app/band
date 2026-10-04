@@ -52,6 +52,7 @@ import {
   startUsageScanner,
   stopUsageScanner,
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
+import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import { agentSessionRegistry } from "./src/server/services/agent-session-registry-service.ts";
@@ -80,6 +81,7 @@ import {
   WORKER_EXCHANGE_PATH,
   workerLinkService,
 } from "./src/server/services/worker-link-service.ts";
+import { workerRelayService } from "./src/server/services/worker-relay-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------
@@ -399,6 +401,37 @@ function serveStaticFile(
     res.writeHead(404);
     res.end("Not found");
   }
+}
+
+/**
+ * Serves a chat upload or a shared file that lives on a remote workspace's
+ * worker, by streaming it through the host. Resolves false for a local
+ * workspace, whose files the caller serves from the hub's disk.
+ */
+async function serveHostedFile(
+  res: ServerResponse,
+  kind: "uploads" | "shared",
+  workspaceId: string,
+  rawName: string,
+): Promise<boolean> {
+  if (hostRegistry.hostFor(workspaceId).id === hostRegistry.local.id) return false;
+  const file = await openHostedFile(kind, workspaceId, rawName);
+  if (!file) {
+    res.writeHead(404);
+    res.end("Not found");
+    return true;
+  }
+  res.writeHead(200, {
+    "Content-Type": mimeTypeFromFilename(basename(decodeURIComponent(rawName))),
+    "Content-Length": file.size.toString(),
+    "Cache-Control": "private, max-age=86400",
+  });
+  pipeline(
+    Readable.from(file.stream, { objectMode: false, highWaterMark: 64 * 1024 }),
+    res,
+    () => {},
+  );
+  return true;
 }
 
 /**
@@ -818,8 +851,23 @@ async function main() {
     if (handleAuth(req, res)) return;
 
     // Serve uploaded files (images, attachments)
+    // A local upload is `/api/uploads/<name>`. One on a remote workspace's
+    // worker is `/api/uploads/<workspaceId>/<name>`.
     if (req.url?.startsWith("/api/uploads/")) {
-      serveStaticFile(res, bandHome(), "uploads", req.url.slice("/api/uploads/".length));
+      const rest = req.url.slice("/api/uploads/".length);
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx !== -1) {
+        let wId: string;
+        try {
+          wId = decodeURIComponent(rest.slice(0, slashIdx));
+        } catch {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        if (await serveHostedFile(res, "uploads", wId, rest.slice(slashIdx + 1))) return;
+      }
+      serveStaticFile(res, bandHome(), "uploads", rest);
       return;
     }
 
@@ -871,6 +919,7 @@ async function main() {
         res.end("Bad request");
         return;
       }
+      if (await serveHostedFile(res, "shared", partition, rest.slice(slashIdx + 1))) return;
       serveStaticFile(res, bandHome(), join("shared", partition), rest.slice(slashIdx + 1));
       return;
     }
@@ -1334,6 +1383,8 @@ async function main() {
   // loopback request never leaves the machine, so the band_token a child
   // CLI sends has no network hop to encrypt.
   process.env.BAND_SERVER_URL = `http://127.0.0.1:${boundPort}`;
+  // Calls that workers relay for their agents are replayed against this server.
+  workerRelayService.configure(process.env.BAND_SERVER_URL, expectedToken);
 
   if (adminTokenGenerated && /^(true|1|yes|on)$/i.test(process.env.BAND_PRINT_ADMIN_TOKEN ?? "")) {
     // The only place a token is logged. A later boot finds it stored and says nothing.
