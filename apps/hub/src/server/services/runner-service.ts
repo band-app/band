@@ -30,6 +30,7 @@ import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { ISOLATION_LABEL_KEY, requestedIsolation, runnerLevel } from "./_utils/isolation";
 import { parseRunners, type RunnerConfig, resolveHookPath } from "./_utils/runner-config";
+import { environmentBuildService } from "./environment-build-service";
 import { HostRequestError, placementService } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
@@ -492,6 +493,8 @@ export class RunnerService {
         .join(","),
       BAND_REQUIRES: JSON.stringify(row.requires ?? {}),
       BAND_PROJECT: row.project,
+      // The project's current environment image (plan step 3.2), empty before its first ready build.
+      BAND_PROJECT_IMAGE: this.projectImage(row.project),
       BAND_RUNNER_ID: runner.id,
       BAND_REQUEST_ID: row.id,
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
@@ -499,6 +502,14 @@ export class RunnerService {
     });
     if (token) env.BAND_BOOTSTRAP_TOKEN = token;
     return env;
+  }
+
+  private projectImage(project: string): string {
+    try {
+      return environmentBuildService.currentImage(project) ?? "";
+    } catch {
+      return "";
+    }
   }
 
   private hubUrlFor(runner: RunnerConfig): string {

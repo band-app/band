@@ -151,4 +151,4 @@ Builds run on the builder host: the hub's own machine, or a worker with Docker. 
 
 `hostId` defaults to `local`. The project needs a checkout on that host. `registry` is optional, and without it the image stays on the builder host. Every command goes through the host's `exec` with each credential-like variable (names with TOKEN, SECRET, PASSWORD, KEY and the like) and every `BAND_*` variable of the hub's environment blanked, because a build runs commands from the repository. Do not point `hostId` at a machine whose environment holds secrets you would not run a repository's scripts next to.
 
-Not done yet: booting the image in a runner, snapshots, and a settings page for `environmentBuilder`.
+The `docker` runner hook boots the current image (`docs/runner-hooks.md`). Not done yet: snapshots, and a settings page for `environmentBuilder`.

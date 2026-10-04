@@ -66,6 +66,7 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
 | `BAND_REPO_URLS` | Comma-separated clone URLs of the request's repository, without credentials. The hub's local path when the project has no origin remote; only a hook on the hub's machine can use that. |
 | `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser (`docs/agent-environments.md`), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
+| `BAND_PROJECT_IMAGE` | The project's current environment image (`band env build`, `docs/agent-environments.md`), empty before its first ready build. |
 | `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
 | `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the host carries them. |
 | `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
@@ -135,13 +136,13 @@ Starts the worker image in a hardened container with `docker run --detach --rm`.
 | `--label band.runner`, `band.request`, `band.worker` | The runner, the host request and the worker id, for `docker ps --filter label=...`. |
 | `--network bridge` | The default. See below. |
 
-Nothing from the host is mounted and the docker socket is never passed in. The token goes in with `-e BAND_BOOTSTRAP_TOKEN`, so it is not in a command line or `ps`. It is in the container's config, though, so anyone who can run `docker inspect` on that daemon can read it. It is one-time and expires after an hour by default, so use a daemon only the hub's operator can reach. The container clones the first of `BAND_REPO_URLS` into `/work/<project>` before the worker starts, so the repository needs a URL the container can reach. A project with no origin remote has only a path on the hub's machine, which fails the clone.
+The project's image is `BAND_PROJECT_IMAGE` when this docker daemon has it or can pull it (it has the toolchain, the installed dependencies and the worker, and needs `git` for the clone). When it cannot get the image, for example one built on another host with no registry, the hook says so in its log and runs the base image. Nothing from the host is mounted and the docker socket is never passed in. The token goes in with `-e BAND_BOOTSTRAP_TOKEN`, so it is not in a command line or `ps`. It is in the container's config, though, so anyone who can run `docker inspect` on that daemon can read it. It is one-time and expires after an hour by default, so use a daemon only the hub's operator can reach. The container clones the first of `BAND_REPO_URLS` into `/work/<project>` before the worker starts, so the repository needs a URL the container can reach. A project with no origin remote has only a path on the hub's machine, which fails the clone.
 
 Settings (`env`):
 
 | Variable | Meaning |
 | --- | --- |
-| `BAND_DOCKER_IMAGE` | The image. Default `band-worker`, built with `docker build -f docker/worker.Dockerfile -t band-worker .`. The environment's `build.image` wins when it sets one. Building a project image from `build.dockerfile` or `build.devcontainer` is not done yet. |
+| `BAND_DOCKER_IMAGE` | The worker base image, run when the project has no ready environment image. Default `band-worker`, built with `docker build -f docker/worker.Dockerfile -t band-worker .`. |
 | `BAND_DOCKER_NETWORK` | Docker network. Default `bridge`. |
 | `BAND_DOCKER_PIDS_LIMIT` | Default 512. |
 | `BAND_DOCKER_MEMORY`, `BAND_DOCKER_CPUS` | Limits for an environment with no `resources`. Default none. |

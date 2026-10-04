@@ -302,4 +302,52 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       expect(docker("volume", "ls", "--quiet", "--filter", `name=${v}`)).toBe("");
     }
   }, 60_000);
+
+  it("runs the project's environment image, else the worker base image", async () => {
+    const spawnHook = join(import.meta.dirname, "../../../runners/docker/spawn.sh");
+    const destroyHook = join(import.meta.dirname, "../../../runners/docker/destroy.sh");
+    const projectTag = "band-env-test/proj:ready";
+    docker("tag", IMAGE, projectTag);
+    const hubUrl = process.env.BAND_DOCKER_TEST_HUB_URL ?? server.url;
+    const started: string[] = [];
+    try {
+      for (const projectImage of [projectTag, "band-env-test/proj:missing", ""]) {
+        const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
+          hostName: "image check",
+        });
+        started.push(issued.hostId);
+        execFileSync("sh", [spawnHook], {
+          env: {
+            PATH: process.env.PATH ?? "",
+            ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
+            BAND_NODE: process.execPath,
+            BAND_HUB_URL: hubUrl,
+            BAND_WORKER_ID: issued.hostId,
+            BAND_BOOTSTRAP_TOKEN: issued.token,
+            BAND_DOCKER_IMAGE: IMAGE,
+            BAND_DOCKER_NETWORK: NETWORK,
+            BAND_PROJECT_IMAGE: projectImage,
+          },
+        });
+        const [container] = containerOf(issued.hostId);
+        const image = JSON.parse(docker("inspect", container))[0].Config.Image as string;
+        expect(image).toBe(projectImage === projectTag ? projectTag : IMAGE);
+      }
+    } finally {
+      for (const hostId of started) {
+        execFileSync("sh", [destroyHook], {
+          env: {
+            PATH: process.env.PATH ?? "",
+            ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
+            BAND_WORKER_ID: hostId,
+          },
+        });
+      }
+      try {
+        docker("rmi", projectTag);
+      } catch {
+        // Already gone.
+      }
+    }
+  }, 120_000);
 });

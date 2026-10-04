@@ -159,8 +159,11 @@ export function devcontainerBuildArgs(opts: {
 
 /**
  * The Dockerfile of the final layer: the toolchain image plus the worker
- * copied from the worker base image. The worker runs on the node binary it
- * brings, so the toolchain needs no node of its own.
+ * copied from the worker base image, and a /work directory any uid can write.
+ * The worker runs on the node binary it brings, so the toolchain needs no node
+ * of its own. The caller puts an empty `root/work` directory in the build
+ * context. COPY makes /work where a RUN would fail, because the toolchain
+ * image may end on a non-root USER.
  */
 export function workerLayerDockerfile(opts: { from: string; workerBase: string }): string {
   return [
@@ -168,6 +171,9 @@ export function workerLayerDockerfile(opts: { from: string; workerBase: string }
     `COPY --from=${opts.workerBase} /usr/local/bin/node ${WORKER_NODE}`,
     `COPY --from=${opts.workerBase} /opt/band-worker ${WORKER_DIR}`,
     `COPY band-worker.sh ${WORKER_LAUNCHER}`,
+    // The docker runner hook (runners/docker) runs the image as uid 65532 with a /work volume, which
+    // takes its mode from this directory. COPY runs as root whatever USER the toolchain ends on.
+    "COPY --chmod=1777 root/ /",
     "",
   ].join("\n");
 }

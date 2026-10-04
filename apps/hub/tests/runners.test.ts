@@ -549,6 +549,8 @@ describe("the hook contract", () => {
     // The environment's own isolation wins over the runner's.
     expect(env.BAND_ISOLATION).toBe("container");
     expect(env.BAND_LABELS.split(",").sort()).toEqual(["pool=env", "zone=x"]);
+    // The project has no environment image built, so the hook is told there is none.
+    expect(env.BAND_PROJECT_IMAGE).toBe("");
     expect(env.BAND_RUNNER_ID).toBe("envdump");
     expect(env.BAND_REQUEST_ID).toBe(id);
     // The hub's own secrets and home do not reach the hook.

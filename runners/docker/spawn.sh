@@ -8,8 +8,11 @@
 # mounted and the docker socket is never passed in.
 #
 # Settings (the runner's "env"):
-#   BAND_DOCKER_IMAGE       image to run (default: band-worker, built from docker/worker.Dockerfile).
-#                           The environment's build.image wins when it sets one.
+#   BAND_DOCKER_IMAGE       the worker base image, run when the project has no ready environment image
+#                           (default: band-worker, built from docker/worker.Dockerfile).
+#   BAND_PROJECT_IMAGE      set by the hub: the project's current image from `band env build` (plan
+#                           step 3.2). It wins over BAND_DOCKER_IMAGE when this docker daemon has it or
+#                           can pull it, else the base image runs. It needs git for the clone.
 #   BAND_DOCKER_NETWORK     docker network (default: bridge). A worker accepts plain http only for a
 #                           loopback hub, so a hub on this machine needs "host" and http://127.0.0.1:<port>,
 #                           or an https BAND_HUB_URL.
@@ -27,13 +30,13 @@ node="${BAND_NODE:-node}"
 image="${BAND_DOCKER_IMAGE:-band-worker}"
 name="band-$BAND_WORKER_ID"
 
-# resources.cpu, resources.memory and build.image from the request's environment (docs/agent-environments.md).
+# resources.cpu and resources.memory from the request's environment (docs/agent-environments.md).
 env_field() {
   printf '%s' "${BAND_ENVIRONMENT:-}" | "$node" -e '
     let s = "";
     process.stdin.on("data", (c) => (s += c)).on("end", () => {
       const e = JSON.parse(s || "{}");
-      const v = { cpu: e.resources?.cpu, memory: e.resources?.memory, image: e.build?.image }[process.argv[1]];
+      const v = { cpu: e.resources?.cpu, memory: e.resources?.memory }[process.argv[1]];
       if (v !== undefined) process.stdout.write(String(v));
     });' "$1"
 }
@@ -43,14 +46,15 @@ docker_size() {
   printf '%s' "$1" | sed -E 's/^([0-9.]+) ?(Ki|K|KB)$/\1k/; s/^([0-9.]+) ?(Mi|M|MB)$/\1m/; s/^([0-9.]+) ?(Gi|G|GB)$/\1g/; s/^([0-9.]+) ?(Ti|T|TB)$/\1024g/'
 }
 
-# TODO(plan 3.2): when the environment's build produces a project image, run that. Until then only an
-# explicit build.image is used, and everything else gets the worker base image.
-project_image="$(env_field image)"
-if [ -n "$project_image" ]; then
-  case "$project_image" in
-    -* | *[!A-Za-z0-9._/:@-]*) echo "refusing build.image '$project_image'" >&2; exit 1 ;;
-  esac
-  image="$project_image"
+# The project's own image holds its toolchain and installed dependencies, and the worker (layer 1 of
+# docs/agent-environments.md). When this daemon cannot get it (a build on another host without a
+# registry), the worker base image runs instead.
+if [ -n "${BAND_PROJECT_IMAGE:-}" ]; then
+  if docker image inspect "$BAND_PROJECT_IMAGE" >/dev/null 2>&1 || docker pull --quiet "$BAND_PROJECT_IMAGE" >/dev/null 2>&1; then
+    image="$BAND_PROJECT_IMAGE"
+  else
+    echo "project image $BAND_PROJECT_IMAGE is not available on this docker host; using $image" >&2
+  fi
 fi
 
 cpus="$(env_field cpu)"
@@ -100,11 +104,12 @@ set -- "$@" \
   -e HOME=/work/home \
   -e BAND_WORKER_ROOTS=/work \
   -e BAND_WORKER_STATE_DIR=/work/.band-worker \
-  -e GIT_CONFIG_GLOBAL=/home/worker/.gitconfig \
   -e "BAND_CLONE_URL=$repo" -e "BAND_CLONE_NAME=$repo_name"
 if [ -n "${BAND_IDLE_EXIT:-}" ]; then set -- "$@" -e "BAND_WORKER_IDLE_EXIT=$BAND_IDLE_EXIT"; fi
 
 start='set -e
+# The worker image keeps its git identity and safe.directory in /home/worker, which HOME no longer is.
+if [ -f /home/worker/.gitconfig ]; then export GIT_CONFIG_GLOBAL=/home/worker/.gitconfig; fi
 mkdir -p "$HOME" "$BAND_WORKER_STATE_DIR"
 if [ -n "$BAND_CLONE_URL" ]; then env -u BAND_BOOTSTRAP_TOKEN GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- "$BAND_CLONE_URL" "/work/$BAND_CLONE_NAME"; fi
 exec band-worker'
