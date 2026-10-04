@@ -432,6 +432,54 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       assert.ok(exit.code !== null || exit.signal !== null);
     });
 
+    it("runs an ACP round trip over the agent's stdio", async () => {
+      const launch = await host.acp.resolveLaunch({ type: "claude-code" });
+      assert.notEqual(typeof launch, "string", "the suite needs an agent it can start");
+      if (typeof launch === "string") return;
+
+      const agent = await host.acp.spawn(launch, fixture.workDir);
+      const decoder = new TextDecoder();
+      const messages: { id?: number; result?: Record<string, unknown>; method?: string }[] = [];
+      let pending = "";
+      void (async () => {
+        for await (const chunk of agent.stdout) {
+          pending += decoder.decode(chunk, { stream: true });
+          for (;;) {
+            const end = pending.indexOf("\n");
+            if (end < 0) break;
+            const line = pending.slice(0, end).trim();
+            pending = pending.slice(end + 1);
+            if (line) messages.push(JSON.parse(line));
+          }
+        }
+      })();
+      const request = async (id: number, method: string, params: Record<string, unknown>) => {
+        agent.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+        return waitFor(`the answer to ${method}`, () => messages.find((m) => m.id === id));
+      };
+
+      try {
+        const init = await request(1, "initialize", { protocolVersion: 1, clientCapabilities: {} });
+        assert.ok(init.result?.agentCapabilities, "initialize answers with capabilities");
+        const created = await request(2, "session/new", { cwd: fixture.workDir, mcpServers: [] });
+        const sessionId = created.result?.sessionId;
+        assert.equal(typeof sessionId, "string");
+        const prompt = await request(3, "session/prompt", {
+          sessionId,
+          prompt: [{ type: "text", text: "hello" }],
+        });
+        assert.equal(prompt.result?.stopReason, "end_turn");
+        assert.ok(
+          messages.some((m) => m.method === "session/update"),
+          "the agent streamed an update before it answered",
+        );
+      } finally {
+        agent.kill();
+        const exit = await agent.exit;
+        assert.ok(exit.code !== null || exit.signal !== null);
+      }
+    });
+
     it("finds no setup script in a project without one", async () => {
       assert.equal(
         await host.scripts.prepare({ projectPath: repo, worktreePath: repo, label: "setup" }),
