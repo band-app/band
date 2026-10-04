@@ -19,6 +19,7 @@ function present(sub: Subscription) {
     ...(config.cron && { cron: config.cron }),
     ...(config.repo && { repo: config.repo }),
     ...(config.webhook && { webhook: config.webhook }),
+    ...(config.allowedSenders && { allowedSenders: config.allowedSenders }),
   };
 }
 
@@ -50,6 +51,11 @@ const createInput = z.object({
   pr: z.number().int().min(1).optional(),
   /** GitHub only: branch whose CI result is delivered once per commit, after every check completes. */
   branch: z.string().min(1).optional(),
+  /**
+   * GitHub `pr` only: logins whose comments and reviews are delivered; everyone else's are
+   * recorded and dropped. Defaults to the repo owner and the authenticated gh user.
+   */
+  allowedSenders: z.array(z.string().min(1)).optional(),
 });
 
 /**
@@ -72,11 +78,17 @@ export const subscriptionsRouter = t.router({
       throw new TRPCError({ code: "NOT_FOUND", message: `Chat ${chatId} not found` });
     }
     try {
-      const { source, at, cron, repo, pr, branch, ...common } = input;
+      const { source, at, cron, repo, pr, branch, allowedSenders, ...common } = input;
       if (source !== "github" && (repo !== undefined || pr !== undefined || branch !== undefined)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "`repo`, `pr` and `branch` apply to the github source only",
+        });
+      }
+      if (source !== "github" && allowedSenders !== undefined) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "`allowedSenders` applies to github subscriptions only",
         });
       }
       if (source === "github") {
@@ -92,10 +104,20 @@ export const subscriptionsRouter = t.router({
             message: "A github subscription needs `repo` and exactly one of `pr` and `branch`",
           });
         }
+        if (allowedSenders !== undefined && pr === undefined) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "`allowedSenders` applies to `pr` subscriptions only",
+          });
+        }
         const base = { ...common, chatId, workspaceId, repo };
         const subscription =
           pr !== undefined
-            ? subscriptionService.createGithubPr({ ...base, number: pr })
+            ? subscriptionService.createGithubPr({
+                ...base,
+                number: pr,
+                allowedSenders: allowedSenders ?? (await githubWebhookService.defaultSenders(repo)),
+              })
             : subscriptionService.createGithubCi({ ...base, branch: branch as string });
         // Registers the repo webhook (or records that it waits for a public URL).
         await githubWebhookService.ensureRegistered(subscription);
