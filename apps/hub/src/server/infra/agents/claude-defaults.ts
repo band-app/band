@@ -28,15 +28,10 @@ import { execFile } from "node:child_process";
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
+import type { ClaudeCliArgs } from "@band-app/host-api";
 import type { ResolvedDefaults } from "@band-app/shared/chat-events";
 
-/** Model and effort flags on the CLI's command line, and its `--settings`. */
-export interface ClaudeCliArgs {
-  /** Paths or inline JSON, in command-line order. */
-  settings: string[];
-  model?: string;
-  effort?: string;
-}
+export type { ClaudeCliArgs };
 
 interface ClaudeSettings {
   model?: unknown;

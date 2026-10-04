@@ -479,7 +479,7 @@ async function runTask(task: InternalTask): Promise<void> {
 /** Applies a per-turn model or mode choice through the session's config. */
 async function applyTurnChoice(chatId: string, category: "model" | "mode", value: string) {
   try {
-    const state = agentSessionService.getSessionState(chatId, { resolveDefaults: false });
+    const state = agentSessionService.getSessionState(chatId);
     const option = findOption(state.configOptions, category);
     const configId = option?.id ?? (category === "model" ? "__legacy_model" : "__legacy_mode");
     await agentSessionService.setConfigOption(chatId, configId, value);

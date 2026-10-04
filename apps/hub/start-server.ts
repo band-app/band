@@ -25,7 +25,7 @@ import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
-import { stopAllAgentProcesses } from "./src/server/infra/agents/acp-agent-process.ts";
+import { stopAllAgentProcesses } from "./src/server/infra/agents/agent-spawn.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";

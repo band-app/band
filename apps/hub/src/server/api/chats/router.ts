@@ -80,7 +80,9 @@ export const chatsRouter = t.router({
    */
   sessionState: publicProcedure
     .input(z.object({ chatId: z.string() }))
-    .query(({ input }) => ({ state: agentSessionService.getSessionState(input.chatId) })),
+    .query(async ({ input }) => ({
+      state: await agentSessionService.resolvedSessionState(input.chatId),
+    })),
 
   /**
    * Changes one ACP session config option (model, mode, reasoning effort,
