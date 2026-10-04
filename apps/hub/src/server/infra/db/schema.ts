@@ -9,6 +9,28 @@ import {
 } from "drizzle-orm/sqlite-core";
 import type { PullRequestSummary } from "../git/git-client";
 
+// A machine Band can run workspaces on. The `local` row is seeded by the
+// migration and is the only one until remote hosts are registered. `host_id`
+// columns elsewhere default to it, so existing rows need no backfill.
+export const hosts = sqliteTable("hosts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  mode: text("mode", { enum: ["attached", "ephemeral"] })
+    .notNull()
+    .default("attached"),
+  runner: text("runner"),
+  labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+  status: text("status", { enum: ["online", "offline", "lost", "disposed"] })
+    .notNull()
+    .default("online"),
+  lastSeenAt: integer("last_seen_at"),
+  info: text("info", { mode: "json" }).$type<Record<string, unknown>>(),
+  version: text("version"),
+  createdAt: integer("created_at").notNull(),
+});
+
+const hostId = () => text("host_id").notNull().default("local");
+
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
   project: text("project").notNull(),
@@ -19,6 +41,7 @@ export const workspaceStatuses = sqliteTable("workspace_statuses", {
   agentLastActivity: text("agent_last_activity"),
   agentSummary: text("agent_summary"),
   codingAgentId: text("coding_agent_id"),
+  hostId: hostId(),
   updatedAt: integer("updated_at").notNull(),
 });
 
@@ -80,6 +103,23 @@ export const projects = sqliteTable("projects", {
   hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
 });
 
+// A project's checkout path on each host. `projects.path` stays the source
+// that readers use and `ProjectQueries.saveAll` mirrors it here as the `local`
+// row, so Phase 2 can add a row per remote host without a schema change.
+export const projectHosts = sqliteTable(
+  "project_hosts",
+  {
+    projectName: text("project_name")
+      .notNull()
+      .references(() => projects.name, { onDelete: "cascade" }),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectName, t.hostId] })],
+);
+
 export const worktrees = sqliteTable("worktrees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   projectName: text("project_name")
@@ -99,6 +139,7 @@ export const worktrees = sqliteTable("worktrees", {
   path: text("path").notNull(),
   head: text("head"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  hostId: hostId(),
 });
 
 export const tasks = sqliteTable("tasks", {
@@ -196,6 +237,7 @@ export const cronjobs = sqliteTable("cronjobs", {
   // fire. Used as the overlap-check handle: if this PTY is still alive when the
   // next tick fires, the run is skipped rather than launching a second agent.
   lastTerminalId: text("last_terminal_id"),
+  hostId: hostId(),
 });
 
 // Persistent record of token usage and cost from coding-agent sessions
@@ -244,6 +286,7 @@ export const usageEvents = sqliteTable(
      * rows captured before the scanner shipped don't all need a backfill.
      */
     externalKey: text("external_key"),
+    hostId: hostId(),
   },
   (t) => [
     index("usage_events_captured_at_idx").on(t.capturedAt),
@@ -266,6 +309,7 @@ export const usageScanState = sqliteTable(
     workspaceId: text("workspace_id").notNull(),
     agentType: text("agent_type").notNull(),
     lastScannedUpdatedAt: integer("last_scanned_updated_at").notNull(),
+    hostId: hostId(),
   },
   (t) => [uniqueIndex("usage_scan_state_pk").on(t.workspaceId, t.agentType)],
 );

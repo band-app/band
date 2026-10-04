@@ -1,10 +1,11 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { hostRegistry } from "../src/server/infra/host/registry";
-import { saveState } from "../src/server/services/state";
+import { HostRegistry, hostRegistry } from "../src/server/infra/host/registry";
+import { loadState, saveState } from "../src/server/services/state";
 import { workspaceService } from "../src/server/services/workspace-service";
 
 // Uses a real SQLite DB in a temp BAND_HOME, as `sync-service.test.ts` does.
@@ -53,5 +54,36 @@ describe("host registry", () => {
       expect(resolved?.worktree.name).toBe(worktree);
     }
     expect(workspaceService.resolve("proj-missing")).toBeNull();
+  });
+
+  it("resolves a workspace through its stored host_id", () => {
+    saveState({
+      projects: [
+        {
+          name: "proj",
+          path: join(tmp, "proj"),
+          defaultBranch: "main",
+          worktrees: [
+            { name: "main", branch: "main", path: join(tmp, "proj"), pinned: false },
+            { name: "feat", branch: "feat", path: join(tmp, "proj-feat"), pinned: false },
+          ],
+        },
+      ],
+    });
+    const remote = Object.create(hostRegistry.local, { id: { value: "remote-1" } });
+    const registry = new HostRegistry(hostRegistry.local);
+    registry.register(remote);
+    const db = new DatabaseSync(join(tmp, ".band", "band.db"));
+    db.exec("INSERT INTO hosts (id, name, created_at) VALUES ('remote-1', 'Remote', 0)");
+    db.exec("UPDATE worktrees SET host_id = 'remote-1' WHERE name = 'feat'");
+    db.close();
+
+    expect(registry.hostFor("proj-feat")).toBe(remote);
+    expect(registry.hostFor("proj-main")).toBe(hostRegistry.local);
+
+    // A save from the in-memory tree keeps the stored host.
+    const state = loadState();
+    saveState(state);
+    expect(registry.hostFor("proj-feat")).toBe(remote);
   });
 });
