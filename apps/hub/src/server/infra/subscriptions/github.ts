@@ -224,6 +224,8 @@ export interface CheckRun {
   status: string;
   conclusion: string | null;
   url?: string;
+  /** The commit the check ran on. */
+  headSha?: string;
 }
 
 const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "action_required", "startup_failure"]);
@@ -292,6 +294,7 @@ export function parseCheckRuns(output: string): CheckRun[] {
         status: str(run.status),
         conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
         url: str(run.html_url) || undefined,
+        headSha: str(run.head_sha) || undefined,
       },
     ];
   });

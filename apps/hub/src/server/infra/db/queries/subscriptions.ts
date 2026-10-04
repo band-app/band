@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../connection";
-import { pushedShas, subscriptionEvents, subscriptions } from "../schema";
+import { pushedShas, subscriptionCursors, subscriptionEvents, subscriptions } from "../schema";
 
 type Row = typeof subscriptions.$inferSelect;
 
@@ -110,6 +110,7 @@ export class SubscriptionQueries {
   remove(id: string): void {
     getDb().transaction((tx) => {
       tx.delete(subscriptionEvents).where(eq(subscriptionEvents.subscriptionId, id)).run();
+      tx.delete(subscriptionCursors).where(eq(subscriptionCursors.subscriptionId, id)).run();
       tx.delete(subscriptions).where(eq(subscriptions.id, id)).run();
     });
   }
@@ -149,6 +150,25 @@ export class SubscriptionQueries {
   removeEvents(eventIds: string[]): void {
     if (eventIds.length === 0) return;
     getDb().delete(subscriptionEvents).where(inArray(subscriptionEvents.eventId, eventIds)).run();
+  }
+
+  cursor(subscriptionId: string): string | undefined {
+    return getDb()
+      .select()
+      .from(subscriptionCursors)
+      .where(eq(subscriptionCursors.subscriptionId, subscriptionId))
+      .get()?.cursor;
+  }
+
+  setCursor(subscriptionId: string, cursor: string, updatedAt: number): void {
+    getDb()
+      .insert(subscriptionCursors)
+      .values({ subscriptionId, cursor, updatedAt })
+      .onConflictDoUpdate({
+        target: subscriptionCursors.subscriptionId,
+        set: { cursor, updatedAt },
+      })
+      .run();
   }
 
   /** Remembers a head commit Band pushed from a workspace. */

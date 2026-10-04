@@ -176,6 +176,15 @@ export class ChatPanePage {
    *  `messageRowCount()` to get the windowed count without inlining
    *  `await this.messageRows.count()` in the test body. */
   readonly messageRows: Locator;
+  /** The "Listening" pill in the chat's top right corner. Absent while the
+   *  chat has no subscriptions. */
+  readonly listeningPill: Locator;
+  /** The number of subscriptions the pill shows. */
+  readonly listeningCount: Locator;
+  /** The open subscription list. */
+  readonly listeningList: Locator;
+  /** The rows of the open subscription list, one per subscription. */
+  readonly listeningItems: Locator;
 
   constructor(
     private readonly page: Page,
@@ -231,6 +240,30 @@ export class ChatPanePage {
     this.scroller = page.getByTestId("chat-pane__scroller");
     this.virtualList = page.getByTestId("chat-pane__virtual-list");
     this.messageRows = page.getByTestId("chat-pane__message-row");
+    this.listeningPill = page.getByTestId("listening-pill").filter({ visible: true });
+    this.listeningCount = page.getByTestId("listening-pill__count").filter({ visible: true });
+    this.listeningList = page.getByTestId("listening-pill__list");
+    this.listeningItems = page.getByTestId(/^listening-pill__item--/);
+  }
+
+  /** Open the pill's subscription list. */
+  async openListening(): Promise<void> {
+    await test.step("Open the Listening list", async () => {
+      await this.listeningPill.click();
+      await expect(this.listeningList).toBeVisible();
+    });
+  }
+
+  /** One subscription's row in the open list. */
+  listeningItem(subscriptionId: string): Locator {
+    return this.page.getByTestId(`listening-pill__item--${subscriptionId}`);
+  }
+
+  /** Remove one subscription through its row's remove button. */
+  async removeListening(subscriptionId: string): Promise<void> {
+    await test.step(`Remove subscription ${subscriptionId}`, async () => {
+      await this.page.getByTestId(`listening-pill__remove--${subscriptionId}`).click();
+    });
   }
 
   /** Navigate to the workspace's chat view. The only place URLs are

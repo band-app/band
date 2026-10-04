@@ -31,6 +31,10 @@ const SKILL_TEMPLATES: &[(&str, &str)] = &[
     ),
     ("band-start", include_str!("../skills/band-start/SKILL.md")),
     ("band-loop", include_str!("../skills/band-loop/SKILL.md")),
+    (
+        "band-subscribe",
+        include_str!("../skills/band-subscribe/SKILL.md"),
+    ),
 ];
 
 /// Supported coding agents that get a per-skill symlink under their
