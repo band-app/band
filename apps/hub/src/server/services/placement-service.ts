@@ -19,8 +19,17 @@ import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { z } from "zod";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
 import { hostRegistry } from "../infra/host/registry";
+import {
+  type IsolationLevel,
+  isExclusiveHost,
+  offers,
+  requestedIsolation,
+  runnerLevel,
+} from "./_utils/isolation";
 import type { Placement } from "./_utils/placement-input";
+import { parseRunners } from "./_utils/runner-config";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { settingsService } from "./settings-service";
 import { tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { type WorkspaceCreateInput, workspaceService } from "./workspace-service";
@@ -39,6 +48,8 @@ export const leaseFilterInput = z
     labels: z.record(z.string(), z.string()).optional(),
     /** Facts about what the runner starts. When given, a request's `requires` must hold for them. */
     provides: z.record(z.string(), z.string()).optional(),
+    /** The isolation the runner's machines have. A request asking for more is left alone. */
+    isolation: z.enum(["worktree", "container", "vm"]).optional(),
   })
   .default({});
 export type { Placement };
@@ -179,9 +190,17 @@ export class PlacementService {
     return out;
   }
 
-  /** The least loaded online host that satisfies `placement`, or null. */
+  /**
+   * The least loaded online host that satisfies `placement`, or null. A
+   * `container` or `vm` workspace gets a worker of its own, so it never reuses
+   * a host, and a `worktree` workspace never lands on a host that was started
+   * for one of those.
+   */
   async place(placement: Placement): Promise<string | null> {
-    const fits = (await this.candidates()).filter((c) => matches(c, placement));
+    if (requestedIsolation(placement.environment ?? null) !== "worktree") return null;
+    const fits = (await this.candidates()).filter(
+      (c) => !isExclusiveHost(c.labels) && matches(c, placement),
+    );
     if (fits.length === 0) return null;
     const load = this.queries.worktreeCounts();
     fits.sort((a, b) => (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0) || a.id.localeCompare(b.id));
@@ -203,6 +222,7 @@ export class PlacementService {
     // run together.
     const raced = this.queries.findOpenForWorkspace(workspaceId);
     if (raced) return { kind: "request", requestId: raced.id };
+    this.assertRunnerOffers(requestedIsolation(placement.environment ?? null), workspaceId);
     const now = this.now();
     const { placement: _placement, ...replay } = input;
     const id = `hr-${randomUUID().slice(0, 12)}`;
@@ -227,6 +247,22 @@ export class PlacementService {
     log.info(`no host fits ${workspaceId}; recorded request ${id}`);
     this.publish(id, workspaceId, "pending");
     return { kind: "request", requestId: id };
+  }
+
+  /**
+   * Refuses a `container` or `vm` request that no configured runner could
+   * take, so the caller gets the reason now and not after the placement timeout.
+   */
+  private assertRunnerOffers(wanted: IsolationLevel, workspaceId: string): void {
+    if (wanted === "worktree") return;
+    const { runners } = parseRunners(settingsService.get().runners);
+    if (runners.some((r) => offers(runnerLevel(r.isolation), wanted))) return;
+    const reason =
+      wanted === "vm"
+        ? "No runner offers isolation vm. Set isolation to vm on a runner in settings.json. The bundled hooks start no virtual machines yet."
+        : "No runner offers isolation container. Add a runner with isolation container to settings.json, such as the bundled docker hook.";
+    log.warn(`${workspaceId} asked for isolation ${wanted}, but ${reason}`);
+    throw new Error(`Cannot place ${workspaceId}: ${reason}`);
   }
 
   /**
@@ -286,6 +322,15 @@ export class PlacementService {
     for (const row of this.queries.listLeasable(now)) {
       const wanted = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
       if (filter.labels && !wanted.every((l) => offered.includes(l))) continue;
+      // A runner that names no level offers `worktree`, so it never takes a container or vm request.
+      if (
+        !offers(
+          filter.isolation ?? "worktree",
+          requestedIsolation(row.environment as Record<string, unknown> | null),
+        )
+      ) {
+        continue;
+      }
       const provides = filter.provides;
       if (
         provides &&

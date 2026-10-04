@@ -586,6 +586,8 @@ export class EnvironmentBuildService {
     await plan.host.fs.writeFile(posix.join(dir, "band-worker.sh"), workerLauncherScript(), {
       mode: 0o755,
     });
+    // The layer's `COPY root/ /` creates /work with a mode every uid can write.
+    await plan.host.fs.mkdir(posix.join(dir, "root", "work"), { recursive: true });
     const tag = layeredTag(plan.project, plan.key);
     await this.exec(plan.host, "docker", ["build", "--tag", tag, dir], log);
     return tag;

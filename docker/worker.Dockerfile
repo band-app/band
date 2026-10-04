@@ -55,6 +55,9 @@ RUN ln -s /opt/band-worker/node_modules/.bin/band-worker /usr/local/bin/band-wor
 RUN useradd --uid 10001 --create-home --shell /bin/bash worker \
  && mkdir -p /work /home/worker/.band/worker \
  && chown -R worker:worker /work /home/worker
+# /work is writable by any uid. The docker runner hook (runners/docker) runs the image as uid 65532
+# with a fresh /work volume, which takes its ownership and mode from this directory.
+RUN chmod 1777 /work
 USER worker
 WORKDIR /work
 

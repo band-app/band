@@ -28,7 +28,9 @@ import { createLogger } from "@band-app/logger";
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
 import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
+import { ISOLATION_LABEL_KEY, requestedIsolation, runnerLevel } from "./_utils/isolation";
 import { parseRunners, type RunnerConfig, resolveHookPath } from "./_utils/runner-config";
+import { environmentBuildService } from "./environment-build-service";
 import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
@@ -243,7 +245,11 @@ export class RunnerService {
         while (this.runningCount(runner.id) < runner.maxConcurrent) {
           const row = placementService.lease(
             runner.id,
-            { labels: runner.labels, provides: runner.provides },
+            {
+              labels: runner.labels,
+              provides: runner.provides,
+              isolation: runnerLevel(runner.isolation),
+            },
             LEASE_MS,
           );
           if (!row) break;
@@ -392,6 +398,9 @@ export class RunnerService {
   ): Promise<string> {
     const deadline = Date.now() + runner.timeoutSec * 1000;
     const labelList = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
+    // A worker started for a container or vm workspace serves that workspace only: placement skips hosts with this label.
+    const wanted = requestedIsolation(row.environment as Record<string, unknown> | null);
+    if (wanted !== "worktree") labelList.push(`${ISOLATION_LABEL_KEY}=${wanted}`);
     // A request to wake a sleeping ephemeral host starts a worker with that host's id.
     const wake = wakeOf(row);
     const ttl = runner.timeoutSec * 1000 + 60_000;
@@ -482,12 +491,14 @@ export class RunnerService {
       BAND_WORKER_ID: workerId,
       BAND_REPO_URLS: repos.join(","),
       BAND_ENVIRONMENT: JSON.stringify(environmentOf(row) ?? {}),
-      BAND_ISOLATION: environmentOf(row)?.isolation ?? runner.isolation,
+      BAND_ISOLATION: environmentOf(row)?.isolation ?? runnerLevel(runner.isolation),
       BAND_LABELS: Object.entries(row.labels)
         .map(([k, v]) => `${k}=${v}`)
         .join(","),
       BAND_REQUIRES: JSON.stringify(row.requires ?? {}),
       BAND_PROJECT: row.project,
+      // The project's current environment image (plan step 3.2), empty before its first ready build.
+      BAND_PROJECT_IMAGE: this.projectImage(row.project),
       BAND_RUNNER_ID: runner.id,
       BAND_REQUEST_ID: row.id,
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
@@ -495,6 +506,14 @@ export class RunnerService {
     });
     if (token) env.BAND_BOOTSTRAP_TOKEN = token;
     return env;
+  }
+
+  private projectImage(project: string): string {
+    try {
+      return environmentBuildService.currentImage(project) ?? "";
+    } catch {
+      return "";
+    }
   }
 
   private hubUrlFor(runner: RunnerConfig): string {

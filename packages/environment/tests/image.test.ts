@@ -108,6 +108,7 @@ describe("command construction", () => {
     const text = workerLayerDockerfile({ from: "tc:1", workerBase: "band-worker:latest" });
     assert.match(text, /^FROM tc:1$/m);
     assert.match(text, /COPY --from=band-worker:latest \/opt\/band-worker \/opt\/band\/worker/);
+    assert.match(text, /^COPY --chmod=1777 root\/ \/$/m);
   });
 
   it("runs install through sh -c and commits with the key as a label", () => {

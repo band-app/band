@@ -59,6 +59,8 @@ jobs:
 
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
 
     steps:
       - name: Checkout
@@ -328,6 +330,7 @@ jobs:
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       BAND_TEST_HOST: remote-loopback
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
       BAND_WORKER_USE_DIST: "1"
     steps:
       - name: Checkout
@@ -530,7 +533,7 @@ jobs:
           # Docker: the image builds the Rust CLI, the hub and the UI, so it
           # depends on the Dockerfile, the build scripts, every app, the
           # packages and plugins, the lockfile and this workflow file.
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|deploy/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|deploy/|runners/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "docker=true" >> "$GITHUB_OUTPUT"
           else
             echo "docker=false" >> "$GITHUB_OUTPUT"
@@ -743,6 +746,36 @@ jobs:
             docker logs band-worker-ci >&2
             exit 1
           fi
+
+      # The docker runner hook (plan step 3.6): a hub on this machine starts
+      # workers from the image above through runners/docker, each in a hardened
+      # container, and the test inspects the containers. `--network host` lets
+      # the container reach the hub and a `git daemon` on loopback.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build hub
+        run: pnpm --filter @band-app/server build
+
+      - name: Docker runner hook
+        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts
+        env:
+          BAND_DOCKER_TEST_IMAGE: band-worker-check
+          BAND_DOCKER_TEST_NETWORK: host
+
+      - name: Remove runner containers
+        if: always()
+        run: docker ps --all --quiet --filter label=band.runner=docker | xargs -r docker rm --force --volumes
 
       - name: Worker logs
         if: failure()

@@ -11,7 +11,7 @@ export interface RunnerSettings {
   destroy?: string;
   labels: Record<string, string>;
   provides?: Record<string, string>;
-  isolation: string;
+  isolation: "process" | "worktree" | "container" | "vm";
   maxConcurrent: number;
   timeoutSec: number;
   env: Record<string, string>;
