@@ -65,9 +65,9 @@ import { projectAvatarService } from "./src/server/services/project-avatar-servi
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,
-  getOrCreateToken,
   loadSettings,
   resetAgentStatuses,
+  resolveAdminToken,
   startStatusSourceCleanup,
 } from "./src/server/services/state.ts";
 import { subscriptionService } from "./src/server/services/subscription-service.ts";
@@ -256,7 +256,15 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 // the deleted `trpcDevPlugin` never added auth either. Production (`node
 // dist/start-server.mjs`) enforces the cookie as before.
 const isDev = process.env.NODE_ENV === "development";
-const persistedToken = getOrCreateToken();
+// `BAND_ADMIN_TOKEN` sets the shared admin token. Without it the stored one is
+// kept, and a first boot mints one (printed once in `main()` when
+// `BAND_PRINT_ADMIN_TOKEN` is set, as the Docker entrypoint does).
+const { token: persistedToken, generated: adminTokenGenerated } = resolveAdminToken(
+  process.env.BAND_ADMIN_TOKEN,
+);
+// `BAND_SERVE_UI=false` turns the hub into an API only: no UI files are read
+// and every non-API path answers 404. Dev mode always serves the UI.
+const serveUi = isDev || !/^(false|0|no|off)$/i.test(process.env.BAND_SERVE_UI?.trim() ?? "");
 // The shared token is an admin device token (`tokenService.ensureSharedToken`,
 // called in `main()` once the `tokens` table exists). Any live device token
 // passes auth, and `tokens.revoke` takes one away.
@@ -266,11 +274,12 @@ const { handleAuth, expectedToken } = createAuthMiddleware(
 );
 
 // Origins that may call the hub from another origin: `corsAllowedOrigins` in
-// settings plus `BAND_CORS_ORIGINS`. Read on every request so an edit applies
+// settings plus `BAND_ALLOWED_ORIGINS` and `BAND_CORS_ORIGINS`. Read on every request so an edit applies
 // without a restart.
 function allowedOrigins(): string[] {
   return [
     ...parseOriginList((loadSettings().corsAllowedOrigins ?? []).join(",")),
+    ...parseOriginList(process.env.BAND_ALLOWED_ORIGINS),
     ...parseOriginList(process.env.BAND_CORS_ORIGINS),
   ];
 }
@@ -1092,7 +1101,8 @@ async function main() {
     // In prod `assets` is set inside `main()` before we accept the first
     // request, so the non-null assertion is structural; in dev we take
     // the branch above.
-    assets!(req, res, rendererFallback);
+    if (assets) assets(req, res, rendererFallback);
+    else void rendererFallback();
   }
 
   // -----------------------------------------------------------------------
@@ -1127,7 +1137,7 @@ async function main() {
     };
     // Vite now serves `apps/web`, so it no longer watches the router. A
     // `tsx watch` restart on a router edit clears the cached OpenAPI spec.
-  } else {
+  } else if (serveUi) {
     assets = sirv(clientDir, {
       maxAge: 31536000,
       immutable: true,
@@ -1325,7 +1335,20 @@ async function main() {
   // CLI sends has no network hop to encrypt.
   process.env.BAND_SERVER_URL = `http://127.0.0.1:${boundPort}`;
 
+  if (adminTokenGenerated && /^(true|1|yes|on)$/i.test(process.env.BAND_PRINT_ADMIN_TOKEN ?? "")) {
+    // The only place a token is logged. A later boot finds it stored and says nothing.
+    console.log(
+      [
+        "──────────────────────────────────────────────────────────────",
+        " First run: admin token (shown once, store it now)",
+        `   ${persistedToken}`,
+        " Use it as a Bearer token, BAND_TOKEN for the CLI, or ?token= in a browser.",
+        "──────────────────────────────────────────────────────────────",
+      ].join("\n"),
+    );
+  }
   console.log(`Web server listening on http://0.0.0.0:${boundPort}`);
+  if (!serveUi) console.log("  UI serving is off (BAND_SERVE_UI=false): API only");
   if (boundPort !== initialPort) {
     console.log(
       `  (started looking at ${initialPort}; ports ${initialPort}..${boundPort - 1} were in use)`,

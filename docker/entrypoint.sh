@@ -9,11 +9,13 @@ set -eu
 BAND_DIR="$HOME/.band"
 mkdir -p "$BAND_DIR"
 
-# getOrCreateToken() keeps an existing tokenSecret, so we only seed one on
-# first boot. Visiting /?token=<secret> sets the cookie for the session.
-if [ ! -f "$BAND_DIR/settings.json" ]; then
-  printf '{\n  "tokenSecret": "%s"\n}\n' "$BAND_ACCESS_TOKEN" > "$BAND_DIR/settings.json"
+# The hub owns the admin token: BAND_ADMIN_TOKEN sets it, and a first run with
+# none mints one and prints it once (BAND_PRINT_ADMIN_TOKEN). BAND_ACCESS_TOKEN
+# is the older name for BAND_ADMIN_TOKEN.
+if [ -z "${BAND_ADMIN_TOKEN:-}" ] && [ -n "${BAND_ACCESS_TOKEN:-}" ]; then
+  export BAND_ADMIN_TOKEN="$BAND_ACCESS_TOKEN"
 fi
+export BAND_PRINT_ADMIN_TOKEN=true
 
 # git needs an identity for worktree/commit operations and must trust
 # bind-mounted repos owned by a different uid than the container user.
@@ -34,12 +36,11 @@ if [ ! -d "$SAMPLE/.git" ]; then
     && git add -A && git commit -qm "init" ) >/dev/null 2>&1 || true
 fi
 
-TOKEN="$(node -e "process.stdout.write(require('$BAND_DIR/settings.json').tokenSecret || '')" 2>/dev/null || echo "$BAND_ACCESS_TOKEN")"
 HOST_PORT="${BAND_HOST_PORT:-$PORT}"
 
 echo "──────────────────────────────────────────────────────────────"
-echo " Band server (Linux standalone) listening on container port ${PORT}"
-echo " Open:  http://localhost:${HOST_PORT}/?token=${TOKEN}"
+echo " Band hub listening on container port ${PORT}"
+echo " Open:  http://localhost:${HOST_PORT}/ (sign in with the admin token)"
 echo " State: ${BAND_DIR} (mounted volume)"
 echo " Sample project: ${SAMPLE} (auto-registered once the server is up)"
 echo "──────────────────────────────────────────────────────────────"

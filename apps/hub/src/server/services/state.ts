@@ -144,6 +144,10 @@ export function getOrCreateToken(): string {
   return settingsService.getOrCreateToken();
 }
 
+export function resolveAdminToken(envToken?: string): { token: string; generated: boolean } {
+  return settingsService.resolveAdminToken(envToken);
+}
+
 export function worktreesDir(): string {
   return settingsService.worktreesDir();
 }

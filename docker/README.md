@@ -13,11 +13,8 @@ docker compose up --build
 # (or, with the standalone v2 binary: docker-compose up --build)
 ```
 
-On startup the container prints an access URL:
-
-```
- Open:  http://localhost:3457/?token=band-local
-```
+This harness sets `BAND_ADMIN_TOKEN=band-local` in `docker-compose.yml`, so open
+`http://localhost:3457/?token=band-local`.
 
 > The container listens on 3456 internally but is published on host **3457**,
 > because Band's default port is 3456 — if you already run Band natively it
@@ -27,7 +24,8 @@ On startup the container prints an access URL:
 Open that in your browser. The `?token=` sets the auth cookie (production
 mode enforces it); after the first load you can drop the query string.
 
-Change the token via `BAND_ACCESS_TOKEN` in `docker-compose.yml`.
+Change the token via `BAND_ADMIN_TOKEN` (`BAND_ACCESS_TOKEN` still works) in `docker-compose.yml`.
+For a real server deployment use `deploy/compose/` instead.
 
 ## What this exercises
 

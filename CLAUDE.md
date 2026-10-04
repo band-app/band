@@ -122,6 +122,15 @@ A worker (`apps/worker`, `band-worker`) is a machine the hub runs workspaces on.
 - A workspace on a remote host has `worktrees.host_id` set. `workspaces.create` takes `hostId` and, the first time a project is used on that host, `hostProjectPath` (the repository on the worker, kept in `project_hosts`). The worktree goes under `<first worker root>/.band-worktrees/<project>/<branch>`. `syncWorktrees` and `projects.list` pass remote worktrees through, since this machine's `git worktree list` cannot see them, and `ProjectQueries.saveAll` keeps the `project_hosts` rows of remote hosts.
 - Not done yet: cloning a project onto a worker, uploads and the shared dir through the host, the worker's local relay for agent hooks and the CLI (step 2.5), and the CLI flag for choosing a host.
 
+## Architecture: headless hub deploy
+
+`deploy/compose/compose.yml` runs the hub image with a `band-data` volume for BAND_HOME, a healthcheck that reads the token from `settings.json`, and an optional Caddy `tls` profile. The guide is `docs/run-the-hub-on-a-server.md`, and the CI `docker` job runs the compose file.
+
+- `BAND_ADMIN_TOKEN` sets the shared admin token (`SettingsQueries.resolveAdminToken`) and replaces a stored secret that differs. With none set, the first boot mints one and, when `BAND_PRINT_ADMIN_TOKEN` is true (the Docker entrypoint sets it), prints it once in `start-server.ts`. `BAND_ACCESS_TOKEN` is the entrypoint's older name for `BAND_ADMIN_TOKEN`. The image bakes in no token.
+- `BAND_SERVE_UI=false` skips sirv and the shell, so every non-API path answers 404 and a missing UI build doesn't stop the boot. Dev mode ignores it.
+- `BAND_ALLOWED_ORIGINS` adds to `BAND_CORS_ORIGINS` and `corsAllowedOrigins`, for both CORS and the WebSocket origin check.
+- Tests: `apps/hub/tests/headless-hub.test.ts`.
+
 ## Architecture: machine access lives in host-local
 
 Code that touches a machine (git and `gh`, the exec worker, ripgrep, the LSP manager, ACP launch and spawn, the terminal pool and daemon backend, setup scripts, the Claude environment readers and installers) lives in `packages/host-local` (`@band-app/host-local`). `LocalHost` implements the `Host` interface from `packages/host-api`. The hub imports it through `HostRegistry` (`apps/hub/src/server/infra/host/registry.ts`) and a few helpers by subpath (`@band-app/host-local/git/git-client`). The package has its own host contract test and its own dependencies (node-pty, ripgrep, xterm, the ACP adapters, typescript-language-server). `apps/hub` still lists node-pty, ripgrep, the adapters and the language server, because its build script copies them into `dist/`.
