@@ -158,6 +158,7 @@ afterAll(async () => {
 // Leftover subscriptions would take slots of the next test's poll.
 afterEach(() => {
   for (const sub of subscriptionService.list()) subscriptionService.remove(sub.id);
+  stub.requests.splice(0);
 });
 
 describe("github polling fallback", () => {
@@ -239,25 +240,6 @@ describe("github polling fallback", () => {
     await githubPollService.poll();
     await githubPollService.poll();
     expect(promptsAbout("All 2 checks passed")).toHaveLength(1);
-  });
-
-  it("S3: stops polling a repo once its webhook is registered", async () => {
-    const { coords, full } = newRepo();
-    stub.setPrActivityQuery(coords, () => prAnswer([]));
-    const sub = await subscribe({ pr: 7 }, full);
-    await githubPollService.poll();
-    const before = calls(`repo`).filter((r) =>
-      r.fields.query?.toString().includes(coords.name),
-    ).length;
-    expect(before).toBe(1);
-
-    subscriptionService.setConfig(sub.id, { ...sub.config, webhook: { status: "registered" } });
-    await githubPollService.poll();
-    await githubPollService.poll();
-    const after = calls(`repo`).filter((r) =>
-      r.fields.query?.toString().includes(coords.name),
-    ).length;
-    expect(after).toBe(before);
   });
 
   it("S3: registers the webhook when a public URL appears, then stops polling", async () => {

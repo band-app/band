@@ -137,7 +137,13 @@ export class GithubPollService {
       // The hub got a public URL since the subscription waited for one.
       if (publicHubUrl() && current.some((s) => s.config.webhook?.status === "waiting-for-url")) {
         for (const sub of current.filter((s) => s.config.webhook?.status === "waiting-for-url")) {
-          await githubWebhookService.ensureRegistered(sub);
+          // One repo's failed registration must not end the poll for the rest.
+          await githubWebhookService.ensureRegistered(sub).catch((err) => {
+            log.warn(
+              { repo, err: err instanceof Error ? err.message : String(err) },
+              "could not register webhook",
+            );
+          });
         }
         current = subscriptionService.listGithub(repo);
       }
@@ -193,7 +199,10 @@ export class GithubPollService {
           // Only this subscription: another one on the PR has its own cursor.
           subscriptionService.ingest(item.event, sub.id);
         } catch (err) {
-          log.warn({ repo, subscriptionId: sub.id, err }, "skipping a malformed PR event");
+          log.warn(
+            { repo, subscriptionId: sub.id, err: err instanceof Error ? err.message : String(err) },
+            "skipping a malformed PR event",
+          );
         }
         if (item.createdAt > newest) newest = item.createdAt;
       }
