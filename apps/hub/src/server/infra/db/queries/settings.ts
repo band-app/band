@@ -3,6 +3,20 @@ import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** A runner hook as stored in `settings.json`. The shape `runnerSchema` validates. */
+export interface RunnerSettings {
+  id: string;
+  kind: "hook";
+  spawn: string;
+  destroy?: string;
+  labels: Record<string, string>;
+  provides?: Record<string, string>;
+  isolation: string;
+  maxConcurrent: number;
+  timeoutSec: number;
+  env: Record<string, string>;
+}
+
 /**
  * Notification-channel preferences embedded in the on-disk settings document.
  */
@@ -171,6 +185,13 @@ export interface Settings {
     disabled?: string[];
     [key: string]: unknown;
   };
+  /**
+   * Runner hooks (plan step 3.4): scripts the hub runs to start a
+   * `band-worker` for a host request. Validated by `runnerSchema`
+   * (`services/_utils/runner-config.ts`); `RunnerService` skips an invalid
+   * entry.
+   */
+  runners?: RunnerSettings[];
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

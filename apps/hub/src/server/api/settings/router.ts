@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { settingsService, settingsUpdateInput } from "../../services/settings-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -20,7 +21,14 @@ export const settingsRouter = t.router({
     return settingsService.get();
   }),
 
-  update: publicProcedure.input(settingsUpdateInput).mutation(({ input }) => {
+  update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
+    // Runners are programs the hub executes, so only an admin token may change them.
+    if (input.runners !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing runners needs an admin token.",
+      });
+    }
     settingsService.update(input);
     return { ok: true };
   }),

@@ -35,6 +35,8 @@ export const leaseFilterInput = z
   .object({
     /** What the runner offers. A request is leasable when every label it asks for is here. */
     labels: z.record(z.string(), z.string()).optional(),
+    /** Facts about what the runner starts. When given, a request's `requires` must hold for them. */
+    provides: z.record(z.string(), z.string()).optional(),
   })
   .default({});
 export type { Placement };
@@ -251,6 +253,13 @@ export class PlacementService {
     for (const row of this.queries.listLeasable(now)) {
       const wanted = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
       if (filter.labels && !wanted.every((l) => offered.includes(l))) continue;
+      const provides = filter.provides;
+      if (
+        provides &&
+        !Object.entries(row.requires).every(([k, constraint]) => satisfies(provides[k], constraint))
+      ) {
+        continue;
+      }
       // A runner that lost the race to another one tries the next request.
       if (this.queries.lease(row.id, runnerId, now, now + ttl)) {
         this.publish(row.id, row.workspaceId, "leased");

@@ -8,6 +8,7 @@ import {
   type Settings,
   SettingsQueries,
 } from "../infra/db/queries/settings";
+import { runnersSchema } from "./_utils/runner-config";
 
 /**
  * Zod schema for an in-flight settings update.
@@ -114,6 +115,9 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // Runner hooks (plan step 3.4). A bad entry fails the whole update, so the
+    // file never holds one `RunnerService` would skip.
+    runners: runnersSchema.optional(),
   })
   .passthrough();
 

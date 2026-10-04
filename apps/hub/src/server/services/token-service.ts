@@ -325,6 +325,11 @@ export class TokenService {
     return this.queries.list(limit).map((row) => toView(row, at));
   }
 
+  /** The status of one host, or null when there is no such host. */
+  hostStatus(id: string): string | null {
+    return this.queries.findHost(id)?.status ?? null;
+  }
+
   /** The oldest `limit` hosts, the local one first. */
   listHosts(limit: number = DEFAULT_LIST_LIMIT): HostView[] {
     return this.queries.listHosts(limit).map((h) => ({

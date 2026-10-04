@@ -203,6 +203,15 @@ band hosts remove <id>
 
 Removes an offline worker host that has no workspaces and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with workspaces are refused.
 
+### List the runners and read their logs
+
+```sh
+band runners list
+band runners log <request-id>
+```
+
+A runner is a pair of scripts the hub runs to start a worker when `band workspaces create --labels ...` finds no host. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one host request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
+
 ### List, create and revoke the hub's tokens
 
 ```sh
