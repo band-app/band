@@ -460,37 +460,73 @@ importers:
 
   apps/worker:
     dependencies:
+      '@agentclientprotocol/claude-agent-acp':
+        specifier: 0.81.2
+        version: 0.81.2(@anthropic-ai/sdk@0.81.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+      '@agentclientprotocol/codex-acp':
+        specifier: 1.13.1
+        version: 1.13.1
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@3.25.76)
+      '@vscode/ripgrep':
+        specifier: ^1.18.0
+        version: 1.18.0
+      '@xterm/addon-serialize':
+        specifier: 0.15.0-beta.300
+        version: 0.15.0-beta.300(patch_hash=851eac3d75e6d8c013b9f4c053e61d824b23965cb19ecc28e335e05059f3a294)(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/addon-unicode11':
+        specifier: 0.10.0-beta.300
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/headless':
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      typescript-language-server:
+        specifier: ^5.1.3
+        version: 5.1.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
       '@band-app/host-api':
         specifier: workspace:^
         version: link:../../packages/host-api
       '@band-app/host-local':
         specifier: workspace:^
         version: link:../../packages/host-local
+      '@band-app/host-remote':
+        specifier: workspace:^
+        version: link:../../packages/host-remote
       '@band-app/link':
         specifier: workspace:^
         version: link:../../packages/link
       '@band-app/logger':
         specifier: workspace:^
         version: link:../../packages/logger
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
-    devDependencies:
-      '@band-app/host-remote':
-        specifier: workspace:^
-        version: link:../../packages/host-remote
       '@types/node':
         specifier: ^22.19.13
         version: 22.19.13
       '@types/ws':
         specifier: ^8.18.0
         version: 8.18.1
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      ws:
-        specifier: ^8.18.0
-        version: 8.19.0
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
 
   packages/coding-agent:
     dependencies:

@@ -1,31 +1,58 @@
 {
   "name": "@band-app/worker",
   "version": "0.1.0",
-  "private": true,
+  "description": "Serves a machine to a Band hub: files, git, terminals and coding agents over an outbound link.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "band-worker": "./bin/band-worker.mjs"
   },
+  "files": [
+    "bin",
+    "dist",
+    "scripts/postinstall.mjs",
+    "README.md"
+  ],
   "engines": {
     "node": ">=22.5.0"
   },
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "scripts": {
+    "build": "node scripts/build.mjs",
     "start": "node bin/band-worker.mjs",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "prepack": "node scripts/build.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
+    "pack:smoke": "./scripts/pack-smoke.sh"
   },
   "dependencies": {
-    "@band-app/host-api": "workspace:^",
-    "@band-app/host-local": "workspace:^",
-    "@band-app/link": "workspace:^",
-    "@band-app/logger": "workspace:^",
-    "tsx": "^4.21.0"
+    "@agentclientprotocol/claude-agent-acp": "0.81.2",
+    "@agentclientprotocol/codex-acp": "1.13.1",
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@vscode/ripgrep": "^1.18.0",
+    "@xterm/addon-serialize": "0.15.0-beta.300",
+    "@xterm/addon-unicode11": "0.10.0-beta.300",
+    "@xterm/headless": "6.1.0-beta.302",
+    "node-pty": "^1.1.0",
+    "pino": "^9.6.0",
+    "typescript": "^5.7.0",
+    "typescript-language-server": "^5.1.3",
+    "ws": "^8.18.0",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@band-app/host-api": "workspace:^",
+    "@band-app/host-local": "workspace:^",
     "@band-app/host-remote": "workspace:^",
+    "@band-app/link": "workspace:^",
+    "@band-app/logger": "workspace:^",
     "@types/node": "^22.19.13",
     "@types/ws": "^8.18.0",
-    "typescript": "^5.7.0",
-    "ws": "^8.18.0"
+    "esbuild": "^0.25.0",
+    "tsx": "^4.21.0"
   }
 }

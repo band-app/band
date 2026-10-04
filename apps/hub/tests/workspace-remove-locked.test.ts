@@ -111,7 +111,7 @@ describe("workspaces.remove on a locked worktree", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
   });
 
   afterAll(async () => {
@@ -173,7 +173,7 @@ describe("workspaces.remove on a locked worktree", () => {
     // has already run against the cleaned git state. If the entry had
     // survived locked, reconcile would re-add `feature` here.
     await server.close();
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
     expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);
   });

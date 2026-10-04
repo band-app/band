@@ -553,7 +553,8 @@ describe("a disabled GitHub plugin", () => {
     seedSettings(tmpHome, { tokenSecret: TOKEN, plugins: { disabled: ["github"] } });
     stub = await ghStub.start();
     stub.setReviewQuery(FAKE_REPO, "main", reviewQueryData({}));
-    server = await startServer({ tmpHome, env: stub.env });
+    // A worker probes `gh --version` itself when it starts, which this test counts as a call.
+    server = await startServer({ tmpHome, env: stub.env, remoteHost: false });
   });
 
   afterAll(async () => {

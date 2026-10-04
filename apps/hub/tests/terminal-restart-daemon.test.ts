@@ -90,7 +90,7 @@ describe("terminal.restartDaemon", () => {
       workspaceRoot: worktree,
     });
 
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
 
     const a = await createTerminal();
     const b = await createTerminal();
@@ -133,14 +133,14 @@ describe("terminal.restartDaemon", () => {
   });
 
   it("is a no-op when no terminal has ever been spawned", async () => {
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     const res = await trpcMutate(server.url, "terminal.restartDaemon", undefined, TOKEN);
     expect(res.status).toBe(200);
     expect(await trpcData<{ killedCount: number }>(res)).toEqual({ killedCount: 0 });
   });
 
   it("requires the auth token, like the other terminal procedures", async () => {
-    server = await startServer({ tmpHome });
+    server = await startServer({ remoteHost: false, tmpHome });
     const res = await fetch(`${server.url}/trpc/terminal.restartDaemon`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
