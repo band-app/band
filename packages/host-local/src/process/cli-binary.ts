@@ -26,7 +26,7 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     // From this source file in dev (packages/host-local/src/process/ → apps/)
     resolve(dirname, "..", "..", "..", "..", "apps"),
     // From bundled `dist/` file (<Resources>/web/dist/ → <Resources>/) only
-    // — in dev mode this resolves to `packages/host-local/`, which has no
+    // — in dev mode this resolves to `packages/`, which has no
     // `cli/target/<profile>/band` and is harmless; the walk above is the
     // actual dev-mode path. Included so a future cargo-target
     // layout under <Resources>/cli/ would still resolve. Today's Electron

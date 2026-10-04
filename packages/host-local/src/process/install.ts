@@ -7,7 +7,7 @@
  * (resolving the interactive `$PATH` via `shellPath()` first, then calling
  * this) lives in `services/system-service.ts`.
  *
- * Web vs desktop split note (CLAUDE.md): `brew` is unix-only (macOS and
+ * Web vs desktop split note: `brew` is unix-only (macOS and
  * Linuxbrew). The `prereqs.installTunnel` tRPC procedure that ultimately
  * reaches this adapter pre-existed the #535 cleanup; relocating it
  * behind the desktop IPC bridge (alongside the Finder reveal / app open
