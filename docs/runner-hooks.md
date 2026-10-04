@@ -47,7 +47,7 @@ A workspace asks for a level with `isolation` in its environment (`placement.env
 
 | Level | Meaning | Placement |
 | --- | --- | --- |
-| `worktree` | A git worktree on a worker that other workspaces share. The default. | Goes to an online worker whose labels match, or to a runner offering any level. A worker started for a `container` or `vm` workspace is never used. |
+| `worktree` | A git worktree on a worker that other workspaces share. The default. | Goes to an online worker whose labels match, or to a runner offering any level. A worker a runner started is ephemeral and belongs to the workspace it was started for, so only a worker registered by hand is shared. A worker started for a `container` or `vm` workspace is never used. |
 | `container` | A worker of its own, in a container. | Never reuses a host. A runner offering `container` or `vm` starts a new worker for each workspace. |
 | `vm` | A worker of its own in a virtual machine. | Only a runner with `isolation: "vm"` takes it. The bundled hooks start no virtual machines, so you bring your own hook. |
 
@@ -92,7 +92,7 @@ A hook must:
 4. An attempt fails when `spawn` exits non-zero, runs past the timeout, or the worker does not say hello in time. The hub then runs `destroy` and deletes the host it made. It tries once more with a new host and token. After the second failure the request fails, and its error holds the reason and the last 20 log lines.
 5. Cancelling the request stops the run and runs `destroy`.
 
-Ephemeral lifecycle, such as when an idle worker is destroyed, is not part of this step.
+When the worker later exits because it was idle, the hub stores its workspaces and starts a new worker with the same id on the next message, terminal or file access. That wake is another request, and `spawn` runs again with the same `BAND_WORKER_ID`, so the hook must start that id on a clean machine. See [Ephemeral workers](ephemeral-workers.md).
 
 ## Logs
 
@@ -102,7 +102,7 @@ The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.l
 
 ### `local`
 
-Starts an ephemeral `band-worker` on the hub's machine. Everything lives under `$BAND_RUNNER_DIR/<worker id>/`: its own `HOME` and `BAND_HOME` (`home/.band`), its state dir, and a work dir that is its only root. If `BAND_REPO_URLS` is set, `spawn` clones the first URL into the work dir and prints `BAND_HOST_PROJECT_PATH`. It writes the worker's pid to `pid`. `destroy` kills that pid and removes the directory.
+Starts an ephemeral `band-worker` on the hub's machine. Everything lives under `$BAND_RUNNER_DIR/<worker id>/`: its own `HOME` and `BAND_HOME` (`home/.band`), its state dir, and a work dir that is its only root. If `BAND_REPO_URLS` is set, `spawn` clones the first URL into the work dir and prints `BAND_HOST_PROJECT_PATH`. It writes the worker's pid to `pid`. `destroy` kills that pid and removes the directory. A `spawn` for a worker id that already has a directory (a worker waking up) deletes the old directory first, because a woken worker is a new machine, and it refuses when that worker's pid is still alive.
 
 Settings (`env`): `BAND_WORKER_BIN` is the worker, either a `.mjs`/`.js` file run with `BAND_NODE` or an executable (default `band-worker` on `PATH`). `BAND_IDLE_EXIT` sets how long an idle worker waits before it exits, like `90s` (default 10 minutes).
 
@@ -150,7 +150,7 @@ Settings (`env`):
 | `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
 | `DOCKER_HOST` | A remote docker daemon, such as `ssh://user@build-host`. |
 
-`destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
+A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
 
 A worker takes plain `http` only for a loopback hub, and a container on the `bridge` network cannot reach the hub's loopback. So the hub URL must be `https`, or on Linux the runner uses `"BAND_DOCKER_NETWORK": "host"` with the default `http://127.0.0.1:<port>`.
 

@@ -31,7 +31,7 @@ import { hostRegistry } from "../infra/host/registry";
 import { ISOLATION_LABEL_KEY, requestedIsolation, runnerLevel } from "./_utils/isolation";
 import { parseRunners, type RunnerConfig, resolveHookPath } from "./_utils/runner-config";
 import { environmentBuildService } from "./environment-build-service";
-import { HostRequestError, placementService } from "./placement-service";
+import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
 import { tokenService } from "./token-service";
@@ -312,7 +312,7 @@ export class RunnerService {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       run.attempt = attempt;
       runLog.write("hub", `attempt ${attempt} of ${ATTEMPTS}`);
-      const attemptState: { hostId: string | null; token: string | null } = {
+      const attemptState: { hostId: string | null; token: string | null; reused?: boolean } = {
         hostId: null,
         token: null,
       };
@@ -356,7 +356,7 @@ export class RunnerService {
   private async cleanup(
     runner: RunnerConfig,
     row: HostRequestRow,
-    state: { hostId: string | null; token: string | null },
+    state: { hostId: string | null; token: string | null; reused?: boolean },
     runLog: RunLog,
   ): Promise<void> {
     if (!state.hostId) return;
@@ -375,6 +375,8 @@ export class RunnerService {
         runLog.write("hub", `destroy failed: ${err instanceof Error ? err.message : err}`);
       }
     }
+    // A host that was woken keeps its row: it still holds the sleeping workspaces.
+    if (state.reused) return;
     try {
       tokenService.removeHost(state.hostId);
       hostRegistry.unregister(state.hostId);
@@ -392,19 +394,21 @@ export class RunnerService {
     row: HostRequestRow,
     run: RunnerRun,
     runLog: RunLog,
-    state: { hostId: string | null; token: string | null },
+    state: { hostId: string | null; token: string | null; reused?: boolean },
   ): Promise<string> {
     const deadline = Date.now() + runner.timeoutSec * 1000;
     const labelList = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
     // A worker started for a container or vm workspace serves that workspace only: placement skips hosts with this label.
     const wanted = requestedIsolation(row.environment as Record<string, unknown> | null);
     if (wanted !== "worktree") labelList.push(`${ISOLATION_LABEL_KEY}=${wanted}`);
-    const issued = tokenService.issueWorkerBootstrap(
-      `runner:${runner.id}`,
-      labelList,
-      runner.timeoutSec * 1000 + 60_000,
-    );
+    // A request to wake a sleeping ephemeral host starts a worker with that host's id.
+    const wake = wakeOf(row);
+    const ttl = runner.timeoutSec * 1000 + 60_000;
+    const issued = wake
+      ? tokenService.issueWorkerBootstrapFor(wake.hostId, ttl)
+      : tokenService.issueWorkerBootstrap(`runner:${runner.id}`, labelList, ttl);
     state.hostId = issued.hostId;
+    state.reused = wake !== null;
     state.token = issued.token;
     runLog.addSecret(issued.token);
     run.workerId = issued.hostId;

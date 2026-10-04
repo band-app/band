@@ -132,7 +132,8 @@
         "apps/hub/src/server/api/browser-host/router.ts",
         "apps/hub/src/server/services/project-service.ts",
         "apps/hub/src/server/services/runner-service.ts",
-        "apps/hub/src/server/services/_utils/runner-config.ts"
+        "apps/hub/src/server/services/_utils/runner-config.ts",
+        "apps/hub/src/server/services/ephemeral-lifecycle-service.ts"
       ],
       "linter": {
         "rules": {

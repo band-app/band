@@ -74,3 +74,40 @@ export interface CliFetchParams {
 export type CliFetchReply =
   | { available: false; reason: string }
   | { available: true; sha256: string; size: number; chan?: number };
+
+/**
+ * Worker to hub: an ephemeral worker that has been idle for its idle time asks
+ * whether it may exit. The hub checks that nothing runs, persists every
+ * workspace on the worker through ordinary calls on this link, and answers
+ * `exit: true` only when all of it is stored (plan step 3.5).
+ */
+export const METHOD_LIFECYCLE_IDLE = "lifecycle.idle";
+
+export interface LifecycleIdleParams {
+  /** How long the worker has been idle, in milliseconds. */
+  idleMs: number;
+}
+
+export type LifecycleIdleReply = { exit: true } | { exit: false; reason: string };
+
+/** Hub to worker: the idle policy, sent after the worker connects. */
+export const METHOD_LIFECYCLE_POLICY = "lifecycle.policy";
+
+export interface LifecyclePolicy {
+  /** Idle time before an ephemeral worker asks to exit. Replaces `--idle-exit`. */
+  idleExitMs?: number;
+}
+
+/** Hub to worker: reads the agent session files of the named sessions. See `apps/worker/src/methods-lifecycle.ts`. */
+export const METHOD_LIFECYCLE_EXPORT_SESSIONS = "lifecycle.exportSessions";
+/** Hub to worker: moves staged session files into the agent session directories. */
+export const METHOD_LIFECYCLE_IMPORT_SESSIONS = "lifecycle.importSessions";
+
+export interface SessionFile {
+  /** The agent session directory the file came from, such as `claude` or `extra0`. */
+  root: string;
+  /** Path under that directory. */
+  rel: string;
+  /** File content, base64. */
+  data: string;
+}

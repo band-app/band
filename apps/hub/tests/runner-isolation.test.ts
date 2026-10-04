@@ -6,7 +6,7 @@
 // and leasing, not containers (those are in runner-docker.test.ts and the CI
 // docker job).
 
-import { execFileSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -70,6 +70,7 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 let server: ServerHandle;
+const workers: ChildProcess[] = [];
 
 const q = <T>(procedure: string, input?: unknown) =>
   trpcQuery(server.url, procedure, input, TOKEN).then(async (res) => {
@@ -137,6 +138,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  for (const w of workers) w.kill();
   // Ephemeral workers the local hook left running.
   const base = join(server?.home ?? "", ".band", "runners");
   if (existsSync(base)) {
@@ -185,19 +187,61 @@ describe("container isolation", () => {
 });
 
 describe("worktree isolation", () => {
-  it("lets two workspaces share one worker (S3)", async () => {
-    await setRunners([workerRunner("shared", "process", "wt", 1)]);
-    const first = await place("wt-a", { labels: { pool: "wt" } });
-    expect(first.provisioning?.requestId).toBeTruthy();
-    const wa = await workspace("wt-a");
-    expect(await hostLabels(wa.hostId as string)).not.toContain("band.isolation=container");
+  // A worker a runner starts is ephemeral and belongs to the workspace it was started for
+  // (step 3.5). A worker someone registered by hand is shared.
+  it("lets two workspaces share one registered worker (S3)", async () => {
+    await setRunners([]);
+    const root = tmp("band-isolation-root-");
+    const repo = join(root, "proj");
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "-q", "-b", "main");
+    writeFileSync(join(repo, "hello.txt"), "hello\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "init");
+    const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
+      hostName: "Shared box",
+    });
+    const home = tmp("band-isolation-whome-");
+    const child = spawn(
+      process.execPath,
+      [
+        WORKER_BIN,
+        "--hub",
+        server.url,
+        "--token",
+        issued.token,
+        "--root",
+        root,
+        "--state-dir",
+        tmp("band-isolation-state-"),
+        "--labels",
+        "pool=shared",
+      ],
+      { env: { ...process.env, HOME: home, BAND_HOME: join(home, ".band") }, stdio: "ignore" },
+    );
+    workers.push(child);
+    await waitFor(
+      async () =>
+        (await q<HostsList>("hosts.list")).hosts.find((h) => h.id === issued.hostId)?.status ===
+          "online" || undefined,
+      { label: "shared worker online", timeoutMs: 20_000 },
+    );
 
-    // The worker is online and matches, so the second workspace goes straight to it.
-    const second = await place("wt-b", { labels: { pool: "wt" } });
-    expect(second.provisioning).toBeUndefined();
-    expect(second.path).not.toBe("");
-    const wb = await workspace("wt-b");
-    expect(wb.hostId).toBe(wa.hostId);
+    const placement = { labels: { pool: "shared" } };
+    for (const branch of ["wt-a", "wt-b"]) {
+      const res = await m<CreateResult>("workspaces.create", {
+        project: "proj",
+        branch,
+        placement,
+        hostProjectPath: repo,
+      });
+      expect(res.provisioning).toBeUndefined();
+      expect(res.path).not.toBe("");
+    }
+    const [wa, wb] = await Promise.all([workspace("wt-a"), workspace("wt-b")]);
+    expect(wa.hostId).toBe(issued.hostId);
+    expect(wb.hostId).toBe(issued.hostId);
+    expect(await hostLabels(issued.hostId)).not.toContain("band.isolation=container");
   }, 120_000);
 });
 

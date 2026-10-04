@@ -17,6 +17,7 @@ import {
   FolderOpen,
   Home,
   Loader,
+  Moon,
   Pin,
   PinOff,
   Play,
@@ -311,6 +312,21 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             >
               <Loader className="size-3.5 animate-spin" />
               Deleting…
+            </span>
+          )}
+          {/* The workspace's ephemeral worker exited (sleeping) or is coming back (waking). */}
+          {worktree.lifecycle && !isDeleting && (
+            <span
+              data-testid="workspace-card__lifecycle"
+              data-lifecycle={worktree.lifecycle}
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              {worktree.lifecycle === "waking" ? (
+                <Loader className="size-3.5 animate-spin" />
+              ) : (
+                <Moon className="size-3.5" />
+              )}
+              {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
           <div

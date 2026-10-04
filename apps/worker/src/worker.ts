@@ -4,7 +4,18 @@ import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
-import { type Channel, LinkClient, type LinkClientOptions, type Ready } from "@band-app/link";
+import {
+  type Channel,
+  type LifecycleIdleReply,
+  type LifecyclePolicy,
+  LinkClient,
+  type LinkClientOptions,
+  METHOD_LIFECYCLE_IDLE,
+  METHOD_LIFECYCLE_POLICY,
+  type Ready,
+  RPC_METHOD_NOT_FOUND,
+  RpcError,
+} from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
@@ -12,6 +23,7 @@ import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
+import { registerLifecycleMethods } from "./methods-lifecycle.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
 import { registerRelayMethods } from "./relay.ts";
@@ -27,6 +39,13 @@ const log = createLogger("band-worker");
 
 const require = createRequire(import.meta.url);
 export const WORKER_VERSION: string = require("../package.json").version;
+
+/**
+ * How long an ephemeral worker waits for a hub it has lost before it exits. It
+ * cannot persist its workspaces without the hub, so it stays up much longer
+ * than the idle time, in case the hub comes back.
+ */
+const LOST_HUB_EXIT_MS = 60 * 60_000;
 
 /** Agent types the worker probes for in its hello. */
 const AGENT_TYPES = ["claude-code", "codex", "opencode", "gemini-cli", "cursor-cli"];
@@ -122,6 +141,7 @@ export class Worker {
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
+    if (config.ephemeral) registerLifecycleMethods(registrar, ctx);
     worker.wire(ctx);
 
     try {
@@ -187,20 +207,72 @@ export class Worker {
     });
 
     if (this.config.ephemeral) {
-      const { idleExitMs } = this.config;
+      // The hub may replace the idle time (`lifecycle.policy`).
+      let idleExitMs = this.config.idleExitMs;
+      client.session.handle(METHOD_LIFECYCLE_POLICY, (params) => {
+        const policy = (params ?? {}) as LifecyclePolicy;
+        if (typeof policy.idleExitMs === "number" && policy.idleExitMs > 0) {
+          idleExitMs = policy.idleExitMs;
+          log.info({ idleExitMs }, "the hub set the idle time");
+        }
+        return null;
+      });
+      const lostHubMs = Math.max(idleExitMs, LOST_HUB_EXIT_MS);
       const tick = setInterval(
         () => {
           for (const ch of hubChannels) if (ch.closed) hubChannels.delete(ch);
           if (hubChannels.size > 0) ctx.activity.touch();
-          const gone = disconnectedSince !== null && Date.now() - disconnectedSince >= idleExitMs;
-          if (gone || ctx.activity.idleMs() >= idleExitMs) {
-            log.info({ idleMs: idleExitMs }, gone ? "hub unreachable, exiting" : "idle, exiting");
+          if (disconnectedSince !== null && Date.now() - disconnectedSince >= lostHubMs) {
+            log.info({ lostHubMs }, "hub unreachable, exiting");
             void this.stop(0);
+            return;
           }
+          if (ctx.activity.idleMs() >= idleExitMs) void this.askToExit(ctx);
         },
         Math.min(1000, Math.max(20, idleExitMs / 4)),
       );
       this.timers.push(tick);
+    }
+  }
+
+  private asking = false;
+
+  /**
+   * Idle for the idle time: asks the hub whether to exit. The hub checks that
+   * nothing runs and stores every workspace on this worker before it says yes,
+   * so the worker exits only on `exit: true`. Any other answer, or no answer,
+   * counts as activity and the question comes again after another idle time.
+   */
+  private async askToExit(ctx: WorkerContext): Promise<void> {
+    if (this.asking || this.stopping) return;
+    this.asking = true;
+    try {
+      const reply = await this.client.session.request<LifecycleIdleReply>(
+        METHOD_LIFECYCLE_IDLE,
+        { idleMs: ctx.activity.idleMs() },
+        { timeoutMs: 15 * 60_000 },
+      );
+      if (reply.exit) {
+        log.info("the hub stored the workspaces, exiting");
+        await this.stop(0);
+        return;
+      }
+      log.info({ reason: reply.reason }, "the hub asked the worker to stay");
+      ctx.activity.touch();
+    } catch (err) {
+      if (err instanceof RpcError && err.code === RPC_METHOD_NOT_FOUND) {
+        // A hub that does not manage ephemeral lifecycles has nothing to store.
+        log.info("idle, exiting");
+        await this.stop(0);
+        return;
+      }
+      log.warn(
+        { message: err instanceof Error ? err.message : String(err) },
+        "could not ask the hub to exit",
+      );
+      ctx.activity.touch();
+    } finally {
+      this.asking = false;
     }
   }
 }

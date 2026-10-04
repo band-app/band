@@ -11,6 +11,12 @@ set -eu
 : "${BAND_HUB_URL:?}" "${BAND_WORKER_ID:?}" "${BAND_BOOTSTRAP_TOKEN:?}"
 
 base="${BAND_RUNNER_DIR:-${TMPDIR:-/tmp}/band-runner}/$BAND_WORKER_ID"
+# A worker id that wakes up an ephemeral host comes back on a new machine, so it starts from nothing.
+if [ -f "$base/pid" ] && kill -0 "$(cat "$base/pid")" 2>/dev/null; then
+  echo "worker $BAND_WORKER_ID is still running" >&2
+  exit 1
+fi
+rm -rf "$base"
 mkdir -p "$base/home/.band" "$base/state" "$base/work"
 chmod 700 "$base"
 

@@ -30,6 +30,16 @@ node="${BAND_NODE:-node}"
 image="${BAND_DOCKER_IMAGE:-band-worker}"
 name="band-$BAND_WORKER_ID"
 
+# A worker id that wakes an ephemeral host (docs/ephemeral-workers.md) comes back on a clean container.
+# A leftover that has stopped is removed with its volume. One that still runs is left alone.
+if running="$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null)"; then
+  if [ "$running" = true ]; then
+    echo "container $name is still running" >&2
+    exit 1
+  fi
+  docker rm --force --volumes "$name" >/dev/null
+fi
+
 # resources.cpu and resources.memory from the request's environment (docs/agent-environments.md).
 env_field() {
   printf '%s' "${BAND_ENVIRONMENT:-}" | "$node" -e '

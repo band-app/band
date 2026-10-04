@@ -23,7 +23,7 @@
 // PR stays scoped to the cronjobs migration.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -276,6 +276,14 @@ async function startHubServer(opts: StartServerOptions): Promise<ServerHandle> {
         // group already torn down
       }
     };
+
+    // `BAND_TEST_SERVER_LOG=<file>` keeps what the server prints, for a test that needs to say why it failed.
+    const logFile = process.env.BAND_TEST_SERVER_LOG;
+    if (logFile) {
+      const tee = (chunk: Buffer) => appendFileSync(logFile, chunk);
+      child.stdout!.on("data", tee);
+      child.stderr!.on("data", tee);
+    }
 
     let stderr = "";
     let settled = false;

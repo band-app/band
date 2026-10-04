@@ -87,7 +87,11 @@ Terminals run in the worker process (`InProcessTerminalBackend`), so they end wh
 
 ## Ephemeral mode
 
-An ephemeral worker exits with code 0 once nothing has run for `--idle-exit`. A call in progress and every open channel count as activity, including channels the hub opened. A worker that has lost the hub for that long also exits.
+An ephemeral worker asks the hub whether it may exit once nothing has run for `--idle-exit` (the hub can replace that time with `lifecycle.policy`). It exits with code 0 only when the hub answers that every workspace on it is stored. A refusal, such as a running terminal or a failed upload, keeps the worker up, and it asks again after another idle time. Against a hub with no `lifecycle.idle` handler it exits at once, as before.
+
+A call in progress and every open channel count as activity, including channels the hub opened. The reads the hub makes on its own schedule (`host.info`, `worktree.list`, `git.exec`, `git.gh`, and the read-only `fs.*` and `search.listFiles` calls) hold the worker while they run but do not restart the idle clock, so a status poller does not keep a machine awake. A worker that has lost the hub for an hour (or its idle time, if longer) also exits, because it cannot store anything without the hub.
+
+Two methods serve the hub's sleep and wake handshake: `lifecycle.exportSessions` reads the agent session files for the given session ids from `~/.claude/projects`, `~/.codex/sessions` and the directories in `BAND_AGENT_SESSION_DIRS`, and `lifecycle.importSessions` moves staged files back there. See [Ephemeral workers](../../docs/ephemeral-workers.md).
 
 ## Tests
 

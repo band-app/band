@@ -250,6 +250,38 @@ export class TokenService {
   }
 
   /**
+   * A bootstrap token for a host that already exists, so a new worker can take
+   * over its id (an ephemeral host waking up, plan step 3.5). Live tokens of
+   * the host are revoked first: the worker that held them is gone.
+   */
+  issueWorkerBootstrapFor(
+    hostId: string,
+    ttlMs: number = DEFAULT_BOOTSTRAP_TTL_MS,
+  ): { token: string; hostId: string; view: TokenView } {
+    const host = this.queries.findHost(hostId);
+    if (!host) throw new Error(`No host "${hostId}"`);
+    if (host.status === "online" || host.status === "lost") {
+      throw new Error(`Host "${hostId}" is ${host.status}`);
+    }
+    this.revokeHostTokens(hostId);
+    const ttl = Math.min(Math.max(ttlMs, 1000), MAX_BOOTSTRAP_TTL_MS);
+    const at = this.now();
+    const token = newToken("worker_bootstrap");
+    const row = this.insert("worker_bootstrap", token, {
+      label: host.name,
+      hostId,
+      expiresAt: at + ttl,
+    });
+    log.info(`issued worker bootstrap token ${row.id} for existing host ${hostId}`);
+    return { token, hostId, view: toView(row, at) };
+  }
+
+  /** Revokes every live token bound to a host, which cuts the link of a worker still holding one. */
+  revokeHostTokens(hostId: string): void {
+    for (const token of this.queries.listLiveTokensForHost(hostId)) this.revoke(token.id);
+  }
+
+  /**
    * Trades a bootstrap token for a session token bound to `workerId`. The
    * bootstrap token works once: the update that consumes it is guarded in
    * SQL, so concurrent exchanges can't both succeed. A mismatched worker id
@@ -382,7 +414,7 @@ export class TokenService {
         `Host "${host.name}" still has ${workspaces} workspace${workspaces === 1 ? "" : "s"}. Remove them first.`,
       );
     }
-    for (const token of this.queries.listLiveTokensForHost(id)) this.revoke(token.id);
+    this.revokeHostTokens(id);
     this.queries.deleteHost(id);
     log.info(`removed host ${id}`);
     return id;
