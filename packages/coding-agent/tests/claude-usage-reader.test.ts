@@ -62,7 +62,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "band-claude-usage-")));
   worktree = join(root, "worktrees", "my.repo");
   mkdirSync(worktree, { recursive: true });
-  repoDir = join(root, "config", "repos", encodeClaudeProjectDir(worktree));
+  repoDir = join(root, "config", "projects", encodeClaudeProjectDir(worktree));
   mkdirSync(repoDir, { recursive: true });
   originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
   process.env.CLAUDE_CONFIG_DIR = join(root, "config");

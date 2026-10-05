@@ -881,7 +881,8 @@ export class WorktreeService {
     removal.commit();
 
     try {
-      unlinkSync(join(bandHome(), "worktree-prompts", `${worktreeId}.json`));
+      // Older installs keep prompt files in `workspace-prompts`; the directory name is not renamed.
+      unlinkSync(join(bandHome(), "workspace-prompts", `${worktreeId}.json`));
     } catch {
       // Prompt file may not exist
     }

@@ -131,7 +131,7 @@ describe("terminal daemon — a daemon from another build", () => {
     const runDir = join(tmpHome, ".band", "run");
     const inRunDir = readdirSync(runDir).filter((name) => name.includes(".retired-"));
     const socketDir = dirname(
-      JSON.parse(readFileSync(join(runDir, "terminal-daemon-v2.pid"), "utf8")).socket,
+      JSON.parse(readFileSync(join(runDir, "terminal-daemon-v3.pid"), "utf8")).socket,
     );
     const sockets = inRunDir
       .map((name) => /\.retired-([0-9a-f]+)\.token$/.exec(name)?.[1])

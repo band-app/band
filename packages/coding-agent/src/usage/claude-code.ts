@@ -10,7 +10,7 @@ import type { UsageReader, UsageSessionItem } from "./types.ts";
  * Claude Code usage reader for the Reports scanner (issue #425).
  *
  * Reads Claude Code's per-repo session transcripts directly from
- * `$CLAUDE_CONFIG_DIR/repos/<encoded-cwd>/<sessionId>.jsonl` (default
+ * `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/<sessionId>.jsonl` (default
  * `~/.claude/projects/...`). No SDK import: the directory layout and the
  * cwd encoding below mirror `@anthropic-ai/claude-agent-sdk`'s own
  * `listSessions` / `getSessionMessages` implementation.

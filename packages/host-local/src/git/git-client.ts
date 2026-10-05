@@ -129,7 +129,7 @@ export function parseGitRemoteUrl(url: string): RepoInfo | null {
  *      pinning, and the `data-testid` hook on `WorktreeCard`. Embedding the
  *      short commit SHA disambiguates them.
  *   3. **Filesystem- and URL-safe** — `worktreeId` is used as a path
- *      component in `worktree-prompts/<id>.json` and `shared/<id>/...`, and
+ *      component in `workspace-prompts/<id>.json` (the older name stays on disk) and `shared/<id>/...`, and
  *      as a URL segment via `encodeURIComponent`. We stick to `[a-z0-9-]` so
  *      no encoding surprises leak through. (Bug surfaced when a user had
  *      ~9 worktrees in detached-HEAD states — see the WorktreeCard chain

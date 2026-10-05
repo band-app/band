@@ -168,7 +168,7 @@ function transcriptPath(env: NodeJS.ProcessEnv, cwd: string, sessionId: string):
   }
   return join(
     claudeConfigDir(env),
-    "repos",
+    "projects",
     real.replace(/[^a-zA-Z0-9]/g, "-"),
     `${sessionId}.jsonl`,
   );

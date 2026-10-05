@@ -408,7 +408,7 @@ function helloReply(token: string, workerId: string): Promise<{ type: string; re
       ws.send(
         JSON.stringify({
           type: "hello",
-          protocol: 1,
+          protocol: 2,
           workerId,
           token,
           buildId: "test",

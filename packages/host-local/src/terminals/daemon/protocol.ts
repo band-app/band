@@ -24,7 +24,7 @@ import type {
  * The hello / mismatch / shutdown exchange is the one part that must never
  * change: it is how a newer server asks an older daemon to exit.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Daemon exit code for "a live daemon already owns the endpoint"; the launcher connects to it. */
 export const EXIT_ENDPOINT_OCCUPIED = 20;
