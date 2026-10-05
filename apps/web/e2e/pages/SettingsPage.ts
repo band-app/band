@@ -445,17 +445,23 @@ export class SettingsPage {
   }
 
   /**
-   * Fills the "Connect a service" form and clicks Connect. Returns the window the hub sends to the
-   * consent page, which the caller follows.
+   * Opens the MCP add form, fills the name and URL and clicks "Connect with OAuth". Returns the window
+   * the hub sends to the consent page, which the caller follows.
    */
-  async connectService(name: string, serverUrl: string): Promise<Page> {
-    return await test.step(`Connect ${name}`, async () => {
-      await this.dialog.getByRole("textbox", { name: "Connection name" }).fill(name);
-      await this.dialog.getByRole("textbox", { name: "Server URL" }).fill(serverUrl);
+  async connectMcpOAuth(name: string, serverUrl: string): Promise<Page> {
+    return await test.step(`Connect ${name} with OAuth`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(name);
+      await this.dialog.getByRole("textbox", { name: "MCP server URL" }).fill(serverUrl);
       const popup = this.page.waitForEvent("popup");
-      await this.dialog.getByTestId("settings__credential-connect").click();
+      await this.dialog.getByTestId("settings__mcp-connect-oauth").click();
       return await popup;
     });
+  }
+
+  /** The error shown under the MCP section. */
+  mcpError(): Locator {
+    return this.dialog.getByTestId("settings__mcp-error");
   }
 
   /** Waits for the consent window to land on the hub's callback page and report success. */

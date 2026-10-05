@@ -1,7 +1,6 @@
 import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { crossOriginHub } from "../../../lib/hub-config";
+import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { SettingsRow } from "./SettingsRow";
 
@@ -9,7 +8,6 @@ type VaultList = Awaited<ReturnType<typeof trpc.vault.list.query>>;
 type VaultItem = VaultList["items"][number];
 
 const VAULT_KEY = ["vault.list"] as const;
-const POLL_MS = 1000;
 
 const KIND_LABEL: Record<VaultItem["kind"], string> = {
   api_key: "API key",
@@ -32,9 +30,9 @@ function oauthDetail(item: VaultItem): string {
 /**
  * Rows for the Settings dialog's Credentials section (plan step 4.1): the
  * secrets the hub stores encrypted. A value is write-only: the form sends it
- * and the hub never returns it. "Connect" starts an OAuth consent in a new
- * window and follows the flow until the hub has stored the tokens. Changes
- * apply at once and are not part of the dialog's Save.
+ * and the hub never returns it. OAuth credentials are created from the MCP
+ * section, which starts the consent flow; they are listed and deleted here.
+ * Changes apply at once and are not part of the dialog's Save.
  */
 export function CredentialsSettings() {
   const queryClient = useQueryClient();
@@ -46,27 +44,14 @@ export function CredentialsSettings() {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"api_key" | "env">("api_key");
   const [value, setValue] = useState("");
-  const [oauthName, setOauthName] = useState("");
-  const [serverUrl, setServerUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const polling = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (polling.current) clearInterval(polling.current);
-    },
-    [],
-  );
-
   const refresh = () => queryClient.invalidateQueries({ queryKey: VAULT_KEY });
   const fail = (err: unknown) => setError(err instanceof Error ? err.message : String(err));
 
   const add = async () => {
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       await trpc.vault.put.mutate({ name: name.trim(), kind, value, scope: "global" });
       setName("");
@@ -81,69 +66,12 @@ export function CredentialsSettings() {
 
   const remove = async (item: VaultItem) => {
     setError(null);
-    setNotice(null);
     try {
       await trpc.vault.delete.mutate({ id: item.id });
     } catch (err) {
       fail(err);
     }
     await refresh();
-  };
-
-  const connect = async () => {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    // Opened inside the click, so the browser does not take it for a pop-up. It is pointed at the
-    // consent page once the hub has discovered the server.
-    const consent = window.open("about:blank", "_blank");
-    if (consent) consent.opener = null;
-    try {
-      const { flowId, authorizationUrl } = await trpc.vault.startOAuth.mutate({
-        name: oauthName.trim(),
-        serverUrl: serverUrl.trim(),
-        scope: "global",
-        redirectBase: crossOriginHub()?.origin ?? window.location.origin,
-      });
-      if (consent) consent.location.href = authorizationUrl;
-      else window.open(authorizationUrl, "_blank");
-      setNotice("Waiting for you to approve the connection in the new window.");
-      if (polling.current) clearInterval(polling.current);
-      const startedAt = Date.now();
-      polling.current = setInterval(() => {
-        void (async () => {
-          try {
-            const status = await trpc.vault.oauthStatus.query({ flowId });
-            if (
-              (status.status === "pending" || status.status === "exchanging") &&
-              Date.now() - startedAt < 10 * 60_000
-            )
-              return;
-            if (polling.current) clearInterval(polling.current);
-            polling.current = null;
-            if (status.status === "connected") {
-              setNotice(null);
-              setOauthName("");
-              setServerUrl("");
-              await refresh();
-            } else {
-              setNotice(null);
-              setError(status.error ?? "The connection was not completed.");
-            }
-          } catch (err) {
-            if (polling.current) clearInterval(polling.current);
-            polling.current = null;
-            setNotice(null);
-            fail(err);
-          }
-        })();
-      }, POLL_MS);
-    } catch (err) {
-      consent?.close();
-      fail(err);
-    } finally {
-      setBusy(false);
-    }
   };
 
   return (
@@ -241,43 +169,6 @@ export function CredentialsSettings() {
           >
             Add credential
           </Button>
-        </div>
-      </SettingsRow>
-
-      <SettingsRow
-        variant="stacked"
-        label="Connect a service"
-        description="Sign in to an OAuth-protected server, such as an HTTP MCP server. Band finds the sign-in page from the server URL and stores the tokens."
-      >
-        <div className="space-y-2">
-          <Input
-            aria-label="Connection name"
-            placeholder="Name"
-            value={oauthName}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOauthName(e.target.value)}
-            className="h-8 text-sm"
-          />
-          <Input
-            aria-label="Server URL"
-            placeholder="https://mcp.example.com/mcp"
-            value={serverUrl}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setServerUrl(e.target.value)}
-            className="h-8 text-sm"
-          />
-          <Button
-            type="button"
-            size="sm"
-            data-testid="settings__credential-connect"
-            disabled={busy || oauthName.trim() === "" || serverUrl.trim() === ""}
-            onClick={() => void connect()}
-          >
-            Connect
-          </Button>
-          {notice ? (
-            <p className="text-xs text-muted-foreground" data-testid="settings__credential-notice">
-              {notice}
-            </p>
-          ) : null}
         </div>
       </SettingsRow>
 

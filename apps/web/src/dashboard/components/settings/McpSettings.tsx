@@ -369,6 +369,8 @@ export function McpSettings() {
             setNotice(null);
             if (state.status === "connected") {
               await queryClient.invalidateQueries({ queryKey: VAULT_KEY });
+              // The Credentials section lists the new OAuth credential.
+              await queryClient.invalidateQueries({ queryKey: ["vault.list"] });
               if (state.item) patch({ vaultItemId: state.item.id });
             } else {
               setError(state.error ?? "The connection was not completed.");

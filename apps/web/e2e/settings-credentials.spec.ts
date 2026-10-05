@@ -1,6 +1,7 @@
 /**
  * Settings > Credentials (plan step 4.1): add an API key whose value is write-only, connect an
- * OAuth-protected server through the consent window, and delete both. The authorization server is
+ * OAuth-protected server through the consent window (started from the MCP form, plan step 4.5),
+ * and delete both. The authorization server is
  * a real local Express stub with discovery, dynamic client registration and PKCE
  * (`apps/hub/tests/fixtures/oauth-stub.ts`). Real hub, temp BAND_HOME.
  * `apps/hub/tests/vault.test.ts` covers encryption, rotation, refresh and revocation.
@@ -66,7 +67,7 @@ test("connects an OAuth server through the consent window, then deletes and revo
   await settingsPage.goto();
   await settingsPage.openDialog();
 
-  const consent = await settingsPage.connectService("e2e-mcp", oauth.resourceUrl);
+  const consent = await settingsPage.connectMcpOAuth("e2e-mcp", oauth.resourceUrl);
   // The stub consents at once and redirects the window back to the hub's callback.
   await settingsPage.expectOAuthCallbackConnected(consent);
 
@@ -87,7 +88,7 @@ test("shows the hub's refusal when a server cannot be reached", async ({ page })
   await settingsPage.goto();
   await settingsPage.openDialog();
 
-  await settingsPage.connectService("nowhere", "http://127.0.0.1:1/mcp");
-  await expect(settingsPage.credentialError()).toBeVisible();
+  await settingsPage.connectMcpOAuth("nowhere", "http://127.0.0.1:1/mcp");
+  await expect(settingsPage.mcpError()).toBeVisible();
   await expect(settingsPage.credentialRow("nowhere")).toHaveCount(0);
 });
