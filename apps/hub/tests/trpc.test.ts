@@ -17,9 +17,13 @@ function createTmpHome(): string {
 }
 
 async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+  opts: { tmpHome?: string; env?: Record<string, string>; remoteHost?: boolean } = {},
 ): Promise<ServerHandle> {
-  return startServerBase({ tmpHome: opts.tmpHome ?? createTmpHome(), env: opts.env });
+  return startServerBase({
+    tmpHome: opts.tmpHome ?? createTmpHome(),
+    env: opts.env,
+    remoteHost: opts.remoteHost,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1679,7 +1683,9 @@ describe("tRPC — pinned workspaces", () => {
       tokenSecret: DEFAULT_TOKEN,
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
-    server = await startServer({ tmpHome });
+    // The hub usage scanner still reads a workspace's checkout from the hub, so
+    // this suite stays on the hub's own machine in remote-loopback mode.
+    server = await startServer({ tmpHome, remoteHost: false });
   });
 
   afterAll(async () => {
@@ -1790,7 +1796,7 @@ describe("tRPC — pinned workspaces", () => {
     // only persistence layer for pin state, so a fresh process must see
     // the same value.
     await server.close();
-    server = await startServer({ tmpHome });
+    server = await startServer({ tmpHome, remoteHost: false });
 
     expect(await readPinned("feature")).toBe(true);
     expect(await readPinned("main")).toBe(false);

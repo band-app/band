@@ -32,7 +32,7 @@ function createTmpHome(): string {
 }
 
 function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  return startCanonicalServer({ tmpHome: opts.tmpHome });
+  return startCanonicalServer({ tmpHome: opts.tmpHome, remoteHost: false });
 }
 
 async function trpcQuery(
