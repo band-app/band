@@ -76,6 +76,7 @@ import { terminalsRouters } from "./terminals/router";
 import { tokensRouter } from "./tokens/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
+import { vaultRouter } from "./vault/router";
 import { workspaceRouter } from "./workspace/router";
 import { workspacesRouter } from "./workspaces/router";
 
@@ -104,6 +105,7 @@ export const appRouter = t.router({
   hostRequests: hostRequestsRouter,
   runners: runnersRouter,
   tokens: tokensRouter,
+  vault: vaultRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,
   tunnel: tunnelRouter,

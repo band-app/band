@@ -38,6 +38,7 @@ function discoverProcedures(): ProcedureInfo[] {
     // holding a device token must not be able to mint or list others.
     if (
       path.startsWith("tokens.") ||
+      path.startsWith("vault.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")

@@ -229,6 +229,8 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).toContain("band_tunnel_status");
     expect(toolNames).toContain("band_workspaces_create");
     expect(toolNames).toContain("band_cronjobs_list");
+    // Credentials stay out of agent reach.
+    expect(toolNames.filter((n) => n.startsWith("band_vault_"))).toEqual([]);
 
     // Subscriptions should NOT be exposed
     expect(toolNames).not.toContain("band_tasks_stream");
