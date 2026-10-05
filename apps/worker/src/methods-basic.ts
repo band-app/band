@@ -2,10 +2,17 @@ import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import type { ClaudeCliArgs, ExecOptions, ScriptLabel, ScriptPlan } from "@band-app/host-api";
+import type {
+  ClaudeCliArgs,
+  ContextSpec,
+  ExecOptions,
+  ScriptLabel,
+  ScriptPlan,
+} from "@band-app/host-api";
 import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import {
+  asParams,
   compact,
   num,
   optBool,
@@ -162,6 +169,36 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   const worktreePaths = async (a: Params) => ({
     repoPath: await path(a, "repoPath"),
     worktreePath: await path(a, "worktreePath"),
+  });
+
+  // Working copies of the hub's context repos (plan step 5.2).
+  const contexts = (a: Params): ContextSpec[] => {
+    const list = a.contexts;
+    if (!Array.isArray(list)) throw invalid("contexts must be an array");
+    return list.map((c) => {
+      const spec = asParams(c);
+      const kind = str(spec, "kind");
+      const name = str(spec, "name");
+      if (kind !== "user" && kind !== "project") throw invalid("kind must be user or project");
+      if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(name)) throw invalid("not a context name");
+      return { name, kind };
+    });
+  };
+  r.json("context.pull", async (a) =>
+    host.context.pull({ contexts: contexts(a), timeoutMs: optNum(a, "timeoutMs") }),
+  );
+  r.json("context.push", async (a) => {
+    const secrets = Array.isArray(a.secrets) ? a.secrets.map(asParams) : [];
+    return host.context.push({
+      contexts: contexts(a),
+      message: str(a, "message"),
+      hostLabel: str(a, "hostLabel"),
+      secrets: secrets.map((s) => ({
+        length: num(s, "length"),
+        prefix: str(s, "prefix"),
+        sha256: str(s, "sha256"),
+      })),
+    });
   });
 
   r.json("scripts.command", async (a) =>

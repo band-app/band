@@ -727,7 +727,7 @@ enum McpCmd {
 enum ContextCmd {
     /// List the contexts
     List,
-    /// Create a context. `user` is the user context; any other name is a named (mission) context.
+    /// Create a context. `user` is the user context; any other name is a named (project) context.
     Create {
         /// Context name: lowercase letters, digits, hyphens and underscores
         name: String,

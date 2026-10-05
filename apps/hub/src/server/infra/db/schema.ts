@@ -791,10 +791,13 @@ export const contexts = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["user", "mission"] }).notNull(),
+    kind: text("kind", { enum: ["user", "project"] }).notNull(),
     remoteUrl: text("remote_url"),
     remoteVaultItemId: text("remote_vault_item_id"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    // Repos whose sessions get this project context (plan step 5.2). Empty means none. A user
+    // context goes to every session and ignores it.
+    repos: text("repos", { mode: "json" }).$type<string[]>().notNull().default([]),
     workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
       .notNull()
       .default("read-write"),
@@ -804,4 +807,19 @@ export const contexts = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [uniqueIndex("contexts_name_idx").on(t.name)],
+);
+
+// What the worker sync (plan step 5.2) reported to the hub: a conflict whose two versions were
+// kept, or files the redaction scan held back. `detail` never holds a matched secret.
+export const contextEvents = sqliteTable(
+  "context_events",
+  {
+    id: text("id").primaryKey(),
+    context: text("context").notNull(),
+    hostId: text("host_id").notNull(),
+    kind: text("kind", { enum: ["conflict", "blocked"] }).notNull(),
+    detail: text("detail", { mode: "json" }).$type<unknown>().notNull(),
+    at: integer("at").notNull(),
+  },
+  (t) => [index("context_events_at_idx").on(t.at)],
 );

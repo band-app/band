@@ -59,6 +59,7 @@ import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
+import { contextSyncService } from "./context-sync-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 import { worktreeService } from "./worktree-service";
@@ -993,7 +994,11 @@ export class AgentSessionService {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
     // A message to a sleeping worktree brings its worker back first.
-    if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
+    if (purpose === "prompt") {
+      await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
+      // Fresh context files before the agent reads them. A slow or unreachable hub never blocks it.
+      await contextSyncService.pullForWorktree(chat.worktreeId);
+    }
     const worktree = worktreeService.resolve(chat.worktreeId);
     if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
@@ -1060,6 +1065,8 @@ export class AgentSessionService {
     } finally {
       rt.inTurn = false;
       if (rt.process) scheduleIdle(rt);
+      // What the agent wrote to its context files goes to the hub without holding the turn's result.
+      void contextSyncService.pushAfterTurn(rt.worktreeId, chatId, rt.turnSeq);
       // Never let a failed push replace the turn's result.
       try {
         await this.pushClaudeDefaults(chatId, true);

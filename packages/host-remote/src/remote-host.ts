@@ -16,6 +16,7 @@ import type {
   Host,
   HostAcp,
   HostAgentEnv,
+  HostContext,
   HostFs,
   HostGit,
   HostInfo,
@@ -211,6 +212,13 @@ export class RemoteHost implements Host {
         },
       };
     },
+  };
+
+  readonly context: HostContext = {
+    // The worker pulls its contexts in parallel and bounds each by `timeoutMs`.
+    pull: (request) =>
+      this.rpc.call("context.pull", request, { timeoutMs: (request.timeoutMs ?? 10_000) + 10_000 }),
+    push: (request) => this.rpc.call("context.push", request, { timeoutMs: 5 * 60_000 }),
   };
 
   readonly scripts: HostScripts = {

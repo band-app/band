@@ -1,6 +1,6 @@
 /**
  * Context repos the hub holds (plan step 5.1): one user context and any number
- * of named ones (mission contexts, step 6.1). Each is a bare git repo at
+ * of named ones (project contexts, step 6.1). Each is a bare git repo at
  * `<BAND_HOME>/context/<name>.git`, served over git smart HTTP by
  * `api/context/git-http.ts`.
  *
@@ -34,6 +34,7 @@ const MAX_LABELS = 20;
 const DEFAULT_POLL_MS = 60_000;
 const PUSH_DEBOUNCE_MS = 2_000;
 const GIT_TIMEOUT_MS = 5 * 60_000;
+const EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 export interface ContextView {
   id: string;
@@ -42,6 +43,7 @@ export interface ContextView {
   remoteUrl: string | null;
   remoteVaultItemId: string | null;
   labels: string[];
+  repos: string[];
   workerAccess: ContextRow["workerAccess"];
   syncError: string | null;
   lastSyncAt: number | null;
@@ -65,6 +67,7 @@ function toView(row: ContextRow): ContextView {
     remoteUrl: row.remoteUrl,
     remoteVaultItemId: row.remoteVaultItemId,
     labels: row.labels,
+    repos: row.repos,
     workerAccess: row.workerAccess,
     syncError: row.syncError,
     lastSyncAt: row.lastSyncAt,
@@ -149,7 +152,7 @@ const SCAFFOLD: Record<ContextRow["kind"], Array<[string, string]>> = {
     ["preferences.md", "# Preferences\n\nHow you like agents to work. Agents read this first.\n"],
     ["skills/.gitkeep", ""],
   ],
-  mission: [
+  project: [
     ["notes.md", "# Notes\n\nWritten by the coordinator. Keep it short.\n"],
     ["docs/.gitkeep", ""],
     ["media/.gitkeep", ""],
@@ -224,6 +227,15 @@ function validateLabels(labels: string[]): string[] {
   return [...new Set(labels)];
 }
 
+function validateRepos(repos: string[]): string[] {
+  if (repos.length > 100) throw new ContextInputError("At most 100 repos");
+  for (const repo of repos) {
+    if (!repo || repo.length > 200)
+      throw new ContextInputError("A repo name is 1 to 200 characters");
+  }
+  return [...new Set(repos)];
+}
+
 /** Whether a host's labels include every label a context asks for. An empty list matches any host. */
 export function hostLabelsMatch(required: string[], hostLabels: string[]): boolean {
   return required.every((l) => hostLabels.includes(l));
@@ -233,6 +245,7 @@ export interface CreateContextInput {
   name: string;
   kind?: ContextRow["kind"];
   labels?: string[];
+  repos?: string[];
   workerAccess?: ContextRow["workerAccess"];
   remoteUrl?: string;
   remoteVaultItemId?: string;
@@ -263,6 +276,41 @@ export class ContextService {
     return this.queries.list().map(toView);
   }
 
+  /**
+   * The contexts a session of `repo` on a host with `hostLabels` gets: the user context, and each
+   * project context that lists the repo. A context whose labels the host lacks is left out.
+   */
+  forSession(repo: string, hostLabels: string[]): ContextRow[] {
+    return this.queries
+      .list()
+      .filter((row) => row.kind === "user" || row.repos.includes(repo))
+      .filter((row) => hostLabelsMatch(row.labels, hostLabels));
+  }
+
+  /** Records what a host's sync reported. The detail never holds a matched secret. */
+  recordEvent(
+    context: string,
+    hostId: string,
+    kind: "conflict" | "blocked",
+    detail: unknown,
+  ): void {
+    const now = Date.now();
+    this.queries.insertEvent({
+      id: `cev-${randomBytes(6).toString("hex")}`,
+      context,
+      hostId,
+      kind,
+      detail,
+      at: now,
+    });
+    this.queries.pruneEvents(now - EVENT_RETENTION_MS);
+    log.info(`context ${context}: ${kind} on host ${hostId}`);
+  }
+
+  events(limit: number, context?: string) {
+    return this.queries.listEvents(limit, context);
+  }
+
   /** The row the git endpoint authorizes against, or undefined. */
   find(name: string): ContextRow | undefined {
     return CONTEXT_NAME.test(name) ? this.queries.find(name) : undefined;
@@ -275,11 +323,11 @@ export class ContextService {
         "A context name is lowercase letters, digits, hyphens and underscores",
       );
     }
-    const kind = input.kind ?? (name === USER_CONTEXT_NAME ? "user" : "mission");
+    const kind = input.kind ?? (name === USER_CONTEXT_NAME ? "user" : "project");
     if (kind === "user" && name !== USER_CONTEXT_NAME) {
       throw new ContextInputError(`The user context is named "${USER_CONTEXT_NAME}"`);
     }
-    if (kind === "mission" && name === USER_CONTEXT_NAME) {
+    if (kind === "project" && name === USER_CONTEXT_NAME) {
       throw new ContextInputError(`"${USER_CONTEXT_NAME}" is reserved for the user context`);
     }
     if (this.queries.find(name)) throw new ContextInputError(`Context "${name}" already exists`);
@@ -301,6 +349,7 @@ export class ContextService {
         remoteUrl,
         remoteVaultItemId: vaultItemId,
         labels,
+        repos: validateRepos(input.repos ?? []),
         workerAccess: input.workerAccess ?? "read-write",
         syncError: null,
         lastSyncAt: null,
@@ -340,11 +389,12 @@ export class ContextService {
 
   update(
     name: string,
-    patch: { labels?: string[]; workerAccess?: ContextRow["workerAccess"] },
+    patch: { labels?: string[]; repos?: string[]; workerAccess?: ContextRow["workerAccess"] },
   ): ContextView {
     this.require(name);
     const set: Partial<ContextRow> = {};
     if (patch.labels) set.labels = validateLabels(patch.labels);
+    if (patch.repos) set.repos = validateRepos(patch.repos);
     if (patch.workerAccess) set.workerAccess = patch.workerAccess;
     if (Object.keys(set).length > 0) this.queries.update(name, set);
     return toView(this.require(name));

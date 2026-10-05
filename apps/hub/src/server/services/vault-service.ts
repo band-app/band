@@ -14,6 +14,7 @@
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { fingerprintSecret, type SecretFingerprint } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { VaultInputError, VaultNotFoundError } from "../errors";
 import { type VaultKind, VaultQueries, type VaultRow } from "../infra/db/queries/vault";
@@ -327,6 +328,38 @@ export class VaultService {
     const username =
       typeof best.metadata.username === "string" ? best.metadata.username : DEFAULT_GIT_USERNAME;
     return { username, password: decrypt(this.getKey(), best.id, best.encrypted) };
+  }
+
+  /**
+   * Fingerprints of every secret value in the vault, for the redaction scan on a host's context
+   * pushes (plan step 5.2). A fingerprint holds a hash, a length and four characters, so a host
+   * can spot a value in a file but never recover it. For hub services, never an API.
+   */
+  secretFingerprints(): SecretFingerprint[] {
+    const out: SecretFingerprint[] = [];
+    for (const row of this.queries.list()) {
+      let plain: string;
+      try {
+        plain = decrypt(this.getKey(), row.id, row.encrypted);
+      } catch {
+        continue;
+      }
+      const values: string[] = [];
+      if (row.kind === "oauth") {
+        try {
+          const secret = JSON.parse(plain) as OAuthSecret;
+          values.push(secret.accessToken);
+          if (secret.refreshToken) values.push(secret.refreshToken);
+          if (secret.clientSecret) values.push(secret.clientSecret);
+        } catch {
+          continue;
+        }
+      } else {
+        values.push(plain);
+      }
+      for (const value of values) out.push(...fingerprintSecret(value));
+    }
+    return out;
   }
 
   /** The kind of an item, or undefined when it doesn't exist. Metadata only. */
