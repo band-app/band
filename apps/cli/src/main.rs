@@ -92,6 +92,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: McpCmd,
     },
+    /// Manage the context repos the hub holds (user and named contexts)
+    Context {
+        #[command(subcommand)]
+        cmd: ContextCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -710,6 +715,47 @@ enum McpCmd {
 }
 
 #[derive(Subcommand)]
+enum ContextCmd {
+    /// List the contexts
+    List,
+    /// Create a context. `user` is the user context; any other name is a named (mission) context.
+    Create {
+        /// Context name: lowercase letters, digits, hyphens and underscores
+        name: String,
+        /// Existing repo to mirror both ways (https, ssh or scp-style URL)
+        #[arg(long)]
+        remote: Option<String>,
+        /// Credential ID from `band vault list` for an https remote
+        #[arg(long)]
+        vault_item: Option<String>,
+        /// Comma-separated `key=value` host labels a worker needs to pull this context
+        #[arg(long)]
+        labels: Option<String>,
+        /// Workers may pull but not push
+        #[arg(long)]
+        read_only: bool,
+    },
+    /// Remove a context and its repo on the hub
+    Remove {
+        /// Context name (from `band context list`)
+        name: String,
+    },
+    /// Link a context to a remote repo and mirror it now. Pass `--unlink` to drop the link.
+    LinkRemote {
+        /// Context name
+        name: String,
+        /// Remote URL (https, ssh or scp-style)
+        remote: Option<String>,
+        /// Credential ID from `band vault list` for an https remote
+        #[arg(long)]
+        vault_item: Option<String>,
+        /// Drop the remote link
+        #[arg(long)]
+        unlink: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -1034,6 +1080,29 @@ fn main() {
                 disabled,
             ),
             McpCmd::Remove { name } => cmd_mcp_remove(&name),
+        },
+        Commands::Context { cmd } => match cmd {
+            ContextCmd::List => cmd_context_list(),
+            ContextCmd::Create {
+                name,
+                remote,
+                vault_item,
+                labels,
+                read_only,
+            } => cmd_context_create(
+                &name,
+                remote.as_deref(),
+                vault_item.as_deref(),
+                labels.as_deref(),
+                read_only,
+            ),
+            ContextCmd::Remove { name } => cmd_context_remove(&name),
+            ContextCmd::LinkRemote {
+                name,
+                remote,
+                vault_item,
+                unlink,
+            } => cmd_context_link_remote(&name, remote.as_deref(), vault_item.as_deref(), unlink),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -3888,6 +3957,118 @@ fn cmd_mcp_add(
     })
 }
 
+fn cmd_context_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("context.list", &serde_json::json!({}))?;
+    let contexts = data
+        .get("contexts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 5]> = contexts
+        .iter()
+        .map(|c| {
+            let text = |key: &str| c.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let labels = c
+                .get("labels")
+                .and_then(|v| v.as_array())
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            let sync = match c.get("syncError").and_then(|v| v.as_str()) {
+                Some(e) => format!("error: {e}"),
+                None if c.get("remoteUrl").is_some_and(|v| !v.is_null()) => "ok".to_string(),
+                None => "-".to_string(),
+            };
+            [
+                text("name").to_string(),
+                text("kind").to_string(),
+                if text("remoteUrl").is_empty() {
+                    "-".to_string()
+                } else {
+                    text("remoteUrl").to_string()
+                },
+                if labels.is_empty() {
+                    "any".to_string()
+                } else {
+                    labels
+                },
+                sync,
+            ]
+        })
+        .collect();
+    Ok(CommandResult {
+        text: format_table(&["NAME", "KIND", "REMOTE", "LABELS", "SYNC"], &rows),
+        json: serde_json::json!({"contexts": contexts}),
+    })
+}
+
+fn cmd_context_create(
+    name: &str,
+    remote: Option<&str>,
+    vault_item: Option<&str>,
+    labels: Option<&str>,
+    read_only: bool,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"name": name});
+    if let Some(v) = remote {
+        body["remoteUrl"] = serde_json::json!(v);
+    }
+    if let Some(v) = vault_item {
+        body["remoteVaultItemId"] = serde_json::json!(v);
+    }
+    if let Some(v) = labels {
+        body["labels"] = serde_json::json!(split_list(v));
+    }
+    if read_only {
+        body["workerAccess"] = serde_json::json!("read-only");
+    }
+    let data = client.trpc_mutate("context.create", &body)?;
+    Ok(CommandResult {
+        text: format!("Created context {name}, served at /git/context/{name}.git\n"),
+        json: serde_json::json!({"context": data.get("context")}),
+    })
+}
+
+fn cmd_context_remove(name: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("context.remove", &serde_json::json!({"name": name}))?;
+    Ok(CommandResult {
+        text: format!("Removed context {name}\n"),
+        json: serde_json::json!({"removed": true, "name": name}),
+    })
+}
+
+fn cmd_context_link_remote(
+    name: &str,
+    remote: Option<&str>,
+    vault_item: Option<&str>,
+    unlink: bool,
+) -> Result<CommandResult, String> {
+    if unlink == remote.is_some() {
+        return Err("Pass either a remote URL or --unlink".to_string());
+    }
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"name": name, "remoteUrl": remote});
+    if let Some(v) = vault_item {
+        body["vaultItemId"] = serde_json::json!(v);
+    }
+    let data = client.trpc_mutate("context.linkRemote", &body)?;
+    let text = match remote {
+        Some(url) => format!("Linked context {name} to {url} and mirrored it\n"),
+        None => format!("Unlinked context {name} from its remote\n"),
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"context": data.get("context")}),
+    })
+}
+
 fn cmd_mcp_remove(name: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("mcp.remove", &serde_json::json!({"name": name}))?;
@@ -4613,6 +4794,43 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Server name (from `band mcp list`)"},
             ],
             "notes": "Needs an admin token."
+        }),
+        serde_json::json!({
+            "name": "context list",
+            "description": "List the context repos the hub holds",
+            "parameters": [],
+            "notes": "Needs an admin token. Text output: `NAME  KIND  REMOTE  LABELS  SYNC`.\nJSON output: `{\"contexts\": [{\"id\": \"ctx-...\", \"name\": \"...\", \"kind\": \"user|mission\", \"remoteUrl\": null, \"labels\": [], \"workerAccess\": \"read-write\", \"syncError\": null}]}`."
+        }),
+        serde_json::json!({
+            "name": "context create",
+            "description": "Create a context repo on the hub, with a scaffold or mirroring an existing remote repo",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name. `user` is the user context."},
+                {"name": "remote", "type": "string", "required": false, "description": "Existing repo to mirror both ways (https, ssh or scp-style URL)"},
+                {"name": "vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` for an https remote"},
+                {"name": "labels", "type": "string", "required": false, "description": "Comma-separated key=value host labels a worker needs to pull this context (default: any worker)"},
+                {"name": "read-only", "type": "boolean", "required": false, "description": "Workers may pull but not push"},
+            ],
+            "notes": "Needs an admin token. Clients clone `<hub>/git/context/<name>.git` with a Bearer token."
+        }),
+        serde_json::json!({
+            "name": "context remove",
+            "description": "Remove a context and its repo on the hub",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name (from `band context list`)"},
+            ],
+            "notes": "Needs an admin token. A linked remote is left as it is."
+        }),
+        serde_json::json!({
+            "name": "context link-remote",
+            "description": "Link a context to a remote repo and mirror it now, or drop the link",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name"},
+                {"name": "remote", "type": "string", "required": false, "positional": true, "description": "Remote URL (https, ssh or scp-style)"},
+                {"name": "vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` for an https remote"},
+                {"name": "unlink", "type": "boolean", "required": false, "description": "Drop the remote link"},
+            ],
+            "notes": "Needs an admin token. The hub fetches the remote's branches and pushes its own, never forcing. A branch that moved on both sides is left alone and shown in the SYNC column."
         }),
         serde_json::json!({
             "name": "runners list",

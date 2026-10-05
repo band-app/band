@@ -2149,6 +2149,85 @@ fn mcp_add_list_remove() {
     assert!(!env.band(&["mcp", "remove", "notes"]).status.success());
 }
 
+#[test]
+fn context_create_list_link_remove() {
+    let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
+
+    let created = env.band(&[
+        "context",
+        "create",
+        "alpha",
+        "--labels",
+        "org=epic, region=eu",
+        "--read-only",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let context = &json_of(&created)["context"];
+    assert_eq!(context["name"], "alpha");
+    assert_eq!(context["kind"], "mission");
+    assert_eq!(
+        context["labels"],
+        serde_json::json!(["org=epic", "region=eu"])
+    );
+    assert_eq!(context["workerAccess"], "read-only");
+
+    let user = env.band(&["context", "create", "user"]);
+    assert!(user.status.success(), "stderr: {}", stderr(&user));
+
+    let listed = json_of(&env.band(&["context", "list", "--output", "json"]));
+    let names: Vec<&str> = listed["contexts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["alpha", "user"]);
+    let text = stdout(&env.band(&["context", "list"]));
+    assert!(text.starts_with("NAME"), "text: {text}");
+    assert!(text.contains("org=epic,region=eu"), "text: {text}");
+
+    // A duplicate, a bad name and a second user context are refused.
+    assert!(!env.band(&["context", "create", "alpha"]).status.success());
+    assert!(!env
+        .band(&["context", "create", "Bad Name"])
+        .status
+        .success());
+    assert!(!env
+        .band(&[
+            "context",
+            "create",
+            "again",
+            "--remote",
+            "http://example.com/r.git"
+        ])
+        .status
+        .success());
+
+    // link-remote needs a URL or --unlink, not both and not neither.
+    assert!(!env
+        .band(&["context", "link-remote", "alpha"])
+        .status
+        .success());
+    assert!(!env
+        .band(&[
+            "context",
+            "link-remote",
+            "alpha",
+            "https://example.com/r.git",
+            "--unlink"
+        ])
+        .status
+        .success());
+    let unlinked = env.band(&["context", "link-remote", "alpha", "--unlink"]);
+    assert!(unlinked.status.success(), "stderr: {}", stderr(&unlinked));
+
+    let removed = env.band(&["context", "remove", "alpha"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    assert!(!env.band(&["context", "remove", "alpha"]).status.success());
+}
+
 // --- Subscriptions tests ---
 
 /// A workspace with one chat, and the environment an agent in that chat has.

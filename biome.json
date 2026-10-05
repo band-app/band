@@ -134,6 +134,10 @@
         "apps/hub/src/server/services/runner-service.ts",
         "apps/hub/src/server/services/_utils/runner-config.ts",
         "apps/hub/src/server/services/_utils/vault-crypto.ts",
+        "apps/hub/src/server/services/context-service.ts",
+        "apps/hub/src/server/services/media-service.ts",
+        "apps/hub/src/server/api/context/git-http.ts",
+        "apps/hub/src/server/api/media/handler.ts",
         "apps/hub/src/server/services/ephemeral-lifecycle-service.ts"
       ],
       "linter": {

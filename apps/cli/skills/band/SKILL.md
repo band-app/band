@@ -249,6 +249,17 @@ band mcp remove <name>
 
 The hub proxies HTTP MCP servers at `/mcp-proxy/<name>` and adds the credential from the vault, so an agent never holds it. Each agent session gets its own short-lived token for the servers it may use. `--allow-tools` limits the tools an agent sees and can call. `--read-only` keeps only tools the server marks `readOnlyHint` plus those named in `--read-only-tools`. An API key goes in `--header` (default `Authorization`) after `--prefix` (default `Bearer `). An OAuth connection from Settings > Credentials always goes as a Bearer token. These commands need an admin token. Run them only when the user asks.
 
+### Hold context repos on the hub
+
+```sh
+band context list
+band context create <name> [--remote <url>] [--vault-item <id>] [--labels k=v,k=v] [--read-only]
+band context remove <name>
+band context link-remote <name> <url> [--vault-item <id>]   (or --unlink)
+```
+
+The hub keeps the user context (`user`) and named contexts as bare git repos and serves them at `<hub>/git/context/<name>.git`. `--remote` mirrors an existing repo both ways without forcing, and a branch that moved on both sides is left alone and shown under SYNC. `--labels` limits which workers may pull a context to hosts carrying every label. Media for contexts lives in the hub's media store as `band://media/<id>` links. These commands need an admin token. Run them only when the user asks.
+
 ### Store credentials in the hub's vault
 
 ```sh
