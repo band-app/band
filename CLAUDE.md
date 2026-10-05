@@ -39,6 +39,15 @@ The non-negotiables for any new frontend test:
 
 Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/WorkspacePage.ts` as the model — they follow the doctrine end-to-end. Run frontend tests with `pnpm --filter @band-app/web test:e2e`; backend integration tests with `pnpm --filter @band-app/server test`.
 
+### Running the hub suite locally
+
+`pnpm install`, then `pnpm --filter @band-app/server test`. The `pretest` script builds the web app and the hub bundle first. Use Node 24 (`.nvmrc`); the default Node on some machines is newer and breaks other suites.
+
+- The band CLI: `apps/hub/tests/global-setup.ts` runs `cargo build --manifest-path apps/cli/Cargo.toml` once when no CLI newer than `apps/cli/src`, `skills` and `Cargo.*` exists, after which tests find it under `apps/cli/target`. It needs Rust. Without it the run stops with one message saying how to build the CLI. Set `BAND_CLI_PATH` to use a binary you built yourself.
+- pnpm under a temp HOME: `vitest.config.ts` sets `COREPACK_HOME` to the cache of your real HOME (`~/.cache/node/corepack`, or `XDG_CACHE_HOME`) and turns the download prompt off, so `dev-server` and `plain-projects` find pnpm without the network. Run pnpm once (any `pnpm install`) so the cache holds it.
+- Network: after the install and the CLI build, the suite needs none. `runner-docker`, `runner-k8s-kind` and `environment-build-docker` skip without Docker or a cluster.
+- Teardown: start servers with `startServer` from `tests/helpers/server.ts`, which waits for the server's process group before the test deletes its temp home, and delete the home with `removeTmpHome` (`tests/helpers/tmp-home.ts`), which lists leftover files when the delete fails with ENOTEMPTY.
+
 ### Exceptions
 
 - `apps/web/tests/hub-boundary.test.ts` scans the UI sources (`apps/web/src`, `vite.config.ts`) for a value import from the hub. The rule is about what the UI bundle may contain, so there is no server or client surface to drive. It stays a source scan because a lint rule cannot tell `import type` from a value import of the same module.

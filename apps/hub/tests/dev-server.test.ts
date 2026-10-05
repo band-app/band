@@ -35,7 +35,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -48,6 +48,7 @@ import { findFreePort } from "../src/server/services/_utils/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { waitForProcessGroupExit } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
+import { removeTmpHome } from "./helpers/tmp-home";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "server", "infra", "db", "migrations");
@@ -297,7 +298,7 @@ describe("dev server — parity with prod", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("/api/health returns 200 without auth", async () => {
@@ -455,7 +456,7 @@ describe("dev server — HMR through unified server", () => {
       writeFileSync(ROOT_ROUTE_PATH, originalRootRoute, "utf-8");
     }
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("edit to __root.tsx title shows up on next SSR request", async () => {
@@ -540,7 +541,7 @@ describe("dev server — WebSocket coexistence with Vite HMR", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("opens /terminal and a tRPC subscription on the same http listener without interference", async () => {

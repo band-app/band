@@ -1,42 +1,29 @@
-import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createTmpHomeBase,
+  type ServerHandle,
+  startServer as startServerBase,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "test-tunnel-token";
+
+function createTmpHome(): string {
+  return createTmpHomeBase("band-test-");
+}
+
+async function startServer(
+  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+): Promise<ServerHandle> {
+  return startServerBase({ tmpHome: opts.tmpHome ?? createTmpHome(), env: opts.env });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = mkdtempSync(join(tmpdir(), "band-test-"));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
 
 function createDefaultState(tmpHome: string) {
   const repoDir = join(tmpHome, "repo");
@@ -101,72 +88,6 @@ exit 1
   const scriptPath = join(binDir, "cloudflared");
   writeFileSync(scriptPath, script);
   chmodSync(scriptPath, 0o755);
-}
-
-async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +177,7 @@ describe("tunnel.start — parses URL from cloudflared stderr output", () => {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     }).catch(() => {});
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("starts tunnel and extracts trycloudflare.com URL", async () => {
@@ -320,7 +241,7 @@ describe("tunnel.start — returns URL in mutation response", () => {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     }).catch(() => {});
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("mutation response includes the tunnel URL", async () => {
@@ -367,7 +288,7 @@ describe("tunnel.start — cloudflared error returns null URL", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns 200 with null URL when cloudflared fails", async () => {
@@ -417,7 +338,7 @@ describe("services.health — with running local tunnel process", () => {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     }).catch(() => {});
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("reports tunnel URL via services.health after tunnel starts", async () => {
@@ -473,7 +394,7 @@ describe("services.health — no tunnel running", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns tunnel false when no tunnel is running", async () => {
@@ -520,7 +441,7 @@ describe("tunnel crash — health reflects down state after cloudflared dies", (
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("starts tunnel, cloudflared crashes, status and health reflect the crash", async () => {

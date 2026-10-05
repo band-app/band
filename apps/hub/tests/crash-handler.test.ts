@@ -1,17 +1,11 @@
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SERVER_RUNTIME } from "./helpers/server-runtime";
+import { removeTmpHome } from "./helpers/tmp-home";
 
 // The real built server entry point — same binary the Electron app spawns.
 const serverScript = join(import.meta.dirname, "../dist/start-server.mjs");
@@ -127,7 +121,7 @@ describe("server crash handlers", () => {
   });
 
   afterEach(() => {
-    rmSync(bandHome, { recursive: true, force: true });
+    removeTmpHome(bandHome);
   });
 
   it("logs unhandled promise rejection to server.log and keeps the server running", async () => {
