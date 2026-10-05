@@ -528,6 +528,7 @@ describe("maximum lifetime and the destroy action", () => {
     // The lifetime ends now, and the deadline is 12 s later.
     const age = Math.ceil((Date.now() - (await spawnedAt(running.id))) / 1000);
     await setRunner({ maxLifetimeSec: age, lifetimeGraceSec: 12 });
+    const deadline = (await spawnedAt(running.id)) + age * 1000 + 12_000;
     const pid = pidOf(hostId);
 
     const stopping = await waitFor(() => machineOf(hostId, "stopping"), {
@@ -541,10 +542,17 @@ describe("maximum lifetime and the destroy action", () => {
       { label: "the agent keeps the worker", timeoutMs: 30_000, intervalMs: 250 },
     );
     expect(stopping.state).toBe("stopping");
-    // Several sweeps later it is still there: nothing was stored, so nothing is destroyed.
-    await new Promise((r) => setTimeout(r, 3000));
-    expect((await machineOf(hostId))?.state).toBe("stopping");
-    expect(isAlive(pid)).toBe(true);
+    // Look at the machine on every sweep until 3 s have passed or the deadline is near, and
+    // never after it: a loaded runner can spend most of the grace period on the waits above,
+    // and a machine destroyed at its deadline is correct then.
+    const watchUntil = Math.min(Date.now() + 3000, deadline - 1500);
+    do {
+      const row = await machineOf(hostId);
+      if (Date.now() >= deadline - 500) break;
+      expect(row?.state).toBe("stopping");
+      expect(isAlive(pid)).toBe(true);
+      await new Promise((r) => setTimeout(r, 250));
+    } while (Date.now() < watchUntil);
     expect(workerLog(hostId)).not.toContain("the hub stored the workspaces");
 
     const destroyed = await waitFor(() => machineOf(hostId, "destroyed"), {
