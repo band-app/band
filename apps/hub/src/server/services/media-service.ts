@@ -113,14 +113,16 @@ export const mediaService = {
       }
       const target = join(dir, id);
       const created = !existsSync(target);
-      if (created) renameSync(tmp, target);
-      else rmSync(tmp, { force: true });
-      // Same bytes always get the same type on first store; a later upload with another type doesn't change it.
-      if (created) {
+      // The type file goes first: a blob is only visible once its type is, and a
+      // blob left without one by a crash gets it on the next upload.
+      const typePath = join(dir, `${id}.type`);
+      if (created || !existsSync(typePath)) {
         const typeTmp = join(dir, `.type-${randomBytes(8).toString("hex")}`);
         writeFileSync(typeTmp, contentType);
-        renameSync(typeTmp, join(dir, `${id}.type`));
+        renameSync(typeTmp, typePath);
       }
+      if (created) renameSync(tmp, target);
+      else rmSync(tmp, { force: true });
       return {
         id,
         size,

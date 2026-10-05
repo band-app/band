@@ -5,7 +5,7 @@
  * stores it and answers with the id and its `band://media/<id>` link. `GET` and
  * `HEAD /media/<id>` read it back, with byte ranges so video can seek. Any
  * device token or worker session token may call it; the browser's cookie works
- * too, so `<img src>` loads. Served bytes carry their stored type, `nosniff` and
+ * for reads, so `<img src>` loads. Served bytes carry their stored type, `nosniff` and
  * a sandboxing CSP.
  */
 
@@ -49,7 +49,8 @@ export async function handleMedia(
   const readOnly = req.method === "GET" || req.method === "HEAD";
   const principal = authenticate(req, {
     authRequired: opts.authRequired,
-    allowCookie: true,
+    // A cookie is for loading <img src>. Writes need a header, so another site can't ride the cookie.
+    allowCookie: readOnly,
     allowQuery: readOnly,
   });
   if (!principal) {
