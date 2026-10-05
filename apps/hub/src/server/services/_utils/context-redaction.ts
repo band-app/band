@@ -52,7 +52,8 @@ const EXTRA_PATTERNS: RegExp[] = [
 const ASSIGNMENT =
   /\b([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*["']?)([^\s"',;]{6,})/gi;
 
-const globally = (re: RegExp) => new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+const globally = (re: RegExp) =>
+  new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
 
 /**
  * `text` with every credential-shaped match replaced by `[redacted]`. The
