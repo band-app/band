@@ -222,3 +222,11 @@ export class ProjectConflictError extends Error {
     this.name = "ProjectConflictError";
   }
 }
+
+/** Thrown by `ProjectDispatchService` for a dispatch request the caller can fix or must not repeat. Mapped to 400. */
+export class DispatchInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DispatchInputError";
+  }
+}

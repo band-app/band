@@ -399,6 +399,54 @@ describe("a steer project asks the user first (S2)", () => {
   });
 });
 
+describe("approval edge cases", () => {
+  let bearer: string;
+
+  beforeAll(async () => {
+    await createProject("edge", { autonomy: "steer", labels: ["zone=home"] });
+    bearer = await coordinatorOf("edge");
+  }, 60_000);
+
+  it("keeps a request pending when the re-check at approval refuses it", async () => {
+    const res = await callTool(bearer, "worktrees_create", {
+      repo: "client",
+      branch: "feat-late",
+      brief: "x",
+      scenarios: [],
+      placement: { labels: { zone: "home" } },
+    });
+    expect(res.json()).toMatchObject({ status: "pending approval" });
+    const [request] = await dispatchesOf("edge", "pending");
+    // The branch is taken while the request waits.
+    await m("worktrees.create", { repo: "client", branch: "feat-late" });
+    expect(await mFail("projects.approveDispatch", { requestId: request.id })).toContain(
+      "already exists",
+    );
+    expect((await dispatchesOf("edge", "pending")).map((d) => d.id)).toEqual([request.id]);
+    await m("projects.rejectDispatch", { requestId: request.id });
+    expect(await dispatchesOf("edge", "pending")).toEqual([]);
+  }, 60_000);
+
+  it("refuses approval and rejection from a non-admin token", async () => {
+    const res = await callTool(bearer, "worktrees_create", {
+      repo: "api",
+      branch: "feat-admin",
+      brief: "x",
+      scenarios: [],
+      placement: { labels: { zone: "home" } },
+    });
+    expect(res.json()).toMatchObject({ status: "pending approval" });
+    const [request] = await dispatchesOf("edge", "pending");
+    const { token } = await m<{ token: string }>("tokens.createDevice", { label: "viewer" });
+    for (const proc of ["projects.approveDispatch", "projects.rejectDispatch"]) {
+      const forbidden = await trpcMutate(server.url, proc, { requestId: request.id }, token);
+      expect(forbidden.status).toBe(403);
+    }
+    expect((await dispatchesOf("edge", "pending")).map((d) => d.id)).toEqual([request.id]);
+    await m("projects.rejectDispatch", { requestId: request.id });
+  }, 60_000);
+});
+
 describe("the policy refuses a dispatch (S3)", () => {
   const base = (branch: string, extra: Record<string, unknown> = {}) => ({
     repo: "api",

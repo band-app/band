@@ -1,8 +1,8 @@
 /** Writes `.am/BRIEF.md` into a worktree through its host and keeps it out of git (plan step 6.3). */
 
-import { join, posix } from "node:path";
+import { dirname, join, posix } from "node:path";
 import type { Host } from "@band-app/host-api";
-import { BRIEF_DIR, BRIEF_FILE, BRIEF_PATH } from "./dispatch-brief";
+import { BRIEF_DIR, BRIEF_FILE } from "./dispatch-brief";
 
 export async function writeBrief(
   host: Host,
@@ -24,7 +24,7 @@ export async function writeBrief(
   try {
     current = new TextDecoder().decode(await host.fs.readFile(excludePath));
   } catch {
-    await host.fs.mkdir(remote ? posix.dirname(excludePath) : join(excludePath, ".."), {
+    await host.fs.mkdir(remote ? posix.dirname(excludePath) : dirname(excludePath), {
       recursive: true,
     });
   }
@@ -35,5 +35,3 @@ export async function writeBrief(
     `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${entry}\n`,
   );
 }
-
-export { BRIEF_PATH };

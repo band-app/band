@@ -10,15 +10,13 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   ContextInputError,
+  DispatchInputError,
   ProjectConflictError,
   ProjectInputError,
   ProjectNotFoundError,
 } from "../../errors";
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
-import {
-  DispatchInputError,
-  projectDispatchService,
-} from "../../services/project-dispatch-service";
+import { projectDispatchService } from "../../services/project-dispatch-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 

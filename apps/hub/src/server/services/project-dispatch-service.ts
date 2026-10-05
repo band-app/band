@@ -22,6 +22,7 @@ import { randomBytes } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { DispatchInputError } from "../errors";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import {
   type DispatchRequestRow,
@@ -92,7 +93,17 @@ export interface DispatchRequestView {
   placement: DispatchInput["placement"] | null;
 }
 
-export class DispatchInputError extends Error {}
+/** Dispatches and approvals of one project run one at a time, so the limits are checked against settled state. */
+const lanes = new Map<string, Promise<unknown>>();
+function serialized<T>(projectId: string, run: () => Promise<T>): Promise<T> {
+  const next = (lanes.get(projectId) ?? Promise.resolve()).then(run, run);
+  const tail = next.catch(() => undefined);
+  lanes.set(projectId, tail);
+  void tail.then(() => {
+    if (lanes.get(projectId) === tail) lanes.delete(projectId);
+  });
+  return next;
+}
 
 function newId(prefix: string): string {
   return `${prefix}-${randomBytes(6).toString("hex")}`;
@@ -108,7 +119,14 @@ export class ProjectDispatchService {
   // ---- the tool ---------------------------------------------------------------------
 
   /** The `worktrees_create` call. Throws `CoordinatorToolError` for a refusal. */
-  async dispatch(row: ProjectRow, raw: unknown): Promise<DispatchResult | PendingDispatchResult> {
+  dispatch(row: ProjectRow, raw: unknown): Promise<DispatchResult | PendingDispatchResult> {
+    return serialized(row.id, () => this.dispatchNow(row, raw));
+  }
+
+  private async dispatchNow(
+    row: ProjectRow,
+    raw: unknown,
+  ): Promise<DispatchResult | PendingDispatchResult> {
     projectCoordinatorService.requireMutation(row);
     let input: DispatchInput;
     try {
@@ -336,15 +354,19 @@ export class ProjectDispatchService {
   }
 
   /** Runs a pending dispatch after the user approved it. The limits are checked again. */
-  async approve(id: string): Promise<DispatchResult> {
+  approve(id: string): Promise<DispatchResult> {
+    const { row } = this.pending(id);
+    return serialized(row.id, () => this.approveNow(id));
+  }
+
+  private async approveNow(id: string): Promise<DispatchResult> {
     const { row, request } = this.pending(id);
     const input = parseDispatchInput(request.input);
     try {
       this.check(row, input);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.queries.decide(id, "failed", { error: message });
-      throw new DispatchInputError(message);
+      // The request stays pending: a full slot or a taken branch can clear, and the user can retry or reject.
+      throw new DispatchInputError(err instanceof Error ? err.message : String(err));
     }
     // Claim the request first, so a second click cannot dispatch it twice.
     if (!this.queries.decide(id, "approved")) {
