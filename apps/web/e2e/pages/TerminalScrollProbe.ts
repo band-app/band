@@ -77,12 +77,12 @@ export interface ScrollReport {
  *
  * `install()` wraps `WebSocket` before the app loads (test instrumentation,
  * no production change); `start()` hooks the terminal through its public
- * xterm API on the module-level terminal cache. One terminal per workspace.
+ * xterm API on the module-level terminal cache. One terminal per worktree.
  */
 export class TerminalScrollProbe {
   constructor(
     private readonly page: Page,
-    private readonly workspaceId: string,
+    private readonly worktreeId: string,
   ) {}
 
   /** Wrap `WebSocket` so terminal socket sends and arrivals are stamped. Call before `goto`. */
@@ -149,10 +149,10 @@ export class TerminalScrollProbe {
         };
         const cache = (
           globalThis as unknown as {
-            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+            __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
           }
         ).__bandTerminalCache__;
-        const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+        const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
         const term = entry?.getTerminal() as Term | null;
         if (!term?.element) return false;
         const store = window as unknown as {
@@ -225,7 +225,7 @@ export class TerminalScrollProbe {
         };
         probe.active = true;
         return true;
-      }, this.workspaceId);
+      }, this.worktreeId);
       if (!ok) throw new Error("terminal not loaded");
     });
   }
@@ -243,10 +243,10 @@ export class TerminalScrollProbe {
       };
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as Term | null;
       if (!term) return -1;
       const buffer = term.buffer.active;
@@ -255,7 +255,7 @@ export class TerminalScrollProbe {
         ?.translateToString(true)
         .match(/OFF=(\d+)/);
       return match ? Number(match[1]) : -1;
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** Wheel reports sent since `start()`. */
@@ -272,17 +272,17 @@ export class TerminalScrollProbe {
     return await this.page.evaluate((id) => {
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as { modes: unknown; buffer: { active: { type: string } } };
       return JSON.stringify({
         modes: term.modes,
         buffer: term.buffer.active.type,
         now: Math.round(performance.now()),
       });
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** A hash of the text on screen, to tell when a TUI has stopped drawing. */
@@ -298,10 +298,10 @@ export class TerminalScrollProbe {
       };
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as Term | null;
       if (!term) return 0;
       const buffer = term.buffer.active;
@@ -313,7 +313,7 @@ export class TerminalScrollProbe {
         hash = (hash * 31 + 10) | 0;
       }
       return hash;
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** Stop recording and reduce the stamps to a report. `baseOffset` is the

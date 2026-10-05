@@ -39,24 +39,24 @@ export class EnvironmentBuildQueries {
       .run();
   }
 
-  /** The project's image to boot: the newest ready build. A failed build is never it. */
-  current(project: string): EnvironmentBuildRow | undefined {
+  /** The repo's image to boot: the newest ready build. A failed build is never it. */
+  current(repo: string): EnvironmentBuildRow | undefined {
     return getDb()
       .select()
       .from(environmentBuilds)
-      .where(and(eq(environmentBuilds.project, project), eq(environmentBuilds.status, "ready")))
+      .where(and(eq(environmentBuilds.repo, repo), eq(environmentBuilds.status, "ready")))
       .orderBy(desc(environmentBuilds.endedAt), desc(environmentBuilds.startedAt))
       .get();
   }
 
   /** The newest ready build for a key, on the host that built it. */
-  readyForKey(project: string, key: string, hostId: string): EnvironmentBuildRow | undefined {
+  readyForKey(repo: string, key: string, hostId: string): EnvironmentBuildRow | undefined {
     return getDb()
       .select()
       .from(environmentBuilds)
       .where(
         and(
-          eq(environmentBuilds.project, project),
+          eq(environmentBuilds.repo, repo),
           eq(environmentBuilds.key, key),
           eq(environmentBuilds.hostId, hostId),
           eq(environmentBuilds.status, "ready"),
@@ -67,33 +67,33 @@ export class EnvironmentBuildQueries {
   }
 
   /** The newest build, whatever its status. */
-  latest(project: string): EnvironmentBuildRow | undefined {
+  latest(repo: string): EnvironmentBuildRow | undefined {
     return getDb()
       .select()
       .from(environmentBuilds)
-      .where(eq(environmentBuilds.project, project))
+      .where(eq(environmentBuilds.repo, repo))
       .orderBy(desc(environmentBuilds.startedAt))
       .get();
   }
 
   /** Newest first. */
-  list(project: string, limit: number): EnvironmentBuildRow[] {
+  list(repo: string, limit: number): EnvironmentBuildRow[] {
     return getDb()
       .select()
       .from(environmentBuilds)
-      .where(eq(environmentBuilds.project, project))
+      .where(eq(environmentBuilds.repo, repo))
       .orderBy(desc(environmentBuilds.startedAt))
       .limit(limit)
       .all();
   }
 
-  /** Projects that have been built at least once. The auto trigger rebuilds only these. */
-  projectsWithBuilds(): string[] {
+  /** Repos that have been built at least once. The auto trigger rebuilds only these. */
+  reposWithBuilds(): string[] {
     return getDb()
-      .selectDistinct({ project: environmentBuilds.project })
+      .selectDistinct({ repo: environmentBuilds.repo })
       .from(environmentBuilds)
       .all()
-      .map((r) => r.project);
+      .map((r) => r.repo);
   }
 
   /** Marks builds a stopped hub left running as failed. Returns how many. */
@@ -110,8 +110,8 @@ export class EnvironmentBuildQueries {
     return Number(result.changes ?? 0);
   }
 
-  deleteForProject(project: string): void {
-    getDb().delete(environmentBuilds).where(eq(environmentBuilds.project, project)).run();
+  deleteForRepo(repo: string): void {
+    getDb().delete(environmentBuilds).where(eq(environmentBuilds.repo, repo)).run();
   }
 }
 

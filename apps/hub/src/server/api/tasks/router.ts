@@ -1,10 +1,10 @@
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { WorkspaceNotFoundError } from "../../errors";
+import { WorktreeNotFoundError } from "../../errors";
 import { sessionIdSchema } from "../../services/_utils/session-id";
-import { saveWorkspaceUploads } from "../../services/_utils/upload-utils";
+import { saveWorktreeUploads } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
 import { type TaskAttachment, TaskConflictError, taskService } from "../../services/task-service";
@@ -20,7 +20,7 @@ type SubmitResult =
   | {
       queued: false;
       id: string;
-      workspaceId: string;
+      worktreeId: string;
       chatId: string;
       sessionId: string | undefined;
     }
@@ -28,13 +28,13 @@ type SubmitResult =
       queued: true;
       id: null;
       queuedMessageId: string;
-      workspaceId: string;
+      worktreeId: string;
       chatId: string;
       sessionId: null;
     };
 
 interface RerunResult {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   sessionId: string | undefined;
 }
@@ -57,7 +57,7 @@ const log = createLogger("tasks-router");
  * there.
  *
  * Service-level domain errors (`TaskConflictError`,
- * `WorkspaceNotFoundError`) are translated into tRPC error codes here so
+ * `WorktreeNotFoundError`) are translated into tRPC error codes here so
  * the service tier stays framework-agnostic and remains reusable by
  * non-tRPC entry points (CLI, scripts, future REST surface).
  */
@@ -67,8 +67,8 @@ export const tasksRouter = t.router({
     .input(
       z
         .object({
-          project: z.string().optional(),
-          workspaceId: z.string().optional(),
+          repo: z.string().optional(),
+          worktreeId: z.string().optional(),
           status: z.enum(["running", "completed", "failed"]).optional(),
           sessionId: sessionIdSchema.optional(),
           chatId: z.string().optional(),
@@ -78,16 +78,16 @@ export const tasksRouter = t.router({
     .query(({ input }) => {
       const tasks = taskService.listTaskRecords(input);
       const state = loadState();
-      const workspaceIds = new Set<string>();
-      for (const p of state.projects) {
+      const worktreeIds = new Set<string>();
+      for (const p of state.repos) {
         for (const wt of p.worktrees) {
-          workspaceIds.add(toWorkspaceId(p.name, wt.name));
+          worktreeIds.add(toWorktreeId(p.name, wt.name));
         }
       }
       return {
         tasks: tasks.map((row) => ({
           ...row,
-          workspaceExists: workspaceIds.has(row.workspaceId),
+          worktreeExists: worktreeIds.has(row.worktreeId),
         })),
       };
     }),
@@ -95,7 +95,7 @@ export const tasksRouter = t.router({
   submit: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string().optional(),
         prompt: z.string(),
         sessionId: sessionIdSchema.optional(),
@@ -128,7 +128,7 @@ export const tasksRouter = t.router({
         if (!existing) {
           // Lazily create the chat record. Preserve the agent from the
           // task so the correct agent type is used (not the default).
-          chatService.create(input.workspaceId, {
+          chatService.create(input.worktreeId, {
             id: input.chatId,
             name: "Chat",
             agent: input.codingAgentId,
@@ -136,7 +136,7 @@ export const tasksRouter = t.router({
         }
         chatId = input.chatId;
       } else {
-        chatId = chatService.getOrCreateDefault(input.workspaceId).id;
+        chatId = chatService.getOrCreateDefault(input.worktreeId).id;
       }
 
       // Persist any uploaded files first; the agent gets them as ACP
@@ -144,8 +144,8 @@ export const tasksRouter = t.router({
       // `/api/uploads/<storedName>` URL.
       let attachments: TaskAttachment[] = [];
       if (input.files && input.files.length > 0) {
-        const savedFiles = await saveWorkspaceUploads(input.workspaceId, input.files);
-        // `saveWorkspaceUploads` skips malformed data URLs; say so
+        const savedFiles = await saveWorktreeUploads(input.worktreeId, input.files);
+        // `saveWorktreeUploads` skips malformed data URLs; say so
         // rather than drop them silently.
         if (savedFiles.length !== input.files.length) {
           log.warn(
@@ -163,7 +163,7 @@ export const tasksRouter = t.router({
 
       try {
         const result = taskService.submitOrQueueTask({
-          workspaceId: input.workspaceId,
+          worktreeId: input.worktreeId,
           chatId,
           prompt: input.prompt,
           sessionId: input.sessionId,
@@ -177,7 +177,7 @@ export const tasksRouter = t.router({
             queued: true,
             id: null,
             queuedMessageId: result.queuedMessageId,
-            workspaceId: input.workspaceId,
+            worktreeId: input.worktreeId,
             chatId,
             sessionId: null,
           };
@@ -186,7 +186,7 @@ export const tasksRouter = t.router({
         return {
           queued: false,
           id: task.id,
-          workspaceId: task.workspaceId,
+          worktreeId: task.worktreeId,
           chatId: task.chatId,
           sessionId: task.sessionId,
         };
@@ -196,9 +196,9 @@ export const tasksRouter = t.router({
     }),
 
   get: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const task = taskService.getTask(chatId);
       return { task };
     }),
@@ -210,17 +210,17 @@ export const tasksRouter = t.router({
    * round-trip on every retry tick.
    */
   isRunning: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const task = taskService.getTask(chatId);
       return { running: task?.status === "running" };
     }),
 
   abort: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const aborted = taskService.abortTask(chatId);
       if (!aborted) {
         throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
@@ -248,19 +248,19 @@ export const tasksRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
       }
 
-      // Use original chat pane or default for workspace
-      const chatId = record.chatId ?? chatService.getOrCreateDefault(record.workspaceId).id;
+      // Use original chat pane or default for worktree
+      const chatId = record.chatId ?? chatService.getOrCreateDefault(record.worktreeId).id;
 
       try {
         const task = taskService.submitTask({
-          workspaceId: record.workspaceId,
+          worktreeId: record.worktreeId,
           chatId,
           prompt: record.prompt,
           mode: record.mode,
           model: record.model,
           codingAgentId: record.codingAgentId,
         });
-        return { workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
+        return { worktreeId: task.worktreeId, chatId: task.chatId, sessionId: task.sessionId };
       } catch (err) {
         throwAsTrpcError(err);
       }
@@ -280,9 +280,9 @@ export type TasksRouter = typeof tasksRouter;
  *   - `TaskConflictError` → 409 `CONFLICT`, from `rerun` only: a task is
  *     already running for this chat pane. `submit` queues the message
  *     instead (`submitOrQueueTask`).
- *   - `WorkspaceNotFoundError` → 404 `NOT_FOUND`. Matched by `instanceof`
+ *   - `WorktreeNotFoundError` → 404 `NOT_FOUND`. Matched by `instanceof`
  *     rather than message-string (the legacy router did
- *     `err.message.startsWith("Workspace not found")`, which was fragile
+ *     `err.message.startsWith("Worktree not found")`, which was fragile
  *     across the service-tier boundary).
  *
  * Anything else is rethrown unchanged so unexpected failures surface as a
@@ -295,7 +295,7 @@ function throwAsTrpcError(err: unknown): never {
       message: "Task already running for this chat pane",
     });
   }
-  if (err instanceof WorkspaceNotFoundError) {
+  if (err instanceof WorktreeNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
   throw err;

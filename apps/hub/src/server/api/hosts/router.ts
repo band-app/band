@@ -1,5 +1,5 @@
 /**
- * `hosts.list` — the machines Band can run workspaces on, for the Hosts screen
+ * `hosts.list` — the machines Band can run worktrees on, for the Hosts screen
  * and `band hosts list`. The MCP endpoint leaves this procedure out.
  */
 
@@ -64,7 +64,7 @@ export const hostsRouter = t.router({
     }),
 
   /**
-   * Removes a worker host: only when it is offline and has no workspaces.
+   * Removes a worker host: only when it is offline and has no worktrees.
    * Revokes its tokens, so the worker cannot dial in again.
    */
   remove: adminProcedure.input(z.object({ hostId: z.string().min(1) })).mutation(({ input }) => {

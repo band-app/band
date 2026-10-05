@@ -2,10 +2,10 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import { WorkspaceQueries } from "../db/queries/workspaces";
+import { WorktreeQueries } from "../db/queries/worktrees";
 import { hostRegistry } from "../host/registry";
 
-const workspaceQueries = new WorkspaceQueries();
+const worktreeQueries = new WorktreeQueries();
 
 const log = createLogger("lsp-proxy");
 
@@ -81,7 +81,7 @@ function didCloseMessage(uri: string): string {
 
 /**
  * How many connections hold each document open, per language server
- * (`${workspaceId}:${lang}`). Every WebSocket for a workspace and language
+ * (`${worktreeId}:${lang}`). Every WebSocket for a worktree and language
  * shares the server, so only the first `didOpen` and the last `didClose` of a
  * URI reach it.
  */
@@ -89,11 +89,11 @@ const serverDocuments = new Map<string, Map<string, number>>();
 
 export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
-  const workspaceId = url.searchParams.get("workspaceId");
+  const worktreeId = url.searchParams.get("worktreeId");
   const lang = url.searchParams.get("lang");
 
-  if (!workspaceId || !lang) {
-    ws.close(4000, "Missing workspaceId or lang");
+  if (!worktreeId || !lang) {
+    ws.close(4000, "Missing worktreeId or lang");
     return;
   }
 
@@ -109,22 +109,17 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   let connection: Duplex;
   try {
     // Direct infra-tier DB read: the proxy is in the infra tier and cannot
-    // depend on `WorkspaceService.resolve` (issue #535).
-    const workspace = workspaceQueries.findIdentity(workspaceId);
-    if (!workspace) {
-      throw new Error(`Workspace not found: ${workspaceId}`);
+    // depend on `WorktreeService.resolve` (issue #535).
+    const worktree = worktreeQueries.findIdentity(worktreeId);
+    if (!worktree) {
+      throw new Error(`Worktree not found: ${worktreeId}`);
     }
     connection = await hostRegistry
-      .hostFor(workspaceId)
-      .lsp.connect({ workspaceId, lang, root: workspace.worktreePath });
+      .hostFor(worktreeId)
+      .lsp.connect({ worktreeId, lang, root: worktree.worktreePath });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error(
-      "Failed to spawn %s language server for workspace %s: %s",
-      lang,
-      workspaceId,
-      message,
-    );
+    log.error("Failed to spawn %s language server for worktree %s: %s", lang, worktreeId, message);
     ws.close(4001, message);
     return;
   }
@@ -135,7 +130,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     return;
   }
 
-  log.debug("LSP client connected: %s/%s", workspaceId, lang);
+  log.debug("LSP client connected: %s/%s", worktreeId, lang);
 
   // Track pending requests so we can retry on transient "No Project" errors.
   // This happens when a definition request arrives before tsserver has finished
@@ -143,7 +138,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   const pendingRequests = new Map<number, string>();
   // Documents this connection opened and has not closed. The language server
   // outlives the connection and is shared by every connection to this
-  // workspace, so opens and closes are counted on the session: without that,
+  // worktree, so opens and closes are counted on the session: without that,
   // a page reload's `didOpen` of a file the old page left open is rejected as
   // "already open" (tsserver then answers "No Project"), and one tab closing
   // would close a file another tab still has open.
@@ -153,7 +148,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // other's edits are applied to that text, which drifts when the two
   // buffers differed.
   const openDocuments = new Set<string>();
-  const serverId = `${workspaceId}:${lang}`;
+  const serverId = `${worktreeId}:${lang}`;
 
   /** Looked up on every use: `release` may delete an empty map another connection still needs. */
   function documentCounts(): Map<string, number> {
@@ -197,7 +192,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   const parseFrame = createFrameParser((json: string) => {
     log.debug(
       "LSP stdout [%s/%s]: %s",
-      workspaceId,
+      worktreeId,
       lang,
       json.length > 200 ? `${json.slice(0, 200)}…` : json,
     );
@@ -220,7 +215,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
         log.debug(
           "LSP retrying request %d after 'No Project' error [%s/%s]",
           msg.id,
-          workspaceId,
+          worktreeId,
           lang,
         );
         // Retry after a delay to give tsserver time to load the project.
@@ -258,7 +253,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
       for await (const chunk of connection.output)
         parseFrame(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
     } catch (err) {
-      log.warn("LSP output stream failed [%s/%s]: %s", workspaceId, lang, String(err));
+      log.warn("LSP output stream failed [%s/%s]: %s", worktreeId, lang, String(err));
     }
     // Server exit -> close WebSocket
     release();
@@ -272,7 +267,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   function forwardToStdin(json: string): void {
     log.debug(
       "LSP stdin [%s/%s]: %s",
-      workspaceId,
+      worktreeId,
       lang,
       json.length > 200 ? `${json.slice(0, 200)}…` : json,
     );
@@ -325,6 +320,6 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   ws.on("close", () => {
     release();
     connection.close();
-    log.debug("LSP client disconnected: %s/%s (server kept alive)", workspaceId, lang);
+    log.debug("LSP client disconnected: %s/%s (server kept alive)", worktreeId, lang);
   });
 }

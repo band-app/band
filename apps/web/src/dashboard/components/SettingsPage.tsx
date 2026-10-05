@@ -112,7 +112,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "general",
     title: "General",
-    subtitle: "Workspace defaults and editor behavior.",
+    subtitle: "Worktree defaults and editor behavior.",
     group: "Set up",
   },
   {
@@ -162,7 +162,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "hosts",
     title: "Hosts",
-    subtitle: "Machines that run workspaces, and the tokens that reach the hub.",
+    subtitle: "Machines that run worktrees, and the tokens that reach the hub.",
     group: "Infrastructure",
   },
   {
@@ -174,21 +174,21 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "environment",
     title: "Environment",
-    subtitle: "Each project's .band/environment.json, checked against the hosts.",
+    subtitle: "Each repo's .band/environment.json, checked against the hosts.",
     group: "Infrastructure",
   },
   {
     id: "labels",
     title: "Labels",
-    subtitle: "Tag projects to filter and group them in the sidebar.",
-    group: "Workspace",
+    subtitle: "Tag repos to filter and group them in the sidebar.",
+    group: "Worktree",
   },
   {
     id: "usage",
     title: "Usage report",
     subtitle:
       "Configure how the Usage dialog collects and retains per-session token and cost rows.",
-    group: "Workspace",
+    group: "Worktree",
   },
 ];
 
@@ -314,13 +314,13 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const adapter = useAdapter();
 
   // Which hosts can start each agent. A refresh runs on the host chosen here,
-  // by default the one the open workspace is on, else Local.
-  const activeWorkspaceId = /^\/workspace\/([^/]+)/.exec(window.location.pathname)?.[1];
+  // by default the one the open worktree is on, else Local.
+  const activeWorktreeId = /^\/worktree\/([^/]+)/.exec(window.location.pathname)?.[1];
   const availability = useQuery({
-    queryKey: ["models.availability", activeWorkspaceId ?? null],
+    queryKey: ["models.availability", activeWorktreeId ?? null],
     queryFn: () =>
       trpc.models.availability.query({
-        workspaceId: activeWorkspaceId ? decodeURIComponent(activeWorkspaceId) : undefined,
+        worktreeId: activeWorktreeId ? decodeURIComponent(activeWorktreeId) : undefined,
       }),
   });
   const [chosenRefreshHostId, setRefreshHostId] = useState<string | null>(null);
@@ -709,7 +709,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                         <SettingsRow
                           htmlFor="translucent-sidebar"
                           label="Translucent sidebar"
-                          description="Show the desktop through the project list, blurred and tinted."
+                          description="Show the desktop through the repo list, blurred and tinted."
                         >
                           <Switch
                             id="translucent-sidebar"
@@ -756,7 +756,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                       <SettingsRow
                         htmlFor="enable-lsp"
                         label="Code intelligence (LSP)"
-                        description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
+                        description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per worktree."
                       >
                         <Switch
                           id="enable-lsp"
@@ -835,7 +835,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   {active === "environment" ? (
                     <SettingsSection
                       title="Environment"
-                      description="Each project's .band/environment.json, checked against the hosts."
+                      description="Each repo's .band/environment.json, checked against the hosts."
                     >
                       <EnvironmentSettings />
                     </SettingsSection>
@@ -845,12 +845,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   {active === "labels" ? (
                     <SettingsSection
                       title="Labels"
-                      description="Tag projects to filter and group them in the sidebar."
+                      description="Tag repos to filter and group them in the sidebar."
                     >
                       {labels.length === 0 ? (
                         <SettingsRow
                           label="No labels yet"
-                          description="Add a label to start tagging projects."
+                          description="Add a label to start tagging repos."
                         >
                           <Button
                             variant="outline"
@@ -940,7 +940,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                         <SettingsRow
                           variant="responsive"
                           label="Default agent"
-                          description="Used for new workspaces. You can switch agents per workspace from the workspace chat header."
+                          description="Used for new worktrees. You can switch agents per worktree from the worktree chat header."
                         >
                           <Select
                             value={defaultAgentId || codingAgents[0].id}

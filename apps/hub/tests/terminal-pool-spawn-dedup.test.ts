@@ -45,13 +45,13 @@ describe("TerminalPool.spawn deduplication (#617)", () => {
     const root = makeWorkdir();
     const pool = new TerminalPool();
     cleanups.push(() => pool.killAll());
-    const workspaceId = "proj/main";
+    const worktreeId = "proj/main";
     const terminalId = "term-concurrent";
 
     // Two spawns fire concurrently for the SAME terminalId — the WS + tRPC race.
     const [a, b] = await Promise.all([
-      pool.spawn(workspaceId, terminalId, root),
-      pool.spawn(workspaceId, terminalId, root),
+      pool.spawn(worktreeId, terminalId, root),
+      pool.spawn(worktreeId, terminalId, root),
     ]);
 
     // Both callers get the exact same session (one PTY), and it is the one the
@@ -59,20 +59,20 @@ describe("TerminalPool.spawn deduplication (#617)", () => {
     // diverge onto competing PTYs.
     expect(a).toBe(b);
     expect(pool.get(terminalId)).toBe(a);
-    expect(pool.list(workspaceId)).toHaveLength(1);
+    expect(pool.list(worktreeId)).toHaveLength(1);
   });
 
   it("is idempotent — a later spawn returns the already-live session", async () => {
     const root = makeWorkdir();
     const pool = new TerminalPool();
     cleanups.push(() => pool.killAll());
-    const workspaceId = "proj/main";
+    const worktreeId = "proj/main";
     const terminalId = "term-idempotent";
 
-    const first = await pool.spawn(workspaceId, terminalId, root);
-    const second = await pool.spawn(workspaceId, terminalId, root);
+    const first = await pool.spawn(worktreeId, terminalId, root);
+    const second = await pool.spawn(worktreeId, terminalId, root);
 
     expect(second).toBe(first);
-    expect(pool.list(workspaceId)).toHaveLength(1);
+    expect(pool.list(worktreeId)).toHaveLength(1);
   });
 });

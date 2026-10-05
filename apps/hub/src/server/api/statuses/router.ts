@@ -2,10 +2,10 @@ import { z } from "zod";
 import { branchStatusPoller } from "../../services/branch-status-poller";
 import {
   applyHookNotification,
-  getWorkspaceStatus,
+  getWorktreeStatus,
   MANUAL_STATUS_SOURCE,
-  resolveWorkspaceIdByCwd,
-  setWorkspaceSourceStatus,
+  resolveWorktreeIdByCwd,
+  setWorktreeSourceStatus,
 } from "../../services/state";
 import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
@@ -16,14 +16,14 @@ import { publicProcedure, t } from "../trpc";
  * Phase 7.5 (issue #517).
  *
  * Two sub-routers live together because they share the same domain (the
- * "agent status" per workspace + the SSE stream of status updates):
+ * "agent status" per worktree + the SSE stream of status updates):
  *
- *   - `statusesRouter` — CRUD-ish surface: get one workspace's status,
+ *   - `statusesRouter` — CRUD-ish surface: get one worktree's status,
  *     upsert from the dashboard, clear the "needs attention" indicator
  *     once the user has acknowledged it, and resolve a cwd to a known
- *     workspace.
+ *     worktree.
  *   - `statusRouter`   — the long-lived SSE stream that drives the
- *     dashboard's per-workspace status pills.
+ *     dashboard's per-worktree status pills.
  *
  * The merged root router (`server/api/router.ts`) exposes them as
  * `statuses.*` and `status.*` respectively; this file owns both halves
@@ -33,14 +33,14 @@ import { publicProcedure, t } from "../trpc";
  * The legacy declarations lived inline in `apps/web/src/trpc/router.ts`.
  */
 export const statusesRouter = t.router({
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return getWorkspaceStatus(input.workspaceId);
+  get: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
+    return getWorktreeStatus(input.worktreeId);
   }),
 
   update: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         agent: z.object({
           status: z.string(),
           lastActivity: z.string().optional(),
@@ -48,7 +48,7 @@ export const statusesRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const status = setWorkspaceSourceStatus(input.workspaceId, MANUAL_STATUS_SOURCE, input.agent);
+      const status = setWorktreeSourceStatus(input.worktreeId, MANUAL_STATUS_SOURCE, input.agent);
 
       // Emit update directly to SSE listeners
       emit({ kind: "update", status });
@@ -57,27 +57,27 @@ export const statusesRouter = t.router({
     }),
 
   /**
-   * Re-read one workspace's git status now and push it on the status stream.
-   * The dashboard calls this when the user selects a workspace, so its badge
+   * Re-read one worktree's git status now and push it on the status stream.
+   * The dashboard calls this when the user selects a worktree, so its badge
    * doesn't wait for the next poll tick. `refreshed` is false when no git
-   * workspace has that id.
+   * worktree has that id.
    */
   refreshBranchStatus: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(z.object({ worktreeId: z.string() }))
     .mutation(async ({ input }) => ({
-      refreshed: await branchStatusPoller.refreshWorkspace(input.workspaceId),
+      refreshed: await branchStatusPoller.refreshWorktree(input.worktreeId),
     })),
 
   clearNeedsAttention: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(z.object({ worktreeId: z.string() }))
     .mutation(({ input }) => {
-      const status = taskService.acknowledgeAttention(input.workspaceId);
+      const status = taskService.acknowledgeAttention(input.worktreeId);
       if (status) emit({ kind: "update", status });
       return { ok: true };
     }),
 
   resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
-    return { workspaceId: resolveWorkspaceIdByCwd(input.cwd) };
+    return { worktreeId: resolveWorktreeIdByCwd(input.cwd) };
   }),
 
   /**
@@ -85,7 +85,7 @@ export const statusesRouter = t.router({
    * (e.g. Claude Code hooks piped through `band notify`). The CLI forwards
    * the raw payload plus the agent's cwd, the agent type the hook command
    * names (`--agent`), and its `BAND_DISPATCH` / `BAND_TERMINAL_ID`. The
-   * server resolves the workspace and the sending agent, and dispatches to
+   * server resolves the worktree and the sending agent, and dispatches to
    * that agent's adapter to translate the payload into a status. Keeping the
    * mapping in the adapter means adding hook support for a new agent never
    * touches the CLI.

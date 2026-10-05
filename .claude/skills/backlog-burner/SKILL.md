@@ -1,20 +1,20 @@
 ---
 name: backlog-burner
-description: Master orchestrator that burns through a project backlog. Runs as a project-scoped cronjob on the main branch — scans GitHub issues labeled `backlog-burner`, manages one workspace per issue, dispatches implementation work via `band chats send`, and merges PRs itself (from outside the workspace) once CI is green and there are no outstanding reviewer remarks. Use when setting up automated backlog processing, orchestrating multiple agents, or supervising workspace-level work across a project.
+description: Master orchestrator that burns through a repo backlog. Runs as a repo-scoped cronjob on the main branch — scans GitHub issues labeled `backlog-burner`, manages one worktree per issue, dispatches implementation work via `band chats send`, and merges PRs itself (from outside the worktree) once CI is green and there are no outstanding reviewer remarks. Use when setting up automated backlog processing, orchestrating multiple agents, or supervising worktree-level work across a repo.
 ---
 
 # Backlog Burner — Master Orchestrator
 
-Supervises all workspaces in a project. On every run: scans the backlog, checks each workspace's chat state, dispatches work to idle agents, merges PRs that are ready, and cleans up finished workspaces.
+Supervises all worktrees in a repo. On every run: scans the backlog, checks each worktree's chat state, dispatches work to idle agents, merges PRs that are ready, and cleans up finished worktrees.
 
-This skill is designed to run as a **project-scoped cronjob on the main branch**. Set it up with:
+This skill is designed to run as a **repo-scoped cronjob on the main branch**. Set it up with:
 
 ```sh
-band cronjobs create <project> \
+band cronjobs create <repo> \
   --name "Backlog Burner" \
   --prompt "Run /backlog-burner" \
   --cron "*/10 * * * *" \
-  --scope project
+  --scope repo
 ```
 
 ## What the burner picks up
@@ -23,7 +23,7 @@ Only GitHub issues with the **`backlog-burner`** label are in scope. Every other
 
 ## Division of labor
 
-**Workspace agent** (inside each per-issue workspace) — narrow job:
+**Worktree agent** (inside each per-issue worktree) — narrow job:
 
 1. Implement the issue.
 2. Run **`/review-and-apply`** to lint/clippy/test and apply any fixes it surfaces.
@@ -33,17 +33,17 @@ Only GitHub issues with the **`backlog-burner`** label are in scope. Every other
 
 **Burner** (this skill, running as a cronjob) — orchestration:
 
-- Creates the workspace and the initial chat (no `/band-start` needed — the burner already has all the context).
-- On every tick: scans PR state, nudges the agent when there's `blocker`-severity feedback or CI failures, and **merges directly** (from outside the workspace) once CI is green and no blocker remarks remain.
-- Cleans up the workspace after merging.
+- Creates the worktree and the initial chat (no `/band-start` needed — the burner already has all the context).
+- On every tick: scans PR state, nudges the agent when there's `blocker`-severity feedback or CI failures, and **merges directly** (from outside the worktree) once CI is green and no blocker remarks remain.
+- Cleans up the worktree after merging.
 
 The agent never invokes `/finish-pr`. PR creation is the agent's last step before it stops; everything after that — CI watching, feedback dispatch, merge, cleanup — happens at cron cadence from the burner.
 
 There is **no human approval gate**. A PR is mergeable as long as there are **no `blocker`-severity remarks** and CI is green. Findings tagged `nit` or `suggestion` are **advisory** — they never block the merge. Even nits are capped: the burner dispatches at most **3 non-blocker iteration rounds** before merging anyway (see step 3 case (d) and the `review-round` chat label).
 
-## How the burner finds its workspaces
+## How the burner finds its worktrees
 
-Each chat the burner creates in a workspace is tagged with two labels so the next run can find it without parsing branch names:
+Each chat the burner creates in a worktree is tagged with two labels so the next run can find it without parsing branch names:
 
 | Label             | Value                   | Why                                                                 |
 | ----------------- | ----------------------- | ------------------------------------------------------------------- |
@@ -60,36 +60,36 @@ A chat without the `backlog-burner=true` label is **invisible** to this skill �
 - Band server running
 - `gh` CLI authenticated with GitHub
 - `band` CLI available
-- Project registered with Band (`band projects list`)
-- `/review-and-apply` skill available to the workspace agent (checked into this repo under `.claude/skills/review-and-apply/`)
+- Repo registered with Band (`band repos list`)
+- `/review-and-apply` skill available to the worktree agent (checked into this repo under `.claude/skills/review-and-apply/`)
 
 ## Steps
 
 ### 1. Gather state
 
-Detect project and repo from the current working directory:
+Detect repo and repo from the current working directory:
 
 ```sh
-PROJECT=$(band projects list --output json | jq -r '.projects[] | select(.path == "'"$(pwd)"'") | .name')
+REPO=$(band repos list --output json | jq -r '.repos[] | select(.path == "'"$(pwd)"'") | .name')
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ```
 
 Collect the full picture:
 
 ```sh
-# All workspaces for this project
-WORKSPACES=$(band workspaces list --output json \
-  | jq '[.workspaces[] | select(.project == "'"$PROJECT"'")]')
+# All worktrees for this repo
+WORKTREES=$(band worktrees list --output json \
+  | jq '[.worktrees[] | select(.repo == "'"$REPO"'")]')
 
 # Burner-managed chats: each chat this skill created carries
 # `backlog-burner=true` plus `issue=<N>` labels (see step 4b). The chat
-# is the source of truth — it tells us which workspace maps to which
+# is the source of truth — it tells us which worktree maps to which
 # issue without parsing branch names.
-MANAGED=$(for ws_id in $(echo "$WORKSPACES" | jq -r '.[].workspaceId'); do
+MANAGED=$(for ws_id in $(echo "$WORKTREES" | jq -r '.[].worktreeId'); do
   band chats list "$ws_id" --output json \
     | jq -c --arg ws "$ws_id" \
         '.chats[] | select(.labels."backlog-burner" == "true") |
-         {workspace_id: $ws, chat_id: .id, status: .status,
+         {worktree_id: $ws, chat_id: .id, status: .status,
           issue: (.labels.issue // ""),
           review_round: ((.labels."review-round" // "0") | tonumber)}'
 done | jq -s '.')
@@ -112,20 +112,20 @@ The chat's `status` field tells you whether the agent is busy:
 
 ### 3. Dispatch or merge based on git + PR state
 
-For each non-`running` entry in `$MANAGED`, destructure the per-chat fields and then look up the workspace's branch and worktree path:
+For each non-`running` entry in `$MANAGED`, destructure the per-chat fields and then look up the worktree's branch and worktree path:
 
 ```sh
 # Per-entry fields captured by the $MANAGED query in step 1.
 # (Treat these as already-set when iterating; the loop binding is omitted here for readability.)
-workspace_id=$(echo "$entry" | jq -r .workspace_id)
+worktree_id=$(echo "$entry" | jq -r .worktree_id)
 chat_id=$(echo      "$entry" | jq -r .chat_id)
 N=$(echo            "$entry" | jq -r .issue)
 REVIEW_ROUND=$(echo "$entry" | jq -r .review_round)
 
-BRANCH=$(echo "$WORKSPACES" | jq -r --arg id "$workspace_id" \
-  '.[] | select(.workspaceId == $id) | .branch')
-WT_PATH=$(echo "$WORKSPACES" | jq -r --arg id "$workspace_id" \
-  '.[] | select(.workspaceId == $id) | .path')
+BRANCH=$(echo "$WORKTREES" | jq -r --arg id "$worktree_id" \
+  '.[] | select(.worktreeId == $id) | .branch')
+WT_PATH=$(echo "$WORKTREES" | jq -r --arg id "$worktree_id" \
+  '.[] | select(.worktreeId == $id) | .path')
 
 # PR state for this branch. `gh pr view` doesn't accept --head; use list + first.
 # `mergeStateStatus` and `mergeable` are needed by case (g) to detect a branch
@@ -233,7 +233,7 @@ AHEAD=$(git -C "$WT_PATH" rev-list --count main..HEAD)
 The agent died before doing anything. Resend the kickoff prompt:
 
 ```sh
-band chats send --workspace "$workspace_id" --message "Implement GitHub issue #$N: <issue-url>.
+band chats send --worktree "$worktree_id" --message "Implement GitHub issue #$N: <issue-url>.
 
 Run /review-and-apply before pushing. Commit, push, and then create the PR:
   gh pr create --base main --fill --body 'Closes #$N'
@@ -248,7 +248,7 @@ Track progress with a '## Implementation Progress' comment on the issue."
 Implementation is partway done but the agent stopped before opening a PR. Nudge it to finish and open the PR:
 
 ```sh
-band chats send --workspace "$workspace_id" --message "Continue implementing issue #$N. When done: /review-and-apply, commit, push, then 'gh pr create --base main --fill --body \"Closes #$N\"'. Stop after the PR is open."
+band chats send --worktree "$worktree_id" --message "Continue implementing issue #$N. When done: /review-and-apply, commit, push, then 'gh pr create --base main --fill --body \"Closes #$N\"'. Stop after the PR is open."
 ```
 
 (If `$DIRTY` is empty *and* `$AHEAD > 0`, the agent may have already pushed without opening a PR — the same nudge above will trigger them to run `gh pr create`.)
@@ -275,8 +275,8 @@ gh pr merge "$PR_NUM" --repo "$REPO" --squash --delete-branch
 # Close the issue if the "Closes #N" link didn't already do it
 gh issue close "$N" --repo "$REPO" 2>/dev/null || true
 
-# Remove the workspace
-band workspaces remove "$PROJECT" "$BRANCH"
+# Remove the worktree
+band worktrees remove "$REPO" "$BRANCH"
 ```
 
 #### Case (d) — PR exists, blocker remarks OR fresh non-blocker feedback (within cap)
@@ -292,7 +292,7 @@ The how-to for the agent — list threads, then resolve by ID — is below in th
 ```sh
 if [ "$UNRESOLVED_BLOCKERS" -gt 0 ]; then
   # Blockers always dispatch — no iteration cap on shipping correctness fixes.
-  band chats send --workspace "$workspace_id" --message "PR #$PR_NUM has $UNRESOLVED_BLOCKERS unresolved BLOCKER finding(s).
+  band chats send --worktree "$worktree_id" --message "PR #$PR_NUM has $UNRESOLVED_BLOCKERS unresolved BLOCKER finding(s).
 
 1. Read the findings:
    gh api repos/$REPO/pulls/$PR_NUM/comments --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, body: .body[:200]}'
@@ -330,7 +330,7 @@ elif [ "$UNRESOLVED_NITS" -gt 0 ] && [ "$REVIEW_ROUND" -lt 3 ]; then
   # so a same-tick crash doesn't undercount.
   NEW_ROUND=$((REVIEW_ROUND + 1))
   band chats label "$chat_id" "review-round=$NEW_ROUND"
-  band chats send --workspace "$workspace_id" --message "PR #$PR_NUM has nit/suggestion feedback (round $NEW_ROUND of 3).
+  band chats send --worktree "$worktree_id" --message "PR #$PR_NUM has nit/suggestion feedback (round $NEW_ROUND of 3).
 
 1. Read the findings:
    gh api repos/$REPO/pulls/$PR_NUM/comments --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, body: .body[:200]}'
@@ -386,7 +386,7 @@ Note: case (c) and case (d) can both apply on the same tick — if `UNRESOLVED_B
 #### Case (e) — PR exists, CI failing
 
 ```sh
-band chats send --workspace "$workspace_id" --message "CI is failing on PR #$PR_NUM. Run 'gh pr checks $PR_NUM' to see what failed. Fix it, /review-and-apply, commit, push. Stop after pushing."
+band chats send --worktree "$worktree_id" --message "CI is failing on PR #$PR_NUM. Run 'gh pr checks $PR_NUM' to see what failed. Fix it, /review-and-apply, commit, push. Stop after pushing."
 ```
 
 #### Case (f) — PR exists, CI still pending
@@ -407,9 +407,9 @@ Trigger:
 Why evaluate this **before** (e) and (f): a conflicting branch produces a no-op `pull_request` event (GitHub can't compute the merge commit), so CI either never fires or fires against a stale tree. Waiting on case (f) is futile; dispatching a CI-fix in case (e) wastes a round on the wrong problem.
 
 ```sh
-band chats send --workspace "$workspace_id" --message "PR #$PR_NUM is mergeable=CONFLICTING against main. Your branch was forked before recent merges to main landed.
+band chats send --worktree "$worktree_id" --message "PR #$PR_NUM is mergeable=CONFLICTING against main. Your branch was forked before recent merges to main landed.
 
-Run inside the workspace:
+Run inside the worktree:
   git fetch origin main
   git rebase origin/main
 
@@ -453,11 +453,11 @@ for dep in $DEP_NUMS; do
 done
 ```
 
-An issue is **eligible** only if `DEP_NUMS` is empty OR every dependency resolves to `state == "CLOSED"`. Issues with one or more open dependencies stay in the backlog untouched until those dependencies close — they show up as `blocked` lines in the summary (step 6), not as new workspaces.
+An issue is **eligible** only if `DEP_NUMS` is empty OR every dependency resolves to `state == "CLOSED"`. Issues with one or more open dependencies stay in the backlog untouched until those dependencies close — they show up as `blocked` lines in the summary (step 6), not as new worktrees.
 
-#### 4b. Create the workspace and label its chat
+#### 4b. Create the worktree and label its chat
 
-From the **eligible** candidates, pick the highest-priority one (lowest issue number, ties broken by created-at). The burner picks its own branch name and creates the workspace directly — it already has the issue number, title, and URL, so there's no need to delegate to a separate kickoff skill:
+From the **eligible** candidates, pick the highest-priority one (lowest issue number, ties broken by created-at). The burner picks its own branch name and creates the worktree directly — it already has the issue number, title, and URL, so there's no need to delegate to a separate kickoff skill:
 
 ```sh
 N=$(echo "$ISSUE" | jq -r .number)
@@ -472,7 +472,7 @@ SLUG=$(echo "$TITLE" \
   | sed -E 's/-+$//')
 BRANCH="${N}-${SLUG}"
 
-band workspaces create "$PROJECT" "$BRANCH" --prompt "Implement GitHub issue #$N: $URL.
+band worktrees create "$REPO" "$BRANCH" --prompt "Implement GitHub issue #$N: $URL.
 
 Run /review-and-apply before pushing. Commit, push, then create the PR:
   gh pr create --base main --fill --body 'Closes #$N'
@@ -482,34 +482,34 @@ After the PR is open, stop. The backlog burner will monitor CI, dispatch any rev
 Track progress with a '## Implementation Progress' comment on the issue."
 ```
 
-Immediately after creation, label the workspace's default chat so the next burner run can find it via labels (step 1):
+Immediately after creation, label the worktree's default chat so the next burner run can find it via labels (step 1):
 
 ```sh
-WORKSPACE_ID=$(band workspaces list --output json \
-  | jq -r --arg b "$BRANCH" '.workspaces[] | select(.branch == $b) | .workspaceId')
+WORKTREE_ID=$(band worktrees list --output json \
+  | jq -r --arg b "$BRANCH" '.worktrees[] | select(.branch == $b) | .worktreeId')
 
-# The workspace's default chat is the first (and only) chat at creation time
-CHAT_ID=$(band chats list "$WORKSPACE_ID" --output json | jq -r '.chats[0].id')
+# The worktree's default chat is the first (and only) chat at creation time
+CHAT_ID=$(band chats list "$WORKTREE_ID" --output json | jq -r '.chats[0].id')
 
 # Tag it — these are the labels the next run's `$MANAGED` query relies on.
 # `review-round=0` initializes the non-blocker iteration counter (see step 3 case (d)).
 band chats label "$CHAT_ID" backlog-burner=true "issue=$N" review-round=0
 ```
 
-A workspace whose chat is missing the `backlog-burner=true` label is invisible to subsequent runs — the burner will treat the issue as unclaimed and try to create a second workspace on the next tick, producing a duplicate. **Labeling is part of workspace creation, not an optional follow-up.**
+A worktree whose chat is missing the `backlog-burner=true` label is invisible to subsequent runs — the burner will treat the issue as unclaimed and try to create a second worktree on the next tick, producing a duplicate. **Labeling is part of worktree creation, not an optional follow-up.**
 
-**Limit: create at most 1 new workspace per burner run.** Let existing work finish before starting more.
+**Limit: create at most 1 new worktree per burner run.** Let existing work finish before starting more.
 
-### 5. Janitor pass — clean up stranded workspaces
+### 5. Janitor pass — clean up stranded worktrees
 
-Step 3 case (c) removes a workspace right after merging. This step catches edge cases where that didn't fire — interrupted run, network blip mid-cleanup, or a workspace whose branch was deleted by something other than the burner.
+Step 3 case (c) removes a worktree right after merging. This step catches edge cases where that didn't fire — interrupted run, network blip mid-cleanup, or a worktree whose branch was deleted by something other than the burner.
 
 ```sh
-echo "$WORKSPACES" | jq -c '.[]' | while read -r ws; do
+echo "$WORKTREES" | jq -c '.[]' | while read -r ws; do
   WS_BRANCH=$(echo "$ws" | jq -r .branch)
   WS_PATH=$(echo "$ws" | jq -r .path)
 
-  # Skip the project's main-branch workspace — that's where the burner runs.
+  # Skip the repo's main-branch worktree — that's where the burner runs.
   [ "$WS_BRANCH" = "main" ] && continue
 
   # If the remote head still exists, the branch is live; leave it alone.
@@ -517,7 +517,7 @@ echo "$WORKSPACES" | jq -c '.[]' | while read -r ws; do
     continue
   fi
 
-  band workspaces remove "$PROJECT" "$WS_BRANCH"
+  band worktrees remove "$REPO" "$WS_BRANCH"
 done
 ```
 
@@ -526,33 +526,33 @@ done
 Print a single summary of every action taken this run:
 
 ```
-Backlog Burner Summary (project: band, repo: band-app/band)
-- Created workspace for issue #311 (branch: 311-phase-0-scaffold, review-round=0)
-- Merged PR #520 and removed workspace 315-phase-4-cronjobs (issue #315, blockers=0, CI green)
+Backlog Burner Summary (repo: band, repo: band-app/band)
+- Created worktree for issue #311 (branch: 311-phase-0-scaffold, review-round=0)
+- Merged PR #520 and removed worktree 315-phase-4-cronjobs (issue #315, blockers=0, CI green)
 - Merged PR #524 via iteration-cap escape hatch (review-round=3, blockers=0, 4 nits left advisory)
-- Nudged 313-phase-2-projects on PR #517: 2 BLOCKERS — dispatched without incrementing counter
+- Nudged 313-phase-2-repos on PR #517: 2 BLOCKERS — dispatched without incrementing counter
 - Nudged 316-phase-5-chats-browsers on PR #527: CONFLICTING against main — dispatched rebase (case g, counter unchanged)
 - Nudged 318-phase-7-terminals on PR #530: nits-only (review-round 1 → 2)
 - Skipped 319-cleanup on PR #531: nits-only at review-round=3 — waiting for case (c) to merge
 - Nudged 314-phase-3-tunnel to fix CI on PR #519
 - Flagged PR #534: CI pending >10min with 0 workflow runs — likely Actions outage or quota, human investigation needed
-- Cleaned up stranded workspace 312-phase-1-settings (branch deleted on remote)
-- 2 workspaces busy (status: running) — skipped
+- Cleaned up stranded worktree 312-phase-1-settings (branch deleted on remote)
+- 2 worktrees busy (status: running) — skipped
 - 3 issues blocked by open dependencies: #316 (waiting on #314), #319 (waiting on #311, #317), #322 (waiting on #320)
-- 1 eligible open backlog-burner issue still without a workspace
+- 1 eligible open backlog-burner issue still without a worktree
 ```
 
 ## Rules
 
-- **Issue filter is non-negotiable**: only `backlog-burner`-labeled issues are in scope. Never act on an unlabeled issue, even if it has a workspace.
-- **Label every chat you create.** Workspace ownership is tracked exclusively by `backlog-burner=true`, `issue=<N>`, and `review-round=<int>` labels on the chat (see step 4b). A chat without those labels is invisible to the next run and will cause a duplicate workspace.
-- **Dependencies block.** Never create a workspace for an issue whose `## Dependencies` section references an open issue.
-- **One new workspace per run.** Prevents the cronjob from spawning N workspaces on its first tick after a long pause.
+- **Issue filter is non-negotiable**: only `backlog-burner`-labeled issues are in scope. Never act on an unlabeled issue, even if it has a worktree.
+- **Label every chat you create.** Worktree ownership is tracked exclusively by `backlog-burner=true`, `issue=<N>`, and `review-round=<int>` labels on the chat (see step 4b). A chat without those labels is invisible to the next run and will cause a duplicate worktree.
+- **Dependencies block.** Never create a worktree for an issue whose `## Dependencies` section references an open issue.
+- **One new worktree per run.** Prevents the cronjob from spawning N worktrees on its first tick after a long pause.
 - **Never send to a `status: "running"` chat.** That preempts work in flight.
-- **Burner owns the merge.** The workspace agent implements + commits + pushes + opens the PR, then stops. CI watching, feedback dispatch, merging, and workspace removal all happen from the burner — never via `/finish-pr` in the workspace.
+- **Burner owns the merge.** The worktree agent implements + commits + pushes + opens the PR, then stops. CI watching, feedback dispatch, merging, and worktree removal all happen from the burner — never via `/finish-pr` in the worktree.
 - **Merge gate = no `blocker`-severity remarks AND green CI.** Nits and suggestions are advisory; they never block. Inline comments are classified by severity-marker in their body (`severity:blocker`, `[blocker]`, `**blocker**`) — see `$UNRESOLVED_BLOCKERS` in step 3.
 - **Cap non-blocker iterations at 3.** The `review-round` chat label counts dispatch rounds where the only outstanding feedback is nits/suggestions. On round ≥ 3 the burner merges anyway (step 3 case (c) "iteration-cap escape hatch"). Blocker dispatches never increment this counter — correctness fixes are uncapped.
 - **Increment the counter before dispatch, not after.** A same-tick crash would otherwise undercount and let the loop run forever.
 - **Rebase before everything else.** A `mergeable: CONFLICTING` branch (case (g)) is dispatched before CI-fix (case (e)) and pending-wait (case (f)) are even considered. CI on a conflicting branch is either no-op or stale, so waiting on it burns ticks for nothing. Case (g) does NOT increment `review-round` — a rebase is structural, not polish.
-- **Skip the main-branch workspace.** That's where this skill runs — never send a message to your own chat.
+- **Skip the main-branch worktree.** That's where this skill runs — never send a message to your own chat.
 - **Always print the summary.** It's the only audit trail the cronjob produces.

@@ -2,7 +2,7 @@
  * Page object for the Reports dialog (issue #425).
  *
  * Same shape as `ResourcesPage` — no dedicated route, the dialog is
- * opened from the Usage icon in the project-list bottom action bar.
+ * opened from the Usage icon in the repo-list bottom action bar.
  * Owns the locators for the stat cards, the recharts SVG container, and
  * the four breakdown tables.
  *
@@ -11,7 +11,7 @@
  *   - `getByTestId(...)` for owned card / chart / table / button
  *     elements. The BEM-style `reports__*` prefix matches the
  *     `data-testid` attributes set in `ReportsPageContent.tsx`; the
- *     `project-list__usage-button` testid rides on the Usage icon button.
+ *     `repo-list__usage-button` testid rides on the Usage icon button.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -32,12 +32,12 @@ export class ReportsDialog {
   readonly chart: Locator;
   /** Breakdown tables. */
   readonly byModel: Locator;
-  readonly byProject: Locator;
+  readonly byRepo: Locator;
   readonly byAgent: Locator;
-  readonly byWorkspace: Locator;
+  readonly byWorktree: Locator;
   /** Period select. */
   readonly periodSelect: Locator;
-  /** Usage icon button in the project-list bottom action bar. */
+  /** Usage icon button in the repo-list bottom action bar. */
   readonly reportsButton: Locator;
 
   constructor(
@@ -53,14 +53,14 @@ export class ReportsDialog {
     this.topModel = page.getByTestId("reports__top-model");
     this.chart = page.getByTestId("reports__chart");
     this.byModel = page.getByTestId("reports__by-model");
-    this.byProject = page.getByTestId("reports__by-project");
+    this.byRepo = page.getByTestId("reports__by-repo");
     this.byAgent = page.getByTestId("reports__by-agent");
-    this.byWorkspace = page.getByTestId("reports__by-workspace");
+    this.byWorktree = page.getByTestId("reports__by-worktree");
     this.periodSelect = page.getByTestId("reports__period-select");
-    this.reportsButton = page.getByTestId("project-list__usage-button");
+    this.reportsButton = page.getByTestId("repo-list__usage-button");
   }
 
-  /** Navigate to the dashboard, then click the Usage icon in the project-list
+  /** Navigate to the dashboard, then click the Usage icon in the repo-list
    *  bottom action bar. The button is wrapped in a Radix Tooltip trigger whose
    *  hover/pointer handling can swallow the first click during a fast run, so
    *  re-click until the dialog actually opens. */

@@ -1,9 +1,9 @@
-// Integration tests for issue #416 — workspace task cleanup and time-based
+// Integration tests for issue #416 — worktree task cleanup and time-based
 // prune. Both behaviours are exercised end-to-end through the running web
 // server so the production code path is what actually wipes the rows:
 //
-//   1. `workspaces.remove` is invoked over tRPC; we then inspect the SQLite
-//      DB the server wrote to and assert the workspace's task rows are gone.
+//   1. `worktrees.remove` is invoked over tRPC; we then inspect the SQLite
+//      DB the server wrote to and assert the worktree's task rows are gone.
 //   2. The prune sweep runs synchronously on server boot
 //      (`startTaskPruneScheduler` in start-server.ts). We seed task rows
 //      with timestamps older than the 30-day retention window, start the
@@ -74,8 +74,8 @@ function openDb(tmpHome: string): DatabaseSync {
 
 interface SeedTask {
   id: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   branch: string;
   prompt: string;
   status: "running" | "completed" | "failed";
@@ -86,13 +86,13 @@ interface SeedTask {
 function seedTask(sqlite: DatabaseSync, task: SeedTask): void {
   sqlite
     .prepare(
-      `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, started_at, completed_at)
+      `INSERT OR REPLACE INTO tasks (id, worktree_id, repo, branch, prompt, status, started_at, completed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
-      task.workspaceId,
-      task.project,
+      task.worktreeId,
+      task.repo,
       task.branch,
       task.prompt,
       task.status,
@@ -106,10 +106,10 @@ function listTaskIds(sqlite: DatabaseSync): string[] {
   return rows.map((r) => r.id);
 }
 
-function listWorkspaceTaskIds(sqlite: DatabaseSync, workspaceId: string): string[] {
+function listWorktreeTaskIds(sqlite: DatabaseSync, worktreeId: string): string[] {
   const rows = sqlite
-    .prepare("SELECT id FROM tasks WHERE workspace_id = ? ORDER BY id")
-    .all(workspaceId) as Array<{ id: string }>;
+    .prepare("SELECT id FROM tasks WHERE worktree_id = ? ORDER BY id")
+    .all(worktreeId) as Array<{ id: string }>;
   return rows.map((r) => r.id);
 }
 
@@ -140,10 +140,10 @@ function createGitRepo(parentDir: string, name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. workspaces.remove deletes the workspace's task rows
+// 1. worktrees.remove deletes the worktree's task rows
 // ---------------------------------------------------------------------------
 
-describe("workspace task cleanup on removal (issue #416)", () => {
+describe("worktree task cleanup on removal (issue #416)", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -151,13 +151,13 @@ describe("workspace task cleanup on removal (issue #416)", () => {
     tmpHome = createTmpHome("band-task-cleanup-remove-");
     const repoPath = createGitRepo(tmpHome, "proj");
 
-    // Real git worktree for the feature branch so `workspaces.remove`'s
+    // Real git worktree for the feature branch so `worktrees.remove`'s
     // background `git worktree remove --force` has something to chew on.
     git(repoPath, ["branch", "feature"]);
     git(repoPath, ["worktree", "add", join(tmpHome, "proj-feature"), "feature"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repoPath,
@@ -176,8 +176,8 @@ describe("workspace task cleanup on removal (issue #416)", () => {
     try {
       seedTask(sqlite, {
         id: "tsk_main_a",
-        workspaceId: "proj-main",
-        project: "proj",
+        worktreeId: "proj-main",
+        repo: "proj",
         branch: "main",
         prompt: "main task 1",
         status: "completed",
@@ -186,8 +186,8 @@ describe("workspace task cleanup on removal (issue #416)", () => {
       });
       seedTask(sqlite, {
         id: "tsk_main_b",
-        workspaceId: "proj-main",
-        project: "proj",
+        worktreeId: "proj-main",
+        repo: "proj",
         branch: "main",
         prompt: "main task 2",
         status: "failed",
@@ -196,8 +196,8 @@ describe("workspace task cleanup on removal (issue #416)", () => {
       });
       seedTask(sqlite, {
         id: "tsk_feature_a",
-        workspaceId: "proj-feature",
-        project: "proj",
+        worktreeId: "proj-feature",
+        repo: "proj",
         branch: "feature",
         prompt: "feature task 1",
         status: "completed",
@@ -216,15 +216,15 @@ describe("workspace task cleanup on removal (issue #416)", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("deletes the workspace's tasks and leaves other workspaces untouched", async () => {
+  it("deletes the worktree's tasks and leaves other worktrees untouched", async () => {
     // Sanity-check the seed survived the server boot — `cleanupStaleTasks`
     // can flip running rows to failed, but the rows themselves must remain
     // because none of them are >30d old.
     {
       const sqlite = openDb(tmpHome);
       try {
-        expect(listWorkspaceTaskIds(sqlite, "proj-feature")).toEqual(["tsk_feature_a"]);
-        expect(listWorkspaceTaskIds(sqlite, "proj-main").sort()).toEqual([
+        expect(listWorktreeTaskIds(sqlite, "proj-feature")).toEqual(["tsk_feature_a"]);
+        expect(listWorktreeTaskIds(sqlite, "proj-main").sort()).toEqual([
           "tsk_main_a",
           "tsk_main_b",
         ]);
@@ -233,20 +233,17 @@ describe("workspace task cleanup on removal (issue #416)", () => {
       }
     }
 
-    const res = await trpcMutate(server.url, "workspaces.remove", {
-      project: "proj",
+    const res = await trpcMutate(server.url, "worktrees.remove", {
+      repo: "proj",
       name: "feature",
     });
     expect(res.status).toBe(200);
 
     const sqlite = openDb(tmpHome);
     try {
-      expect(listWorkspaceTaskIds(sqlite, "proj-feature")).toEqual([]);
-      // Other workspace's tasks remain untouched.
-      expect(listWorkspaceTaskIds(sqlite, "proj-main").sort()).toEqual([
-        "tsk_main_a",
-        "tsk_main_b",
-      ]);
+      expect(listWorktreeTaskIds(sqlite, "proj-feature")).toEqual([]);
+      // Other worktree's tasks remain untouched.
+      expect(listWorktreeTaskIds(sqlite, "proj-main").sort()).toEqual(["tsk_main_a", "tsk_main_b"]);
     } finally {
       sqlite.close();
     }
@@ -262,7 +259,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
 
   beforeAll(() => {
     tmpHome = createTmpHome("band-task-cleanup-prune-");
-    seedState(tmpHome, { projects: [] });
+    seedState(tmpHome, { repos: [] });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
   });
 
@@ -283,8 +280,8 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old completed row — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_completed",
-          workspaceId: "any-main",
-          project: "any",
+          worktreeId: "any-main",
+          repo: "any",
           branch: "main",
           prompt: "old completed",
           status: "completed",
@@ -294,8 +291,8 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old failed row — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_failed",
-          workspaceId: "any-main",
-          project: "any",
+          worktreeId: "any-main",
+          repo: "any",
           branch: "main",
           prompt: "old failed",
           status: "failed",
@@ -305,8 +302,8 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old orphan (no completedAt) older than 30 d by startedAt — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_orphan",
-          workspaceId: "any-main",
-          project: "any",
+          worktreeId: "any-main",
+          repo: "any",
           branch: "main",
           prompt: "abandoned",
           status: "failed",
@@ -316,8 +313,8 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Recent completed row — must survive.
         seedTask(sqlite, {
           id: "tsk_recent_completed",
-          workspaceId: "any-main",
-          project: "any",
+          worktreeId: "any-main",
+          repo: "any",
           branch: "main",
           prompt: "recent completed",
           status: "completed",
@@ -327,8 +324,8 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Recent orphan (no completedAt) within window by startedAt — must survive.
         seedTask(sqlite, {
           id: "tsk_recent_orphan",
-          workspaceId: "any-main",
-          project: "any",
+          worktreeId: "any-main",
+          repo: "any",
           branch: "main",
           prompt: "recent orphan",
           status: "running",

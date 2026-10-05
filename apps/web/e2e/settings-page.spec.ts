@@ -20,7 +20,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [] });
+  seedState(tmpHome, { repos: [] });
   // Seed codingAgents explicitly so the Default-agent dropdown renders
   // deterministically — without this, runFirstTimeSetup() relies on the
   // host having `claude`/`codex`/`opencode` on PATH, which is true on
@@ -131,14 +131,14 @@ test("the browser build does not offer the translucent sidebar toggle", async ({
   await expect(settingsPage.translucentSidebarSwitch()).toHaveCount(0);
 });
 
-test("the General section no longer offers a cached-workspaces count", async ({ page }) => {
+test("the General section no longer offers a cached-worktrees count", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog("general");
 
   // Positive anchor: the General section rendered (LSP is one of its rows).
   await settingsPage.expectRowVisible(settingsPage.lspSwitch());
-  await expect(settingsPage.cachedWorkspacesInput()).toHaveCount(0);
+  await expect(settingsPage.cachedWorktreesInput()).toHaveCount(0);
 });
 
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {

@@ -8,7 +8,7 @@ import {
 } from "@band-app/host-api";
 import { getRepoInfo, type RepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq } from "drizzle-orm";
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
@@ -35,19 +35,19 @@ interface GitStatus {
   sync_state: string;
 }
 
-interface WorkspaceInfo {
-  workspaceId: string;
-  project: string;
+interface WorktreeInfo {
+  worktreeId: string;
+  repo: string;
   branch: string;
   defaultBranch: string;
   worktreePath: string;
-  /** The project's checkout on the workspace's host. */
-  projectPath: string;
-  /** The host the workspace lives on. Absent or `local` is the hub's own machine. */
+  /** The repo's checkout on the worktree's host. */
+  repoPath: string;
+  /** The host the worktree lives on. Absent or `local` is the hub's own machine. */
   hostId?: string;
   /**
-   * Whether the project's git repo has an `origin` remote. Populated
-   * from `ProjectState.hasOrigin`, which `syncWorktrees` keeps in sync
+   * Whether the repo's git repo has an `origin` remote. Populated
+   * from `RepoState.hasOrigin`, which `syncWorktrees` keeps in sync
    * at the CI tick cadence. Used to skip the CI / GraphQL probe for
    * origin-less repos — see issue #458.
    */
@@ -64,7 +64,7 @@ interface WorkspaceInfo {
 export type ActivityLevel = "active" | "idle" | "background";
 
 interface IntervalConfig {
-  /** Base tick period in ms — fires `getGitStatus` for every workspace. */
+  /** Base tick period in ms — fires `getGitStatus` for every worktree. */
   pollMs: number;
   /** Every Nth tick also runs `git fetch --all` + the batched CI query. */
   ciTicks: number;
@@ -115,9 +115,9 @@ const pollerState = {
  */
 const lastCIPollErrorByHost = new Map<string, string>();
 
-/** The host a workspace's git runs on, or null when the hub has no such host registered. */
-function hostFor(project: string, hostId: string | undefined): Host | null {
-  if (hostId === undefined || hostId === "local") return hostRegistry.hostForProject(project);
+/** The host a worktree's git runs on, or null when the hub has no such host registered. */
+function hostFor(repo: string, hostId: string | undefined): Host | null {
+  if (hostId === undefined || hostId === "local") return hostRegistry.hostForRepo(repo);
   try {
     return hostRegistry.hostById(hostId);
   } catch {
@@ -125,41 +125,41 @@ function hostFor(project: string, hostId: string | undefined): Host | null {
   }
 }
 
-function hostOf(ws: Pick<WorkspaceInfo, "project" | "hostId">): Host {
-  const host = hostFor(ws.project, ws.hostId);
+function hostOf(ws: Pick<WorktreeInfo, "repo" | "hostId">): Host {
+  const host = hostFor(ws.repo, ws.hostId);
   if (!host) throw new Error(`Unknown host "${ws.hostId}"`);
   return host;
 }
 
-function getWorkspaces(): WorkspaceInfo[] {
+function getWorktrees(): WorktreeInfo[] {
   const state = loadState();
-  const workspaces: WorkspaceInfo[] = [];
-  for (const project of state.projects) {
-    // Plain (non-git) projects can't be polled for git/CI status —
+  const worktrees: WorktreeInfo[] = [];
+  for (const repo of state.repos) {
+    // Plain (non-git) repos can't be polled for git/CI status —
     // there's no .git, no remote, no branches. Skipping them here also
     // avoids noisy `git status` / `gh` errors in the server log.
-    if (project.kind === "plain") continue;
-    for (const wt of project.worktrees) {
+    if (repo.kind === "plain") continue;
+    for (const wt of repo.worktrees) {
       const remote = wt.hostId !== undefined && wt.hostId !== "local";
-      // A remote workspace is read on its host, from the project's checkout there.
-      const projectPath = remote
-        ? hostRegistry.projectPathOn(project.name, wt.hostId as string, project.path)
-        : project.path;
-      if (projectPath === null || !hostFor(project.name, wt.hostId)) continue;
-      workspaces.push({
-        workspaceId: toWorkspaceId(project.name, wt.name),
-        project: project.name,
+      // A remote worktree is read on its host, from the repo's checkout there.
+      const repoPath = remote
+        ? hostRegistry.repoPathOn(repo.name, wt.hostId as string, repo.path)
+        : repo.path;
+      if (repoPath === null || !hostFor(repo.name, wt.hostId)) continue;
+      worktrees.push({
+        worktreeId: toWorktreeId(repo.name, wt.name),
+        repo: repo.name,
         branch: wt.branch,
-        defaultBranch: project.defaultBranch,
+        defaultBranch: repo.defaultBranch,
         worktreePath: wt.path,
-        projectPath,
+        repoPath,
         hostId: remote ? wt.hostId : undefined,
         // The hub's flag describes its own copy; a worker's repo is probed.
-        hasOrigin: remote ? true : project.hasOrigin,
+        hasOrigin: remote ? true : repo.hasOrigin,
       });
     }
   }
-  return workspaces;
+  return worktrees;
 }
 
 /** Run `task` for every item, a few at a time (`GIT_SPAWN_CONCURRENCY`). A task that throws is logged and skipped. */
@@ -174,7 +174,7 @@ async function forEachLimited<T>(items: readonly T[], task: (item: T) => Promise
  * header only when the branch has a resolvable upstream, and one line per
  * changed path (`u <XY>` for unmerged ones).
  */
-async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
+async function getGitStatus(ws: WorktreeInfo): Promise<GitStatus> {
   const status: GitStatus = {
     dirty: false,
     conflict: false,
@@ -190,7 +190,7 @@ async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
       ws.worktreePath,
     );
   } catch (err) {
-    // An offline or unresponsive worker says nothing about the workspace; keep the stored status.
+    // An offline or unresponsive worker says nothing about the worktree; keep the stored status.
     if (err instanceof HostOfflineError || err instanceof HostTimeoutError) throw err;
     // git status failed - leave defaults
     return status;
@@ -225,13 +225,13 @@ async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
 }
 
 /**
- * Fetch CI status for all workspaces using batched GraphQL queries.
+ * Fetch CI status for all worktrees using batched GraphQL queries.
  *
- * Groups workspaces by GitHub host and executes one GraphQL query per host,
+ * Groups worktrees by GitHub host and executes one GraphQL query per host,
  * fetching PR status and check suite results for all branches in a single request.
  *
- * The caller is responsible for pre-filtering to workspaces whose project
- * has `hasOrigin === true` (see `ProjectState.hasOrigin`, written by
+ * The caller is responsible for pre-filtering to worktrees whose repo
+ * has `hasOrigin === true` (see `RepoState.hasOrigin`, written by
  * `syncWorktrees`). That removes the no-origin / not-a-git-checkout
  * steady-state failures from this path entirely — no per-tick `getRepoInfo`
  * retry loop, no negative cache (issue #458). Because the caller has
@@ -241,20 +241,20 @@ async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
  * `hasOrigin` on the next sync tick and the noise stops on its own.
  */
 export async function getBatchedCIStatuses(
-  workspaces: WorkspaceInfo[],
+  worktrees: WorktreeInfo[],
 ): Promise<Map<string, CIStatus>> {
-  // Dedupe `getRepoInfo` calls by project path. A project with N
-  // worktrees produces N `WorkspaceInfo` entries that all share the
-  // same `projectPath`; without this, each tick fans out to N
+  // Dedupe `getRepoInfo` calls by repo path. A repo with N
+  // worktrees produces N `WorktreeInfo` entries that all share the
+  // same `repoPath`; without this, each tick fans out to N
   // identical `git remote get-url origin` subprocesses. One probe per
-  // unique project per tick is all we need.
-  const repoKey = (ws: WorkspaceInfo) => `${ws.hostId ?? "local"}\0${ws.projectPath}`;
-  const repoWorkspaces = new Map(workspaces.map((ws) => [repoKey(ws), ws]));
-  const uniqueProjectPaths = [...repoWorkspaces.keys()];
+  // unique repo per tick is all we need.
+  const repoKey = (ws: WorktreeInfo) => `${ws.hostId ?? "local"}\0${ws.repoPath}`;
+  const repoWorktrees = new Map(worktrees.map((ws) => [repoKey(ws), ws]));
+  const uniqueRepoPaths = [...repoWorktrees.keys()];
   const repoInfoByPath = new Map<string, RepoInfo | null>();
-  await forEachLimited(uniqueProjectPaths, async (key) => {
-    const ws = repoWorkspaces.get(key) as WorkspaceInfo;
-    repoInfoByPath.set(key, await getRepoInfo(ws.projectPath, gitRunner(hostOf(ws))));
+  await forEachLimited(uniqueRepoPaths, async (key) => {
+    const ws = repoWorktrees.get(key) as WorktreeInfo;
+    repoInfoByPath.set(key, await getRepoInfo(ws.repoPath, gitRunner(hostOf(ws))));
   });
 
   // Caller already filtered to `hasOrigin === true`, so a null result
@@ -263,35 +263,35 @@ export async function getBatchedCIStatuses(
   // misbehaving (binary missing, auth broken, FS perms). Surface those
   // at `warn` so operators don't miss them. `syncWorktrees` will rewrite
   // `hasOrigin` on its next tick and the noise stops on its own.
-  for (const [key, ws] of repoWorkspaces) {
+  for (const [key, ws] of repoWorktrees) {
     if (repoInfoByPath.get(key) === null && ws.hostId === undefined) {
       log.warn(
         "CI poll: getRepoInfo returned null for %s despite hasOrigin=true; will reconcile on next sync tick",
-        ws.projectPath,
+        ws.repoPath,
       );
     }
   }
 
   const resolved: Array<{
-    ws: WorkspaceInfo;
+    ws: WorktreeInfo;
     repoInfo: RepoInfo;
     alias: string;
   }> = [];
-  for (const [index, ws] of workspaces.entries()) {
+  for (const [index, ws] of worktrees.entries()) {
     const repoInfo = repoInfoByPath.get(repoKey(ws));
     if (repoInfo) {
       resolved.push({ ws, repoInfo, alias: `ws_${index}` });
     }
   }
 
-  // If no workspaces have repo info, return empty. No host is being
+  // If no worktrees have repo info, return empty. No host is being
   // queried this tick, so any remembered failures are stale — clear them
   // so a host re-arms logging if it comes back.
   if (resolved.length === 0) {
     lastCIPollErrorByHost.clear();
     const results = new Map<string, CIStatus>();
-    for (const ws of workspaces) {
-      results.set(ws.workspaceId, { state: "none" });
+    for (const ws of worktrees) {
+      results.set(ws.worktreeId, { state: "none" });
     }
     return results;
   }
@@ -318,7 +318,7 @@ export async function getBatchedCIStatuses(
     }));
 
     const query = buildBatchedCIQuery(inputs);
-    // Use any workspace's worktreePath for cwd (gh auth is per-host)
+    // Use any worktree's worktreePath for cwd (gh auth is per-host)
     const cwd = group[0].ws.worktreePath;
 
     const ghArgs = ["api", "graphql", "-f", `query=${query}`];
@@ -345,11 +345,11 @@ export async function getBatchedCIStatuses(
         defaultBranches,
       );
 
-      // Map aliases back to workspace IDs
+      // Map aliases back to worktree IDs
       for (const g of group) {
         const status = parsed.get(g.alias);
         if (status) {
-          allResults.set(g.ws.workspaceId, status);
+          allResults.set(g.ws.worktreeId, status);
         }
       }
 
@@ -365,7 +365,7 @@ export async function getBatchedCIStatuses(
       if (lastCIPollErrorByHost.get(groupKey) !== message) {
         lastCIPollErrorByHost.set(groupKey, message);
         console.error(
-          `CI poll: GraphQL query failed for host (${group.length} workspaces):`,
+          `CI poll: GraphQL query failed for host (${group.length} worktrees):`,
           message,
         );
       }
@@ -373,16 +373,16 @@ export async function getBatchedCIStatuses(
   }
 
   // Drop throttle state for hosts that dropped out of the polled set, so
-  // it doesn't leak as projects/workspaces come and go — and a host that
+  // it doesn't leak as repos/worktrees come and go — and a host that
   // returns re-arms logging.
   for (const key of [...lastCIPollErrorByHost.keys()]) {
     if (!byHost.has(key)) lastCIPollErrorByHost.delete(key);
   }
 
-  // Fill in "none" for workspaces that couldn't resolve repo info
-  for (const ws of workspaces) {
-    if (!allResults.has(ws.workspaceId)) {
-      allResults.set(ws.workspaceId, { state: "none" });
+  // Fill in "none" for worktrees that couldn't resolve repo info
+  for (const ws of worktrees) {
+    if (!allResults.has(ws.worktreeId)) {
+      allResults.set(ws.worktreeId, { state: "none" });
     }
   }
 
@@ -390,15 +390,15 @@ export async function getBatchedCIStatuses(
 }
 
 let pollCount = 0;
-/** The newest poll started for each workspace (see `pollWorkspace`). */
-const latestPollByWorkspace = new Map<string, number>();
+/** The newest poll started for each worktree (see `pollWorktree`). */
+const latestPollByWorktree = new Map<string, number>();
 /**
- * CI status a tick fetched for a workspace and hasn't stored yet. When a
- * later poll supersedes the tick's (see `pollWorkspace`), the later poll
+ * CI status a tick fetched for a worktree and hasn't stored yet. When a
+ * later poll supersedes the tick's (see `pollWorktree`), the later poll
  * stores this instead of the older row, so the GitHub result isn't lost
  * until the next CI tick.
  */
-const pendingCIByWorkspace = new Map<string, CIStatus>();
+const pendingCIByWorktree = new Map<string, CIStatus>();
 
 /** Whether a stored `branch_statuses` row already holds `git` and `ci`. */
 function isSameStatus(
@@ -419,42 +419,42 @@ function isSameStatus(
 }
 
 /**
- * Poll one workspace's git status and, when it or the CI status changed,
+ * Poll one worktree's git status and, when it or the CI status changed,
  * store it with `newCI` (or the stored CI status when `null`) and emit it to
  * status stream listeners.
  */
-async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
+async function pollWorktree(ws: WorktreeInfo, newCI: CIStatus | null): Promise<void> {
   const poll = ++pollCount;
-  latestPollByWorkspace.set(ws.workspaceId, poll);
-  if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
+  latestPollByWorktree.set(ws.worktreeId, poll);
+  if (newCI) pendingCIByWorktree.set(ws.worktreeId, newCI);
   const git = await getGitStatus(ws);
   // Store and emit in an event-loop turn of its own. Git replies from the
   // exec-file worker arrive in batches, and handling a batch in one turn
   // held off terminal I/O on a slow host.
   await yieldToEventLoop();
-  // A poll of this workspace that started later (a selection refresh during a
+  // A poll of this worktree that started later (a selection refresh during a
   // tick) read fresher state and writes it; this older result must not land last.
-  if (latestPollByWorkspace.get(ws.workspaceId) !== poll) return;
+  if (latestPollByWorktree.get(ws.worktreeId) !== poll) return;
 
   const db = getDb();
   const existing = db
     .select()
     .from(branchStatusesTable)
-    .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
+    .where(eq(branchStatusesTable.worktreeId, ws.worktreeId))
     .get();
-  const pendingCI = pendingCIByWorkspace.get(ws.workspaceId);
+  const pendingCI = pendingCIByWorktree.get(ws.worktreeId);
   let ci: CIStatus = newCI ?? pendingCI ?? { state: "none" };
   if (!newCI && !pendingCI && existing) {
     // Keep the stored CI status when this poll didn't query CI
     ci = { state: existing.ciState, url: existing.ciUrl, pr: existing.ciPr };
   }
-  if (pendingCIByWorkspace.get(ws.workspaceId) === ci) {
-    pendingCIByWorkspace.delete(ws.workspaceId);
+  if (pendingCIByWorktree.get(ws.worktreeId) === ci) {
+    pendingCIByWorktree.delete(ws.worktreeId);
   }
 
   // Most polls find nothing changed. Writing and emitting all of them anyway
   // cost the event loop 100-300 ms per tick on a macOS CI runner (73
-  // workspaces), enough to hold up terminal echo.
+  // worktrees), enough to hold up terminal echo.
   if (existing && isSameStatus(existing, git, ci)) return;
 
   const now = Date.now();
@@ -462,7 +462,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
   // Upsert branch status into DB
   db.insert(branchStatusesTable)
     .values({
-      workspaceId: ws.workspaceId,
+      worktreeId: ws.worktreeId,
       gitDirty: git.dirty,
       gitConflict: git.conflict,
       gitAhead: git.ahead,
@@ -474,7 +474,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: branchStatusesTable.workspaceId,
+      target: branchStatusesTable.worktreeId,
       set: {
         gitDirty: git.dirty,
         gitConflict: git.conflict,
@@ -493,7 +493,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
   // doesn't change isn't sent again, so the first one must be complete.
   emit({
     kind: "branch-status",
-    workspaceId: ws.workspaceId,
+    worktreeId: ws.worktreeId,
     git,
     ci: { state: ci.state, url: ci.url ?? null, pr: ci.pr ?? null },
   });
@@ -503,16 +503,16 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
 const refreshesInFlight = new Map<string, Promise<boolean>>();
 
 /**
- * Poll one workspace now, outside the tick: the dashboard asks when the user
- * selects a workspace, so its status doesn't wait for the next tick. Returns
- * `false` when no git workspace has that id.
+ * Poll one worktree now, outside the tick: the dashboard asks when the user
+ * selects a worktree, so its status doesn't wait for the next tick. Returns
+ * `false` when no git worktree has that id.
  */
-export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boolean> {
-  const inFlight = refreshesInFlight.get(workspaceId);
+export function refreshWorktreeBranchStatus(worktreeId: string): Promise<boolean> {
+  const inFlight = refreshesInFlight.get(worktreeId);
   if (inFlight) return inFlight;
-  const ws = getWorkspaces().find((w) => w.workspaceId === workspaceId);
+  const ws = getWorktrees().find((w) => w.worktreeId === worktreeId);
   if (!ws) return Promise.resolve(false);
-  const refresh = pollWorkspace(ws, null)
+  const refresh = pollWorktree(ws, null)
     .then(
       () => true,
       (err) => {
@@ -521,8 +521,8 @@ export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boole
         throw err;
       },
     )
-    .finally(() => refreshesInFlight.delete(workspaceId));
-  refreshesInFlight.set(workspaceId, refresh);
+    .finally(() => refreshesInFlight.delete(worktreeId));
+  refreshesInFlight.set(worktreeId, refresh);
   return refresh;
 }
 
@@ -536,26 +536,26 @@ async function pollTick() {
     await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
-  const workspaces = getWorkspaces();
+  const worktrees = getWorktrees();
 
-  if (workspaces.length === 0) return;
+  if (worktrees.length === 0) return;
 
-  // On CI ticks, git fetch each unique project path. A fetch waits on the
+  // On CI ticks, git fetch each unique repo path. A fetch waits on the
   // network for seconds, so it runs alongside the status pass below instead
   // of ahead of it; the counts it changes show up on the next tick.
   let fetches: Promise<void> = Promise.resolve();
   if (isCITick) {
     const fetchTargets = new Map(
-      workspaces.map((w) => [`${w.hostId ?? "local"}\0${w.projectPath}`, w]),
+      worktrees.map((w) => [`${w.hostId ?? "local"}\0${w.repoPath}`, w]),
     );
     fetches = forEachLimited([...fetchTargets.values()], async (ws) => {
-      await gitRunner(hostOf(ws))(["fetch", "--quiet", "--all"], ws.projectPath).catch(() => {});
+      await gitRunner(hostOf(ws))(["fetch", "--quiet", "--all"], ws.repoPath).catch(() => {});
     });
   }
 
-  // Fetch CI statuses in batch on CI ticks. Filter to workspaces whose
-  // project has an `origin` remote — by construction, an origin-less
-  // project has no PR / CI status to report and the GraphQL query would
+  // Fetch CI statuses in batch on CI ticks. Filter to worktrees whose
+  // repo has an `origin` remote — by construction, an origin-less
+  // repo has no PR / CI status to report and the GraphQL query would
   // need a `getRepoInfo` probe that's guaranteed to fail (issue #458).
   // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
   // tick body just above; freshly-discovered origin changes land in the
@@ -566,9 +566,9 @@ async function pollTick() {
   // PR, and the rows show neither the PR badge nor the CI icon.
   let ciStatuses = new Map<string, CIStatus>();
   if (queryCI && pluginHost.isEnabled("github")) {
-    const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
-    if (ciWorkspaces.length > 0) {
-      ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
+    const ciWorktrees = worktrees.filter((w) => w.hasOrigin);
+    if (ciWorktrees.length > 0) {
+      ciStatuses = await getBatchedCIStatuses(ciWorktrees);
     }
   }
 
@@ -580,8 +580,8 @@ async function pollTick() {
       .catch((err) => log.warn({ err }, "github subscription poll failed"));
   }
 
-  await forEachLimited(workspaces, (ws) =>
-    pollWorkspace(ws, queryCI ? (ciStatuses.get(ws.workspaceId) ?? { state: "none" }) : null),
+  await forEachLimited(worktrees, (ws) =>
+    pollWorktree(ws, queryCI ? (ciStatuses.get(ws.worktreeId) ?? { state: "none" }) : null),
   );
 
   await fetches;
@@ -589,7 +589,7 @@ async function pollTick() {
 
 /**
  * Start a tick unless the previous one is still running. Git calls are
- * rationed (`GIT_SPAWN_CONCURRENCY`), so a tick over many workspaces can outlast
+ * rationed (`GIT_SPAWN_CONCURRENCY`), so a tick over many worktrees can outlast
  * the interval; overlapping ticks would double the spawns.
  */
 function runTick() {
@@ -667,8 +667,8 @@ export class BranchStatusPoller {
     return getPollerActivity();
   }
 
-  refreshWorkspace(workspaceId: string): Promise<boolean> {
-    return refreshWorkspaceBranchStatus(workspaceId);
+  refreshWorktree(worktreeId: string): Promise<boolean> {
+    return refreshWorktreeBranchStatus(worktreeId);
   }
 }
 

@@ -66,9 +66,9 @@ function unknownAgent(agentType: string): CliInvocation {
  * interactive terminal pane with `prompt` pre-loaded (cmux-style, e.g.
  * `claude "Implement X"`).
  *
- * Powers `workspaces.create --via terminal` (issue #551). The server passes
+ * Powers `worktrees.create --via terminal` (issue #551). The server passes
  * the returned `command + args` to `terminalService.spawn`, which composes a
- * shell-escaped command line inside the workspace's PTY.
+ * shell-escaped command line inside the worktree's PTY.
  *
  * Without a prompt it opens the agent's REPL with nothing pre-loaded (a TUI
  * agent session started from the New agent menu, issue #682).
@@ -92,8 +92,8 @@ export function cliInvocation(
       // being parsed as a flag by the Gemini binary.
       return { command: binary(agentType, opts), args: prompt ? ["--", prompt] : [] };
     case "opencode":
-      // The OpenCode TUI's positional is a *project path* (`opencode
-      // [project]`), so the prompt goes through the dedicated `--prompt` flag.
+      // The OpenCode TUI's positional is a *repo path* (`opencode
+      // [repo]`), so the prompt goes through the dedicated `--prompt` flag.
       return { command: binary(agentType, opts), args: prompt ? ["--prompt", prompt] : [] };
     case "cursor-cli":
       return {
@@ -160,7 +160,7 @@ export function resumeCliInvocation(
 ): CliInvocation {
   switch (agentType) {
     case "claude-code":
-      // Session-ID lookup is scoped to the project directory + its
+      // Session-ID lookup is scoped to the repo directory + its
       // worktrees, which is where the PTY is spawned.
       return { command: binary(agentType, opts), args: ["--resume", sessionId] };
     case "codex":

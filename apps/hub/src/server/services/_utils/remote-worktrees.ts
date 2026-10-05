@@ -1,16 +1,16 @@
-import type { WorktreeState } from "../../infra/db/queries/projects";
+import type { WorktreeState } from "../../infra/db/queries/repos";
 import { hostRegistry } from "../../infra/host/registry";
 
 /**
- * Refreshes the branch and head of a project's worktrees on remote hosts from
+ * Refreshes the branch and head of a repo's worktrees on remote hosts from
  * what git on each worker reports, so a branch switch in a worker's terminal
  * shows up. Rows are only updated, never added or dropped: the hub can't tell
  * a worktree git no longer lists from a worker that is unreachable. A host
- * that is offline or has no checkout of the project keeps its rows as they are.
+ * that is offline or has no checkout of the repo keeps its rows as they are.
  */
 export async function refreshRemoteWorktrees(
-  projectName: string,
-  projectPath: string,
+  repoName: string,
+  repoPath: string,
   worktrees: WorktreeState[],
 ): Promise<{ worktrees: WorktreeState[]; changed: boolean }> {
   const hostIds = new Set<string>();
@@ -20,7 +20,7 @@ export async function refreshRemoteWorktrees(
   let changed = false;
   let result = worktrees;
   for (const hostId of hostIds) {
-    const checkout = hostRegistry.projectPathOn(projectName, hostId, projectPath);
+    const checkout = hostRegistry.repoPathOn(repoName, hostId, repoPath);
     if (checkout === null) continue;
     let listed: Awaited<ReturnType<ReturnType<typeof hostRegistry.hostById>["worktree"]["list"]>>;
     try {

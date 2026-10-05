@@ -18,14 +18,14 @@ import type { ContentSearchMatch } from "../types";
 import { SearchBar, type SearchBarHandle, type SearchOptions } from "./SearchBar";
 
 interface SearchFilesDialogProps {
-  workspaceId: string;
+  worktreeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenFile: (path: string) => void;
 }
 
 export function SearchFilesDialog({
-  workspaceId,
+  worktreeId,
   open,
   onOpenChange,
   onOpenFile,
@@ -45,7 +45,7 @@ export function SearchFilesDialog({
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open || !adapter.searchWorkspaceContent || query.length < 2) {
+    if (!open || !adapter.searchWorktreeContent || query.length < 2) {
       if (query.length < 2) setResults([]);
       return;
     }
@@ -56,7 +56,7 @@ export function SearchFilesDialog({
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(() => {
-      adapter.searchWorkspaceContent!(workspaceId, query, {
+      adapter.searchWorktreeContent!(worktreeId, query, {
         caseSensitive: searchOptions.caseSensitive,
         wholeWord: searchOptions.wholeWord,
         regex: searchOptions.regex,
@@ -77,7 +77,7 @@ export function SearchFilesDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, query, searchOptions, open]);
+  }, [adapter, worktreeId, query, searchOptions, open]);
 
   // Auto-focus and select text on open so typing replaces previous query
   useEffect(() => {
@@ -158,7 +158,7 @@ export function SearchFilesDialog({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Search in Files</DialogTitle>
-          <DialogDescription>Text search across workspace files</DialogDescription>
+          <DialogDescription>Text search across worktree files</DialogDescription>
         </DialogHeader>
         <Command shouldFilter={false} value={selectedValue} onValueChange={setSelectedValue}>
           <SearchBar

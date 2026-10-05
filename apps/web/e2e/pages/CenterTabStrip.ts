@@ -8,19 +8,19 @@ export interface TabStripScroll {
 }
 
 /**
- * The visible center dockview's tab strip (`WorkspaceCenterDockview`).
+ * The visible center dockview's tab strip (`WorktreeCenterDockview`).
  *
  * The strip itself is dockview's markup (`.dv-tabs-container`, and the
  * `.dv-tabs-overflow-dropdown-root` "N hidden tabs" control dockview renders
  * when it is enabled; both class names checked against dockview-core 6.0.6),
  * not an element Band owns, so it is located by dockview's own class names,
  * like xterm's textarea elsewhere. Tabs are Band's: callers pass tab locators
- * from `WorkspacePage` (`fileTab`, …) so the testid format lives in one place.
+ * from `WorktreePage` (`fileTab`, …) so the testid format lives in one place.
  */
 export class CenterTabStrip {
-  /** The scrollable list of tabs in the visible workspace's dockview. */
+  /** The scrollable list of tabs in the visible worktree's dockview. */
   readonly list: Locator;
-  /** dockview's hidden-tabs dropdown in the visible workspace's dockview. */
+  /** dockview's hidden-tabs dropdown in the visible worktree's dockview. */
   readonly overflowDropdown: Locator;
   /** The strip row: the tabs plus the header actions on either side. */
   readonly strip: Locator;
@@ -35,10 +35,10 @@ export class CenterTabStrip {
       .locator(".dockview-center-tabs .dv-tabs-and-actions-container")
       .filter({ visible: true });
     this.newTabButton = page
-      .getByTestId("workspace-center__new-tab-button")
+      .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true });
     this.tabActionsButton = page
-      .getByTestId("workspace-center__tab-actions-button")
+      .getByTestId("worktree-center__tab-actions-button")
       .filter({ visible: true });
     this.overflowDropdown = page
       .locator(".dockview-center-tabs .dv-tabs-overflow-dropdown-root")

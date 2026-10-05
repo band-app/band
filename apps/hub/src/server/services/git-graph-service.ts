@@ -1,6 +1,6 @@
 /**
  * Read-only git history for the Changes tab's Commits panel: a paged,
- * decorated `git log` of the workspace's HEAD, a cheap signature of HEAD +
+ * decorated `git log` of the worktree's HEAD, a cheap signature of HEAD +
  * refs so the client can tell when to reload it, and one commit's changed
  * files and per-file diff.
  *
@@ -8,17 +8,17 @@
  * Git Graph tab prototype (PR #612); this service narrows the log to HEAD,
  * adds paging, and returns refs as structured badges.
  *
- * Every git shell-out goes through the workspace's host (`host.git.exec`).
+ * Every git shell-out goes through the worktree's host (`host.git.exec`).
  */
 
 import { createHash } from "node:crypto";
 import { type CommandRun, gitRunner } from "@band-app/host-api";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { assertWorktreeRelative } from "./diff-service";
 import {
-  workspaceService as defaultWorkspaceService,
-  type WorkspaceService,
-} from "./workspace-service";
+  worktreeService as defaultWorktreeService,
+  type WorktreeService,
+} from "./worktree-service";
 
 // Field (US, 0x1f) and record (RS, 0x1e) separators: commit subjects and ref
 // names never contain them, unlike pipes, quotes or commas.
@@ -135,12 +135,12 @@ function parseNameStatus(output: string): CommitFileChange[] {
 }
 
 export class GitGraphService {
-  constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
+  constructor(private readonly worktrees: WorktreeService = defaultWorktreeService) {}
 
-  private target(workspaceId: string): { cwd: string; execGit: CommandRun } {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
-    return { cwd: workspace.worktree.path, execGit: gitRunner(workspace.host) };
+  private target(worktreeId: string): { cwd: string; execGit: CommandRun } {
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
+    return { cwd: worktree.worktree.path, execGit: gitRunner(worktree.host) };
   }
 
   /**
@@ -148,8 +148,8 @@ export class GitGraphService {
    * reset, fetch, branch or tag change, so the client polls it and reloads
    * the history only when it moves. Empty for a repo with no commits.
    */
-  async getCommitHistorySignature(workspaceId: string): Promise<string> {
-    const { cwd, execGit } = this.target(workspaceId);
+  async getCommitHistorySignature(worktreeId: string): Promise<string> {
+    const { cwd, execGit } = this.target(worktreeId);
     return this.signature(execGit, cwd);
   }
 
@@ -171,10 +171,10 @@ export class GitGraphService {
    * throwing, for a repo with no commits.
    */
   async getCommitHistory(
-    workspaceId: string,
+    worktreeId: string,
     options: { skip?: number; limit?: number } = {},
   ): Promise<CommitHistoryResult> {
-    const { cwd, execGit } = this.target(workspaceId);
+    const { cwd, execGit } = this.target(worktreeId);
     const skip = options.skip ?? 0;
     const limit = options.limit ?? COMMIT_HISTORY_DEFAULT_LIMIT;
 
@@ -227,8 +227,8 @@ export class GitGraphService {
   }
 
   /** Full metadata and changed-file list for a single commit. */
-  async getCommitDetails(workspaceId: string, sha: string): Promise<CommitDetails> {
-    const { cwd, execGit } = this.target(workspaceId);
+  async getCommitDetails(worktreeId: string, sha: string): Promise<CommitDetails> {
+    const { cwd, execGit } = this.target(worktreeId);
 
     // Body (%b) is last so it can safely contain newlines and separators.
     const fmt = ["%H", "%P", "%an", "%ae", "%at", "%cn", "%ct", "%s", "%b"].join(FS);
@@ -275,12 +275,12 @@ export class GitGraphService {
    * edit rather than a whole-file add.
    */
   async getCommitFileDiff(
-    workspaceId: string,
+    worktreeId: string,
     sha: string,
     filePath: string,
     options: { contextLines?: number } = {},
   ): Promise<{ diff: string }> {
-    const { cwd, execGit } = this.target(workspaceId);
+    const { cwd, execGit } = this.target(worktreeId);
     assertWorktreeRelative(cwd, filePath);
     const oldPath = (await this.commitFiles(execGit, cwd, sha)).find(
       (f) => f.path === filePath,

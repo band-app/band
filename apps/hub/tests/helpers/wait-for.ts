@@ -1,5 +1,5 @@
 // Generic polling helper for integration tests. Two tests already had a
-// near-verbatim inline copy (`workspace-create-via.test.ts` and the new
+// near-verbatim inline copy (`worktree-create-via.test.ts` and the new
 // `tasks-submit-maxturns-strip.test.ts`); promoting it here removes the
 // duplication and the risk that one copy drifts forward without the
 // other (e.g. one gets a new `intervalMs` default but the other doesn't,

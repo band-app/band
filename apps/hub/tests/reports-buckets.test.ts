@@ -67,8 +67,8 @@ describe("UsageEventQueries.aggregate — week & month buckets", () => {
   function seed(capturedAt: number, tokens: number, cost: number, sessionId: string): void {
     queries.insert({
       taskId: "",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       sessionId,
       provider: "claude",
       model: "claude-sonnet-4-6",

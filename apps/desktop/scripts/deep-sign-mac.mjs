@@ -141,7 +141,7 @@ function resolveSigningContext(opts, log, label) {
 }
 
 /**
- * Sign + verify a single explicit Mach-O file with the project's standard
+ * Sign + verify a single explicit Mach-O file with the repo's standard
  * codesign args (hardened runtime, timestamp, entitlements plist).
  *
  * Used by the afterSign hook for the CLI sidecar at

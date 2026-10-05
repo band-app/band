@@ -68,9 +68,9 @@ describe("terminal daemon backend — launch retry", () => {
     });
     try {
       const entry1 = await backend.spawn({
-        workspaceId: "ws-retry-ok",
+        worktreeId: "ws-retry-ok",
         terminalId: randomUUID(),
-        workspaceRoot: tmpHome,
+        worktreeRoot: tmpHome,
       });
       expect(entry1.pid).toBeGreaterThan(0);
       // Exactly two launches were attempted: the failing one and the one that succeeded.
@@ -94,9 +94,9 @@ describe("terminal daemon backend — launch retry", () => {
     const old = await startDaemonOfBuild(tmpHome, { entry: DAEMON_ENTRY, buildId: "old-build" });
     const oldTerminalId = randomUUID();
     const oldShellPid = await old.spawnShell({
-      workspaceId: "ws-old",
+      worktreeId: "ws-old",
       terminalId: oldTerminalId,
-      workspaceRoot: tmpHome,
+      worktreeRoot: tmpHome,
     });
 
     const backend = new DaemonTerminalBackend({
@@ -108,9 +108,9 @@ describe("terminal daemon backend — launch retry", () => {
     try {
       await expect(
         backend.spawn({
-          workspaceId: "ws-retry-fail",
+          worktreeId: "ws-retry-fail",
           terminalId: randomUUID(),
-          workspaceRoot: tmpHome,
+          worktreeRoot: tmpHome,
         }),
       ).rejects.toThrow(TerminalDaemonUnavailableError);
       // Exactly LAUNCH_ATTEMPTS (2) attempts, not one and not unbounded retries.

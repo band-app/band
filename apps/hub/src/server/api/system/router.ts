@@ -2,12 +2,12 @@ import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 // TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
-// inline worktree-filter / aggregation / sort logic in `resourcesProjects`
-// and `resourcesProjectSize` are a layering bypass — the architecture doc
+// inline worktree-filter / aggregation / sort logic in `resourcesRepos`
+// and `resourcesRepoSize` are a layering bypass — the architecture doc
 // puts business logic in the services tier. Lifted as-is from the legacy
 // `servicesRouter` to keep the wire surface identical during Phase 7.5;
 // a follow-up should move the orchestration into
-// `SystemService.listProjectResources(...)` / `getProjectResourceSize(...)`
+// `SystemService.listRepoResources(...)` / `getRepoResourceSize(...)`
 // (mirroring `tunnel/router.ts`, `cli/router.ts`, `editor/router.ts`) and
 // fold `branch-status-poller` into a `StatusService`. The same pattern
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
@@ -26,11 +26,11 @@ const log = createLogger("trpc.system");
  * (issue #517).
  *
  * The procedures group server-level state that does not belong to any one
- * workspace / project: liveness probes (`health`), the branch-status
+ * worktree / repo: liveness probes (`health`), the branch-status
  * poller activity dial that the Electron main process drives from
  * window-focus and power-state events (`setActivity` / `getActivity`),
  * and the read-only Resources dashboard endpoints that snapshot the
- * server's CPU/memory plus per-project disk usage.
+ * server's CPU/memory plus per-repo disk usage.
  *
  * Renamed from `services` → `system` to follow the 3-tier convention
  * (`<domain>/router.ts` exporting `<domain>Router`). The wire surface is
@@ -96,21 +96,21 @@ export const systemRouter = t.router({
     };
   }),
 
-  // Resources dashboard — list every tracked git project + its
+  // Resources dashboard — list every tracked git repo + its
   // worktree paths *without* doing any disk walks. Instant: just
   // reads state + a single `git worktree list --porcelain` per
-  // project (in parallel). The client uses this to paint rows
-  // immediately, then fetches each project's size individually
-  // via `resourcesProjectSize` so the slow `du` work is amortised
+  // repo (in parallel). The client uses this to paint rows
+  // immediately, then fetches each repo's size individually
+  // via `resourcesRepoSize` so the slow `du` work is amortised
   // and observable per-row.
-  resourcesProjects: publicProcedure.query(async () => {
+  resourcesRepos: publicProcedure.query(async () => {
     const state = loadState();
-    const projects = await Promise.all(
-      state.projects
+    const repos = await Promise.all(
+      state.repos
         .filter((p) => p.kind === "git")
-        .map(async (project) => {
+        .map(async (repo) => {
           try {
-            const list = await systemService.listWorktrees(project.name, project.path);
+            const list = await systemService.listWorktrees(repo.name, repo.path);
             // `listWorktrees` guarantees a non-empty branch for non-bare
             // worktrees: detached HEADs (mid-rebase, mid-bisect, or
             // explicit `git checkout <sha>`) are labelled with the
@@ -121,25 +121,25 @@ export const systemRouter = t.router({
               .filter((wt) => !wt.isBare)
               .map((wt) => ({ branch: wt.branch, path: wt.path, hostId: wt.hostId }));
             return {
-              project: project.name,
-              path: project.path,
+              repo: repo.name,
+              path: repo.path,
               worktrees,
               error: undefined as string | undefined,
             };
           } catch (err) {
             return {
-              project: project.name,
-              path: project.path,
+              repo: repo.name,
+              path: repo.path,
               worktrees: [] as { branch: string; path: string; hostId?: string }[],
               error: err instanceof Error ? err.message : String(err),
             };
           }
         }),
     );
-    return { projects };
+    return { repos };
   }),
 
-  // Resources dashboard — measure disk usage for a single project.
+  // Resources dashboard — measure disk usage for a single repo.
   //
   // Slow: runs `du -sk` once per worktree, in parallel via
   // Promise.all. The client fan-outs are concurrency-limited so the
@@ -147,26 +147,26 @@ export const systemRouter = t.router({
   // single page open. Per-worktree errors are absorbed into the
   // response (sizeBytes 0, `error` populated) so a single broken
   // worktree doesn't fail the whole query.
-  resourcesProjectSize: publicProcedure
-    .input(z.object({ project: z.string() }))
+  resourcesRepoSize: publicProcedure
+    .input(z.object({ repo: z.string() }))
     .query(async ({ input }) => {
       const state = loadState();
-      const project = state.projects.find((p) => p.name === input.project && p.kind === "git");
-      if (!project) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+      const repo = state.repos.find((p) => p.name === input.repo && p.kind === "git");
+      if (!repo) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Repo not found" });
       }
 
       let worktreePaths: { branch: string; path: string; hostId?: string }[];
       try {
-        const list = await systemService.listWorktrees(project.name, project.path);
-        // See `resourcesProjects` above — `listWorktrees` already
+        const list = await systemService.listWorktrees(repo.name, repo.path);
+        // See `resourcesRepos` above — `listWorktrees` already
         // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list
           .filter((wt) => !wt.isBare)
           .map((wt) => ({ branch: wt.branch, path: wt.path, hostId: wt.hostId }));
       } catch (err) {
         return {
-          project: project.name,
+          repo: repo.name,
           sizeBytes: 0,
           worktrees: [] as Array<{
             branch: string;
@@ -181,7 +181,7 @@ export const systemRouter = t.router({
       const worktrees = await Promise.all(
         worktreePaths.map(async (wt) => {
           try {
-            const sizeBytes = await systemService.duBytes(project.name, wt.path, wt.hostId);
+            const sizeBytes = await systemService.duBytes(repo.name, wt.path, wt.hostId);
             return { branch: wt.branch, path: wt.path, hostId: wt.hostId, sizeBytes };
           } catch (err) {
             return {
@@ -196,7 +196,7 @@ export const systemRouter = t.router({
 
       worktrees.sort((a, b) => b.sizeBytes - a.sizeBytes);
       const sizeBytes = worktrees.reduce((sum, wt) => sum + wt.sizeBytes, 0);
-      return { project: project.name, sizeBytes, worktrees };
+      return { repo: repo.name, sizeBytes, worktrees };
     }),
 });
 

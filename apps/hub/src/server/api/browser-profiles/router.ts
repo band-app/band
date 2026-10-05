@@ -1,5 +1,5 @@
 /**
- * `browserProfiles.*` — Band browser profiles and each project's default
+ * `browserProfiles.*` — Band browser profiles and each repo's default
  * profile. Thin: validates input and delegates to `BrowserProfileService`.
  *
  * Profiles carry metadata only. Importing Chrome cookies happens entirely in
@@ -62,23 +62,21 @@ export const browserProfilesRouter = t.router({
     return { ok: true };
   }),
 
-  /** Every project's default profile. Projects with no row use Default. */
-  projectDefaults: publicProcedure.query(() => {
-    return { defaults: browserProfileService.listProjectDefaults() };
+  /** Every repo's default profile. Repos with no row use Default. */
+  repoDefaults: publicProcedure.query(() => {
+    return { defaults: browserProfileService.listRepoDefaults() };
   }),
 
-  getProjectDefault: publicProcedure
-    .input(z.object({ projectName: z.string() }))
-    .query(({ input }) => {
-      return { profileId: browserProfileService.getProjectDefault(input.projectName) };
-    }),
+  getRepoDefault: publicProcedure.input(z.object({ repoName: z.string() })).query(({ input }) => {
+    return { profileId: browserProfileService.getRepoDefault(input.repoName) };
+  }),
 
-  /** `profileId: null` resets the project to the Default profile. */
-  setProjectDefault: publicProcedure
-    .input(z.object({ projectName: z.string(), profileId: profileId.nullable() }))
+  /** `profileId: null` resets the repo to the Default profile. */
+  setRepoDefault: publicProcedure
+    .input(z.object({ repoName: z.string(), profileId: profileId.nullable() }))
     .mutation(({ input }) => {
       try {
-        browserProfileService.setProjectDefault(input.projectName, input.profileId);
+        browserProfileService.setRepoDefault(input.repoName, input.profileId);
       } catch (err) {
         rethrowProfileError(err);
       }

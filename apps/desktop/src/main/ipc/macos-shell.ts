@@ -54,7 +54,7 @@ export async function pickFolder(parent: BrowserWindow | null): Promise<string |
  * modal-relative on other platforms.
  *
  * Backs the editor's "Open File…" action — lets a user open files
- * that sit outside the current workspace root.
+ * that sit outside the current worktree root.
  */
 export async function pickFile(parent: BrowserWindow | null): Promise<string | null> {
   const opts = {

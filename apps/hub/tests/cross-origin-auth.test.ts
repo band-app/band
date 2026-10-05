@@ -34,7 +34,7 @@ describe("HTTP auth", () => {
   it("returns 401 for a missing or wrong token on every kind of route", async () => {
     for (const path of [
       "/api/health",
-      "/trpc/projects.list",
+      "/trpc/repos.list",
       "/api/chats/x/events",
       "/api/uploads/x.png",
       "/",
@@ -50,7 +50,7 @@ describe("HTTP auth", () => {
   it("accepts the token as a Bearer header", async () => {
     const health = await fetch(`${server.url}/api/health`, { headers: bearer });
     expect(health.status).toBe(200);
-    const trpc = await fetch(`${server.url}/trpc/projects.list`, { headers: bearer });
+    const trpc = await fetch(`${server.url}/trpc/repos.list`, { headers: bearer });
     expect(trpc.status).toBe(200);
   });
 
@@ -70,7 +70,7 @@ describe("HTTP auth", () => {
     const login = await fetch(`${server.url}/?token=${TOKEN}`);
     expect(login.status).toBe(200);
     expect(login.headers.get("set-cookie")).toContain(`band_token=${TOKEN}`);
-    const cookie = await fetch(`${server.url}/trpc/projects.list`, {
+    const cookie = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Cookie: `band_token=${TOKEN}` },
     });
     expect(cookie.status).toBe(200);
@@ -80,14 +80,14 @@ describe("HTTP auth", () => {
 describe("CORS allowlist", () => {
   it("answers a preflight from an allowed origin without credentials", async () => {
     for (const origin of ["app://local", REMOTE_HUB_ORIGIN]) {
-      const res = await fetch(`${server.url}/trpc/projects.list`, {
+      const res = await fetch(`${server.url}/trpc/repos.list`, {
         headers: { ...bearer, Origin: origin },
       });
       expect(res.status, origin).toBe(200);
       expect(res.headers.get("access-control-allow-origin"), origin).toBe(origin);
     }
     for (const origin of [ALLOWED_ORIGIN, SETTINGS_ORIGIN, "app://local", REMOTE_HUB_ORIGIN]) {
-      const res = await fetch(`${server.url}/trpc/projects.list`, {
+      const res = await fetch(`${server.url}/trpc/repos.list`, {
         method: "OPTIONS",
         headers: {
           Origin: origin,
@@ -103,7 +103,7 @@ describe("CORS allowlist", () => {
   });
 
   it("serves an authenticated request from an allowed origin", async () => {
-    const res = await fetch(`${server.url}/trpc/projects.list`, {
+    const res = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { ...bearer, Origin: ALLOWED_ORIGIN },
     });
     expect(res.status).toBe(200);
@@ -112,7 +112,7 @@ describe("CORS allowlist", () => {
   });
 
   it("blocks a preflight and a request from an origin outside the allowlist", async () => {
-    const preflight = await fetch(`${server.url}/trpc/projects.list`, {
+    const preflight = await fetch(`${server.url}/trpc/repos.list`, {
       method: "OPTIONS",
       headers: { Origin: EVIL_ORIGIN, "Access-Control-Request-Method": "GET" },
     });
@@ -120,7 +120,7 @@ describe("CORS allowlist", () => {
     expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
 
     // Even with a valid token and cookie, no data comes back.
-    const res = await fetch(`${server.url}/trpc/projects.list`, {
+    const res = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { ...bearer, Cookie: `band_token=${TOKEN}`, Origin: EVIL_ORIGIN },
     });
     expect(res.status).toBe(403);
@@ -137,12 +137,12 @@ describe("CORS allowlist", () => {
       "file://",
       "null",
     ]) {
-      const preflight = await fetch(`${server.url}/trpc/projects.list`, {
+      const preflight = await fetch(`${server.url}/trpc/repos.list`, {
         method: "OPTIONS",
         headers: { Origin: origin, "Access-Control-Request-Method": "GET" },
       });
       expect(preflight.status, origin).toBe(403);
-      const res = await fetch(`${server.url}/trpc/projects.list`, {
+      const res = await fetch(`${server.url}/trpc/repos.list`, {
         headers: { ...bearer, Origin: origin },
       });
       expect(res.status, origin).toBe(403);
@@ -151,7 +151,7 @@ describe("CORS allowlist", () => {
   });
 
   it("treats the server's own origin as same-origin", async () => {
-    const res = await fetch(`${server.url}/trpc/projects.list`, {
+    const res = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Cookie: `band_token=${TOKEN}`, Origin: server.url },
     });
     expect(res.status).toBe(200);
@@ -183,8 +183,8 @@ function connect(
 
 const WS_PATHS = [
   "/trpc",
-  "/terminal?workspaceId=none&terminalId=none",
-  "/lsp?workspaceId=none&lang=ts",
+  "/terminal?worktreeId=none&terminalId=none",
+  "/lsp?worktreeId=none&lang=ts",
   "/cdp",
 ];
 
@@ -204,11 +204,11 @@ describe("CORS with null configured", () => {
   });
 
   it("allows Origin null only when it is configured, and ignores the cookie from it", async () => {
-    const withCookie = await fetch(`${nullServer.url}/trpc/projects.list`, {
+    const withCookie = await fetch(`${nullServer.url}/trpc/repos.list`, {
       headers: { Cookie: `band_token=${TOKEN}`, Origin: "null" },
     });
     expect(withCookie.status).toBe(401);
-    const withBearer = await fetch(`${nullServer.url}/trpc/projects.list`, {
+    const withBearer = await fetch(`${nullServer.url}/trpc/repos.list`, {
       headers: { ...bearer, Origin: "null" },
     });
     expect(withBearer.status).toBe(200);

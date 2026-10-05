@@ -6,10 +6,10 @@
 // `apps/web/src/dashboard/adapters/web.ts` (the client the former DiffView
 // routed through) — were configured without `maxURLLength`, so
 // the default cap is `Infinity`. DiffView fired one
-// `workspace.getFileDiff` query per expanded file on mount, on every SSE
+// `worktree.getFileDiff` query per expanded file on mount, on every SSE
 // `branch-status` tick, and all at once when the user clicked "expand all".
 // All of those queries collapse into a single GET whose URL encodes every
-// batched op's `workspaceId` + `filePath` + `mergeBase` (40-char SHA).
+// batched op's `worktreeId` + `filePath` + `mergeBase` (40-char SHA).
 // Past Node's default 16 KiB header limit the server returns 431 with an
 // empty body and the batch link's `response.json()` blows up with
 // "Unexpected end of JSON input", failing every op in the batch.
@@ -20,7 +20,7 @@
 //
 // This test exercises the real production server with a real tRPC client
 // configured the same way both production clients are, and fires N
-// parallel `workspace.getFileDiff` queries — N picked high enough that,
+// parallel `worktree.getFileDiff` queries — N picked high enough that,
 // without the fix, the single batched GET would exceed Node's default
 // `--max-http-header-size` of 16 KiB. With the fix, the batch link splits
 // the requests into multiple smaller GETs, so every query resolves with a
@@ -29,7 +29,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AppRouter } from "../src/server/api/router";
@@ -90,12 +90,12 @@ describe("tRPC — batch URL splitting (#430)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
-  let workspaceId: string;
+  let worktreeId: string;
   let mergeBase: string;
 
   // High enough that, without `maxURLLength`, the single batched GET URL
   // comfortably exceeds Node's default 16 KiB header limit (each batched op
-  // carries a ~70-char path, a ~40-char SHA and a workspaceId; the URL-encoded
+  // carries a ~70-char path, a ~40-char SHA and a worktreeId; the URL-encoded
   // JSON input + the comma-separated procedure list together push past 16 KiB
   // somewhere around N=75). 100 keeps the test fast while leaving a wide
   // safety margin so transient overhead can't mask the regression.
@@ -121,7 +121,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
     git(repoPath, ["commit", "-m", "initial commit"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "repo",
           path: repoPath,
@@ -136,12 +136,12 @@ describe("tRPC — batch URL splitting (#430)", () => {
     });
     server = await startServer({ tmpHome });
 
-    // Create a feature workspace and modify every file on the branch so
+    // Create a feature worktree and modify every file on the branch so
     // each one will appear in the diff against the merge-base with main.
     const client = createBatchClient(server.url);
-    const project = "repo";
+    const repo = "repo";
     const branch = "many-files";
-    const createRes = await client.workspaces.create.mutate({ project, branch });
+    const createRes = await client.worktrees.create.mutate({ repo, branch });
     const wtPath = createRes.path;
 
     for (let i = 0; i < FILE_COUNT; i++) {
@@ -150,14 +150,14 @@ describe("tRPC — batch URL splitting (#430)", () => {
     git(wtPath, ["add", "."]);
     git(wtPath, ["commit", "-m", "modify every file"]);
 
-    // Derive the workspaceId via the canonical helper so a future naming
+    // Derive the worktreeId via the canonical helper so a future naming
     // convention change doesn't silently fail this test with a misleading
-    // "workspace not found" error instead of the batch-URL assertion.
-    workspaceId = toWorkspaceId(project, branch);
+    // "worktree not found" error instead of the batch-URL assertion.
+    worktreeId = toWorktreeId(repo, branch);
     // `getChanges` is what the Changes view reads to discover the merge-base
     // + per-file entries before fanning out a `getFileDiff` query per file
     // (the "View all" tab does exactly that), so use it here too.
-    const changes = await client.workspace.getChanges.query({ workspaceId });
+    const changes = await client.worktree.getChanges.query({ worktreeId });
     mergeBase = changes.mergeBase ?? "";
 
     // Sanity check the fixture: every file we plan to query must actually
@@ -179,8 +179,8 @@ describe("tRPC — batch URL splitting (#430)", () => {
 
     const results = await Promise.all(
       Array.from({ length: FILE_COUNT }, (_, i) =>
-        client.workspace.getFileDiff.query({
-          workspaceId,
+        client.worktree.getFileDiff.query({
+          worktreeId,
           filePath: buildFilePath(i),
           section: "branch",
           mergeBase,

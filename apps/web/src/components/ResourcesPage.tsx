@@ -51,15 +51,15 @@ interface AppMetrics {
   processes: AppProcessMetric[];
 }
 
-interface ProjectListing {
-  project: string;
+interface RepoListing {
+  repo: string;
   path: string;
   worktrees: Array<{ branch: string; path: string }>;
   error?: string;
 }
 
-interface ProjectsResponse {
-  projects: ProjectListing[];
+interface ReposResponse {
+  repos: RepoListing[];
 }
 
 interface WorktreeSize {
@@ -69,8 +69,8 @@ interface WorktreeSize {
   error?: string;
 }
 
-interface ProjectSize {
-  project: string;
+interface RepoSize {
+  repo: string;
   sizeBytes: number;
   worktrees: WorktreeSize[];
   error?: string;
@@ -109,30 +109,30 @@ function formatCpuMs(micros: number): string {
 }
 
 /**
- * Make a project + branch pair safe to embed in a `data-testid`.
+ * Make a repo + branch pair safe to embed in a `data-testid`.
  * Git allows `/`, `.`, and other chars that are legal in an
  * attribute value but awkward to grep, and the two halves need to
- * be combined uniquely — two projects with a `main` branch would
+ * be combined uniquely — two repos with a `main` branch would
  * otherwise collide on `resources-worktree-row-main` and break
  * Playwright strict-mode locators. Replace anything outside
  * `[A-Za-z0-9_-]` with `_`, then join with `__`.
  */
-function testIdForWorktree(project: string, branch: string): string {
+function testIdForWorktree(repo: string, branch: string): string {
   const safe = (s: string) => s.replace(/[^\w-]/g, "_");
-  return `${safe(project)}__${safe(branch)}`;
+  return `${safe(repo)}__${safe(branch)}`;
 }
 
 /**
- * Bound on simultaneous in-flight per-project `du` requests. The
- * server walks each request as `Promise.all` over that project's
+ * Bound on simultaneous in-flight per-repo `du` requests. The
+ * server walks each request as `Promise.all` over that repo's
  * worktrees (one `du -sk` process per worktree), so this is the
- * client-side "how many projects should we be measuring at once"
+ * client-side "how many repos should we be measuring at once"
  * — not the total `du` process count. 3 keeps the spinner pattern
- * visibly progressive on a 5-10 project setup, doesn't bury a
- * shared SSD in random reads, and means a slow project can't
+ * visibly progressive on a 5-10 repo setup, doesn't bury a
+ * shared SSD in random reads, and means a slow repo can't
  * starve the whole queue.
  */
-const PROJECT_FETCH_CONCURRENCY = 3;
+const REPO_FETCH_CONCURRENCY = 3;
 
 /**
  * Run `fn` over every item with at most `limit` running at once.
@@ -176,46 +176,46 @@ export function ResourcesPage() {
     enabled: isDesktop,
   });
 
-  // Cheap query — just `git worktree list --porcelain` per project,
+  // Cheap query — just `git worktree list --porcelain` per repo,
   // no disk walks. Fires on mount automatically.
-  const projectsQuery = useQuery<ProjectsResponse>({
-    queryKey: ["resources", "projects"],
-    queryFn: () => trpc.services.resourcesProjects.query(),
+  const reposQuery = useQuery<ReposResponse>({
+    queryKey: ["resources", "repos"],
+    queryFn: () => trpc.services.resourcesRepos.query(),
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-  // Per-project disk-usage cache, populated as `du` calls finish.
+  // Per-repo disk-usage cache, populated as `du` calls finish.
   // Key absent = not yet measured (show spinner). Cleared on
-  // Refresh + on initial mount of a fresh project list.
-  const [sizes, setSizes] = useState<Map<string, ProjectSize>>(() => new Map());
+  // Refresh + on initial mount of a fresh repo list.
+  const [sizes, setSizes] = useState<Map<string, RepoSize>>(() => new Map());
   // Bumped by the Refresh button to force the size-fetch effect to
-  // re-run even if the underlying projects list hasn't changed.
+  // re-run even if the underlying repos list hasn't changed.
   const [refreshKey, setRefreshKey] = useState(0);
 
   const server = serverQuery.data;
-  const projects = projectsQuery.data?.projects ?? [];
+  const repos = reposQuery.data?.repos ?? [];
 
-  // Stable identity for the projects list — keyed only on project
+  // Stable identity for the repos list — keyed only on repo
   // names, not the array reference. Without this, every render
   // before the query resolves hands `useEffect` a fresh `[]`
   // literal, and any future refetch (window focus, manual
   // `invalidateQueries`, …) flaps the cache by re-issuing the
   // whole `setSizes(new Map())` + queue dispatch. The `useMemo`
-  // freezes the list while the underlying project set is stable.
+  // freezes the list while the underlying repo set is stable.
   //
-  // `projects` is intentionally NOT in the dep list — the join'd
+  // `repos` is intentionally NOT in the dep list — the join'd
   // names string is the stable identity we're keying on. Biome's
   // exhaustive-deps rule reads that as a missing dep; suppressing
   // is the correct call.
-  const projectNames = projects.map((p) => p.project).join("\n");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: projectNames is the intentional stable-identity key
-  const projectsRef = useMemo(() => projects, [projectNames]);
+  const repoNames = repos.map((p) => p.repo).join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: repoNames is the intentional stable-identity key
+  const reposRef = useMemo(() => repos, [repoNames]);
 
-  // Kick off per-project size fetches in a concurrency-limited loop
-  // whenever the projects set actually changes or the user hits
+  // Kick off per-repo size fetches in a concurrency-limited loop
+  // whenever the repos set actually changes or the user hits
   // Refresh. `cancelled` guards against state writes after the
   // dialog unmounts or another refresh fires mid-flight.
   //
@@ -224,28 +224,28 @@ export function ResourcesPage() {
   // the re-run is the entire point on Refresh.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is the re-run trigger
   useEffect(() => {
-    if (projectsRef.length === 0) return;
+    if (reposRef.length === 0) return;
     let cancelled = false;
     setSizes(new Map());
 
     void runWithLimit(
-      projectsRef,
-      PROJECT_FETCH_CONCURRENCY,
+      reposRef,
+      REPO_FETCH_CONCURRENCY,
       async (p) => {
         try {
-          const data = await trpc.services.resourcesProjectSize.query({ project: p.project });
+          const data = await trpc.services.resourcesRepoSize.query({ repo: p.repo });
           if (cancelled) return;
           setSizes((prev) => {
             const next = new Map(prev);
-            next.set(p.project, data);
+            next.set(p.repo, data);
             return next;
           });
         } catch (err) {
           if (cancelled) return;
           setSizes((prev) => {
             const next = new Map(prev);
-            next.set(p.project, {
-              project: p.project,
+            next.set(p.repo, {
+              repo: p.repo,
               sizeBytes: 0,
               worktrees: [],
               error: err instanceof Error ? err.message : String(err),
@@ -260,60 +260,60 @@ export function ResourcesPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectsRef, refreshKey]);
+  }, [reposRef, refreshKey]);
 
   const handleRefreshSizes = useCallback(async () => {
-    await projectsQuery.refetch();
+    await reposQuery.refetch();
     setRefreshKey((k) => k + 1);
-  }, [projectsQuery]);
+  }, [reposQuery]);
 
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
-  const toggleProject = (project: string) => {
-    setExpandedProjects((prev) => {
+  const [expandedRepos, setExpandedRepos] = useState<Set<string>>(() => new Set());
+  const toggleRepo = (repo: string) => {
+    setExpandedRepos((prev) => {
       const next = new Set(prev);
-      if (next.has(project)) next.delete(project);
-      else next.add(project);
+      if (next.has(repo)) next.delete(repo);
+      else next.add(repo);
       return next;
     });
   };
 
-  // Sorted view of the projects list — known sizes first (largest
+  // Sorted view of the repos list — known sizes first (largest
   // to smallest by `sizeBytes`), then everything still loading in
   // its incoming order so the spinners don't reshuffle as data
-  // arrives. Note: a project whose `du` walk errored is recorded
+  // arrives. Note: a repo whose `du` walk errored is recorded
   // with `sizeBytes: 0`, which sorts identically to a real
-  // zero-byte project; both end up at the bottom of the
+  // zero-byte repo; both end up at the bottom of the
   // size-known group. We treat that as acceptable because errors
   // are also surfaced inline (the size cell renders "error").
-  const sortedProjects = useMemo(
+  const sortedRepos = useMemo(
     () =>
-      [...projects].sort((a, b) => {
-        const sa = sizes.get(a.project);
-        const sb = sizes.get(b.project);
+      [...repos].sort((a, b) => {
+        const sa = sizes.get(a.repo);
+        const sb = sizes.get(b.repo);
         if (sa && sb) return sb.sizeBytes - sa.sizeBytes;
         if (sa && !sb) return -1;
         if (!sa && sb) return 1;
         return 0;
       }),
-    [projects, sizes],
+    [repos, sizes],
   );
 
   const knownTotalBytes = useMemo(
     () => Array.from(sizes.values()).reduce((sum, s) => sum + s.sizeBytes, 0),
     [sizes],
   );
-  // Total worktree count across all projects — shown in the table footer.
+  // Total worktree count across all repos — shown in the table footer.
   const totalWorktreeCount = useMemo(
-    () => projects.reduce((sum, p) => sum + p.worktrees.length, 0),
-    [projects],
+    () => repos.reduce((sum, p) => sum + p.worktrees.length, 0),
+    [repos],
   );
-  // "All sizes accounted for" — true when every project has either
-  // a known size or there are no projects at all. The latter case
+  // "All sizes accounted for" — true when every repo has either
+  // a known size or there are no repos at all. The latter case
   // matters because the user with zero tracked repos would
   // otherwise see a perpetually-spinning Refresh button (sizes.size
-  // === 0 === projects.length, but the previous `> 0` guard
+  // === 0 === repos.length, but the previous `> 0` guard
   // excluded that path).
-  const allLoaded = sizes.size === projects.length;
+  const allLoaded = sizes.size === repos.length;
 
   // Each card starts collapsed (issue: compact overview by default) —
   // its headline total shows next to the title until the user expands
@@ -416,10 +416,10 @@ export function ResourcesPage() {
                 total={`${formatBytes(knownTotalBytes)}${allLoaded ? "" : " (partial)"}`}
                 description={
                   <>
-                    Disk usage per tracked git project (allocated blocks, as reported by{" "}
+                    Disk usage per tracked git repo (allocated blocks, as reported by{" "}
                     <code className="rounded bg-muted px-1 py-0.5 text-xs">du</code>). Sizes load
-                    per project in batches of {PROJECT_FETCH_CONCURRENCY}. Click a project to see
-                    its per-worktree breakdown.
+                    per repo in batches of {REPO_FETCH_CONCURRENCY}. Click a repo to see its
+                    per-worktree breakdown.
                   </>
                 }
                 refresh={
@@ -430,9 +430,9 @@ export function ResourcesPage() {
                     title="Refresh"
                     data-testid="resources-refresh-worktrees"
                     onClick={handleRefreshSizes}
-                    disabled={projectsQuery.isFetching || !allLoaded}
+                    disabled={reposQuery.isFetching || !allLoaded}
                   >
-                    {projectsQuery.isFetching || !allLoaded ? (
+                    {reposQuery.isFetching || !allLoaded ? (
                       <Spinner className="size-3.5" />
                     ) : (
                       <RefreshCw className="size-3.5" />
@@ -442,39 +442,39 @@ export function ResourcesPage() {
               />
               <CollapsibleContent>
                 <div className="border-t border-border p-4">
-                  {projectsQuery.isError ? (
+                  {reposQuery.isError ? (
                     <p className="text-sm text-destructive">
-                      Failed to load projects: {String(projectsQuery.error)}
+                      Failed to load repos: {String(reposQuery.error)}
                     </p>
                   ) : (
                     <div className="relative overflow-x-auto">
                       <table
-                        data-testid="resources-projects-table"
+                        data-testid="resources-repos-table"
                         className="w-full border-collapse text-sm"
                       >
                         <thead>
                           <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            <th className="py-2 pr-3">Project</th>
+                            <th className="py-2 pr-3">Repo</th>
                             <th className="py-2 pr-3 text-right">Worktrees</th>
                             <th className="py-2 pr-3 text-right">Total size</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {sortedProjects.length === 0 ? (
+                          {sortedRepos.length === 0 ? (
                             <tr>
                               <td
                                 colSpan={3}
                                 className="py-6 text-center text-sm text-muted-foreground"
                               >
-                                {projectsQuery.isFetching ? "Loading…" : "No git projects found"}
+                                {reposQuery.isFetching ? "Loading…" : "No git repos found"}
                               </td>
                             </tr>
                           ) : (
-                            sortedProjects.map((project) => {
-                              const size = sizes.get(project.project);
-                              const isExpanded = expandedProjects.has(project.project);
+                            sortedRepos.map((repo) => {
+                              const size = sizes.get(repo.repo);
+                              const isExpanded = expandedRepos.has(repo.repo);
                               return (
-                                <Fragment key={project.project}>
+                                <Fragment key={repo.repo}>
                                   {/* See the cell-scoped <button> below — a
                               row-level click handler can't be a
                               real <button> (must be a direct
@@ -482,7 +482,7 @@ export function ResourcesPage() {
                               in the first cell and let it span the
                               click target. */}
                                   <tr
-                                    data-testid={`resources-project-row-${project.project}`}
+                                    data-testid={`resources-repo-row-${repo.repo}`}
                                     data-expanded={isExpanded ? "true" : "false"}
                                     className="border-b border-border/60 last:border-0 hover:bg-muted/40"
                                   >
@@ -490,7 +490,7 @@ export function ResourcesPage() {
                                       <button
                                         type="button"
                                         aria-expanded={isExpanded}
-                                        onClick={() => toggleProject(project.project)}
+                                        onClick={() => toggleRepo(repo.repo)}
                                         className="inline-flex w-full cursor-pointer items-center gap-1 text-left"
                                       >
                                         <ChevronRight
@@ -498,15 +498,15 @@ export function ResourcesPage() {
                                             isExpanded ? "rotate-90" : ""
                                           }`}
                                         />
-                                        {project.project}
+                                        {repo.repo}
                                       </button>
                                     </td>
                                     <td className="py-2 pr-3 text-right tabular-nums">
-                                      {project.worktrees.length}
+                                      {repo.worktrees.length}
                                     </td>
                                     <td
                                       className="py-2 pr-3 text-right tabular-nums"
-                                      data-testid={`resources-project-size-${project.project}`}
+                                      data-testid={`resources-repo-size-${repo.repo}`}
                                     >
                                       {size === undefined ? (
                                         <span className="inline-flex items-center justify-end gap-1.5 text-muted-foreground">
@@ -547,8 +547,8 @@ export function ResourcesPage() {
                                     ) : (
                                       size.worktrees.map((wt) => (
                                         <tr
-                                          key={`${project.project}::${wt.branch}::${wt.path}`}
-                                          data-testid={`resources-worktree-row-${testIdForWorktree(project.project, wt.branch)}`}
+                                          key={`${repo.repo}::${wt.branch}::${wt.path}`}
+                                          data-testid={`resources-worktree-row-${testIdForWorktree(repo.repo, wt.branch)}`}
                                           className="border-b border-border/40 bg-muted/20 last:border-0"
                                         >
                                           <td className="py-1.5 pl-8 pr-3">
@@ -577,7 +577,7 @@ export function ResourcesPage() {
                             })
                           )}
                         </tbody>
-                        {projects.length > 0 && (
+                        {repos.length > 0 && (
                           <tfoot>
                             <tr className="border-t-2 border-border font-medium">
                               <td className="py-2 pr-3">Total{allLoaded ? "" : " (partial)"}</td>
@@ -586,7 +586,7 @@ export function ResourcesPage() {
                               </td>
                               <td
                                 className="py-2 pr-3 text-right tabular-nums"
-                                data-testid="resources-projects-total"
+                                data-testid="resources-repos-total"
                               >
                                 {formatBytes(knownTotalBytes)}
                               </td>

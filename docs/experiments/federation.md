@@ -21,10 +21,10 @@ assume them.
    stable hostnames, mutual reachability, and identity. Users without
    Tailscale on a LAN can pair via direct hostname/IP; everything else is
    "use Tailscale."
-4. **Workspace handoff is git, not migration.** A workspace stays on its
+4. **Worktree handoff is git, not migration.** A worktree stays on its
    home peer for its lifetime. To continue work on another machine: commit,
-   push, pull on the other peer, create a workspace there. Band does not
-   try to move a workspace's runtime state between peers.
+   push, pull on the other peer, create a worktree there. Band does not
+   try to move a worktree's runtime state between peers.
 5. **`band tunnel` stays.** Federation is for pairing your own machines.
    Tunnel is for exposing one peer's dashboard publicly (e.g. share a demo,
    reach your own server from a network without Tailscale). Different use
@@ -33,7 +33,7 @@ assume them.
    peer connection. Server refuses incompatible versions. Bumping the
    protocol is a deliberate, breaking-change decision.
 7. **Browser panes federate later, via CDP.** v1 simply doesn't show a
-   browser pane for remote workspaces. The eventual story is screencast /
+   browser pane for remote worktrees. The eventual story is screencast /
    CDP streaming from the home peer, building on the existing
    [CDP screencast experiment](cdp-screencast.md).
 
@@ -55,7 +55,7 @@ The use cases:
   your phone over coffee.
 - **Step-away continuity.** Mid-task, leave for a meeting. Approve
   checkpoints from your phone. Send follow-up prompts.
-- **Multi-environment dispatch.** A project that needs Node 18 on macOS for
+- **Multi-environment dispatch.** A repo that needs Node 18 on macOS for
   one part and CUDA on Linux for another. One worker on each. Pick from
   the dropdown per task.
 
@@ -83,7 +83,7 @@ events up; the dashboard is the source of truth.
 ### Option B: peer mesh / federation (recommended)
 
 Every Band install stays a full server, as it is today. Servers peer with
-each other over a federation protocol. Each peer owns its own workspaces
+each other over a federation protocol. Each peer owns its own worktrees
 on its own filesystem; peers exchange metadata so you can see all of them
 from any dashboard. Execution data (PTY output, agent events, file
 watcher events) streams between peers on demand.
@@ -121,9 +121,9 @@ full-fat, and add a federation protocol so they can see each other.
 That's strictly less invasive. No extraction of `agent-pool.ts` into a
 separate process. No control-plane / data-plane split. The agent pool,
 terminal manager, file watcher, diff endpoints, browser host — none of
-these change. They keep operating on local workspaces only. A new
+these change. They keep operating on local worktrees only. A new
 federation layer handles the remote case by **delegating to the peer
-that owns the workspace**.
+that owns the worktree**.
 
 It also matches Band's positioning: local-first, no SaaS dependency, your
 code never leaves machines you control. Peer mesh is what local-first
@@ -133,7 +133,7 @@ means in a multi-device world.
 
 Every Band install is symmetric. Each one:
 
-- Owns its own workspaces — the ones whose worktrees live on its disk.
+- Owns its own worktrees — the ones whose worktrees live on its disk.
 - Hosts a full dashboard on whichever port it's bound to.
 - Knows about its peers and exchanges metadata with them.
 - Streams execution data (PTY output, agent events, file watcher events,
@@ -144,9 +144,9 @@ User-visible behavior:
 | Scenario | What you see |
 |---|---|
 | At desk, both laptop & desktop online | Open desktop dashboard → see both. Open laptop dashboard → see both. |
-| Laptop closed, on phone, hitting desktop | Desktop dashboard shows its own workspaces + "laptop offline (last seen 2h ago)" section. |
+| Laptop closed, on phone, hitting desktop | Desktop dashboard shows its own worktrees + "laptop offline (last seen 2h ago)" section. |
 | Both off, on phone | Nothing reachable. Phone shows "no peers online." |
-| Travelling with laptop only | Laptop dashboard shows its workspaces; desktop's appear as offline with last-known metadata. |
+| Travelling with laptop only | Laptop dashboard shows its worktrees; desktop's appear as offline with last-known metadata. |
 
 That's the natural behavior. No special offline-handling code — it falls
 out of the federation model.
@@ -154,38 +154,38 @@ out of the federation model.
 ## Key simplifying insight: home-peer authority
 
 The reason this is tractable, and not a distributed-systems nightmare,
-is that **every workspace has exactly one home peer**: the machine whose
+is that **every worktree has exactly one home peer**: the machine whose
 filesystem holds its worktree. That peer is the sole authority for the
-workspace's state — chat transcripts, file watcher events, terminal
+worktree's state — chat transcripts, file watcher events, terminal
 sessions, agent processes, all of it.
 
 Other peers are **viewers**, not replicas. When the desktop's dashboard
-shows a workspace that lives on the laptop, it's federating queries to
+shows a worktree that lives on the laptop, it's federating queries to
 the laptop in real time. It doesn't keep its own copy of the chat history
 or files. It only persistently caches the **metadata** needed to render
-the workspace card while the laptop is offline: name, project, branch,
+the worktree card while the laptop is offline: name, repo, branch,
 last activity, status.
 
 This sidesteps the hardest problem in distributed state — conflict
-resolution. There's nothing to conflict over because each workspace has
+resolution. There's nothing to conflict over because each worktree has
 exactly one writer. Peers exchange state because they ask each other
 "what do you have?", not because they're trying to maintain identical
 replicas.
 
-The same principle applies to **projects**. A project (logical entity:
+The same principle applies to **repos**. A repo (logical entity:
 name + git URL) is something peers agree about by URL identity. Each
-peer reports "I have a clone of project X on my disk." Other peers learn
-that fact but don't try to mirror the project.
+peer reports "I have a clone of repo X on my disk." Other peers learn
+that fact but don't try to mirror the repo.
 
 ## What syncs, what stays local
 
 | Data | Where it lives |
 |---|---|
-| Workspace ownership (which peer owns each workspace) | Each peer owns its own list; peers exchange |
-| Workspace metadata (name, branch, status, last activity) | Owned by home peer; cached on viewers for offline rendering |
-| Workspace contents (files, diffs, chat transcripts, PTY scrollback) | Home peer only; viewers fetch on demand |
-| Projects (logical: name + URL) | Each peer reports what it has; union shown in UI |
-| Project clones (`.git`, files) | Each peer owns its own clones; never shared |
+| Worktree ownership (which peer owns each worktree) | Each peer owns its own list; peers exchange |
+| Worktree metadata (name, branch, status, last activity) | Owned by home peer; cached on viewers for offline rendering |
+| Worktree contents (files, diffs, chat transcripts, PTY scrollback) | Home peer only; viewers fetch on demand |
+| Repos (logical: name + URL) | Each peer reports what it has; union shown in UI |
+| Repo clones (`.git`, files) | Each peer owns its own clones; never shared |
 | User settings / preferences | Replicated across peers (the only thing that benefits from real sync) |
 | Cronjobs | Owned by the peer they run on — a cron is bound to a machine |
 
@@ -232,7 +232,7 @@ queries the phone makes:
 
 - Phone → laptop dashboard
 - Laptop renders its own UI
-- For every "show me the desktop's workspaces" query, laptop proxies to
+- For every "show me the desktop's worktrees" query, laptop proxies to
   desktop over the peer protocol
 - For every "subscribe to chat X on desktop," laptop sets up a relay
 
@@ -259,11 +259,11 @@ user agent.
 
 ## Execution flow
 
-User opens desktop dashboard. Sees a workspace owned by laptop. Clicks it.
+User opens desktop dashboard. Sees a worktree owned by laptop. Clicks it.
 
-1. Desktop's UI fetches workspace detail from laptop over the peer protocol.
+1. Desktop's UI fetches worktree detail from laptop over the peer protocol.
 2. User opens a terminal pane. Desktop's UI calls
-   `laptop.spawnTerminal(workspaceId, ...)`.
+   `laptop.spawnTerminal(worktreeId, ...)`.
 3. Laptop spawns the PTY locally — this is the existing
    `terminal-manager.ts` code path, totally unchanged.
 4. Laptop streams PTY output back to desktop. Desktop forwards to the
@@ -284,11 +284,11 @@ The peer protocol is mostly **state exchange** plus **on-demand RPC**:
 peer → peer
 ─────────────────
 hello                    // identity, capabilities, supported protocol versions
-workspacesIOwn           // list with metadata (id, name, project, branch, status)
-projectsIHaveCloned      // list with URLs + local paths
-subscribeToWorkspace     // for live data when viewed
-unsubscribeFromWorkspace
-workspaceEventStream     // streamed only while subscribed:
+worktreesIOwn           // list with metadata (id, name, repo, branch, status)
+reposIHaveCloned      // list with URLs + local paths
+subscribeToWorktree     // for live data when viewed
+unsubscribeFromWorktree
+worktreeEventStream     // streamed only while subscribed:
                          //   - chatEvents
                          //   - ptyOutput
                          //   - fileChangeEvents
@@ -314,18 +314,18 @@ Strikingly little, compared to the workers split:
    WebSocket between peers). Lives in something like
    `apps/web/src/lib/federation/`.
 3. **Add a federation layer** in `apps/web` that, for any tRPC call
-   referencing a workspace not owned by this peer, proxies to the owning
+   referencing a worktree not owned by this peer, proxies to the owning
    peer.
-4. **Workspace records gain `ownerPeerId`** (null = this peer; non-null
+4. **Worktree records gain `ownerPeerId`** (null = this peer; non-null
    = remote).
-5. **Dashboard renders all workspaces uniformly**, with a "running on:
+5. **Dashboard renders all worktrees uniformly**, with a "running on:
    laptop" badge for remote ones and an offline state.
-6. **Workspace creation** asks "which peer should host this?" — defaults
+6. **Worktree creation** asks "which peer should host this?" — defaults
    to local.
 
 The agent pool, terminal manager, file watcher, browser host, diff
 endpoints — none of these change. They keep operating on local
-workspaces only.
+worktrees only.
 
 ## Trade-offs vs the control-plane alternative
 
@@ -343,23 +343,23 @@ workspaces only.
 | Cursor-shaped pitch (mobile control of dev) | Works, but requires one peer reachable | Works natively (central dashboard always reachable) |
 | Resource needs per node | Higher — every node runs the full stack | Workers can be cheaper |
 
-## Workspace handoff via git
+## Worktree handoff via git
 
-Per Decision 4, Band does **not** try to migrate a workspace's runtime
-state between peers. A workspace is bound to its home peer for its
+Per Decision 4, Band does **not** try to migrate a worktree's runtime
+state between peers. A worktree is bound to its home peer for its
 lifetime — its worktree is on that machine's filesystem, its chat
 history is in that machine's SQLite, its terminal scrollback is in that
 machine's memory.
 
 The handoff story is git, the way it would be without Band:
 
-1. You're working on workspace `feature/login` on the laptop peer.
+1. You're working on worktree `feature/login` on the laptop peer.
 2. You commit and push from the laptop (via the agent, a terminal pane,
    or your normal shell).
-3. On the desktop peer, you create a new workspace targeting the same
-   project and branch. Desktop's Band clones / fetches / checks out.
+3. On the desktop peer, you create a new worktree targeting the same
+   repo and branch. Desktop's Band clones / fetches / checks out.
 4. You continue work on the desktop. The chat history from the laptop's
-   workspace does **not** come with you — that's the cost of this
+   worktree does **not** come with you — that's the cost of this
    model, and it's the same cost you'd pay if you switched IDEs or
    machines without Band. If you really need the old chat, the laptop
    peer still has it as long as the laptop is reachable.
@@ -377,8 +377,8 @@ in scope.
 |---|---|
 | Peer network blip (<60s) | Peer reconnects, resumes subscriptions. No data loss. |
 | Peer process restart, processes die | Open terminals / agents marked `dead` with full transcript preserved. User starts new ones. |
-| Peer host offline for hours | Dashboard shows full metadata, all actions on that peer's workspaces disabled. Cronjobs on that peer simply don't run while it's off. |
-| Peer host permanently gone | Workspaces remain in metadata-only state. No automatic migration in v1; user creates new workspaces elsewhere. |
+| Peer host offline for hours | Dashboard shows full metadata, all actions on that peer's worktrees disabled. Cronjobs on that peer simply don't run while it's off. |
+| Peer host permanently gone | Worktrees remain in metadata-only state. No automatic migration in v1; user creates new worktrees elsewhere. |
 | Network partition (laptop sees peer A, desktop sees peer B, but not each other) | Each side shows its own + whoever it can reach. Re-converges when the partition heals. |
 
 ## Remaining open questions
@@ -387,8 +387,8 @@ The big architectural questions are settled in [Decisions](#decisions)
 at the top of this doc. What's left to decide before coding:
 
 1. **Minimum useful demo.** Proposal: two Band installs paired over
-   Tailscale, each shows the other's workspace list, you can click into
-   a remote workspace and see its files. That's the milestone that
+   Tailscale, each shows the other's worktree list, you can click into
+   a remote worktree and see its files. That's the milestone that
    validates the protocol end-to-end. Confirm this is the right v0
    target before starting work.
 2. **Where does the federation code live?** Suggested:
@@ -398,7 +398,7 @@ at the top of this doc. What's left to decide before coding:
    easy default; protobuf or msgpack if we hit perf issues with PTY
    output. Start with JSON; revisit if benchmarks demand.
 4. **How does the dashboard render "remote, currently offline"
-   workspaces?** Need a UI design — grayed-out card, badge, last-seen
+   worktrees?** Need a UI design — grayed-out card, badge, last-seen
    timestamp, action affordances (probably all disabled). Out of scope
    for this doc; tracked separately when we get to step 2 of the PR
    sequence.
@@ -408,20 +408,20 @@ at the top of this doc. What's left to decide before coding:
 1. **`peers` table + pairing UI + tRPC CRUD.** No federation yet; just
    register / list / revoke. Pair via manual URL + public key exchange.
 2. **Peer protocol scaffold:** mTLS WebSocket, handshake, heartbeat,
-   `workspacesIOwn` exchange. After this PR, paired peers can see each
-   other's workspace lists in the dashboard but can't click into them.
+   `worktreesIOwn` exchange. After this PR, paired peers can see each
+   other's worktree lists in the dashboard but can't click into them.
 3. **Pick the smallest useful federated capability and wire it
    end-to-end.** Proposal: `listFiles` + `readFile` for a remote
-   workspace. Validates the proxy plumbing without any long-lived
-   subscriptions. After this PR you can browse a remote workspace's
+   worktree. Validates the proxy plumbing without any long-lived
+   subscriptions. After this PR you can browse a remote worktree's
    files from any peer's dashboard.
 4. **Diff view federated.** Same plumbing as files; serves as a second
    datapoint for the proxy pattern.
-5. **Chat / agent federated.** Subscribe to a remote workspace's chat,
+5. **Chat / agent federated.** Subscribe to a remote worktree's chat,
    send messages, receive events. This is the headline feature.
 6. **Terminal federated.** PTY output streamed over the peer protocol.
 7. **File watcher federated.** Subscribe to `fileChanges` from a remote
-   workspace.
+   worktree.
 8. **mDNS auto-discovery** for LAN pairing.
 9. **Settings replication** (LWW).
 10. **Cron jobs UI** — surface which peer runs each cron; allow target
@@ -435,13 +435,13 @@ useful for real work. After step 5 it's useful end-to-end.
 Things not being decided now, and which the v1 design doesn't paint us
 into a corner on:
 
-- Workspace migration between peers (today-on-laptop, tomorrow-on-desktop).
+- Worktree migration between peers (today-on-laptop, tomorrow-on-desktop).
 - Cloud workers (Band provisions a VM that runs a Band install and joins
   as a peer — works identically to a self-hosted peer).
 - Browser pane federation.
 - Multi-user / team on a single peer.
 - Adoption flow for already-existing checkouts (worker discovers
-  `~/code/my-app` and offers it as a workspace).
+  `~/code/my-app` and offers it as a worktree).
 - CRDT-based settings sync (LWW is enough for now).
 - NAT traversal without a VPN.
 

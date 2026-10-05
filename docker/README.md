@@ -44,21 +44,21 @@ For a real server deployment use `deploy/compose/` instead.
 - **Tunnel install hint** — clicking "Install Tunnel" surfaces the Linux
   package-manager hint instead of shelling out to a nonexistent `brew`.
 
-## Add a project
+## Add a repo
 
 With `BAND_LOCAL_HOST=on` the container **auto-creates and registers a
-`sample` project** at `/data/projects/sample` on first boot. The image default
-is `off`: workspaces run on workers and no sample project is created. Set
-`BAND_LOCAL_HOST=on` to run workspaces in the container.
-To add more, note: a "project" is just a directory the server can see (a git
-repo, or a plain folder — plain folders get a single implicit workspace).
+`sample` repo** at `/data/repos/sample` on first boot. The image default
+is `off`: worktrees run on workers and no sample repo is created. Set
+`BAND_LOCAL_HOST=on` to run worktrees in the container.
+To add more, note: a "repo" is just a directory the server can see (a git
+repo, or a plain folder — plain folders get a single implicit worktree).
 
 > **The path must exist inside the container.** Registering a path that isn't
-> there (e.g. the placeholder `/projects/myrepo` without a matching bind
-> mount) leaves a project whose directory is missing — terminals then fail
-> with `Workspace directory does not exist: <path>`. Either mount a real repo
+> there (e.g. the placeholder `/repos/myrepo` without a matching bind
+> mount) leaves a repo whose directory is missing — terminals then fail
+> with `Worktree directory does not exist: <path>`. Either mount a real repo
 > at that path (option 2) or use an in-container path like
-> `/data/projects/...`. Remove a broken entry with `band projects remove <name>`.
+> `/data/repos/...`. Remove a broken entry with `band repos remove <name>`.
 
 Three ways to add your own:
 
@@ -69,20 +69,20 @@ register it with the bundled `band` CLI (which talks to the local server):
 
 ```sh
 docker compose exec band sh -lc \
-  'mkdir -p /data/projects/sample && cd /data/projects/sample \
+  'mkdir -p /data/repos/sample && cd /data/repos/sample \
    && git init -q && echo "# Sample" > README.md \
    && git add -A && git commit -qm init'
 
-docker compose exec band band projects add /data/projects/sample
+docker compose exec band band repos add /data/repos/sample
 ```
 
 It appears immediately in the web UI. You can also drive it entirely from the
-CLI — e.g. create a workspace (git worktree):
+CLI — e.g. create a worktree (git worktree):
 
 ```sh
-docker compose exec band band workspaces create sample feat/demo
-docker compose exec band band projects list
-docker compose exec band band workspaces list
+docker compose exec band band worktrees create sample feat/demo
+docker compose exec band band repos list
+docker compose exec band band worktrees list
 ```
 
 ### 2. Mount a real host repo
@@ -93,25 +93,25 @@ worktree` can write its metadata into the repo's `.git`):
 ```yaml
     volumes:
       - band-data:/data
-      - /absolute/path/to/your/repo:/projects/myrepo
+      - /absolute/path/to/your/repo:/repos/myrepo
 ```
 
 Then register it (uid mismatches are already handled — the entrypoint sets
 `git config --global --add safe.directory '*'`):
 
 ```sh
-docker compose exec band band projects add /projects/myrepo
-# …or use "Register Project" in the UI and enter /projects/myrepo
+docker compose exec band band repos add /repos/myrepo
+# …or use "Register Repo" in the UI and enter /repos/myrepo
 ```
 
 ### 3. From the UI
 
-Use **Register Project** and type the container path (e.g. `/projects/myrepo`
-or `/data/projects/sample`).
+Use **Register Repo** and type the container path (e.g. `/repos/myrepo`
+or `/data/repos/sample`).
 
-> Note: `--label` on `band projects add` refers to a pre-defined grouping
+> Note: `--label` on `band repos add` refers to a pre-defined grouping
 > label, not a display name — omit it unless you've created labels. Remove a
-> project with `band projects remove <name>`.
+> repo with `band repos remove <name>`.
 
 ## Persisted state
 

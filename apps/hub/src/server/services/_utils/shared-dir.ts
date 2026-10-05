@@ -4,19 +4,19 @@ import { join } from "node:path";
 import { hostRegistry } from "../../infra/host/registry";
 import { bandHome } from "../state";
 
-/** The directory a workspace's agent drops files in to share them with the user. */
+/** The directory a worktree's agent drops files in to share them with the user. */
 export interface SharedDir {
-  /** Absolute path on the machine the workspace lives on. */
+  /** Absolute path on the machine the worktree lives on. */
   path: string;
-  /** File names now in the directory. Synchronous for a local workspace, a call to the worker for a remote one. */
+  /** File names now in the directory. Synchronous for a local worktree, a call to the worker for a remote one. */
   list(): Set<string> | Promise<Set<string>>;
 }
 
-/** Creates the workspace's shared directory on its host, if it is missing, and returns it. */
-export async function openSharedDir(workspaceId: string): Promise<SharedDir> {
-  const host = hostRegistry.hostFor(workspaceId);
+/** Creates the worktree's shared directory on its host, if it is missing, and returns it. */
+export async function openSharedDir(worktreeId: string): Promise<SharedDir> {
+  const host = hostRegistry.hostFor(worktreeId);
   if (host.id === hostRegistry.local.id) {
-    const path = join(bandHome(), "shared", workspaceId);
+    const path = join(bandHome(), "shared", worktreeId);
     await mkdir(path, { recursive: true });
     return {
       path,
@@ -31,7 +31,7 @@ export async function openSharedDir(workspaceId: string): Promise<SharedDir> {
   }
   const dirs = (await host.info()).dirs;
   if (!dirs) throw new Error(`Host ${host.id} has no directory for shared files`);
-  const path = join(dirs.shared, workspaceId);
+  const path = join(dirs.shared, worktreeId);
   await host.fs.mkdir(path, { recursive: true });
   return {
     path,
@@ -45,9 +45,9 @@ export async function openSharedDir(workspaceId: string): Promise<SharedDir> {
   };
 }
 
-/** The directories an agent in this workspace may read besides its worktree. */
-export async function agentExtraDirs(workspaceId: string): Promise<string[]> {
-  const host = hostRegistry.hostFor(workspaceId);
+/** The directories an agent in this worktree may read besides its worktree. */
+export async function agentExtraDirs(worktreeId: string): Promise<string[]> {
+  const host = hostRegistry.hostFor(worktreeId);
   if (host.id === hostRegistry.local.id) {
     return [join(bandHome(), "uploads"), join(bandHome(), "shared")];
   }

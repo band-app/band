@@ -1,5 +1,5 @@
 /**
- * Result of a workspace git pull, push or commit, shared by the server and
+ * Result of a worktree git pull, push or commit, shared by the server and
  * the dashboard.
  *
  * Git refusing an operation for an ordinary reason (local changes in the way

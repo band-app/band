@@ -34,31 +34,31 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     desktop app handles the local-only OS bits.
   </p>
 
-  <h2>Git Worktree-Based Workspace Isolation</h2>
+  <h2>Git Worktree-Based Worktree Isolation</h2>
 
   <p>
-    Each workspace is backed by a Git worktree. When you create a workspace, Band runs
+    Each worktree is backed by a Git worktree. When you create a worktree, Band runs
     <code>git worktree add</code> to create an isolated working directory with its own branch. This
     provides:
   </p>
 
   <ul>
-    <li><strong>File isolation</strong> — Each workspace has its own copy of the project files.</li>
-    <li><strong>Branch isolation</strong> — Each workspace works on its own Git branch.</li>
+    <li><strong>File isolation</strong> — Each worktree has its own copy of the repo files.</li>
+    <li><strong>Branch isolation</strong> — Each worktree works on its own Git branch.</li>
     <li><strong>Concurrent work</strong> — Multiple agents can work on different tasks simultaneously without conflicts.</li>
     <li><strong>Efficient storage</strong> — Git worktrees share the object database, so disk usage is minimal.</li>
   </ul>
 
   <p>
     Worktrees are stored in the configured worktrees directory (default
-    <code>~/.band/worktrees/&lt;project&gt;/&lt;branch&gt;</code>).
+    <code>~/.band/worktrees/&lt;repo&gt;/&lt;branch&gt;</code>).
   </p>
 
   <h2>SQLite for State</h2>
 
   <p>
     All application state is stored in a local SQLite database at <code>~/.band/band.db</code>.
-    This includes projects, worktrees, chat panes, cronjobs, and panel layout state. The server
+    This includes repos, worktrees, chat panes, cronjobs, and panel layout state. The server
     uses Node's built-in <code>node:sqlite</code> module via Drizzle ORM — no native module ships
     in the bundle, and the binary always matches the runtime Node version.
   </p>
@@ -86,7 +86,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <li><strong>WebSockets</strong> — Terminals (<code>/terminal</code>) and language servers
       (<code>/lsp</code>) use raw WebSockets so the renderer can pipe them directly into xterm
       and the LSP client.</li>
-    <li><strong>tRPC subscriptions</strong> — Lower-volume realtime events (workspace status,
+    <li><strong>tRPC subscriptions</strong> — Lower-volume realtime events (worktree status,
       cronjob ticks, tunnel state) ride a tRPC WebSocket subscription.</li>
   </ul>
 
@@ -132,10 +132,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ol>
     <li>User sends a message to a chat pane via the dashboard, CLI, or cronjob.</li>
-    <li>Server stores the message in SQLite and spawns / resumes the agent in the chat pane's workspace.</li>
+    <li>Server stores the message in SQLite and spawns / resumes the agent in the chat pane's worktree.</li>
     <li>Agent works in the Git worktree, making file changes and running commands.</li>
     <li>Agent events stream via SSE to the dashboard (and via stdout to <code>band chats watch</code>).</li>
     <li>Claude Code hooks publish status updates through <code>band notify</code> as the agent runs.</li>
-    <li>Desktop app handles window focus and positioning when the user switches workspaces.</li>
+    <li>Desktop app handles window focus and positioning when the user switches worktrees.</li>
   </ol>
 </DocsLayout>

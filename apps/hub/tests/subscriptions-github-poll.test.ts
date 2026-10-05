@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { initialCursor } from "../src/server/infra/subscriptions/github-poll";
@@ -27,8 +27,8 @@ import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const PROJECT = "testproject";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "testrepo";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 const ENV_KEYS = [
   "BAND_HOME",
@@ -74,10 +74,10 @@ async function subscribe(
   repo: string,
   over: Record<string, unknown> = {},
 ) {
-  const chat = chatService.create(WORKSPACE);
+  const chat = chatService.create(WORKTREE);
   const input = {
     chatId: chat.id,
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     coalesceSeconds: 0,
     repo,
     ...over,
@@ -135,9 +135,9 @@ beforeAll(async () => {
     execFileSync("git", args, { cwd: repo, env: gitEnv, stdio: "ignore" });
   }
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repo }],
@@ -161,7 +161,7 @@ beforeAll(async () => {
 afterAll(async () => {
   assertTempBandHome();
   subscriptionService.stop();
-  for (const chat of chatService.list(WORKSPACE)) agentSessionService.stop(chat.id);
+  for (const chat of chatService.list(WORKTREE)) agentSessionService.stop(chat.id);
   await stub.stop();
   closeDb();
   for (const key of ENV_KEYS) {

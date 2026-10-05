@@ -1,24 +1,24 @@
 ---
 name: band-terminal
 version: 0.1.0
-description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band workspace, or restart the terminal daemon. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane", "restart terminal daemon", "terminal frozen".
+description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band worktree, or restart the terminal daemon. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane", "restart terminal daemon", "terminal frozen".
 allowed-tools: Bash
 argument-hint: terminals [list|create|send|output|kill|attach|restart-daemon] [args...]
 ---
 
 # Band Terminal Sessions
 
-Terminal sessions are PTY processes attached to a Band workspace. Each terminal has its own scrollback buffer and shell process.
+Terminal sessions are PTY processes attached to a Band worktree. Each terminal has its own scrollback buffer and shell process.
 
 This skill is focused on **terminal management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
-- **`band-chat`** — agent chat panes inside a workspace.
-- **`band-browser`** — browser tabs inside a workspace.
+- **`band`** — worktrees, repos, cronjobs, tunnel, settings.
+- **`band-chat`** — agent chat panes inside a worktree.
+- **`band-browser`** — browser tabs inside a worktree.
 
 ## Prerequisites
 
-The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the workspace lifecycle.
+The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the worktree lifecycle.
 
 ## JSON Output
 
@@ -29,23 +29,23 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Commands
 
-### List terminal sessions for a workspace
+### List terminal sessions for a worktree
 
 ```sh
-band terminals list [workspace_id]
+band terminals list [worktree_id]
 ```
 
 Text output: `TERMINAL ID\tTITLE\tPID\tSCROLLBACK` (tab-separated table).
-JSON output: `{"terminals": [{"terminalId": "...", "workspaceId": "...", "pid": N, "scrollbackLength": N, "title": "..."}]}`
+JSON output: `{"terminals": [{"terminalId": "...", "worktreeId": "...", "pid": N, "scrollbackLength": N, "title": "..."}]}`
 
-### Create a new terminal session in a workspace
+### Create a new terminal session in a worktree
 
 ```sh
-band terminals create [workspace_id] [--command <string>] [--cwd <string>]
+band terminals create [worktree_id] [--command <string>] [--cwd <string>]
 ```
 
 Creates a new terminal session with its own PTY process. Returns the terminal ID.
-JSON output: `{"terminalId": "...", "workspaceId": "...", "pid": N}`
+JSON output: `{"terminalId": "...", "worktreeId": "...", "pid": N}`
 
 ### Send input to a terminal session
 
@@ -88,24 +88,24 @@ Press Ctrl+C to detach. Best for running commands, not full TUI interaction (use
 band terminals restart-daemon
 ```
 
-Ends every terminal hosted by the current-build terminal daemon and lets the next one spawn a fresh daemon. Panes show that the process exited and can be reopened — a reopened pane's scrollback and working directory are restored, and a Claude Code session running in it resumes automatically. Sessions from a previous version of Band, on a retired daemon, are left running. Use this to recover from a frozen or misbehaving terminal daemon (e.g. after a native-module load failure); it takes no arguments and doesn't need a workspace or terminal ID.
+Ends every terminal hosted by the current-build terminal daemon and lets the next one spawn a fresh daemon. Panes show that the process exited and can be reopened — a reopened pane's scrollback and working directory are restored, and a Claude Code session running in it resumes automatically. Sessions from a previous version of Band, on a retired daemon, are left running. Use this to recover from a frozen or misbehaving terminal daemon (e.g. after a native-module load failure); it takes no arguments and doesn't need a worktree or terminal ID.
 JSON output: `{"ok": true, "killedCount": N}`
 
-## Default workspace and terminal resolution
+## Default worktree and terminal resolution
 
-Every `band terminals` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first terminal session when `[terminal_id]` is omitted. So the typical flow from inside a workspace is just `band terminals send --data "..."` — no IDs to type.
+Every `band terminals` subcommand auto-detects the worktree from the current working directory (matched against registered worktree paths) when `[worktree_id]` is omitted, and resolves to the worktree's first terminal session when `[terminal_id]` is omitted. So the typical flow from inside a worktree is just `band terminals send --data "..."` — no IDs to type.
 
-You only need to pass an explicit ID when you're outside the workspace's cwd or you want to target a specific terminal among several.
+You only need to pass an explicit ID when you're outside the worktree's cwd or you want to target a specific terminal among several.
 
 ## Workflows
 
 ### Run a dev server and watch the output
 
 ```sh
-# Create a terminal in the current workspace
+# Create a terminal in the current worktree
 tid=$(band terminals create --command "npm run dev" --output json | jq -r .terminalId)
 
-# Check the last 20 lines (no terminal_id → the cwd workspace's first terminal)
+# Check the last 20 lines (no terminal_id → the cwd worktree's first terminal)
 band terminals output --lines 20
 
 # Stream live output
@@ -115,7 +115,7 @@ band terminals output --follow
 ### Send a command to an existing terminal
 
 ```sh
-# Defaults to the cwd workspace's first terminal. Trailing \n presses enter.
+# Defaults to the cwd worktree's first terminal. Trailing \n presses enter.
 band terminals send --data "echo hello\n"
 
 # Or target a specific terminal:
@@ -132,7 +132,7 @@ band terminals attach
 ### Kill a terminal when done
 
 ```sh
-# Kill the cwd workspace's first terminal
+# Kill the cwd worktree's first terminal
 band terminals kill
 
 # Or kill a specific terminal
@@ -141,8 +141,8 @@ band terminals kill "$tid"
 
 ## Cross-references
 
-- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
-- For agent-driven work in a workspace, use `band-chat` instead of running the agent in a terminal.
+- To find the worktree ID explicitly, use `band worktrees list` (see the `band` skill).
+- For agent-driven work in a worktree, use `band-chat` instead of running the agent in a terminal.
 
 ## Configuration
 

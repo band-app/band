@@ -7,10 +7,10 @@ import {
 } from "@band-app/environment";
 import { TRPCError } from "@trpc/server";
 import { hostRegistry } from "../infra/host/registry";
-import { projectService } from "./project-service";
+import { repoService } from "./repo-service";
 import { MAX_LIST_LIMIT, tokenService } from "./token-service";
 
-/** A host and whether its tools meet a project's `requires`. */
+/** A host and whether its tools meet a repo's `requires`. */
 export interface HostFit {
   id: string;
   name: string;
@@ -29,21 +29,21 @@ export interface EnvironmentView {
   issues: EnvironmentIssue[];
 }
 
-export interface ProjectEnvironmentView extends EnvironmentView {
+export interface RepoEnvironmentView extends EnvironmentView {
   /** Every host with whether it meets the file's `requires`. Empty when the file does not parse. */
   hosts: HostFit[];
 }
 
 /**
  * `.band/environment.json` for the dashboard and the CLI. The file is read on
- * the hub's own machine, from a project's main checkout or from a path the
- * caller names. A workspace reads its own copy through its host when it sets
+ * the hub's own machine, from a repo's main checkout or from a path the
+ * caller names. A worktree reads its own copy through its host when it sets
  * up (see `HostScripts.environment`).
  */
 export class EnvironmentService {
-  /** The environment of a project's main checkout, and which hosts meet its `requires`. */
-  async forProject(projectName: string): Promise<ProjectEnvironmentView | null> {
-    const path = projectService.findPath(projectName);
+  /** The environment of a repo's main checkout, and which hosts meet its `requires`. */
+  async forRepo(repoName: string): Promise<RepoEnvironmentView | null> {
+    const path = repoService.findPath(repoName);
     if (path === undefined) return null;
     const view = await this.read(path);
     return { ...view, hosts: view.environment ? await this.hostsFor(view.environment) : [] };
@@ -62,7 +62,7 @@ export class EnvironmentService {
   }
 
   private read(dir: string): Promise<EnvironmentView> {
-    return hostRegistry.local.scripts.environment({ projectPath: dir, worktreePath: dir });
+    return hostRegistry.local.scripts.environment({ repoPath: dir, worktreePath: dir });
   }
 
   private async hostsFor(environment: Environment): Promise<HostFit[]> {

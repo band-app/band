@@ -1,6 +1,6 @@
-// The auto trigger of the environment image builder (plan step 3.2): a project
+// The auto trigger of the environment image builder (plan step 3.2): a repo
 // that has been built is rebuilt when its lockfile or environment files change
-// on the default branch, and a project that was never built is left alone.
+// on the default branch, and a repo that was never built is left alone.
 //
 // Real production server with a short poll interval, real git repos, real
 // SQLite, temp BAND_HOME, and the docker stub from `fixtures/docker-stub-bin.mjs`.
@@ -46,7 +46,7 @@ beforeAll(async () => {
     }),
   };
   seedState(home, {
-    projects: Object.entries(repos).map(([name, path]) => ({
+    repos: Object.entries(repos).map(([name, path]) => ({
       name,
       path,
       defaultBranch: "main",
@@ -71,7 +71,7 @@ afterAll(async () => {
 });
 
 describe("the auto trigger", () => {
-  it("rebuilds a built project when a lockfile changes on the default branch", async () => {
+  it("rebuilds a built repo when a lockfile changes on the default branch", async () => {
     const first = await buildAndWait("autoproj");
     expect(first.status, first.error ?? "").toBe("ready");
     expect(first.trigger).toBe("manual");
@@ -104,7 +104,7 @@ describe("the auto trigger", () => {
     expect((await imageStatus("autoproj")).current?.status).toBe("ready");
   });
 
-  it("does not build a project that was never built", async () => {
+  it("does not build a repo that was never built", async () => {
     commit(join(home, "idleproj"), { "go.sum": "v2\n" }, "bump go.sum");
     await new Promise((r) => setTimeout(r, 1500));
     expect((await imageStatus("idleproj")).builds).toHaveLength(0);

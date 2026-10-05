@@ -243,7 +243,7 @@ function seedRunningTask(tmpHome: string, taskId: string): void {
   // fix needs to be reflected in `cleanupStaleTasks` too.
   sqlite
     .prepare(
-      `INSERT INTO tasks (id, workspace_id, project, branch, prompt, status, started_at, completed_at)
+      `INSERT INTO tasks (id, worktree_id, repo, branch, prompt, status, started_at, completed_at)
        VALUES (?, ?, ?, ?, ?, 'running', ?, NULL)`,
     )
     .run(taskId, "devtest-main", "devtest", "main", "stale task", now - 60_000);
@@ -276,7 +276,7 @@ describe("dev server — parity with prod", () => {
     const repoDir = join(tmpHome, "repo");
     mkdirSync(repoDir, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "devtest",
           path: repoDir,
@@ -374,7 +374,7 @@ describe("dev server — parity with prod", () => {
       name: "Dev parity cron",
       prompt: "noop",
       cronExpression: "0 9 * * 1",
-      scope: "project",
+      scope: "repo",
       enabled: true,
     });
     expect(createRes.status).toBe(200);
@@ -524,7 +524,7 @@ describe("dev server — WebSocket coexistence with Vite HMR", () => {
     const repoDir = join(tmpHome, "repo");
     mkdirSync(repoDir, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "wstest",
           path: repoDir,
@@ -555,10 +555,10 @@ describe("dev server — WebSocket coexistence with Vite HMR", () => {
     // — accepting `"errored"` as passing would let a regression that
     // silently drops the upgrade slip through (the test was originally
     // written that way and reviewer caught it).
-    const workspaceId = "wstest-main";
+    const worktreeId = "wstest-main";
     const terminalId = `dev-coexistence-${Date.now()}`;
     const termWs = new WebSocket(
-      `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`,
+      `ws://127.0.0.1:${server.port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`,
     );
 
     const upgradeOk = await new Promise<boolean>((resolve) => {

@@ -17,10 +17,10 @@ import { TerminalToolbar } from "./TerminalToolbar";
 export type { PaneMetadata };
 
 interface TerminalPanelProps {
-  workspaceId: string;
+  worktreeId: string;
   terminalId: string;
   visible: boolean;
-  /** Optional metadata from workspace terminal config (command, cwd, env). */
+  /** Optional metadata from worktree terminal config (command, cwd, env). */
   paneMetadata?: PaneMetadata;
   /** When true, auto-focus this terminal after it opens. */
   autoFocus?: boolean;
@@ -37,15 +37,15 @@ interface TerminalPanelProps {
  *   - resolves (or lazily creates) the cache entry for `terminalId`,
  *   - `attach`es the entry's persistent wrapper into a live container when the
  *     panel is visible and `detach`es (parks it off-screen) otherwise — never
- *     disposing on a workspace/tab switch (band-app/band#617),
+ *     disposing on a worktree/tab switch (band-app/band#617),
  *   - mirrors the entry's reactive UI state via `useSyncExternalStore` and
  *     renders the find bar + iOS keyboard toolbar wired to the entry's handlers.
  *
- * Dispose is driven externally (pane close / workspace deletion / the parking
+ * Dispose is driven externally (pane close / worktree deletion / the parking
  * policy's cold park), NOT by this component's unmount — unmount only parks.
  */
 export function TerminalPanel({
-  workspaceId,
+  worktreeId,
   terminalId,
   visible,
   paneMetadata,
@@ -67,7 +67,7 @@ export function TerminalPanel({
   // Re-resolve when the terminalId changes (never for a given panel) OR when the
   // held entry was disposed out from under us — the parking policy cold-parks a
   // hidden terminal while this panel stays mounted (a hidden tab, or a hidden
-  // workspace). On becoming visible again we must pick up a fresh entry, which
+  // worktree). On becoming visible again we must pick up a fresh entry, which
   // reconnects + replays, rather than attach a destroyed one (a no-op that would
   // leave a dead/blank terminal). Only on becoming visible: re-creating it on an
   // unrelated re-render while still hidden would undo the cold park.
@@ -77,7 +77,7 @@ export function TerminalPanel({
     (entryRef.current.isDestroyed() && visible)
   ) {
     entryRef.current = getOrCreateTerminal(terminalId, {
-      workspaceId,
+      worktreeId,
       paneMetadata,
       useWebGL,
       autoFocus,
@@ -90,7 +90,7 @@ export function TerminalPanel({
   // Attach when visible, park when hidden. Park (not dispose) on unmount.
   // Layout effects, so the wrapper is back in the live box (and fitted, see
   // `attach`) before the browser paints the commit that revealed it; a passive
-  // effect let the incoming workspace paint one frame with an empty terminal.
+  // effect let the incoming worktree paint one frame with an empty terminal.
   // The unmount park is a layout effect too, so in a commit that remounts the
   // panel it still runs before the new instance's attach.
   useLayoutEffect(() => {
@@ -110,7 +110,7 @@ export function TerminalPanel({
     [entry],
   );
 
-  // Workspace-level ⌃` "focus Terminal": only the visible session grabs focus.
+  // Worktree-level ⌃` "focus Terminal": only the visible session grabs focus.
   useEffect(() => {
     const handler = () => {
       if (visible) entry.focus();
@@ -161,14 +161,14 @@ export function TerminalPanel({
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
-      if (!detail?.reference || detail.workspaceId !== workspaceId) return;
+      if (!detail?.reference || detail.worktreeId !== worktreeId) return;
       if (detail.terminalId && detail.terminalId !== terminalId) return;
       pendingInsertRef.current = detail.reference;
       if (visible) flushPendingInsert();
     };
     window.addEventListener("band:terminal-insert", handler);
     return () => window.removeEventListener("band:terminal-insert", handler);
-  }, [visible, workspaceId, terminalId, flushPendingInsert]);
+  }, [visible, worktreeId, terminalId, flushPendingInsert]);
 
   // Reserve space at the bottom for the floating iOS keyboard toolbar (0 on
   // desktop). The cache's ResizeObserver on the wrapper reflows xterm on change.

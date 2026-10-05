@@ -29,9 +29,9 @@ function createDefaultState(tmpHome: string) {
   const repoDir = join(tmpHome, "repo");
   mkdirSync(repoDir, { recursive: true });
   return {
-    projects: [
+    repos: [
       {
-        name: "testproject",
+        name: "testrepo",
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],

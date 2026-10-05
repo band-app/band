@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -25,8 +25,8 @@ import { waitFor } from "./helpers/wait-for";
 // meanwhile.
 
 const TOKEN = "terminal-daemon-flood-token";
-const PROJECT = "floodproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "floodproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 /** Well past the daemon's 64 MB drop threshold. */
 const FLOOD_BYTES = 200_000_000;
 
@@ -38,7 +38,7 @@ async function createTerminal(): Promise<string> {
   const res = await trpcMutate(
     server.url,
     "terminal.create",
-    { workspaceId: WORKSPACE_ID, id: terminalId },
+    { worktreeId: WORKTREE_ID, id: terminalId },
     TOKEN,
   );
   expect(res.status).toBe(200);
@@ -47,12 +47,12 @@ async function createTerminal(): Promise<string> {
 
 beforeAll(async () => {
   tmpHome = createTmpHome("band-td-flood-");
-  const worktree = join(tmpHome, PROJECT);
+  const worktree = join(tmpHome, REPO);
   mkdirSync(worktree, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: worktree,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: worktree }],
@@ -75,13 +75,13 @@ describe("terminal daemon under a full-speed flood", () => {
     const floodId = await createTerminal();
     const quietId = await createTerminal();
     const flood = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: floodId,
       token: TOKEN,
       maxOutputChars: 64 * 1024,
     });
     const quiet = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: quietId,
       token: TOKEN,
     });
@@ -107,7 +107,7 @@ describe("terminal daemon under a full-speed flood", () => {
     expect(flood.bytes).toBeGreaterThan(FLOOD_BYTES);
 
     // Both terminals are still live on the server.
-    const res = await trpcQuery(server.url, "terminal.list", { workspaceId: WORKSPACE_ID }, TOKEN);
+    const res = await trpcQuery(server.url, "terminal.list", { worktreeId: WORKTREE_ID }, TOKEN);
     expect(res.status).toBe(200);
     const { terminals } = await trpcData<{ terminals: { terminalId: string }[] }>(res);
     expect(terminals.map((t) => t.terminalId).sort()).toEqual([floodId, quietId].sort());
@@ -117,7 +117,7 @@ describe("terminal daemon under a full-speed flood", () => {
   });
 
   it("refuses to list terminals without the token", async () => {
-    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const input = encodeURIComponent(JSON.stringify({ worktreeId: WORKTREE_ID }));
     const res = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
     expect(res.status).toBe(401);
   });

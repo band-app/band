@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 # Test a Band Chat via CLI
 
-Drive a coding-agent chat session end-to-end from the terminal — start the dev server, point the CLI at it, kick off a workspace or send a message, watch the streaming NDJSON output, and assert on it. Faster and more scriptable than clicking through the dashboard, and produces structured output you can paste into a PR as evidence.
+Drive a coding-agent chat session end-to-end from the terminal — start the dev server, point the CLI at it, kick off a worktree or send a message, watch the streaming NDJSON output, and assert on it. Faster and more scriptable than clicking through the dashboard, and produces structured output you can paste into a PR as evidence.
 
 This skill is for **verification**, not for ordinary day-to-day work. Day-to-day chat use is documented in the sibling `band-chat` skill (the global CLI skill auto-generated from the schema). Use this skill when:
 
@@ -34,7 +34,7 @@ Auth uses the same priority: `$BAND_TOKEN` else `settings.token_secret`. Usually
   - `codex` agent: `which codex` returns a path, `ls ~/.codex/auth.json` exists
   - `claude-code` agent: `which claude` (or your alias such as `claude-xyz`) returns a path
   - `opencode` agent: `which opencode` returns a path
-- The cwd is a registered Band workspace. The worktree you're standing in (where the dev server is serving from) should appear in `band workspaces list --output json` — Band-managed worktrees under `.band/worktrees/<project>/<branch>/` register automatically.
+- The cwd is a registered Band worktree. The worktree you're standing in (where the dev server is serving from) should appear in `band worktrees list --output json` — Band-managed worktrees under `.band/worktrees/<repo>/<branch>/` register automatically.
 
 ## Workflow
 
@@ -76,16 +76,16 @@ export BAND_SERVER_URL="http://127.0.0.1:$PORT"
 Sanity-check that the CLI is actually talking to the dev server (and not silently falling through to 3456):
 
 ```bash
-band projects list --output json | head -c 200
+band repos list --output json | head -c 200
 ```
 
-If this returns project data the connection is good. If it errors with `Cannot connect to Band web server.` then either `$PORT` is wrong or the dev server is still booting — wait a couple more seconds and retry.
+If this returns repo data the connection is good. If it errors with `Cannot connect to Band web server.` then either `$PORT` is wrong or the dev server is still booting — wait a couple more seconds and retry.
 
 ### 3. Send the test prompt — always from the current worktree
 
-**Run from the worktree whose code you're testing.** The dev server you started in step 1 is serving from this worktree's source; the chat workspace just needs to be a registered Band workspace and the current worktree already is one. Don't spin up a fresh workspace — it adds setup + cleanup with zero diagnostic value, since the adapter being exercised is the one in the dev server's process, not the one in the workspace's filesystem.
+**Run from the worktree whose code you're testing.** The dev server you started in step 1 is serving from this worktree's source; the chat worktree just needs to be a registered Band worktree and the current worktree already is one. Don't spin up a fresh worktree — it adds setup + cleanup with zero diagnostic value, since the adapter being exercised is the one in the dev server's process, not the one in the worktree's filesystem.
 
-`band chats send` auto-detects the workspace from `cwd`, so no `--workspace` flag is needed. Override the agent and model per-message so you can test an adapter different from the workspace's configured default without mutating the workspace:
+`band chats send` auto-detects the worktree from `cwd`, so no `--worktree` flag is needed. Override the agent and model per-message so you can test an adapter different from the worktree's configured default without mutating the worktree:
 
 ```bash
 band chats send \
@@ -94,7 +94,7 @@ band chats send \
   --message "<the test prompt>"
 ```
 
-- `<agent-type>` — one of `codex`, `claude-code`, `opencode`, `cursor-cli` (the latter has no skills directory but is valid for chat). Use the exact type ID; values not in `band settings`'s `codingAgents[].id` list are silently rejected and the workspace's default agent is used instead, so verify with `band settings` first if you're unsure.
+- `<agent-type>` — one of `codex`, `claude-code`, `opencode`, `cursor-cli` (the latter has no skills directory but is valid for chat). Use the exact type ID; values not in `band settings`'s `codingAgents[].id` list are silently rejected and the worktree's default agent is used instead, so verify with `band settings` first if you're unsure.
 - `<model-id>` — call `/trpc/models.listAll` (or the `models.listAll` CLI helper) for the list each adapter accepts. Over ACP the list is the agent's `model` session config option (`band chats` pickers read the same).
 
 Test prompts should be **small and observable** — "list the files in this directory" or "echo 'pong' to a file called pong.txt". Avoid prompts that touch the network or take more than a turn or two; every turn costs API budget and time, and the goal is to confirm the *event pipeline* works, not to evaluate the model.
@@ -103,7 +103,7 @@ If the worktree doesn't have an active chat pane yet, `band chats send` will cre
 
 ### 4. Watch the NDJSON event stream
 
-`band chats watch` defaults to the cwd workspace's first chat pane, so from the same worktree:
+`band chats watch` defaults to the cwd worktree's first chat pane, so from the same worktree:
 
 ```bash
 band chats watch > /tmp/chat-stream.ndjson
@@ -146,7 +146,7 @@ Fail-fast checks before declaring success:
 
 ### 6. Clean up
 
-Nothing to dispose of on the workspace side — we used the current worktree, which you keep regardless. Just kill the dev server and unset the env override so subsequent `band` invocations go back to the production server:
+Nothing to dispose of on the worktree side — we used the current worktree, which you keep regardless. Just kill the dev server and unset the env override so subsequent `band` invocations go back to the production server:
 
 ```bash
 kill -TERM "$DEV_PID" 2>/dev/null
@@ -164,8 +164,8 @@ If you created a one-off chat pane during the test and want to tidy up, list and
 | `Cannot connect to Band web server` | Wrong port, or dev server not booted yet | Recheck `/tmp/band-dev.log` for the `Local:` line; the port may have moved |
 | `turn-ended` with an auth-style `error` (e.g. "Authentication required") | The user is not logged in to the agent CLI | `codex login` (or equivalent for the agent) — auth state is host-wide |
 | `chat watch` stops moving after a `permission` or `elicitation` event | The agent's own permission rules asked the user; over ACP Band forwards the request instead of auto-approving | Answer it in the dashboard, or pick a more permissive mode (e.g. Claude Code `acceptEdits` / `bypassPermissions`) |
-| `band chats send` succeeds but the stream's events look wrong (claude-code shapes when you asked for codex, etc.) | The agent type was rejected silently and Band fell back to the workspace's default agent | Verify the `--agent <id>` value is one of the IDs in `band settings` under `codingAgents[].id`. When in doubt, query `/trpc/models.listAll` |
-| `band chats send` fails with "no workspace at this path" | You're not standing in a registered Band worktree | Run from a Band-managed worktree (anywhere under `.band/worktrees/<project>/<branch>/` or a path that appears in `band workspaces list --output json`). Or pass `--workspace <id>` explicitly |
+| `band chats send` succeeds but the stream's events look wrong (claude-code shapes when you asked for codex, etc.) | The agent type was rejected silently and Band fell back to the worktree's default agent | Verify the `--agent <id>` value is one of the IDs in `band settings` under `codingAgents[].id`. When in doubt, query `/trpc/models.listAll` |
+| `band chats send` fails with "no worktree at this path" | You're not standing in a registered Band worktree | Run from a Band-managed worktree (anywhere under `.band/worktrees/<repo>/<branch>/` or a path that appears in `band worktrees list --output json`). Or pass `--worktree <id>` explicitly |
 
 ## Notes on event shapes
 

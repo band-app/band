@@ -18,7 +18,7 @@
  * test unless something cancels the turn. No tRPC mocking.
  *
  * The `@`-mention dropdown is the chosen surface because its data path
- * (`workspace.searchFiles` → `git ls-files`) needs only a real git
+ * (`worktree.searchFiles` → `git ls-files`) needs only a real git
  * repo + one committed file in the worktree. The slash-command
  * dropdown is fed by the agent's ACP `available_commands_update`; the
  * fix applied to both Esc
@@ -31,7 +31,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -44,8 +44,8 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-mention-escape-token";
-const PROJECT = "mentionproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "mentionproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -53,7 +53,7 @@ let server: ServerHandle;
 let tmpHome: string;
 
 // Hermetic git environment — identical pattern to
-// `workspace-cache-eviction.spec.ts`. Without it a contributor's
+// `worktree-cache-eviction.spec.ts`. Without it a contributor's
 // `GIT_CONFIG_GLOBAL` (signing keys, hooks, etc.) leaks into the
 // `git init` / `commit` calls below and can hang or fail the test.
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
@@ -76,7 +76,7 @@ function git(cwd: string, args: string[], home: string): string {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  // Real git repo with one committed file. `workspace.searchFiles` runs
+  // Real git repo with one committed file. `worktree.searchFiles` runs
   // `git ls-files --cached --others --exclude-standard` against the
   // worktree; without a real repo the call throws and the `@`-mention
   // dropdown never opens.
@@ -88,9 +88,9 @@ test.beforeAll(async () => {
   git(repoDir, ["commit", "-m", "initial commit"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -130,7 +130,7 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // Kick a task off — Stop button visible == task is streaming.
@@ -147,7 +147,7 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     await chatPane.focusPrompt();
     await chatPane.pressKey("@");
 
-    // The dropdown takes ~150 ms (debounced trpc.workspace.searchFiles)
+    // The dropdown takes ~150 ms (debounced trpc.worktree.searchFiles)
     // to populate. `toBeVisible()` auto-retries until it appears or
     // Playwright times out.
     await expect(chatPane.fileMentionDropdown).toBeVisible();

@@ -50,8 +50,8 @@ interface GraphQLRepoResponse {
  * Build a single GraphQL query that fetches PR status and CI check suites
  * for multiple branches/repos in one request.
  *
- * Each workspace gets a unique alias (e.g. ws_0, ws_1) so results can be
- * mapped back to the originating workspace.
+ * Each worktree gets a unique alias (e.g. ws_0, ws_1) so results can be
+ * mapped back to the originating worktree.
  */
 export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
   const fragments = inputs.map((input) => {
@@ -155,7 +155,7 @@ export function statePriority(state: string): number {
 /**
  * Parse the batched GraphQL response into a map of alias -> CIStatus.
  *
- * Applies the same aggregation logic as the original per-workspace code:
+ * Applies the same aggregation logic as the original per-worktree code:
  * - Dedup check suites by workflow name (keep latest)
  * - Priority: failure > running > pending > cancelled > success
  */

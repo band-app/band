@@ -7,17 +7,17 @@ export const PLUGIN_API_VERSION = 1;
  * Events that activate a plugin's server module.
  *
  * - `onStartup` activates the plugin when the server boots.
- * - `onProjectRemote:<host glob>` activates it the first time the core needs a
+ * - `onRepoRemote:<host glob>` activates it the first time the core needs a
  *   provider for a repository whose `origin` host matches the glob. `*`
  *   matches any run of characters, so `*.ghe.com` matches `acme.ghe.com`.
  */
 const activationEventSchema = z.union([
   z.literal("onStartup"),
-  z.string().regex(/^onProjectRemote:[a-z0-9.*-]+$/),
+  z.string().regex(/^onRepoRemote:[a-z0-9.*-]+$/),
 ]);
 
 /** Client slot ids a plugin may fill. The core renders each one. */
-export const CLIENT_SLOT_IDS = ["workspace.sideTabs"] as const;
+export const CLIENT_SLOT_IDS = ["worktree.sideTabs"] as const;
 export type ClientSlotId = (typeof CLIENT_SLOT_IDS)[number];
 
 /**
@@ -41,12 +41,12 @@ export const pluginManifestSchema = z.object({
 
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
 
-/** Whether a manifest's activation events include `onProjectRemote` for `host`. */
-export function matchesProjectRemote(manifest: PluginManifest, host: string): boolean {
+/** Whether a manifest's activation events include `onRepoRemote` for `host`. */
+export function matchesRepoRemote(manifest: PluginManifest, host: string): boolean {
   const lower = host.toLowerCase();
   return manifest.activationEvents.some((event) => {
-    if (!event.startsWith("onProjectRemote:")) return false;
-    return globToRegExp(event.slice("onProjectRemote:".length)).test(lower);
+    if (!event.startsWith("onRepoRemote:")) return false;
+    return globToRegExp(event.slice("onRepoRemote:".length)).test(lower);
   });
 }
 

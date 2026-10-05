@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "band", about = "Band CLI — programmatic workspace management")]
+#[command(name = "band", about = "Band CLI — programmatic worktree management")]
 struct Cli {
     /// Output format: text or json
     #[arg(long, global = true, default_value = "text", env = "BAND_OUTPUT")]
@@ -22,15 +22,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage registered projects
-    Projects {
+    /// Manage registered repos
+    Repos {
         #[command(subcommand)]
-        cmd: ProjectsCmd,
+        cmd: ReposCmd,
     },
-    /// Manage workspaces (git worktrees)
-    Workspaces {
+    /// Manage worktrees (git worktrees)
+    Worktrees {
         #[command(subcommand)]
-        cmd: WorkspacesCmd,
+        cmd: WorktreesCmd,
     },
     /// Start coding agents and list their sessions
     Agents {
@@ -62,12 +62,12 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
-    /// List the hosts workspaces can run on
+    /// List the hosts worktrees can run on
     Hosts {
         #[command(subcommand)]
         cmd: HostsCmd,
     },
-    /// List the runners that start workers for workspaces waiting on a host
+    /// List the runners that start workers for worktrees waiting on a host
     Runners {
         #[command(subcommand)]
         cmd: RunnersCmd,
@@ -104,14 +104,14 @@ enum Commands {
         #[command(subcommand)]
         cmd: TunnelCmd,
     },
-    /// Open a file in the active Band workspace's editor pane
+    /// Open a file in the active Band worktree's editor pane
     Open {
         /// Path to the file (absolute, or relative to cwd). Optionally
         /// suffixed with `:line` / `:line:col` / `:line-lineEnd`.
         file_path: String,
-        /// Workspace ID (overrides the dashboard's active workspace)
+        /// Worktree ID (overrides the dashboard's active worktree)
         #[arg(long)]
-        workspace: Option<String>,
+        worktree: Option<String>,
         /// Don't raise the dashboard window to the foreground after opening
         #[arg(long = "no-focus")]
         no_focus: bool,
@@ -119,7 +119,7 @@ enum Commands {
     /// Receive coding-agent hook notifications (reads JSON from stdin)
     Notify {
         /// Agent type that sent the hook (e.g. `claude-code`). Omit to let
-        /// the server work it out from the payload or the workspace.
+        /// the server work it out from the payload or the worktree.
         #[arg(long)]
         agent: Option<String>,
     },
@@ -152,39 +152,39 @@ enum SkillsCmd {
 }
 
 #[derive(Subcommand)]
-enum ProjectsCmd {
-    /// List registered projects
+enum ReposCmd {
+    /// List registered repos
     List,
-    /// Register an existing repository as a project
+    /// Register an existing repository as a repo
     Add {
         /// Path to the git repository
         path: String,
-        /// Label for the project
+        /// Label for the repo
         #[arg(long)]
         label: Option<String>,
     },
-    /// Unregister a project
+    /// Unregister a repo
     Remove {
-        /// Project name
+        /// Repo name
         name: String,
     },
 }
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
-enum WorkspacesCmd {
-    /// List workspaces, optionally filtered by project
+enum WorktreesCmd {
+    /// List worktrees, optionally filtered by repo
     List {
-        /// Project name (optional filter)
-        project: Option<String>,
+        /// Repo name (optional filter)
+        repo: Option<String>,
     },
-    /// Create a new workspace (git worktree + state registration)
+    /// Create a new worktree (git worktree + state registration)
     Create {
-        /// Project name
-        project: String,
+        /// Repo name
+        repo: String,
         /// Branch name
         branch: String,
-        /// Base branch to create from (defaults to project's default branch)
+        /// Base branch to create from (defaults to repo's default branch)
         #[arg(long)]
         base: Option<String>,
         /// Prompt to pass to the coding agent
@@ -201,14 +201,14 @@ enum WorkspacesCmd {
         agent: Option<String>,
         /// Dispatch target for the prompt: 'terminal' (CLI default —
         /// launches the agent's interactive CLI in a fresh terminal pane)
-        /// or 'chat' (submits to the workspace chat pane). Override
+        /// or 'chat' (submits to the worktree chat pane). Override
         /// precedence highest first: `--via` flag → `BAND_DISPATCH` env →
         /// `.band/config.json` `workspace.defaultVia` →
         /// `~/.band/settings.json` `cli.defaultVia` → terminal (issue #551)
         #[arg(long)]
         via: Option<String>,
-        /// Place the workspace on an online host with these labels (k=v,
-        /// comma-separated or repeated). With no match, the workspace waits
+        /// Place the worktree on an online host with these labels (k=v,
+        /// comma-separated or repeated). With no match, the worktree waits
         /// as "provisioning" until a runner provides a host.
         #[arg(long, value_delimiter = ',')]
         labels: Vec<String>,
@@ -219,37 +219,37 @@ enum WorkspacesCmd {
         /// Place on any online host, with no label or requirement.
         #[arg(long)]
         any_host: bool,
-        /// How strongly the workspace is isolated: `worktree` (a git worktree
+        /// How strongly the worktree is isolated: `worktree` (a git worktree
         /// on a shared worker, the default), `container` (a worker of its own
         /// in a container) or `vm`. `container` and `vm` need a runner that
         /// offers that level. Implies placement.
         #[arg(long, value_parser = ["worktree", "container", "vm"])]
         isolation: Option<String>,
-        /// Where the project's repository is on the chosen host (needed the
-        /// first time the project is used there).
+        /// Where the repo's repository is on the chosen host (needed the
+        /// first time the repo is used there).
         #[arg(long)]
-        host_project_path: Option<String>,
+        host_repo_path: Option<String>,
     },
-    /// Remove a workspace (git worktree + state cleanup)
+    /// Remove a worktree (git worktree + state cleanup)
     Remove {
-        /// Project name
-        project: String,
-        /// Workspace name (the branch it was created on — its stable identity)
+        /// Repo name
+        repo: String,
+        /// Worktree name (the branch it was created on — its stable identity)
         name: String,
     },
 }
 
 #[derive(Subcommand)]
 enum ChatsCmd {
-    /// List chat panes for a workspace
+    /// List chat panes for a worktree
     List {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
     },
     /// Create a new chat pane
     Create {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
         /// Display name for the chat pane
         #[arg(long)]
         name: Option<String>,
@@ -267,16 +267,16 @@ enum ChatsCmd {
         #[arg(long = "label")]
         labels: Vec<String>,
     },
-    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
+    /// Send a message to a worktree chat (defaults to the worktree's active chat panel)
     Send {
-        /// Chat pane ID (defaults to the workspace's active chat panel)
+        /// Chat pane ID (defaults to the worktree's active chat panel)
         chat_id: Option<String>,
         /// Message text
         #[arg(long)]
         message: String,
-        /// Workspace ID (auto-detected from cwd if omitted)
+        /// Worktree ID (auto-detected from cwd if omitted)
         #[arg(long)]
-        workspace: Option<String>,
+        worktree: Option<String>,
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
@@ -289,17 +289,17 @@ enum ChatsCmd {
     },
     /// Stream a chat pane's running task as raw NDJSON
     Watch {
-        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        /// Chat pane ID (defaults to the cwd worktree's first chat pane)
         chat_id: Option<String>,
     },
     /// Stop a running chat pane
     Stop {
-        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        /// Chat pane ID (defaults to the cwd worktree's first chat pane)
         chat_id: Option<String>,
     },
     /// Remove a chat pane
     Remove {
-        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        /// Chat pane ID (defaults to the cwd worktree's first chat pane)
         chat_id: Option<String>,
     },
     /// Add or overwrite labels on a chat pane (additive merge — other
@@ -324,15 +324,15 @@ enum ChatsCmd {
 
 #[derive(Subcommand)]
 enum BrowsersCmd {
-    /// List browser tabs for a workspace
+    /// List browser tabs for a worktree
     List {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
     },
     /// Create a new browser tab
     Create {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
         /// Initial URL to navigate to
         #[arg(long)]
         url: Option<String>,
@@ -342,7 +342,7 @@ enum BrowsersCmd {
     },
     /// Navigate a browser tab to a URL
     Navigate {
-        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        /// Browser tab ID (defaults to the cwd worktree's first browser tab)
         browser_id: Option<String>,
         /// URL to navigate to
         #[arg(long)]
@@ -350,27 +350,27 @@ enum BrowsersCmd {
     },
     /// Get a browser tab's current state
     Get {
-        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        /// Browser tab ID (defaults to the cwd worktree's first browser tab)
         browser_id: Option<String>,
     },
     /// Remove a browser tab
     Remove {
-        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        /// Browser tab ID (defaults to the cwd worktree's first browser tab)
         browser_id: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
 enum AgentsCmd {
-    /// List the running agent sessions of a workspace
+    /// List the running agent sessions of a worktree
     List {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
     },
     /// Start a coding agent, as a chat (gui) or as its CLI in a terminal (tui)
     Launch {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
         /// Coding agent ID from settings (default agent if omitted)
         #[arg(long)]
         agent: Option<String>,
@@ -387,25 +387,25 @@ enum AgentsCmd {
 
 #[derive(Subcommand)]
 enum TerminalsCmd {
-    /// List terminal sessions for a workspace
+    /// List terminal sessions for a worktree
     List {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
     },
     /// Create a new terminal session
     Create {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
+        /// Worktree ID (auto-detected from cwd if omitted)
+        worktree_id: Option<String>,
         /// Shell command to auto-run after spawn
         #[arg(long)]
         command: Option<String>,
-        /// Working directory (relative to workspace root)
+        /// Working directory (relative to worktree root)
         #[arg(long)]
         cwd: Option<String>,
     },
     /// Send input to a terminal session
     Send {
-        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        /// Terminal ID (defaults to the cwd worktree's first terminal)
         terminal_id: Option<String>,
         /// Text to send (supports \\n for newline, \\t for tab)
         #[arg(long)]
@@ -413,7 +413,7 @@ enum TerminalsCmd {
     },
     /// Get terminal output (scrollback buffer)
     Output {
-        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        /// Terminal ID (defaults to the cwd worktree's first terminal)
         terminal_id: Option<String>,
         /// Number of lines to show (from end of buffer)
         #[arg(long, short = 'n')]
@@ -424,12 +424,12 @@ enum TerminalsCmd {
     },
     /// Kill a terminal session
     Kill {
-        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        /// Terminal ID (defaults to the cwd worktree's first terminal)
         terminal_id: Option<String>,
     },
     /// Attach to a terminal (stream output + send input interactively)
     Attach {
-        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        /// Terminal ID (defaults to the cwd worktree's first terminal)
         terminal_id: Option<String>,
     },
     /// Restart the terminal daemon, ending every terminal it hosts
@@ -440,16 +440,16 @@ enum TerminalsCmd {
 enum CronjobsCmd {
     /// List cronjobs
     List {
-        /// Filter by project name
+        /// Filter by repo name
         #[arg(long)]
-        project: Option<String>,
-        /// Filter by workspace ID
+        repo: Option<String>,
+        /// Filter by worktree ID
         #[arg(long)]
-        workspace: Option<String>,
+        worktree: Option<String>,
     },
     /// Create a new cronjob
     Create {
-        /// Storage key: project name (for project-scoped) or workspace ID (for workspace-scoped)
+        /// Storage key: repo name (for repo-scoped) or worktree ID (for worktree-scoped)
         key: String,
         /// Human-readable name for the job
         #[arg(long)]
@@ -460,15 +460,15 @@ enum CronjobsCmd {
         /// Cron expression (e.g. "0 */6 * * *")
         #[arg(long)]
         cron: String,
-        /// Scope: project or workspace
-        #[arg(long, default_value = "project")]
+        /// Scope: repo or worktree
+        #[arg(long, default_value = "repo")]
         scope: String,
-        /// Workspace ID (required when scope is "workspace")
+        /// Worktree ID (required when scope is "worktree")
         #[arg(long)]
-        workspace_id: Option<String>,
+        worktree_id: Option<String>,
         /// Where each fire dispatches the prompt: `chat` (chat pane) or
         /// `terminal` (agent's vendor CLI in a fresh self-closing PTY). When
-        /// omitted, resolved via the same precedence as `workspaces create`:
+        /// omitted, resolved via the same precedence as `worktrees create`:
         /// `--via` flag → `$BAND_DISPATCH` → `.band/config.json`
         /// `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia`
         /// → `terminal`. So a cron created from a chat agent defaults to chat,
@@ -481,7 +481,7 @@ enum CronjobsCmd {
     },
     /// Update an existing cronjob
     Update {
-        /// Storage key (project name or workspace ID)
+        /// Storage key (repo name or worktree ID)
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
@@ -503,14 +503,14 @@ enum CronjobsCmd {
     },
     /// Delete a cronjob
     Delete {
-        /// Storage key (project name or workspace ID)
+        /// Storage key (repo name or worktree ID)
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
     },
     /// Manually trigger a cronjob now
     Trigger {
-        /// Storage key (project name or workspace ID)
+        /// Storage key (repo name or worktree ID)
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
@@ -524,10 +524,10 @@ enum SubscriptionsCmd {
         /// Chat ID (defaults to `$BAND_CHAT_ID`)
         #[arg(long, env = "BAND_CHAT_ID")]
         chat: Option<String>,
-        /// List every subscription in this workspace instead of one chat's
+        /// List every subscription in this worktree instead of one chat's
         /// (wins over `$BAND_CHAT_ID`)
         #[arg(long)]
-        workspace: Option<String>,
+        worktree: Option<String>,
     },
     /// Subscribe a chat to events. Exactly one of `--pr`, `--branch`,
     /// `--webhook`, `--cron` and `--at`.
@@ -535,9 +535,9 @@ enum SubscriptionsCmd {
         /// Chat ID (defaults to `$BAND_CHAT_ID`)
         #[arg(long, env = "BAND_CHAT_ID")]
         chat: Option<String>,
-        /// Workspace ID (defaults to `$BAND_WORKSPACE_ID`, then the chat's workspace)
-        #[arg(long, env = "BAND_WORKSPACE_ID")]
-        workspace: Option<String>,
+        /// Worktree ID (defaults to `$BAND_WORKTREE_ID`, then the chat's worktree)
+        #[arg(long, env = "BAND_WORKTREE_ID")]
+        worktree: Option<String>,
         /// Watch a pull request, as `owner/repo#N`
         #[arg(long, value_name = "OWNER/REPO#N")]
         pr: Option<String>,
@@ -581,7 +581,7 @@ enum SubscriptionsCmd {
 enum HostsCmd {
     /// List hosts with their status, labels, agents, roots and last contact
     List,
-    /// Remove an offline worker host that has no workspaces, and revoke its tokens
+    /// Remove an offline worker host that has no worktrees, and revoke its tokens
     Remove {
         /// Host ID (from `band hosts list`)
         id: String,
@@ -594,7 +594,7 @@ enum RunnersCmd {
     List,
     /// Show what a runner's hooks printed for a host request
     Log {
-        /// Host request ID (from `band workspaces create`'s provisioning result)
+        /// Host request ID (from `band worktrees create`'s provisioning result)
         request_id: String,
     },
 }
@@ -606,10 +606,10 @@ enum EnvCmd {
         /// Repository directory, or the environment.json file (default: the current directory)
         path: Option<String>,
     },
-    /// Build the project's environment image at its default branch, or report a cache hit
+    /// Build the repo's environment image at its default branch, or report a cache hit
     Build {
-        /// Project name (from `band projects list`)
-        project: String,
+        /// Repo name (from `band repos list`)
+        repo: String,
         /// Build again even when an image for the same key exists
         #[arg(long)]
         force: bool,
@@ -617,10 +617,10 @@ enum EnvCmd {
         #[arg(long)]
         no_wait: bool,
     },
-    /// Show a project's current environment image and its latest build, with the log
+    /// Show a repo's current environment image and its latest build, with the log
     Status {
-        /// Project name (from `band projects list`)
-        project: String,
+        /// Repo name (from `band repos list`)
+        repo: String,
     },
 }
 
@@ -656,7 +656,7 @@ enum VaultCmd {
         /// `api_key` (default), `env` or `git`
         #[arg(long, default_value = "api_key")]
         kind: String,
-        /// `global` (default) or `project:<name>`
+        /// `global` (default) or `repo:<name>`
         #[arg(long, default_value = "global")]
         scope: String,
         /// Short note shown in the list
@@ -829,25 +829,25 @@ fn main() {
         let exit_code = match cmd {
             EnvCmd::Validate { path } => handle_env_validate(path.as_deref(), json_output),
             EnvCmd::Build {
-                project,
+                repo,
                 force,
                 no_wait,
-            } => handle_env_build(project, *force, *no_wait, json_output),
-            EnvCmd::Status { project } => handle_env_status(project, json_output),
+            } => handle_env_build(repo, *force, *no_wait, json_output),
+            EnvCmd::Status { repo } => handle_env_status(repo, json_output),
         };
         process::exit(exit_code);
     }
 
     let result = match cli.command {
-        Commands::Projects { cmd } => match cmd {
-            ProjectsCmd::List => cmd_projects_list(),
-            ProjectsCmd::Add { path, label } => cmd_projects_add(&path, label.as_deref()),
-            ProjectsCmd::Remove { name } => cmd_projects_remove(&name),
+        Commands::Repos { cmd } => match cmd {
+            ReposCmd::List => cmd_repos_list(),
+            ReposCmd::Add { path, label } => cmd_repos_add(&path, label.as_deref()),
+            ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
-        Commands::Workspaces { cmd } => match cmd {
-            WorkspacesCmd::List { project } => cmd_workspaces_list(project.as_deref()),
-            WorkspacesCmd::Create {
-                project,
+        Commands::Worktrees { cmd } => match cmd {
+            WorktreesCmd::List { repo } => cmd_worktrees_list(repo.as_deref()),
+            WorktreesCmd::Create {
+                repo,
                 branch,
                 base,
                 prompt,
@@ -859,9 +859,9 @@ fn main() {
                 requires,
                 any_host,
                 isolation,
-                host_project_path,
-            } => cmd_workspaces_create(
-                &project,
+                host_repo_path,
+            } => cmd_worktrees_create(
+                &repo,
                 &branch,
                 base.as_deref(),
                 prompt.as_deref(),
@@ -874,36 +874,36 @@ fn main() {
                     requires: &requires,
                     any_host,
                     isolation: isolation.as_deref(),
-                    host_project_path: host_project_path.as_deref(),
+                    host_repo_path: host_repo_path.as_deref(),
                 },
             ),
-            WorkspacesCmd::Remove { project, name } => cmd_workspaces_remove(&project, &name),
+            WorktreesCmd::Remove { repo, name } => cmd_worktrees_remove(&repo, &name),
         },
         Commands::Agents { cmd } => match cmd {
-            AgentsCmd::List { workspace_id } => cmd_agents_list(workspace_id.as_deref()),
+            AgentsCmd::List { worktree_id } => cmd_agents_list(worktree_id.as_deref()),
             AgentsCmd::Launch {
-                workspace_id,
+                worktree_id,
                 agent,
                 mode,
                 prompt,
             } => cmd_agents_launch(
-                workspace_id.as_deref(),
+                worktree_id.as_deref(),
                 agent.as_deref(),
                 mode.as_deref(),
                 prompt.as_deref(),
             ),
         },
         Commands::Chats { cmd } => match cmd {
-            ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
+            ChatsCmd::List { worktree_id } => cmd_chats_list(worktree_id.as_deref()),
             ChatsCmd::Create {
-                workspace_id,
+                worktree_id,
                 name,
                 agent,
                 model,
                 mode,
                 labels,
             } => cmd_chats_create(
-                workspace_id.as_deref(),
+                worktree_id.as_deref(),
                 name.as_deref(),
                 agent.as_deref(),
                 model.as_deref(),
@@ -913,14 +913,14 @@ fn main() {
             ChatsCmd::Send {
                 chat_id,
                 message,
-                workspace,
+                worktree,
                 mode,
                 model,
                 agent,
             } => cmd_chats_send(
                 chat_id.as_deref(),
                 &message,
-                workspace.as_deref(),
+                worktree.as_deref(),
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
@@ -932,12 +932,12 @@ fn main() {
             ChatsCmd::Unlabel { chat_id, keys } => cmd_chats_unlabel(&chat_id, &keys),
         },
         Commands::Browsers { cmd } => match cmd {
-            BrowsersCmd::List { workspace_id } => cmd_browser_list(workspace_id.as_deref()),
+            BrowsersCmd::List { worktree_id } => cmd_browser_list(worktree_id.as_deref()),
             BrowsersCmd::Create {
-                workspace_id,
+                worktree_id,
                 url,
                 name,
-            } => cmd_browser_create(workspace_id.as_deref(), url.as_deref(), name.as_deref()),
+            } => cmd_browser_create(worktree_id.as_deref(), url.as_deref(), name.as_deref()),
             BrowsersCmd::Navigate { url, browser_id } => {
                 cmd_browser_navigate(browser_id.as_deref(), &url)
             }
@@ -945,12 +945,12 @@ fn main() {
             BrowsersCmd::Remove { browser_id } => cmd_browser_remove(browser_id.as_deref()),
         },
         Commands::Terminals { cmd } => match cmd {
-            TerminalsCmd::List { workspace_id } => cmd_terminal_list(workspace_id.as_deref()),
+            TerminalsCmd::List { worktree_id } => cmd_terminal_list(worktree_id.as_deref()),
             TerminalsCmd::Create {
-                workspace_id,
+                worktree_id,
                 command,
                 cwd,
-            } => cmd_terminal_create(workspace_id.as_deref(), command.as_deref(), cwd.as_deref()),
+            } => cmd_terminal_create(worktree_id.as_deref(), command.as_deref(), cwd.as_deref()),
             TerminalsCmd::Send { terminal_id, data } => {
                 cmd_terminal_send(terminal_id.as_deref(), &data)
             }
@@ -964,8 +964,8 @@ fn main() {
             TerminalsCmd::RestartDaemon => cmd_terminal_restart_daemon(),
         },
         Commands::Cronjobs { cmd } => match cmd {
-            CronjobsCmd::List { project, workspace } => {
-                cmd_cronjobs_list(project.as_deref(), workspace.as_deref())
+            CronjobsCmd::List { repo, worktree } => {
+                cmd_cronjobs_list(repo.as_deref(), worktree.as_deref())
             }
             CronjobsCmd::Create {
                 key,
@@ -973,7 +973,7 @@ fn main() {
                 prompt,
                 cron,
                 scope,
-                workspace_id,
+                worktree_id,
                 via,
                 disabled,
             } => cmd_cronjobs_create(
@@ -982,7 +982,7 @@ fn main() {
                 &prompt,
                 &cron,
                 &scope,
-                workspace_id.as_deref(),
+                worktree_id.as_deref(),
                 via.as_deref(),
                 disabled,
             ),
@@ -1007,12 +1007,12 @@ fn main() {
             CronjobsCmd::Trigger { key, id } => cmd_cronjobs_trigger(&key, &id),
         },
         Commands::Subscriptions { cmd } => match cmd {
-            SubscriptionsCmd::List { chat, workspace } => {
-                cmd_subscriptions_list(chat.as_deref(), workspace.as_deref())
+            SubscriptionsCmd::List { chat, worktree } => {
+                cmd_subscriptions_list(chat.as_deref(), worktree.as_deref())
             }
             SubscriptionsCmd::Create {
                 chat,
-                workspace,
+                worktree,
                 pr,
                 branch,
                 reviews,
@@ -1025,7 +1025,7 @@ fn main() {
                 coalesce,
             } => cmd_subscriptions_create(&SubscriptionSpec {
                 chat,
-                workspace,
+                worktree,
                 pr,
                 branch,
                 reviews,
@@ -1135,9 +1135,9 @@ fn main() {
         },
         Commands::Open {
             file_path,
-            workspace,
+            worktree,
             no_focus,
-        } => cmd_open(&file_path, workspace.as_deref(), !no_focus),
+        } => cmd_open(&file_path, worktree.as_deref(), !no_focus),
         Commands::Notify { agent } => cmd_notify(agent.as_deref()),
         Commands::Schema { .. } => unreachable!(),
         Commands::Skills { cmd } => match cmd {
@@ -1176,21 +1176,21 @@ fn handle_schema(command: Option<&str>) {
     }
 }
 
-// --- Projects commands ---
+// --- Repos commands ---
 
-fn cmd_projects_list() -> Result<CommandResult, String> {
+fn cmd_repos_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query_no_input("projects.list")?;
+    let data = client.trpc_query_no_input("repos.list")?;
 
-    let projects = data
-        .get("projects")
+    let repos = data
+        .get("repos")
         .and_then(|p| p.as_array())
         .cloned()
         .unwrap_or_default();
 
-    let mut json_projects = Vec::new();
+    let mut json_repos = Vec::new();
     let mut rows: Vec<[String; 4]> = Vec::new();
-    for proj in &projects {
+    for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
         // `kind` defaults to "git" — the server always sets it, but older
@@ -1215,7 +1215,7 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
             ),
             kind.to_string(),
         ]);
-        json_projects.push(serde_json::json!({
+        json_repos.push(serde_json::json!({
             "name": name,
             "path": path,
             "kind": kind,
@@ -1227,11 +1227,11 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
 
     Ok(CommandResult {
         text,
-        json: serde_json::json!({"projects": json_projects}),
+        json: serde_json::json!({"repos": json_repos}),
     })
 }
 
-fn cmd_projects_add(path: &str, label: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_repos_add(path: &str, label: Option<&str>) -> Result<CommandResult, String> {
     validate::validate_path(path, "Path")?;
 
     let client = api::ApiClient::from_settings()?;
@@ -1239,7 +1239,7 @@ fn cmd_projects_add(path: &str, label: Option<&str>) -> Result<CommandResult, St
     if let Some(label) = label {
         input["label"] = serde_json::json!(label);
     }
-    let data = client.trpc_mutate("projects.add", &input)?;
+    let data = client.trpc_mutate("repos.add", &input)?;
     let name = data.get("name").and_then(|n| n.as_str()).unwrap_or("");
     let result_path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
 
@@ -1249,11 +1249,11 @@ fn cmd_projects_add(path: &str, label: Option<&str>) -> Result<CommandResult, St
     })
 }
 
-fn cmd_projects_remove(name: &str) -> Result<CommandResult, String> {
-    validate::validate_name(name, "Project name")?;
+fn cmd_repos_remove(name: &str) -> Result<CommandResult, String> {
+    validate::validate_name(name, "Repo name")?;
 
     let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("projects.remove", &serde_json::json!({"name": name}))?;
+    client.trpc_mutate("repos.remove", &serde_json::json!({"name": name}))?;
 
     Ok(CommandResult {
         text: String::new(),
@@ -1261,28 +1261,28 @@ fn cmd_projects_remove(name: &str) -> Result<CommandResult, String> {
     })
 }
 
-// --- Workspaces commands ---
+// --- Worktrees commands ---
 
-fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, String> {
-    if let Some(name) = project_filter {
-        validate::validate_name(name, "Project name")?;
+fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String> {
+    if let Some(name) = repo_filter {
+        validate::validate_name(name, "Repo name")?;
     }
 
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query_no_input("projects.list")?;
+    let data = client.trpc_query_no_input("repos.list")?;
 
-    let projects = data
-        .get("projects")
+    let repos = data
+        .get("repos")
         .and_then(|p| p.as_array())
         .cloned()
         .unwrap_or_default();
 
     let mut found_any = false;
     let mut rows: Vec<[String; 4]> = Vec::new();
-    let mut workspaces = Vec::new();
-    for proj in &projects {
+    let mut listed = Vec::new();
+    for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        if let Some(filter) = project_filter {
+        if let Some(filter) = repo_filter {
             if name != filter {
                 continue;
             }
@@ -1295,50 +1295,50 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
         for wt in &worktrees {
             let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
-            let workspace_id = wt.get("workspaceId").and_then(|w| w.as_str()).unwrap_or("");
+            let worktree_id = wt.get("worktreeId").and_then(|w| w.as_str()).unwrap_or("");
             rows.push([
                 name.to_string(),
                 branch.to_string(),
-                workspace_id.to_string(),
+                worktree_id.to_string(),
                 path.to_string(),
             ]);
-            workspaces.push(serde_json::json!({
-                "project": name,
+            listed.push(serde_json::json!({
+                "repo": name,
                 "branch": branch,
-                "workspaceId": workspace_id,
+                "worktreeId": worktree_id,
                 "path": path,
             }));
             found_any = true;
         }
     }
 
-    if let Some(filter) = project_filter {
+    if let Some(filter) = repo_filter {
         if !found_any {
-            return Err(format!("Project '{filter}' not found"));
+            return Err(format!("Repo '{filter}' not found"));
         }
     }
 
-    let text = format_table(&["PROJECT", "BRANCH", "WORKSPACE ID", "PATH"], &rows);
+    let text = format_table(&["REPO", "BRANCH", "WORKTREE ID", "PATH"], &rows);
 
     Ok(CommandResult {
         text,
-        json: serde_json::json!({"workspaces": workspaces}),
+        json: serde_json::json!({"worktrees": listed}),
     })
 }
 
-/// Where `workspaces create` should put the workspace, when the caller gave
+/// Where `worktrees create` should put the worktree, when the caller gave
 /// criteria instead of a host.
 struct Placement<'a> {
     labels: &'a [String],
     requires: &'a [String],
     any_host: bool,
     isolation: Option<&'a str>,
-    host_project_path: Option<&'a str>,
+    host_repo_path: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cmd_workspaces_create(
-    project: &str,
+fn cmd_worktrees_create(
+    repo: &str,
     branch: &str,
     base: Option<&str>,
     prompt: Option<&str>,
@@ -1348,7 +1348,7 @@ fn cmd_workspaces_create(
     via: Option<&str>,
     placement: &Placement,
 ) -> Result<CommandResult, String> {
-    validate::validate_name(project, "Project name")?;
+    validate::validate_name(repo, "Repo name")?;
     validate::validate_name(branch, "Branch name")?;
     if let Some(b) = base {
         validate::validate_name(b, "Base branch")?;
@@ -1364,7 +1364,7 @@ fn cmd_workspaces_create(
     let client = api::ApiClient::from_loaded_settings(settings.clone());
 
     // The server only branches on `via` when a prompt is present —
-    // a no-prompt workspace create is a pure worktree-add with no
+    // a no-prompt worktree create is a pure worktree-add with no
     // dispatch. Skip the precedence resolution entirely in that case
     // so we don't fork `git rev-parse --show-toplevel` or `stat` the
     // `.band/config.json` for nothing. We still validate an
@@ -1390,7 +1390,7 @@ fn cmd_workspaces_create(
     };
 
     let mut input = serde_json::json!({
-        "project": project,
+        "repo": repo,
         "branch": branch,
     });
     if let Some(ref v) = resolved_via {
@@ -1424,12 +1424,12 @@ fn cmd_workspaces_create(
             input["placement"]["environment"] = serde_json::json!({ "isolation": isolation });
         }
     }
-    if let Some(path) = placement.host_project_path {
-        input["hostProjectPath"] = serde_json::json!(path);
+    if let Some(path) = placement.host_repo_path {
+        input["hostRepoPath"] = serde_json::json!(path);
     }
-    let data = client.trpc_mutate("workspaces.create", &input)?;
+    let data = client.trpc_mutate("worktrees.create", &input)?;
     // No host fits yet: the hub recorded a host request and creates the
-    // workspace when a runner provides one.
+    // worktree when a runner provides one.
     if let Some(request_id) = data
         .get("provisioning")
         .and_then(|p| p.get("requestId"))
@@ -1445,7 +1445,7 @@ fn cmd_workspaces_create(
     // back the via it dispatched with (which may differ from
     // `resolved_via` when the chosen adapter falls back to chat) and
     // emits `terminalId` only when a PTY was reserved. On the idempotent
-    // path (existing workspace) the server omits both fields entirely —
+    // path (existing worktree) the server omits both fields entirely —
     // no fresh dispatch happened — and the CLI must suppress them too so
     // a caller scripting on `.terminalId` can detect that case.
     let actual_via = data
@@ -1480,7 +1480,7 @@ fn cmd_workspaces_create(
 ///
 /// Takes a pre-loaded `Settings` snapshot so the caller can share its
 /// file read with the API client (`api::ApiClient::from_loaded_settings`)
-/// — without it, every `band workspaces create` without `--via` or
+/// — without it, every `band worktrees create` without `--via` or
 /// `BAND_DISPATCH` would `stat`+`read` `~/.band/settings.json` twice.
 ///
 /// Rejects unknown string values with a CLI error so a typo
@@ -1521,13 +1521,13 @@ fn validate_via(value: &str, source: &str) -> Result<String, String> {
 /// working directory's git toplevel (or `cwd` when not in a git repo).
 /// Returns `None` if the file is absent, malformed, or missing the key.
 ///
-/// The repo-level config is the per-project override for the user-level
+/// The repo-level config is the per-repo override for the user-level
 /// `cli.defaultVia`. We deliberately read the file directly (no server
 /// roundtrip) so the CLI behaves the same way whether the dashboard is
 /// running or not.
 ///
 /// **Cheap-stat first.** Most callers are outside a `.band/`-configured
-/// repo (or run from a workspace that has none), so we check whether
+/// repo (or run from a worktree that has none), so we check whether
 /// `cwd/.band/config.json` exists *before* forking `git
 /// rev-parse --show-toplevel`. If the file already sits in cwd we read
 /// it directly; otherwise we fall through to the git-toplevel resolution
@@ -1576,18 +1576,18 @@ fn user_default_via(settings: &state::Settings) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-fn cmd_workspaces_remove(project: &str, name: &str) -> Result<CommandResult, String> {
-    validate::validate_name(project, "Project name")?;
-    validate::validate_name(name, "Workspace name")?;
+fn cmd_worktrees_remove(repo: &str, name: &str) -> Result<CommandResult, String> {
+    validate::validate_name(repo, "Repo name")?;
+    validate::validate_name(name, "Worktree name")?;
 
     let client = api::ApiClient::from_settings()?;
-    // The server identifies a workspace by its immutable `name` — the branch
+    // The server identifies a worktree by its immutable `name` — the branch
     // it was created on, which stays stable even after the git branch is
     // switched (see the `worktrees.name` column).
     client.trpc_mutate(
-        "workspaces.remove",
+        "worktrees.remove",
         &serde_json::json!({
-            "project": project,
+            "repo": repo,
             "name": name,
         }),
     )?;
@@ -1600,12 +1600,12 @@ fn cmd_workspaces_remove(project: &str, name: &str) -> Result<CommandResult, Str
 
 // --- Chats commands ---
 
-fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
     let data = client.trpc_query(
         "chats.list",
-        &serde_json::json!({"workspaceId": workspace_id}),
+        &serde_json::json!({"worktreeId": worktree_id}),
     )?;
 
     let chats = data
@@ -1658,7 +1658,7 @@ fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
 }
 
 fn cmd_chats_create(
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     name: Option<&str>,
     agent: Option<&str>,
     model: Option<&str>,
@@ -1666,8 +1666,8 @@ fn cmd_chats_create(
     label_args: &[String],
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
-    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
+    let mut input = serde_json::json!({"worktreeId": worktree_id});
     if let Some(n) = name {
         input["name"] = serde_json::json!(n);
     }
@@ -1862,7 +1862,7 @@ fn format_labels_cell(labels: &serde_json::Value) -> String {
     format!("{}\n", rendered.join(","))
 }
 
-/// Send a message to a workspace chat, defaulting to the workspace's active
+/// Send a message to a worktree chat, defaulting to the worktree's active
 /// chat panel when no `chat_id` is provided. Returns the task id, or
 /// `queued <queue entry id>` when the chat is busy and the server queued
 /// the message behind the running turn.
@@ -1870,22 +1870,22 @@ fn format_labels_cell(labels: &serde_json::Value) -> String {
 /// Calls `tasks.submit` server-side, which resolves the default chat via
 /// `getOrCreateDefaultChat` — honoring the saved chat layout's active panel,
 /// then the first panel in the saved layout, then the first chat in the
-/// registry, and finally lazy-creating a new "Chat" panel if the workspace
+/// registry, and finally lazy-creating a new "Chat" panel if the worktree
 /// has none. So passing no `chat_id` here matches the chat the user is
 /// looking at in the dashboard.
 fn cmd_chats_send(
     chat_id: Option<&str>,
     message: &str,
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
 
     let mut input = serde_json::json!({
-        "workspaceId": workspace_id,
+        "worktreeId": worktree_id,
         "prompt": message,
     });
     if let Some(chat_id) = chat_id {
@@ -1904,7 +1904,7 @@ fn cmd_chats_send(
     let data = client.trpc_mutate("tasks.submit", &input)?;
 
     let ws = data
-        .get("workspaceId")
+        .get("worktreeId")
         .and_then(|w| w.as_str())
         .unwrap_or("");
     let resolved_chat_id = data.get("chatId").and_then(|c| c.as_str()).unwrap_or("");
@@ -1920,7 +1920,7 @@ fn cmd_chats_send(
                 "id": null,
                 "queued": true,
                 "queuedMessageId": queued_id,
-                "workspaceId": ws,
+                "worktreeId": ws,
                 "chatId": resolved_chat_id,
             }),
         });
@@ -1932,7 +1932,7 @@ fn cmd_chats_send(
         json: serde_json::json!({
             "id": id,
             "queued": false,
-            "workspaceId": ws,
+            "worktreeId": ws,
             "chatId": resolved_chat_id,
         }),
     })
@@ -2079,12 +2079,12 @@ fn cmd_chats_remove(chat_id: Option<&str>) -> Result<CommandResult, String> {
 
 // --- Browser commands ---
 
-fn cmd_browser_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_browser_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
     let data = client.trpc_query(
         "browsers.list",
-        &serde_json::json!({"workspaceId": workspace_id}),
+        &serde_json::json!({"worktreeId": worktree_id}),
     )?;
 
     let browsers = data
@@ -2118,13 +2118,13 @@ fn cmd_browser_list(workspace_id: Option<&str>) -> Result<CommandResult, String>
 }
 
 fn cmd_browser_create(
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     url: Option<&str>,
     name: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
-    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
+    let mut input = serde_json::json!({"worktreeId": worktree_id});
     if let Some(u) = url {
         input["url"] = serde_json::json!(u);
     }
@@ -2232,12 +2232,12 @@ fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {
     }
 }
 
-fn cmd_agents_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_agents_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
     let data = client.trpc_query(
         "agentSessions.list",
-        &serde_json::json!({"workspaceId": workspace_id}),
+        &serde_json::json!({"worktreeId": worktree_id}),
     )?;
     let sessions = data
         .get("agentSessions")
@@ -2315,15 +2315,15 @@ fn resolve_agent_mode(flag: Option<&str>) -> Result<Option<&'static str>, String
 }
 
 fn cmd_agents_launch(
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     agent: Option<&str>,
     mode: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<CommandResult, String> {
     let mode = resolve_agent_mode(mode)?;
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
-    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
+    let mut input = serde_json::json!({"worktreeId": worktree_id});
     if let Some(a) = agent {
         input["agentId"] = serde_json::json!(a);
     }
@@ -2350,12 +2350,12 @@ fn cmd_agents_launch(
 
 // --- Terminal commands ---
 
-fn cmd_terminal_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_terminal_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
     let data = client.trpc_query(
         "terminal.list",
-        &serde_json::json!({"workspaceId": workspace_id}),
+        &serde_json::json!({"worktreeId": worktree_id}),
     )?;
 
     let terminals = data
@@ -2395,13 +2395,13 @@ fn cmd_terminal_list(workspace_id: Option<&str>) -> Result<CommandResult, String
 }
 
 fn cmd_terminal_create(
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     command: Option<&str>,
     cwd: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
-    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
+    let mut input = serde_json::json!({"worktreeId": worktree_id});
     if let Some(cmd) = command {
         input["command"] = serde_json::json!(cmd);
     }
@@ -2777,18 +2777,15 @@ fn cmd_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> Result<(
 
 // --- Cronjobs commands ---
 
-fn cmd_cronjobs_list(
-    project: Option<&str>,
-    workspace: Option<&str>,
-) -> Result<CommandResult, String> {
+fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
 
     let mut input = serde_json::json!({});
-    if let Some(p) = project {
-        input["project"] = serde_json::json!(p);
+    if let Some(p) = repo {
+        input["repo"] = serde_json::json!(p);
     }
-    if let Some(w) = workspace {
-        input["workspaceId"] = serde_json::json!(w);
+    if let Some(w) = worktree {
+        input["worktreeId"] = serde_json::json!(w);
     }
 
     let data = client.trpc_query("cronjobs.list", &input)?;
@@ -2848,20 +2845,20 @@ fn cmd_cronjobs_create(
     prompt: &str,
     cron: &str,
     scope: &str,
-    workspace_id: Option<&str>,
+    worktree_id: Option<&str>,
     via: Option<&str>,
     disabled: bool,
 ) -> Result<CommandResult, String> {
-    if scope != "project" && scope != "workspace" {
-        return Err("Scope must be 'project' or 'workspace'".to_string());
+    if scope != "repo" && scope != "worktree" {
+        return Err("Scope must be 'repo' or 'worktree'".to_string());
     }
-    if scope == "workspace" && workspace_id.is_none() {
-        return Err("--workspace-id is required when scope is 'workspace'".to_string());
+    if scope == "worktree" && worktree_id.is_none() {
+        return Err("--worktree-id is required when scope is 'worktree'".to_string());
     }
 
     // Read settings once and share the snapshot between the API client (port +
     // auth token) and the dispatch-target resolver — same pattern as
-    // `cmd_workspaces_create`. A cronjob always carries a prompt, so we always
+    // `cmd_worktrees_create`. A cronjob always carries a prompt, so we always
     // resolve `via` through the precedence chain: a cron created from a chat
     // agent (BAND_DISPATCH=chat) defaults to chat, one from a terminal
     // (BAND_DISPATCH=terminal) defaults to terminal (issue #581).
@@ -2878,8 +2875,8 @@ fn cmd_cronjobs_create(
         "via": resolved_via,
         "enabled": !disabled,
     });
-    if let Some(ws) = workspace_id {
-        input["workspaceId"] = serde_json::json!(ws);
+    if let Some(ws) = worktree_id {
+        input["worktreeId"] = serde_json::json!(ws);
     }
 
     let data = client.trpc_mutate("cronjobs.create", &input)?;
@@ -2955,8 +2952,8 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
     // via="terminal" job returns a `terminalId` (and no task/chat); a via="chat"
     // job — including a terminal job whose agent has no vendor CLI and fell back
     // — returns `taskId`/`chatId`.
-    let workspace_id = data
-        .get("workspaceId")
+    let worktree_id = data
+        .get("worktreeId")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let via = data.get("via").and_then(|v| v.as_str()).unwrap_or("chat");
@@ -2971,7 +2968,7 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
             json: serde_json::json!({
                 "via": "terminal",
                 "terminalId": terminal_id,
-                "workspaceId": workspace_id,
+                "worktreeId": worktree_id,
             }),
         });
     }
@@ -2982,7 +2979,7 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
         json: serde_json::json!({
             "via": "chat",
             "taskId": task_id,
-            "workspaceId": workspace_id,
+            "worktreeId": worktree_id,
         }),
     })
 }
@@ -3125,18 +3122,18 @@ fn describe_subscription(sub: &serde_json::Value) -> String {
 
 fn cmd_subscriptions_list(
     chat: Option<&str>,
-    workspace: Option<&str>,
+    worktree: Option<&str>,
 ) -> Result<CommandResult, String> {
-    if chat.is_none() && workspace.is_none() {
+    if chat.is_none() && worktree.is_none() {
         return Err(
-            "A chat is required. Pass --chat <id> or --workspace <id>, or run inside an agent chat ($BAND_CHAT_ID)"
+            "A chat is required. Pass --chat <id> or --worktree <id>, or run inside an agent chat ($BAND_CHAT_ID)"
                 .to_string(),
         );
     }
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({});
-    if let Some(w) = workspace {
-        input["workspaceId"] = serde_json::json!(w);
+    if let Some(w) = worktree {
+        input["worktreeId"] = serde_json::json!(w);
     } else if let Some(c) = chat {
         input["chatId"] = serde_json::json!(c);
     }
@@ -3178,7 +3175,7 @@ fn cmd_subscriptions_list(
 #[allow(clippy::struct_excessive_bools)]
 struct SubscriptionSpec {
     chat: Option<String>,
-    workspace: Option<String>,
+    worktree: Option<String>,
     pr: Option<String>,
     branch: Option<String>,
     reviews: bool,
@@ -3260,8 +3257,8 @@ fn cmd_subscriptions_create(spec: &SubscriptionSpec) -> Result<CommandResult, St
     for mut input in sources {
         input["chatId"] = serde_json::json!(chat);
         input["createdBy"] = serde_json::json!("agent");
-        if let Some(w) = &spec.workspace {
-            input["workspaceId"] = serde_json::json!(w);
+        if let Some(w) = &spec.worktree {
+            input["worktreeId"] = serde_json::json!(w);
         }
         if let Some(n) = spec.max_wakeups {
             input["maxWakeups"] = serde_json::json!(n);
@@ -3577,8 +3574,8 @@ fn env_latest_log(status: &serde_json::Value) -> String {
 
 /// Start a build (or find it cached or running) and, unless `no_wait`, follow
 /// its log until it ends. Exit code 0 for a ready image, 1 for a failure.
-fn handle_env_build(project: &str, force: bool, no_wait: bool, json_output: bool) -> i32 {
-    match cmd_env_build(project, force, no_wait, json_output) {
+fn handle_env_build(repo: &str, force: bool, no_wait: bool, json_output: bool) -> i32 {
+    match cmd_env_build(repo, force, no_wait, json_output) {
         Ok(code) => code,
         Err(e) => {
             if json_output {
@@ -3591,16 +3588,11 @@ fn handle_env_build(project: &str, force: bool, no_wait: bool, json_output: bool
     }
 }
 
-fn cmd_env_build(
-    project: &str,
-    force: bool,
-    no_wait: bool,
-    json_output: bool,
-) -> Result<i32, String> {
+fn cmd_env_build(repo: &str, force: bool, no_wait: bool, json_output: bool) -> Result<i32, String> {
     let client = api::ApiClient::from_settings()?;
     let started = client.trpc_mutate(
         "environment.build",
-        &serde_json::json!({"projectName": project, "force": force}),
+        &serde_json::json!({"repoName": repo, "force": force}),
     )?;
     let build = started.get("build").cloned().unwrap_or_default();
     let cache_hit = started
@@ -3637,7 +3629,7 @@ fn cmd_env_build(
     loop {
         let status = client.trpc_query(
             "environment.imageStatus",
-            &serde_json::json!({"projectName": project}),
+            &serde_json::json!({"repoName": repo}),
         )?;
         let latest = status.get("latest").cloned().unwrap_or_default();
         let same_build = latest.get("id").and_then(|v| v.as_str()) == Some(build_id.as_str());
@@ -3681,11 +3673,11 @@ fn cmd_env_build(
     }
 }
 
-fn handle_env_status(project: &str, json_output: bool) -> i32 {
+fn handle_env_status(repo: &str, json_output: bool) -> i32 {
     let result = api::ApiClient::from_settings().and_then(|client| {
         client.trpc_query(
             "environment.imageStatus",
-            &serde_json::json!({"projectName": project}),
+            &serde_json::json!({"repoName": repo}),
         )
     });
     match result {
@@ -4127,28 +4119,25 @@ fn cmd_mcp_remove(name: &str) -> Result<CommandResult, String> {
     })
 }
 
-/// Resolve an explicit workspace ID, or auto-detect it from the current
+/// Resolve an explicit worktree ID, or auto-detect it from the current
 /// working directory by matching `git rev-parse --show-toplevel` against
-/// registered workspace paths.
-fn resolve_workspace_id(
-    client: &api::ApiClient,
-    workspace: Option<&str>,
-) -> Result<String, String> {
-    if let Some(ws) = workspace {
+/// registered worktree paths.
+fn resolve_worktree_id(client: &api::ApiClient, worktree: Option<&str>) -> Result<String, String> {
+    if let Some(ws) = worktree {
         return Ok(ws.to_string());
     }
 
-    detect_workspace_from_cwd(client)
+    detect_worktree_from_cwd(client)
 }
 
 /// Resolve a panel ID for a chat / terminal / browser. When `panel_id` is
-/// `Some`, returns it as-is. When `None`, auto-detects the workspace from
+/// `Some`, returns it as-is. When `None`, auto-detects the worktree from
 /// the current working directory, queries `list_proc`, and returns the
 /// `id_field` of the first panel returned by the server.
 ///
 /// This gives every panel-targeted command (`chats send`, `terminals output`,
 /// `browsers navigate`, …) a uniform "default panel" behavior so the user
-/// rarely has to type IDs when working inside a workspace.
+/// rarely has to type IDs when working inside a worktree.
 fn resolve_default_panel(
     client: &api::ApiClient,
     panel_id: Option<&str>,
@@ -4160,15 +4149,15 @@ fn resolve_default_panel(
     if let Some(id) = panel_id {
         return Ok(id.to_string());
     }
-    let ws = resolve_workspace_id(client, None)?;
-    let data = client.trpc_query(list_proc, &serde_json::json!({"workspaceId": ws}))?;
+    let ws = resolve_worktree_id(client, None)?;
+    let data = client.trpc_query(list_proc, &serde_json::json!({"worktreeId": ws}))?;
     let panels = data
         .get(list_field)
         .and_then(|v| v.as_array())
         .ok_or_else(|| format!("Server returned no {list_field} array"))?;
     let first = panels.first().ok_or_else(|| {
         format!(
-            "No {domain_label} found in workspace '{ws}'. Create one first or pass an explicit id."
+            "No {domain_label} found in worktree '{ws}'. Create one first or pass an explicit id."
         )
     })?;
     let id = first
@@ -4178,30 +4167,30 @@ fn resolve_default_panel(
     Ok(id.to_string())
 }
 
-/// Detect the current workspace by matching `git rev-parse --show-toplevel`
-/// against the `path` field of all registered workspaces.
-fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> {
+/// Detect the current worktree by matching `git rev-parse --show-toplevel`
+/// against the `path` field of all registered worktrees.
+fn detect_worktree_from_cwd(client: &api::ApiClient) -> Result<String, String> {
     let git_output = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if !git_output.status.success() {
-        return Err("Not in a git repository. Specify --workspace.".to_string());
+        return Err("Not in a git repository. Specify --worktree.".to_string());
     }
 
     let toplevel = String::from_utf8_lossy(&git_output.stdout)
         .trim()
         .to_string();
 
-    let data = client.trpc_query_no_input("projects.list")?;
-    let projects = data
-        .get("projects")
+    let data = client.trpc_query_no_input("repos.list")?;
+    let repos = data
+        .get("repos")
         .and_then(|p| p.as_array())
         .cloned()
         .unwrap_or_default();
 
-    for proj in &projects {
+    for proj in &repos {
         let worktrees = proj
             .get("worktrees")
             .and_then(|w| w.as_array())
@@ -4210,7 +4199,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
         for wt in &worktrees {
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
             if path == toplevel {
-                let ws_id = wt.get("workspaceId").and_then(|w| w.as_str()).unwrap_or("");
+                let ws_id = wt.get("worktreeId").and_then(|w| w.as_str()).unwrap_or("");
                 if !ws_id.is_empty() {
                     return Ok(ws_id.to_string());
                 }
@@ -4219,7 +4208,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
     }
 
     Err(format!(
-        "No workspace found for '{toplevel}'. Specify --workspace."
+        "No worktree found for '{toplevel}'. Specify --worktree."
     ))
 }
 
@@ -4371,18 +4360,14 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
     (raw.to_string(), None, None, None)
 }
 
-fn cmd_open(
-    file_path: &str,
-    workspace: Option<&str>,
-    focus: bool,
-) -> Result<CommandResult, String> {
+fn cmd_open(file_path: &str, worktree: Option<&str>, focus: bool) -> Result<CommandResult, String> {
     let (path_only, line, line_end, column) = split_file_location(file_path);
     if path_only.is_empty() {
         return Err("File path is empty".to_string());
     }
 
     // Resolve relative paths against cwd so the server sees an absolute
-    // path it can validate against the workspace root. Absolute paths are
+    // path it can validate against the worktree root. Absolute paths are
     // passed through unchanged.
     let resolved: std::path::PathBuf = if std::path::Path::new(&path_only).is_absolute() {
         std::path::PathBuf::from(&path_only)
@@ -4404,8 +4389,8 @@ fn cmd_open(
         "filePath": absolute_str,
         "focus": focus,
     });
-    if let Some(ws) = workspace {
-        input["workspaceId"] = serde_json::json!(ws);
+    if let Some(ws) = worktree {
+        input["worktreeId"] = serde_json::json!(ws);
     }
     if let Some(line) = line {
         input["line"] = serde_json::json!(line);
@@ -4422,10 +4407,10 @@ fn cmd_open(
     // the server's response shape ever drifts — the three fields below
     // are part of the editor.openFile contract; an empty string here
     // would be a silent bug.
-    let workspace_id = data
-        .get("workspaceId")
+    let worktree_id = data
+        .get("worktreeId")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "server response missing workspaceId".to_string())?;
+        .ok_or_else(|| "server response missing worktreeId".to_string())?;
     let resolved_path = data
         .get("filePath")
         .and_then(|v| v.as_str())
@@ -4436,16 +4421,16 @@ fn cmd_open(
         .ok_or_else(|| "server response missing external".to_string())?;
 
     let where_label = if external {
-        format!("{workspace_id} (external)")
+        format!("{worktree_id} (external)")
     } else {
-        workspace_id.to_string()
+        worktree_id.to_string()
     };
 
     Ok(CommandResult {
         text: format!("Opened {resolved_path} in {where_label}\n"),
         json: serde_json::json!({
             "ok": true,
-            "workspaceId": workspace_id,
+            "worktreeId": worktree_id,
             "filePath": resolved_path,
             "external": external,
         }),
@@ -4459,7 +4444,7 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
 
     // The CLI is intentionally agent-agnostic: it forwards the raw hook
     // payload to the server and lets the server dispatch to the relevant
-    // coding-agent adapter to decide the workspace status. Adding hook
+    // coding-agent adapter to decide the worktree status. Adding hook
     // support for a new agent therefore never requires changing this command.
 
     let ok = || {
@@ -4477,7 +4462,7 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     let payload: serde_json::Value = serde_json::from_str(&input)
         .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
 
-    // `cwd` tells the server which workspace this notification is for — that's
+    // `cwd` tells the server which worktree this notification is for — that's
     // about routing, not about interpreting the agent's behavior. Prefer the
     // payload's cwd (agents include it), falling back to the process cwd.
     let cwd = payload
@@ -4578,59 +4563,59 @@ fn format_table<const N: usize>(headers: &[&str; N], rows: &[[String; N]]) -> St
 pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
     let commands = vec![
         serde_json::json!({
-            "name": "projects list",
-            "description": "List registered projects",
+            "name": "repos list",
+            "description": "List registered repos",
             "parameters": [],
-            "notes": "Text output: `name\\tpath\\tN worktree(s)` (tab-separated).\nJSON output: `{\"projects\": [{\"name\": \"...\", \"path\": \"...\", \"worktreeCount\": N}]}`"
+            "notes": "Text output: `name\\tpath\\tN worktree(s)` (tab-separated).\nJSON output: `{\"repos\": [{\"name\": \"...\", \"path\": \"...\", \"worktreeCount\": N}]}`"
         }),
         serde_json::json!({
-            "name": "projects add",
-            "description": "Register an existing repository as a project",
+            "name": "repos add",
+            "description": "Register an existing repository as a repo",
             "parameters": [
                 {"name": "path", "type": "string", "required": true, "positional": true, "description": "Path to the git repository"},
-                {"name": "--label", "type": "string", "required": false, "description": "Label for the project"},
+                {"name": "--label", "type": "string", "required": false, "description": "Label for the repo"},
             ],
-            "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the project name."
+            "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the repo name."
         }),
         serde_json::json!({
-            "name": "projects remove",
-            "description": "Unregister a project",
+            "name": "repos remove",
+            "description": "Unregister a repo",
             "parameters": [
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Project name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Repo name"},
             ],
-            "notes": "Removes the project from Band's registry (does not delete the repository)."
+            "notes": "Removes the repo from Band's registry (does not delete the repository)."
         }),
         serde_json::json!({
-            "name": "workspaces list",
-            "description": "List workspaces, optionally filtered by project",
+            "name": "worktrees list",
+            "description": "List worktrees, optionally filtered by repo",
             "parameters": [
-                {"name": "project", "type": "string", "required": false, "positional": true, "description": "Project name (optional filter)"},
+                {"name": "repo", "type": "string", "required": false, "positional": true, "description": "Repo name (optional filter)"},
             ],
-            "notes": "Text output: `project\\tbranch\\tpath` (tab-separated, one per line).\nJSON output: `{\"workspaces\": [{\"project\": \"...\", \"branch\": \"...\", \"path\": \"...\"}]}`"
+            "notes": "Text output: `repo\\tbranch\\tpath` (tab-separated, one per line).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"path\": \"...\"}]}`"
         }),
         serde_json::json!({
-            "name": "workspaces create",
-            "description": "Create a new workspace (git worktree + state registration)",
+            "name": "worktrees create",
+            "description": "Create a new worktree (git worktree + state registration)",
             "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
-                {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
+                {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to repo's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
-                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides worktree default)"},
                 {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
             ],
-            "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the workspace's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband workspaces create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
+            "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
         serde_json::json!({
-            "name": "workspaces remove",
-            "description": "Remove a workspace (git worktree + state cleanup)",
+            "name": "worktrees remove",
+            "description": "Remove a worktree (git worktree + state cleanup)",
             "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Workspace name (the branch it was created on — its stable identity)"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name (the branch it was created on — its stable identity)"},
             ],
-            "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
+            "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
         }),
         serde_json::json!({
             "name": "settings",
@@ -4658,23 +4643,23 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "cronjobs list",
-            "description": "List cronjobs, optionally filtered by project or workspace",
+            "description": "List cronjobs, optionally filtered by repo or worktree",
             "parameters": [
-                {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Filter by workspace ID"},
+                {"name": "--repo", "type": "string", "required": false, "description": "Filter by repo name"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Filter by worktree ID"},
             ]
         }),
         serde_json::json!({
             "name": "cronjobs create",
             "description": "Create a new scheduled cronjob",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key: project name or workspace ID"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key: repo name or worktree ID"},
                 {"name": "--name", "type": "string", "required": true, "description": "Human-readable name for the job"},
                 {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the coding agent"},
                 {"name": "--cron", "type": "string", "required": true, "description": "Cron expression (e.g. \"0 */6 * * *\")"},
-                {"name": "--scope", "type": "string", "required": false, "description": "Scope: project (default) or workspace"},
-                {"name": "--workspace-id", "type": "string", "required": false, "description": "Workspace ID (required when scope is workspace)"},
-                {"name": "--via", "type": "string", "required": false, "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'workspaces create' (--via > BAND_DISPATCH > config > settings > terminal)."},
+                {"name": "--scope", "type": "string", "required": false, "description": "Scope: repo (default) or worktree"},
+                {"name": "--worktree-id", "type": "string", "required": false, "description": "Worktree ID (required when scope is worktree)"},
+                {"name": "--via", "type": "string", "required": false, "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'worktrees create' (--via > BAND_DISPATCH > config > settings > terminal)."},
                 {"name": "--disabled", "type": "boolean", "required": false, "description": "Create the job in disabled state"},
             ]
         }),
@@ -4682,7 +4667,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs update",
             "description": "Update an existing cronjob",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
                 {"name": "--name", "type": "string", "required": false, "description": "New name"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "New prompt"},
@@ -4695,7 +4680,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs delete",
             "description": "Delete a cronjob",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
         }),
@@ -4703,7 +4688,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs trigger",
             "description": "Manually trigger a cronjob now",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
         }),
@@ -4712,7 +4697,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "List what a chat listens for",
             "parameters": [
                 {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "List every subscription in this workspace instead of one chat's"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "List every subscription in this worktree instead of one chat's"},
             ],
             "notes": "Text output: `ID  SOURCE  WATCHES  WAKEUPS  EXPIRES` (space-padded table).\nJSON output: `{\"subscriptions\": [{\"id\": \"...\", \"source\": \"github|timer|webhook\", \"filterKey\": \"...\", \"wakeups\": 0, \"maxWakeups\": 10, \"expiresAt\": 0}]}`."
         }),
@@ -4721,7 +4706,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Subscribe a chat to events; the chat is woken with a short message when one arrives",
             "parameters": [
                 {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (defaults to $BAND_WORKSPACE_ID, then the chat's workspace)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (defaults to $BAND_WORKTREE_ID, then the chat's worktree)"},
                 {"name": "--pr", "type": "string", "required": false, "description": "Watch a pull request, as owner/repo#N"},
                 {"name": "--branch", "type": "string", "required": false, "description": "Watch a branch's CI, as owner/repo@branch"},
                 {"name": "--reviews", "type": "boolean", "required": false, "description": "With --pr: deliver reviews"},
@@ -4752,9 +4737,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "env build",
-            "description": "Build the project's environment image at its default branch, or report a cache hit",
+            "description": "Build the repo's environment image at its default branch, or report a cache hit",
             "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name (from `band projects list`)"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name (from `band repos list`)"},
                 {"name": "force", "type": "boolean", "required": false, "description": "Build again even when an image for the same key exists"},
                 {"name": "no-wait", "type": "boolean", "required": false, "description": "Return once the build has started instead of waiting for it to finish"},
             ],
@@ -4762,25 +4747,25 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "env status",
-            "description": "Show a project's current environment image and its latest build, with the log",
+            "description": "Show a repo's current environment image and its latest build, with the log",
             "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name (from `band projects list`)"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name (from `band repos list`)"},
             ],
             "notes": "The current image is the newest ready build. A failed build never replaces it.\nJSON output: `{\"builder\": {...}, \"current\": {...} | null, \"latest\": {..., \"log\": \"...\"} | null, \"builds\": [...]}`."
         }),
         serde_json::json!({
             "name": "hosts list",
-            "description": "List the hosts workspaces can run on",
+            "description": "List the hosts worktrees can run on",
             "parameters": [],
-            "notes": "Text output: `ID  NAME  STATUS  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. AGENTS are the coding agents the host can start, ROOTS the directories it serves workspaces from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null}]}`."
+            "notes": "Text output: `ID  NAME  STATUS  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. AGENTS are the coding agents the host can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null}]}`."
         }),
         serde_json::json!({
             "name": "hosts remove",
-            "description": "Remove an offline worker host that has no workspaces, and revoke its tokens",
+            "description": "Remove an offline worker host that has no worktrees, and revoke its tokens",
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Host ID (from `band hosts list`)"},
             ],
-            "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has workspaces."
+            "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has worktrees."
         }),
         serde_json::json!({
             "name": "vault list",
@@ -4794,7 +4779,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Credential name (an env item's name is the variable name)"},
                 {"name": "kind", "type": "string", "required": false, "description": "api_key (default), env or git"},
-                {"name": "scope", "type": "string", "required": false, "description": "global (default) or project:<name>"},
+                {"name": "scope", "type": "string", "required": false, "description": "global (default) or repo:<name>"},
                 {"name": "description", "type": "string", "required": false, "description": "Short note shown in the list"},
                 {"name": "host", "type": "string", "required": false, "description": "For --kind git: the remote's host, such as github.com"},
                 {"name": "path", "type": "string", "required": false, "description": "For --kind git: a pattern over the repository path, such as 'owner/*'"},
@@ -4886,7 +4871,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "runners list",
-            "description": "List the runners that start workers for workspaces waiting on a host",
+            "description": "List the runners that start workers for worktrees waiting on a host",
             "parameters": [],
             "notes": "Text output: `ID  SPAWN  LABELS  RUNNING  TIMEOUT` (space-padded table), then one `Invalid runner: ...` line per entry of `runners` in settings.json that the hub skips. RUNNING is `<in flight>/<maxConcurrent>`.\nJSON output: `{\"runners\": [{\"id\": \"local\", \"spawn\": \"bundled:local\", \"labels\": {}, \"maxConcurrent\": 1, \"timeoutSec\": 120, \"running\": 0}], \"runs\": [...], \"errors\": []}`."
         }),
@@ -4923,17 +4908,17 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "chats list",
-            "description": "List chat panes for a workspace",
+            "description": "List chat panes for a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
         }),
         serde_json::json!({
             "name": "chats create",
-            "description": "Create a new chat pane in a workspace",
+            "description": "Create a new chat pane in a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the chat pane"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model override"},
@@ -4944,22 +4929,22 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "chats send",
-            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
+            "description": "Send a message to a worktree chat (defaults to the worktree's active chat panel)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the workspace's active chat panel)"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the worktree's active chat panel)"},
                 {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (auto-detected from cwd if omitted)"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
-                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides worktree default)"},
             ],
-            "notes": "Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.\nJSON output: `{\"id\": \"tsk_...\", \"queued\": false, \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`, or `{\"id\": null, \"queued\": true, \"queuedMessageId\": \"...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}` when queued.\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
+            "notes": "Sends a message to a worktree chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the worktree's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the worktree has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.\nJSON output: `{\"id\": \"tsk_...\", \"queued\": false, \"worktreeId\": \"...\", \"chatId\": \"chat_...\"}`, or `{\"id\": null, \"queued\": true, \"queuedMessageId\": \"...\", \"worktreeId\": \"...\", \"chatId\": \"chat_...\"}` when queued.\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
         }),
         serde_json::json!({
             "name": "chats watch",
             "description": "Stream a chat pane's running task as raw NDJSON",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)"},
             ],
             "notes": "Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task."
         }),
@@ -4967,7 +4952,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats stop",
             "description": "Stop a running chat pane",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)"},
             ],
             "notes": "Aborts the running task and sets chat status to stopped."
         }),
@@ -4975,7 +4960,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats remove",
             "description": "Remove a chat pane (kills agent, cleans up state)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
         }),
@@ -4999,17 +4984,17 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "browsers list",
-            "description": "List browser tabs for a workspace",
+            "description": "List browser tabs for a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`"
         }),
         serde_json::json!({
             "name": "browsers create",
-            "description": "Create a new browser tab in a workspace",
+            "description": "Create a new browser tab in a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
                 {"name": "--url", "type": "string", "required": false, "description": "Initial URL to navigate to"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the browser tab"},
             ],
@@ -5019,16 +5004,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers navigate",
             "description": "Navigate a browser tab to a URL",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)"},
                 {"name": "--url", "type": "string", "required": true, "description": "URL to navigate to"},
             ],
-            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag."
+            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the worktree from cwd and targets that worktree's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag."
         }),
         serde_json::json!({
             "name": "browsers get",
             "description": "Get a browser tab's current state",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)"},
             ],
             "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`"
         }),
@@ -5036,23 +5021,23 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers remove",
             "description": "Remove a browser tab",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)"},
             ],
             "notes": "Removes the browser tab and cleans up state."
         }),
         serde_json::json!({
             "name": "agents list",
-            "description": "List the running agent sessions of a workspace",
+            "description": "List the running agent sessions of a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"workspaceId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
+            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
         }),
         serde_json::json!({
             "name": "agents launch",
             "description": "Start a coding agent as a chat (gui) or as its CLI in a terminal (tui)",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID from settings (default agent if omitted)"},
                 {"name": "--mode", "type": "string", "required": false, "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Falls back to BAND_DISPATCH, then .band/config.json workspace.defaultVia, then the server's agents.defaultMode"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "First prompt for the agent"},
@@ -5061,27 +5046,27 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "terminals list",
-            "description": "List terminal sessions for a workspace",
+            "description": "List terminal sessions for a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
+            "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"worktreeId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
         }),
         serde_json::json!({
             "name": "terminals create",
-            "description": "Create a new terminal session in a workspace",
+            "description": "Create a new terminal session in a worktree",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
                 {"name": "--command", "type": "string", "required": false, "description": "Shell command to auto-run after spawn"},
-                {"name": "--cwd", "type": "string", "required": false, "description": "Working directory (relative to workspace root)"},
+                {"name": "--cwd", "type": "string", "required": false, "description": "Working directory (relative to worktree root)"},
             ],
-            "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N}`"
+            "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"worktreeId\": \"...\", \"pid\": N}`"
         }),
         serde_json::json!({
             "name": "terminals send",
             "description": "Send input to a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd worktree's first terminal)"},
                 {"name": "--data", "type": "string", "required": true, "description": "Text to send (supports \\n for newline, \\t for tab)"},
             ],
             "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminals send <id> --data \"ls -la\\n\""
@@ -5090,7 +5075,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals output",
             "description": "Get terminal output (scrollback buffer)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd worktree's first terminal)"},
                 {"name": "--lines", "type": "integer", "required": false, "description": "Number of lines to show (from end of buffer)"},
                 {"name": "--follow", "type": "boolean", "required": false, "description": "Stream live output (like tail -f)"},
             ],
@@ -5100,7 +5085,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals kill",
             "description": "Kill a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd worktree's first terminal)"},
             ],
             "notes": "Kills the terminal's PTY process and cleans up the session."
         }),
@@ -5108,7 +5093,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals attach",
             "description": "Attach to a terminal (stream output + send input interactively)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd worktree's first terminal)"},
             ],
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
         }),
@@ -5120,19 +5105,19 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "open",
-            "description": "Open a file in the active Band workspace's editor pane",
+            "description": "Open a file in the active Band worktree's editor pane",
             "parameters": [
                 {"name": "file_path", "type": "string", "required": true, "positional": true, "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'."},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (overrides the dashboard's active workspace)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (overrides the dashboard's active worktree)"},
                 {"name": "--no-focus", "type": "boolean", "required": false, "description": "Don't raise the dashboard window to the foreground after opening"},
             ],
-            "notes": "Opens the file in the dashboard's currently focused workspace. When `--workspace` is omitted, the server uses the workspace most recently focused in the Band dashboard — exits non-zero if no workspace is active. Relative paths are resolved against the current working directory. Paths inside the workspace open as normal editor tabs; paths outside any workspace root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever workspace the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-workspace fallback\nband open src/main.rs --workspace my-app/feat/auth\n\n# An out-of-workspace file opens as an external tab (workspace-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
+            "notes": "Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-worktree fallback\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an external tab (worktree-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
         }),
         serde_json::json!({
             "name": "notify",
             "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
             "parameters": [
-                {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the workspace."},
+                {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree."},
             ],
             "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard (`band notify --agent claude-code`). Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
         }),

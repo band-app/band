@@ -2,7 +2,7 @@
  * Page object for the Cronjobs dialog and its nested New Cronjob dialog.
  *
  * Like `TasksDialog`, it has no route: it opens from the overflow menu in the
- * project-list bottom action bar. `getByRole({ name })` covers the dialogs and
+ * repo-list bottom action bar. `getByRole({ name })` covers the dialogs and
  * the menu item (system-controlled names); owned controls use `cronjobs__*`
  * test IDs set in `CronjobsPageContent.tsx`.
  */
@@ -15,7 +15,7 @@ export class CronjobsDialog {
   readonly cronjobsMenuItem: Locator;
   readonly newCronjobButton: Locator;
   readonly newCronjobDialog: Locator;
-  readonly projectSelect: Locator;
+  readonly repoSelect: Locator;
 
   constructor(
     private readonly page: Page,
@@ -23,11 +23,11 @@ export class CronjobsDialog {
     private readonly token: string,
   ) {
     this.dialog = page.getByRole("dialog", { name: "Cronjobs" });
-    this.overflowTrigger = page.getByTestId("project-list__overflow-trigger");
+    this.overflowTrigger = page.getByTestId("repo-list__overflow-trigger");
     this.cronjobsMenuItem = page.getByRole("menuitem", { name: "Cronjobs" });
     this.newCronjobButton = page.getByTestId("cronjobs__new-button");
     this.newCronjobDialog = page.getByRole("dialog", { name: "New Cronjob" });
-    this.projectSelect = page.getByTestId("cronjobs__project-select");
+    this.repoSelect = page.getByTestId("cronjobs__repo-select");
   }
 
   /** Navigate to the dashboard root with the test token. */
@@ -52,21 +52,21 @@ export class CronjobsDialog {
     });
   }
 
-  /** Open the New Cronjob dialog and expand its project picker. */
-  async openProjectPicker(): Promise<void> {
-    await test.step("Open the New Cronjob project picker", async () => {
+  /** Open the New Cronjob dialog and expand its repo picker. */
+  async openRepoPicker(): Promise<void> {
+    await test.step("Open the New Cronjob repo picker", async () => {
       await this.newCronjobButton.click();
       await expect(this.newCronjobDialog).toBeVisible();
-      await this.projectSelect.click();
+      await this.repoSelect.click();
     });
   }
 
-  /** A project's avatar inside the open project picker. */
-  projectOption(projectName: string): Locator {
-    return this.page.getByRole("option", { name: projectName });
+  /** A repo's avatar inside the open repo picker. */
+  repoOption(repoName: string): Locator {
+    return this.page.getByRole("option", { name: repoName });
   }
 
-  projectAvatar(projectName: string): Locator {
-    return this.projectOption(projectName).getByTestId(`cronjobs__project-avatar--${projectName}`);
+  repoAvatar(repoName: string): Locator {
+    return this.repoOption(repoName).getByTestId(`cronjobs__repo-avatar--${repoName}`);
   }
 }

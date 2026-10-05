@@ -1,10 +1,10 @@
 /**
- * Workspace diff service — branch listing, the Changes view's sections,
- * single-file diffs, and staging / discarding. Lifted out of `api/workspace/router.ts`
+ * Worktree diff service — branch listing, the Changes view's sections,
+ * single-file diffs, and staging / discarding. Lifted out of `api/worktree/router.ts`
  * (issue #535, follow-up 1) so the router contains validation + delegation
  * only.
  *
- * Every git shell-out goes through the workspace's host (`host.git.exec`) —
+ * Every git shell-out goes through the worktree's host (`host.git.exec`) —
  * the service layer never spawns git itself.
  */
 
@@ -17,18 +17,18 @@ import {
   HostTimeoutError,
 } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import {
-  workspaceService as defaultWorkspaceService,
-  type WorkspaceService,
-} from "./workspace-service";
+  worktreeService as defaultWorktreeService,
+  type WorktreeService,
+} from "./worktree-service";
 
 const log = createLogger("diff-service");
 
 /**
  * Args for `git hash-object -t tree /dev/null` — yields the canonical
  * empty-tree SHA at runtime, used as the fallback `mergeBase` when the
- * workspace has no commits yet (`HEAD` doesn't resolve).
+ * worktree has no commits yet (`HEAD` doesn't resolve).
  */
 const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
 
@@ -41,7 +41,7 @@ export interface DiffStats {
 }
 
 export interface DiffContext {
-  /** Resolved compare branch — defaults to project default. */
+  /** Resolved compare branch — defaults to repo default. */
   compareBranch: string;
   /** Current branch name, or `defaultBranch` if HEAD is detached / unborn. */
   headBranch: string;
@@ -193,7 +193,7 @@ export interface ChangesResult {
 /**
  * Resolves the `(headBranch, mergeBase, compareBranch)` triple for
  * `getDiff`. Falls back to the empty
- * tree when the workspace has no commits yet (so brand-new repos don't 500).
+ * tree when the worktree has no commits yet (so brand-new repos don't 500).
  */
 async function resolveDiffContext(
   execGit: CommandRun,
@@ -262,7 +262,7 @@ function parseFileStatuses(nameStatusOutput: string): Record<string, string> {
 }
 
 /**
- * Resolve a workspace-relative file path against a worktree root and
+ * Resolve a worktree-relative file path against a worktree root and
  * reject anything that escapes the root or targets `.git` internals.
  *
  * Today the only producers of `filePath` are `git diff --name-status` /
@@ -576,10 +576,10 @@ async function hasHead(execGit: CommandRun, cwd: string): Promise<boolean> {
 }
 
 export class DiffService {
-  constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
+  constructor(private readonly worktrees: WorktreeService = defaultWorktreeService) {}
 
   /**
-   * Search the workspace's local and remote-tracking branches for the
+   * Search the worktree's local and remote-tracking branches for the
    * Changes view's diff-target picker. Repos can have thousands of
    * branches, so the filter runs here and only the top `limit` matches
    * travel to the client.
@@ -589,15 +589,15 @@ export class DiffService {
    * the matches; ties keep git's order, most recent commit first.
    */
   async listBranches(
-    workspaceId: string,
+    worktreeId: string,
     options: { query?: string; limit?: number } = {},
   ): Promise<ListBranchesResult> {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
 
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
-    const defaultBranch = workspace.project.defaultBranch;
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
+    const defaultBranch = worktree.repo.defaultBranch;
     const limit = options.limit ?? DEFAULT_BRANCH_LIMIT;
     const query = options.query?.trim().toLowerCase() ?? "";
 
@@ -651,24 +651,24 @@ export class DiffService {
 
   /**
    * Compute the full text diff + summary stats + per-file status map for
-   * the workspace, optionally against a non-default compare branch.
+   * the worktree, optionally against a non-default compare branch.
    * Synthesises diff entries for untracked files so the UI sees them next
    * to tracked changes.
    */
   async getDiff(
-    workspaceId: string,
+    worktreeId: string,
     options: {
       contextLines?: number;
       diffMode?: DiffMode;
       compareBranch?: string;
     },
   ): Promise<DiffResult> {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
 
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
-    const defaultBranch = workspace.project.defaultBranch;
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
+    const defaultBranch = worktree.repo.defaultBranch;
     const { compareBranch, headBranch, mergeBase } = await resolveDiffContext(
       execGit,
       cwd,
@@ -701,7 +701,7 @@ export class DiffService {
     // as the parallelised git calls above. Result-ordering preserved by
     // pairing back with the original `untrackedFiles` array.
     const untrackedLines = await Promise.all(
-      untrackedFiles.map((file) => readUntrackedFileLines(workspace.host, cwd, file)),
+      untrackedFiles.map((file) => readUntrackedFileLines(worktree.host, cwd, file)),
     );
 
     for (let i = 0; i < untrackedFiles.length; i++) {
@@ -724,7 +724,7 @@ export class DiffService {
       diff,
       stats,
       // `compareBranch` is the branch we diffed against (the user's pick, or
-      // the project default). `defaultBranch` is the project default. They
+      // the repo default). `defaultBranch` is the repo default. They
       // diverge once a non-default branch is picked.
       compareBranch,
       defaultBranch,
@@ -746,23 +746,23 @@ export class DiffService {
    * Line counts come from `--numstat` per section; untracked files count
    * their lines. Binary files carry no counts.
    *
-   * Short-circuits to empty sections for plain (non-git) projects, and when
+   * Short-circuits to empty sections for plain (non-git) repos, and when
    * the worktree's `.git` is missing on disk regardless of the recorded
    * kind — the kind field can lag reality (see #427), and running git there
    * would surface as a raw error in the Changes view.
    */
   async getChanges(
-    workspaceId: string,
+    worktreeId: string,
     options: { compareBranch?: string } = {},
   ): Promise<ChangesResult> {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
 
-    const defaultBranch = workspace.project.defaultBranch;
+    const defaultBranch = worktree.repo.defaultBranch;
     const compareBranch = options.compareBranch ?? defaultBranch;
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
-    const hasGit = await workspace.host.fs.stat(join(cwd, ".git")).then(
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
+    const hasGit = await worktree.host.fs.stat(join(cwd, ".git")).then(
       () => true,
       (err) => {
         // An unreachable worker is not a missing repository.
@@ -770,7 +770,7 @@ export class DiffService {
         return false;
       },
     );
-    if (workspace.project.kind === "plain" || !hasGit) {
+    if (worktree.repo.kind === "plain" || !hasGit) {
       return {
         headBranch: defaultBranch,
         defaultBranch,
@@ -810,7 +810,7 @@ export class DiffService {
     applyLineCounts(status.staged, parseNumstat(stagedNumstat));
     await Promise.all(
       status.untracked.map(async (entry) => {
-        const lines = await countUntrackedLines(workspace.host, join(cwd, entry.path));
+        const lines = await countUntrackedLines(worktree.host, join(cwd, entry.path));
         if (lines !== null) {
           entry.additions = lines;
           entry.deletions = 0;
@@ -843,7 +843,7 @@ export class DiffService {
    *     `getChanges` returned, so the diff matches the list it came from.
    */
   async getFileDiff(
-    workspaceId: string,
+    worktreeId: string,
     options: {
       filePath: string;
       section: ChangeSection;
@@ -852,11 +852,11 @@ export class DiffService {
       contextLines?: number;
     },
   ): Promise<{ diff: string }> {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
 
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
     // Enforce path-traversal + .git guard at the public entry — git's
     // own output is repo-internal by definition, but the caller hands
     // us this string and we don't trust it.
@@ -864,7 +864,7 @@ export class DiffService {
     if (options.oldPath) assertWorktreeRelative(cwd, options.oldPath);
 
     if (options.section === "untracked") {
-      const lines = await readUntrackedFileLines(workspace.host, cwd, options.filePath);
+      const lines = await readUntrackedFileLines(worktree.host, cwd, options.filePath);
       if (lines === null) return { diff: "" };
       return { diff: synthesizeAddedFileDiff(options.filePath, lines) };
     }
@@ -894,15 +894,15 @@ export class DiffService {
 
   /** `git add` the paths — stage all of an unstaged/untracked/conflicted
    *  file's changes (for a conflict this marks it resolved). */
-  async stageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
-    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
+  async stageFiles(worktreeId: string, paths: string[]): Promise<{ ok: true }> {
+    const { cwd, execGit } = this.worktreeFor(worktreeId, paths);
     await execGitOnPaths(execGit, ["add", "-A"], paths, cwd);
     return { ok: true };
   }
 
   /** Move the paths' staged changes back to the working tree. */
-  async unstageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
-    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
+  async unstageFiles(worktreeId: string, paths: string[]): Promise<{ ok: true }> {
+    const { cwd, execGit } = this.worktreeFor(worktreeId, paths);
     if (await hasHead(execGit, cwd)) {
       await execGitOnPaths(execGit, ["restore", "--staged"], paths, cwd);
     } else {
@@ -923,11 +923,11 @@ export class DiffService {
    *   - `untracked`: delete the files.
    */
   async discardChanges(
-    workspaceId: string,
+    worktreeId: string,
     options: { paths: string[]; section: "unstaged" | "staged" | "untracked" },
   ): Promise<{ ok: true }> {
     const { paths, section } = options;
-    const { cwd, execGit, host } = this.worktreeFor(workspaceId, paths);
+    const { cwd, execGit, host } = this.worktreeFor(worktreeId, paths);
     switch (section) {
       case "unstaged":
         await execGitOnPaths(execGit, ["restore", "--worktree"], paths, cwd);
@@ -978,16 +978,16 @@ export class DiffService {
     return { ok: true };
   }
 
-  /** Resolve the workspace's worktree and check every path stays inside it. */
+  /** Resolve the worktree's worktree and check every path stays inside it. */
   private worktreeFor(
-    workspaceId: string,
+    worktreeId: string,
     paths: string[],
   ): { cwd: string; execGit: CommandRun; host: Host } {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
-    const cwd = workspace.worktree.path;
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) throw new WorktreeNotFoundError(worktreeId);
+    const cwd = worktree.worktree.path;
     for (const p of paths) assertWorktreeRelative(cwd, p);
-    return { cwd, execGit: gitRunner(workspace.host), host: workspace.host };
+    return { cwd, execGit: gitRunner(worktree.host), host: worktree.host };
   }
 }
 

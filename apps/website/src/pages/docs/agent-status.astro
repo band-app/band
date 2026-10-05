@@ -4,14 +4,14 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 <DocsLayout title="Agent Status Monitoring — Band Docs">
   <h1>Agent Status Monitoring</h1>
   <p>
-    Band continuously monitors the status of coding agents running in your workspaces. Agent
-    status is displayed as a colored indicator dot on each workspace card, giving you an
-    at-a-glance view of what every agent is doing across all your projects.
+    Band continuously monitors the status of coding agents running in your worktrees. Agent
+    status is displayed as a colored indicator dot on each worktree card, giving you an
+    at-a-glance view of what every agent is doing across all your repos.
   </p>
 
   <h2>Status Types</h2>
   <p>
-    Each workspace's coding agent can be in one of these states:
+    Each worktree's coding agent can be in one of these states:
   </p>
   <ul>
     <li>
@@ -35,7 +35,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <figure class="my-6 mx-auto max-w-sm overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-agent-working.png"
-      alt="A workspace row labelled main with a pulsing dot indicator showing the agent is currently working."
+      alt="A worktree row labelled main with a pulsing dot indicator showing the agent is currently working."
       width="252"
       height="44"
       loading="lazy"
@@ -50,7 +50,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <figure class="my-6 mx-auto max-w-sm overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-agent-needs-attention.png"
-      alt="A workspace row labelled main with a static dot indicator showing the agent needs attention."
+      alt="A worktree row labelled main with a static dot indicator showing the agent needs attention."
       width="256"
       height="40"
       loading="lazy"
@@ -75,7 +75,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     The <code>band notify</code> command is agent-agnostic: it simply forwards the raw hook
     payload (plus the working directory) to the Band server. The server resolves which
-    workspace the directory belongs to, then dispatches to that workspace's coding-agent
+    worktree the directory belongs to, then dispatches to that worktree's coding-agent
     adapter to translate the payload into a status — so the event→status mapping lives next
     to each agent's logic and adding a new agent never requires changing the CLI. The
     resulting status change is broadcast to the dashboard in real-time via server-sent
@@ -100,8 +100,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     Agent status is displayed in two locations:
   </p>
   <ul>
-    <li><strong>Workspace list</strong> &mdash; A small colored dot appears next to the branch name in the project list. This is always visible and provides a quick summary.</li>
-    <li><strong>Workspace detail view</strong> &mdash; When viewing a workspace in the web interface, the status is shown alongside other workspace metadata.</li>
+    <li><strong>Worktree list</strong> &mdash; A small colored dot appears next to the branch name in the repo list. This is always visible and provides a quick summary.</li>
+    <li><strong>Worktree detail view</strong> &mdash; When viewing a worktree in the web interface, the status is shown alongside other worktree metadata.</li>
   </ul>
 
   <h2>Notification Sounds</h2>

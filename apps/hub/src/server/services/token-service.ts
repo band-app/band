@@ -68,13 +68,13 @@ export interface HostView {
   info: HostRow["info"];
   /** Coding agents the worker can launch, from its hello. Empty before it has connected. */
   agents: string[];
-  /** Directories the worker serves workspaces from. */
+  /** Directories the worker serves worktrees from. */
   roots: string[];
   /** What the worker can do: `git`, `gh`, `pty`, `acp` and so on. */
   capabilities: string[];
   /** The worker's home directory, or null when it has not said. */
   home: string | null;
-  /** Toolchain versions on the host (`node`, `python`, `go`, ...), checked against a project's `requires`. Empty before the worker has connected. */
+  /** Toolchain versions on the host (`node`, `python`, `go`, ...), checked against a repo's `requires`. Empty before the worker has connected. */
   tools: Record<string, string>;
   /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
   usable: boolean;
@@ -83,7 +83,7 @@ export interface HostView {
 /** Why `removeHost` refused. */
 export class HostRemoveError extends Error {
   constructor(
-    readonly reason: "not-found" | "local" | "online" | "has-workspaces",
+    readonly reason: "not-found" | "local" | "online" | "has-worktrees",
     message: string,
   ) {
     super(message);
@@ -412,7 +412,7 @@ export class TokenService {
   }
 
   /**
-   * Removes a worker host: only an offline one with no workspaces. Revokes its
+   * Removes a worker host: only an offline one with no worktrees. Revokes its
    * live tokens first (which cuts any link still open), then deletes the row.
    * Returns the removed host's id.
    */
@@ -426,11 +426,11 @@ export class TokenService {
         `Host "${host.name}" is ${host.status}. Stop its worker and wait until it is offline before removing it.`,
       );
     }
-    const workspaces = this.queries.countWorkspacesOnHost(id);
-    if (workspaces > 0) {
+    const worktrees = this.queries.countWorktreesOnHost(id);
+    if (worktrees > 0) {
       throw new HostRemoveError(
-        "has-workspaces",
-        `Host "${host.name}" still has ${workspaces} workspace${workspaces === 1 ? "" : "s"}. Remove them first.`,
+        "has-worktrees",
+        `Host "${host.name}" still has ${worktrees} worktree${worktrees === 1 ? "" : "s"}. Remove them first.`,
       );
     }
     this.revokeHostTokens(id);

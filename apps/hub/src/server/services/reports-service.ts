@@ -31,9 +31,9 @@ export interface ReportsSummary {
   /** Exactly one row with `bucket = "total"`. */
   total: AggregateRow;
   byModel: AggregateRow[];
-  byProject: AggregateRow[];
+  byRepo: AggregateRow[];
   byAgent: AggregateRow[];
-  byWorkspace: AggregateRow[];
+  byWorktree: AggregateRow[];
   /** Trend series — one row per time bucket whose size is
    *  `bucketSize`. Each row's `bucket` is a YYYY-MM-DD string the
    *  client can `Date.parse(...)` to position on a numeric X-axis. */
@@ -136,9 +136,9 @@ export class ReportsService {
       bucketSize,
       total,
       byModel: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "model" }),
-      byProject: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "project" }),
+      byRepo: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "repo" }),
       byAgent: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "codingAgentId" }),
-      byWorkspace: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "workspaceId" }),
+      byWorktree: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: "worktreeId" }),
       byBucket: this.usageEventQueries.aggregate({ fromMs, toMs, groupBy: bucketSize }),
     };
   }

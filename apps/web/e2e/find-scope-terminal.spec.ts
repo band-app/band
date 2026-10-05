@@ -20,7 +20,7 @@
  *
  * Architecture (repo integration doctrine): boots the real production server
  * against a fresh tmp home + a real git worktree, drives a real Chromium via a
- * `WorkspacePage` page object (no tRPC mocking, no `page.route()` on own
+ * `WorktreePage` page object (no tRPC mocking, no `page.route()` on own
  * routes, no direct `page.getByTestId` in the test body).
  *
  * The file editor is the surface asserted here; the changes/diff leaf shares
@@ -31,7 +31,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -41,13 +41,13 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-find-scope-terminal-token";
-const PROJECT = "find-scope-repo";
+const REPO = "find-scope-repo";
 const BRANCH = "main";
 const FILE = "app.ts";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 // Wide viewport so `useIsDesktop()` reports true and the shared center dockview
 // (with its per-leaf find + terminal) renders — matches >= 1024px.
@@ -58,10 +58,10 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
 
-  // A real worktree with a committed file — `workspace.getFile` reads the file
+  // A real worktree with a committed file — `worktree.getFile` reads the file
   // off disk when the `file` leaf opens.
   git(repoPath, ["init", "-b", BRANCH]);
   writeFileSync(join(repoPath, FILE), "const needle = 1;\n// needle again\n");
@@ -69,9 +69,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial"]);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -88,9 +88,9 @@ test.afterAll(async () => {
 });
 
 test("Cmd+F opens the find bar for the focused surface, not another leaf", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // Open a file into a center `file` leaf. The default layout is a single
   // terminal, so the file opens as a tab in the terminal's group: file and
@@ -101,20 +101,20 @@ test("Cmd+F opens the find bar for the focused surface, not another leaf", async
   // handler ignored focus and fired for every mounted leaf — the bug fixed by
   // `use-search`'s `registerGlobalFindKey` opt-out + the terminal-focus guard in
   // `SharedDockviewLayout`.)
-  await workspacePage.openFileLeaf(FILE, WORKSPACE);
+  await worktreePage.openFileLeaf(FILE, WORKTREE);
 
   // Focus the terminal → Cmd+F opens the TERMINAL's own find bar, and never the
   // file/preview bar. `handleOpenSearch` renders a frame later, so poll for the
   // wrong (file) bar's ARRIVAL within a bounded window and assert it never came,
   // rather than a bare t=0 `toHaveCount(0)` that could pass trivially.
-  await workspacePage.focusTerminal();
-  await workspacePage.pressFindShortcut();
-  await expect(workspacePage.findInTerminalBar).toHaveCount(1);
-  await expect(workspacePage.findInTerminalBar).toBeFocused();
+  await worktreePage.focusTerminal();
+  await worktreePage.pressFindShortcut();
+  await expect(worktreePage.findInTerminalBar).toHaveCount(1);
+  await expect(worktreePage.findInTerminalBar).toBeFocused();
   let leakedToFile = false;
   try {
     await expect
-      .poll(async () => workspacePage.findInFileOrPreviewBar.count(), { timeout: 1500 })
+      .poll(async () => worktreePage.findInFileOrPreviewBar.count(), { timeout: 1500 })
       .toBeGreaterThan(0);
     leakedToFile = true;
   } catch {
@@ -126,15 +126,15 @@ test("Cmd+F opens the find bar for the focused surface, not another leaf", async
   // final `toHaveCount(0)` below proves the FILE's Cmd+F didn't open it.
   // Terminal leaves use `renderer: "always"`, so a bar left open here would stay
   // in the DOM (hidden) after switching tabs and make that assertion meaningless.
-  await workspacePage.pressEscape();
-  await expect(workspacePage.findInTerminalBar).toHaveCount(0);
+  await worktreePage.pressEscape();
+  await expect(worktreePage.findInTerminalBar).toHaveCount(0);
 
   // Symmetric positive control: activate + focus the file editor → Cmd+F opens
   // its find bar (not the terminal's), proving the scoping holds both ways and
   // the negative above is a real guard rather than a dead keybind.
-  await workspacePage.focusFileEditor(FILE);
-  await workspacePage.pressFindShortcut();
-  await expect(workspacePage.findInFileOrPreviewBar).toHaveCount(1);
-  await expect(workspacePage.findInFileOrPreviewBar).toBeFocused();
-  await expect(workspacePage.findInTerminalBar).toHaveCount(0);
+  await worktreePage.focusFileEditor(FILE);
+  await worktreePage.pressFindShortcut();
+  await expect(worktreePage.findInFileOrPreviewBar).toHaveCount(1);
+  await expect(worktreePage.findInFileOrPreviewBar).toBeFocused();
+  await expect(worktreePage.findInTerminalBar).toHaveCount(0);
 });

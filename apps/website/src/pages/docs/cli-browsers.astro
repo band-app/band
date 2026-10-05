@@ -6,17 +6,17 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The <code>band browsers</code> command group manages browser tabs attached to a
-    workspace. Each tab is rendered by the desktop app's embedded browser view; the CLI
+    worktree. Each tab is rendered by the desktop app's embedded browser view; the CLI
     can create, navigate, inspect, and remove them. Useful for previewing dev servers
     next to the chat pane or auto-positioning docs alongside the editor.
   </p>
 
-  <h2>Default workspace and browser resolution</h2>
+  <h2>Default worktree and browser resolution</h2>
 
   <p>
-    Every <code>band browsers</code> subcommand auto-detects the workspace from the
-    current working directory when <code>[workspace_id]</code> is omitted, and resolves
-    to the workspace's first browser tab when <code>[browser_id]</code> is omitted.
+    Every <code>band browsers</code> subcommand auto-detects the worktree from the
+    current working directory when <code>[worktree_id]</code> is omitted, and resolves
+    to the worktree's first browser tab when <code>[browser_id]</code> is omitted.
   </p>
 
   <h2>List browser tabs</h2>
@@ -31,7 +31,7 @@ band browsers create --url https://example.com --name "docs"</code></pre>
 
   <p>Options:</p>
   <ul>
-    <li><code>workspace_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
+    <li><code>worktree_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
     <li><code>--url &lt;url&gt;</code> — initial URL.</li>
     <li><code>--name &lt;label&gt;</code> — display name for the tab.</li>
   </ul>
@@ -45,7 +45,7 @@ band browsers navigate b_abc --url https://example.com/changelog</code></pre>
 
   <h2>Get the current state</h2>
 
-  <pre><code>band browsers get                # cwd workspace's first browser tab
+  <pre><code>band browsers get                # cwd worktree's first browser tab
 band browsers get b_abc          # specific tab</code></pre>
 
   <h2>Remove a tab</h2>

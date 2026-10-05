@@ -7,7 +7,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     Band is distributed as a macOS desktop application. The app bundles both the dashboard UI
-    and the web server that manages your projects, workspaces, and chat panes.
+    and the web server that manages your repos, worktrees, and chat panes.
   </p>
 
   <h2>System requirements</h2>
@@ -79,7 +79,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>The Band CLI</h2>
 
   <p>
-    Band includes a command-line interface that lets you manage projects, workspaces, chat panes,
+    Band includes a command-line interface that lets you manage repos, worktrees, chat panes,
     terminals, browser tabs, and cronjobs from your terminal. The CLI binary is bundled with the
     desktop app and communicates with the web server over HTTP.
   </p>
@@ -88,7 +88,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     After installing Band, you can verify the CLI is working by running:
   </p>
 
-  <pre><code>band projects list</code></pre>
+  <pre><code>band repos list</code></pre>
 
   <p>
     If <code>band</code> is not on your <code>PATH</code>, open <strong>Settings &rarr; About</strong>
@@ -112,6 +112,6 @@ curl "http://localhost:3456/api/health?token=$TOKEN"
 
   <p>
     Now that Band is installed, head to
-    <a href="/docs/first-project">Adding your first project</a> to register a git repository.
+    <a href="/docs/first-repo">Adding your first repo</a> to register a git repository.
   </p>
 </DocsLayout>

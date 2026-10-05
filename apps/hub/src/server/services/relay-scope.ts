@@ -3,14 +3,14 @@
  *
  * The worker forwards calls from processes it started, so the hub treats each
  * one as coming from that worker and allows only the agent surface the `band`
- * CLI, the MCP endpoint and the hooks use. A call must name a workspace on the
- * worker's own host (a workspace id, a chat of one, or a working directory in
- * one), so an agent on one machine cannot reach another machine's workspaces.
+ * CLI, the MCP endpoint and the hooks use. A call must name a worktree on the
+ * worker's own host (a worktree id, a chat of one, or a working directory in
+ * one), so an agent on one machine cannot reach another machine's worktrees.
  */
 
 import path from "node:path";
 import type { RelayHttpRequest } from "@band-app/link";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 
 /**
  * The tRPC procedures an agent may call, by exact name. A procedure missing
@@ -57,7 +57,7 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "editor.openFile",
   "statuses.notify",
   "statuses.clearNeedsAttention",
-  "projects.list",
+  "repos.list",
   "cronjobs.list",
   "cronjobs.create",
   "cronjobs.update",
@@ -65,20 +65,20 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "cronjobs.trigger",
   "subscriptions.remove",
   "terminal.stream",
-  "workspaces.create",
-  "workspaces.remove",
+  "worktrees.create",
+  "worktrees.remove",
 ]);
 
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
-const UNBATCHABLE = new Set(["projects.list", "workspaces.create"]);
+const UNBATCHABLE = new Set(["repos.list", "worktrees.create"]);
 
 /**
- * `workspaces.create` from a worker makes the workspace on that worker. The
+ * `worktrees.create` from a worker makes the worktree on that worker. The
  * check refuses another `hostId`, and this puts the caller's own into the body
  * the hub sees, so a call that names no host cannot land on the hub's machine.
  */
-export function pinWorkspaceHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
-  if (request.method !== "POST" || request.path.split("?")[0] !== "/trpc/workspaces.create") {
+export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
+  if (request.method !== "POST" || request.path.split("?")[0] !== "/trpc/worktrees.create") {
     return request;
   }
   const parsed = parseJson(bodyText(request.body));
@@ -91,16 +91,16 @@ export function pinWorkspaceHost(request: RelayHttpRequest, workerId: string): R
 }
 
 /**
- * Procedures that take the workspace from the caller's headers, which the hub
- * sets from the token's scope. `projects.list` names nothing, and the relay
- * service cuts its answer down to the worker's own workspaces
+ * Procedures that take the worktree from the caller's headers, which the hub
+ * sets from the token's scope. `repos.list` names nothing, and the relay
+ * service cuts its answer down to the worker's own worktrees
  * (`filterRelayReply`).
  */
-const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "projects.list"]);
+const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "repos.list"]);
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
 
-/** The cronjob key is a workspace id for a workspace-scoped job and a project name for a project-scoped one. */
+/** The cronjob key is a worktree id for a worktree-scoped job and a repo name for a repo-scoped one. */
 const CRONJOB_KEY_PROCEDURES = new Set([
   "cronjobs.create",
   "cronjobs.update",
@@ -129,40 +129,40 @@ export function trpcRefusalBody(status: number, message: string, batch: boolean)
   return batch ? [{ error }] : { error };
 }
 
-/** Keeps only the worktrees on `workerId` in a `projects.list` answer, and the projects that have any. */
-export function filterProjectsReply(data: unknown, workerId: string): unknown {
+/** Keeps only the worktrees on `workerId` in a `repos.list` answer, and the repos that have any. */
+export function filterReposReply(data: unknown, workerId: string): unknown {
   if (data === null || typeof data !== "object") return data;
-  const result = (data as { result?: { data?: { projects?: unknown } } }).result;
-  const projects = result?.data?.projects;
-  if (!Array.isArray(projects)) return data;
-  const kept = projects
-    .map((project) => {
-      const worktrees = Array.isArray(project?.worktrees) ? project.worktrees : [];
+  const result = (data as { result?: { data?: { repos?: unknown } } }).result;
+  const repos = result?.data?.repos;
+  if (!Array.isArray(repos)) return data;
+  const kept = repos
+    .map((repo) => {
+      const worktrees = Array.isArray(repo?.worktrees) ? repo.worktrees : [];
       return {
-        ...project,
+        ...repo,
         worktrees: worktrees.filter((w: { hostId?: string }) => w.hostId === workerId),
       };
     })
-    .filter((project) => project.worktrees.length > 0);
-  return { ...data, result: { ...result, data: { ...result?.data, projects: kept } } };
+    .filter((repo) => repo.worktrees.length > 0);
+  return { ...data, result: { ...result, data: { ...result?.data, repos: kept } } };
 }
 
 const CHAT_ROUTE = /^\/api\/chats\/([^/]+)\/(events|history|messages)$/;
 const MAX_DEPTH = 8;
 
 export interface ScopeLookups {
-  /** The host a workspace lives on, or null when there is no such workspace. */
-  hostOfWorkspace(workspaceId: string): string | null;
-  /** The workspace a chat belongs to, or null when the chat does not exist. */
-  workspaceOfChat(chatId: string): string | null;
-  /** The workspace whose worktree contains `cwd`, or null. */
-  workspaceOfCwd(cwd: string): string | null;
+  /** The host a worktree lives on, or null when there is no such worktree. */
+  hostOfWorktree(worktreeId: string): string | null;
+  /** The worktree a chat belongs to, or null when the chat does not exist. */
+  worktreeOfChat(chatId: string): string | null;
+  /** The worktree whose worktree contains `cwd`, or null. */
+  worktreeOfCwd(cwd: string): string | null;
   /** The host a terminal runs on, or null when there is no such terminal. */
   hostOfTerminal(terminalId: string): string | null;
-  /** The workspace a browser tab belongs to, or null when there is no such tab. */
-  workspaceOfBrowser(browserId: string): string | null;
-  /** The workspace a subscription belongs to, or null when there is no such subscription. */
-  workspaceOfSubscription(subscriptionId: string): string | null;
+  /** The worktree a browser tab belongs to, or null when there is no such tab. */
+  worktreeOfBrowser(browserId: string): string | null;
+  /** The worktree a subscription belongs to, or null when there is no such subscription. */
+  worktreeOfSubscription(subscriptionId: string): string | null;
 }
 
 export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
@@ -170,7 +170,7 @@ export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: s
 const deny = (status: number, reason: string): RelayVerdict => ({ ok: false, status, reason });
 
 interface Named {
-  workspaces: string[];
+  worktrees: string[];
   chats: string[];
   cwds: string[];
   terminals: string[];
@@ -179,11 +179,11 @@ interface Named {
   unscoped: boolean;
 }
 
-/** Keys that pick a target on their own. An unchecked one next to a valid workspaceId would slip past the scope check. */
+/** Keys that pick a target on their own. An unchecked one next to a valid worktreeId would slip past the scope check. */
 const UNSCOPED_KEYS = new Set([
   "taskId",
   "hostId",
-  "hostProjectPath",
+  "hostRepoPath",
   "worktreePath",
   "key",
   "profileId",
@@ -197,20 +197,20 @@ function collect(value: unknown, into: Named, depth = 0): void {
   }
   const record = value as Record<string, unknown>;
   if (depth === 0) {
-    const { project, name } = record;
-    if (typeof project === "string" && typeof name === "string") {
-      into.workspaces.push(toWorkspaceId(project, name));
-    } else if (project !== undefined) {
+    const { repo, name } = record;
+    if (typeof repo === "string" && typeof name === "string") {
+      into.worktrees.push(toWorktreeId(repo, name));
+    } else if (repo !== undefined) {
       into.unscoped = true;
     }
-    // A `name` with no `project` is a display name (a chat or a job), not a workspace.
+    // A `name` with no `repo` is a display name (a chat or a job), not a worktree.
   }
   for (const [key, v] of Object.entries(record)) {
     if (depth === 0 && UNSCOPED_KEYS.has(key)) into.unscoped = true;
     if (typeof v === "string") {
       if (key === "terminalId") into.terminals.push(v);
       else if (key === "browserId") into.browsers.push(v);
-      else if (key === "workspaceId") into.workspaces.push(v);
+      else if (key === "worktreeId") into.worktrees.push(v);
       else if (key === "chatId") into.chats.push(v);
       else if (key === "cwd") into.cwds.push(v);
     } else {
@@ -228,7 +228,7 @@ function checkNamed(
   named?: number;
 } {
   const named: Named = {
-    workspaces: [],
+    worktrees: [],
     chats: [],
     cwds: [],
     terminals: [],
@@ -236,30 +236,30 @@ function checkNamed(
     unscoped: false,
   };
   collect(input, named);
-  const outside = deny(403, "That workspace is not on this host");
+  const outside = deny(403, "That worktree is not on this host");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
-  for (const id of named.workspaces) {
-    if (lookups.hostOfWorkspace(id) !== workerId) return outside;
+  for (const id of named.worktrees) {
+    if (lookups.hostOfWorktree(id) !== workerId) return outside;
   }
   for (const id of named.chats) {
-    const workspace = lookups.workspaceOfChat(id);
-    if (workspace === null || lookups.hostOfWorkspace(workspace) !== workerId) return outside;
+    const worktree = lookups.worktreeOfChat(id);
+    if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const cwd of named.cwds) {
-    const workspace = lookups.workspaceOfCwd(path.resolve(cwd));
-    if (workspace === null || lookups.hostOfWorkspace(workspace) !== workerId) return outside;
+    const worktree = lookups.worktreeOfCwd(path.resolve(cwd));
+    if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const id of named.terminals) {
     if (lookups.hostOfTerminal(id) !== workerId) return outside;
   }
   for (const id of named.browsers) {
-    const workspace = lookups.workspaceOfBrowser(id);
-    if (workspace === null || lookups.hostOfWorkspace(workspace) !== workerId) return outside;
+    const worktree = lookups.worktreeOfBrowser(id);
+    if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   return {
     ok: true,
     named:
-      named.workspaces.length +
+      named.worktrees.length +
       named.chats.length +
       named.cwds.length +
       named.terminals.length +
@@ -269,18 +269,18 @@ function checkNamed(
 
 /**
  * `chats.create` and `browsers.create` let the caller pick the new id. An id
- * that already exists must belong to the workspace the call names, so an agent
- * cannot take over or collide with another workspace's chat or tab.
+ * that already exists must belong to the worktree the call names, so an agent
+ * cannot take over or collide with another worktree's chat or tab.
  */
 function checkChosenId(procedure: string, input: unknown, lookups: ScopeLookups): RelayVerdict {
   if (procedure !== "chats.create" && procedure !== "browsers.create") return { ok: true };
-  const { id, workspaceId } = (input ?? {}) as { id?: unknown; workspaceId?: unknown };
+  const { id, worktreeId } = (input ?? {}) as { id?: unknown; worktreeId?: unknown };
   if (id === undefined) return { ok: true };
   if (typeof id !== "string") return deny(400, "id must be a string");
   const owner =
-    procedure === "chats.create" ? lookups.workspaceOfChat(id) : lookups.workspaceOfBrowser(id);
-  if (owner !== null && owner !== workspaceId) {
-    return deny(403, "That id belongs to another workspace");
+    procedure === "chats.create" ? lookups.worktreeOfChat(id) : lookups.worktreeOfBrowser(id);
+  if (owner !== null && owner !== worktreeId) {
+    return deny(403, "That id belongs to another worktree");
   }
   return { ok: true };
 }
@@ -297,29 +297,29 @@ function checkCall(
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
     if (typeof key !== "string") return deny(400, `${procedure} needs a key`);
-    if (procedure === "cronjobs.create" && rest.scope !== "workspace") {
-      return deny(403, `${procedure} is available to agents for workspace-scoped jobs only`);
+    if (procedure === "cronjobs.create" && rest.scope !== "worktree") {
+      return deny(403, `${procedure} is available to agents for worktree-scoped jobs only`);
     }
-    named = { ...rest, workspaceId: key };
-    if (typeof rest.workspaceId === "string" && rest.workspaceId !== key) {
-      return deny(403, `${procedure} names two different workspaces`);
+    named = { ...rest, worktreeId: key };
+    if (typeof rest.worktreeId === "string" && rest.worktreeId !== key) {
+      return deny(403, `${procedure} names two different worktrees`);
     }
   }
-  if (procedure === "workspaces.create") {
-    const { project, branch, hostId } = (input ?? {}) as Record<string, unknown>;
-    if (typeof project !== "string" || typeof branch !== "string") {
-      return deny(400, `${procedure} needs a project and a branch`);
+  if (procedure === "worktrees.create") {
+    const { repo, branch, hostId } = (input ?? {}) as Record<string, unknown>;
+    if (typeof repo !== "string" || typeof branch !== "string") {
+      return deny(400, `${procedure} needs a repo and a branch`);
     }
     if (hostId !== undefined && hostId !== workerId) {
-      return deny(403, `${procedure}: A workspace made from a worker is created on that worker`);
+      return deny(403, `${procedure}: A worktree made from a worker is created on that worker`);
     }
     return { ok: true };
   }
   if (procedure === "subscriptions.remove") {
     const { id } = (input ?? {}) as { id?: unknown };
     if (typeof id !== "string") return deny(400, `${procedure} needs an id`);
-    const owner = lookups.workspaceOfSubscription(id);
-    if (owner === null || lookups.hostOfWorkspace(owner) !== workerId) {
+    const owner = lookups.worktreeOfSubscription(id);
+    if (owner === null || lookups.hostOfWorktree(owner) !== workerId) {
       return deny(403, `${procedure}: That subscription is not on this host`);
     }
     return { ok: true };
@@ -327,7 +327,7 @@ function checkCall(
   const verdict = checkNamed(named, workerId, lookups);
   if (!verdict.ok) return deny(verdict.status, `${procedure}: ${verdict.reason}`);
   if (verdict.named === 0 && !SCOPE_FROM_HEADERS.has(procedure)) {
-    return deny(403, `${procedure} must name a workspace on this host`);
+    return deny(403, `${procedure} must name a worktree on this host`);
   }
   const chosen = checkChosenId(procedure, input, lookups);
   return chosen.ok ? chosen : deny(chosen.status, `${procedure}: ${chosen.reason}`);
@@ -408,8 +408,8 @@ function checkChatRoute(
 ): RelayVerdict {
   const body = request.method === "POST" ? parseJson(bodyText(request.body)) : null;
   if (body && !body.ok) return deny(400, "The body is not JSON");
-  const workspace = lookups.workspaceOfChat(chatId);
-  if (workspace === null) return deny(404, "No such chat");
+  const worktree = lookups.worktreeOfChat(chatId);
+  if (worktree === null) return deny(404, "No such chat");
   return checkNamed({ chatId, ...(body?.ok ? { body: body.value } : {}) }, workerId, lookups);
 }
 
@@ -420,13 +420,13 @@ export function checkRelayRequest(
   lookups: ScopeLookups,
 ): RelayVerdict {
   const scope = checkNamed(
-    { workspaceId: request.scope.workspaceId, chatId: request.scope.chatId },
+    { worktreeId: request.scope.worktreeId, chatId: request.scope.chatId },
     workerId,
     lookups,
   );
   if (!scope.ok) return scope;
-  if (lookups.hostOfWorkspace(request.scope.workspaceId) !== workerId) {
-    return deny(403, "That workspace is not on this host");
+  if (lookups.hostOfWorktree(request.scope.worktreeId) !== workerId) {
+    return deny(403, "That worktree is not on this host");
   }
 
   let url: URL;
@@ -439,7 +439,7 @@ export function checkRelayRequest(
   if (pathname === "/api/health" && request.method === "GET") return { ok: true };
   if (pathname === "/mcp") return checkMcp(request, workerId, lookups);
   // The MCP proxy checks its own per-session token, so the relay only has to
-  // let the call through. The workspace was checked above.
+  // let the call through. The worktree was checked above.
   if (MCP_PROXY_ROUTE.test(pathname)) return { ok: true };
   if (request.path.startsWith("/mcp-proxy/")) return deny(403, "Not an MCP proxy route");
   if (pathname.startsWith("/trpc/")) {

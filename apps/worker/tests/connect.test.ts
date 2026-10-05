@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { HostInfo } from "@band-app/host-api";
+import { PROTOCOL_VERSION } from "@band-app/link";
 import { call, cleanup, startHub, startWorker, type TestHub, type TestWorker } from "./helpers.ts";
 
 // S1: the worker dials a real link server, says hello with what it has, and gets ready.
@@ -20,7 +21,7 @@ describe("handshake", () => {
 
   it("sends a hello with its roots, agents, capabilities and labels", () => {
     const { hello } = w.session;
-    assert.equal(hello.protocol, 1);
+    assert.equal(hello.protocol, PROTOCOL_VERSION);
     assert.equal(hello.mode, "attached");
     assert.equal(hello.workerId, w.worker.workerId);
     assert.match(hello.workerId, /^w-[0-9a-f]{12}$/);

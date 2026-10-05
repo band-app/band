@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { HostRegistry, hostRegistry } from "../src/server/infra/host/registry";
 import { loadState, saveState } from "../src/server/services/state";
-import { workspaceService } from "../src/server/services/workspace-service";
+import { worktreeService } from "../src/server/services/worktree-service";
 
 // Uses a real SQLite DB in a temp BAND_HOME, as `sync-service.test.ts` does.
 describe("host registry", () => {
@@ -26,15 +26,15 @@ describe("host registry", () => {
     if (tmp) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("puts every workspace and project on the local host", () => {
+  it("puts every worktree and repo on the local host", () => {
     expect(hostRegistry.local.id).toBe("local");
-    expect(hostRegistry.hostFor("any-workspace")).toBe(hostRegistry.local);
-    expect(hostRegistry.hostForProject("any-project")).toBe(hostRegistry.local);
+    expect(hostRegistry.hostFor("any-worktree")).toBe(hostRegistry.local);
+    expect(hostRegistry.hostForRepo("any-repo")).toBe(hostRegistry.local);
   });
 
-  it("returns the host from workspaceService.resolve", () => {
+  it("returns the host from worktreeService.resolve", () => {
     saveState({
-      projects: [
+      repos: [
         {
           name: "proj",
           path: join(tmp, "proj"),
@@ -48,17 +48,17 @@ describe("host registry", () => {
     });
 
     for (const worktree of ["main", "feat"]) {
-      const resolved = workspaceService.resolve(`proj-${worktree}`);
+      const resolved = worktreeService.resolve(`proj-${worktree}`);
       expect(resolved).not.toBeNull();
       expect(resolved?.host).toBe(hostRegistry.local);
       expect(resolved?.worktree.name).toBe(worktree);
     }
-    expect(workspaceService.resolve("proj-missing")).toBeNull();
+    expect(worktreeService.resolve("proj-missing")).toBeNull();
   });
 
-  it("resolves a workspace through its stored host_id", () => {
+  it("resolves a worktree through its stored host_id", () => {
     saveState({
-      projects: [
+      repos: [
         {
           name: "proj",
           path: join(tmp, "proj"),

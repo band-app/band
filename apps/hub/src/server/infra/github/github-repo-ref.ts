@@ -1,7 +1,7 @@
 import type { RepoInfo } from "@band-app/host-local/git/git-client";
 
 /**
- * GitHub coordinates of a project's `origin`, normalised for avatar
+ * GitHub coordinates of a repo's `origin`, normalised for avatar
  * lookups. `host` is lower-cased; `owner` / `repo` keep their case so the
  * `owner/repo` label reads the way GitHub shows it.
  */

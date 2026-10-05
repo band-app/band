@@ -7,7 +7,7 @@
  *
  *  1. Output CONTINUES to flow into a parked terminal. Detach only moves the
  *     DOM wrapper — the xterm instance and its WebSocket stay live in the cache,
- *     so a command that keeps printing while its workspace is in the background
+ *     so a command that keeps printing while its worktree is in the background
  *     still lands in that terminal's buffer (no reconnect, same socket).
  *
  *  2. Keystrokes NEVER leak into a parked terminal. The parking container is
@@ -17,7 +17,7 @@
  * Renderer note: unlike the sibling `terminal-parking-switch.spec.ts`, this spec
  * does NOT force SwiftShader WebGL — so xterm falls back to its DOM renderer and
  * `.xterm-rows` carries the actual glyphs, which is what lets us read a parked
- * terminal's rendered text. Real server, real PTYs, driven via `WorkspacePage`.
+ * terminal's rendered text. Real server, real PTYs, driven via `WorktreePage`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -25,7 +25,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -35,21 +35,21 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-parking-liveness-token";
 
-// The two tests use SEPARATE workspace pairs. Server-side PTYs persist across
+// The two tests use SEPARATE worktree pairs. Server-side PTYs persist across
 // tests in a file, so the output test's long-running loop would otherwise poison
-// the workspace the focus test reconnects to (busy shell / markers scrolled off).
-const PROJECT_A = "alpha-parking-live";
-const PROJECT_B = "bravo-parking-live";
-const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
-const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
-const PROJECT_C = "charlie-parking-live";
-const PROJECT_D = "delta-parking-live";
-const WORKSPACE_C = toWorkspaceId(PROJECT_C, "main");
-const WORKSPACE_D = toWorkspaceId(PROJECT_D, "main");
+// the worktree the focus test reconnects to (busy shell / markers scrolled off).
+const REPO_A = "alpha-parking-live";
+const REPO_B = "bravo-parking-live";
+const WORKTREE_A = toWorktreeId(REPO_A, "main");
+const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const REPO_C = "charlie-parking-live";
+const REPO_D = "delta-parking-live";
+const WORKTREE_C = toWorktreeId(REPO_C, "main");
+const WORKTREE_D = toWorktreeId(REPO_D, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -98,27 +98,27 @@ test.beforeAll(async () => {
   workdirC = makeGitWorkdir("band-parking-live-c-", tmpHome);
   workdirD = makeGitWorkdir("band-parking-live-d-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT_A,
+        name: REPO_A,
         path: workdirA,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirA }],
       },
       {
-        name: PROJECT_B,
+        name: REPO_B,
         path: workdirB,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
       },
       {
-        name: PROJECT_C,
+        name: REPO_C,
         path: workdirC,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirC }],
       },
       {
-        name: PROJECT_D,
+        name: REPO_D,
         path: workdirD,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirD }],
@@ -150,26 +150,26 @@ test.afterAll(async () => {
 test.describe("Terminal parking: liveness + focus isolation", () => {
   test("output keeps flowing into a parked terminal over the same socket", async ({ page }) => {
     // The default 30 s test budget can't absorb this test's stacked 20 s
-    // waits (two workspace loads + three rendered-text polls) on a loaded CI
+    // waits (two worktree loads + three rendered-text polls) on a loaded CI
     // worker — same override as the other terminal-heavy specs.
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    // Count only workspace A's terminal sockets so a reconnect is detectable
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    // Count only worktree A's terminal sockets so a reconnect is detectable
     // independent of B opening its own.
-    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+    const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalReady(20_000);
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
     // Barrier: the prompt is rendered in `.xterm-rows` before we type. Splits
     // "DOM renderer never active (rows empty forever)" from "keystrokes lost"
     // — the two causes a bare TICK poll can't tell apart.
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_A);
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE_A);
 
     // Start a long, self-paced stream of incrementing markers. Self-verifying
     // typing: retypes if no TICK renders (dropped keystrokes under CI load).
@@ -177,21 +177,21 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // digits — only real loop output matches. A rare double-typed loop is
     // harmless: the second copy sits buffered in the PTY until the first
     // finishes (~50 s), long after this test stopped reading.
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE_A,
+    await worktreePage.runInTerminalUntilRendered(
+      WORKTREE_A,
       "for i in $(seq 1 200); do echo TICK_$i; sleep 0.25; done",
       /TICK_\d+/,
     );
     // Record the highest marker visible just before we switch away.
-    const beforePark = maxTick(await workspacePage.readTerminalRenderedText(WORKSPACE_A));
+    const beforePark = maxTick(await worktreePage.readTerminalRenderedText(WORKTREE_A));
 
-    // Switch away → A parks. In-app nav keeps A's workspace mounted.
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
+    // Switch away → A parks. In-app nav keeps A's worktree mounted.
+    await worktreePage.switchWorktree(WORKTREE_B);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_B, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_A), { timeout: 20_000 })
       .toBe(true);
 
     // xterm pauses its renderer for an off-screen element, so we can't observe
@@ -200,18 +200,18 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // parked). The stream keeps ticking, and `socketCount === 1` below proves it
     // was the SAME live connection feeding the parked terminal — no fixed wait
     // needed; the auto-retrying poll after return catches the accumulation.
-    await workspacePage.switchWorkspace(WORKSPACE_A);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.switchWorktree(WORKTREE_A);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_A), { timeout: 20_000 })
       .toBe(false);
 
     // The highest marker jumped well past the pre-park value: output kept
     // arriving into the parked terminal's buffer and is now repainted on return.
     await expect
-      .poll(async () => maxTick(await workspacePage.readTerminalRenderedText(WORKSPACE_A)), {
+      .poll(async () => maxTick(await worktreePage.readTerminalRenderedText(WORKTREE_A)), {
         timeout: 20_000,
       })
       .toBeGreaterThan(beforePark + 3);
@@ -221,18 +221,18 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
   });
 
   test("keystrokes for the active terminal never leak into a parked one", async ({ page }) => {
-    // Own workspace pair (C/D), separate from the output test's (A/B), so this
+    // Own worktree pair (C/D), separate from the output test's (A/B), so this
     // test always starts from fresh, idle shells.
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_C);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_C);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_C, true)).toBeVisible({
       timeout: 20_000,
     });
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalReady(20_000);
 
     // Anchor: type a marker into C WHILE IT IS ACTIVE (no focus race), and wait
     // until C renders it. This becomes the positive anchor for the negative
@@ -243,33 +243,33 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // The quoted fragment keeps the typed echo (`C_OWN_"MARKER"`) from matching
     // the marker — only executed output (quote removal) can satisfy it, so a
     // dropped trailing Enter can't pass verification.
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_C);
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE_C,
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE_C);
+    await worktreePage.runInTerminalUntilRendered(
+      WORKTREE_C,
       'echo C_OWN_"MARKER"',
       /C_OWN_MARKER/,
     );
 
     // Bring D forward with its own terminal; C parks.
-    await workspacePage.switchWorkspace(WORKSPACE_D);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_D, true)).toBeVisible({
+    await worktreePage.switchWorktree(WORKTREE_D);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_D, true)).toBeVisible({
       timeout: 20_000,
     });
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalReady(20_000);
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_C), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_C), { timeout: 20_000 })
       .toBe(true);
 
     // The parking container isolates focus/input.
-    expect(await workspacePage.readParkingIsolation()).toEqual({ inert: true, ariaHidden: true });
+    expect(await worktreePage.readParkingIsolation()).toEqual({ inert: true, ariaHidden: true });
 
     // Type a unique marker; it must land in the ACTIVE terminal (D), never the
     // parked one (C). `terminalInput` resolves to D only — C's textarea is
     // aria-hidden inside the inert parking container.
     // Quoted fragment again: typed echo can't satisfy the marker, only output.
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_D);
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE_D,
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE_D);
+    await worktreePage.runInTerminalUntilRendered(
+      WORKTREE_D,
       'echo LEAK"MARKER987"',
       /LEAKMARKER987/,
     );
@@ -278,23 +278,23 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // rendering while parked). Wait until C's own marker is rendered again (the
     // repaint completed), then assert the leak marker is absent — the keystrokes
     // went only to D.
-    await workspacePage.switchWorkspace(WORKSPACE_C);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible({
+    await worktreePage.switchWorktree(WORKTREE_C);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_C, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_C), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_C), { timeout: 20_000 })
       .toBe(false);
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_C)).includes("C_OWN_MARKER"),
+          (await worktreePage.readTerminalRenderedText(WORKTREE_C)).includes("C_OWN_MARKER"),
         { timeout: 20_000 },
       )
       .toBe(true);
     // "MARKER987" (not the full "LEAKMARKER987") so a leak is caught in BOTH
     // forms it could render in C: executed output (`LEAKMARKER987`) and the raw
     // typed echo (`LEAK"MARKER987"`). C's own marker never contains "MARKER987".
-    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_C)).not.toContain("MARKER987");
+    expect(await worktreePage.readTerminalRenderedText(WORKTREE_C)).not.toContain("MARKER987");
   });
 });

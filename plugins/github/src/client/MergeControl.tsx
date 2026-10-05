@@ -49,7 +49,7 @@ function mergeStatus(review: ReviewInfo): { label: string; canMerge: boolean; hi
 }
 
 /** The merge button, its method menu and the inline confirm step. */
-export function MergeControl({ workspaceId, review }: { workspaceId: string; review: ReviewInfo }) {
+export function MergeControl({ worktreeId, review }: { worktreeId: string; review: ReviewInfo }) {
   const host = useClientPluginHost();
   const [confirming, setConfirming] = useState<MergeMethod | null>(null);
   const [merging, setMerging] = useState(false);
@@ -61,7 +61,7 @@ export function MergeControl({ workspaceId, review }: { workspaceId: string; rev
     setMerging(true);
     setError(null);
     try {
-      await host.mergeReview(workspaceId, method);
+      await host.mergeReview(worktreeId, method);
       setConfirming(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

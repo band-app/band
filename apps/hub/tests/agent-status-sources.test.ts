@@ -1,8 +1,8 @@
-// Workspace agent status from several agents at once.
+// Worktree agent status from several agents at once.
 //
-// Every agent reporting into a workspace keeps its own status: each chat
+// Every agent reporting into a worktree keeps its own status: each chat
 // pane's ACP turns, and each hook-reporting CLI session (`statuses.notify`,
-// what `band notify` posts). The workspace status the dashboard shows is
+// what `band notify` posts). The worktree status the dashboard shows is
 // derived from all of them, needs_attention over working over waiting, so
 // one agent never overwrites another. Chats run against the scripted stub
 // agent (`tests/fixtures/acp-stub-agent.mjs`).
@@ -20,7 +20,7 @@ import {
   TEST_TOKEN,
   trpc,
   turnEnded,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import type { ServerHandle } from "./helpers/server";
@@ -28,11 +28,11 @@ import type { ServerHandle } from "./helpers/server";
 let seq = 0;
 const newChatId = () => `status-chat-${Date.now()}-${seq++}`;
 
-async function workspaceStatus(url: string): Promise<string | undefined> {
+async function worktreeStatus(url: string): Promise<string | undefined> {
   const data = await trpc<{ agent?: { status: string } } | null>(
     url,
     "statuses.get",
-    { workspaceId: WORKSPACE_ID },
+    { worktreeId: WORKTREE_ID },
     "query",
   );
   return data?.agent?.status;
@@ -43,7 +43,7 @@ async function notify(url: string, input: Record<string, unknown>): Promise<void
 }
 
 async function clearAttention(url: string): Promise<void> {
-  await trpc(url, "statuses.clearNeedsAttention", { workspaceId: WORKSPACE_ID });
+  await trpc(url, "statuses.clearNeedsAttention", { worktreeId: WORKTREE_ID });
 }
 
 /** A Claude Code hook payload, as Claude Code pipes it to `band notify`. */
@@ -56,7 +56,7 @@ function claudeHook(repo: string, sessionId: string, fields: Record<string, unkn
   };
 }
 
-describe("workspace status from chats and hook sessions", () => {
+describe("worktree status from chats and hook sessions", () => {
   let server: ServerHandle;
   let repo: string;
 
@@ -115,26 +115,26 @@ describe("workspace status from chats and hook sessions", () => {
       error: "Claude Code: the model is overloaded",
     });
 
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("a chat turn the user stopped does not ask for attention", async () => {
     const chatId = newChatId();
     const { done } = await startLongTurn(chatId);
-    expect(await workspaceStatus(server.url)).toBe("working");
-    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    expect(await worktreeStatus(server.url)).toBe("working");
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
     await done;
 
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("a hook session starting work does not hide a chat that finished", async () => {
     const chatId = newChatId();
     await runTurn(server.url, chatId, "hello");
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     // A Claude Code in a terminal takes a prompt. Before, its `working`
     // overwrote the chat's needs_attention.
@@ -143,21 +143,21 @@ describe("workspace status from chats and hook sessions", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "session-a", { hook_event_name: "UserPromptSubmit" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     // Acknowledging clears the chat; the hook session is still working.
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
     await notify(server.url, {
       cwd: repo,
       agent: "claude-code",
       payload: claudeHook(repo, "session-a", { hook_event_name: "Stop" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("a running chat stays working after a hook session's attention is acknowledged", async () => {
@@ -169,17 +169,17 @@ describe("workspace status from chats and hook sessions", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "session-b", { hook_event_name: "Stop" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
-    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
     await done;
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
-  it("two hook sessions in one workspace keep their own status", async () => {
+  it("two hook sessions in one worktree keep their own status", async () => {
     await notify(server.url, {
       cwd: repo,
       agent: "claude-code",
@@ -190,10 +190,10 @@ describe("workspace status from chats and hook sessions", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "session-d", { hook_event_name: "PreToolUse", tool_name: "Read" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
     // Claude Code exiting ends session-d's status.
     await notify(server.url, {
@@ -201,14 +201,14 @@ describe("workspace status from chats and hook sessions", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "session-d", { hook_event_name: "SessionEnd" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("acknowledging keeps a chat that waits on a permission answer", async () => {
     const chatId = newChatId();
     const stream = await openStream(server.url, chatId, { until: turnEnded });
     await sendMessage(server.url, chatId, "ask first");
-    await expect.poll(() => workspaceStatus(server.url)).toBe("needs_attention");
+    await expect.poll(() => worktreeStatus(server.url)).toBe("needs_attention");
 
     await notify(server.url, {
       cwd: repo,
@@ -217,28 +217,28 @@ describe("workspace status from chats and hook sessions", () => {
     });
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     // Stopping the turn resolves the permission. The hook session was
     // acknowledged by the clear above, so nothing asks for attention now.
-    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
     await stream.events;
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("removing a chat drops its status", async () => {
     const chatId = newChatId();
     await runTurn(server.url, chatId, "hello");
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await trpc(server.url, "chats.remove", { chatId });
-    await expect.poll(() => workspaceStatus(server.url)).toBe("waiting");
+    await expect.poll(() => worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("closing a terminal drops the status of the hook session inside it", async () => {
     const terminalId = randomUUID();
     mkdirSync(repo, { recursive: true });
-    await trpc(server.url, "terminal.create", { workspaceId: WORKSPACE_ID, id: terminalId });
+    await trpc(server.url, "terminal.create", { worktreeId: WORKTREE_ID, id: terminalId });
 
     await notify(server.url, {
       cwd: repo,
@@ -247,17 +247,17 @@ describe("workspace status from chats and hook sessions", () => {
       terminalId,
       payload: claudeHook(repo, "session-f", { hook_event_name: "PreToolUse", tool_name: "Bash" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
     await trpc(server.url, "terminal.kill", { terminalId });
-    await expect.poll(() => workspaceStatus(server.url)).toBe("waiting");
+    await expect.poll(() => worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("a Band terminal tells its agents which terminal they run in", async () => {
     const terminalId = randomUUID();
     mkdirSync(repo, { recursive: true });
     await trpc(server.url, "terminal.create", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       id: terminalId,
       command: `printf 'TERMINAL_ID:%s|\\n' "$BAND_TERMINAL_ID"`,
     });
@@ -284,14 +284,14 @@ describe("workspace status from chats and hook sessions", () => {
       dispatch: "chat",
       payload: claudeHook(repo, "session-g", { hook_event_name: "Stop" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
   it("rejects statuses.clearNeedsAttention without the band_token cookie (401)", async () => {
     const res = await fetch(`${server.url}/trpc/statuses.clearNeedsAttention`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID }),
     });
     expect(res.status).toBe(401);
   });
@@ -303,7 +303,7 @@ describe("hooks are read with the sending agent's rules", () => {
   let repo: string;
 
   beforeAll(async () => {
-    // The workspace's agent is Codex; the hooks come from Claude Code.
+    // The worktree's agent is Codex; the hooks come from Claude Code.
     home = seedAcpHome("band-status-codex-");
     seedSettings(home, {
       tokenSecret: TEST_TOKEN,
@@ -328,14 +328,14 @@ describe("hooks are read with the sending agent's rules", () => {
       agent: "claude-code",
       payload: { session_id: "flagged", cwd: repo, hook_event_name: "PostToolUse" },
     });
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
     await notify(server.url, {
       cwd: repo,
       agent: "claude-code",
       payload: { session_id: "flagged", cwd: repo, hook_event_name: "Stop" },
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
   });
@@ -345,25 +345,25 @@ describe("hooks are read with the sending agent's rules", () => {
       cwd: repo,
       payload: claudeHook(repo, "unflagged", { hook_event_name: "PostToolUse" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
 
     await notify(server.url, {
       cwd: repo,
       payload: claudeHook(repo, "unflagged", { hook_event_name: "Stop" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("needs_attention");
+    expect(await worktreeStatus(server.url)).toBe("needs_attention");
 
     await clearAttention(server.url);
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 
-  it("falls back to the workspace's agent when the sender is unknown", async () => {
+  it("falls back to the worktree's agent when the sender is unknown", async () => {
     // Codex has no hook mapping, so any hook it sends means `working`.
     await notify(server.url, {
       cwd: repo,
       payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Stop" },
     });
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
   });
 });
 
@@ -378,12 +378,12 @@ describe("server restart", () => {
         agent: "claude-code",
         payload: claudeHook(repo, "before-restart", { hook_event_name: "Stop" }),
       });
-      expect(await workspaceStatus(server.url)).toBe("needs_attention");
+      expect(await worktreeStatus(server.url)).toBe("needs_attention");
       await server.close();
 
       server = await startAcpServer({ home });
       try {
-        await expect.poll(() => workspaceStatus(server.url)).toBe("waiting");
+        await expect.poll(() => worktreeStatus(server.url)).toBe("waiting");
         await notify(server.url, {
           cwd: repo,
           agent: "claude-code",
@@ -392,7 +392,7 @@ describe("server restart", () => {
             tool_name: "Read",
           }),
         });
-        expect(await workspaceStatus(server.url)).toBe("working");
+        expect(await worktreeStatus(server.url)).toBe("working");
       } finally {
         await server.close();
       }
@@ -425,7 +425,7 @@ describe("tab statuses", () => {
     const data = await trpc<{ tabStatuses?: unknown[] } | null>(
       server.url,
       "statuses.get",
-      { workspaceId: WORKSPACE_ID },
+      { worktreeId: WORKTREE_ID },
       "query",
     );
     return data?.tabStatuses;
@@ -448,7 +448,7 @@ describe("tab statuses", () => {
 
     expect(await tabStatuses()).toEqual([{ chatId, status: "working" }]);
 
-    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
     await stream.events;
     expect(await tabStatuses()).toEqual([]);
   });
@@ -465,7 +465,7 @@ describe("tab statuses", () => {
 
   /** The `snapshot` event a status stream subscriber gets first. */
   async function streamSnapshot(): Promise<{
-    statuses: { workspaceId: string; tabStatuses?: unknown[] }[];
+    statuses: { worktreeId: string; tabStatuses?: unknown[] }[];
   }> {
     const ac = new AbortController();
     const res = await fetch(`${server.url}/trpc/status.stream`, {
@@ -494,7 +494,7 @@ describe("tab statuses", () => {
 
   it("lists a terminal by the most urgent hook session running in it", async () => {
     const terminalId = randomUUID();
-    await trpc(server.url, "terminal.create", { workspaceId: WORKSPACE_ID, id: terminalId });
+    await trpc(server.url, "terminal.create", { worktreeId: WORKTREE_ID, id: terminalId });
 
     await notify(server.url, {
       cwd: repo,
@@ -516,7 +516,7 @@ describe("tab statuses", () => {
 
     // A client that connects now gets the same statuses in its first snapshot.
     const snapshot = await streamSnapshot();
-    expect(snapshot.statuses.find((st) => st.workspaceId === WORKSPACE_ID)?.tabStatuses).toEqual([
+    expect(snapshot.statuses.find((st) => st.worktreeId === WORKTREE_ID)?.tabStatuses).toEqual([
       { terminalId, status: "needs_attention" },
     ]);
 
@@ -530,7 +530,7 @@ describe("tab statuses", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "tab-c", { hook_event_name: "PreToolUse", tool_name: "Read" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("working");
     expect(await tabStatuses()).toEqual([]);
 
     await notify(server.url, {
@@ -538,6 +538,6 @@ describe("tab statuses", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "tab-c", { hook_event_name: "SessionEnd" }),
     });
-    expect(await workspaceStatus(server.url)).toBe("waiting");
+    expect(await worktreeStatus(server.url)).toBe("waiting");
   });
 });

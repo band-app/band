@@ -84,7 +84,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.raw("lsp.connect", async (a) => {
     const lang = str(a, "lang");
     const duplex = await host.lsp.connect({
-      workspaceId: str(a, "workspaceId"),
+      worktreeId: str(a, "worktreeId"),
       lang,
       root: await path(a, "root"),
     });
@@ -102,7 +102,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     });
     return { chan: ch.id };
   });
-  r.json("lsp.killWorkspace", (a) => host.lsp.killWorkspace(str(a, "workspaceId")));
+  r.json("lsp.killWorktree", (a) => host.lsp.killWorktree(str(a, "worktreeId")));
   r.json("lsp.killAll", () => host.lsp.killAll());
 
   // ---- agents -------------------------------------------------------------
@@ -207,7 +207,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   const pty = host.pty;
 
   r.json("pty.spawn", async (a) => {
-    const workspaceRoot = await path(a, "workspaceRoot");
+    const worktreeRoot = await path(a, "worktreeRoot");
     const o = optObj(a, "options");
     let options: SpawnOptions | undefined = o && {
       command: optStr(o, "command"),
@@ -221,21 +221,21 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       const base = options?.env?.PATH ?? (await shellPath());
       options = { ...options, env: { ...options?.env, PATH: [cliDir, base].join(delimiter) } };
     }
-    // The pool resolves `cwd` inside the workspace root, so check where that lands.
-    if (options?.cwd !== undefined) await policy.resolve(resolve(workspaceRoot, options.cwd));
+    // The pool resolves `cwd` inside the worktree root, so check where that lands.
+    if (options?.cwd !== undefined) await policy.resolve(resolve(worktreeRoot, options.cwd));
     return pty.spawn({
-      workspaceId: str(a, "workspaceId"),
+      worktreeId: str(a, "worktreeId"),
       terminalId: str(a, "terminalId"),
-      workspaceRoot,
+      worktreeRoot,
       options,
       cleanupOnExit: optBool(a, "cleanupOnExit"),
     });
   });
   r.json("pty.info", (a) => pty.info(str(a, "terminalId")));
-  r.json("pty.list", (a) => pty.list(str(a, "workspaceId")));
+  r.json("pty.list", (a) => pty.list(str(a, "worktreeId")));
   r.json("pty.listAll", () => pty.listAll());
   r.json("pty.kill", (a) => pty.kill(str(a, "terminalId")));
-  r.json("pty.killWorkspace", (a) => pty.killWorkspace(str(a, "workspaceId")));
+  r.json("pty.killWorktree", (a) => pty.killWorktree(str(a, "worktreeId")));
   r.json("pty.getScrollback", (a) => pty.getScrollback(str(a, "terminalId"), optNum(a, "lines")));
   r.json("pty.write", (a) => pty.write(str(a, "terminalId"), str(a, "data")));
   r.json("pty.input", (a) => pty.input(str(a, "terminalId"), str(a, "data")));

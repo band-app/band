@@ -11,7 +11,7 @@
  *   deleted in Chrome since stay. The macOS Keychain dialog for "Chrome
  *   Safe Storage" appears during the import; denying it ends the import
  *   with an error here.
- * - Browsing history goes into this workspace's history (`history.import`).
+ * - Browsing history goes into this worktree's history (`history.import`).
  *
  * The desktop reads every selected Chrome DB before writing anything, so a
  * DB Chrome has locked fails the import as a whole. A new profile's server
@@ -75,8 +75,8 @@ type Step =
 export interface ChromeImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Workspace whose history receives imported history. History is off without one. */
-  workspaceId: string | null;
+  /** Worktree whose history receives imported history. History is off without one. */
+  worktreeId: string | null;
   /** Called with the Band profile's id once its cookies are imported. */
   onImported: (profileId: string) => void;
 }
@@ -84,7 +84,7 @@ export interface ChromeImportDialogProps {
 export function ChromeImportDialog({
   open,
   onOpenChange,
-  workspaceId,
+  worktreeId,
   onImported,
 }: ChromeImportDialogProps) {
   const [step, setStep] = useState<Step>({ kind: "loading" });
@@ -145,7 +145,7 @@ export function ChromeImportDialog({
   const busy = step.kind === "importing";
   const chosen = profiles?.find((p) => p.directory === selection.profile);
   const cookiesAvailable = chosen?.hasCookies ?? false;
-  const historyAvailable = workspaceId !== null && (chosen?.hasHistory ?? false);
+  const historyAvailable = worktreeId !== null && (chosen?.hasHistory ?? false);
   const wantCookies = selection.cookies && cookiesAvailable;
   const wantHistory = selection.history && historyAvailable;
   const canImport = step.kind === "form" && (wantCookies || wantHistory);
@@ -177,9 +177,9 @@ export function ChromeImportDialog({
         history: wantHistory,
       });
       let historyCount: number | null = null;
-      if (result.history && workspaceId) {
+      if (result.history && worktreeId) {
         const { imported } = await trpc.history.import.mutate({
-          workspaceId,
+          worktreeId,
           entries: result.history,
         });
         historyCount = imported;
@@ -307,7 +307,7 @@ export function ChromeImportDialog({
             ) : null}
             {wantHistory ? (
               <p className="text-xs text-muted-foreground">
-                History is added to this workspace's browser history.
+                History is added to this worktree's browser history.
               </p>
             ) : null}
 
@@ -335,11 +335,11 @@ export function ChromeImportDialog({
               <p>
                 {step.updated ? "Updated" : "Imported"} {step.cookies.imported} cookies{" "}
                 {step.updated ? "in" : "into"} "{step.profileName}". This tab now uses it, and so
-                will new browser tabs in this project.
+                will new browser tabs in this repo.
               </p>
             ) : null}
             {step.historyCount !== null ? (
-              <p>Imported {step.historyCount} history entries into this workspace.</p>
+              <p>Imported {step.historyCount} history entries into this worktree.</p>
             ) : null}
             {step.cookies && step.cookies.skippedGoogle > 0 ? (
               <p className="text-muted-foreground">

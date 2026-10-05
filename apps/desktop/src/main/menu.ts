@@ -191,7 +191,7 @@ export function buildAppMenu(deps: MenuDeps): Menu {
       accelerator: "CmdOrCtrl+-",
       click: () => zoomFocused("out"),
     },
-    // CmdOrCtrl+0 is owned by the dashboard's "All projects" label filter
+    // CmdOrCtrl+0 is owned by the dashboard's "All repos" label filter
     // (see DashboardShell), so zoom-reset uses the shifted variant instead
     // of the conventional plain Cmd+0.
     {

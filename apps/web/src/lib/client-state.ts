@@ -11,7 +11,7 @@
  * existing cross-window listeners pick them up.
  *
  * Before the first read, the dashboard hydrates: `hydrateGlobal()` before the
- * app shell mounts and `hydrateWorkspace(id)` before a workspace's dockview
+ * app shell mounts and `hydrateWorktree(id)` before a worktree's dockview
  * mounts. Hydration copies the server's entries into localStorage and uploads
  * local values the server doesn't have yet, which moves existing
  * localStorage state to the server on first load.
@@ -52,7 +52,7 @@ export const HYDRATE_WAIT_MS = 1500;
 export interface ClientStateChange {
   key: string;
   scope: ClientStateScope;
-  workspaceId: string | null;
+  worktreeId: string | null;
   value: unknown;
   /** The previous server value this device knew, before this change. */
   previous: unknown;
@@ -82,8 +82,8 @@ function parseEntryId(id: string): { scope: ClientStateScope; key: string } {
   return { scope: id.slice(0, bar) as ClientStateScope, key: id.slice(bar + 1) };
 }
 
-function groupOf(workspaceId: string | null): string {
-  return workspaceId === null ? "global" : `ws:${workspaceId}`;
+function groupOf(worktreeId: string | null): string {
+  return worktreeId === null ? "global" : `ws:${worktreeId}`;
 }
 
 function byteLength(text: string): number {
@@ -225,7 +225,7 @@ class ClientStateStore {
       const id = entryId(this.resolveScope(part), key);
       this.setPending(id, true);
       if (this.inflight.has(id)) this.dirtyAgain.add(id);
-      if (this.hydrated.has(groupOf(matched.workspaceId))) this.schedule(id);
+      if (this.hydrated.has(groupOf(matched.worktreeId))) this.schedule(id);
     }
   }
 
@@ -321,7 +321,7 @@ class ClientStateStore {
   flushPending(): void {
     for (const id of this.getMeta().pending) {
       const matched = matchKey(parseEntryId(id).key);
-      if (matched && this.hydrated.has(groupOf(matched.workspaceId))) this.schedule(id, 0);
+      if (matched && this.hydrated.has(groupOf(matched.worktreeId))) this.schedule(id, 0);
     }
   }
 
@@ -362,7 +362,7 @@ class ClientStateStore {
     const change: ClientStateChange = {
       key: entry.key,
       scope: entry.scope,
-      workspaceId: entry.workspaceId,
+      worktreeId: entry.worktreeId,
       value: entry.value,
       previous,
       source,
@@ -382,18 +382,18 @@ class ClientStateStore {
     const matched = matchKey(entry.key);
     if (!matched || !this.partFor(entry.key, entry.scope)) return;
     // Only hydrated groups track versions; the rest pick it up on hydrate.
-    if (!this.hydrated.has(groupOf(matched.workspaceId))) return;
+    if (!this.hydrated.has(groupOf(matched.worktreeId))) return;
     const id = entryId(entry.scope, entry.key);
     if ((this.getMeta().versions[id] ?? 0) >= entry.version) return;
     this.apply(entry, "remote");
   }
 
-  hydrate(workspaceId: string | null, force = false): Promise<void> {
-    const group = groupOf(workspaceId);
+  hydrate(worktreeId: string | null, force = false): Promise<void> {
+    const group = groupOf(worktreeId);
     if (!force && this.hydrated.has(group)) return Promise.resolve();
     const running = this.hydrating.get(group);
     if (running) return running;
-    const promise = this.load(workspaceId)
+    const promise = this.load(worktreeId)
       .catch((err) => {
         // Offline: keep using localStorage and try again on reconnect.
         console.warn("[client-state] hydrate failed:", err);
@@ -403,11 +403,11 @@ class ClientStateStore {
     return promise;
   }
 
-  private async load(workspaceId: string | null): Promise<void> {
-    const group = groupOf(workspaceId);
+  private async load(worktreeId: string | null): Promise<void> {
+    const group = groupOf(worktreeId);
     const trpc = await api();
     const { entries } = (await trpc.clientState.list.query({
-      workspaceId,
+      worktreeId,
       deviceType: this.deviceType(),
     })) as { entries: ClientStateEntry[] };
     const meta = this.getMeta();
@@ -431,10 +431,10 @@ class ClientStateStore {
     }
 
     // Local values the server has never seen: first load after this change
-    // shipped, or keys written while the workspace had no server rows.
+    // shipped, or keys written while the worktree had no server rows.
     for (const key of localKeys()) {
       const matched = matchKey(key);
-      if (!matched || groupOf(matched.workspaceId) !== group) continue;
+      if (!matched || groupOf(matched.worktreeId) !== group) continue;
       for (const part of matched.parts) {
         const id = entryId(this.resolveScope(part), key);
         if (onServer.has(id)) continue;
@@ -446,14 +446,14 @@ class ClientStateStore {
     // A sent write the server doesn't have never landed.
     for (const id of Object.keys(meta.sent)) {
       const matched = matchKey(parseEntryId(id).key);
-      if (matched && groupOf(matched.workspaceId) === group && !onServer.has(id)) {
+      if (matched && groupOf(matched.worktreeId) === group && !onServer.has(id)) {
         delete meta.sent[id];
       }
     }
     // Pending entries whose key is gone locally and unknown to the server.
     for (const id of meta.pending) {
       const matched = matchKey(parseEntryId(id).key);
-      if (matched && groupOf(matched.workspaceId) === group && !onServer.has(id)) {
+      if (matched && groupOf(matched.worktreeId) === group && !onServer.has(id)) {
         meta.versions[id] = 0;
       }
     }
@@ -462,13 +462,13 @@ class ClientStateStore {
     this.flushPending();
   }
 
-  /** A workspace was deleted: its server rows are gone, drop the local copies. */
-  forgetWorkspace(workspaceId: string): void {
-    const group = groupOf(workspaceId);
+  /** A worktree was deleted: its server rows are gone, drop the local copies. */
+  forgetWorktree(worktreeId: string): void {
+    const group = groupOf(worktreeId);
     const meta = this.getMeta();
     for (const key of localKeys()) {
       const matched = matchKey(key);
-      if (!matched || groupOf(matched.workspaceId) !== group) continue;
+      if (!matched || groupOf(matched.worktreeId) !== group) continue;
       writeLocal(key, null);
       for (const part of matched.parts) {
         const id = entryId(this.resolveScope(part), key);
@@ -481,11 +481,11 @@ class ClientStateStore {
     }
     meta.pending = meta.pending.filter((id) => {
       const matched = matchKey(parseEntryId(id).key);
-      return !matched || groupOf(matched.workspaceId) !== group;
+      return !matched || groupOf(matched.worktreeId) !== group;
     });
     for (const id of Object.keys(meta.sent)) {
       const matched = matchKey(parseEntryId(id).key);
-      if (matched && groupOf(matched.workspaceId) === group) delete meta.sent[id];
+      if (matched && groupOf(matched.worktreeId) === group) delete meta.sent[id];
     }
     this.saveMeta();
     this.hydrated.delete(group);
@@ -520,9 +520,9 @@ export function hydrateGlobal(timeoutMs = HYDRATE_WAIT_MS): Promise<void> {
   return withTimeout(store.hydrate(null), timeoutMs);
 }
 
-/** Resolve once a workspace's keys are hydrated, or after `timeoutMs` (offline). */
-export function hydrateWorkspace(workspaceId: string, timeoutMs = HYDRATE_WAIT_MS): Promise<void> {
-  return withTimeout(store.hydrate(workspaceId), timeoutMs);
+/** Resolve once a worktree's keys are hydrated, or after `timeoutMs` (offline). */
+export function hydrateWorktree(worktreeId: string, timeoutMs = HYDRATE_WAIT_MS): Promise<void> {
+  return withTimeout(store.hydrate(worktreeId), timeoutMs);
 }
 
 function withTimeout(promise: Promise<void>, ms: number): Promise<void> {
@@ -544,7 +544,7 @@ let syncStarted = false;
 
 /**
  * Follow other devices' writes on the status stream, re-read after a
- * reconnect, and drop a deleted workspace's keys. Idempotent.
+ * reconnect, and drop a deleted worktree's keys. Idempotent.
  */
 export function startClientStateSync(
   subscribeStatusEvents: (handler: (event: Record<string, unknown>) => void) => () => void,
@@ -555,8 +555,8 @@ export function startClientStateSync(
   subscribeStatusEvents((event) => {
     if (event.kind === "client-state-changed" && event.clientState) {
       store.receive(event.clientState as ClientStateEntry, event.clientId as string | undefined);
-    } else if (event.kind === "remove" && typeof event.workspaceId === "string") {
-      store.forgetWorkspace(event.workspaceId);
+    } else if (event.kind === "remove" && typeof event.worktreeId === "string") {
+      store.forgetWorktree(event.worktreeId);
     } else if (event.kind === "snapshot") {
       // The server sends a snapshot on every (re)subscribe. The first is the
       // initial connect; later ones mean we were disconnected.

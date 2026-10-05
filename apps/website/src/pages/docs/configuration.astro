@@ -1,13 +1,13 @@
 ---
 import DocsLayout from "../../layouts/DocsLayout.astro";
 ---
-<DocsLayout title="Project Configuration — Band Docs">
-  <h1>Project Configuration</h1>
+<DocsLayout title="Repo Configuration — Band Docs">
+  <h1>Repo Configuration</h1>
 
   <p>
-    Each Band project can include a <code>.band/config.json</code> file at the repository root.
-    This file defines shell commands that run during workspace lifecycle events. Commit it to the
-    repository so that all team members share the same workspace setup.
+    Each Band repo can include a <code>.band/config.json</code> file at the repository root.
+    This file defines shell commands that run during worktree lifecycle events. Commit it to the
+    repository so that all team members share the same worktree setup.
   </p>
 
   <h2>File Location</h2>
@@ -15,7 +15,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     The configuration file is read from
     <code>&lt;worktree-root&gt;/.band/config.json</code> first, falling back to
-    <code>&lt;project-root&gt;/.band/config.json</code>. The fallback handles the common case
+    <code>&lt;repo-root&gt;/.band/config.json</code>. The fallback handles the common case
     where the config file lives on the main branch but is <code>.gitignore</code>d, so new
     worktrees don't contain it.
   </p>
@@ -39,43 +39,43 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Setup Command</h2>
 
   <p>
-    The <code>setup</code> command runs after a workspace is created via
-    <code>band workspaces create</code> (or the dashboard equivalent). It executes inside the
+    The <code>setup</code> command runs after a worktree is created via
+    <code>band worktrees create</code> (or the dashboard equivalent). It executes inside the
     new worktree directory with <code>/opt/homebrew/bin</code> and <code>/usr/local/bin</code>
     prepended to <code>PATH</code> so Homebrew tools are reachable. A failed setup is reported
-    in the dashboard but does not delete the workspace.
+    in the dashboard but does not delete the worktree.
   </p>
 
   <pre><code>"setup": "npm install &amp;&amp; npm run db:migrate &amp;&amp; cp .env.example .env"</code></pre>
 
   <p>
     Use the setup command for dependency installation, database migrations, environment file
-    creation, or any other initialization your project needs.
+    creation, or any other initialization your repo needs.
   </p>
 
   <h2>Teardown Command</h2>
 
   <p>
-    The <code>teardown</code> command runs before a workspace is removed via
-    <code>band workspaces remove</code>. It runs inside the worktree (which still exists at this
-    point) and is non-fatal — a teardown failure is logged and the workspace is removed anyway.
+    The <code>teardown</code> command runs before a worktree is removed via
+    <code>band worktrees remove</code>. It runs inside the worktree (which still exists at this
+    point) and is non-fatal — a teardown failure is logged and the worktree is removed anyway.
   </p>
 
   <pre><code>"teardown": "docker compose down -v"</code></pre>
 
-  <h2>Workspace File Copying</h2>
+  <h2>Worktree File Copying</h2>
 
   <p>
-    Workspaces are fresh git worktrees, so untracked files like <code>.env</code>,
+    Worktrees are fresh git worktrees, so untracked files like <code>.env</code>,
     <code>.env.local</code>, local credential overrides, or IDE settings are <strong>not</strong>
     present after creation — git only checks out tracked files. Band can copy those files into
-    a new worktree on creation, driven by either of two declarative sources at the project root:
+    a new worktree on creation, driven by either of two declarative sources at the repo root:
   </p>
 
   <h3>Option A: <code>.band/config.json::workspace.copyFiles</code></h3>
 
   <p>
-    Explicit list of paths relative to the project root. Glob patterns
+    Explicit list of paths relative to the repo root. Glob patterns
     (<code>*</code>, <code>?</code>, <code>[abc]</code>, <code>{`{a,b}`}</code>) are supported.
   </p>
 
@@ -93,7 +93,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h3>Option B: <code>.worktreeinclude</code></h3>
 
   <p>
-    A <code>.gitignore</code>-syntax file at the project root, parallel to
+    A <code>.gitignore</code>-syntax file at the repo root, parallel to
     <code>.gitignore</code>. Patterns use the same grammar as <code>.gitignore</code>
     (anchored leading slash, <code>**</code> segments, character classes, etc.).
   </p>
@@ -119,7 +119,7 @@ config/*.local.json
       by both is copied exactly once.
     </li>
     <li>
-      The source is always the project's <strong>main checkout</strong>, not another
+      The source is always the repo's <strong>main checkout</strong>, not another
       worktree, so copies are deterministic regardless of which worktrees happen to
       exist at the time of creation.
     </li>
@@ -131,12 +131,12 @@ config/*.local.json
     </li>
     <li>
       Missing source files are <strong>skipped with a warning</strong>, not treated
-      as fatal. Stale entries in the config don't break workspace creation.
+      as fatal. Stale entries in the config don't break worktree creation.
     </li>
     <li>
       Copies run <strong>after</strong> <code>git worktree add</code> and
       <strong>before</strong> the <code>setup</code> script (and the first agent
-      prompt, when one is supplied via <code>band workspaces create --prompt</code>),
+      prompt, when one is supplied via <code>band worktrees create --prompt</code>),
       so the setup script can read <code>.env</code> / local credentials just like
       it can in the main checkout.
     </li>
@@ -145,7 +145,7 @@ config/*.local.json
   <p>
     Out of scope (today): per-user overrides (<code>.band/config.local.json</code>),
     copying files back from a worktree to the main checkout on cleanup
-    (workspace-files copy is one-way only), and variable substitution inside copied
+    (worktree-files copy is one-way only), and variable substitution inside copied
     files.
   </p>
 

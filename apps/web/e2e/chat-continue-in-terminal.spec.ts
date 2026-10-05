@@ -13,7 +13,7 @@
  *     tells the test which session id that was, and that id is what both
  *     context-menu actions operate on.
  *   - UI driven through page objects: `ChatPanePage` to send the message,
- *     `WorkspacePage` for the chat-tab context menu, clipboard capture, and
+ *     `WorktreePage` for the chat-tab context menu, clipboard capture, and
  *     the outer Terminal panel. The test body never touches raw `page.*`
  *     locators.
  *
@@ -27,7 +27,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -38,11 +38,11 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-continue-terminal-token";
-const PROJECT = "continueproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "continueproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 // Wide viewport so the desktop dockview layout (with the outer Terminal tab)
 // renders.
@@ -60,9 +60,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -91,12 +91,12 @@ test.afterAll(async () => {
 test.describe("Chat tab context menu — continue in terminal / copy session id", () => {
   test("copies the session id and continues the session in a terminal", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
+    const worktree = new WorktreePage(page, server.url, TOKEN);
 
     // Record clipboard writes before any navigation.
-    await workspace.installClipboardCapture();
+    await worktree.installClipboardCapture();
 
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // Send one message to establish the agent session. Waiting for the
@@ -110,19 +110,19 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
     expect(sessionId).toMatch(/^stub-/);
 
     // Open the chat tab's right-click menu — both items present.
-    await workspace.openChatTabContextMenu();
-    await expect(workspace.chatTabContextMenu).toBeVisible();
-    await expect(workspace.continueInTerminalItem).toBeVisible();
-    await expect(workspace.copySessionIdItem).toBeVisible();
+    await worktree.openChatTabContextMenu();
+    await expect(worktree.chatTabContextMenu).toBeVisible();
+    await expect(worktree.continueInTerminalItem).toBeVisible();
+    await expect(worktree.copySessionIdItem).toBeVisible();
 
     // "Copy session ID" copies the chat's underlying agent session id. The
     // item enables once the on-open `chats.get` resolves the active session;
     // assert that enabled transition as a positive anchor before clicking so
     // the click can't race the resolve.
-    await expect(workspace.copySessionIdItem).toBeEnabled();
-    await workspace.copySessionIdItem.click();
+    await expect(worktree.copySessionIdItem).toBeEnabled();
+    await worktree.copySessionIdItem.click();
     await expect
-      .poll(async () => (await workspace.readCopied()).at(-1), {
+      .poll(async () => (await worktree.readCopied()).at(-1), {
         message: "session id copied to clipboard",
         // The copy follows the on-open chats.get round-trip; give it room
         // beyond Playwright's 5 s expect.poll default so a slow CI run
@@ -133,15 +133,15 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
 
     // "Continue in terminal" spawns the resume terminal and surfaces the
     // outer Terminal panel so the user lands on it.
-    await workspace.openChatTabContextMenu();
-    await expect(workspace.continueInTerminalItem).toBeEnabled();
-    await workspace.continueInTerminalItem.click();
+    await worktree.openChatTabContextMenu();
+    await expect(worktree.continueInTerminalItem).toBeEnabled();
+    await worktree.continueInTerminalItem.click();
 
     // Explicit timeout: the dockview setActive effect can be starved under
-    // parallel-worker CI contention (mirrors workspace-maximize-state.spec.ts).
-    await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
+    // parallel-worker CI contention (mirrors worktree-maximize-state.spec.ts).
+    await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
       timeout: 15_000,
     });
-    await workspace.waitForTerminalReady(75_000);
+    await worktree.waitForTerminalReady(75_000);
   });
 });

@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -19,12 +19,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-file-leaf-view-changes-token";
-const PROJECT = "file-leaf-view-changes-repo";
+const REPO = "file-leaf-view-changes-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 const CLEAN_FILE = "clean.txt";
 const CHANGED_FILE = "changed.txt";
@@ -39,7 +39,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH], tmpHome);
   writeFileSync(join(repo, CLEAN_FILE), CLEAN_ORIGINAL);
@@ -49,9 +49,9 @@ test.beforeAll(async () => {
   // An uncommitted edit, so changed.txt shows up in the Changes summary.
   writeFileSync(join(repo, CHANGED_FILE), "changed modified\n");
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -68,32 +68,32 @@ test.afterAll(async () => {
 });
 
 test("View changes shows only for a file with changes and follows saves", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   // Scoped to the visible file leaf: both leaves stay mounted once opened.
-  const viewer = new FileViewerPage(page, workspacePage.fileLeafVisibilityMarker(true));
+  const viewer = new FileViewerPage(page, worktreePage.fileLeafVisibilityMarker(true));
 
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // A file with uncommitted changes gets the button. This also proves the
   // changes summary has loaded before the negative check below.
-  await workspacePage.openFileViaQuickOpen(CHANGED_FILE);
+  await worktreePage.openFileViaQuickOpen(CHANGED_FILE);
   await viewer.expectContent("changed modified");
-  await expect(workspacePage.fileLeafViewChangesButton).toBeVisible({ timeout: 15_000 });
+  await expect(worktreePage.fileLeafViewChangesButton).toBeVisible({ timeout: 15_000 });
 
   // A clean file does not.
-  await workspacePage.openFileViaQuickOpen(CLEAN_FILE);
+  await worktreePage.openFileViaQuickOpen(CLEAN_FILE);
   await viewer.expectContent(CLEAN_ORIGINAL);
-  await expect(workspacePage.fileLeafViewChangesButton).toBeHidden();
+  await expect(worktreePage.fileLeafViewChangesButton).toBeHidden();
 
   // Saving an edit makes it changed: the button appears.
   await viewer.replaceAll(CLEAN_EDITED);
-  await workspacePage.saveFileLeaf();
+  await worktreePage.saveFileLeaf();
   // Well under the leaf's 15 s poll, so only the refetch on save can pass it.
-  await expect(workspacePage.fileLeafViewChangesButton).toBeVisible({ timeout: 5_000 });
+  await expect(worktreePage.fileLeafViewChangesButton).toBeVisible({ timeout: 5_000 });
 
   // Saving it back to the committed content makes it clean: the button goes.
   await viewer.replaceAll(CLEAN_ORIGINAL);
-  await workspacePage.saveFileLeaf();
-  await expect(workspacePage.fileLeafViewChangesButton).toBeHidden({ timeout: 5_000 });
+  await worktreePage.saveFileLeaf();
+  await expect(worktreePage.fileLeafViewChangesButton).toBeHidden({ timeout: 5_000 });
 });

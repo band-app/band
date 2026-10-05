@@ -10,7 +10,7 @@ fallback. There was no way to *see* the browser tabs you opened on the
 desktop when connecting to the same Band server from another device.
 
 This experiment fills the gap, but the more important contribution is
-**reframing the browser tab as workspace state instead of UI state**:
+**reframing the browser tab as worktree state instead of UI state**:
 tabs live in the DB; both desktop and web are clients that observe and
 drive them. The web's Browser pane is a screencast viewer over CDP; the
 desktop's Browser pane is the existing native webview overlay; both
@@ -23,7 +23,7 @@ target the same chromium target, so they don't diverge.
    │  Band web frontend     │                       │  Band desktop           │
    │  ScreencastPanel       │                       │  (Electron)             │
    │   - GET /api/cdp/tabs  │                       │                         │
-   │     (workspaceId)      │                       │  React tree:            │
+   │     (worktreeId)      │                       │  React tree:            │
    │   - WS /cdp?bandTabId  │                       │   BrowserHostBridge     │
    └────────┬───────────────┘                       │     (subscribes to      │
             │                                       │      browserHost.       │
@@ -88,7 +88,7 @@ ensure roundtrip.
   same `dockview-theme-band dockview-browser-tabs` theme. Each Band
   browser tab is a panel with an address bar above the live stream.
 - ✅ Tab list comes from Band's DB (`browsers.list`), exposed via
-  `/api/cdp/tabs?workspaceId=X`. No URL-based filtering, no
+  `/api/cdp/tabs?worktreeId=X`. No URL-based filtering, no
   `document.visibilityState` polling — those were artifacts of the old
   "filter `/json/list`" approach.
 - ✅ Lazy view materialisation: when the web client opens a stream for a
@@ -97,7 +97,7 @@ ensure roundtrip.
   `browserHost.ensureView` bridge spawns one. The web sees a brief
   "Connecting…" before the first frame arrives.
 - ✅ Within-session persistence: the same `WebContentsView` survives
-  workspace switches and panel unmounts (existing `BrowserViewManager`
+  worktree switches and panel unmounts (existing `BrowserViewManager`
   behaviour, LRU cap of 10). Closing the web pane and re-opening on
   desktop reveals the same instance with DOM, scroll, and JS state
   preserved.
@@ -145,13 +145,13 @@ ensure roundtrip.
 - `apps/hub/src/server/infra/browser-host/cdp-proxy.ts` — `/cdp?bandTabId=…` proxy resolves
   via `ensureCdpTargetId`.
 - `apps/web/start-server.ts` + `apps/web/vite.config.ts` —
-  `/api/cdp/tabs?workspaceId=…` reads from DB; `/api/cdp/snapshot/<id>`
+  `/api/cdp/tabs?worktreeId=…` reads from DB; `/api/cdp/snapshot/<id>`
   is the new snapshot endpoint; old active-tab routes deleted.
 - `apps/web/src/trpc/router.ts` — adds `browserHost` router with
   `ensureView` subscription, `targetReady` + `viewDestroyed` mutations.
 - `apps/web/src/components/ScreencastPanel.tsx` — drops click-cooldown
   + visibility polling + Page.bringToFront; data source is
-  `/api/cdp/tabs?workspaceId=…`; WS uses `bandTabId`.
+  `/api/cdp/tabs?worktreeId=…`; WS uses `bandTabId`.
 - `apps/web/src/routes/__root.tsx` — mounts `<BrowserHostBridge />`.
 - `apps/desktop/src/browser/view-manager.ts` — adds `ensure(args)` and
   `getCdpTargetId(args)` methods + emits `browser-view-destroyed`.
@@ -182,7 +182,7 @@ From any other browser:
 - Activate the Browser pane (⌘B). The web pane shows the same tabs.
 - Click a tab → live stream starts. Click links / scroll → the desktop
   tab reacts.
-- Switch workspaces in the web. Come back. Tab strip is still there,
+- Switch worktrees in the web. Come back. Tab strip is still there,
   stream resumes.
 - Close the web tab, return to desktop. Same WebContentsView, same DOM,
   same scroll position.

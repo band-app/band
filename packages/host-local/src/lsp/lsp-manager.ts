@@ -70,14 +70,14 @@ class OutputQueue implements AsyncIterable<Uint8Array> {
   }
 }
 
-/** serverId -> session (serverId = `${workspaceId}:${lang}`) */
+/** serverId -> session (serverId = `${worktreeId}:${lang}`) */
 const servers = new Map<string, LspServerSession>();
 
-/** workspaceId -> Set<serverId> (reverse index for workspace-level cleanup) */
-const workspaceServers = new Map<string, Set<string>>();
+/** worktreeId -> Set<serverId> (reverse index for worktree-level cleanup) */
+const worktreeServers = new Map<string, Set<string>>();
 
-function toServerId(workspaceId: string, lang: string): string {
-  return `${workspaceId}:${lang}`;
+function toServerId(worktreeId: string, lang: string): string {
+  return `${worktreeId}:${lang}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,11 +90,11 @@ function toServerId(workspaceId: string, lang: string): string {
  * initialize handshake is left to the client library (@codemirror/lsp-client).
  */
 async function getOrSpawnServer(
-  workspaceId: string,
+  worktreeId: string,
   lang: string,
   root: string,
 ): Promise<LspServerSession> {
-  const serverId = toServerId(workspaceId, lang);
+  const serverId = toServerId(worktreeId, lang);
 
   const existing = servers.get(serverId);
   if (existing) return existing;
@@ -108,7 +108,7 @@ async function getOrSpawnServer(
   const cwd = root;
 
   // Build PATH: app node_modules/.bin (where typescript-language-server
-  // lives), workspace node_modules/.bin (where tsserver lives), then
+  // lives), worktree node_modules/.bin (where tsserver lives), then
   // the user's shell PATH for anything else (node, etc.).
   //
   // In development, __dirname is packages/host-local/src/lsp/ so we walk up
@@ -122,13 +122,13 @@ async function getOrSpawnServer(
   // install in `<package>/node_modules`, or beside the package when hoisted.
   const workerBin = resolve(__dirname, "../node_modules/.bin");
   const hoistedBin = resolve(__dirname, "../../../.bin");
-  const workspaceBin = join(cwd, "node_modules/.bin");
+  const worktreeBin = join(cwd, "node_modules/.bin");
   const pathSep = process.platform === "win32" ? ";" : ":";
-  const combinedPath = [bundledBin, appBin, workerBin, hoistedBin, workspaceBin, resolvedPath].join(
+  const combinedPath = [bundledBin, appBin, workerBin, hoistedBin, worktreeBin, resolvedPath].join(
     pathSep,
   );
 
-  log.debug("Spawning %s language server in %s for workspace %s", lang, cwd, workspaceId);
+  log.debug("Spawning %s language server in %s for worktree %s", lang, cwd, worktreeId);
 
   const child = spawn(config.command, config.args, {
     cwd,
@@ -146,11 +146,11 @@ async function getOrSpawnServer(
     const current = servers.get(serverId);
     if (current && current !== session) return;
     servers.delete(serverId);
-    const set = workspaceServers.get(workspaceId);
+    const set = worktreeServers.get(worktreeId);
     if (set) {
       set.delete(serverId);
       if (set.size === 0) {
-        workspaceServers.delete(workspaceId);
+        worktreeServers.delete(worktreeId);
       }
     }
   }
@@ -158,10 +158,10 @@ async function getOrSpawnServer(
   servers.set(serverId, session);
 
   // Register in reverse index
-  let ids = workspaceServers.get(workspaceId);
+  let ids = worktreeServers.get(worktreeId);
   if (!ids) {
     ids = new Set();
-    workspaceServers.set(workspaceId, ids);
+    worktreeServers.set(worktreeId, ids);
   }
   ids.add(serverId);
 
@@ -207,15 +207,15 @@ async function getOrSpawnServer(
 }
 
 /**
- * Opens a connection to the workspace's language server for `lang`, starting
+ * Opens a connection to the worktree's language server for `lang`, starting
  * the server first if it isn't running.
  */
 export async function connectLspServer(spec: {
-  workspaceId: string;
+  worktreeId: string;
   lang: string;
   root: string;
 }): Promise<Duplex> {
-  const session = await getOrSpawnServer(spec.workspaceId, spec.lang, spec.root);
+  const session = await getOrSpawnServer(spec.worktreeId, spec.lang, spec.root);
   const { process: child, subscribers } = session;
   if (!child.stdin || !child.stdout) {
     throw new Error("Language server stdio not available");
@@ -245,10 +245,10 @@ export async function connectLspServer(spec: {
 // ---------------------------------------------------------------------------
 
 /**
- * Kill all language servers for a workspace.
+ * Kill all language servers for a worktree.
  */
-export function killWorkspaceServers(workspaceId: string): void {
-  const ids = workspaceServers.get(workspaceId);
+export function killWorktreeServers(worktreeId: string): void {
+  const ids = worktreeServers.get(worktreeId);
   if (!ids) return;
   for (const serverId of ids) {
     const session = servers.get(serverId);
@@ -257,7 +257,7 @@ export function killWorkspaceServers(workspaceId: string): void {
       servers.delete(serverId);
     }
   }
-  workspaceServers.delete(workspaceId);
+  worktreeServers.delete(worktreeId);
 }
 
 /**
@@ -268,5 +268,5 @@ export function killAllServers(): void {
     session.process.kill();
   }
   servers.clear();
-  workspaceServers.clear();
+  worktreeServers.clear();
 }

@@ -11,12 +11,12 @@ export type FocusedSurface =
   | `other:${string}`;
 
 /**
- * Keyboard tab cycling in the visible workspace's center dockview
- * (`WorkspaceCenterDockview`), and which surface ends up focused.
+ * Keyboard tab cycling in the visible worktree's center dockview
+ * (`WorktreeCenterDockview`), and which surface ends up focused.
  *
  * The leaves' focus targets are partly third-party markup: xterm's
  * `.xterm-helper-textarea` and CodeMirror's `.cm-content` (both used the same
- * way by `WorkspacePage` and `TerminalSurface`). Band's own elements are found
+ * way by `WorktreePage` and `TerminalSurface`). Band's own elements are found
  * by their `data-testid`.
  */
 export class CenterTabFocus {

@@ -35,8 +35,8 @@ function seedTask(
   tmpHome: string,
   task: {
     id: string;
-    workspaceId: string;
-    project: string;
+    worktreeId: string;
+    repo: string;
     branch: string;
     prompt: string;
     status: "running" | "completed" | "failed";
@@ -55,13 +55,13 @@ function seedTask(
   });
   sqlite
     .prepare(
-      `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
+      `INSERT OR REPLACE INTO tasks (id, worktree_id, repo, branch, prompt, status, session_id, started_at, completed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
-      task.workspaceId,
-      task.project,
+      task.worktreeId,
+      task.repo,
       task.branch,
       task.prompt,
       task.status,
@@ -96,17 +96,17 @@ function deleteTask(tmpHome: string, taskId: string): void {
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projectPath = join(tmpHome, "projects", "myapp");
-  const backendPath = join(tmpHome, "projects", "backend");
+  const repoPath = join(tmpHome, "repos", "myapp");
+  const backendPath = join(tmpHome, "repos", "backend");
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: "myapp",
-        path: projectPath,
+        path: repoPath,
         defaultBranch: "main",
         worktrees: [
-          { branch: "main", path: projectPath },
-          { branch: "feat/auth", path: join(tmpHome, "projects", "myapp-auth") },
+          { branch: "main", path: repoPath },
+          { branch: "feat/auth", path: join(tmpHome, "repos", "myapp-auth") },
         ],
       },
       {
@@ -121,8 +121,8 @@ test.beforeAll(async () => {
 
   seedTask(tmpHome, {
     id: "tsk_1000",
-    workspaceId: "myapp-main",
-    project: "myapp",
+    worktreeId: "myapp-main",
+    repo: "myapp",
     branch: "main",
     prompt: "Add authentication to the API",
     status: "completed",
@@ -133,8 +133,8 @@ test.beforeAll(async () => {
 
   seedTask(tmpHome, {
     id: "tsk_2000",
-    workspaceId: "myapp-feat/auth",
-    project: "myapp",
+    worktreeId: "myapp-feat/auth",
+    repo: "myapp",
     branch: "feat/auth",
     prompt: "Fix login validation bug",
     status: "failed",
@@ -151,8 +151,8 @@ test.beforeAll(async () => {
   // `failed`, breaking the "Running" badge assertion.
   seedTask(tmpHome, {
     id: "tsk_cleanup_sentinel",
-    workspaceId: "myapp-main",
-    project: "myapp",
+    worktreeId: "myapp-main",
+    repo: "myapp",
     branch: "main",
     prompt: "sentinel — flipped to failed by Phase B cleanup",
     status: "running",
@@ -176,8 +176,8 @@ test.beforeAll(async () => {
   // so this row stays as-is.
   seedTask(tmpHome, {
     id: "tsk_3000",
-    workspaceId: "backend-main",
-    project: "backend",
+    worktreeId: "backend-main",
+    repo: "backend",
     branch: "main",
     prompt: "Optimize database queries",
     status: "running",
@@ -240,7 +240,7 @@ test("filtering by status works", async ({ page }) => {
   await expect(tasks.card("tsk_3000")).toHaveCount(0);
 });
 
-test("filtering by project works", async ({ page }) => {
+test("filtering by repo works", async ({ page }) => {
   const tasks = new TasksDialog(page, server.url, TOKEN);
   await tasks.goto();
   await tasks.open();
@@ -248,7 +248,7 @@ test("filtering by project works", async ({ page }) => {
   // Wait for tasks to load.
   await expect(tasks.card("tsk_1000")).toBeVisible();
 
-  await tasks.filterByProject("backend");
+  await tasks.filterByRepo("backend");
 
   // Only the backend task remains (positive anchor); the myapp tasks drop out.
   await expect(tasks.card("tsk_3000")).toBeVisible();
@@ -265,7 +265,7 @@ test("empty state shows when no tasks match filters", async ({ page }) => {
   await expect(tasks.card("tsk_1000")).toBeVisible();
 
   // backend + completed matches no seeded task.
-  await tasks.filterByProject("backend");
+  await tasks.filterByRepo("backend");
   await tasks.filterByStatus("completed");
 
   await expect(tasks.emptyState).toBeVisible();
@@ -282,7 +282,7 @@ test("completed task shows session link", async ({ page }) => {
   await expect(tasks.sessionLink.first()).toBeVisible();
 });
 
-test("new task dialog opens and shows project/workspace selectors", async ({ page }) => {
+test("new task dialog opens and shows repo/worktree selectors", async ({ page }) => {
   const tasks = new TasksDialog(page, server.url, TOKEN);
   await tasks.goto();
   await tasks.open();
@@ -291,8 +291,8 @@ test("new task dialog opens and shows project/workspace selectors", async ({ pag
 
   await tasks.openNewTask();
 
-  await expect(tasks.newTaskProject).toBeVisible();
-  await expect(tasks.newTaskWorkspace).toBeVisible();
+  await expect(tasks.newTaskRepo).toBeVisible();
+  await expect(tasks.newTaskWorktree).toBeVisible();
   await expect(tasks.newTaskPrompt).toBeVisible();
 });
 
@@ -301,6 +301,6 @@ test("tasks dialog renders filter controls", async ({ page }) => {
   await tasks.goto();
   await tasks.open();
 
-  await expect(tasks.projectFilter).toBeVisible();
+  await expect(tasks.repoFilter).toBeVisible();
   await expect(tasks.statusFilter).toBeVisible();
 });

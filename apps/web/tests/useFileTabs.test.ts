@@ -12,7 +12,7 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 // Minimal renderHook utility — avoids adding @testing-library/react
 // ---------------------------------------------------------------------------
-function renderHook(workspaceId: string): {
+function renderHook(worktreeId: string): {
   result: { current: UseFileTabsReturn };
   unmount: () => void;
 } {
@@ -20,7 +20,7 @@ function renderHook(workspaceId: string): {
   let root: Root;
 
   function TestComponent() {
-    result.current = useFileTabs(workspaceId);
+    result.current = useFileTabs(worktreeId);
     return null;
   }
 

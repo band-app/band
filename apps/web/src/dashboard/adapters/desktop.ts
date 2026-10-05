@@ -144,8 +144,8 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     return isDesktopShell() && /Mac/.test(navigator.userAgent);
   }
 
-  getWorkspaceHref(workspaceId: string): string | undefined {
-    return this.web.getWorkspaceHref(workspaceId);
+  getWorktreeHref(worktreeId: string): string | undefined {
+    return this.web.getWorktreeHref(worktreeId);
   }
 
   async revealInFinder(path: string): Promise<void> {

@@ -39,7 +39,7 @@ const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs")
 
 interface HostRequest {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   status: "pending" | "leased" | "fulfilled" | "failed" | "cancelled";
   hostId: string | null;
   error: string | null;
@@ -59,8 +59,8 @@ interface CreateResult {
   path: string;
   provisioning?: { requestId: string };
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 
 const scratch: string[] = [];
@@ -117,10 +117,10 @@ const request = async (id: string) =>
   (await q<{ requests: HostRequest[] }>("hostRequests.list")).requests.find((r) => r.id === id);
 const runnersList = () => q<RunnersList>("runners.list");
 const create = (branch: string, placement: Record<string, unknown>) =>
-  m<CreateResult>("workspaces.create", { project: "proj", branch, placement });
+  m<CreateResult>("worktrees.create", { repo: "proj", branch, placement });
 const requestIdOf = (c: CreateResult) => c.provisioning?.requestId as string;
-const workspace = async (name: string) =>
-  (await q<ProjectsList>("projects.list")).projects
+const worktree = async (name: string) =>
+  (await q<ReposList>("repos.list")).repos
     .find((p) => p.name === "proj")
     ?.worktrees.find((w) => w.name === name);
 const lines = (file: string) =>
@@ -134,7 +134,7 @@ beforeAll(async () => {
   makeRepo(hubRepo);
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -211,7 +211,7 @@ describe("settings", () => {
 });
 
 describe("the local hook", () => {
-  it("spawns a real worker for a request and the workspace becomes ready (S1)", async () => {
+  it("spawns a real worker for a request and the worktree becomes ready (S1)", async () => {
     await setRunners([
       {
         id: "local",
@@ -229,8 +229,8 @@ describe("the local hook", () => {
     expect(id).toBeTruthy();
     expect(created.path).toBe("");
 
-    const wt = await waitFor(() => workspace("runner-local"), {
-      label: "workspace exists on the spawned worker",
+    const wt = await waitFor(() => worktree("runner-local"), {
+      label: "worktree exists on the spawned worker",
       timeoutMs: 90_000,
       intervalMs: 250,
     });
@@ -277,8 +277,8 @@ describe("the ssh hook", () => {
       },
     ]);
     const created = await create("runner-ssh", { labels: { pool: "ssh" } });
-    const wt = await waitFor(() => workspace("runner-ssh"), {
-      label: "workspace exists on the ssh worker",
+    const wt = await waitFor(() => worktree("runner-ssh"), {
+      label: "worktree exists on the ssh worker",
       timeoutMs: 90_000,
       intervalMs: 250,
     });
@@ -549,8 +549,8 @@ describe("the hook contract", () => {
     // The environment's own isolation wins over the runner's.
     expect(env.BAND_ISOLATION).toBe("container");
     expect(env.BAND_LABELS.split(",").sort()).toEqual(["pool=env", "zone=x"]);
-    // The project has no environment image built, so the hook is told there is none.
-    expect(env.BAND_PROJECT_IMAGE).toBe("");
+    // The repo has no environment image built, so the hook is told there is none.
+    expect(env.BAND_REPO_IMAGE).toBe("");
     expect(env.BAND_RUNNER_ID).toBe("envdump");
     expect(env.BAND_REQUEST_ID).toBe(id);
     // The hub's own secrets and home do not reach the hook.

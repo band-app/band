@@ -99,9 +99,9 @@ export async function startDaemonOfBuild(
 }
 
 export interface ShellSpec {
-  workspaceId: string;
+  worktreeId: string;
   terminalId: string;
-  workspaceRoot: string;
+  worktreeRoot: string;
 }
 
 /** The parent pid of `pid`: for a shell, the daemon hosting it. */

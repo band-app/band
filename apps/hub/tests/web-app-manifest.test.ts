@@ -2,7 +2,7 @@
  * The web app manifest that keeps every Band URL inside the iOS home-screen
  * app (`scope: "/"`), and its icons. iOS fetches both without the session
  * cookie when the app is added, so they load without the token, and they must
- * not carry the token or any workspace data.
+ * not carry the token or any worktree data.
  *
  * Real production server, plain HTTP.
  */

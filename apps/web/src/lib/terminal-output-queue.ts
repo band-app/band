@@ -4,7 +4,7 @@
 //
 // Every cached terminal parses its PTY output on the one renderer main thread,
 // including terminals parked off-screen (up to 6 tabs in each of 4 warm hidden
-// workspaces, see `terminal-park-policy.ts`). A parked terminal that streams
+// worktrees, see `terminal-park-policy.ts`). A parked terminal that streams
 // (an agent redrawing its TUI, a build log) used to call `term.write` per
 // WebSocket frame, and each call starts its own xterm parse loop of up to
 // 12 ms slices. Measured with the typing-latency probe, three parked

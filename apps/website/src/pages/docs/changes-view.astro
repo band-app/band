@@ -5,7 +5,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Changes view</h1>
 
   <p>
-    The Changes view is Band's built-in diff reviewer for the active workspace.
+    The Changes view is Band's built-in diff reviewer for the active worktree.
     It shows every modified, added, deleted, untracked, and renamed file in
     the worktree, lets you read the changes inline with syntax highlighting,
     and gives you the basic git actions you usually run from a terminal &mdash;
@@ -23,7 +23,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-changes-view.png"
-      alt="The Band Changes view in a workspace. The file tree sidebar lists the modified files on the left. The toolbar at the top of the diff pane shows the head branch and compare-target dropdown next to action icons for commit, git pull, git push, reload, find, expand all, and the unified/split view toggle. Two files are expanded below in split view, each showing old code on the left and new code on the right with green and red highlights for additions and deletions."
+      alt="The Band Changes view in a worktree. The file tree sidebar lists the modified files on the left. The toolbar at the top of the diff pane shows the head branch and compare-target dropdown next to action icons for commit, git pull, git push, reload, find, expand all, and the unified/split view toggle. Two files are expanded below in split view, each showing old code on the left and new code on the right with green and red highlights for additions and deletions."
       width="1217"
       height="1258"
       loading="lazy"
@@ -79,7 +79,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The <strong>Committed on Branch</strong> section compares the
-    workspace's <strong>HEAD</strong> against the project's default branch
+    worktree's <strong>HEAD</strong> against the repo's default branch
     (e.g. <code>main</code>). The branch picker under the current branch
     name lets you pick any other local or remote branch instead. Band uses
     <code>git merge-base</code>, so you see only the changes your branch
@@ -87,7 +87,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
 
   <p>
-    Your pick is remembered per workspace, so coming back to a workspace
+    Your pick is remembered per worktree, so coming back to a worktree
     later restores the same compare branch.
   </p>
 
@@ -156,7 +156,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     The toolbar's <strong>Commit</strong> button (the git-commit icon next
     to <em>Reload changes</em>) opens the commit dialog. From there you can
     stage every change in the worktree &mdash; tracked and untracked &mdash;
-    and create a commit on the workspace's current branch without leaving
+    and create a commit on the worktree's current branch without leaving
     the Changes view.
   </p>
 
@@ -180,7 +180,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ul>
     <li>
       <strong>Message</strong> &mdash; the commit subject. Capped at 200
-      characters in the input; the convention in most projects is to keep
+      characters in the input; the convention in most repos is to keep
       it under 72.
     </li>
     <li>
@@ -194,7 +194,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     When you click <strong>Commit</strong>, Band runs
     <code>git add -A</code> followed by a single <code>git commit</code>
-    in the workspace's worktree. The Changes view refreshes immediately so
+    in the worktree's worktree. The Changes view refreshes immediately so
     the diff reflects the new <code>HEAD</code>.
   </p>
 
@@ -211,7 +211,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ol>
     <li>Run <code>git status</code> and <code>git diff HEAD</code> to see what changed.</li>
-    <li>Optionally peek at recent commits or surrounding files to match the project's commit style.</li>
+    <li>Optionally peek at recent commits or surrounding files to match the repo's commit style.</li>
     <li>Output a single commit message in subject + body format.</li>
   </ol>
 
@@ -253,7 +253,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ul>
     <li>
       <strong>Git pull</strong> &mdash; runs <code>git pull --rebase</code>
-      in the workspace's worktree, then refreshes the diff so the change set
+      in the worktree's worktree, then refreshes the diff so the change set
       reflects the new <code>HEAD</code>.
     </li>
     <li>
@@ -274,8 +274,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
 
   <p>
-    Both actions are also available from the workspace context menu on the
-    project sidebar &mdash; the toolbar buttons are simply a convenience for
+    Both actions are also available from the worktree context menu on the
+    repo sidebar &mdash; the toolbar buttons are simply a convenience for
     users who already have the diff open.
   </p>
 
@@ -283,7 +283,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The Changes view stays in sync with the worktree without you having to
-    hit reload. Band runs a branch-status poller that watches the workspace
+    hit reload. Band runs a branch-status poller that watches the worktree
     for git activity (commits made elsewhere, files written by the agent,
     branch checkouts from a terminal) and pushes updates over the same
     Server-Sent Events stream the rest of the dashboard uses. When something

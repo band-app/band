@@ -1,6 +1,6 @@
 // Integration test for the bundled `k8s` runner hook against a real cluster (plan step 3.9). A real
 // hub (the production bundle, temp BAND_HOME) runs `runners/k8s` with kubectl. The hook starts the
-// band-worker image as a Pod, the worker dials the hub over TLS, and the workspace becomes ready on
+// band-worker image as a Pod, the worker dials the hub over TLS, and the worktree becomes ready on
 // it. Destroy then removes the Pod and its token Secret.
 //
 // It needs a cluster that already has the worker image (the CI `k8s (kind)` job builds it and runs
@@ -14,7 +14,7 @@
 // file: a node `tls` server on 0.0.0.0 that pipes the decrypted bytes to the hub (HTTP and WebSocket
 // alike). Its certificate is self-signed (openssl), and the pods trust it through a ConfigMap
 // (BAND_K8S_CA_CONFIGMAP). Pods reach this machine at BAND_K8S_TEST_HUB_HOST, by default the gateway
-// of docker's `kind` network. The project's origin is a `git daemon` on 0.0.0.0, because the pod clones
+// of docker's `kind` network. The repo's origin is a `git daemon` on 0.0.0.0, because the pod clones
 // the repository itself.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -45,8 +45,8 @@ interface CreateResult {
   path: string;
   provisioning?: { requestId: string };
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 interface HostsList {
   hosts: Array<{ id: string; status: string }>;
@@ -142,16 +142,16 @@ const m = <T>(procedure: string, input: unknown) =>
     if (res.status !== 200) throw new Error(`${procedure}: HTTP ${res.status} ${await res.text()}`);
     return trpcData<T>(res);
   });
-/** Waits for a workspace. On a timeout the error carries the runner's log and the pods. */
-const workspace = async (name: string) => {
+/** Waits for a worktree. On a timeout the error carries the runner's log and the pods. */
+const worktree = async (name: string) => {
   try {
     return await waitFor(
       async () => {
-        const found = (await q<ProjectsList>("projects.list")).projects
+        const found = (await q<ReposList>("repos.list")).repos
           .find((p) => p.name === "proj")
           ?.worktrees.find((w) => w.name === name);
         if (found) return found;
-        // A failed request will not turn into a workspace, so stop waiting.
+        // A failed request will not turn into a worktree, so stop waiting.
         const { requests } = await q<{ requests: Array<{ branch: string; status: string }> }>(
           "hostRequests.list",
         );
@@ -160,7 +160,7 @@ const workspace = async (name: string) => {
         }
         return undefined;
       },
-      { label: `workspace ${name} exists`, timeoutMs: 240_000, intervalMs: 1000 },
+      { label: `worktree ${name} exists`, timeoutMs: 240_000, intervalMs: 1000 },
     );
   } catch (err) {
     const requests = await q<{
@@ -305,7 +305,7 @@ describe.skipIf(!IMAGE || !ADMIN_KUBECONFIG)("the k8s hook on a cluster", () => 
 
     seedSettings(hubHome, { tokenSecret: TOKEN });
     seedState(hubHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: seed,
@@ -372,8 +372,8 @@ describe.skipIf(!IMAGE || !ADMIN_KUBECONFIG)("the k8s hook on a cluster", () => 
   });
 
   it("starts a hardened worker Pod that says hello over TLS (S2)", async () => {
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "k8s-a",
       placement: {
         labels: { pool: "k8s" },
@@ -381,7 +381,7 @@ describe.skipIf(!IMAGE || !ADMIN_KUBECONFIG)("the k8s hook on a cluster", () => 
       },
     });
     expect(created.provisioning?.requestId).toBeTruthy();
-    const w = await workspace("k8s-a");
+    const w = await worktree("k8s-a");
     const hostId = w.hostId as string;
     expect(hostId).toBeTruthy();
     expect((await q<HostsList>("hosts.list")).hosts.find((h) => h.id === hostId)?.status).toBe(
@@ -428,7 +428,7 @@ describe.skipIf(!IMAGE || !ADMIN_KUBECONFIG)("the k8s hook on a cluster", () => 
   }, 360_000);
 
   it("removes the Pod and its Secret on destroy (S2)", async () => {
-    const w = await workspace("k8s-a");
+    const w = await worktree("k8s-a");
     const hostId = w.hostId as string;
     expect(podsOf(hostId)).toHaveLength(1);
     const hook = join(import.meta.dirname, "../../../runners/k8s/destroy.sh");

@@ -57,9 +57,9 @@ export function useFavicon(browserId: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 export interface BrowserPaneParams {
-  workspaceId: string;
+  worktreeId: string;
   browserId: string;
-  /** Whether the pane's workspace is the one on screen. */
+  /** Whether the pane's worktree is the one on screen. */
   wsActive?: boolean;
   initialUrl?: string;
 }
@@ -130,7 +130,7 @@ function initialSrc(url: string): string {
 //     can't see an outside click; `lib/browser-webview-dom-bridge.ts`
 //     synthesises one when focus moves into a webview.
 //   - Keys typed inside the page never reach this document either. The main
-//     process forwards the pane shortcuts and `WorkspaceCenterDockview`
+//     process forwards the pane shortcuts and `WorktreeCenterDockview`
 //     re-dispatches them on the webview.
 // ---------------------------------------------------------------------------
 
@@ -141,7 +141,7 @@ export function BrowserPaneComponent({
   params: BrowserPaneParams;
   api: IDockviewPanelProps<BrowserPaneParams>["api"];
 }) {
-  const { browserId, initialUrl, workspaceId: workspaceIdParam } = params;
+  const { browserId, initialUrl, worktreeId: worktreeIdParam } = params;
   const wsActive = params.wsActive !== false;
 
   const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
@@ -151,15 +151,15 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
-  // `workspaceId` may be absent on the BrowserPaneParams when the panel
+  // `worktreeId` may be absent on the BrowserPaneParams when the panel
   // is restored from a saved layout that pre-dates the history feature.
   // Backfill it lazily from `trpc.browsers.get` so history recording and
-  // autocomplete still know which workspace they belong to. Keep the
-  // value in a ref so listeners read the latest workspace without
+  // autocomplete still know which worktree they belong to. Keep the
+  // value in a ref so listeners read the latest worktree without
   // re-binding.
-  const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
+  const [worktreeId, setWorktreeId] = useState(worktreeIdParam ?? "");
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
   // Browser profile (cookie jar) of this tab, from the server's tab record.
   // `null` is the Default profile. A guest's partition is fixed when it is
   // created, so the page is only created once the profile is known, and is
@@ -181,7 +181,7 @@ export function BrowserPaneComponent({
   const { settings } = useSettingsQuery();
   const cdpEnabled = (settings as { webBrowserCdpEnabled?: boolean }).webBrowserCdpEnabled ?? false;
 
-  // On screen = selected tab in its group AND the workspace is shown.
+  // On screen = selected tab in its group AND the worktree is shown.
   const [tabVisible, setTabVisible] = useState(api.isVisible);
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setTabVisible(e.isVisible));
@@ -191,8 +191,8 @@ export function BrowserPaneComponent({
 
   // ------- guest lifecycle -------
   // `wantGuest` turns on the first time the pane is on screen (a restored
-  // workspace with many tabs doesn't spin up every page at once) and off
-  // when the hidden-workspace budget evicts the page. The page is rebuilt
+  // worktree with many tabs doesn't spin up every page at once) and off
+  // when the hidden-worktree budget evicts the page. The page is rebuilt
   // at the last URL the next time the pane is shown.
   const [wantGuest, setWantGuest] = useState(false);
   useEffect(() => {
@@ -299,7 +299,7 @@ export function BrowserPaneComponent({
         .then(() => {
           // Recreates the page in the new profile at the current URL.
           setProfileId(next);
-          // The project's default changed too; Settings shows it.
+          // The repo's default changed too; Settings shows it.
           void invalidateProfiles();
         })
         .catch((e) => console.error("Failed to switch browser profile:", e));
@@ -315,27 +315,27 @@ export function BrowserPaneComponent({
     [invalidateProfiles, handleProfileSelect],
   );
 
-  // ------- hidden-workspace guest budget -------
+  // ------- hidden-worktree guest budget -------
   // While the page exists, offer it to the budget in
   // `browser-guest-retention.ts`. Evicting removes the webview; the effect
-  // above rebuilds it at the last URL when the workspace is shown again.
+  // above rebuilds it at the last URL when the worktree is shown again.
   useEffect(() => {
-    if (!webview || !workspaceId) return;
-    const unregister = registerBrowserGuest(workspaceId, browserId, () => {
+    if (!webview || !worktreeId) return;
+    const unregister = registerBrowserGuest(worktreeId, browserId, () => {
       // Leave the budget now rather than on the next commit, so an evicted
-      // workspace stops counting as holding a live guest straight away.
+      // worktree stops counting as holding a live guest straight away.
       unregister();
       setWantGuest(false);
     });
     return unregister;
-  }, [webview, workspaceId, browserId]);
+  }, [webview, worktreeId, browserId]);
 
   // ------- pane shortcuts typed inside the page -------
   // The page consumes its own keydowns. The main process swallows the pane
   // shortcuts (find, new tabs, close, split, cycle) and forwards them; replay
   // each one as a `keydown` on the webview, where it bubbles through this
   // pane's `onKeyDown` and reaches the window listeners of
-  // `WorkspaceCenterDockview` exactly like a key typed in Band's own UI.
+  // `WorktreeCenterDockview` exactly like a key typed in Band's own UI.
   useEffect(() => {
     if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
@@ -377,11 +377,11 @@ export function BrowserPaneComponent({
   // ------- fetch the tab record from the server -------
   // The server browser record is the source of truth for the profile, and
   // for the URL when there is no initialUrl param (a browser created via CLI
-  // with --url, or a workspace revisit adds the panel without one).
+  // with --url, or a worktree revisit adds the panel without one).
   //
   // A new tab's pane mounts while its `browsers.create` is still in flight,
   // so the record can be missing for a moment. Retry briefly before falling
-  // back to Default, or a new tab would open outside its project's profile.
+  // back to Default, or a new tab would open outside its repo's profile.
   useEffect(() => {
     if (!browserId) return;
 
@@ -403,11 +403,11 @@ export function BrowserPaneComponent({
       setProfileId(browser?.profileId ?? null);
       setProfileResolved(true);
       if (initialUrl || !browser) return;
-      const ws = browser.workspaceId;
-      if (ws && !workspaceIdRef.current) {
-        // Lazy workspace backfill — see comment on `workspaceId`
+      const ws = browser.worktreeId;
+      if (ws && !worktreeIdRef.current) {
+        // Lazy worktree backfill — see comment on `worktreeId`
         // state above.
-        setWorkspaceId(ws);
+        setWorktreeId(ws);
       }
       const url = browser.url;
       if (!url || url === BLANK_URL) return;
@@ -424,7 +424,7 @@ export function BrowserPaneComponent({
   }, [browserId, initialUrl, navigateWebview]);
 
   // ------- listen for URL / title changes from the main process -------
-  // Persist URL to server (debounced) so it survives workspace switches.
+  // Persist URL to server (debounced) so it survives worktree switches.
   // Refs (`browserIdRef`, `currentUrlRef`, `addressInputFocusedRef`,
   // `urlPersistTimer`) are read via `.current` inside the listener —
   // adding `.current` to the deps would force the listener to re-bind
@@ -472,14 +472,14 @@ export function BrowserPaneComponent({
           // ignore invalid URLs
         }
 
-        // Record committed navigations into the per-workspace history.
+        // Record committed navigations into the per-worktree history.
         // Gated on `loading=false` so we only capture the final URL
         // after a redirect chain settles. The server filters
         // about:blank / chrome-extension / devtools / file URLs.
-        if (!event.payload.loading && workspaceIdRef.current) {
+        if (!event.payload.loading && worktreeIdRef.current) {
           trpc.history.record
             .mutate({
-              workspaceId: workspaceIdRef.current,
+              worktreeId: worktreeIdRef.current,
               url,
               faviconUrl: faviconForHistory,
             })
@@ -497,10 +497,10 @@ export function BrowserPaneComponent({
             // 100-2000ms after `did-stop-loading`, so the row already
             // exists from the URL listener above.
             const url = currentUrlRef.current;
-            if (url && url !== BLANK_URL && workspaceIdRef.current) {
+            if (url && url !== BLANK_URL && worktreeIdRef.current) {
               trpc.history.updateMeta
                 .mutate({
-                  workspaceId: workspaceIdRef.current,
+                  worktreeId: worktreeIdRef.current,
                   url,
                   title: event.payload.title,
                 })
@@ -611,7 +611,7 @@ export function BrowserPaneComponent({
   } = useBrowserPaneControls({
     browserId,
     webview,
-    workspaceId,
+    worktreeId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
@@ -731,7 +731,7 @@ export function BrowserPaneComponent({
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
-          // Stable hook for `WorkspaceCenterDockview` to focus the address
+          // Stable hook for `WorktreeCenterDockview` to focus the address
           // bar via `[data-band-address-input]` — more durable than
           // `input[type='text']`, which would also match the find-bar's
           // search input.
@@ -741,12 +741,10 @@ export function BrowserPaneComponent({
           profiles={profiles}
           profileId={effectiveProfileId}
           onSelect={handleProfileSelect}
-          workspaceId={workspaceId || null}
+          worktreeId={worktreeId || null}
           onImported={handleProfileImported}
         />
-        {workspaceId ? (
-          <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
-        ) : null}
+        {worktreeId ? <HistoryPopover worktreeId={worktreeId} onNavigate={handleNavigate} /> : null}
         <button
           type="button"
           onClick={handleToggleDevTools}

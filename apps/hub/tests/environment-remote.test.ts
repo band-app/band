@@ -1,6 +1,6 @@
 // Integration tests for `.band/environment.json` on a remote host (plan step
 // 3.1): a real `band-worker` process dials a real hub, reports the tool
-// versions it has, and a workspace on it runs the file's install and start on
+// versions it has, and a worktree on it runs the file's install and start on
 // the worker. `requires` is checked against what the worker reported.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
@@ -104,13 +104,13 @@ beforeAll(async () => {
   writeFileSync(join(hubRepo, ".band", "environment.json"), JSON.stringify(ENVIRONMENT));
   const workerRepo = join(workerRoot, "proj");
   makeRepo(workerRepo);
-  // Untracked in the worker's checkout, so the worktree reads it from the project path.
+  // Untracked in the worker's checkout, so the worktree reads it from the repo path.
   mkdirSync(join(workerRepo, ".band"), { recursive: true });
   writeFileSync(join(workerRepo, ".band", "environment.json"), JSON.stringify(ENVIRONMENT));
 
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -168,29 +168,29 @@ describe("tool versions", () => {
   });
 
   it("finds node >=99 unmet on the worker, using the versions it reported", async () => {
-    const project = await q<{
+    const repo = await q<{
       issues: unknown[];
       hosts: {
         id: string;
         meets: boolean;
         unmet: { tool: string; range: string; found: string | null }[];
       }[];
-    }>("environment.forProject", { projectName: "proj" });
-    expect(project.issues).toEqual([]);
-    const fit = project.hosts.find((h) => h.id === hostId);
+    }>("environment.forRepo", { repoName: "proj" });
+    expect(repo.issues).toEqual([]);
+    const fit = repo.hosts.find((h) => h.id === hostId);
     expect(fit?.meets).toBe(false);
     const node = fit?.unmet.find((u) => u.tool === "node");
     expect(node).toEqual({ tool: "node", range: ">=99", found: (await hostView())?.tools.node });
   });
 });
 
-describe("a workspace on the worker", () => {
+describe("a worktree on the worker", () => {
   it("runs install, start and the declared terminals on the worker", async () => {
-    const created = await m<{ path: string }>("workspaces.create", {
-      project: "proj",
+    const created = await m<{ path: string }>("worktrees.create", {
+      repo: "proj",
       branch: "remote-env",
       hostId,
-      hostProjectPath: join(workerRoot, "proj"),
+      hostRepoPath: join(workerRoot, "proj"),
     });
     expect(created.path).toBe(join(workerRoot, ".band-worktrees", "proj", "remote-env"));
     await waitFor(async () => (existsSync(join(created.path, "terminal.txt")) ? true : undefined), {

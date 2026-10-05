@@ -69,9 +69,9 @@ describe("syncWorktrees", () => {
     git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
 
     saveState({
-      projects: [
+      repos: [
         {
-          name: "test-project",
+          name: "test-repo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [],
@@ -82,13 +82,13 @@ describe("syncWorktrees", () => {
     await syncWorktrees();
 
     const state = loadState();
-    expect(state.projects[0].worktrees.length).toBe(2);
+    expect(state.repos[0].worktrees.length).toBe(2);
 
-    const mainWt = state.projects[0].worktrees.find((wt) => wt.branch === "main");
+    const mainWt = state.repos[0].worktrees.find((wt) => wt.branch === "main");
     expect(mainWt).toBeDefined();
     expect(mainWt!.path).toBe(repoPath);
 
-    const featureWt = state.projects[0].worktrees.find((wt) => wt.branch === "feature");
+    const featureWt = state.repos[0].worktrees.find((wt) => wt.branch === "feature");
     expect(featureWt).toBeDefined();
     expect(featureWt!.path).toBe(wtPath);
   });
@@ -97,9 +97,9 @@ describe("syncWorktrees", () => {
     const repoPath = createRepo(tmp);
 
     saveState({
-      projects: [
+      repos: [
         {
-          name: "test-project",
+          name: "test-repo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [
@@ -113,9 +113,9 @@ describe("syncWorktrees", () => {
     await syncWorktrees();
 
     const state = loadState();
-    expect(state.projects[0].worktrees.length).toBe(1);
-    expect(state.projects[0].worktrees[0].branch).toBe("main");
-    expect(state.projects[0].worktrees[0].path).toBe(repoPath);
+    expect(state.repos[0].worktrees.length).toBe(1);
+    expect(state.repos[0].worktrees[0].branch).toBe("main");
+    expect(state.repos[0].worktrees[0].path).toBe(repoPath);
   });
 
   it("does not write state when already in sync", async () => {
@@ -125,11 +125,11 @@ describe("syncWorktrees", () => {
     // Seed `hasOrigin: false` to match reality — `createRepo` doesn't add
     // an origin remote, so `syncWorktrees` would otherwise rewrite the
     // default `true` to `false` and the "no write" assertion below would
-    // fail. See `ProjectState.hasOrigin` and issue #458.
+    // fail. See `RepoState.hasOrigin` and issue #458.
     saveState({
-      projects: [
+      repos: [
         {
-          name: "test-project",
+          name: "test-repo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ name: "main", branch: "main", path: repoPath, head }],
@@ -148,7 +148,7 @@ describe("syncWorktrees", () => {
   });
 
   // `hasOrigin` is the persisted "should we even probe CI for this
-  // project" flag introduced for issue #458. It must flip between true
+  // repo" flag introduced for issue #458. It must flip between true
   // and false based on whether the on-disk repo has an `origin` remote,
   // so the branch-status poller can skip the CI query without a
   // per-tick `git remote get-url origin` retry / cache.
@@ -159,7 +159,7 @@ describe("syncWorktrees", () => {
     git(repoPath, ["remote", "add", "origin", "git@github.com:band-app/band.git"]);
 
     saveState({
-      projects: [
+      repos: [
         {
           name: "with-origin",
           path: repoPath,
@@ -172,17 +172,17 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    expect(loadState().projects[0].hasOrigin).toBe(true);
+    expect(loadState().repos[0].hasOrigin).toBe(true);
   });
 
   it("sets hasOrigin=false when the repo has no origin remote", async () => {
     const repoPath = createRepo(tmp);
     // No `git remote add` here — the seeded `hasOrigin: true` (the
-    // schema default for fresh projects, see `projects.add`) should be
+    // schema default for fresh repos, see `repos.add`) should be
     // overwritten by the sync.
 
     saveState({
-      projects: [
+      repos: [
         {
           name: "no-origin",
           path: repoPath,
@@ -195,24 +195,24 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    expect(loadState().projects[0].hasOrigin).toBe(false);
+    expect(loadState().repos[0].hasOrigin).toBe(false);
   });
 
-  it("skips projects where git fails", async () => {
+  it("skips repos where git fails", async () => {
     const repoPath = createRepo(tmp);
     const wtPath = join(tmp, "wt-feature");
     git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
 
     saveState({
-      projects: [
+      repos: [
         {
-          name: "broken-project",
+          name: "broken-repo",
           path: join(tmp, "does-not-exist"),
           defaultBranch: "main",
           worktrees: [{ name: "stale", branch: "stale", path: join(tmp, "does-not-exist", "wt") }],
         },
         {
-          name: "good-project",
+          name: "good-repo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [],
@@ -224,13 +224,13 @@ describe("syncWorktrees", () => {
 
     const state = loadState();
 
-    // Broken project keeps its stale worktrees (skipped)
-    expect(state.projects[0].worktrees.length).toBe(1);
-    expect(state.projects[0].worktrees[0].branch).toBe("stale");
+    // Broken repo keeps its stale worktrees (skipped)
+    expect(state.repos[0].worktrees.length).toBe(1);
+    expect(state.repos[0].worktrees[0].branch).toBe("stale");
 
-    // Good project gets synced
-    expect(state.projects[1].worktrees.length).toBe(2);
-    expect(state.projects[1].worktrees.find((wt) => wt.branch === "feature")).toBeDefined();
+    // Good repo gets synced
+    expect(state.repos[1].worktrees.length).toBe(2);
+    expect(state.repos[1].worktrees.find((wt) => wt.branch === "feature")).toBeDefined();
   });
 
   // Regression: the `pinned` flag is dashboard-state, not git-state — it
@@ -243,7 +243,7 @@ describe("syncWorktrees", () => {
     const head = git(repoPath, ["rev-parse", "HEAD"]).trim();
 
     saveState({
-      projects: [
+      repos: [
         {
           name: "pin-test",
           path: repoPath,
@@ -257,14 +257,14 @@ describe("syncWorktrees", () => {
     await syncWorktrees();
 
     const state = loadState();
-    expect(state.projects[0].worktrees.length).toBe(1);
-    expect(state.projects[0].worktrees[0].pinned).toBe(true);
+    expect(state.repos[0].worktrees.length).toBe(1);
+    expect(state.repos[0].worktrees[0].pinned).toBe(true);
   });
 
-  // Regression (workspace `name` field): the immutable `name` identity must
+  // Regression (worktree `name` field): the immutable `name` identity must
   // survive a git branch switch inside the worktree — that is the whole
   // point of decoupling identity from `branch`. Sync reconciles the live
-  // `branch` to match git but leaves `name` (and thus the workspace id)
+  // `branch` to match git but leaves `name` (and thus the worktree id)
   // untouched, so panels/chats/labels keyed by the id are not orphaned when
   // the user switches branches. `pinned` rides along on the same path-keyed
   // merge.
@@ -274,7 +274,7 @@ describe("syncWorktrees", () => {
     git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
 
     saveState({
-      projects: [
+      repos: [
         {
           name: "switch-test",
           path: repoPath,
@@ -294,7 +294,7 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    const wt = loadState().projects[0].worktrees.find((w) => w.path === wtPath);
+    const wt = loadState().repos[0].worktrees.find((w) => w.path === wtPath);
     expect(wt).toBeDefined();
     // Identity frozen at creation…
     expect(wt!.name).toBe("feature");

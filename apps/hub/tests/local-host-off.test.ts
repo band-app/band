@@ -1,5 +1,5 @@
-// BAND_LOCAL_HOST=off: a real hub with local workspaces off and a real
-// `band-worker` process. A workspace with no host goes to the worker, and a
+// BAND_LOCAL_HOST=off: a real hub with local worktrees off and a real
+// `band-worker` process. A worktree with no host goes to the worker, and a
 // request for the local host is refused.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
@@ -71,7 +71,7 @@ beforeAll(async () => {
   makeRepo(join(workerRoot, "proj"));
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -132,9 +132,9 @@ describe("BAND_LOCAL_HOST=off", () => {
     expect(hosts.find((h) => h.id === hostId)?.usable).toBe(true);
   });
 
-  it("refuses a workspace on the local host", async () => {
-    const res = await mutate("workspaces.create", {
-      project: "proj",
+  it("refuses a worktree on the local host", async () => {
+    const res = await mutate("worktrees.create", {
+      repo: "proj",
       branch: "on-local",
       hostId: "local",
     });
@@ -142,11 +142,11 @@ describe("BAND_LOCAL_HOST=off", () => {
     expect(await res.text()).toContain("BAND_LOCAL_HOST=off");
   });
 
-  it("puts a workspace with no host on the only online worker", async () => {
-    const res = await mutate("workspaces.create", {
-      project: "proj",
+  it("puts a worktree with no host on the only online worker", async () => {
+    const res = await mutate("worktrees.create", {
+      repo: "proj",
       branch: "on-worker",
-      hostProjectPath: join(workerRoot, "proj"),
+      hostRepoPath: join(workerRoot, "proj"),
     });
     expect(res.status).toBe(200);
     expect((await trpcData<{ path: string }>(res)).path).toBe(

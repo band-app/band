@@ -1,5 +1,5 @@
 /**
- * `hostRequests.*`: workspaces waiting for a host (plan step 3.3). `list` and
+ * `hostRequests.*`: worktrees waiting for a host (plan step 3.3). `list` and
  * `cancel` are for the UI and CLI. `lease`, `renew`, `fulfil` and `fail` are
  * the runner's side and need an admin token. The MCP endpoint leaves the whole
  * router out, like `hosts.*`.
@@ -33,8 +33,8 @@ export const hostRequestsRouter = t.router({
   list: publicProcedure.query(() => ({
     requests: placementService.list().map((r) => ({
       id: r.id,
-      workspaceId: r.workspaceId,
-      project: r.project,
+      worktreeId: r.worktreeId,
+      repo: r.repo,
       branch: r.branch,
       labels: r.labels,
       requires: r.requires,
@@ -73,7 +73,7 @@ export const hostRequestsRouter = t.router({
       requestId.extend({
         runnerId,
         hostId: z.string().min(1),
-        hostProjectPath: z.string().min(1).optional(),
+        hostRepoPath: z.string().min(1).optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -83,7 +83,7 @@ export const hostRequestsRouter = t.router({
             input.requestId,
             input.runnerId,
             input.hostId,
-            input.hostProjectPath,
+            input.hostRepoPath,
           ),
         };
       } catch (err) {

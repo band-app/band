@@ -35,7 +35,7 @@ interface CodeMirrorEditorProps {
   originalContent?: string;
   language: string;
   className?: string;
-  /** Workspace-relative file path — enables the file actions in the selection context menu */
+  /** Worktree-relative file path — enables the file actions in the selection context menu */
   filePath?: string;
   /** 1-based line number to scroll to and highlight */
   line?: number;

@@ -12,7 +12,7 @@ Test the Band web application by starting the dev server and using `agent-browse
 
 ### 1. Start the dev server and detect the port
 
-Run from the repo root (`/Users/amirilovic/Projects/band`). Do NOT kill any existing server — Vite will automatically pick another port if 3456 is occupied.
+Run from the repo root (`/Users/amirilovic/Repos/band`). Do NOT kill any existing server — Vite will automatically pick another port if 3456 is occupied.
 
 ```bash
 pnpm dev:web &
@@ -68,12 +68,12 @@ Adjust based on what the user asks. Common routes:
 
 | Route | Description |
 |-------|-------------|
-| `/` | Dashboard — project list |
-| `/chat/<workspaceId>` | Workspace chat view |
+| `/` | Dashboard — repo list |
+| `/chat/<worktreeId>` | Worktree chat view |
 | `/tasks` | Tasks page |
 | `/cronjobs` | Cronjobs page |
 
-To find valid workspace IDs for the chat route, first snapshot the dashboard and look for project links.
+To find valid worktree IDs for the chat route, first snapshot the dashboard and look for repo links.
 
 ### 3. Interactive testing
 

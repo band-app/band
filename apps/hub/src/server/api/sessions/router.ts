@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { WorkspaceNotFoundError } from "../../errors";
+import { WorktreeNotFoundError } from "../../errors";
 import type { ListSessionsResponse } from "../../services/session-service";
 import { sessionService } from "../../services/session-service";
 import { publicProcedure, t } from "../trpc";
@@ -26,7 +26,7 @@ import { publicProcedure, t } from "../trpc";
  */
 export const sessionsRouter = t.router({
   list: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .query(async ({ input }): Promise<ListSessionsResponse> => {
       // Explicit return-type annotation pins the wire contract even though
       // TypeScript infers it correctly today (the `never` from
@@ -52,13 +52,13 @@ export type SessionsRouter = typeof sessionsRouter;
  * `: never` so callers can `throwAsTrpcError(err)` without a redundant
  * `throw` keyword (same convention as cronjobs / tasks routers).
  *
- *   - `WorkspaceNotFoundError` → 404 `NOT_FOUND`
+ *   - `WorktreeNotFoundError` → 404 `NOT_FOUND`
  *
  * Anything else is rethrown unchanged so unexpected failures surface as
  * a 500 with the original stack.
  */
 function throwAsTrpcError(err: unknown): never {
-  if (err instanceof WorkspaceNotFoundError) {
+  if (err instanceof WorktreeNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
   throw err;

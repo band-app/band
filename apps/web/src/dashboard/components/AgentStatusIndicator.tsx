@@ -33,7 +33,7 @@ export function AgentStatusIndicator({ agent, isActive, fallback }: Props) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          data-testid="workspace-card__agent-status"
+          data-testid="worktree-card__agent-status"
           className={`inline-block size-2 shrink-0 rounded-full ${color} ${animation}`}
         />
       </TooltipTrigger>

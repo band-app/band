@@ -28,12 +28,12 @@ export class AgentSessionQueries {
     return this.find(id);
   }
 
-  /** Sessions of a workspace that haven't ended, oldest first. */
-  findOpenByWorkspace(workspaceId: string): AgentSessionRecord[] {
+  /** Sessions of a worktree that haven't ended, oldest first. */
+  findOpenByWorktree(worktreeId: string): AgentSessionRecord[] {
     return getDb()
       .select()
       .from(agentSessions)
-      .where(and(eq(agentSessions.workspaceId, workspaceId), ne(agentSessions.state, "ended")))
+      .where(and(eq(agentSessions.worktreeId, worktreeId), ne(agentSessions.state, "ended")))
       .orderBy(asc(agentSessions.createdAt))
       .all();
   }
@@ -56,7 +56,7 @@ export class AgentSessionQueries {
       .get();
   }
 
-  deleteForWorkspace(workspaceId: string): void {
-    getDb().delete(agentSessions).where(eq(agentSessions.workspaceId, workspaceId)).run();
+  deleteForWorktree(worktreeId: string): void {
+    getDb().delete(agentSessions).where(eq(agentSessions.worktreeId, worktreeId)).run();
   }
 }

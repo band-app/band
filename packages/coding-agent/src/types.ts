@@ -64,7 +64,7 @@ export type CliInvocation =
     };
 
 /**
- * Workspace status an agent's lifecycle notification resolves to.
+ * Worktree status an agent's lifecycle notification resolves to.
  *
  *   - `working`         → the agent is actively making progress.
  *   - `needs_attention` → the ball is in the user's court: the agent finished

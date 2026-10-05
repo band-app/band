@@ -76,8 +76,8 @@ function openDb(home: string): DatabaseSync {
 
 interface SeedRow {
   taskId: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   codingAgentId?: string;
   provider?: string;
   model?: string;
@@ -92,7 +92,7 @@ function seedUsageEvent(sqlite: DatabaseSync, row: SeedRow): void {
   sqlite
     .prepare(
       `INSERT INTO usage_events
-        (task_id, session_id, workspace_id, project, coding_agent_id, provider, model,
+        (task_id, session_id, worktree_id, repo, coding_agent_id, provider, model,
          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
          reasoning_output_tokens, cost_usd, captured_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -103,8 +103,8 @@ function seedUsageEvent(sqlite: DatabaseSync, row: SeedRow): void {
       // session_id so the "Sessions" stat (COUNT DISTINCT session_id)
       // counts these rows correctly.
       row.taskId,
-      row.workspaceId,
-      row.project,
+      row.worktreeId,
+      row.repo,
       row.codingAgentId ?? null,
       row.provider ?? null,
       row.model ?? null,
@@ -120,7 +120,7 @@ function seedUsageEvent(sqlite: DatabaseSync, row: SeedRow): void {
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [] });
+  seedState(tmpHome, { repos: [] });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
 
   const sqlite = openDb(tmpHome);
@@ -128,8 +128,8 @@ test.beforeAll(async () => {
     // Today — Claude Sonnet, two turns + cost
     seedUsageEvent(sqlite, {
       taskId: "tsk_a",
-      workspaceId: "band-feat",
-      project: "band",
+      worktreeId: "band-feat",
+      repo: "band",
       codingAgentId: "claude-code",
       provider: "claude",
       model: "claude-sonnet-4-6",
@@ -141,8 +141,8 @@ test.beforeAll(async () => {
     });
     seedUsageEvent(sqlite, {
       taskId: "tsk_a",
-      workspaceId: "band-feat",
-      project: "band",
+      worktreeId: "band-feat",
+      repo: "band",
       codingAgentId: "claude-code",
       provider: "claude",
       model: "claude-sonnet-4-6",
@@ -150,11 +150,11 @@ test.beforeAll(async () => {
       capturedAt: TODAY_ANCHOR + 1,
     });
 
-    // Yesterday — Codex, zero cost, different project
+    // Yesterday — Codex, zero cost, different repo
     seedUsageEvent(sqlite, {
       taskId: "tsk_b",
-      workspaceId: "other-main",
-      project: "other",
+      worktreeId: "other-main",
+      repo: "other",
       codingAgentId: "codex",
       provider: "codex",
       model: "gpt-5",
@@ -200,17 +200,17 @@ test.describe("Reports dialog (issue #425)", () => {
     await expect(reports.chart.locator("svg")).toBeVisible({ timeout: 10_000 });
 
     // Breakdown tables: model lists sonnet + gpt-5, agent lists claude-code
-    // + codex, project lists band + other, workspace lists band-feat +
+    // + codex, repo lists band + other, worktree lists band-feat +
     // other-main. Cost cell for gpt-5/codex/other shows the em-dash
     // placeholder, not "$0.00".
     await expect(reports.byModel).toContainText("claude-sonnet-4-6");
     await expect(reports.byModel).toContainText("gpt-5");
     await expect(reports.byAgent).toContainText("claude-code");
     await expect(reports.byAgent).toContainText("codex");
-    await expect(reports.byProject).toContainText("band");
-    await expect(reports.byProject).toContainText("other");
-    await expect(reports.byWorkspace).toContainText("band-feat");
-    await expect(reports.byWorkspace).toContainText("other-main");
+    await expect(reports.byRepo).toContainText("band");
+    await expect(reports.byRepo).toContainText("other");
+    await expect(reports.byWorktree).toContainText("band-feat");
+    await expect(reports.byWorktree).toContainText("other-main");
 
     // The em-dash for cost-unavailable rows. We assert presence on the
     // by-model table (Codex/gpt-5 row); it's the most precisely scoped

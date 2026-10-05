@@ -58,11 +58,11 @@ export function run(main) {
 
 /** The repository name the hooks clone into, as `runners/docker` derives it. */
 export function repoName() {
-  const name = (process.env.BAND_PROJECT || "repo").replace(/[^A-Za-z0-9_.-]/g, "_");
+  const name = (process.env.BAND_REPO || "repo").replace(/[^A-Za-z0-9_.-]/g, "_");
   return name === "" || name === "." || name === ".." ? "repo" : name;
 }
 
-/** The first clone URL the VM can use, or "" when the project has only a path on the hub's machine. */
+/** The first clone URL the VM can use, or "" when the repo has only a path on the hub's machine. */
 export function cloneUrl() {
   const first = (process.env.BAND_REPO_URLS || "").split(",")[0] ?? "";
   return first.startsWith("/") ? "" : first;

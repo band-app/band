@@ -54,8 +54,8 @@ export interface UseBrowserPaneControlsArgs {
   browserId: string;
   /** The tab's page element, or null while the pane has none. */
   webview: BrowserWebview | null;
-  /** Workspace this pane belongs to. Drives history autocomplete scope. */
-  workspaceId: string;
+  /** Worktree this pane belongs to. Drives history autocomplete scope. */
+  worktreeId: string;
   /** Latest committed URL (for Escape restore). Ref so `setInputUrl`
    *  reads the current value, not a stale closure. */
   currentUrlRef: React.RefObject<string>;
@@ -102,8 +102,7 @@ const AUTOCOMPLETE_BLUR_CLOSE_MS = 100;
 export function useBrowserPaneControls(
   args: UseBrowserPaneControlsArgs,
 ): UseBrowserPaneControlsReturn {
-  const { browserId, webview, workspaceId, currentUrlRef, setInputUrl, inputUrl, onNavigate } =
-    args;
+  const { browserId, webview, worktreeId, currentUrlRef, setInputUrl, inputUrl, onNavigate } = args;
 
   const find = useBrowserFindInPage(webview);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -142,7 +141,7 @@ export function useBrowserPaneControls(
     let cancelled = false;
     const handle = setTimeout(() => {
       trpc.history.search
-        .query({ workspaceId, query: trimmed, limit: 8 })
+        .query({ worktreeId, query: trimmed, limit: 8 })
         .then((result) => {
           if (cancelled) return;
           if (result.entries.length === 0) {
@@ -163,7 +162,7 @@ export function useBrowserPaneControls(
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [inputUrl, workspaceId, closeAutocomplete, currentUrlRef]);
+  }, [inputUrl, worktreeId, closeAutocomplete, currentUrlRef]);
 
   const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
     addressInputFocusedRef.current = true;
@@ -236,7 +235,7 @@ export function useBrowserPaneControls(
         // restored value (setting `input.value` mid-render would clear
         // any selection we made here). Guard with `isConnected` because
         // the component may unmount between Escape and the next frame
-        // (e.g. user closes the workspace immediately after pressing
+        // (e.g. user closes the worktree immediately after pressing
         // Escape) — calling `.select()` on a detached element throws.
         requestAnimationFrame(() => {
           if (input.isConnected) input.select();

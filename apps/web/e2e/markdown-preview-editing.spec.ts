@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -24,12 +24,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-markdown-preview-editing-token";
-const PROJECT = "md-editing-repo";
+const REPO = "md-editing-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 const ORIGINAL = [
   "---",
@@ -69,7 +69,7 @@ let repo: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  repo = join(tmpHome, PROJECT);
+  repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   writeFileSync(join(repo, "EDIT.md"), ORIGINAL);
@@ -88,9 +88,9 @@ test.beforeAll(async () => {
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -113,11 +113,11 @@ test.afterAll(async () => {
 test("typing markdown in the preview formats it and saves it back without touching the rest", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf("EDIT.md");
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf("EDIT.md");
 
   // The existing content renders: heading, bullets, bold, and the table and
   // frontmatter as rendered blocks.
@@ -157,17 +157,17 @@ test("typing markdown in the preview formats it and saves it back without touchi
 test("find in the preview counts and steps through matches, including text typed in it", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf("FIND.md");
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf("FIND.md");
   await expect(viewer.previewHeading(1, "Find")).toBeVisible({ timeout: 20_000 });
 
   await viewer.focusPreviewEnd();
   await viewer.typeInPreview("A **needle** in bold");
 
-  await workspacePage.pressFindShortcut();
+  await worktreePage.pressFindShortcut();
   const find = viewer.findWidget;
   await expect(find.input).toBeFocused();
 
@@ -198,17 +198,17 @@ test("find in the preview counts and steps through matches, including text typed
   await find.expectNoResults();
 });
 
-test("relative images load from the workspace and cannot climb out of it", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+test("relative images load from the worktree and cannot climb out of it", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf("docs/IMAGES.md");
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf("docs/IMAGES.md");
   await expect(viewer.previewHeading(1, "Images")).toBeVisible({ timeout: 20_000 });
 
   await expect(viewer.previewImage("logo")).toBeVisible();
   await expect.poll(() => viewer.previewImageNaturalWidth("logo")).toBe(1);
-  // An encoded `..` that climbs above the workspace root is not turned into a URL.
+  // An encoded `..` that climbs above the worktree root is not turned into a URL.
   await expect(viewer.previewImage("escape")).toHaveCount(0);
 });
 
@@ -218,11 +218,11 @@ test.describe("rendered block controls", () => {
   test("copy, download and fullscreen on a rendered block run without revealing its source", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const viewer = new FileViewerPage(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openFileLeaf("DIAGRAM.md");
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openFileLeaf("DIAGRAM.md");
     await expect(viewer.previewHeading(1, "Diagram")).toBeVisible({ timeout: 20_000 });
     const diagram = viewer.previewRenderedBlock("mermaid");
     await expect(viewer.previewBlockControl("mermaid", "Copy Code")).toBeVisible({

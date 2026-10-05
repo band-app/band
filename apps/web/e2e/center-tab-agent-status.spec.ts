@@ -16,7 +16,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -28,12 +28,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-tab-agent-status-token";
-// One project per test, so one test's agent status doesn't reach the other.
-const PROJECTS = ["tabstatuschat", "tabstatusterm"];
-const [CHAT_WS, TERM_WS] = PROJECTS.map((p) => toWorkspaceId(p, "main"));
+// One repo per test, so one test's agent status doesn't reach the other.
+const REPOS = ["tabstatuschat", "tabstatusterm"];
+const [CHAT_WS, TERM_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -43,7 +43,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: PROJECTS.map((name) => {
+    repos: REPOS.map((name) => {
       const repoDir = join(tmpHome, name);
       mkdirSync(repoDir, { recursive: true });
       return {
@@ -78,7 +78,7 @@ test.afterAll(async () => {
 
 test("a hidden chat tab shows a spinner while its agent works", async ({ page }) => {
   const chatPane = new ChatPanePage(page, server.url, TOKEN);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   await chatPane.goto(CHAT_WS);
   await chatPane.waitForReady();
 
@@ -87,58 +87,58 @@ test("a hidden chat tab shows a spinner while its agent works", async ({ page })
   await expect(chatPane.assistantMessage("working")).toBeVisible();
 
   // The shown chat tab keeps its close button in the slot.
-  await expect(workspace.tabCloseButton("chat")).toBeVisible();
-  await expect(workspace.tabStatus("chat")).toHaveCount(0);
+  await expect(worktree.tabCloseButton("chat")).toBeVisible();
+  await expect(worktree.tabStatus("chat")).toHaveCount(0);
 
-  await workspace.activateTab("terminal");
-  await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
-  await expect(workspace.tabStatus("chat")).toHaveAttribute("data-status", "working");
-  await expect(workspace.tabCloseButton("chat")).toHaveCSS("opacity", "0");
+  await worktree.activateTab("terminal");
+  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabStatus("chat")).toHaveAttribute("data-status", "working");
+  await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "0");
 
   // Hovering swaps the spinner for the close button.
-  await workspace.hoverTab("chat");
-  await expect(workspace.tabCloseButton("chat")).toHaveCSS("opacity", "1");
+  await worktree.hoverTab("chat");
+  await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "1");
 
   // A turn the user stopped leaves nothing to show.
-  await workspace.activateTab("chat");
+  await worktree.activateTab("chat");
   await chatPane.clickStop();
   await expect(chatPane.submitButton).toBeVisible();
-  await workspace.activateTab("terminal");
-  await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
-  await expect(workspace.tabStatus("chat")).toHaveCount(0);
+  await worktree.activateTab("terminal");
+  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabStatus("chat")).toHaveCount(0);
 });
 
 test("a hidden terminal tab shows its Claude Code session's status", async ({ page }) => {
   const chatPane = new ChatPanePage(page, server.url, TOKEN);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   const cwd = join(tmpHome, "tabstatusterm");
   await chatPane.goto(TERM_WS);
   // Opens a chat and shows it, so the default terminal tab is hidden.
   await chatPane.waitForReady();
-  await expect(workspace.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
-  const terminalId = await workspace.firstTerminalTabId();
+  await expect(worktree.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  const terminalId = await worktree.firstTerminalTabId();
   expect(terminalId).not.toBe("");
-  await expect(workspace.tabStatus("terminal")).toHaveCount(0);
+  await expect(worktree.tabStatus("terminal")).toHaveCount(0);
 
-  await workspace.reportTerminalHook({
+  await worktree.reportTerminalHook({
     cwd,
     terminalId,
     sessionId: "tab-status-session",
     hook: { hook_event_name: "PreToolUse", tool_name: "Bash" },
   });
-  await expect(workspace.tabStatus("terminal")).toHaveAttribute("data-status", "working");
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "working");
 
-  await workspace.reportTerminalHook({
+  await worktree.reportTerminalHook({
     cwd,
     terminalId,
     sessionId: "tab-status-session",
     hook: { hook_event_name: "Stop" },
   });
-  await expect(workspace.tabStatus("terminal")).toHaveAttribute("data-status", "needs_attention");
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "needs_attention");
 
   // Showing the terminal puts its close button in the slot.
-  await workspace.activateTab("terminal");
-  await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
-  await expect(workspace.tabCloseButton("terminal")).toBeVisible();
-  await expect(workspace.tabStatus("terminal")).toHaveCount(0);
+  await worktree.activateTab("terminal");
+  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabCloseButton("terminal")).toBeVisible();
+  await expect(worktree.tabStatus("terminal")).toHaveCount(0);
 });

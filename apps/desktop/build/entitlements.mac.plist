@@ -17,7 +17,7 @@
       spawn-helper).
     - network.client / network.server: the bundled web server binds to
       localhost and the dashboard renderer talks to it over HTTP/WS.
-    - files.user-selected.read-write: project pickers (folder dialogs) read
+    - files.user-selected.read-write: repo pickers (folder dialogs) read
       from arbitrary user-selected directories.
 
   Intentionally NOT set:

@@ -63,7 +63,7 @@ const DEFAULT_OPTIONS: SearchOptions = {
 
 /**
  * `webview` is the tab's page element, or null while the pane has none
- * (not created yet, or evicted by the hidden-workspace budget).
+ * (not created yet, or evicted by the hidden-worktree budget).
  */
 export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowserFindInPageReturn {
   const [isOpen, setIsOpen] = useState(false);

@@ -25,7 +25,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Modes</h2>
   <p>The Codex adapter exposes two modes that map onto the SDK's sandbox setting:</p>
   <ul>
-    <li><strong>edit</strong> &mdash; <code>sandbox: workspace-write</code>. The agent can read, edit files, and run commands in the worktree.</li>
+    <li><strong>edit</strong> &mdash; <code>sandbox: worktree-write</code>. The agent can read, edit files, and run commands in the worktree.</li>
     <li><strong>plan</strong> &mdash; <code>sandbox: read-only</code>. The agent browses files in read-only mode for planning passes.</li>
   </ul>
 
@@ -42,7 +42,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Session Listing &amp; Resume</h2>
   <p>
     Codex stores session transcripts under <code>~/.codex/sessions/</code>. Band reads
-    that directory to populate the session list per workspace and exposes
+    that directory to populate the session list per worktree and exposes
     <code>getSessionMessages</code> for paging through history. Sending a message with
     an existing <code>sessionId</code> resumes the thread via
     <code>codex.resumeThread()</code>, so Band continues the conversation in context.
@@ -56,7 +56,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ul>
     <li><code>~/.codex/skills/.system/</code> &mdash; built-in skills shipped with Codex.</li>
     <li><code>~/.codex/skills/</code> &mdash; user-global skills.</li>
-    <li><code>&lt;workspace&gt;/.codex/skills/</code> &mdash; project-local skills.</li>
+    <li><code>&lt;worktree&gt;/.codex/skills/</code> &mdash; repo-local skills.</li>
   </ul>
 
   <h2>Cost Tracking</h2>

@@ -378,7 +378,7 @@ describe.skipIf(!builtCli)("CLI skills sync (ensureSkillsInstalled)", () => {
     mkdirSync(claudeSkills, { recursive: true });
 
     // Plant a symlink pointing somewhere the user might have set up
-    // deliberately (e.g. a sibling project's checkout).
+    // deliberately (e.g. a sibling repo's checkout).
     const decoy = join(tmp, "decoy-band-skill");
     mkdirSync(decoy, { recursive: true });
     const link = join(claudeSkills, "band");

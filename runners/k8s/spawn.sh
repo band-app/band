@@ -9,8 +9,8 @@
 #
 # Settings (the runner's "env"):
 #   BAND_K8S_NAMESPACE        namespace for the workers (default: band-workers). deploy/k8s/ creates it.
-#   BAND_K8S_IMAGE            the worker base image, run when the project has no environment image
-#                             (default: band-worker). BAND_PROJECT_IMAGE, set by the hub, wins over it.
+#   BAND_K8S_IMAGE            the worker base image, run when the repo has no environment image
+#                             (default: band-worker). BAND_REPO_IMAGE, set by the hub, wins over it.
 #   BAND_K8S_KIND             pod (default), job, or sandbox (kubernetes-sigs/agent-sandbox Sandbox).
 #   BAND_K8S_RUNTIME_CLASS    runtimeClassName, such as kata or gvisor. Required for isolation vm.
 #   BAND_K8S_PULL_POLICY      imagePullPolicy (default: the cluster's).
@@ -22,7 +22,7 @@
 #   BAND_K8S_WORK_SIZE        size limit of the /work emptyDir (default: 10Gi).
 #   BAND_K8S_SECRET_WAIT      seconds to retry the token Secret create while an old one is collected (default: 30).
 #   BAND_K8S_CONTEXT          kubectl --context.
-#   BAND_PROJECT_IMAGE        must be pullable by the cluster (see BAND_K8S_PULL_SECRET), else the pod stays in
+#   BAND_REPO_IMAGE        must be pullable by the cluster (see BAND_K8S_PULL_SECRET), else the pod stays in
 #                             ImagePullBackOff until the runner times out.
 #   BAND_KUBECTL_BIN          the kubectl binary (default: kubectl).
 #   KUBECONFIG                the hook environment carries only HOME, so ~/.kube/config is read by default.
@@ -82,6 +82,6 @@ if [ -z "$secret_ok" ]; then
   exit 1
 fi
 
-if [ -n "${BAND_REPO_URLS:-}" ]; then echo "BAND_HOST_PROJECT_PATH=/work/$repo_name"; fi
+if [ -n "${BAND_REPO_URLS:-}" ]; then echo "BAND_HOST_REPO_PATH=/work/$repo_name"; fi
 echo "BAND_MACHINE_HANDLE=$ns/$name"
 echo "started $resource $ns/$name"

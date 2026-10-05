@@ -23,7 +23,7 @@ export const runnersRouter = t.router({
       id: s.id,
       runnerId: s.runnerId,
       hostId: s.hostId,
-      workspaceIds: s.workspaceIds,
+      worktreeIds: s.worktreeIds,
       snapshotId: s.snapshotId,
       sizeBytes: s.sizeBytes,
       restoredAt: s.restoredAt,
@@ -41,7 +41,7 @@ export const runnersRouter = t.router({
   machines: adminProcedure.query(() => ({ machines: runnerReaperService.list() })),
 
   /**
-   * Destroys a machine now. A machine holding workspaces that are not stored is refused unless
+   * Destroys a machine now. A machine holding worktrees that are not stored is refused unless
    * `force` is set.
    */
   destroyMachine: adminProcedure

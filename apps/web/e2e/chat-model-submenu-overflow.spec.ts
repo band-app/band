@@ -24,7 +24,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { expectInsideViewport } from "./helpers/geometry";
 import {
@@ -37,10 +37,10 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-model-submenu-overflow-token";
-const PROJECTS = ["submenudesktop", "submenumobile", "submenuzoom", "submenuopencode"] as const;
+const REPOS = ["submenudesktop", "submenumobile", "submenuzoom", "submenuopencode"] as const;
 const pad = (n: number) => String(n).padStart(2, "0");
 // Thirty models from one provider, then one model from each of twenty more.
 // Claude Code lists them flat; OpenCode lists 21 providers under "More
@@ -63,7 +63,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = PROJECTS.map((name) => {
+  const repos = REPOS.map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -73,7 +73,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -157,7 +157,7 @@ test.describe("More models submenu on a short desktop window", () => {
 
   test("stays inside the window and scrolls to its last model", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("submenudesktop", "main"));
+    await chatPane.goto(toWorktreeId("submenudesktop", "main"));
     await chatPane.waitForReady();
     await expectEveryModelReachable(chatPane, viewport);
   });
@@ -169,7 +169,7 @@ test.describe("More models submenu on a phone", () => {
 
   test("stays inside the screen and scrolls to its last model", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("submenumobile", "main"));
+    await chatPane.goto(toWorktreeId("submenumobile", "main"));
     await chatPane.waitForReady();
     await expectEveryModelReachable(chatPane, viewport);
   });
@@ -183,10 +183,10 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("submenuzoom", "main"));
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorktreeId("submenuzoom", "main"));
     await chatPane.waitForReady();
-    await workspacePage.zoomInBy(3);
+    await worktreePage.zoomInBy(3);
     await expectEveryModelReachable(chatPane, viewport);
   });
 
@@ -194,12 +194,12 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("submenuopencode", "main"));
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorktreeId("submenuopencode", "main"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("opencode");
-    await workspacePage.zoomInBy(3);
+    await worktreePage.zoomInBy(3);
 
     await chatPane.typeMessage("first");
     await chatPane.submit();

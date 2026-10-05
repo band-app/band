@@ -33,7 +33,7 @@ export class RemoteTerminalBackend implements TerminalBackend {
     for (const entry of [...this.live.values()]) {
       this.handleExit({
         terminalId: entry.terminalId,
-        workspaceId: entry.workspaceId,
+        worktreeId: entry.worktreeId,
         exitCode: -1,
         killed: true,
         cleanupOnExit: false,
@@ -51,8 +51,8 @@ export class RemoteTerminalBackend implements TerminalBackend {
     return this.rpc.call("pty.info", { terminalId });
   }
 
-  list(workspaceId: string): Promise<TerminalListEntry[]> {
-    return this.rpc.call("pty.list", { workspaceId });
+  list(worktreeId: string): Promise<TerminalListEntry[]> {
+    return this.rpc.call("pty.list", { worktreeId });
   }
 
   listAll(): Promise<TerminalListEntry[]> {
@@ -63,8 +63,8 @@ export class RemoteTerminalBackend implements TerminalBackend {
     return this.rpc.call("pty.kill", { terminalId });
   }
 
-  killWorkspace(workspaceId: string): Promise<void> {
-    return this.rpc.call("pty.killWorkspace", { workspaceId });
+  killWorktree(worktreeId: string): Promise<void> {
+    return this.rpc.call("pty.killWorktree", { worktreeId });
   }
 
   getScrollback(terminalId: string, lines?: number): Promise<string | null> {

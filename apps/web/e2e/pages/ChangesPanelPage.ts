@@ -1,5 +1,5 @@
 /**
- * Page object for the Changes UI of the unified workspace layout (#643):
+ * Page object for the Changes UI of the unified worktree layout (#643):
  *
  *   - The Changes tab of the right sidepanel (`RightSidepanel.tsx`), which
  *     holds the current-branch / compare-branch header (`DiffTargetHeader.tsx`)
@@ -17,14 +17,14 @@
  * page.
  *
  * Revealing the sidepanel and selecting its tab is delegated to
- * `WorkspacePage` rather than re-deriving those testids here.
+ * `WorktreePage` rather than re-deriving those testids here.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";
-import { WorkspacePage } from "./WorkspacePage";
+import { WorktreePage } from "./WorktreePage";
 
 export type DiffViewMode = "unified" | "split";
 
@@ -70,17 +70,17 @@ export class ChangesPanelPage {
   /** The overview ruler down the diff scroller's right edge. */
   readonly overviewRuler: Locator;
 
-  private readonly workspace: WorkspacePage;
-  /** Workspace opened via `goto`, remembered so `compareBranch()` can build
-   *  the per-workspace `band:diff-compare-branch:<id>` localStorage key. */
-  private currentWorkspaceId: string | null = null;
+  private readonly worktree: WorktreePage;
+  /** Worktree opened via `goto`, remembered so `compareBranch()` can build
+   *  the per-worktree `band:diff-compare-branch:<id>` localStorage key. */
+  private currentWorktreeId: string | null = null;
 
   constructor(
     private readonly page: Page,
     baseUrl: string,
     token: string,
   ) {
-    this.workspace = new WorkspacePage(page, baseUrl, token);
+    this.worktree = new WorktreePage(page, baseUrl, token);
     this.diffTargetTrigger = page.getByTestId("right-sidepanel__diff-target-select");
     this.headBranch = page.getByTestId("right-sidepanel__head-branch");
     this.diffTargetPicker = page.getByTestId("right-sidepanel__diff-target-picker");
@@ -96,16 +96,16 @@ export class ChangesPanelPage {
     this.overviewRuler = this.diffLeaf.getByTestId("diff-overview-ruler");
   }
 
-  /** Navigate to the workspace, reveal the right sidepanel, and select its
+  /** Navigate to the worktree, reveal the right sidepanel, and select its
    *  Changes tab. The sidepanel defaults to Explorer, and only the active
    *  tab's body is mounted, so the picker and tree exist only after this. */
-  async goto(workspaceId: string): Promise<void> {
-    this.currentWorkspaceId = workspaceId;
-    await this.workspace.goto(workspaceId);
-    await this.workspace.waitForReady();
-    await this.workspace.revealRightPanel();
-    await this.workspace.selectRightPanelTab("changes");
-    await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
+  async goto(worktreeId: string): Promise<void> {
+    this.currentWorktreeId = worktreeId;
+    await this.worktree.goto(worktreeId);
+    await this.worktree.waitForReady();
+    await this.worktree.revealRightPanel();
+    await this.worktree.selectRightPanelTab("changes");
+    await expect(this.worktree.changesSection).toBeVisible({ timeout: 15_000 });
   }
 
   /** The floating find widget of the visible diff leaf. */
@@ -160,7 +160,7 @@ export class ChangesPanelPage {
   /** The dockview tab of a file's diff. A commit's diff tab carries the
    *  commit SHA in `data-commit`; a working-tree diff tab has none. */
   diffTab(path: string): Locator {
-    return this.workspace.diffTab(path);
+    return this.worktree.diffTab(path);
   }
 
   /** Close the diff tab for `path` with its close button. */
@@ -203,12 +203,12 @@ export class ChangesPanelPage {
 
   /** Reload the page and reopen the Changes tab. */
   async reload(): Promise<void> {
-    await test.step("Reload the workspace", async () => {
+    await test.step("Reload the worktree", async () => {
       await this.page.reload();
-      await this.workspace.waitForReady();
-      await this.workspace.revealRightPanel();
-      await this.workspace.selectRightPanelTab("changes");
-      await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
+      await this.worktree.waitForReady();
+      await this.worktree.revealRightPanel();
+      await this.worktree.selectRightPanelTab("changes");
+      await expect(this.worktree.changesSection).toBeVisible({ timeout: 15_000 });
     });
   }
 
@@ -229,7 +229,7 @@ export class ChangesPanelPage {
   /** The editor tab a go-to-definition from the diff opened (the visible
    *  file leaf). */
   get openedEditor(): FileViewerPage {
-    return new FileViewerPage(this.page, this.workspace.fileLeafVisibilityMarker(true));
+    return new FileViewerPage(this.page, this.worktree.fileLeafVisibilityMarker(true));
   }
 
   /** Open the visible diff's file in an editor tab (the diff leaf's "Open
@@ -237,42 +237,42 @@ export class ChangesPanelPage {
   async openDiffFileInEditor(): Promise<void> {
     await test.step("Open the diffed file in an editor", async () => {
       await this.page.getByTestId("center-diff-leaf__open-file").click();
-      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible({ timeout: 15_000 });
+      await expect(this.worktree.fileLeafVisibilityMarker(true)).toBeVisible({ timeout: 15_000 });
     });
   }
 
   /** Close `path`'s editor tab. */
   async closeEditor(path: string): Promise<void> {
     await test.step(`Close the editor for ${path}`, async () => {
-      await this.workspace.fileTab(path).hover();
+      await this.worktree.fileTab(path).hover();
       await this.page.getByTestId(`center-file-tab__close--${path}`).click();
-      await expect(this.workspace.fileTab(path)).toHaveCount(0);
+      await expect(this.worktree.fileTab(path)).toHaveCount(0);
     });
   }
 
   /** Bring `path`'s editor tab to the front. */
   async showEditor(path: string): Promise<void> {
     await test.step(`Show the editor for ${path}`, async () => {
-      await this.workspace.fileTab(path).click();
-      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible();
+      await this.worktree.fileTab(path).click();
+      await expect(this.worktree.fileLeafVisibilityMarker(true)).toBeVisible();
     });
   }
 
   /** Bring `path`'s diff tab back to the front. */
   async showDiff(path: string): Promise<void> {
     await test.step(`Show the diff for ${path}`, async () => {
-      await this.workspace.diffTab(path).click();
+      await this.worktree.diffTab(path).click();
       await expect(this.diffLeaf).toBeVisible();
     });
   }
 
-  /** Every file leaf in the workspace, visible or not. A go-to-definition
+  /** Every file leaf in the worktree, visible or not. A go-to-definition
    *  into another file adds one. */
   get fileLeaves(): Locator {
-    return this.workspace.allFileLeaves();
+    return this.worktree.allFileLeaves();
   }
 
-  /** A changed-file row in the Changes tab, keyed by workspace-relative path.
+  /** A changed-file row in the Changes tab, keyed by worktree-relative path.
    *  Matches the row in any section; use `sectionRow` when a file is listed
    *  in more than one (staged and unstaged, say). */
   changesTreeRow(path: string): Locator {
@@ -432,16 +432,16 @@ export class ChangesPanelPage {
     });
   }
 
-  /** The stored compare branch, read from the per-workspace
+  /** The stored compare branch, read from the per-worktree
    *  `band:diff-compare-branch:<id>` localStorage key `useDiffTarget` writes.
    *  `null` when nothing has been picked. */
   async compareBranch(): Promise<string | null> {
-    if (!this.currentWorkspaceId) {
+    if (!this.currentWorktreeId) {
       throw new Error("compareBranch() called before goto()");
     }
     return await this.page.evaluate(
-      (workspaceId) => localStorage.getItem(`band:diff-compare-branch:${workspaceId}`),
-      this.currentWorkspaceId,
+      (worktreeId) => localStorage.getItem(`band:diff-compare-branch:${worktreeId}`),
+      this.currentWorktreeId,
     );
   }
 

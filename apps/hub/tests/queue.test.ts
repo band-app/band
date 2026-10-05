@@ -105,7 +105,7 @@ describe("tRPC — queue CRUD", () => {
     const repo = createGitRepo(tmpHome, "proj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repo,
@@ -125,7 +125,7 @@ describe("tRPC — queue CRUD", () => {
   });
 
   it("returns empty array when no queued messages exist", async () => {
-    const res = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const res = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     expect(res.status).toBe(200);
     const data = await trpcData<{ messages: QueuedMessage[] }>(res);
     expect(data.messages).toEqual([]);
@@ -133,7 +133,7 @@ describe("tRPC — queue CRUD", () => {
 
   it("pushes a single queued message via queue.push", async () => {
     const res = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "fix the bug",
     });
     expect(res.status).toBe(200);
@@ -143,13 +143,13 @@ describe("tRPC — queue CRUD", () => {
     expect(typeof data.message.id).toBe("string");
     expect(data.message.files).toBeUndefined();
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.text)).toEqual(["fix the bug"]);
   });
 
   it("pushes a queued message with file attachments (data URL → server saves to disk; wire shape strips path)", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
 
     const file: QueuedFile = {
       mediaType: "image/png",
@@ -159,7 +159,7 @@ describe("tRPC — queue CRUD", () => {
     };
 
     const res = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "review this image",
       files: [file],
     });
@@ -183,7 +183,7 @@ describe("tRPC — queue CRUD", () => {
     // a tunnel-sharing scenario can't leak `<HOME>/.band/uploads/…`.
     expect(persistedFile.path).toBeUndefined();
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].files).toHaveLength(1);
@@ -191,11 +191,11 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages[0].files![0].path).toBeUndefined();
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("queue.push drops files whose client-supplied path escapes the uploads directory", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
 
     // A malicious (or careless) client could enqueue a path that
     // points at a sensitive file — without containment the drain in
@@ -204,7 +204,7 @@ describe("tRPC — queue CRUD", () => {
     // would happily read+stream the contents back. Reject any path
     // not under `<HOME>/.band/uploads/`, including traversal attempts.
     const res = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "secret-extract attempt",
       files: [
         {
@@ -224,11 +224,11 @@ describe("tRPC — queue CRUD", () => {
     expect(data.message.files).toBeUndefined();
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("queue.set roundtrip with only `url` (no client-supplied path) is accepted (drag-reorder works)", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
 
     // Push a message with a file via the standard data-URL path so the
     // server actually persists bytes.
@@ -238,7 +238,7 @@ describe("tRPC — queue CRUD", () => {
       filename: "pixel.png",
     };
     const pushRes = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "look at this image",
       files: [file],
     });
@@ -254,7 +254,7 @@ describe("tRPC — queue CRUD", () => {
     // intact — without that, the drain would have nothing to inject
     // into the agent prompt.
     await trpcMutate(server.url, "queue.set", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       messages: [
         {
           id: pushData.message.id,
@@ -264,7 +264,7 @@ describe("tRPC — queue CRUD", () => {
       ],
     });
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].files).toHaveLength(1);
@@ -274,58 +274,58 @@ describe("tRPC — queue CRUD", () => {
     expect(after.path).toBeUndefined();
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("pushes multiple messages and preserves order", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "first" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "first" });
     await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "add tests",
     });
     await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "update docs",
     });
 
-    const res = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const res = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const data = await trpcData<{ messages: QueuedMessage[] }>(res);
     expect(data.messages.map((m) => m.text)).toEqual(["first", "add tests", "update docs"]);
   });
 
   it("replaces the entire queue via queue.set", async () => {
     const res = await trpcMutate(server.url, "queue.set", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       messages: [{ text: "new first" }, { text: "new second" }],
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.text)).toEqual(["new first", "new second"]);
   });
 
   it("queue.set with empty array clears the queue", async () => {
     await trpcMutate(server.url, "queue.set", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       messages: [],
     });
 
-    const res = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const res = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const data = await trpcData<{ messages: QueuedMessage[] }>(res);
     expect(data.messages).toEqual([]);
   });
 
   it("reorders messages via queue.set, preserving ids and files", async () => {
     // Seed three messages, the middle one with a file attachment.
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
     const pushA = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "alpha",
     });
     const pushB = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "bravo",
       files: [
         {
@@ -336,7 +336,7 @@ describe("tRPC — queue CRUD", () => {
       ],
     });
     const pushC = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "charlie",
     });
     const a = (await trpcData<{ message: QueuedMessage }>(pushA)).message;
@@ -345,7 +345,7 @@ describe("tRPC — queue CRUD", () => {
 
     // Reorder to C, A, B (mirrors what a drag-end persists).
     const setRes = await trpcMutate(server.url, "queue.set", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       messages: [
         { id: c.id, text: c.text },
         { id: a.id, text: a.text },
@@ -354,7 +354,7 @@ describe("tRPC — queue CRUD", () => {
     });
     expect(setRes.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.id)).toEqual([c.id, a.id, b.id]);
     expect(getData.messages.map((m) => m.text)).toEqual(["charlie", "alpha", "bravo"]);
@@ -369,41 +369,41 @@ describe("tRPC — queue CRUD", () => {
     expect(reorderedB?.files?.[0].path).toBeUndefined();
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("removes a single message by id via queue.remove", async () => {
     // Seed: a, b, c
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "a" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "a" });
     const pushB = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "b",
     });
     const pushBData = await trpcData<{ message: QueuedMessage }>(pushB);
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "c" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "c" });
 
     const res = await trpcMutate(server.url, "queue.remove", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: pushBData.message.id,
     });
     expect(res.status).toBe(200);
     const removeData = await trpcData<{ ok: boolean; removed: boolean }>(res);
     expect(removeData.removed).toBe(true);
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.text)).toEqual(["a", "c"]);
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("queue.remove of an unknown id returns removed=false", async () => {
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "x" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "x" });
 
     const res = await trpcMutate(server.url, "queue.remove", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: "unknown-id",
     });
     expect(res.status).toBe(200);
@@ -411,19 +411,19 @@ describe("tRPC — queue CRUD", () => {
     expect(removeData.removed).toBe(false);
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("updates the text of a queued message via queue.update", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
     const pushRes = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "before",
     });
     const pushData = await trpcData<{ message: QueuedMessage }>(pushRes);
 
     const updateRes = await trpcMutate(server.url, "queue.update", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: pushData.message.id,
       text: "after",
     });
@@ -431,37 +431,37 @@ describe("tRPC — queue CRUD", () => {
     const updateData = await trpcData<{ ok: boolean; updated: boolean }>(updateRes);
     expect(updateData.updated).toBe(true);
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].id).toBe(pushData.message.id);
     expect(getData.messages[0].text).toBe("after");
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("queue.update preserves file attachments", async () => {
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
     const file: QueuedFile = {
       mediaType: "image/png",
       url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
       filename: "pixel.png",
     };
     const pushRes = await trpcMutate(server.url, "queue.push", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "look at this",
       files: [file],
     });
     const pushData = await trpcData<{ message: QueuedMessage }>(pushRes);
 
     await trpcMutate(server.url, "queue.update", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: pushData.message.id,
       text: "actually, look at this image carefully",
     });
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages[0].text).toBe("actually, look at this image carefully");
     expect(getData.messages[0].files).toHaveLength(1);
@@ -472,12 +472,12 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages[0].files![0].path).toBeUndefined();
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
   });
 
   it("queue.update of an unknown id returns updated=false", async () => {
     const res = await trpcMutate(server.url, "queue.update", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: "unknown-id",
       text: "irrelevant",
     });
@@ -488,52 +488,52 @@ describe("tRPC — queue CRUD", () => {
 
   it("clears all queued messages via queue.clear", async () => {
     // Seed some messages first
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "a" });
-    await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main", text: "b" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "a" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main", text: "b" });
 
-    const clearRes = await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+    const clearRes = await trpcMutate(server.url, "queue.clear", { worktreeId: "proj-main" });
     expect(clearRes.status).toBe(200);
     const clearData = await trpcData<{ ok: boolean }>(clearRes);
     expect(clearData.ok).toBe(true);
 
-    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getRes = await trpcQuery(server.url, "queue.get", { worktreeId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toEqual([]);
   });
 
   it("clearing a non-existent queue is a no-op", async () => {
-    const res = await trpcMutate(server.url, "queue.clear", { workspaceId: "nonexistent-ws" });
+    const res = await trpcMutate(server.url, "queue.clear", { worktreeId: "nonexistent-ws" });
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean }>(res);
     expect(data.ok).toBe(true);
   });
 
-  it("queued messages are isolated per workspace", async () => {
-    await trpcMutate(server.url, "queue.push", { workspaceId: "ws-a", text: "msg-a1" });
-    await trpcMutate(server.url, "queue.push", { workspaceId: "ws-a", text: "msg-a2" });
-    await trpcMutate(server.url, "queue.push", { workspaceId: "ws-b", text: "msg-b1" });
+  it("queued messages are isolated per worktree", async () => {
+    await trpcMutate(server.url, "queue.push", { worktreeId: "ws-a", text: "msg-a1" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "ws-a", text: "msg-a2" });
+    await trpcMutate(server.url, "queue.push", { worktreeId: "ws-b", text: "msg-b1" });
 
-    const resA = await trpcQuery(server.url, "queue.get", { workspaceId: "ws-a" });
+    const resA = await trpcQuery(server.url, "queue.get", { worktreeId: "ws-a" });
     const dataA = await trpcData<{ messages: QueuedMessage[] }>(resA);
     expect(dataA.messages.map((m) => m.text)).toEqual(["msg-a1", "msg-a2"]);
 
-    const resB = await trpcQuery(server.url, "queue.get", { workspaceId: "ws-b" });
+    const resB = await trpcQuery(server.url, "queue.get", { worktreeId: "ws-b" });
     const dataB = await trpcData<{ messages: QueuedMessage[] }>(resB);
     expect(dataB.messages.map((m) => m.text)).toEqual(["msg-b1"]);
 
     // Clearing one doesn't affect the other
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "ws-a" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "ws-a" });
 
-    const resA2 = await trpcQuery(server.url, "queue.get", { workspaceId: "ws-a" });
+    const resA2 = await trpcQuery(server.url, "queue.get", { worktreeId: "ws-a" });
     const dataA2 = await trpcData<{ messages: QueuedMessage[] }>(resA2);
     expect(dataA2.messages).toEqual([]);
 
-    const resB2 = await trpcQuery(server.url, "queue.get", { workspaceId: "ws-b" });
+    const resB2 = await trpcQuery(server.url, "queue.get", { worktreeId: "ws-b" });
     const dataB2 = await trpcData<{ messages: QueuedMessage[] }>(resB2);
     expect(dataB2.messages.map((m) => m.text)).toEqual(["msg-b1"]);
 
     // cleanup
-    await trpcMutate(server.url, "queue.clear", { workspaceId: "ws-b" });
+    await trpcMutate(server.url, "queue.clear", { worktreeId: "ws-b" });
   });
 });
 
@@ -550,7 +550,7 @@ describe("tRPC — queue input validation", () => {
     const repo = createGitRepo(tmpHome, "proj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repo,
@@ -569,44 +569,44 @@ describe("tRPC — queue input validation", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("queue.push fails when workspaceId is missing", async () => {
+  it("queue.push fails when worktreeId is missing", async () => {
     const res = await trpcMutate(server.url, "queue.push", { text: "hello" });
     expect(res.ok).toBe(false);
   });
 
   it("queue.push fails when text is missing", async () => {
-    const res = await trpcMutate(server.url, "queue.push", { workspaceId: "proj-main" });
+    const res = await trpcMutate(server.url, "queue.push", { worktreeId: "proj-main" });
     expect(res.ok).toBe(false);
   });
 
-  it("queue.set fails when workspaceId is missing", async () => {
+  it("queue.set fails when worktreeId is missing", async () => {
     const res = await trpcMutate(server.url, "queue.set", { messages: [{ text: "hello" }] });
     expect(res.ok).toBe(false);
   });
 
   it("queue.set fails when messages is missing", async () => {
-    const res = await trpcMutate(server.url, "queue.set", { workspaceId: "proj-main" });
+    const res = await trpcMutate(server.url, "queue.set", { worktreeId: "proj-main" });
     expect(res.ok).toBe(false);
   });
 
-  it("queue.get fails when workspaceId is missing", async () => {
+  it("queue.get fails when worktreeId is missing", async () => {
     const res = await trpcQuery(server.url, "queue.get", {});
     expect(res.ok).toBe(false);
   });
 
-  it("queue.clear fails when workspaceId is missing", async () => {
+  it("queue.clear fails when worktreeId is missing", async () => {
     const res = await trpcMutate(server.url, "queue.clear", {});
     expect(res.ok).toBe(false);
   });
 
   it("queue.remove fails when id is missing", async () => {
-    const res = await trpcMutate(server.url, "queue.remove", { workspaceId: "proj-main" });
+    const res = await trpcMutate(server.url, "queue.remove", { worktreeId: "proj-main" });
     expect(res.ok).toBe(false);
   });
 
   it("queue.update fails when id is missing", async () => {
     const res = await trpcMutate(server.url, "queue.update", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       text: "x",
     });
     expect(res.ok).toBe(false);
@@ -614,7 +614,7 @@ describe("tRPC — queue input validation", () => {
 
   it("queue.update fails when text is missing", async () => {
     const res = await trpcMutate(server.url, "queue.update", {
-      workspaceId: "proj-main",
+      worktreeId: "proj-main",
       id: "some-id",
     });
     expect(res.ok).toBe(false);

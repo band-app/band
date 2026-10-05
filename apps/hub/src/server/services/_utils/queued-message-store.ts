@@ -87,7 +87,7 @@ export interface WireQueuedMessage {
   files?: WireQueuedFile[];
 }
 
-/** Project a stored `QueuedMessage[]` to the public wire shape. */
+/** Repo a stored `QueuedMessage[]` to the public wire shape. */
 export function toWireQueuedMessages(messages: QueuedMessage[]): WireQueuedMessage[] {
   return messages.map((m) => ({
     id: m.id,

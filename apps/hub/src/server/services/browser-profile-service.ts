@@ -1,10 +1,10 @@
 /**
- * Band browser profiles and the per-project default profile.
+ * Band browser profiles and the per-repo default profile.
  *
  * A profile is an isolated cookie/storage jar for browser tabs. The desktop
  * app maps each profile id to its own Electron session partition; this
- * service only keeps the metadata and remembers which profile each project
- * uses, so a new browser tab in any workspace of that project opens in it.
+ * service only keeps the metadata and remembers which profile each repo
+ * uses, so a new browser tab in any worktree of that repo opens in it.
  *
  * The built-in Default profile has the id `null` everywhere (no row, the
  * desktop's original `persist:band-browser` partition).
@@ -16,7 +16,7 @@ import {
   BrowserProfileQueries,
   type BrowserProfileRow,
 } from "../infra/db/queries/browser-profiles";
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { type BrowserService, browserService } from "./browser-service";
 
 const log = createLogger("browser-profile-service");
@@ -38,7 +38,7 @@ export class BrowserProfileService {
   constructor(
     private readonly queries: BrowserProfileQueries = new BrowserProfileQueries(),
     private readonly browsers: BrowserService = browserService,
-    private readonly workspaces: WorkspaceQueries = new WorkspaceQueries(),
+    private readonly worktrees: WorktreeQueries = new WorktreeQueries(),
   ) {}
 
   list(): BrowserProfile[] {
@@ -73,7 +73,7 @@ export class BrowserProfileService {
   }
 
   /**
-   * Delete a profile. Projects that defaulted to it fall back to Default,
+   * Delete a profile. Repos that defaulted to it fall back to Default,
    * and so do open tabs that used it.
    */
   remove(id: string): void {
@@ -83,42 +83,42 @@ export class BrowserProfileService {
     log.info({ profileId: id }, "browser profile removed");
   }
 
-  /** The profile new tabs in `projectName` open with. `null` is Default. */
-  getProjectDefault(projectName: string): string | null {
-    const profileId = this.queries.getProjectDefault(projectName);
+  /** The profile new tabs in `repoName` open with. `null` is Default. */
+  getRepoDefault(repoName: string): string | null {
+    const profileId = this.queries.getRepoDefault(repoName);
     // A dangling mapping (profile row gone) reads as Default.
     if (profileId && !this.queries.find(profileId)) return null;
     return profileId;
   }
 
-  setProjectDefault(projectName: string, profileId: string | null): void {
+  setRepoDefault(repoName: string, profileId: string | null): void {
     if (profileId === null) {
-      this.queries.clearProjectDefault(projectName);
+      this.queries.clearRepoDefault(repoName);
       return;
     }
     this.requireProfile(profileId);
-    this.queries.setProjectDefault(projectName, profileId, Date.now());
+    this.queries.setRepoDefault(repoName, profileId, Date.now());
   }
 
-  /** Drop the project's mapping. Called when the project is removed. */
-  forgetProject(projectName: string): void {
-    this.queries.clearProjectDefault(projectName);
+  /** Drop the repo's mapping. Called when the repo is removed. */
+  forgetRepo(repoName: string): void {
+    this.queries.clearRepoDefault(repoName);
   }
 
-  /** Every project that has a default profile set. */
-  listProjectDefaults(): { projectName: string; profileId: string }[] {
-    return this.queries.findAllProjectDefaults();
+  /** Every repo that has a default profile set. */
+  listRepoDefaults(): { repoName: string; profileId: string }[] {
+    return this.queries.findAllRepoDefaults();
   }
 
   /**
-   * The profile a new browser tab in `workspaceId` opens with. `requested`
-   * is what the caller asked for: `undefined` means "the project's
+   * The profile a new browser tab in `worktreeId` opens with. `requested`
+   * is what the caller asked for: `undefined` means "the repo's
    * default", `null` means Default, and an id must exist.
    */
-  resolveForNewTab(workspaceId: string, requested: string | null | undefined): string | null {
+  resolveForNewTab(worktreeId: string, requested: string | null | undefined): string | null {
     if (requested === undefined) {
-      const projectName = this.projectNameForWorkspace(workspaceId);
-      return projectName ? this.getProjectDefault(projectName) : null;
+      const repoName = this.repoNameForWorktree(worktreeId);
+      return repoName ? this.getRepoDefault(repoName) : null;
     }
     if (requested !== null) this.requireProfile(requested);
     return requested;
@@ -126,14 +126,14 @@ export class BrowserProfileService {
 
   /**
    * Switch a tab to `profileId` and make that the default for the tab's
-   * project, so the next tab in any workspace of the project opens in it.
+   * repo, so the next tab in any worktree of the repo opens in it.
    */
   setTabProfile(browserId: string, profileId: string | null) {
     if (profileId !== null) this.requireProfile(profileId);
     const tab = this.browsers.setProfile(browserId, profileId);
     if (!tab) return undefined;
-    const projectName = this.projectNameForWorkspace(tab.workspaceId);
-    if (projectName) this.setProjectDefault(projectName, profileId);
+    const repoName = this.repoNameForWorktree(tab.worktreeId);
+    if (repoName) this.setRepoDefault(repoName, profileId);
     return tab;
   }
 
@@ -144,8 +144,8 @@ export class BrowserProfileService {
     return profile;
   }
 
-  private projectNameForWorkspace(workspaceId: string): string | null {
-    return this.workspaces.findIdentity(workspaceId)?.project ?? null;
+  private repoNameForWorktree(worktreeId: string): string | null {
+    return this.worktrees.findIdentity(worktreeId)?.repo ?? null;
   }
 }
 

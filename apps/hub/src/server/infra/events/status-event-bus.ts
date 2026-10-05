@@ -1,5 +1,5 @@
 /**
- * Process-wide pub/sub for workspace-status events (issue #535,
+ * Process-wide pub/sub for worktree-status events (issue #535,
  * follow-up 2).
  *
  * Lives in the Infra tier so the lower-level adapters that produce these
@@ -10,7 +10,7 @@
  * of `subscribe`, and is what the API tier and other services consume.
  *
  * The bus deliberately holds no state beyond the listener set — every
- * status snapshot (current workspace statuses, branch statuses, running
+ * status snapshot (current worktree statuses, branch statuses, running
  * setups) is recomputed in `services/watcher-service.ts` at subscribe time from
  * the database.
  */
@@ -20,13 +20,13 @@ import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import type { ClientStateEntry } from "@band-app/shared/client-state";
 
 /**
- * Per-workspace agent info embedded in a `WorkspaceStatusSnapshot`. The
+ * Per-worktree agent info embedded in a `WorktreeStatusSnapshot`. The
  * canonical shape originally lived in `services/state.ts::AgentInfo`;
  * declared here so the infra event bus has no upward dependency on the
- * services tier. `services/state.ts` re-exports a `WorkspaceStatus` type
+ * services tier. `services/state.ts` re-exports a `WorktreeStatus` type
  * with the same shape for ergonomics.
  */
-export interface WorkspaceAgentInfo {
+export interface WorktreeAgentInfo {
   name: string;
   status: string;
   lastActivity: string;
@@ -35,22 +35,22 @@ export interface WorkspaceAgentInfo {
 }
 
 /**
- * Workspace-status snapshot used inside `StatusEvent`. Mirrors the legacy
- * `WorkspaceStatus` shape that `services/watcher-service.ts` historically owned;
+ * Worktree-status snapshot used inside `StatusEvent`. Mirrors the legacy
+ * `WorktreeStatus` shape that `services/watcher-service.ts` historically owned;
  * extracted here so the infra producers (tunnel-client and any future
  * infra-level emitter) can construct events without crossing into the
  * services tier.
  */
-export interface WorkspaceStatusSnapshot {
-  workspaceId: string;
-  project: string;
+export interface WorktreeStatusSnapshot {
+  worktreeId: string;
+  repo: string;
   branch: string;
   worktreePath: string;
-  agent?: WorkspaceAgentInfo;
+  agent?: WorktreeAgentInfo;
   /**
-   * The chats and terminals in the workspace whose agent is `working` or
+   * The chats and terminals in the worktree whose agent is `working` or
    * `needs_attention`, for the center tab strip. Absent where the snapshot
-   * comes straight from the row (the projects list).
+   * comes straight from the row (the repos list).
    */
   tabStatuses?: TabAgentStatus[];
 }
@@ -105,9 +105,9 @@ export interface StatusEvent {
     | "subscription-delivered"
     | "subscription-removed"
     | "open-file";
-  status?: WorkspaceStatusSnapshot;
-  statuses?: WorkspaceStatusSnapshot[];
-  workspaceId?: string;
+  status?: WorktreeStatusSnapshot;
+  statuses?: WorktreeStatusSnapshot[];
+  worktreeId?: string;
   git?: GitStatus;
   ci?: CIStatus;
   url?: string;
@@ -127,7 +127,7 @@ export interface StatusEvent {
   /** For `kind: "subscription-delivered"`: how many events the message carried. */
   eventCount?: number;
   /** For `kind: "subscription-removed"`: why the subscription ended. */
-  reason?: "expired" | "max-wakeups" | "removed" | "chat-removed" | "workspace-removed";
+  reason?: "expired" | "max-wakeups" | "removed" | "chat-removed" | "worktree-removed";
   /** For `kind: "host-status-changed"`: the host and its new status. */
   hostId?: string;
   hostStatus?: "online" | "offline" | "lost" | "disposed";
@@ -142,7 +142,7 @@ export interface StatusEvent {
    */
   clientId?: string;
   /**
-   * For `kind: "open-file"`: workspace-relative file path with optional
+   * For `kind: "open-file"`: worktree-relative file path with optional
    * line / column suffix in the standard `path:line[:column]` /
    * `path:line-lineEnd` notation. Parsed by the client via
    * `parseFileLocation` from `@/dashboard`. Backs the
@@ -158,7 +158,7 @@ export interface StatusEvent {
   focus?: boolean;
   /**
    * For `kind: "open-file"`: whether the file lives outside the
-   * resolved workspace's root. When true, `filePath` carries an
+   * resolved worktree's root. When true, `filePath` carries an
    * absolute filesystem path and the renderer should open it as an
    * external tab (same surface as desktop Cmd+O / "Open File…").
    */
@@ -183,7 +183,7 @@ export function emit(event: StatusEvent): void {
 
 /**
  * Register a raw listener. Returns an unsubscribe function. Callers that
- * want the on-connect snapshot (current workspace statuses, branch
+ * want the on-connect snapshot (current worktree statuses, branch
  * statuses, running setups) should go through
  * `services/watcher-service.ts::subscribe` instead — it wraps this with the
  * snapshot replay and the branch-status poller lifecycle.

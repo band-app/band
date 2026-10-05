@@ -21,7 +21,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -33,12 +33,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { CenterTabStrip } from "./pages/CenterTabStrip";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-tab-strip-scroll-token";
-const PROJECT = "tab-strip-scroll-repo";
+const REPO = "tab-strip-scroll-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 const FILES = Array.from({ length: 10 }, (_, i) => `tab-strip-file-number-${i}.txt`);
 
 let server: ServerHandle;
@@ -46,16 +46,16 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   for (const file of FILES) writeFileSync(join(repo, file), `${file}\n`);
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -81,11 +81,11 @@ test.describe("desktop", () => {
   test("an overflowing tab strip has no hidden-tabs dropdown and scrolls with a trackpad swipe", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    for (const file of FILES) await workspacePage.openFileViaQuickOpen(file);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
 
     // Anchor: the tabs really overflow the strip, so dockview would have shown
     // its dropdown here.
@@ -95,21 +95,21 @@ test.describe("desktop", () => {
     // Every tab is reachable by swiping: the first file at the left end, the
     // last at the right end.
     await strip.trackpadSwipe(-5000);
-    await expect.poll(() => strip.isTabFullyShown(workspacePage.fileTab(FILES[0]))).toBe(true);
+    await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(true);
     await strip.trackpadSwipe(5000);
     await expect
-      .poll(() => strip.isTabFullyShown(workspacePage.fileTab(FILES[FILES.length - 1])))
+      .poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[FILES.length - 1])))
       .toBe(true);
-    await expect.poll(() => strip.isTabFullyShown(workspacePage.fileTab(FILES[0]))).toBe(false);
+    await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(false);
   });
 
   test("the tab strip keeps the window's 38px title bar height", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openFileViaQuickOpen(FILES[0]);
-    await expect(workspacePage.fileTab(FILES[0])).toBeVisible();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openFileViaQuickOpen(FILES[0]);
+    await expect(worktreePage.fileTab(FILES[0])).toBeVisible();
 
     expect((await strip.strip.boundingBox())?.height).toBe(38);
   });
@@ -121,15 +121,15 @@ test.describe("phone", () => {
   test("a finger drag on the tab strip scrolls it without switching tabs, and a tap switches", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    for (const file of FILES.slice(0, 5)) await workspacePage.openFileViaQuickOpen(file);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    for (const file of FILES.slice(0, 5)) await worktreePage.openFileViaQuickOpen(file);
 
     // The first file is the active tab, and the strip has room to scroll right.
-    await strip.tap(workspacePage.fileTab(FILES[0]));
-    await expect(workspacePage.fileLeafLine(FILES[0])).toBeVisible();
+    await strip.tap(worktreePage.fileTab(FILES[0]));
+    await expect(worktreePage.fileLeafLine(FILES[0])).toBeVisible();
     await expect
       .poll(async () => {
         const { scrollLeft, maxScrollLeft } = await strip.readScroll();
@@ -140,30 +140,30 @@ test.describe("phone", () => {
 
     // Start the drag on a different, inactive tab: before the fix that tab
     // became active on touch-down.
-    await strip.touchSwipe(workspacePage.fileTab(FILES[1]), 200);
+    await strip.touchSwipe(worktreePage.fileTab(FILES[1]), 200);
 
     await expect
       .poll(async () => (await strip.readScroll()).scrollLeft)
       .toBeGreaterThan(before + 50);
-    await expect(workspacePage.fileLeafLine(FILES[0])).toBeVisible();
-    await expect(workspacePage.fileLeafLine(FILES[1])).toHaveCount(0);
+    await expect(worktreePage.fileLeafLine(FILES[0])).toBeVisible();
+    await expect(worktreePage.fileLeafLine(FILES[1])).toHaveCount(0);
 
-    await strip.tap(workspacePage.fileTab(FILES[2]));
-    await expect(workspacePage.fileLeafLine(FILES[2])).toBeVisible();
+    await strip.tap(worktreePage.fileTab(FILES[2]));
+    await expect(worktreePage.fileLeafLine(FILES[2])).toBeVisible();
   });
 
   test("each tab and the strip's buttons are at least 44px tall", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openFileViaQuickOpen(FILES[0]);
-    await workspacePage.openFileViaQuickOpen(FILES[1]);
-    await expect(workspacePage.fileLeafLine(FILES[1])).toBeVisible();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openFileViaQuickOpen(FILES[0]);
+    await worktreePage.openFileViaQuickOpen(FILES[1]);
+    await expect(worktreePage.fileLeafLine(FILES[1])).toBeVisible();
 
     // The active and an inactive tab.
     for (const file of FILES.slice(0, 2)) {
-      expect(await strip.readTabTapHeight(workspacePage.fileTab(file))).toBeGreaterThanOrEqual(44);
+      expect(await strip.readTabTapHeight(worktreePage.fileTab(file))).toBeGreaterThanOrEqual(44);
     }
     for (const button of [strip.newTabButton, strip.tabActionsButton]) {
       const box = await button.boundingBox();
@@ -173,17 +173,17 @@ test.describe("phone", () => {
   });
 
   test("tapping a tab's close button closes that tab", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openFileViaQuickOpen(FILES[0]);
-    await workspacePage.openFileViaQuickOpen(FILES[1]);
-    await expect(workspacePage.fileLeafLine(FILES[1])).toBeVisible();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openFileViaQuickOpen(FILES[0]);
+    await worktreePage.openFileViaQuickOpen(FILES[1]);
+    await expect(worktreePage.fileLeafLine(FILES[1])).toBeVisible();
 
-    await strip.tap(workspacePage.fileTabCloseButton(FILES[1]));
+    await strip.tap(worktreePage.fileTabCloseButton(FILES[1]));
 
-    await expect(workspacePage.fileLeafLine(FILES[0])).toBeVisible();
-    await expect(workspacePage.fileTab(FILES[1])).toHaveCount(0);
+    await expect(worktreePage.fileLeafLine(FILES[0])).toBeVisible();
+    await expect(worktreePage.fileTab(FILES[1])).toHaveCount(0);
   });
 });

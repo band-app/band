@@ -60,7 +60,7 @@ describe("keyInputs", () => {
 describe("tags", () => {
   it("builds a docker-safe tag, under the registry when set", () => {
     const key = "a".repeat(64);
-    assert.equal(imageTag("My Project!", key), `band-env/my-project:${"a".repeat(16)}`);
+    assert.equal(imageTag("My Repo!", key), `band-env/my-repo:${"a".repeat(16)}`);
     assert.equal(
       imageTag("api", key, "ghcr.io/acme/"),
       `ghcr.io/acme/band-env/api:${"a".repeat(16)}`,

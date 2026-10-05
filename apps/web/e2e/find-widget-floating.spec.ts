@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -30,13 +30,13 @@ import {
 } from "./helpers/server";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 import { topOf, type WidgetPlacement } from "./pages/FindWidget";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-find-widget-floating-token";
-const PROJECT = "find-widget-repo";
+const REPO = "find-widget-repo";
 const BRANCH = "main";
 const FILE = "app.ts";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 // Committed content, then an uncommitted edit so the Changes tab lists FILE.
 // The working copy holds "needle" three times.
@@ -52,7 +52,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", BRANCH]);
   writeFileSync(join(repoPath, FILE), COMMITTED);
@@ -61,9 +61,9 @@ test.beforeAll(async () => {
   writeFileSync(join(repoPath, FILE), WORKING);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -98,19 +98,19 @@ function expectTopRight(placement: WidgetPlacement): void {
 test("file editor: the find widget floats top-right and steps through matches", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf(FILE, WORKSPACE);
-  await workspacePage.focusFileEditor(FILE);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf(FILE, WORKTREE);
+  await worktreePage.focusFileEditor(FILE);
 
   // A fixture line, not the editor's textbox: once the widget opens, its own
   // input is the leaf's first textbox.
-  const firstLine = workspacePage.fileLeafLine("const needle = 1;");
+  const firstLine = worktreePage.fileLeafLine("const needle = 1;");
   const lineTopBefore = await topOf(firstLine);
 
-  await workspacePage.pressFindShortcut();
-  const find = workspacePage.fileLeafFindWidget();
+  await worktreePage.pressFindShortcut();
+  const find = worktreePage.fileLeafFindWidget();
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
   // Laid over the editor, not stacked above it.
@@ -140,15 +140,15 @@ test("file editor: the find widget floats top-right and steps through matches", 
 
 test("diff: the find widget floats top-right over the diff", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await changes.goto(WORKSPACE);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await changes.goto(WORKTREE);
   await changes.openDiff(FILE, "unified");
   // Cmd+F is scoped to the focused leaf, so click into the diff first.
   await changes.diffLine("// needle three").click();
 
   const scrollerTopBefore = await topOf(changes.diffScroller);
 
-  await workspacePage.pressFindShortcut();
+  await worktreePage.pressFindShortcut();
   const find = changes.diffFindWidget;
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
@@ -161,24 +161,24 @@ test("diff: the find widget floats top-right over the diff", async ({ page }) =>
 });
 
 test("terminal: the find widget floats top-right over the terminal", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.focusTerminal();
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.focusTerminal();
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
   // Two output lines to find. The quotes keep the typed command itself from
   // matching, so only the executed output does.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     'echo ZQX_"FOUND"; echo ZQX_"FOUND"',
     /ZQX_FOUND[\s\S]*ZQX_FOUND/,
   );
 
-  const screen = workspacePage.terminalScreen();
+  const screen = worktreePage.terminalScreen();
   const screenTopBefore = await topOf(screen);
 
-  await workspacePage.pressFindShortcut();
-  const find = workspacePage.terminalPaneFindWidget();
+  await worktreePage.pressFindShortcut();
+  const find = worktreePage.terminalPaneFindWidget();
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
   expect(await topOf(screen)).toBe(screenTopBefore);

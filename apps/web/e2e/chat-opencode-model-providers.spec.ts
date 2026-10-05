@@ -15,7 +15,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -29,7 +29,7 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-opencode-model-providers-token";
-const PROJECTS = ["providersopencode", "providersclaude"] as const;
+const REPOS = ["providersopencode", "providersclaude"] as const;
 const MODELS = [
   { value: "opencode/big-pickle", name: "OpenCode Zen/Big Pickle" },
   {
@@ -52,7 +52,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = PROJECTS.map((name) => {
+  const repos = REPOS.map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -62,7 +62,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "opencode",
@@ -89,7 +89,7 @@ test.describe("OpenCode model picker", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("providersopencode", "main"));
+    await chatPane.goto(toWorktreeId("providersopencode", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -147,7 +147,7 @@ test.describe("OpenCode model picker", () => {
 test.describe("Other agents' model picker", () => {
   test("keeps the flat More models list with full model names", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("providersclaude", "main"));
+    await chatPane.goto(toWorktreeId("providersclaude", "main"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("claude-code");

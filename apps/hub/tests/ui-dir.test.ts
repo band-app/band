@@ -2,7 +2,7 @@
  * Where the hub serves the UI from. `--ui-dir <path>` and `BAND_UI_DIR` name a
  * directory holding a built UI (`_shell.html` plus `assets/`); the hub serves
  * its files and answers every app route with that shell. With neither set it
- * serves the web workspace's own build (`apps/web/dist/client`), which
+ * serves the web worktree's own build (`apps/web/dist/client`), which
  * `web-app-manifest.test.ts` and `cold-start.test.ts` already exercise.
  *
  * Real production server, plain HTTP, a throwaway UI directory.
@@ -53,9 +53,9 @@ async function expectUiServed(marker: string): Promise<void> {
   expect(await asset.text()).toContain(marker);
 
   // The API stays on the same port, and stays behind the token.
-  const api = await fetch(`${server!.url}/trpc/projects.list?token=${TOKEN}`);
+  const api = await fetch(`${server!.url}/trpc/repos.list?token=${TOKEN}`);
   expect(api.status).toBe(200);
-  const anonymous = await fetch(`${server!.url}/trpc/projects.list`);
+  const anonymous = await fetch(`${server!.url}/trpc/repos.list`);
   expect(anonymous.status).toBe(401);
 }
 

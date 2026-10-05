@@ -1,7 +1,7 @@
 /**
  * Page object for the GitHub plugin's Checks tab in the right sidepanel
  * (`plugins/github/src/client/PullRequestPanel.tsx`, contributed through the
- * `workspace.sideTabs` slot). Its tab is `right-sidepanel__tab--github-pull-request`
+ * `worktree.sideTabs` slot). Its tab is `right-sidepanel__tab--github-pull-request`
  * and its body `pr-checks`:
  *
  *   - the header: `pr-checks__number`, `pr-checks__state`, `pr-checks__title`,
@@ -17,14 +17,14 @@
  *     (with `pr-checks__check-duration`);
  *   - the overflow menu `pr-checks__menu` (`pr-checks__menu-open`, `-copy`);
  *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
- *     fails and `pr-checks__unavailable` when no plugin serves the project.
+ *     fails and `pr-checks__unavailable` when no plugin serves the repo.
  *
  * Revealing the sidepanel and selecting its tab is delegated to
- * `WorkspacePage`.
+ * `WorktreePage`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { WorkspacePage } from "./WorkspacePage";
+import { WorktreePage } from "./WorktreePage";
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
@@ -64,14 +64,14 @@ export class PrChecksPanelPage {
   /** The name cell of every check row, in list order. */
   readonly checkNames: Locator;
 
-  private readonly workspace: WorkspacePage;
+  private readonly worktree: WorktreePage;
 
   constructor(
     private readonly page: Page,
     baseUrl: string,
     token: string,
   ) {
-    this.workspace = new WorkspacePage(page, baseUrl, token);
+    this.worktree = new WorktreePage(page, baseUrl, token);
     this.body = page.getByTestId("right-sidepanel__plugin--github-pull-request");
     this.loading = page.getByTestId("pr-checks__loading");
     this.root = page.getByTestId("pr-checks");
@@ -104,12 +104,12 @@ export class PrChecksPanelPage {
     this.checkNames = page.getByTestId("pr-checks__check-name");
   }
 
-  /** Open the workspace and its Checks tab, and wait until the lookup settles. */
-  async goto(workspaceId: string): Promise<void> {
-    await this.workspace.goto(workspaceId);
-    await this.workspace.waitForReady();
-    await this.workspace.revealRightPanel();
-    await this.workspace.selectRightPanelTab("github-pull-request");
+  /** Open the worktree and its Checks tab, and wait until the lookup settles. */
+  async goto(worktreeId: string): Promise<void> {
+    await this.worktree.goto(worktreeId);
+    await this.worktree.waitForReady();
+    await this.worktree.revealRightPanel();
+    await this.worktree.selectRightPanelTab("github-pull-request");
     await expect(this.body).toBeVisible();
     await expect(this.loading).toHaveCount(0, { timeout: 15_000 });
   }

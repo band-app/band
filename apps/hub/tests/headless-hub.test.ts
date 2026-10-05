@@ -101,8 +101,8 @@ describe("BAND_SERVE_UI", () => {
     expect((await fetch(`${server.url}/`, { headers: bearer })).status).toBe(404);
     expect((await fetch(`${server.url}/some/route`, { headers: bearer })).status).toBe(404);
     expect((await fetch(`${server.url}/api/health`, { headers: bearer })).status).toBe(200);
-    expect((await fetch(`${server.url}/trpc/projects.list`, { headers: bearer })).status).toBe(200);
-    expect((await fetch(`${server.url}/trpc/projects.list`)).status).toBe(401);
+    expect((await fetch(`${server.url}/trpc/repos.list`, { headers: bearer })).status).toBe(200);
+    expect((await fetch(`${server.url}/trpc/repos.list`)).status).toBe(401);
   });
 
   it("boots without a UI build when false", async () => {
@@ -124,19 +124,19 @@ describe("BAND_ALLOWED_ORIGINS", () => {
       env: { BAND_ALLOWED_ORIGINS: `${LISTED}, https://other.test` },
     });
 
-    const listed = await fetch(`${server.url}/trpc/projects.list`, {
+    const listed = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { ...bearer, Origin: LISTED },
     });
     expect(listed.status).toBe(200);
     expect(listed.headers.get("access-control-allow-origin")).toBe(LISTED);
 
-    const preflight = await fetch(`${server.url}/trpc/projects.list`, {
+    const preflight = await fetch(`${server.url}/trpc/repos.list`, {
       method: "OPTIONS",
       headers: { Origin: LISTED, "Access-Control-Request-Method": "GET" },
     });
     expect(preflight.headers.get("access-control-allow-origin")).toBe(LISTED);
 
-    const unlisted = await fetch(`${server.url}/trpc/projects.list`, {
+    const unlisted = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { ...bearer, Origin: UNLISTED },
     });
     expect(unlisted.status).toBe(403);
@@ -245,11 +245,11 @@ describe("admin token", () => {
     await run.stop();
 
     const server = await boot({ home, env: { BAND_ADMIN_TOKEN: "env-admin-token" } });
-    const ok = await fetch(`${server.url}/trpc/projects.list`, {
+    const ok = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Authorization: "Bearer env-admin-token" },
     });
     expect(ok.status).toBe(200);
-    const old = await fetch(`${server.url}/trpc/projects.list`, {
+    const old = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Authorization: "Bearer old-secret" },
     });
     expect(old.status).toBe(401);

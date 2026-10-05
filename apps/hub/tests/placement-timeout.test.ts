@@ -55,7 +55,7 @@ beforeAll(async () => {
   git("commit", "-q", "-m", "init");
   seedSettings(home, { tokenSecret: TOKEN });
   seedState(home, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: repo,
@@ -74,8 +74,8 @@ afterAll(async () => {
 
 describe("a host request that nobody meets", () => {
   it("fails with a reason after the timeout, and can be dismissed (S4)", async () => {
-    const created = await m<{ provisioning: { requestId: string } }>("workspaces.create", {
-      project: "proj",
+    const created = await m<{ provisioning: { requestId: string } }>("worktrees.create", {
+      repo: "proj",
       branch: "stuck",
       placement: { labels: { zone: "moon" } },
     });
@@ -97,9 +97,9 @@ describe("a host request that nobody meets", () => {
     await m("hostRequests.cancel", { requestId });
     expect((await requests()).find((r) => r.id === requestId)).toBeUndefined();
 
-    // The workspace was never created, so the branch can be asked for again.
-    const again = await m<{ provisioning?: { requestId: string } }>("workspaces.create", {
-      project: "proj",
+    // The worktree was never created, so the branch can be asked for again.
+    const again = await m<{ provisioning?: { requestId: string } }>("worktrees.create", {
+      repo: "proj",
       branch: "stuck",
       placement: { labels: { zone: "moon" } },
     });

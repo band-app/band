@@ -6,7 +6,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Introduction</h1>
 
   <p>
-    You started using an AI coding agent on one project. Then a second agent. Now
+    You started using an AI coding agent on one repo. Then a second agent. Now
     you've got Claude Code running in a Cursor terminal, Codex in a VS Code
     window, OpenCode in a Zed split, three half-finished branches, and no idea
     which one was actually working on the bug. Your IDE wasn't designed for
@@ -18,14 +18,14 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <strong>Band is the agent-first IDE.</strong> It's a desktop app built from
     the ground up around AI coding agents: chat panes for talking to them, a
     code editor and file tree to review what they've done, terminals and
-    browsers to verify it works, and git worktree workspaces to keep parallel
+    browsers to verify it works, and git worktrees to keep parallel
     agents from stepping on each other &mdash; all in one window.
   </p>
 
   <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-dashboard.png"
-      alt="The Band desktop app: workspace sidebar on the far left, chat pane next to it, project file tree in the middle, and a code editor on the right showing the active worktree."
+      alt="The Band desktop app: worktree sidebar on the far left, chat pane next to it, repo file tree in the middle, and a code editor on the right showing the active worktree."
       width="1946"
       height="1187"
       loading="lazy"
@@ -33,7 +33,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       class="block h-auto w-full"
     />
     <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
-      Workspaces, chat, file tree, and code editor &mdash; one window for the whole agent stack.
+      Worktrees, chat, file tree, and code editor &mdash; one window for the whole agent stack.
     </figcaption>
   </figure>
 
@@ -78,11 +78,11 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ol>
     <li>
-      <strong>Register a project</strong> by pointing Band at a git repo you
+      <strong>Register a repo</strong> by pointing Band at a git repo you
       already have checked out.
     </li>
     <li>
-      <strong>Create a workspace.</strong> Band creates a fresh git worktree on a
+      <strong>Create a worktree.</strong> Band creates a fresh git worktree on a
       new branch in <code>.band/worktrees/&hellip;</code>. Your main checkout is
       never touched.
     </li>
@@ -99,7 +99,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </ol>
 
   <p>
-    You can run as many workspaces in parallel as your machine will tolerate,
+    You can run as many worktrees in parallel as your machine will tolerate,
     each with its own agent, branch, and chat history.
   </p>
 
@@ -124,7 +124,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       or another machine.
     </li>
     <li>
-      <strong>Keep state across restarts.</strong> Workspaces, chat history, task
+      <strong>Keep state across restarts.</strong> Worktrees, chat history, task
       output, and worktree metadata all live in <code>~/.band</code> and survive
       reboots.
     </li>
@@ -168,8 +168,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ol>
     <li><a href="/docs/installation">Installation</a> &mdash; download the signed <code>.dmg</code> and install the CLI.</li>
-    <li><a href="/docs/first-project">Adding your first project</a> &mdash; register a repo with Band.</li>
-    <li><a href="/docs/first-workspace">Creating your first workspace</a> &mdash; spin up an isolated worktree.</li>
+    <li><a href="/docs/first-repo">Adding your first repo</a> &mdash; register a repo with Band.</li>
+    <li><a href="/docs/first-worktree">Creating your first worktree</a> &mdash; spin up an isolated worktree.</li>
     <li><a href="/docs/first-task">Running your first task</a> &mdash; dispatch a prompt to a coding agent.</li>
   </ol>
 </DocsLayout>

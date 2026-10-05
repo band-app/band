@@ -13,7 +13,7 @@ Over the lifetime of issue #478 we fixed seven distinct user-visible bugs in
 the chat surface:
 
 1. Indicator delay on send (`handleSubmit` pre-flight HTTP)
-2. Indicator delay on workspace navigation (3 serial round-trips before
+2. Indicator delay on worktree navigation (3 serial round-trips before
    `useChat.status` flips)
 3. Stuck after switch-back mid-stream (sessionIdRef undefined, no recovery)
 4. Stuck on mobile background/foreground (no `visibilitychange` listener)
@@ -126,7 +126,7 @@ Submit a user message. Replaces the POST half of
 
 ```ts
 {
-  workspaceId: string;
+  worktreeId: string;
   text: string;
   files?: { mediaType: string; url: string; filename?: string }[];
   // optional turn-level overrides (mirror today's submit)
@@ -255,7 +255,7 @@ lines to roughly the JSX render + this hook + queued-message DnD.
 - `apps/web/src/trpc/router.ts`:
   - `sessions.messages` stays, but the chat view stops calling it. The
     session-history dropdown's preview still uses it.
-  - `tasks.isRunning`, `tasks.get` stay for non-chat consumers (project
+  - `tasks.isRunning`, `tasks.get` stay for non-chat consumers (repo
     list dot, status indicators).
   - `chats.setActiveSession` becomes a no-op or is removed. Active
     session is derived from the latest `session-resolved` event in the
@@ -342,7 +342,7 @@ the new buffer starts at 1.
 buffer's current `counter` value) and falls back to a full JSONL replay
 plus a `server-restarted` lifecycle event so the client can warn the
 user (or quietly reset). Document the limitation; persistent eventIds is
-a separate, larger project.
+a separate, larger repo.
 
 ### Risk: subscription connection limits
 
@@ -619,7 +619,7 @@ This is the big visible-diff commit. Atomic swap.
       no callers remain.
 - [x] Audit tRPC procedures used only by the chat view (per the
       Step 1 inventory). For each:
-  - [x] If still needed elsewhere (CLI, project list, etc.):
+  - [x] If still needed elsewhere (CLI, repo list, etc.):
         keep, but document the chat view no longer calls it.
   - [x] If unused: delete the procedure and its tests.
 - [x] If `chats.setActiveSession` survives the inventory, convert
@@ -654,7 +654,7 @@ This is the big visible-diff commit. Atomic swap.
       `#478`. Each should be resolved without any patch code —
       because the code paths that produced them no longer exist:
   - [x] Send latency
-  - [x] Indicator delay on workspace navigation
+  - [x] Indicator delay on worktree navigation
   - [x] Stuck after mid-stream switch-back
   - [x] Mobile background/foreground recovery
   - [x] Partial state from buffer-vs-JSONL preference

@@ -2,21 +2,21 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { getWorkspaceStatus, upsertWorkspaceStatus } from "../src/server/services/state";
-import { seedState, seedWorkspaceStatuses } from "./helpers/seed-state";
+import { getWorktreeStatus, upsertWorktreeStatus } from "../src/server/services/state";
+import { seedState, seedWorktreeStatuses } from "./helpers/seed-state";
 
 // Read `updated_at` directly from SQLite — used to assert that the
 // no-op write skip actually prevents writes (rather than the higher-level
 // row staying logically identical).
-function readUpdatedAt(tmpHome: string, workspaceId: string): number | undefined {
+function readUpdatedAt(tmpHome: string, worktreeId: string): number | undefined {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
   try {
     const row = sqlite
-      .prepare("SELECT updated_at FROM workspace_statuses WHERE workspace_id = ?")
-      .get(workspaceId) as { updated_at: number } | undefined;
+      .prepare("SELECT updated_at FROM worktree_statuses WHERE worktree_id = ?")
+      .get(worktreeId) as { updated_at: number } | undefined;
     return row?.updated_at;
   } finally {
     sqlite.close();
@@ -24,18 +24,18 @@ function readUpdatedAt(tmpHome: string, workspaceId: string): number | undefined
 }
 
 // ---------------------------------------------------------------------------
-// upsertWorkspaceStatus — heals stale rows with empty identity fields.
+// upsertWorktreeStatus — heals stale rows with empty identity fields.
 //
 // The desktop EditorPicker dropdown (right sidepanel header) is gated on a non-empty
 // `worktreePath` (see DesktopTitleBar.tsx). Some rows in older Band
 // installs were inserted with `worktreePath = ""` (agent started before
-// the project's worktree was persisted, or rows left behind by a prior
-// version). Without healing, those workspaces never get the dropdown
-// even though the worktree path is recoverable from the projects /
+// the repo's worktree was persisted, or rows left behind by a prior
+// version). Without healing, those worktrees never get the dropdown
+// even though the worktree path is recoverable from the repos /
 // worktrees tables.
 // ---------------------------------------------------------------------------
 
-describe("upsertWorkspaceStatus — identity healing", () => {
+describe("upsertWorktreeStatus — identity healing", () => {
   let tmp: string;
   let originalBandHome: string | undefined;
 
@@ -55,17 +55,17 @@ describe("upsertWorkspaceStatus — identity healing", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("heals an existing row with empty project/branch/worktreePath", () => {
-    const projectName = "kbhq";
+  it("heals an existing row with empty repo/branch/worktreePath", () => {
+    const repoName = "kbhq";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "kbhq-main");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
 
-    // Project state has a real worktree for this workspaceId.
+    // Repo state has a real worktree for this worktreeId.
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "kbhq"),
           defaultBranch: "main",
           worktrees: [{ branch, path: wtPath }],
@@ -73,43 +73,43 @@ describe("upsertWorkspaceStatus — identity healing", () => {
       ],
     });
 
-    // workspace_statuses row exists but with empty identity fields,
+    // worktree_statuses row exists but with empty identity fields,
     // mirroring the user-reported real-world state.
-    seedWorkspaceStatuses(tmp, [
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: "",
+        worktreeId,
+        repo: "",
         branch: "",
         worktreePath: "",
         agentStatus: "waiting",
       },
     ]);
 
-    const healed = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
-    expect(healed.project).toBe(projectName);
+    expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);
     expect(healed.worktreePath).toBe(wtPath);
 
-    // Round-trip via getWorkspaceStatus to make sure the update was
+    // Round-trip via getWorktreeStatus to make sure the update was
     // actually written to the row, not just returned in-memory.
-    const persisted = getWorkspaceStatus(workspaceId);
+    const persisted = getWorktreeStatus(worktreeId);
     expect(persisted).not.toBeNull();
-    expect(persisted!.project).toBe(projectName);
+    expect(persisted!.repo).toBe(repoName);
     expect(persisted!.branch).toBe(branch);
     expect(persisted!.worktreePath).toBe(wtPath);
   });
 
   it("heals only the empty subset of identity fields", () => {
-    const projectName = "kbhq";
+    const repoName = "kbhq";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "kbhq-main");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
 
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "kbhq"),
           defaultBranch: "main",
           worktrees: [{ branch, path: wtPath }],
@@ -117,39 +117,39 @@ describe("upsertWorkspaceStatus — identity healing", () => {
       ],
     });
 
-    // Pre-existing row has correct project + branch but lost its
+    // Pre-existing row has correct repo + branch but lost its
     // worktreePath somehow. Only worktreePath should be healed; the
     // already-correct fields must be left alone.
-    seedWorkspaceStatuses(tmp, [
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: projectName,
+        worktreeId,
+        repo: repoName,
         branch,
         worktreePath: "",
         agentStatus: "waiting",
       },
     ]);
 
-    const healed = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
-    expect(healed.project).toBe(projectName);
+    expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);
     expect(healed.worktreePath).toBe(wtPath);
   });
 
   it("does not overwrite non-empty worktreePath even if state.json would resolve differently", () => {
-    const projectName = "kbhq";
+    const repoName = "kbhq";
     const branch = "main";
     const staleButValidPath = "/tmp/some-old-cached-worktree-path";
     const newPathInState = join(tmp, "worktrees", "kbhq-main");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
 
-    // state.json (projects/worktrees DB) currently resolves the
-    // workspace to a different path. We should NOT clobber the row.
+    // state.json (repos/worktrees DB) currently resolves the
+    // worktree to a different path. We should NOT clobber the row.
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "kbhq"),
           defaultBranch: "main",
           worktrees: [{ branch, path: newPathInState }],
@@ -157,58 +157,58 @@ describe("upsertWorkspaceStatus — identity healing", () => {
       ],
     });
 
-    seedWorkspaceStatuses(tmp, [
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: projectName,
+        worktreeId,
+        repo: repoName,
         branch,
         worktreePath: staleButValidPath,
         agentStatus: "waiting",
       },
     ]);
 
-    const result = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    const result = upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
     // worktreePath stays at the (non-empty) seeded value — healing is
     // conservative and never overwrites correct data.
     expect(result.worktreePath).toBe(staleButValidPath);
-    expect(result.project).toBe(projectName);
+    expect(result.repo).toBe(repoName);
     expect(result.branch).toBe(branch);
   });
 
-  it("leaves an existing row alone when project/worktrees DB has no matching entry", () => {
-    const workspaceId = "unknown-project-main";
+  it("leaves an existing row alone when repo/worktrees DB has no matching entry", () => {
+    const worktreeId = "unknown-repo-main";
 
-    // No projects/worktrees seeded — resolveWorkspaceIdentity returns
+    // No repos/worktrees seeded — resolveWorktreeIdentity returns
     // null, so the row stays empty (no spurious writes).
-    seedState(tmp, { projects: [] });
-    seedWorkspaceStatuses(tmp, [
+    seedState(tmp, { repos: [] });
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: "",
+        worktreeId,
+        repo: "",
         branch: "",
         worktreePath: "",
         agentStatus: "waiting",
       },
     ]);
 
-    const result = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    const result = upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
-    expect(result.project).toBe("");
+    expect(result.repo).toBe("");
     expect(result.branch).toBe("");
     expect(result.worktreePath).toBe("");
   });
 });
 
 // ---------------------------------------------------------------------------
-// upsertWorkspaceStatus — no-op write skip.
+// upsertWorktreeStatus — no-op write skip.
 //
-// The status poller calls `upsertWorkspaceStatus(_, { status: "waiting" })`
-// on every tick for every idle workspace; without a no-op guard each tick
+// The status poller calls `upsertWorktreeStatus(_, { status: "waiting" })`
+// on every tick for every idle worktree; without a no-op guard each tick
 // produces a WAL frame just to bump `updatedAt`, which nothing reads.
 // ---------------------------------------------------------------------------
 
-describe("upsertWorkspaceStatus — no-op write skip", () => {
+describe("upsertWorktreeStatus — no-op write skip", () => {
   let tmp: string;
   let originalBandHome: string | undefined;
 
@@ -229,15 +229,15 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
   });
 
   it("does not bump updated_at when nothing changed", () => {
-    const projectName = "demo";
+    const repoName = "demo";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "demo-main");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
 
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "demo"),
           defaultBranch: "main",
           worktrees: [{ branch, path: wtPath }],
@@ -246,10 +246,10 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
     });
 
     // Seed a fully-populated row so no healing or status change is needed.
-    seedWorkspaceStatuses(tmp, [
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: projectName,
+        worktreeId,
+        repo: repoName,
         branch,
         worktreePath: wtPath,
         agentStatus: "waiting",
@@ -257,26 +257,26 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
       },
     ]);
 
-    const before = readUpdatedAt(tmp, workspaceId);
+    const before = readUpdatedAt(tmp, worktreeId);
     expect(before).toBeDefined();
 
-    upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
-    const after = readUpdatedAt(tmp, workspaceId);
+    const after = readUpdatedAt(tmp, worktreeId);
     // updated_at must be byte-identical — no UPDATE was issued.
     expect(after).toBe(before);
   });
 
   it("does bump updated_at when status changes", () => {
-    const projectName = "demo";
+    const repoName = "demo";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "demo-main");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
 
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "demo"),
           defaultBranch: "main",
           worktrees: [{ branch, path: wtPath }],
@@ -288,10 +288,10 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
     // observable without depending on wall-clock progression between
     // the seed and the upsert (which on a loaded CI host can land on
     // the same millisecond as `Date.now()` inside upsert).
-    seedWorkspaceStatuses(tmp, [
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: projectName,
+        worktreeId,
+        repo: repoName,
         branch,
         worktreePath: wtPath,
         agentStatus: "waiting",
@@ -299,25 +299,25 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
       },
     ]);
 
-    expect(readUpdatedAt(tmp, workspaceId)).toBe(0);
+    expect(readUpdatedAt(tmp, worktreeId)).toBe(0);
 
-    upsertWorkspaceStatus(workspaceId, { status: "working" });
+    upsertWorktreeStatus(worktreeId, { status: "working" });
 
-    const after = readUpdatedAt(tmp, workspaceId)!;
+    const after = readUpdatedAt(tmp, worktreeId)!;
     expect(after).toBeGreaterThan(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// resolveWorkspaceIdentity — SQL-side `toWorkspaceId` match.
+// resolveWorktreeIdentity — SQL-side `toWorktreeId` match.
 //
-// The lookup pushes the `${project}-${branch.replaceAll("/", "-")}`
-// computation into SQL (`project || '-' || REPLACE(branch, '/', '-')`)
+// The lookup pushes the `${repo}-${branch.replaceAll("/", "-")}`
+// computation into SQL (`repo || '-' || REPLACE(branch, '/', '-')`)
 // so it can filter server-side instead of scanning every worktree in
 // JS. Exercise the slash-in-branch case to prove the REPLACE works.
 // ---------------------------------------------------------------------------
 
-describe("upsertWorkspaceStatus — identity lookup with slashes in branch", () => {
+describe("upsertWorktreeStatus — identity lookup with slashes in branch", () => {
   let tmp: string;
   let originalBandHome: string | undefined;
 
@@ -337,18 +337,18 @@ describe("upsertWorkspaceStatus — identity lookup with slashes in branch", () 
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("resolves a workspaceId whose branch contains slashes", () => {
-    const projectName = "demo";
+  it("resolves a worktreeId whose branch contains slashes", () => {
+    const repoName = "demo";
     const branch = "feat/nested/thing";
     const wtPath = join(tmp, "worktrees", "demo-feat-nested-thing");
-    const workspaceId = toWorkspaceId(projectName, branch);
+    const worktreeId = toWorktreeId(repoName, branch);
     // Sanity: helper collapses slashes to dashes.
-    expect(workspaceId).toBe("demo-feat-nested-thing");
+    expect(worktreeId).toBe("demo-feat-nested-thing");
 
     seedState(tmp, {
-      projects: [
+      repos: [
         {
-          name: projectName,
+          name: repoName,
           path: join(tmp, "repos", "demo"),
           defaultBranch: "main",
           worktrees: [{ branch, path: wtPath }],
@@ -357,20 +357,20 @@ describe("upsertWorkspaceStatus — identity lookup with slashes in branch", () 
     });
 
     // Stale row with empty identity — forces the heal path through
-    // the new SQL-backed `resolveWorkspaceIdentity`.
-    seedWorkspaceStatuses(tmp, [
+    // the new SQL-backed `resolveWorktreeIdentity`.
+    seedWorktreeStatuses(tmp, [
       {
-        workspaceId,
-        project: "",
+        worktreeId,
+        repo: "",
         branch: "",
         worktreePath: "",
         agentStatus: "waiting",
       },
     ]);
 
-    const healed = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
 
-    expect(healed.project).toBe(projectName);
+    expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);
     expect(healed.worktreePath).toBe(wtPath);
   });

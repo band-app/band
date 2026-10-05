@@ -12,7 +12,7 @@
  *     diff and the editor.
  *
  * The language server is real: the fixture repo is a small TypeScript
- * project whose `node_modules` links to the `typescript-language-server` and
+ * repo whose `node_modules` links to the `typescript-language-server` and
  * `typescript` packages this app installs, which is where the server's LSP
  * manager looks for them (`<worktree>/node_modules/.bin`). Nothing in Band is
  * mocked; the server spawns the language server as it does for a user.
@@ -20,7 +20,7 @@
 
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { createTsLspRepo } from "../../hub/tests/fixtures/ts-lsp-repo";
 import {
   cleanupTmpHome,
@@ -85,7 +85,7 @@ const LOCAL_HELPER_DEF = "function localHelper(): number {";
 interface ServerContext {
   server: ServerHandle;
   tmpHome: string;
-  workspaceId: string;
+  worktreeId: string;
   /** The fixture repo's one commit. */
   commitSha: string;
 }
@@ -94,7 +94,7 @@ function bootServer(theme: "light" | "dark"): ServerContext {
   const ctx: ServerContext = {
     server: undefined as unknown as ServerHandle,
     tmpHome: "",
-    workspaceId: toWorkspaceId(REPO_NAME, BRANCH),
+    worktreeId: toWorktreeId(REPO_NAME, BRANCH),
     commitSha: "",
   };
   test.beforeAll(async () => {
@@ -107,7 +107,7 @@ function bootServer(theme: "light" | "dark"): ServerContext {
       working: { "src/main.ts": MAIN_AFTER },
     });
     seedState(ctx.tmpHome, {
-      projects: [
+      repos: [
         {
           name: REPO_NAME,
           path: repoPath,
@@ -139,7 +139,7 @@ for (const theme of ["light", "dark"] as const) {
       page,
     }) => {
       const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-      await changes.goto(ctx.workspaceId);
+      await changes.goto(ctx.worktreeId);
       await changes.openDiff("src/main.ts", "unified");
       const diff = changes.symbols("new");
 
@@ -170,7 +170,7 @@ function registerNavigationTests(ctx: ServerContext) {
     page,
   }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
     await changes.openDiff("src/main.ts", "unified");
     const diff = changes.symbols("new");
     await expect(diff.line(DOUBLED_LINE)).toBeInViewport();
@@ -187,7 +187,7 @@ function registerNavigationTests(ctx: ServerContext) {
 
   test("A word with no definition is not linked", async ({ page }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
     await changes.openDiff("src/main.ts", "unified");
     const diff = changes.symbols("new");
 
@@ -204,7 +204,7 @@ function registerNavigationTests(ctx: ServerContext) {
 
   test("Split view links only the working-tree side, not the merge-base side", async ({ page }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
     await changes.openDiff("src/main.ts", "split");
 
     // The unchanged line is on both sides. The working-tree side links it...
@@ -232,7 +232,7 @@ function registerNavigationTests(ctx: ServerContext) {
     page,
   }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
     await changes.openDiff("src/main.ts", "unified");
 
     // An editor on the same file takes the document over on the server...
@@ -252,7 +252,7 @@ function registerNavigationTests(ctx: ServerContext) {
 
   test("The diff stops linking a line an editor's unsaved edits have moved", async ({ page }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
     await changes.openDiff("src/main.ts", "unified");
     const diff = changes.symbols("new");
 
@@ -278,7 +278,7 @@ function registerNavigationTests(ctx: ServerContext) {
     page,
   }) => {
     const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
-    await changes.goto(ctx.workspaceId);
+    await changes.goto(ctx.worktreeId);
 
     // Positive anchor: the same line links in the working-tree diff.
     await changes.openDiff("src/main.ts", "unified");

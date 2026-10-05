@@ -15,7 +15,7 @@ import {
   DashboardShell,
   isMacPlatform,
   useDashboardStore,
-  useRecordLabelLastWorkspace,
+  useRecordLabelLastWorktree,
   useSettingsQuery,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
@@ -29,9 +29,9 @@ import {
   NavControls,
   RightPanelHeaderActions,
   SidebarTitleBar,
-  WorkspaceChromeContext,
+  WorktreeChromeContext,
 } from "../components/DesktopTitleBar";
-import { MobileWorkspaceShell } from "../components/MobileWorkspaceShell";
+import { MobileWorktreeShell } from "../components/MobileWorktreeShell";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -39,17 +39,13 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
-import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
+import { activateBrowserGuestWorktree } from "../lib/browser-guest-retention";
 import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
 import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/client-state";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
-import {
-  keepLastWorkspaceOnce,
-  pickStartWorkspace,
-  recordLastWorkspace,
-} from "../lib/last-workspace";
-import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import {
   loadRightPanelCollapsed,
   loadRightPanelWidth,
@@ -68,7 +64,7 @@ import {
   applyTranslucentSidebar,
   TRANSLUCENT_SIDEBAR_INIT_SCRIPT,
 } from "../lib/translucent-sidebar";
-import { setActiveWorkspace } from "../lib/workspace-cold-park";
+import { setActiveWorktree } from "../lib/worktree-cold-park";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -330,7 +326,7 @@ function ZoomSync() {
 
 /**
  * Renders its children once the server-kept client state (panel widths,
- * collapsed projects, …) is in localStorage, so the shell mounts with this
+ * collapsed repos, …) is in localStorage, so the shell mounts with this
  * device's saved layout instead of a stale local copy. Gives up waiting
  * after `HYDRATE_WAIT_MS` so an offline load still renders from
  * localStorage. Server-side it renders nothing: the state lives in the
@@ -342,23 +338,23 @@ function ClientStateGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     startClientStateSync((handler) => adapter.subscribeStatusEvents(handler));
     let cancelled = false;
-    // The project list tells which workspaces still exist. Fetching it into
+    // The repo list tells which worktrees still exist. Fetching it into
     // the query cache here also saves the sidebar its own first fetch.
-    const projects = queryClient
-      .fetchQuery({ queryKey: queryKeys.projects, queryFn: () => adapter.listProjects() })
+    const repos = queryClient
+      .fetchQuery({ queryKey: queryKeys.repos, queryFn: () => adapter.listRepos() })
       .catch(() => null);
     void (async () => {
       await hydrateGlobal();
-      // A load on `/` (every desktop launch) reopens the workspace this
-      // device type last showed. A URL that names a workspace is kept.
+      // A load on `/` (every desktop launch) reopens the worktree this
+      // device type last showed. A URL that names a worktree is kept.
       if (router.state.location.pathname === "/") {
-        const list = await withTimeout(projects, HYDRATE_WAIT_MS);
-        if (!list) keepLastWorkspaceOnce();
-        const target = list ? pickStartWorkspace(list) : null;
+        const list = await withTimeout(repos, HYDRATE_WAIT_MS);
+        if (!list) keepLastWorktreeOnce();
+        const target = list ? pickStartWorktree(list) : null;
         if (target && !cancelled) {
           await router.navigate({
-            to: "/workspace/$workspaceId",
-            params: { workspaceId: target },
+            to: "/worktree/$worktreeId",
+            params: { worktreeId: target },
             replace: true,
           });
         }
@@ -400,13 +396,13 @@ function AppShell() {
     };
   }, [router]);
 
-  // Workspace back/forward history — drives the title-bar arrow buttons.
+  // Worktree back/forward history — drives the title-bar arrow buttons.
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
-  // ⌥⌘← / ⌥⌘→ (Ctrl+Alt+← / → off macOS) step workspace history, copied from
+  // ⌥⌘← / ⌥⌘→ (Ctrl+Alt+← / → off macOS) step worktree history, copied from
   // Orca's worktree history keys. ⌘[ / ⌘] belong to pane cycling. The command
-  // palette's Previous / Next Workspace dispatch the events.
+  // palette's Previous / Next Worktree dispatch the events.
   const { goBack, goForward } = navigationHistory;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -419,12 +415,12 @@ function AppShell() {
       else goForward();
     };
     window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("band:workspace-go-back", goBack);
-    window.addEventListener("band:workspace-go-forward", goForward);
+    window.addEventListener("band:worktree-go-back", goBack);
+    window.addEventListener("band:worktree-go-forward", goForward);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("band:workspace-go-back", goBack);
-      window.removeEventListener("band:workspace-go-forward", goForward);
+      window.removeEventListener("band:worktree-go-back", goBack);
+      window.removeEventListener("band:worktree-go-forward", goForward);
     };
   }, [goBack, goForward]);
 
@@ -432,29 +428,29 @@ function AppShell() {
   // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
 
-  // Derive active workspace from pathname for title bar display
-  const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+  // Derive active worktree from pathname for title bar display
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
 
-  // Tell the memory policies which workspace is on screen, on both layouts:
-  // `workspace-cold-park.ts` stamps when each workspace was hidden (terminals,
-  // LSP clients and file watchers of a cold workspace release), and the
-  // browser guest budget orders workspaces by activation. It is also the
-  // workspace the next launch reopens (`last-workspace.ts`).
+  // Tell the memory policies which worktree is on screen, on both layouts:
+  // `worktree-cold-park.ts` stamps when each worktree was hidden (terminals,
+  // LSP clients and file watchers of a cold worktree release), and the
+  // browser guest budget orders worktrees by activation. It is also the
+  // worktree the next launch reopens (`last-worktree.ts`).
   useEffect(() => {
-    setActiveWorkspace(activeWorkspaceId);
-    activateBrowserGuestWorkspace(activeWorkspaceId);
-    recordLastWorkspace(activeWorkspaceId);
-  }, [activeWorkspaceId]);
-  useRecordLabelLastWorkspace(activeWorkspaceId);
+    setActiveWorktree(activeWorktreeId);
+    activateBrowserGuestWorktree(activeWorktreeId);
+    recordLastWorktree(activeWorktreeId);
+  }, [activeWorktreeId]);
+  useRecordLabelLastWorktree(activeWorktreeId);
 
-  // Get the workspace path from the statuses store (for Finder / copy path)
-  const workspacePath = useDashboardStore((s) =>
-    activeWorkspaceId ? s.statuses.get(activeWorkspaceId)?.worktreePath : undefined,
+  // Get the worktree path from the statuses store (for Finder / copy path)
+  const worktreePath = useDashboardStore((s) =>
+    activeWorktreeId ? s.statuses.get(activeWorktreeId)?.worktreePath : undefined,
   );
 
-  // Inform the server which workspace the user is currently focused on so
+  // Inform the server which worktree the user is currently focused on so
   // the `band open` CLI command knows where to route files when called
-  // without an explicit `--workspace` flag. The adapter de-duplicates so
+  // without an explicit `--worktree` flag. The adapter de-duplicates so
   // it's safe to call on every render — the mutation only fires when the
   // value actually changes.
   // `adapter` is a module-level singleton (created once per page load)
@@ -463,8 +459,8 @@ function AppShell() {
   // because mutating them doesn't trigger a re-render. If we ever
   // promote it to a context or prop, list it then.
   useEffect(() => {
-    void adapter.setActiveWorkspace(activeWorkspaceId);
-  }, [activeWorkspaceId]);
+    void adapter.setActiveWorktree(activeWorktreeId);
+  }, [activeWorktreeId]);
 
   // Listen for `band open` events from the SSE stream and route the
   // dashboard to the requested file. The actual dispatch logic lives
@@ -472,7 +468,7 @@ function AppShell() {
   // without spinning up the dockview.
   //
   // Mobile / narrow web: short-circuit here. `band open` is a desktop
-  // developer affordance — the mobile workspace layout's tab + file
+  // developer affordance — the mobile worktree layout's tab + file
   // state is local-only, so an open-file event has nowhere to land
   // (see issue #467). `useDesktopLayout` is read through a ref so a
   // viewport resize doesn't tear down the SSE subscription — we read
@@ -490,20 +486,20 @@ function AppShell() {
     return unsubscribe;
     // `adapter` (module-level singleton) and `crossPanelHandlers`
     // (module-level mutable registry) are intentionally omitted from
-    // deps — see the comment on the setActiveWorkspace effect above.
+    // deps — see the comment on the setActiveWorktree effect above.
   }, []);
 
-  // Copy the workspace path to clipboard
+  // Copy the worktree path to clipboard
   const handleCopyPath = useCallback(() => {
-    if (!workspacePath) return;
-    navigator.clipboard.writeText(workspacePath).catch(() => {});
-  }, [workspacePath]);
+    if (!worktreePath) return;
+    navigator.clipboard.writeText(worktreePath).catch(() => {});
+  }, [worktreePath]);
 
   // ──────────────────────────────────────────────────────────────────────
-  // Project-list sidebar (separate from the dockview). Collapsing/expanding
+  // Repo-list sidebar (separate from the dockview). Collapsing/expanding
   // the sidebar Panel via its imperative handle hides/shows the list WITHOUT
   // unmounting the sibling Panel that holds <SharedDockviewLayout /> — so the
-  // dockview (and every cached workspace's chat/terminal/browser + live PTYs)
+  // dockview (and every cached worktree's chat/terminal/browser + live PTYs)
   // survives a toggle. Width is persisted as a percentage; the last-left
   // visibility is persisted separately.
   // ──────────────────────────────────────────────────────────────────────
@@ -555,7 +551,7 @@ function AppShell() {
   );
 
   // The right sidepanel lives in a NESTED [center | rightpanel] group inside the
-  // main column, BELOW the workspace title bar — so it aligns with the dockview
+  // main column, BELOW the worktree title bar — so it aligns with the dockview
   // content, not the title-bar row. This is that inner group's initial layout.
   const centerDefaultLayout = useMemo(() => {
     if (rightInit.current.collapsed) return { center: 100, rightpanel: 0 };
@@ -726,7 +722,7 @@ function AppShell() {
     else panel.collapse();
   }, [rightPanelRef, animateRightToggle]);
 
-  // ⌘B toggles the sidebar; ⌃0 / "Focus Projects" reveal it before focusing
+  // ⌘B toggles the sidebar; ⌃0 / "Focus Repos" reveal it before focusing
   // the list.
   useEffect(() => {
     const onToggle = () => toggleSidebar();
@@ -779,7 +775,7 @@ function AppShell() {
   // its own.
   //
   // Memoized for a stable prop reference across the frequent AppShell
-  // re-renders (route changes, workspace switches, sidebar toggles). Hooks
+  // re-renders (route changes, worktree switches, sidebar toggles). Hooks
   // must run unconditionally, so this sits above the narrow/mobile early
   // return below.
   const navControlProps = useMemo(
@@ -820,31 +816,31 @@ function AppShell() {
     return () => ro.disconnect();
   }, []);
 
-  const workspaceChrome = useMemo(
+  const worktreeChrome = useMemo(
     () => ({
       sidebarVisible,
       navOverlayWidth,
       rightPanelVisible: rightVisible,
-      onToggleRightPanel: activeWorkspaceId ? toggleRightPanel : undefined,
+      onToggleRightPanel: activeWorktreeId ? toggleRightPanel : undefined,
     }),
-    [sidebarVisible, navOverlayWidth, rightVisible, activeWorkspaceId, toggleRightPanel],
+    [sidebarVisible, navOverlayWidth, rightVisible, activeWorktreeId, toggleRightPanel],
   );
 
-  // Mobile: the route's own page (the full-screen project list on `/`) and,
-  // over it, the workspace layout, which keeps every visited workspace
+  // Mobile: the route's own page (the full-screen repo list on `/`) and,
+  // over it, the worktree layout, which keeps every visited worktree
   // mounted across route changes the way `SharedDockviewLayout` does below.
   if (!useDesktopLayout) {
     return (
       <>
         <Outlet />
-        <MobileWorkspaceShell />
+        <MobileWorktreeShell />
       </>
     );
   }
 
   return (
     <ToolbarOverflowProvider>
-      <WorkspaceChromeContext.Provider value={workspaceChrome}>
+      <WorktreeChromeContext.Provider value={worktreeChrome}>
         {/* With the translucent sidebar on, this root is transparent so the
           window's vibrancy layer reaches the sidebar column; the main panel
           below paints its own solid background. */}
@@ -867,9 +863,9 @@ function AppShell() {
                 collapsedSize="0%"
                 onResize={handleSidebarResize}
               >
-                {/* The whole sidebar column (its title-bar half + the project
+                {/* The whole sidebar column (its title-bar half + the repo
                   list) is painted with the `--sidebar` surface so it reads as a
-                  distinct panel from the workspace layout to its right. With
+                  distinct panel from the worktree layout to its right. With
                   the translucent sidebar on (macOS desktop), the surface is a
                   light tint over the window's vibrancy layer instead. */}
                 {/* Each column pads the status-bar and home-indicator insets
@@ -899,12 +895,12 @@ function AppShell() {
               />
               <Panel id="main" elementRef={mainElRef} minSize="20%">
                 {/* Stays mounted across sidebar toggles — never unmount this
-                  subtree or the dockview tears down all cached workspaces. */}
+                  subtree or the dockview tears down all cached worktrees. */}
                 {/* The dockview column and the right sidepanel share one
                   full-height row. There is no title bar over the dockview
                   column: its tab strip is the top row, level with the
                   sidepanel's own header row (tabs, open in editor, collapse).
-                  With no workspace active there is no tab strip, so a plain
+                  With no worktree active there is no tab strip, so a plain
                   drag bar takes its place. */}
                 <div
                   className="h-full min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
@@ -918,7 +914,7 @@ function AppShell() {
                   >
                     <Panel id="center" elementRef={centerElRef} minSize="30%">
                       <div className="h-full flex flex-col min-w-0 overflow-hidden">
-                        {!activeWorkspaceId && <CenterDragBar />}
+                        {!activeWorktreeId && <CenterDragBar />}
                         {/* `relative` anchors SharedDockviewLayout's `absolute
                           inset-0` overlay to the dockview area. */}
                         <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
@@ -950,10 +946,10 @@ function AppShell() {
                           visible={rightVisible}
                           headerActions={
                             <RightPanelHeaderActions
-                              workspacePath={activeWorkspaceId ? workspacePath : undefined}
-                              onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+                              worktreePath={activeWorktreeId ? worktreePath : undefined}
+                              onCopyPath={activeWorktreeId ? handleCopyPath : undefined}
                               onToggleRightPanel={
-                                activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
+                                activeWorktreeId && rightVisible ? toggleRightPanel : undefined
                               }
                             />
                           }
@@ -992,7 +988,7 @@ function AppShell() {
             <NavControls {...navControlProps} />
           </div>
         </div>
-      </WorkspaceChromeContext.Provider>
+      </WorktreeChromeContext.Provider>
     </ToolbarOverflowProvider>
   );
 }

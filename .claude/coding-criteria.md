@@ -28,27 +28,27 @@ Server code lives under `apps/hub/src/server/{api,services,infra}/`. The canonic
 
 Routers are the entry point for client requests. Their entire job is: validate input, call one or more services, return the response.
 
-- **CODE-4** *(nit)* — Each router file lives at `apps/hub/src/server/api/<domain>/router.ts` — one sub-router per domain (`projects/router.ts`, `workspaces/router.ts`). New top-level files in `api/` other than the merge file `api/router.ts` are a nit.
-- **CODE-5** *(suggestion)* — Router domains mirror the CLI command structure (projects, workspaces, chats, tasks, cronjobs, terminals, browsers, sessions, settings, tunnel, editor, browser-host, cli, hooks, skills, prereqs, statuses, modes, models, system). A new domain that doesn't correspond to a CLI surface is a suggestion — surface it so the human can decide.
+- **CODE-4** *(nit)* — Each router file lives at `apps/hub/src/server/api/<domain>/router.ts` — one sub-router per domain (`repos/router.ts`, `worktrees/router.ts`). New top-level files in `api/` other than the merge file `api/router.ts` are a nit.
+- **CODE-5** *(suggestion)* — Router domains mirror the CLI command structure (repos, worktrees, chats, tasks, cronjobs, terminals, browsers, sessions, settings, tunnel, editor, browser-host, cli, hooks, skills, prereqs, statuses, modes, models, system). A new domain that doesn't correspond to a CLI surface is a suggestion — surface it so the human can decide.
 - **CODE-6** *(nit)* — Procedures use Zod for input validation. A new procedure with no `.input(z.…)` and a non-trivial argument shape is a nit.
-- **CODE-7** *(blocker)* — Cross-domain operations compose services in the router (e.g. `projects.delete` calls `TaskService.abortAllForProject`, `WorkspaceService.removeAllForProject`, then `ProjectService.delete`). A router that orchestrates business logic via raw query/client calls instead of services is a blocker.
+- **CODE-7** *(blocker)* — Cross-domain operations compose services in the router (e.g. `repos.delete` calls `TaskService.abortAllForRepo`, `WorktreeService.removeAllForRepo`, then `RepoService.delete`). A router that orchestrates business logic via raw query/client calls instead of services is a blocker.
 - **CODE-8** *(nit)* — Routers contain no business logic. "Business logic" means: branching on entity state, computing derived values, enforcing invariants, coordinating side effects. If the procedure body does more than `validate → call service(s) → return`, flag it as a nit (or as a blocker under CODE-7 if it bypasses a service).
 
 ## 3. Tier 2 — Services (business logic)
 
 Services are classes with explicit constructor dependencies on infra adapters and other services. All business logic lives here.
 
-- **CODE-9** *(nit)* — Each service is `apps/hub/src/server/services/<domain>-service.ts` exporting a class named `<Domain>Service` (e.g. `workspace-service.ts` → `WorkspaceService`). New services that break this naming pattern are a nit.
-- **CODE-10** *(nit)* — Dependencies are injected via the constructor with default `new …()` arguments — e.g. `constructor(private workspaceQueries = new WorkspaceQueries(), private git = new GitClient()) {}`. A service that does `import { db } from "..."` or instantiates infra inside a method (instead of declaring it as a constructor field) is a nit — the explicit constructor list is how reviewers see the dependency surface.
+- **CODE-9** *(nit)* — Each service is `apps/hub/src/server/services/<domain>-service.ts` exporting a class named `<Domain>Service` (e.g. `worktree-service.ts` → `WorktreeService`). New services that break this naming pattern are a nit.
+- **CODE-10** *(nit)* — Dependencies are injected via the constructor with default `new …()` arguments — e.g. `constructor(private worktreeQueries = new WorktreeQueries(), private git = new GitClient()) {}`. A service that does `import { db } from "..."` or instantiates infra inside a method (instead of declaring it as a constructor field) is a nit — the explicit constructor list is how reviewers see the dependency surface.
 - **CODE-11** *(blocker)* — Services may depend on infra (queries, clients) and on other services. A service that imports from `api/**` is a blocker.
-- **CODE-12** *(nit)* — Method names are actions: `create`, `delete`, `duplicate`, `list`, `listByProject`, `removeAllForProject`. Names like `handleCreateWorkspace`, `processWorkspaceDeletion`, `doWorkspaceWork` are a nit.
+- **CODE-12** *(nit)* — Method names are actions: `create`, `delete`, `duplicate`, `list`, `listByRepo`, `removeAllForRepo`. Names like `handleCreateWorktree`, `processWorktreeDeletion`, `doWorktreeWork` are a nit.
 - **CODE-13** *(nit)* — Stateful services that own long-lived resources (PTY processes, agent instances, cron timers, sockets) belong in **`infra/`**, not `services/`. A new singleton in `services/` that owns processes or connections is misplaced — flag as a nit (or as a blocker under CODE-2 if it also imports from a router).
 
 ## 4. Tier 3 — Infra (data access & external systems)
 
 Infra is the lowest level: DB queries, git, file system, tunnels, terminals, LSP, CDP proxies, agent pools. No business logic.
 
-- **CODE-14** *(nit)* — DB query classes live at `apps/hub/src/server/infra/db/queries/<domain>.ts` exporting `<Domain>Queries` (`workspaces.ts` → `WorkspaceQueries`). Schema lives at `infra/db/schema.ts`. The DB singleton is `infra/db/connection.ts`. A new top-level `infra/db/<file>.ts` outside of `queries/` (for non-schema/non-connection content) is a nit.
+- **CODE-14** *(nit)* — DB query classes live at `apps/hub/src/server/infra/db/queries/<domain>.ts` exporting `<Domain>Queries` (`worktrees.ts` → `WorktreeQueries`). Schema lives at `infra/db/schema.ts`. The DB singleton is `infra/db/connection.ts`. A new top-level `infra/db/<file>.ts` outside of `queries/` (for non-schema/non-connection content) is a nit.
 - **CODE-15** *(blocker)* — Query classes are **thin**: Drizzle operations only, no business logic, no validation beyond what Drizzle does, no orchestration of multiple tables for an invariant. Branching on entity state, derived values, or enforcement logic inside a query method is a blocker — push it into the service.
 - **CODE-16** *(nit)* — External-system clients live at `infra/<system>/<system>-client.ts` exporting a `<System>Client` class (`infra/git/git-client.ts` → `GitClient`). For pools/managers the suffix is `Pool` or `Manager` (`TerminalPool`, `AgentPool`, `LspManager`). Scattered top-level `execGit()`/`execGh()` functions are a nit — group related operations into a class.
 - **CODE-17** *(blocker)* — Infra files import only from `node:*`, npm packages, and other `infra/**` files. An import from `services/**` or `api/**` is a blocker.
@@ -58,14 +58,14 @@ Infra is the lowest level: DB queries, git, file system, tunnels, terminals, LSP
 
 | What | Pattern | Example |
 |---|---|---|
-| Service file | `{domain}-service.ts` | `workspace-service.ts` |
-| Service class | `{Domain}Service` | `WorkspaceService` |
-| Service method | verb / verb + noun | `create`, `listByProject` |
-| Query file | `{domain}.ts` under `db/queries/` | `workspaces.ts` |
-| Query class | `{Domain}Queries` | `WorkspaceQueries` |
+| Service file | `{domain}-service.ts` | `worktree-service.ts` |
+| Service class | `{Domain}Service` | `WorktreeService` |
+| Service method | verb / verb + noun | `create`, `listByRepo` |
+| Query file | `{domain}.ts` under `db/queries/` | `worktrees.ts` |
+| Query class | `{Domain}Queries` | `WorktreeQueries` |
 | Client file | `{system}-client.ts` | `git-client.ts` |
 | Client class | `{System}Client` / `{System}Pool` / `{System}Manager` | `GitClient`, `AgentPool` |
-| Router file | `api/<domain>/router.ts` | `api/workspaces/router.ts` |
+| Router file | `api/<domain>/router.ts` | `api/worktrees/router.ts` |
 
 Naming violations are at minimum a `nit` (CODE-4, CODE-9, CODE-14, CODE-16). If the wrong name hides a tier-direction violation (a "service" named `*Client` that actually does DB work, etc.) escalate to the blocker under CODE-2/CODE-11/CODE-17.
 

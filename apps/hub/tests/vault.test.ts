@@ -140,9 +140,9 @@ describe("encryption at rest (S1)", () => {
 
   it("replaces a value under the same name and scope, and keeps scopes apart", async () => {
     await m("vault.put", { name: "OPENAI_API_KEY", value: "second-value", scope: "global" });
-    await m("vault.put", { name: "OPENAI_API_KEY", value: "scoped", scope: "project:demo" });
+    await m("vault.put", { name: "OPENAI_API_KEY", value: "scoped", scope: "repo:demo" });
     const items = (await list()).items.filter((i) => i.name === "OPENAI_API_KEY");
-    expect(items.map((i) => i.scope).sort()).toEqual(["global", "project:demo"]);
+    expect(items.map((i) => i.scope).sort()).toEqual(["global", "repo:demo"]);
   });
 
   it("refuses bad names, scopes and env names", async () => {

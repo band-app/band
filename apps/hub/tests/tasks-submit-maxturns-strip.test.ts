@@ -1,5 +1,5 @@
 // Regression guard: `maxTurns` was removed from `tasks.submit` (tRPC) and
-// `workspaceCreateInput` zod schemas. The removal is a breaking wire change
+// `worktreeCreateInput` zod schemas. The removal is a breaking wire change
 // for any pre-existing CLI / API caller that still sends `maxTurns`, and the
 // expected contract is that Zod's default `.strip()` behaviour silently
 // drops the unknown key rather than rejecting the request with a 400. This
@@ -11,15 +11,15 @@
 //      `maxTurns: 5` returns the same shape — no 400, no error envelope,
 //      the task lands on the queue and tasks.list reports it.
 //
-//   2. `workspaces.create` without `maxTurns` dispatches a chat task.
+//   2. `worktrees.create` without `maxTurns` dispatches a chat task.
 //      Submitting `maxTurns: 5` does the same — the legacy field is
-//      silently stripped and the workspace + task are created identically.
+//      silently stripped and the worktree + task are created identically.
 //
 //   3. Both endpoints reject requests without the `band_token` cookie
 //      with HTTP 401. The legacy-strip contract above is only meaningful
 //      for authenticated callers; pinning the auth gate here keeps a
 //      regression that drops the middleware (which would let any
-//      unauthenticated client trigger workspace/task creation) from
+//      unauthenticated client trigger worktree/task creation) from
 //      shipping silently.
 //
 // How the test is wired:
@@ -42,12 +42,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, trpcData, trpcMutate } from "./helpers/server";
-import { listTasksForWorkspace } from "./helpers/tasks";
+import { listTasksForWorktree } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 const gitEnv = {
@@ -74,7 +74,7 @@ function createGitRepo(parentDir: string, name: string): string {
 
 interface SubmitResponse {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   sessionId?: string;
 }
@@ -97,13 +97,13 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
   const TOKEN = "strip-tasks-submit-token";
   let server: ServerHandle;
   let tmpHome: string;
-  const WORKSPACE_ID = toWorkspaceId("stripproj", "main");
+  const WORKTREE_ID = toWorktreeId("stripproj", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-strip-tasks-");
     const repoPath = createGitRepo(tmpHome, "stripproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "stripproj",
           path: repoPath,
@@ -139,7 +139,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
       server.url,
       "tasks.submit",
       {
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         chatId: "strip-chat-baseline",
         prompt: "baseline no-maxTurns",
       },
@@ -149,13 +149,13 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
 
     const data = await trpcData<SubmitResponse>(res);
     expect(data.id).toMatch(/^tsk_/);
-    expect(data.workspaceId).toBe(WORKSPACE_ID);
+    expect(data.worktreeId).toBe(WORKTREE_ID);
     expect(data.chatId).toBe("strip-chat-baseline");
 
     // Positive anchor: the task actually landed on the queue.
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, WORKSPACE_ID, TOKEN);
+        const list = await listTasksForWorktree(server.url, WORKTREE_ID, TOKEN);
         return list.find((t) => t.id === data.id) ? list : undefined;
       },
       { label: "baseline task persisted" },
@@ -170,7 +170,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
     // The test is exactly the "the runtime accepts a key the type system
     // says doesn't exist" case — that's the whole point.
     const legacyBody: Record<string, unknown> = {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId: "strip-chat-legacy",
       prompt: "legacy with maxTurns:5",
       maxTurns: 5,
@@ -182,7 +182,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
 
     const data = await trpcData<SubmitResponse>(res);
     expect(data.id).toMatch(/^tsk_/);
-    expect(data.workspaceId).toBe(WORKSPACE_ID);
+    expect(data.worktreeId).toBe(WORKTREE_ID);
     expect(data.chatId).toBe("strip-chat-legacy");
 
     // The dispatched task carries the same fields as the baseline. The
@@ -192,7 +192,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
     // write a column that no longer exists.
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, WORKSPACE_ID, TOKEN);
+        const list = await listTasksForWorktree(server.url, WORKTREE_ID, TOKEN);
         return list.find((t) => t.id === data.id) ? list : undefined;
       },
       { label: "legacy-maxTurns task persisted" },
@@ -215,12 +215,12 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
     // create tasks. `trpcMutate` always sends the cookie, so we call
     // `fetch` directly to omit it. Mirrors the 401 guard pattern used
     // in `chat-lifecycle.test.ts` / `browsers.test.ts` /
-    // `workspace-create-via.test.ts`.
+    // `worktree-create-via.test.ts`.
     const res = await fetch(`${server.url}/trpc/tasks.submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         chatId: "strip-chat-unauth",
         prompt: "should be rejected",
       }),
@@ -230,15 +230,15 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
 });
 
 // ---------------------------------------------------------------------------
-// workspaces.create — same contract for the workspace-bootstrap path.
+// worktrees.create — same contract for the worktree-bootstrap path.
 // The mutation dispatches an initial chat task when `prompt` is supplied;
 // `maxTurns` on the request body must be silently stripped, and the
 // dispatched task must land on `tasks.list` exactly as if it had been
 // omitted. Two fresh branches keep the assertions independent.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create — legacy maxTurns is silently stripped", () => {
-  const TOKEN = "strip-workspaces-create-token";
+describe("worktrees.create — legacy maxTurns is silently stripped", () => {
+  const TOKEN = "strip-worktrees-create-token";
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -246,7 +246,7 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
     tmpHome = createTmpHome("band-strip-wscreate-");
     const repoPath = createGitRepo(tmpHome, "wsproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "wsproj",
           path: repoPath,
@@ -276,30 +276,30 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
   it("dispatches a chat task without a maxTurns field (baseline)", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "wsproj",
+        repo: "wsproj",
         branch: "feat/strip-baseline",
-        prompt: "baseline workspace prompt",
+        prompt: "baseline worktree prompt",
         via: "chat",
       },
       TOKEN,
     );
-    expect(res.status, `workspaces.create failed: ${await res.clone().text()}`).toBe(200);
+    expect(res.status, `worktrees.create failed: ${await res.clone().text()}`).toBe(200);
 
     const data = await trpcData<CreateResponse>(res);
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
-    const workspaceId = toWorkspaceId("wsproj", "feat/strip-baseline");
+    const worktreeId = toWorktreeId("wsproj", "feat/strip-baseline");
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);
-        return list.find((t) => t.prompt === "baseline workspace prompt") ? list : undefined;
+        const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
+        return list.find((t) => t.prompt === "baseline worktree prompt") ? list : undefined;
       },
-      { label: "baseline workspace task dispatched" },
+      { label: "baseline worktree task dispatched" },
     );
-    expect(tasks.some((t) => t.prompt === "baseline workspace prompt")).toBe(true);
+    expect(tasks.some((t) => t.prompt === "baseline worktree prompt")).toBe(true);
   });
 
   it("dispatches a chat task when a legacy maxTurns field is present", async () => {
@@ -308,46 +308,45 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
     // explicitly opts out of the static check to drive the runtime
     // strip-path.
     const legacyBody: Record<string, unknown> = {
-      project: "wsproj",
+      repo: "wsproj",
       branch: "feat/strip-legacy",
-      prompt: "legacy workspace prompt",
+      prompt: "legacy worktree prompt",
       via: "chat",
       maxTurns: 5,
     };
-    const res = await trpcMutate(server.url, "workspaces.create", legacyBody, TOKEN);
-    expect(
-      res.status,
-      `workspaces.create failed for legacy body: ${await res.clone().text()}`,
-    ).toBe(200);
+    const res = await trpcMutate(server.url, "worktrees.create", legacyBody, TOKEN);
+    expect(res.status, `worktrees.create failed for legacy body: ${await res.clone().text()}`).toBe(
+      200,
+    );
 
     const data = await trpcData<CreateResponse>(res);
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
     // Positive anchor: the dispatched task matches the baseline shape.
-    const workspaceId = toWorkspaceId("wsproj", "feat/strip-legacy");
+    const worktreeId = toWorktreeId("wsproj", "feat/strip-legacy");
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);
-        return list.find((t) => t.prompt === "legacy workspace prompt") ? list : undefined;
+        const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
+        return list.find((t) => t.prompt === "legacy worktree prompt") ? list : undefined;
       },
-      { label: "legacy-maxTurns workspace task dispatched" },
+      { label: "legacy-maxTurns worktree task dispatched" },
     );
-    const found = tasks.find((t) => t.prompt === "legacy workspace prompt");
+    const found = tasks.find((t) => t.prompt === "legacy worktree prompt");
     expect(found).toBeDefined();
     expect((found as unknown as Record<string, unknown>).maxTurns).toBeUndefined();
   });
 
-  it("rejects workspaces.create without the band_token cookie (401)", async () => {
+  it("rejects worktrees.create without the band_token cookie (401)", async () => {
     // Mirror of the `tasks.submit` 401 guard above. The strip contract is
-    // worthless if an unauthenticated caller can drive workspace
+    // worthless if an unauthenticated caller can drive worktree
     // creation; pin it here so the auth middleware is part of the
     // contract this file guards.
-    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+    const res = await fetch(`${server.url}/trpc/worktrees.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        project: "wsproj",
+        repo: "wsproj",
         branch: "feat/strip-unauth",
         prompt: "should be rejected",
         via: "chat",

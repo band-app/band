@@ -15,7 +15,7 @@ const log = createLogger("terminal-history");
 const CHECKPOINT_MAX_BYTES = 5 * 1024 * 1024;
 
 export interface TerminalHistoryMeta {
-  workspaceId: string;
+  worktreeId: string;
   cwd: string;
   cols: number;
   rows: number;
@@ -42,8 +42,8 @@ export interface TerminalHistoryCheckpoint {
  * One directory per terminal under `<bandHome>/terminal-history/`, named by
  * `encodeURIComponent(terminalId)` since a terminalId could in principle
  * contain characters invalid in a path segment. Only an explicit
- * `TerminalPool.kill` / `killWorkspace` removes a session's directory (the
- * tab or workspace is actually gone); any other way a PTY ends — a natural
+ * `TerminalPool.kill` / `killWorktree` removes a session's directory (the
+ * tab or worktree is actually gone); any other way a PTY ends — a natural
  * shell exit, a daemon crash, or `killAll` during a daemon restart — leaves
  * it in place so the next spawn for that terminalId can restore it.
  */
@@ -86,7 +86,7 @@ export class TerminalHistoryManager {
     await writeJson(this.sessionDir(terminalId), "checkpoint.json", checkpoint, serialized);
   }
 
-  /** Drop a terminal's saved history: its tab or workspace was actually closed or deleted. */
+  /** Drop a terminal's saved history: its tab or worktree was actually closed or deleted. */
   removeSession(terminalId: string): void {
     try {
       rmSync(this.sessionDir(terminalId), { recursive: true, force: true });
@@ -96,13 +96,13 @@ export class TerminalHistoryManager {
   }
 
   /**
-   * Drop every saved session whose last known `workspaceId` is `workspaceId`
-   * — used when a workspace is deleted. Scans the whole history directory
+   * Drop every saved session whose last known `worktreeId` is `worktreeId`
+   * — used when a worktree is deleted. Scans the whole history directory
    * rather than the pool's live reverse index, which by then may already be
    * missing terminals that exited (and were never explicitly killed) before
-   * the workspace was removed.
+   * the worktree was removed.
    */
-  removeSessionsForWorkspace(workspaceId: string): void {
+  removeSessionsForWorktree(worktreeId: string): void {
     let names: string[];
     try {
       names = readdirSync(this.historyDir);
@@ -112,7 +112,7 @@ export class TerminalHistoryManager {
     for (const name of names) {
       const dir = join(this.historyDir, name);
       const meta = readJson<TerminalHistoryMeta>(join(dir, "meta.json"));
-      if (meta?.workspaceId !== workspaceId) continue;
+      if (meta?.worktreeId !== worktreeId) continue;
       try {
         rmSync(dir, { recursive: true, force: true });
       } catch (err) {

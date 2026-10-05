@@ -24,7 +24,7 @@ import {
   seedAcpHome,
   startAcpServer,
   trpc,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
@@ -127,7 +127,7 @@ describe("chats.get — persisted activeSessionSummary", () => {
     // No summary given: Band's log has the session, so its first prompt.
     const fromLog = newChatId();
     await trpc(server.url, "chats.setActiveSession", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId: fromLog,
       sessionId,
     });
@@ -139,7 +139,7 @@ describe("chats.get — persisted activeSessionSummary", () => {
     // A summary given (from the agent's session list) wins.
     const fromCaller = newChatId();
     await trpc(server.url, "chats.setActiveSession", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId: fromCaller,
       sessionId,
       summary: "Codebase tour",
@@ -154,7 +154,7 @@ describe("chats.get — persisted activeSessionSummary", () => {
     const server = await boot();
     const chatId = newChatId();
     await trpc(server.url, "chats.setActiveSession", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId,
       sessionId: "session-from-elsewhere",
     });
@@ -165,11 +165,11 @@ describe("chats.get — persisted activeSessionSummary", () => {
 
   it("chats.get on a row with no activeSessionId leaves it null (no auto-promotion)", async () => {
     const server = await boot();
-    // Another chat in the workspace has a session Band could promote.
+    // Another chat in the worktree has a session Band could promote.
     await runTurn(server.url, newChatId(), "some earlier work");
 
     const chatId = newChatId();
-    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: chatId });
+    await trpc(server.url, "chats.create", { worktreeId: WORKTREE_ID, id: chatId });
     const first = await getChat(server.url, chatId);
     expect(first?.activeSessionId == null).toBe(true);
     expect(first?.activeSessionSummary == null).toBe(true);
@@ -184,7 +184,7 @@ describe("chats.get — persisted activeSessionSummary", () => {
     await runTurn(server.url, chatId, "explore the codebase");
     expect((await getChat(server.url, chatId))?.activeSessionSummary).toBe("explore the codebase");
 
-    await trpc(server.url, "chats.setActiveSession", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "chats.setActiveSession", { worktreeId: WORKTREE_ID, chatId });
     const after = await getChat(server.url, chatId);
     expect(after?.activeSessionId == null).toBe(true);
     expect(after?.activeSessionSummary == null).toBe(true);

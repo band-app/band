@@ -22,7 +22,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -36,7 +36,7 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-model-picker-token";
-const PROJECTS = ["pickersettings", "pickerfresh", "pickeragent"] as const;
+const REPOS = ["pickersettings", "pickerfresh", "pickeragent"] as const;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -45,7 +45,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = PROJECTS.map((name) => {
+  const repos = REPOS.map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -55,7 +55,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -108,7 +108,7 @@ test.describe("Chat model settings menu", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("pickersettings", "main"));
+    await chatPane.goto(toWorktreeId("pickersettings", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -161,7 +161,7 @@ test.describe("Chat model settings menu", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("pickerfresh", "main"));
+    await chatPane.goto(toWorktreeId("pickerfresh", "main"));
     await chatPane.waitForReady();
 
     // One turn so the agent's options are known, then "New session": the
@@ -211,7 +211,7 @@ test.describe("New chat agent picker", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("pickeragent", "main"));
+    await chatPane.goto(toWorktreeId("pickeragent", "main"));
 
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();

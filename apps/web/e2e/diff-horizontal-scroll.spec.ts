@@ -31,7 +31,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -45,7 +45,7 @@ import {
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the center dockview
-// renders the diff leaf beside the project sidebar and right sidepanel.
+// renders the diff leaf beside the repo sidebar and right sidepanel.
 // Kept wide so each side of the split MergeView is still far narrower
 // than the ~8000-px long line, while leaving comfortable room for a real
 // side-by-side render.
@@ -57,7 +57,7 @@ const BRANCH = "main";
 const FILE_PATH = "long-line.txt";
 
 // A line wide enough that it's guaranteed to exceed the editor viewport
-// at our 2400-px viewport, even after accounting for the project
+// at our 2400-px viewport, even after accounting for the repo
 // sidebar, right sidepanel, gutters, and padding. Repeating
 // `the_quick_brown_fox_jumps_over_the_lazy_dog_` (44 chars) 30× gives a
 // ~1300-char line, roughly 8000 px in a 13-px monospaced font — several
@@ -73,7 +73,7 @@ const MODIFIED_CONTENT = `first line\nsecond line\nthird line\n${LONG_LINE}\n`;
 
 let server: ServerHandle;
 let tmpHome: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -83,7 +83,7 @@ test.beforeAll(async () => {
   // Seed a real git repo with the file committed at HEAD, then leave a
   // modified version on disk so `git diff` produces an uncommitted hunk
   // containing the long line. The diff leaf fetches that hunk via
-  // `workspace.getFileDiff` exactly the way production does — no mock
+  // `worktree.getFileDiff` exactly the way production does — no mock
   // layer.
   git(repoPath, ["init", "-b", BRANCH]);
   writeFileSync(join(repoPath, FILE_PATH), INITIAL_CONTENT);
@@ -92,7 +92,7 @@ test.beforeAll(async () => {
   writeFileSync(join(repoPath, FILE_PATH), MODIFIED_CONTENT);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -103,7 +103,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -197,7 +197,7 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
 
 test("Diff leaf scrolls horizontally (unified mode)", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   // `openDiff` waits for exactly one `.cm-scroller` in unified mode.
   await changes.openDiff(FILE_PATH, "unified");
   await assertScrollerHorizontallyScrolls(changes);
@@ -205,7 +205,7 @@ test("Diff leaf scrolls horizontally (unified mode)", async ({ page }) => {
 
 test("Diff leaf scrolls horizontally (split mode)", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   // Split mode (MergeView) renders TWO scrollers — one for the "before"
   // side and one for the "after" side. `openDiff` waits for both. The fix
   // has to apply to both since both editors go through

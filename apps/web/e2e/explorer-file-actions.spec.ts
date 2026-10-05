@@ -10,7 +10,7 @@
  *   - Rename (menu and F2) and Delete keep the open editor tabs in step.
  *
  * Architecture (mirrors the rest of the e2e suite): the REAL production
- * server boots against a fresh tmp `$HOME` whose project is an on-disk git
+ * server boots against a fresh tmp `$HOME` whose repo is an on-disk git
  * worktree. Every operation goes through the real tRPC file procedures, and
  * the assertions read the resulting filesystem directly, plus the rendered
  * tree rows and file tabs. Each test works in its own top-level folder so the
@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
@@ -34,7 +34,7 @@ import {
 } from "./helpers/server";
 import { FileTreesPage } from "./pages/FileTreesPage";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1600, height: 900 } });
 
@@ -60,7 +60,7 @@ const SEED_FILES = [
 let server: ServerHandle;
 let tmpHome: string;
 let repoPath: string;
-let workspaceId: string;
+let worktreeId: string;
 
 const onDisk = (rel: string) => existsSync(join(repoPath, rel));
 const isDirOnDisk = (rel: string) => onDisk(rel) && statSync(join(repoPath, rel)).isDirectory();
@@ -78,7 +78,7 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial"]);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -89,7 +89,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -102,19 +102,19 @@ test.afterAll(async () => {
 });
 
 async function openExplorer(page: Page, firstRow: string) {
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
-  const trees = new FileTreesPage(page, workspace);
-  await workspace.goto(workspaceId);
-  await workspace.waitForReady();
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const trees = new FileTreesPage(page, worktree);
+  await worktree.goto(worktreeId);
+  await worktree.waitForReady();
   await trees.openFilesTab(firstRow);
-  return { workspace, trees };
+  return { worktree, trees };
 }
 
 test.describe("Explorer file actions", () => {
   test("header toolbar creates files and folders, refreshes, and collapses all", async ({
     page,
   }) => {
-    const { workspace, trees } = await openExplorer(page, "header");
+    const { worktree, trees } = await openExplorer(page, "header");
 
     // New File with nothing selected lands at the root and opens the file.
     await trees.clickHeaderButton("new-file");
@@ -122,7 +122,7 @@ test.describe("Explorer file actions", () => {
     await trees.submitName("from-toolbar.txt");
     await expect.poll(() => onDisk("from-toolbar.txt")).toBe(true);
     await expect(trees.fileTreeRow("from-toolbar.txt")).toBeVisible();
-    await expect(workspace.fileTab("from-toolbar.txt")).toBeVisible();
+    await expect(worktree.fileTab("from-toolbar.txt")).toBeVisible();
 
     // New Folder with a folder selected lands inside that folder.
     await trees.expandFileTreeFolder("header", "header/nested");
@@ -199,36 +199,36 @@ test.describe("Explorer file actions", () => {
   });
 
   test("rename and delete keep the open editor tab in step", async ({ page }) => {
-    const { workspace, trees } = await openExplorer(page, "ren");
+    const { worktree, trees } = await openExplorer(page, "ren");
     await trees.expandFileTreeFolder("ren", "ren/old.txt");
     await trees.openFile("ren/old.txt");
-    await expect(workspace.fileTab("ren/old.txt")).toBeVisible();
+    await expect(worktree.fileTab("ren/old.txt")).toBeVisible();
 
     // Rename from the context menu retargets the open tab.
     await trees.runRowAction("ren/old.txt", "rename");
     await trees.submitName("new.txt");
     await expect.poll(() => onDisk("ren/new.txt")).toBe(true);
-    await expect(workspace.fileTab("ren/new.txt")).toBeVisible();
-    await expect(workspace.fileTab("ren/old.txt")).toHaveCount(0);
+    await expect(worktree.fileTab("ren/new.txt")).toBeVisible();
+    await expect(worktree.fileTab("ren/old.txt")).toHaveCount(0);
 
     // F2 on a selected row starts the same inline rename.
     await trees.pressOnRow("ren/new.txt", "F2");
     await trees.submitName("f2.txt");
     await expect.poll(() => onDisk("ren/f2.txt")).toBe(true);
-    await expect(workspace.fileTab("ren/f2.txt")).toBeVisible();
+    await expect(worktree.fileTab("ren/f2.txt")).toBeVisible();
 
     // Renaming the parent folder retargets tabs of files inside it.
     await trees.runRowAction("ren", "rename");
     await trees.submitName("ren2");
     await expect.poll(() => onDisk("ren2/f2.txt")).toBe(true);
-    await expect(workspace.fileTab("ren2/f2.txt")).toBeVisible();
-    await expect(workspace.fileTab("ren/f2.txt")).toHaveCount(0);
+    await expect(worktree.fileTab("ren2/f2.txt")).toBeVisible();
+    await expect(worktree.fileTab("ren/f2.txt")).toHaveCount(0);
 
     // A drag-and-drop move retargets the tab too.
     await trees.dragRowToRoot("ren2/f2.txt");
     await expect.poll(() => onDisk("f2.txt")).toBe(true);
-    await expect(workspace.fileTab("f2.txt")).toBeVisible();
-    await expect(workspace.fileTab("ren2/f2.txt")).toHaveCount(0);
+    await expect(worktree.fileTab("f2.txt")).toBeVisible();
+    await expect(worktree.fileTab("ren2/f2.txt")).toHaveCount(0);
 
     // Deleting the file closes its tab.
     await trees.runRowAction("f2.txt", "delete");
@@ -236,14 +236,14 @@ test.describe("Explorer file actions", () => {
     await expect.poll(() => onDisk("f2.txt")).toBe(false);
     await expect(trees.fileTreeRow("ren2")).toBeVisible();
     await expect(trees.fileTreeRow("f2.txt")).toHaveCount(0);
-    await expect(workspace.fileTab("f2.txt")).toHaveCount(0);
+    await expect(worktree.fileTab("f2.txt")).toHaveCount(0);
   });
 
   test("deleting a file with unsaved edits keeps its tab open", async ({ page }) => {
-    const { workspace, trees } = await openExplorer(page, "dirty");
+    const { worktree, trees } = await openExplorer(page, "dirty");
     await trees.expandFileTreeFolder("dirty", "dirty/keep-open.txt");
     await trees.openFile("dirty/keep-open.txt");
-    await new FileViewerPage(page, workspace.cachedPanelEntries(workspaceId)).replaceAll(
+    await new FileViewerPage(page, worktree.cachedPanelEntries(worktreeId)).replaceAll(
       "unsaved edit",
     );
 
@@ -251,7 +251,7 @@ test.describe("Explorer file actions", () => {
     await trees.confirmDelete();
     await expect.poll(() => onDisk("dirty/keep-open.txt")).toBe(false);
     await expect(trees.fileTreeRow("dirty")).toBeVisible();
-    await expect(workspace.fileTab("dirty/keep-open.txt")).toBeVisible();
+    await expect(worktree.fileTab("dirty/keep-open.txt")).toBeVisible();
     await expect(trees.fileTreeRow("dirty/keep-open.txt")).toHaveCount(0);
   });
 });

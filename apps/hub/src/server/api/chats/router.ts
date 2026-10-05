@@ -23,7 +23,7 @@ import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { taskService } from "../../services/task-service";
-import { workspaceService } from "../../services/workspace-service";
+import { worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
 
 // ---------------------------------------------------------------------------
@@ -31,14 +31,14 @@ import { publicProcedure, t } from "../trpc";
 // ---------------------------------------------------------------------------
 
 export const chatsRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { chats: chatService.list(input.workspaceId) };
+  list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
+    return { chats: chatService.list(input.worktreeId) };
   }),
 
   create: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         id: z.string().optional(),
         name: z.string().optional(),
         agent: z.string().optional(),
@@ -49,7 +49,7 @@ export const chatsRouter = t.router({
     )
     .mutation(({ input }) => {
       try {
-        const chat = chatService.create(input.workspaceId, {
+        const chat = chatService.create(input.worktreeId, {
           id: input.id,
           name: input.name,
           agent: input.agent,
@@ -99,7 +99,7 @@ export const chatsRouter = t.router({
         value: z.string(),
         // Lets a new pane's first settings change create its chat record,
         // like its first message does.
-        workspaceId: z.string().optional(),
+        worktreeId: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -109,7 +109,7 @@ export const chatsRouter = t.router({
             input.chatId,
             input.configId,
             input.value,
-            input.workspaceId,
+            input.worktreeId,
           ),
         };
       } catch (err) {
@@ -193,7 +193,7 @@ export const chatsRouter = t.router({
   setActiveSession: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string(),
         // Cap the length: this id is persisted as `activeSessionId` and later
         // flows into the resume command line (`continueInTerminal` →
@@ -207,7 +207,7 @@ export const chatsRouter = t.router({
       // generates chatIds locally, so setActiveSession may be called
       // before the first message is sent (which normally creates the record).
       if (!chatService.get(input.chatId)) {
-        chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+        chatService.create(input.worktreeId, { id: input.chatId, name: "Chat" });
       }
 
       if (!input.sessionId) {
@@ -231,7 +231,7 @@ export const chatsRouter = t.router({
   send: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string(),
         message: z.string(),
         sessionId: sessionIdSchema.optional(),
@@ -243,11 +243,11 @@ export const chatsRouter = t.router({
       // message sent may arrive before a record is created.
       let chat = chatService.get(input.chatId);
       if (!chat) {
-        chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+        chat = chatService.create(input.worktreeId, { id: input.chatId, name: "Chat" });
       }
       // A busy chat queues the message; it runs once the turns ahead finish.
       const result = taskService.submitOrQueueTask({
-        workspaceId: chat.workspaceId,
+        worktreeId: chat.worktreeId,
         chatId: chat.id,
         prompt: input.message,
         sessionId: input.sessionId,
@@ -288,7 +288,7 @@ export const chatsRouter = t.router({
    * shell-safe command, and spawns a fresh terminal pane running it — so the
    * user keeps working in the very session the web chat was running.
    *
-   * Mirrors the spawn+emit pair in `WorkspaceService.create`'s
+   * Mirrors the spawn+emit pair in `WorktreeService.create`'s
    * `via=terminal` branch (issue #551), and resolves the agent inline the
    * same way `setActiveSession` above does. Errors surface to the client so
    * the UI can keep the menu item disabled for agents that can't resume
@@ -297,13 +297,13 @@ export const chatsRouter = t.router({
   continueInTerminal: publicProcedure
     .input(z.object({ chatId: z.string().max(512) }))
     .mutation(async ({ input }) => {
-      const result = await workspaceService.continueChatInTerminal(input.chatId);
+      const result = await worktreeService.continueChatInTerminal(input.chatId);
       if (!result.ok) {
         throw new TRPCError({ code: result.code, message: result.message });
       }
       return {
         terminalId: result.terminalId,
-        workspaceId: result.workspaceId,
+        worktreeId: result.worktreeId,
         sessionId: result.sessionId,
       };
     }),

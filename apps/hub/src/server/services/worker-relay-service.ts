@@ -3,7 +3,7 @@
  *
  * A worker forwards the calls its agents make (`band` CLI, MCP, hooks) as
  * `relay.http` requests on its link. This service checks each against the
- * worker's own workspaces (`relay-scope.ts`), replays the allowed ones against
+ * worker's own worktrees (`relay-scope.ts`), replays the allowed ones against
  * the hub's own HTTP server on loopback, and streams the answer back down a
  * channel. Replaying through the real server keeps one implementation of every
  * route, its auth and its error shapes.
@@ -17,18 +17,18 @@ import {
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
-import { CHAT_ID_HEADER, WORKSPACE_ID_HEADER } from "../api/context";
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { CHAT_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 import {
   checkRelayRequest,
-  filterProjectsReply,
-  pinWorkspaceHost,
+  filterReposReply,
+  pinWorktreeHost,
   type ScopeLookups,
   trpcRefusalBody,
 } from "./relay-scope";
-import { resolveWorkspaceIdByCwd } from "./state";
+import { resolveWorktreeIdByCwd } from "./state";
 import { subscriptionService } from "./subscription-service";
 import { terminalService } from "./terminal-service";
 
@@ -48,16 +48,16 @@ const FORWARDED_HEADERS = [
 
 const RPC_INVALID_PARAMS = -32602;
 
-const workspaceQueries = new WorkspaceQueries();
+const worktreeQueries = new WorktreeQueries();
 
 const defaultLookups: ScopeLookups = {
-  hostOfWorkspace: (id) => workspaceQueries.findHostId(id),
-  workspaceOfChat: (id) => chatService.get(id)?.workspaceId ?? null,
-  workspaceOfCwd: (cwd) => resolveWorkspaceIdByCwd(cwd),
+  hostOfWorktree: (id) => worktreeQueries.findHostId(id),
+  worktreeOfChat: (id) => chatService.get(id)?.worktreeId ?? null,
+  worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
-  workspaceOfBrowser: (id) => browserService.get(id)?.workspaceId ?? null,
-  workspaceOfSubscription: (id) =>
-    subscriptionService.list().find((s) => s.id === id)?.workspaceId ?? null,
+  worktreeOfBrowser: (id) => browserService.get(id)?.worktreeId ?? null,
+  worktreeOfSubscription: (id) =>
+    subscriptionService.list().find((s) => s.id === id)?.worktreeId ?? null,
 };
 
 export class WorkerRelayService {
@@ -85,12 +85,12 @@ export class WorkerRelayService {
       return this.answer(session, verdict.status, refusalBody(request, verdict));
     }
     if (!this.target) return this.answer(session, 503, { error: "The hub is not ready" });
-    request = pinWorkspaceHost(request, session.workerId);
+    request = pinWorktreeHost(request, session.workerId);
     const { baseUrl, token } = this.target;
 
     const headers: Record<string, string> = {
       "accept-encoding": "identity",
-      [WORKSPACE_ID_HEADER]: request.scope.workspaceId,
+      [WORKTREE_ID_HEADER]: request.scope.worktreeId,
     };
     for (const name of FORWARDED_HEADERS) {
       const value = request.headers[name];
@@ -129,10 +129,10 @@ export class WorkerRelayService {
       const value = upstream.headers.get(name);
       if (value !== null) replyHeaders[name] = value;
     }
-    // The project list covers every host, so a worker gets only its own workspaces.
-    if (request.path.split("?")[0] === "/trpc/projects.list" && upstream.ok) {
+    // The repo list covers every host, so a worker gets only its own worktrees.
+    if (request.path.split("?")[0] === "/trpc/repos.list" && upstream.ok) {
       try {
-        const filtered = filterProjectsReply(await upstream.json(), session.workerId);
+        const filtered = filterReposReply(await upstream.json(), session.workerId);
         return this.answer(session, upstream.status, filtered);
       } catch (err) {
         log.warn(`relay call failed: ${err instanceof Error ? err.message : err}`);
@@ -194,7 +194,7 @@ function parseRequest(params: unknown): RelayHttpRequest {
     !p ||
     typeof p.method !== "string" ||
     typeof p.path !== "string" ||
-    typeof scope?.workspaceId !== "string" ||
+    typeof scope?.worktreeId !== "string" ||
     (scope.chatId !== undefined && typeof scope.chatId !== "string") ||
     !/^\/(?![/\\])/.test(p.path) ||
     !["GET", "POST", "DELETE", "OPTIONS", "HEAD"].includes(p.method) ||

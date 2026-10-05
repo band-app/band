@@ -1,5 +1,5 @@
 /**
- * Translucent project-list sidebar (macOS desktop app only).
+ * Translucent repo-list sidebar (macOS desktop app only).
  *
  * The desktop window on macOS is transparent over a `sidebar` vibrancy layer
  * (`apps/desktop/src/main/window.ts`). Setting the `data-translucent-sidebar`

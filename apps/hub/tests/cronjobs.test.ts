@@ -53,11 +53,11 @@ describe("tRPC — cronjobs CRUD", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cronjob-test-");
-    repoPath = createGitRepo(tmpHome, "myproject");
+    repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "myproject",
+          name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -80,16 +80,16 @@ describe("tRPC — cronjobs CRUD", () => {
     expect(data.jobs).toEqual([]);
   });
 
-  it("cronjobs.create creates a project-scoped job", async () => {
+  it("cronjobs.create creates a repo-scoped job", async () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
-        key: "myproject",
+        key: "myrepo",
         name: "Daily dep check",
         prompt: "Check for outdated dependencies",
         cronExpression: "0 9 * * 1",
-        scope: "project",
+        scope: "repo",
         enabled: true,
       },
       DEFAULT_TOKEN,
@@ -97,7 +97,7 @@ describe("tRPC — cronjobs CRUD", () => {
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { id: string; name: string; scope: string } }>(res);
     expect(data.job.name).toBe("Daily dep check");
-    expect(data.job.scope).toBe("project");
+    expect(data.job.scope).toBe("repo");
     expect(data.job.id).toMatch(/^cj_\d+_[0-9a-f]{8}$/);
   });
 
@@ -106,32 +106,32 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "myproject",
+        key: "myrepo",
         name: "Bad cron",
         prompt: "This should fail",
         cronExpression: "not a cron",
-        scope: "project",
+        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(400);
   });
 
-  it("cronjobs.create rejects workspace scope without workspaceId", async () => {
-    // CronjobWorkspaceMissingError path: the service requires `workspaceId`
-    // for workspace-scoped jobs and the router maps the typed error to a
+  it("cronjobs.create rejects worktree scope without worktreeId", async () => {
+    // CronjobWorktreeMissingError path: the service requires `worktreeId`
+    // for worktree-scoped jobs and the router maps the typed error to a
     // 400 Bad Request. Pinning the path here keeps the validation honest
     // — without this test, a refactor that lost the check would only
-    // surface at runtime against a real workspace-scoped create.
+    // surface at runtime against a real worktree-scoped create.
     const res = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
-        key: "myproject",
-        name: "Missing workspace",
+        key: "myrepo",
+        name: "Missing worktree",
         prompt: "Should be rejected",
         cronExpression: "0 9 * * 1",
-        scope: "workspace",
+        scope: "worktree",
       },
       DEFAULT_TOKEN,
     );
@@ -144,16 +144,11 @@ describe("tRPC — cronjobs CRUD", () => {
     const data = await trpcData<{ jobs: Array<{ name: string; fileKey: string }> }>(res);
     expect(data.jobs).toHaveLength(1);
     expect(data.jobs[0].name).toBe("Daily dep check");
-    expect(data.jobs[0].fileKey).toBe("myproject");
+    expect(data.jobs[0].fileKey).toBe("myrepo");
   });
 
-  it("cronjobs.list filters by project", async () => {
-    const res = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+  it("cronjobs.list filters by repo", async () => {
+    const res = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(1);
@@ -161,7 +156,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const empty = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { project: "nonexistent" },
+      { repo: "nonexistent" },
       DEFAULT_TOKEN,
     );
     const emptyData = await trpcData<{ jobs: unknown[] }>(empty);
@@ -173,11 +168,11 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "myproject",
+        key: "myrepo",
         name: "Code quality sweep",
         prompt: "Run linting and fix issues",
         cronExpression: "0 */6 * * *",
-        scope: "project",
+        scope: "repo",
         enabled: false,
       },
       DEFAULT_TOKEN,
@@ -188,31 +183,21 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.list returns both jobs", async () => {
-    const res = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const res = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(2);
   });
 
   it("cronjobs.get returns a specific job", async () => {
-    const listRes = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
     const res = await trpcQuery(
       server.url,
       "cronjobs.get",
-      { key: "myproject", id: jobId },
+      { key: "myrepo", id: jobId },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -224,19 +209,14 @@ describe("tRPC — cronjobs CRUD", () => {
     const res = await trpcQuery(
       server.url,
       "cronjobs.get",
-      { key: "myproject", id: "cj_nonexistent" },
+      { key: "myrepo", id: "cj_nonexistent" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(404);
   });
 
   it("cronjobs.update modifies job properties", async () => {
-    const listRes = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
@@ -244,7 +224,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myproject",
+        key: "myrepo",
         id: jobId,
         name: "Updated name",
         cronExpression: "0 12 * * *",
@@ -258,12 +238,7 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.update rejects invalid cron expression", async () => {
-    const listRes = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
@@ -271,7 +246,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myproject",
+        key: "myrepo",
         id: jobId,
         cronExpression: "invalid",
       },
@@ -281,12 +256,7 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.update toggles enabled state", async () => {
-    const listRes = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     const listData = await trpcData<{ jobs: Array<{ id: string; enabled: boolean }> }>(listRes);
     const job = listData.jobs[0];
 
@@ -294,7 +264,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myproject",
+        key: "myrepo",
         id: job.id,
         enabled: !job.enabled,
       },
@@ -310,7 +280,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myproject",
+        key: "myrepo",
         id: "cj_nonexistent",
         name: "nope",
       },
@@ -320,19 +290,14 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.delete removes a job", async () => {
-    const listRes = await trpcQuery(
-      server.url,
-      "cronjobs.list",
-      { project: "myproject" },
-      DEFAULT_TOKEN,
-    );
+    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[1].id;
 
     const res = await trpcMutate(
       server.url,
       "cronjobs.delete",
-      { key: "myproject", id: jobId },
+      { key: "myrepo", id: jobId },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -340,7 +305,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const afterRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { project: "myproject" },
+      { repo: "myrepo" },
       DEFAULT_TOKEN,
     );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
@@ -351,7 +316,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.delete",
-      { key: "myproject", id: "cj_nonexistent" },
+      { key: "myrepo", id: "cj_nonexistent" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(404);
@@ -359,10 +324,10 @@ describe("tRPC — cronjobs CRUD", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cronjobs cleanup on project removal
+// Cronjobs cleanup on repo removal
 // ---------------------------------------------------------------------------
 
-describe("tRPC — cronjobs cleanup on project removal", () => {
+describe("tRPC — cronjobs cleanup on repo removal", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -371,7 +336,7 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
     tmpHome = createTmpHome("band-cronjob-cleanup-");
     repoPath = createGitRepo(tmpHome, "removeme");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "removeme",
           path: repoPath,
@@ -389,17 +354,17 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("removes project-scoped cronjobs when project is removed", async () => {
-    // Create a cronjob for the project
+  it("removes repo-scoped cronjobs when repo is removed", async () => {
+    // Create a cronjob for the repo
     const createRes = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
         key: "removeme",
-        name: "Project job",
+        name: "Repo job",
         prompt: "Do something",
         cronExpression: "0 * * * *",
-        scope: "project",
+        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
@@ -409,16 +374,16 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
     const listRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { project: "removeme" },
+      { repo: "removeme" },
       DEFAULT_TOKEN,
     );
     const listData = await trpcData<{ jobs: unknown[] }>(listRes);
     expect(listData.jobs).toHaveLength(1);
 
-    // Remove the project
+    // Remove the repo
     const removeRes = await trpcMutate(
       server.url,
-      "projects.remove",
+      "repos.remove",
       { name: "removeme" },
       DEFAULT_TOKEN,
     );
@@ -428,7 +393,7 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
     const afterRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { project: "removeme" },
+      { repo: "removeme" },
       DEFAULT_TOKEN,
     );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
@@ -454,7 +419,7 @@ describe("tRPC — cronjobs.trigger", () => {
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "triggerproj",
           path: repoPath,
@@ -484,7 +449,7 @@ describe("tRPC — cronjobs.trigger", () => {
         name: "Triggerable job",
         prompt: "Run automated check",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
@@ -505,15 +470,15 @@ describe("tRPC — cronjobs.trigger", () => {
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
-    const data = await trpcData<{ taskId: string; workspaceId: string }>(res);
+    const data = await trpcData<{ taskId: string; worktreeId: string }>(res);
     expect(data.taskId).toBeDefined();
-    expect(data.workspaceId).toBe("triggerproj-main");
+    expect(data.worktreeId).toBe("triggerproj-main");
 
     // Verify the task was created via tasks.list
     const listRes = await trpcQuery(
       server.url,
       "tasks.list",
-      { workspaceId: "triggerproj-main" },
+      { worktreeId: "triggerproj-main" },
       DEFAULT_TOKEN,
     );
     const listData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(listRes);
@@ -548,13 +513,13 @@ describe("tRPC — cronjobs.trigger", () => {
     const initialListRes = await trpcQuery(
       server.url,
       "tasks.list",
-      { workspaceId: "triggerproj-main" },
+      { worktreeId: "triggerproj-main" },
       DEFAULT_TOKEN,
     );
     const initialListData = await trpcData<{ tasks: Array<{ id: string }> }>(initialListRes);
     expect(
       initialListData.tasks.length,
-      "preceding 'triggers a cronjob and creates a task' must have run first — no tasks exist in the workspace",
+      "preceding 'triggers a cronjob and creates a task' must have run first — no tasks exist in the worktree",
     ).toBeGreaterThan(0);
 
     await expect
@@ -563,7 +528,7 @@ describe("tRPC — cronjobs.trigger", () => {
           const listRes = await trpcQuery(
             server.url,
             "tasks.list",
-            { workspaceId: "triggerproj-main", status: "running" },
+            { worktreeId: "triggerproj-main", status: "running" },
             DEFAULT_TOKEN,
           );
           const listData = await trpcData<{ tasks: unknown[] }>(listRes);

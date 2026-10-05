@@ -34,7 +34,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -48,8 +48,8 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-send-optimistic-token";
-const PROJECT = "chatproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "chatproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 // Wide viewport so the desktop chat layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -60,16 +60,16 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  // The workspace's "real" directory needs to exist on disk because the
+  // The worktree's "real" directory needs to exist on disk because the
   // server resolves the worktree path and the agent spawns with it as
   // CWD. We don't care about its contents — just that it exists.
   const repoDir = join(tmpHome, "repo");
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -109,7 +109,7 @@ test.describe("Chat send — optimistic dispatch (#478)", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // Sanity: indicator must NOT be on screen yet — no task is running.
@@ -134,10 +134,10 @@ test.describe("Chat send — optimistic dispatch (#478)", () => {
     // The optimistic-dispatch send() path also rolls the optimistic
     // send back when the POST fails — this test
     // asserts that wire shape on the rendered DOM. To force a failure,
-    // we override the workspace to one that doesn't exist; the server's
+    // we override the worktree to one that doesn't exist; the server's
     // `chat-submit` returns 404.
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("does-not-exist", "main"));
+    await chatPane.goto(toWorktreeId("does-not-exist", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("forty-two");

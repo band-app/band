@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 
 import { decideNavigation, decideOpen, isTrustedUiUrl } from "../src/main/navigation-guard.ts";
 
-const HERE = "app://local/workspace/abc";
+const HERE = "app://local/worktree/abc";
 
 describe("navigation guard", () => {
   test("stays on the same app:// host", () => {
@@ -34,7 +34,7 @@ describe("navigation guard", () => {
 
   test("only frames of the served UI are trusted with the hub token", () => {
     const trusted = ["app://local", "http://localhost:3000"];
-    assert.ok(isTrustedUiUrl("app://local/workspace/x", trusted));
+    assert.ok(isTrustedUiUrl("app://local/worktree/x", trusted));
     assert.ok(isTrustedUiUrl("http://localhost:3000/", trusted));
     assert.ok(!isTrustedUiUrl("app://h-0123456789ab/", trusted));
     assert.ok(!isTrustedUiUrl("https://evil.example/", trusted));

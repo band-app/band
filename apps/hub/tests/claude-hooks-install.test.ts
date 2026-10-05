@@ -1,7 +1,7 @@
 // The Claude Code hooks Band writes into `~/.claude/settings.json`.
 //
 // Each hook runs `band notify --agent claude-code`, so the server reads the
-// payload with Claude Code's rules whatever agent the workspace is set to,
+// payload with Claude Code's rules whatever agent the worktree is set to,
 // and `SessionEnd` is among the events, so a session's status goes away when
 // Claude Code exits. Boot upgrades hooks installed before either existed.
 // A fake `band` on PATH stands in for the CLI; nothing runs it.

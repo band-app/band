@@ -24,10 +24,10 @@ export interface UsageEventRecord {
    *  scanner (issue #425). */
   taskId: string;
   chatId?: string;
-  workspaceId: string;
-  /** Project name (e.g. "band"). Always present — empty string is fine for
-   *  the rare case where the workspace can't be resolved. */
-  project: string;
+  worktreeId: string;
+  /** Repo name (e.g. "band"). Always present — empty string is fine for
+   *  the rare case where the worktree can't be resolved. */
+  repo: string;
   sessionId?: string;
   codingAgentId?: string;
   provider?: string;
@@ -46,14 +46,7 @@ export interface UsageEventRecord {
   externalKey?: string;
 }
 
-export type GroupBy =
-  | "model"
-  | "project"
-  | "codingAgentId"
-  | "workspaceId"
-  | "day"
-  | "week"
-  | "month";
+export type GroupBy = "model" | "repo" | "codingAgentId" | "worktreeId" | "day" | "week" | "month";
 
 export interface AggregateFilters {
   fromMs: number;
@@ -63,7 +56,7 @@ export interface AggregateFilters {
 
 /**
  * Per-group aggregated row. The `bucket` field is the group key
- * (model name, project name, agent id, workspace id, or YYYY-MM-DD day).
+ * (model name, repo name, agent id, worktree id, or YYYY-MM-DD day).
  * `null` is replaced with the string `"unknown"` so the UI renders a stable
  * label.
  */
@@ -94,9 +87,9 @@ export interface AggregateRow {
  *  because they need a `strftime`/`date` expression, not a raw column. */
 const GROUP_BY_COLUMN: Record<Exclude<GroupBy, "day" | "week" | "month">, string> = {
   model: "model",
-  project: "project",
+  repo: "repo",
   codingAgentId: "coding_agent_id",
-  workspaceId: "workspace_id",
+  worktreeId: "worktree_id",
 };
 
 /**
@@ -131,8 +124,8 @@ export class UsageEventQueries {
       .values({
         taskId: event.taskId,
         chatId: event.chatId ?? null,
-        workspaceId: event.workspaceId,
-        project: event.project,
+        worktreeId: event.worktreeId,
+        repo: event.repo,
         sessionId: event.sessionId ?? null,
         codingAgentId: event.codingAgentId ?? null,
         provider: event.provider ?? null,
@@ -159,7 +152,7 @@ export class UsageEventQueries {
    * scanner ALWAYS computes the bucket's full totals from the
    * provider's source-of-truth session file, never deltas.
    *
-   * The `taskId`/`chatId`/`workspaceId`/etc. dimensions are left as
+   * The `taskId`/`chatId`/`worktreeId`/etc. dimensions are left as
    * inserted on first write; only the volatile token + cost columns
    * are overwritten on conflict.
    *
@@ -189,8 +182,8 @@ export class UsageEventQueries {
           .values({
             taskId: event.taskId,
             chatId: event.chatId ?? null,
-            workspaceId: event.workspaceId,
-            project: event.project,
+            worktreeId: event.worktreeId,
+            repo: event.repo,
             sessionId: event.sessionId ?? null,
             codingAgentId: event.codingAgentId ?? null,
             provider: event.provider ?? null,
@@ -308,16 +301,16 @@ export class UsageEventQueries {
   }
 
   /**
-   * Delete usage events belonging to a workspace. Called when a workspace is
-   * removed, alongside `TaskQueries.deleteWorkspaceTasks`.
+   * Delete usage events belonging to a worktree. Called when a worktree is
+   * removed, alongside `TaskQueries.deleteWorktreeTasks`.
    *
    * Returns the number of rows deleted.
    */
-  deleteWorkspaceEvents(workspaceId: string): number {
+  deleteWorktreeEvents(worktreeId: string): number {
     const db = getDb();
     const result = db
       .delete(usageEventsTable)
-      .where(eq(usageEventsTable.workspaceId, workspaceId))
+      .where(eq(usageEventsTable.worktreeId, worktreeId))
       .run();
     return Number(result.changes ?? 0);
   }

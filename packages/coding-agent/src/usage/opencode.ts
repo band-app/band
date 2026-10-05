@@ -11,7 +11,7 @@ interface OpenCodeSessionListEntry {
   title: string;
   updated: number;
   created: number;
-  projectId: string;
+  repoId: string;
   directory: string;
 }
 
@@ -119,7 +119,7 @@ export function createOpenCodeUsageReader(command: string = OPENCODE_DEFAULT_BIN
     } catch (err) {
       // ENOENT-style errors (session missing, opencode binary missing)
       // collapse to "no data". Debug level so a scanner pass over a fresh
-      // workspace isn't noisy.
+      // worktree isn't noisy.
       log.debug({ err, sessionId }, "opencode export failed; treating as no data");
       return null;
     }

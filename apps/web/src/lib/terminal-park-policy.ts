@@ -2,8 +2,8 @@
 // Which parked terminals to dispose. Ported from orca's
 // `terminal-pane/terminal-hidden-view-parking.ts`, with the same constants.
 //
-// Every visited workspace stays mounted (`MultiWorkspacePanelHost`), so the
-// memory bound for terminals is this policy rather than a workspace count. A
+// Every visited worktree stays mounted (`MultiWorktreePanelHost`), so the
+// memory bound for terminals is this policy rather than a worktree count. A
 // terminal that is "cold parked" here is disposed by `terminal-cache.ts`: its
 // xterm and socket go away, the server PTY survives, and the next reveal
 // reconnects and replays the scrollback.
@@ -11,13 +11,13 @@
 // Cold-park hysteresis keeps a hidden terminal warm for 30 s so quick flips
 // never pay a replay; hot-retain keeps a bounded recently-hidden working set
 // warm for 5 minutes beyond that. Orca's own note on the numbers: the cap (not
-// the clock) is the primary evictor, 4 workspaces covers the ordinary working
+// the clock) is the primary evictor, 4 worktrees covers the ordinary working
 // set, and cutting remount frequency beats shaving replay cost.
 // ---------------------------------------------------------------------------
 
-export const TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS = 30_000;
-export const TERMINAL_WORKSPACE_HOT_RETAIN_MS = 5 * 60_000;
-export const TERMINAL_WORKSPACE_HOT_RETAIN_LIMIT = 4;
+export const TERMINAL_WORKTREE_COLD_PARK_DELAY_MS = 30_000;
+export const TERMINAL_WORKTREE_HOT_RETAIN_MS = 5 * 60_000;
+export const TERMINAL_WORKTREE_HOT_RETAIN_LIMIT = 4;
 export const TERMINAL_TAB_COLD_PARK_DELAY_MS = 30_000;
 export const TERMINAL_TAB_HOT_RETAIN_MS = 5 * 60_000;
 export const TERMINAL_TAB_HOT_RETAIN_LIMIT = 6;
@@ -29,7 +29,7 @@ export interface ColdParkRetainCandidate {
   lastActivatedSeq?: number;
 }
 
-// A workspace switch hides every terminal of that workspace at once, so
+// A worktree switch hides every terminal of that worktree at once, so
 // activation order must break the hidden-time tie before the id fallback.
 function compareColdParkRecencyDesc(
   a: ColdParkRetainCandidate,

@@ -56,14 +56,14 @@ interface Machine {
   note: string | null;
   hostStatus: string | null;
 }
-interface Workspace {
+interface Worktree {
   name: string;
   path: string;
   hostId?: string;
   lifecycle?: "sleeping" | "waking";
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Workspace[] }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Worktree[] }>;
 }
 
 const scratch: string[] = [];
@@ -162,7 +162,7 @@ describe("lost machines", () => {
     });
     seedSettings(home, { tokenSecret: TOKEN, runners: [runner(600)] });
     seedState(home, {
-      projects: [
+      repos: [
         {
           name: "ghostproj",
           path: "/tmp/fake/ghostproj",
@@ -176,8 +176,8 @@ describe("lost machines", () => {
     let server = await startServer({ tmpHome: home, remoteHost: false, env: REAPER_ENV });
     let machine: Machine;
     try {
-      await call(server, "m", "workspaces.create", {
-        project: "ghostproj",
+      await call(server, "m", "worktrees.create", {
+        repo: "ghostproj",
         branch: "needs-ghost",
         placement: { labels: { pool: "ghost" } },
       });
@@ -354,8 +354,8 @@ describe("maximum lifetime and the destroy action", () => {
 
   const q = <T>(procedure: string, input?: unknown) => call<T>(server, "q", procedure, input);
   const m = <T>(procedure: string, input: unknown) => call<T>(server, "m", procedure, input);
-  const workspace = async (name: string) =>
-    (await q<ProjectsList>("projects.list")).projects
+  const worktree = async (name: string) =>
+    (await q<ReposList>("repos.list")).repos
       .find((p) => p.name === "lifeproj")
       ?.worktrees.find((w) => w.name === name);
   const runnerDir = (hostId: string) => join(hubHome, ".band", "runners", "life", hostId);
@@ -367,19 +367,19 @@ describe("maximum lifetime and the destroy action", () => {
   const machineOf = async (hostId: string, state?: Machine["state"]) =>
     (await machinesOf(server)).find((x) => x.workerId === hostId && (!state || x.state === state));
 
-  async function createWorkspace(branch: string): Promise<Workspace & { hostId: string }> {
-    await m("workspaces.create", {
-      project: "lifeproj",
+  async function createWorktree(branch: string): Promise<Worktree & { hostId: string }> {
+    await m("worktrees.create", {
+      repo: "lifeproj",
       branch,
       placement: { labels: { pool: "life" } },
     });
     return (await waitFor(
       async () => {
-        const wt = await workspace(branch);
+        const wt = await worktree(branch);
         return wt?.hostId ? wt : undefined;
       },
       { label: `${branch} on a worker`, timeoutMs: 90_000, intervalMs: 250 },
-    )) as Workspace & { hostId: string };
+    )) as Worktree & { hostId: string };
   }
 
   beforeAll(async () => {
@@ -420,7 +420,7 @@ describe("maximum lifetime and the destroy action", () => {
       defaultCodingAgent: "claude-code",
     });
     seedState(hubHome, {
-      projects: [
+      repos: [
         {
           name: "lifeproj",
           path: checkout,
@@ -457,7 +457,7 @@ describe("maximum lifetime and the destroy action", () => {
   });
 
   it("puts a machine past its maximum lifetime to sleep, then destroys it, and the work comes back (S3)", async () => {
-    const wt = await createWorkspace("life-a");
+    const wt = await createWorktree("life-a");
     const hostId = wt.hostId;
     appendFileSync(join(wt.path, "hello.txt"), "edited on the worker\n");
     mkdirSync(join(wt.path, "notes"));
@@ -496,16 +496,16 @@ describe("maximum lifetime and the destroy action", () => {
     // leave a `.volta` directory in the worker's home, so the test looks for the worker's own files.)
     expect(existsSync(join(runnerDir(hostId), "pid"))).toBe(false);
     expect(existsSync(join(runnerDir(hostId), "work"))).toBe(false);
-    expect((await workspace("life-a"))?.lifecycle).toBe("sleeping");
+    expect((await worktree("life-a"))?.lifecycle).toBe("sleeping");
 
-    // The workspace keeps its work: it wakes on a new machine with the edit present.
+    // The worktree keeps its work: it wakes on a new machine with the edit present.
     await setRunner();
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: "lifeproj-life-a",
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: "lifeproj-life-a",
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited on the worker\n");
-    expect((await workspace("life-a"))?.lifecycle).toBeUndefined();
+    expect((await worktree("life-a"))?.lifecycle).toBeUndefined();
     const states = (await machinesOf(server))
       .filter((x) => x.workerId === hostId)
       .map((x) => x.state)
@@ -514,12 +514,12 @@ describe("maximum lifetime and the destroy action", () => {
   }, 240_000);
 
   it("keeps a busy machine until its hard deadline, then destroys it and says so (S3)", async () => {
-    const wt = await createWorkspace("life-b");
+    const wt = await createWorktree("life-b");
     const hostId = wt.hostId;
     const res = await fetch(`${server.url}/api/chats/life-busy/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-      body: JSON.stringify({ workspaceId: "lifeproj-life-b", text: "slow please" }),
+      body: JSON.stringify({ worktreeId: "lifeproj-life-b", text: "slow please" }),
     });
     expect(res.ok).toBe(true);
 
@@ -556,21 +556,21 @@ describe("maximum lifetime and the destroy action", () => {
       expect(isAlive(pid)).toBe(true);
       await new Promise((r) => setTimeout(r, 250));
     } while (Date.now() < watchUntil);
-    expect(workerLog(hostId)).not.toContain("the hub stored the workspaces");
+    expect(workerLog(hostId)).not.toContain("the hub stored the worktrees");
 
     const destroyed = await waitFor(() => machineOf(hostId, "destroyed"), {
       label: "the machine destroyed at its hard deadline",
       timeoutMs: 60_000,
       intervalMs: 250,
     });
-    expect(destroyed.note).toContain("hard deadline passed with workspaces NOT stored");
+    expect(destroyed.note).toContain("hard deadline passed with worktrees NOT stored");
     expect(destroyed.note).toContain("lifeproj-life-b");
     await waitFor(async () => !isAlive(pid), { label: "worker stopped", timeoutMs: 10_000 });
     await setRunner();
   }, 240_000);
 
   it("keeps a machine whose agent has not started its turn yet (S2)", async () => {
-    const wt = await createWorkspace("life-d");
+    const wt = await createWorktree("life-d");
     const hostId = wt.hostId;
     // The agent's start is held until the file is removed, so the message is accepted but no turn runs.
     writeFileSync(startDelayFile, "hold");
@@ -578,7 +578,7 @@ describe("maximum lifetime and the destroy action", () => {
       const res = await fetch(`${server.url}/api/chats/life-slow-start/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-        body: JSON.stringify({ workspaceId: "lifeproj-life-d", text: "hello" }),
+        body: JSON.stringify({ worktreeId: "lifeproj-life-d", text: "hello" }),
       });
       expect(res.ok).toBe(true);
       const running = await waitFor(() => machineOf(hostId, "running"), {
@@ -594,7 +594,7 @@ describe("maximum lifetime and the destroy action", () => {
           (await machineOf(hostId))?.note?.includes("an agent is working") ? true : undefined,
         { label: "the starting agent keeps the worker", timeoutMs: 30_000, intervalMs: 100 },
       );
-      expect(workerLog(hostId)).not.toContain("the hub stored the workspaces");
+      expect(workerLog(hostId)).not.toContain("the hub stored the worktrees");
       expect((await machineOf(hostId))?.state).toBe("stopping");
     } finally {
       rmSync(startDelayFile, { force: true });
@@ -618,8 +618,8 @@ describe("maximum lifetime and the destroy action", () => {
     return row.spawnedAt;
   };
 
-  it("lets only an admin destroy a machine, and refuses one with unstored workspaces unless forced (S4)", async () => {
-    const wt = await createWorkspace("life-c");
+  it("lets only an admin destroy a machine, and refuses one with unstored worktrees unless forced (S4)", async () => {
+    const wt = await createWorktree("life-c");
     const hostId = wt.hostId;
     const machine = (await waitFor(() => machineOf(hostId, "running"), {
       label: "the machine is running",
@@ -641,7 +641,7 @@ describe("maximum lifetime and the destroy action", () => {
     expect((await machineOf(hostId))?.state).toBe("running");
     expect(isAlive(pid)).toBe(true);
 
-    // An admin is refused while the workspace on the machine is not stored, then forces it.
+    // An admin is refused while the worktree on the machine is not stored, then forces it.
     const refused = await trpcMutate(
       server.url,
       "runners.destroyMachine",

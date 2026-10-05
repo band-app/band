@@ -1,12 +1,12 @@
 /**
  * Layout coverage for the command-palette-style dialogs, exercised through the
- * WorkspacePickerDialog (which lists real seeded workspaces and filters them
+ * WorktreePickerDialog (which lists real seeded worktrees and filters them
  * client-side, so the result count — and therefore the card height — changes
  * as the user types).
  *
  * The dialogs share the `command-palette` `DialogContent` variant
  * (`packages/ui/src/components/dialog.tsx`), so pinning its geometry on one
- * dialog pins it for all five (quick open, find in files, switch workspace,
+ * dialog pins it for all five (quick open, find in files, switch worktree,
  * command palette, language picker).
  *
  * Two user-observable contracts, both asserted via real Chromium DOM geometry
@@ -23,13 +23,13 @@
  *      entire list, not merely mid-list.
  *
  * Architecture: real production binary against a fresh tmp `~/.band/`, no tRPC
- * mocks. One project with several worktrees is seeded so the picker has enough
+ * mocks. One repo with several worktrees is seeded so the picker has enough
  * rows to shrink meaningfully when filtered. All interaction is via page
  * objects.
  */
 
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -39,11 +39,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
-import { WorkspacePicker } from "./pages/WorkspacePicker";
+import { WorktreePage } from "./pages/WorktreePage";
+import { WorktreePicker } from "./pages/WorktreePicker";
 
 const TOKEN = "e2e-command-dialog-layout-token";
-const PROJECT = "layout-demo";
+const REPO = "layout-demo";
 
 // A handful of worktrees so the picker list is tall when unfiltered and
 // collapses to a single row when a unique branch is typed — the height delta
@@ -55,7 +55,7 @@ const PROJECT = "layout-demo";
 // "s") for readability.
 const BRANCHES = ["main", "alpha", "bravo", "charlie", "delta", "epsilon"];
 const FILTER_TO_ONE = "epsilon";
-const WS_MAIN = toWorkspaceId(PROJECT, "main");
+const WS_MAIN = toWorktreeId(REPO, "main");
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -63,14 +63,14 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        name: REPO,
+        path: `/tmp/fake/${REPO}`,
         defaultBranch: "main",
         worktrees: BRANCHES.map((branch) => ({
           branch,
-          path: `/tmp/fake/${PROJECT}/${branch}`,
+          path: `/tmp/fake/${REPO}/${branch}`,
         })),
       },
     ],
@@ -96,13 +96,13 @@ test.describe("Command dialog layout — desktop (upper third, input anchored)",
   test("input stays at a fixed Y as the result list shrinks, list sits below the input", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const picker = new WorkspacePicker(page);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
 
-    await workspacePage.goto(WS_MAIN);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WS_MAIN);
+    await worktreePage.waitForReady();
 
-    await workspacePage.openWorkspacePickerViaShortcut();
+    await worktreePage.openWorktreePickerViaShortcut();
     await picker.waitVisible();
 
     // All rows visible: on desktop the input is at the TOP, the list below it.
@@ -128,14 +128,14 @@ test.describe("Command dialog layout — mobile (input below the list)", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("input sits below the last result row", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const picker = new WorkspacePicker(page);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
 
-    await workspacePage.goto(WS_MAIN);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WS_MAIN);
+    await worktreePage.waitForMobileReady();
 
-    // Mobile opens the picker from the workspace header title.
-    await workspacePage.openSwitcherFromHeader();
+    // Mobile opens the picker from the worktree header title.
+    await worktreePage.openSwitcherFromHeader();
     await picker.waitVisible();
 
     // Pin the full count before measuring so `options.last()` can't be

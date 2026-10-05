@@ -1,7 +1,7 @@
 /**
  * Integration tests for the `panelFocus.*` tRPC surface — the server-side
  * record of the last-focused panel per type (chat / terminal / browser) for a
- * workspace. This is what "Add to Chat" / "Add to Terminal" query to route a
+ * worktree. This is what "Add to Chat" / "Add to Terminal" query to route a
  * pasted reference into the pane the user was last using.
  *
  * Driven end-to-end through the production server bundle (real HTTP, real auth,
@@ -27,7 +27,7 @@ import {
 } from "./helpers/server";
 
 const DEFAULT_TOKEN = "panel-focus-test-token";
-const WORKSPACE_ID = "focusproject-main";
+const WORKTREE_ID = "focusrepo-main";
 
 function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
   return sharedTrpcMutate(serverUrl, procedure, input, DEFAULT_TOKEN);
@@ -56,13 +56,13 @@ function createGitRepo(parentDir: string, name: string): string {
 }
 
 /** Read the persisted focus row straight from SQLite. Id is deterministic:
- *  `panel_focus:${workspaceId}` (see `PanelFocusService.focusRowId`). */
+ *  `panel_focus:${worktreeId}` (see `PanelFocusService.focusRowId`). */
 function readFocusRow(tmpHome: string): { state: string; panelType: string } | undefined {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"), { readOnly: true });
   try {
     return sqlite
       .prepare("SELECT state, panel_type as panelType FROM panel_states WHERE id = ?")
-      .get(`panel_focus:${WORKSPACE_ID}`) as { state: string; panelType: string } | undefined;
+      .get(`panel_focus:${WORKTREE_ID}`) as { state: string; panelType: string } | undefined;
   } finally {
     sqlite.close();
   }
@@ -76,11 +76,11 @@ describe("panelFocus — last-focused panel per type", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-panel-focus-");
-    const repoPath = createGitRepo(tmpHome, "focusproject");
+    const repoPath = createGitRepo(tmpHome, "focusrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "focusproject",
+          name: "focusrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -102,13 +102,13 @@ describe("panelFocus — last-focused panel per type", () => {
     const res = await fetch(`${server.url}/trpc/panelFocus.set`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID, panelType: "chat", panelId: "chat_x" }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, panelType: "chat", panelId: "chat_x" }),
     });
     expect(res.status).toBe(401);
   });
 
   it("returns an empty record before anything is focused", async () => {
-    const res = await trpcQuery(server.url, "panelFocus.get", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "panelFocus.get", { worktreeId: WORKTREE_ID });
     expect(res.status).toBe(200);
     const data = await trpcData<Focus>(res);
     expect(data).toEqual({});
@@ -116,22 +116,22 @@ describe("panelFocus — last-focused panel per type", () => {
 
   it("records the last-focused panel per type independently", async () => {
     await trpcMutate(server.url, "panelFocus.set", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       panelType: "chat",
       panelId: "chat_alpha",
     });
     await trpcMutate(server.url, "panelFocus.set", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       panelType: "terminal",
       panelId: "term_one",
     });
     await trpcMutate(server.url, "panelFocus.set", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       panelType: "browser",
       panelId: "browser_z",
     });
 
-    const res = await trpcQuery(server.url, "panelFocus.get", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "panelFocus.get", { worktreeId: WORKTREE_ID });
     const data = await trpcData<Focus>(res);
     expect(data).toEqual({ chat: "chat_alpha", terminal: "term_one", browser: "browser_z" });
 
@@ -148,12 +148,12 @@ describe("panelFocus — last-focused panel per type", () => {
 
   it("overwrites only the named type, leaving the others intact", async () => {
     await trpcMutate(server.url, "panelFocus.set", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       panelType: "chat",
       panelId: "chat_beta",
     });
 
-    const res = await trpcQuery(server.url, "panelFocus.get", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "panelFocus.get", { worktreeId: WORKTREE_ID });
     const data = await trpcData<Focus>(res);
     expect(data).toEqual({ chat: "chat_beta", terminal: "term_one", browser: "browser_z" });
   });
@@ -165,7 +165,7 @@ describe("panelFocus — last-focused panel per type", () => {
     await server.close();
     server = await startServer({ tmpHome });
 
-    const res = await trpcQuery(server.url, "panelFocus.get", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "panelFocus.get", { worktreeId: WORKTREE_ID });
     const data = await trpcData<Focus>(res);
     expect(data).toEqual({ chat: "chat_beta", terminal: "term_one", browser: "browser_z" });
   });

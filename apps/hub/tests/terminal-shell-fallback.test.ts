@@ -31,15 +31,15 @@ describe("terminal spawns with no $SHELL set (shell fallback)", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-terminal-shell-fallback-");
-    const projectPath = join(tmpHome, "workspace");
-    mkdirSync(projectPath, { recursive: true });
+    const repoPath = join(tmpHome, "worktree");
+    mkdirSync(repoPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "workspace",
-          path: projectPath,
+          name: "worktree",
+          path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: projectPath }],
+          worktrees: [{ branch: "main", path: repoPath }],
         },
       ],
     });
@@ -67,9 +67,9 @@ describe("terminal spawns with no $SHELL set (shell fallback)", () => {
 
   it("attaches a live PTY and streams output instead of a shell-not-found error", async () => {
     const port = new URL(server.url).port;
-    const workspaceId = "workspace-main";
+    const worktreeId = "worktree-main";
     const terminalId = "shell-fallback-terminal";
-    const wsUrl = `ws://127.0.0.1:${port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
 
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${TOKEN}` } });
 
@@ -110,7 +110,7 @@ describe("terminal spawns with no $SHELL set (shell fallback)", () => {
 
   it("rejects the terminal WebSocket upgrade without an auth token", async () => {
     const port = new URL(server.url).port;
-    const wsUrl = `ws://127.0.0.1:${port}/terminal?workspaceId=workspace-main&terminalId=noauth-terminal`;
+    const wsUrl = `ws://127.0.0.1:${port}/terminal?worktreeId=worktree-main&terminalId=noauth-terminal`;
 
     // No `Cookie` header — the upgrade must be destroyed before a PTY is
     // ever attached, so the socket never reaches the "open" state.

@@ -2,7 +2,7 @@
 name = "band-cli"
 version = "0.1.0"
 edition = "2021"
-description = "CLI for programmatic workspace management with Band"
+description = "CLI for programmatic worktree management with Band"
 
 [[bin]]
 name = "band"

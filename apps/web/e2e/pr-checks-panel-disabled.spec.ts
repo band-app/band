@@ -1,13 +1,13 @@
 /**
  * A GitHub plugin listed in `plugins.disabled` contributes no Checks tab to
- * the right sidepanel. Real server with a github.com project; the fake `gh`
+ * the right sidepanel. Real server with a github.com repo; the fake `gh`
  * (`tests/fixtures/gh-stub.ts`) records that the server never ran it.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import { FAKE_REPO } from "../../hub/tests/fixtures/github-review-data";
 import { git, gitCommit } from "./helpers/git";
@@ -19,12 +19,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-pr-checks-disabled-token";
-const PROJECT = "widgets";
+const REPO = "widgets";
 
 let server: ServerHandle;
 let stub: GhStub;
@@ -32,7 +32,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", "main"]);
   writeFileSync(join(repo, "README.md"), "hello\n");
@@ -44,9 +44,9 @@ test.beforeAll(async () => {
     `https://github.com/${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
   ]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ name: "main", branch: "main", path: repo }],
@@ -65,12 +65,12 @@ test.afterAll(async () => {
 });
 
 test("a disabled GitHub plugin adds no Checks tab and never runs gh", async ({ page }) => {
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
-  await workspace.gotoAndWaitForPlugins(toWorkspaceId(PROJECT, "main"));
-  await workspace.waitForReady();
-  await workspace.revealRightPanel();
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await worktree.gotoAndWaitForPlugins(toWorktreeId(REPO, "main"));
+  await worktree.waitForReady();
+  await worktree.revealRightPanel();
 
-  await expect(workspace.rightPanelTab("changes")).toBeVisible();
-  await expect(workspace.rightPanelTab("github-pull-request")).toHaveCount(0);
+  await expect(worktree.rightPanelTab("changes")).toBeVisible();
+  await expect(worktree.rightPanelTab("github-pull-request")).toHaveCount(0);
   expect(stub.requests).toEqual([]);
 });

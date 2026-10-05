@@ -82,7 +82,7 @@ async function create(fromSnapshot = false) {
   const id = body?.server?.id;
   if (id === undefined) throw new Error("Hetzner answered without a server id");
   printHandle(String(id));
-  if (!fromSnapshot && cloneUrl()) console.log(`BAND_HOST_PROJECT_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`);
+  if (!fromSnapshot && cloneUrl()) console.log(`BAND_HOST_REPO_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`);
   console.log(`created server ${id} (${body.server.name})`);
 }
 

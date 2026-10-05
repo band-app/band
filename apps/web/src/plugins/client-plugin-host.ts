@@ -5,17 +5,17 @@ import { queryClient } from "@/dashboard/query-client";
 import { openExternalUrl } from "../lib/open-external-url";
 import { trpc } from "../lib/trpc-client";
 
-const reviewQueryKey = (workspaceId: string) => ["workspaceReview", workspaceId] as const;
+const reviewQueryKey = (worktreeId: string) => ["worktreeReview", worktreeId] as const;
 
 /** The core's side of the plugin client API, backed by tRPC and TanStack Query. */
 export const clientPluginHost: ClientPluginHost = {
-  useWorkspaceReview(workspaceId, { enabled, refetchInterval }) {
+  useWorktreeReview(worktreeId, { enabled, refetchInterval }) {
     const query = useQuery({
-      queryKey: reviewQueryKey(workspaceId),
-      queryFn: () => trpc.reviews.forWorkspace.query({ workspaceId }),
+      queryKey: reviewQueryKey(worktreeId),
+      queryFn: () => trpc.reviews.forWorktree.query({ worktreeId }),
       enabled,
       // Polling refreshes the panel; this only saves a `gh` call when the
-      // user flips between tabs or workspaces.
+      // user flips between tabs or worktrees.
       staleTime: 15_000,
       refetchInterval:
         typeof refetchInterval === "function"
@@ -31,18 +31,18 @@ export const clientPluginHost: ClientPluginHost = {
     };
   },
 
-  async mergeReview(workspaceId, method) {
+  async mergeReview(worktreeId, method) {
     try {
-      await trpc.reviews.merge.mutate({ workspaceId, method });
+      await trpc.reviews.merge.mutate({ worktreeId, method });
     } finally {
-      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
     }
   },
 
-  async startAgent(workspaceId, prompt) {
-    // The server announces the new chat or terminal, and the workspace's
+  async startAgent(worktreeId, prompt) {
+    // The server announces the new chat or terminal, and the worktree's
     // center dock adds its pane from that event.
-    await trpc.agentSessions.launch.mutate({ workspaceId, prompt, mode: readAgentMode() });
+    await trpc.agentSessions.launch.mutate({ worktreeId, prompt, mode: readAgentMode() });
   },
 
   openUrl(url) {

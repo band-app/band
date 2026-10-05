@@ -13,12 +13,12 @@ import {
   trpcData,
 } from "./helpers/server";
 
-// Integration tests for browser profiles and the per-project default
+// Integration tests for browser profiles and the per-repo default
 // profile (`browserProfiles.*`, `browsers.create` / `browsers.setProfile`).
 //
-// The behaviour under test: a project remembers which browser profile its
-// tabs use, and a new tab in ANY workspace of that project opens with it.
-// Switching a tab's profile updates the project default. Driven through the
+// The behaviour under test: a repo remembers which browser profile its
+// tabs use, and a new tab in ANY worktree of that repo opens with it.
+// Switching a tab's profile updates the repo default. Driven through the
 // production server bundle over tRPC HTTP.
 //
 // The Chrome cookie import itself runs in the desktop app and is covered by
@@ -66,7 +66,7 @@ interface Profile {
 
 interface Browser {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   profileId: string | null;
 }
 
@@ -82,10 +82,10 @@ async function createProfile(serverUrl: string, name: string, id?: string): Prom
 
 async function createBrowser(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   extra: Record<string, unknown> = {},
 ): Promise<Browser> {
-  const res = await trpcMutate(serverUrl, "browsers.create", { workspaceId, ...extra });
+  const res = await trpcMutate(serverUrl, "browsers.create", { worktreeId, ...extra });
   expect(res.status).toBe(200);
   return (await trpcData<{ browser: Browser }>(res)).browser;
 }
@@ -112,16 +112,16 @@ function cdpCloseCode(serverUrl: string, bandTabId: string): Promise<number> {
   });
 }
 
-async function projectDefault(serverUrl: string, projectName: string): Promise<string | null> {
-  const res = await trpcQuery(serverUrl, "browserProfiles.getProjectDefault", { projectName });
+async function repoDefault(serverUrl: string, repoName: string): Promise<string | null> {
+  const res = await trpcQuery(serverUrl, "browserProfiles.getRepoDefault", { repoName });
   expect(res.status).toBe(200);
   return (await trpcData<{ profileId: string | null }>(res)).profileId;
 }
 
-describe("browser profiles — per-project default", () => {
+describe("browser profiles — per-repo default", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  // Two workspaces of project "alpha", one of project "beta".
+  // Two worktrees of repo "alpha", one of repo "beta".
   const alphaMain = "alpha-main";
   const alphaFeature = "alpha-feature";
   const betaMain = "beta-main";
@@ -133,7 +133,7 @@ describe("browser profiles — per-project default", () => {
     git(alphaPath, ["worktree", "add", "-b", "feature", alphaFeaturePath]);
     const betaPath = createGitRepo(tmpHome, "beta");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: alphaPath,
@@ -175,13 +175,13 @@ describe("browser profiles — per-project default", () => {
     expect(setProfile.status).toBe(401);
   });
 
-  it("opens new tabs in the Default profile when the project has none", async () => {
+  it("opens new tabs in the Default profile when the repo has none", async () => {
     const browser = await createBrowser(server.url, alphaMain);
     expect(browser.profileId).toBeNull();
-    expect(await projectDefault(server.url, "alpha")).toBeNull();
+    expect(await repoDefault(server.url, "alpha")).toBeNull();
   });
 
-  it("switching a tab's profile becomes the default for every workspace of the project", async () => {
+  it("switching a tab's profile becomes the default for every worktree of the repo", async () => {
     const work = await createProfile(server.url, "Work (Chrome)");
     const tab = await createBrowser(server.url, alphaMain);
 
@@ -191,69 +191,69 @@ describe("browser profiles — per-project default", () => {
     });
     expect(res.status).toBe(200);
     expect((await trpcData<{ browser: Browser }>(res)).browser.profileId).toBe(work.id);
-    expect(await projectDefault(server.url, "alpha")).toBe(work.id);
+    expect(await repoDefault(server.url, "alpha")).toBe(work.id);
 
-    // A new tab in ANOTHER workspace of the same project opens with it…
+    // A new tab in ANOTHER worktree of the same repo opens with it…
     const sibling = await createBrowser(server.url, alphaFeature);
     expect(sibling.profileId).toBe(work.id);
     // …and survives a round-trip through browsers.get (what the pane reads).
     const getRes = await trpcQuery(server.url, "browsers.get", { browserId: sibling.id });
     expect((await trpcData<{ browser: Browser }>(getRes)).browser.profileId).toBe(work.id);
 
-    // Another project is unaffected.
+    // Another repo is unaffected.
     const other = await createBrowser(server.url, betaMain);
     expect(other.profileId).toBeNull();
   });
 
-  it("an explicit profile on create overrides the project default without changing it", async () => {
+  it("an explicit profile on create overrides the repo default without changing it", async () => {
     const personal = await createProfile(server.url, "Personal (Chrome)");
-    const before = await projectDefault(server.url, "alpha");
+    const before = await repoDefault(server.url, "alpha");
 
     const explicit = await createBrowser(server.url, alphaMain, { profileId: personal.id });
     expect(explicit.profileId).toBe(personal.id);
     const explicitDefault = await createBrowser(server.url, alphaMain, { profileId: null });
     expect(explicitDefault.profileId).toBeNull();
 
-    expect(await projectDefault(server.url, "alpha")).toBe(before);
+    expect(await repoDefault(server.url, "alpha")).toBe(before);
   });
 
-  it("switching a tab back to Default resets the project default", async () => {
+  it("switching a tab back to Default resets the repo default", async () => {
     const tab = await createBrowser(server.url, alphaFeature);
     const res = await trpcMutate(server.url, "browsers.setProfile", {
       browserId: tab.id,
       profileId: null,
     });
     expect(res.status).toBe(200);
-    expect(await projectDefault(server.url, "alpha")).toBeNull();
+    expect(await repoDefault(server.url, "alpha")).toBeNull();
     expect((await createBrowser(server.url, alphaMain)).profileId).toBeNull();
   });
 
-  it("setProjectDefault and projectDefaults drive the Settings rows", async () => {
+  it("setRepoDefault and repoDefaults drive the Settings rows", async () => {
     const qa = await createProfile(server.url, "QA");
-    const setRes = await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
-      projectName: "beta",
+    const setRes = await trpcMutate(server.url, "browserProfiles.setRepoDefault", {
+      repoName: "beta",
       profileId: qa.id,
     });
     expect(setRes.status).toBe(200);
 
-    const listRes = await trpcQuery(server.url, "browserProfiles.projectDefaults");
+    const listRes = await trpcQuery(server.url, "browserProfiles.repoDefaults");
     const { defaults } = await trpcData<{
-      defaults: { projectName: string; profileId: string }[];
+      defaults: { repoName: string; profileId: string }[];
     }>(listRes);
-    expect(defaults).toContainEqual({ projectName: "beta", profileId: qa.id });
+    expect(defaults).toContainEqual({ repoName: "beta", profileId: qa.id });
     expect((await createBrowser(server.url, betaMain)).profileId).toBe(qa.id);
   });
 
-  it("deleting a profile moves its project and its tabs back to Default", async () => {
+  it("deleting a profile moves its repo and its tabs back to Default", async () => {
     const doomed = await createProfile(server.url, "Doomed");
     const tab = await createBrowser(server.url, alphaMain);
     await setTabProfile(server.url, tab.id, doomed.id);
-    expect(await projectDefault(server.url, "alpha")).toBe(doomed.id);
+    expect(await repoDefault(server.url, "alpha")).toBe(doomed.id);
 
     const res = await trpcMutate(server.url, "browserProfiles.remove", { profileId: doomed.id });
     expect(res.status).toBe(200);
 
-    expect(await projectDefault(server.url, "alpha")).toBeNull();
+    expect(await repoDefault(server.url, "alpha")).toBeNull();
     const getRes = await trpcQuery(server.url, "browsers.get", { browserId: tab.id });
     expect((await trpcData<{ browser: Browser }>(getRes)).browser.profileId).toBeNull();
     const listRes = await trpcQuery(server.url, "browserProfiles.list");
@@ -269,7 +269,7 @@ describe("browser profiles — per-project default", () => {
     });
     expect(unknown.status).toBe(404);
     const unknownCreate = await trpcMutate(server.url, "browsers.create", {
-      workspaceId: alphaMain,
+      worktreeId: alphaMain,
       profileId: "profile_missing",
     });
     expect(unknownCreate.status).toBe(404);
@@ -278,8 +278,8 @@ describe("browser profiles — per-project default", () => {
       profileId: null,
     });
     expect(unknownTab.status).toBe(404);
-    const unknownDefault = await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
-      projectName: "alpha",
+    const unknownDefault = await trpcMutate(server.url, "browserProfiles.setRepoDefault", {
+      repoName: "alpha",
       profileId: "profile_missing",
     });
     expect(unknownDefault.status).toBe(404);
@@ -319,23 +319,23 @@ describe("browser profiles — per-project default", () => {
     expect(accented.status).toBe(409);
   });
 
-  it("removing a project forgets its default profile", async () => {
+  it("removing a repo forgets its default profile", async () => {
     const profile = await createProfile(server.url, "Beta only");
-    const setRes = await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
-      projectName: "beta",
+    const setRes = await trpcMutate(server.url, "browserProfiles.setRepoDefault", {
+      repoName: "beta",
       profileId: profile.id,
     });
     expect(setRes.status).toBe(200);
-    expect(await projectDefault(server.url, "beta")).toBe(profile.id);
+    expect(await repoDefault(server.url, "beta")).toBe(profile.id);
 
-    const res = await trpcMutate(server.url, "projects.remove", { name: "beta" });
+    const res = await trpcMutate(server.url, "repos.remove", { name: "beta" });
     expect(res.status).toBe(200);
 
-    const listRes = await trpcQuery(server.url, "browserProfiles.projectDefaults");
+    const listRes = await trpcQuery(server.url, "browserProfiles.repoDefaults");
     const { defaults } = await trpcData<{
-      defaults: { projectName: string; profileId: string }[];
+      defaults: { repoName: string; profileId: string }[];
     }>(listRes);
-    expect(defaults.map((d) => d.projectName)).not.toContain("beta");
+    expect(defaults.map((d) => d.repoName)).not.toContain("beta");
   });
 
   it("never relays raw CDP for a tab in a browser profile", async () => {

@@ -6,7 +6,7 @@
  * Claude adapter's shape: a `default` row in the model and effort options.
  * The server resolves those rows from, in order: the session's Claude Code
  * transcript under `$HOME/.claude/projects/`, the environment and settings
- * files (`$HOME/.claude/settings.json`, the project's `.claude/` files, a
+ * files (`$HOME/.claude/settings.json`, the repo's `.claude/` files, a
  * `--settings` file on the CLI's command line), then what an earlier session
  * of the agent reported. `BAND_TEST_ACP_CLI_ARGS` makes the stub start a
  * stand-in CLI process whose command line carries a wrapper's flags.
@@ -16,14 +16,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ResolvedDefaults } from "@band-app/shared/chat-events";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  maxId,
-  runTurn,
-  seedAcpHome,
-  startAcpServer,
-  trpc,
-  WORKSPACE_ID,
-} from "./helpers/acp-chat";
+import { maxId, runTurn, seedAcpHome, startAcpServer, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
 let servers: ServerHandle[] = [];
@@ -141,7 +134,7 @@ describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () =
     expect(res.status).toBe(401);
   });
 
-  it("reads model and effort from the user and project settings files", async () => {
+  it("reads model and effort from the user and repo settings files", async () => {
     const h = home();
     writeJson(join(h, ".claude", "settings.json"), { model: "sonnet", effortLevel: "low" });
     writeJson(join(h, "repo", ".claude", "settings.json"), { effortLevel: "medium" });
@@ -150,7 +143,7 @@ describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () =
     });
     const server = await boot(h);
     const chatId = newChatId();
-    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: chatId });
+    await trpc(server.url, "chats.create", { worktreeId: WORKTREE_ID, id: chatId });
 
     // Before the chat has a session.
     expect((await sessionState(server.url, chatId)).resolvedDefaults).toEqual({
@@ -168,7 +161,7 @@ describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () =
     });
     const server = await boot(h, { ANTHROPIC_MODEL: "claude-fable-5-1" });
     const chatId = newChatId();
-    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: chatId });
+    await trpc(server.url, "chats.create", { worktreeId: WORKTREE_ID, id: chatId });
 
     expect((await sessionState(server.url, chatId)).resolvedDefaults).toEqual({
       model: "claude-fable-5-1",
@@ -262,7 +255,7 @@ describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () =
     await runTurn(server.url, newChatId(), "third");
 
     const fresh = newChatId();
-    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: fresh });
+    await trpc(server.url, "chats.create", { worktreeId: WORKTREE_ID, id: fresh });
 
     expect((await sessionState(server.url, fresh)).resolvedDefaults).toEqual({
       model: "claude-opus-5-5",
@@ -276,7 +269,7 @@ describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () =
     const server = await boot(h);
     const chatId = newChatId();
     await trpc(server.url, "chats.create", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       id: chatId,
       agent: "codex",
     });

@@ -21,7 +21,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -34,13 +34,13 @@ import {
 } from "./helpers/server";
 import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-composer-find-token";
-const COMPOSER_PROJECT = "composer";
-const FIND_PROJECT = "findchat";
-const COMPOSER_WORKSPACE = toWorkspaceId(COMPOSER_PROJECT, "main");
-const FIND_WORKSPACE = toWorkspaceId(FIND_PROJECT, "main");
+const COMPOSER_REPO = "composer";
+const FIND_REPO = "findchat";
+const COMPOSER_WORKTREE = toWorktreeId(COMPOSER_REPO, "main");
+const FIND_WORKTREE = toWorktreeId(FIND_REPO, "main");
 const FIND_CHAT_ID = "find-chat-deterministic-id";
 const FIND_SESSION_ID = "22222222-3333-4444-5555-666666666666";
 const NEEDLE = "zebra-token";
@@ -48,7 +48,7 @@ const NEEDLE = "zebra-token";
  *  user's prompt in 5. */
 const NEEDLE_TURNS = new Set([1, 5, 9, 17]);
 const TURNS = 20;
-/** A file in the composer workspace, opened beside the chat. */
+/** A file in the composer worktree, opened beside the chat. */
 const FILE = "notes.ts";
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -58,13 +58,13 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = [COMPOSER_PROJECT, FIND_PROJECT].map((name) => {
+  const repos = [COMPOSER_REPO, FIND_REPO].map((name) => {
     const path = join(tmpHome, name);
     mkdirSync(path, { recursive: true });
     return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
   });
-  writeFileSync(join(projects[0].path, FILE), `const ${NEEDLE.replace("-", "_")} = 1;\n`);
-  seedState(tmpHome, { projects });
+  writeFileSync(join(repos[0].path, FILE), `const ${NEEDLE.replace("-", "_")} = 1;\n`);
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -73,7 +73,7 @@ test.beforeAll(async () => {
 
   seedStubSession(tmpHome, {
     sessionId: FIND_SESSION_ID,
-    cwd: projects[1].path,
+    cwd: repos[1].path,
     turns: buildTurns(),
   });
 
@@ -95,12 +95,12 @@ test.beforeAll(async () => {
   });
 
   await trpcMutate(server.url, TOKEN, "chats.create", {
-    workspaceId: FIND_WORKSPACE,
+    worktreeId: FIND_WORKTREE,
     id: FIND_CHAT_ID,
     agent: "claude-code",
   });
   await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
-    workspaceId: FIND_WORKSPACE,
+    worktreeId: FIND_WORKTREE,
     chatId: FIND_CHAT_ID,
     sessionId: FIND_SESSION_ID,
   });
@@ -117,7 +117,7 @@ test("the prompt is one line with send in its corner and grows with more lines",
   page,
 }) => {
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(COMPOSER_WORKSPACE);
+  await chat.goto(COMPOSER_WORKTREE);
   await chat.waitForReady();
   await expect(chat.modeMenuButton).toBeVisible();
   await expect(chat.modelMenuButton).toBeVisible();
@@ -148,7 +148,7 @@ test("the prompt is one line with send in its corner and grows with more lines",
 
 test("the mode menu and model trigger carry no icons", async ({ page }) => {
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(COMPOSER_WORKSPACE);
+  await chat.goto(COMPOSER_WORKTREE);
   await chat.waitForReady();
 
   await expect(chat.modelMenuModel).toHaveText("Stub Small");
@@ -162,7 +162,7 @@ test("the mode menu and model trigger carry no icons", async ({ page }) => {
 
 test("the context ring is always shown and reports the agent's usage_update", async ({ page }) => {
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(COMPOSER_WORKSPACE);
+  await chat.goto(COMPOSER_WORKTREE);
   await chat.waitForReady();
 
   // Shown with no setting turned on, empty until the agent reports usage.
@@ -183,7 +183,7 @@ test("Cmd/Ctrl+F finds text in the conversation and steps through the matches", 
   page,
 }) => {
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(FIND_WORKSPACE);
+  await chat.goto(FIND_WORKTREE);
   await chat.waitForReady();
   await expect(chat.assistantMessage(replyText(TURNS - 1))).toBeVisible({ timeout: 30_000 });
 
@@ -236,15 +236,15 @@ test("Cmd/Ctrl+F in a chat opens the chat's find, not the find of a file beside 
   page,
 }) => {
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
-  await chat.goto(COMPOSER_WORKSPACE);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await chat.goto(COMPOSER_WORKTREE);
   await chat.waitForReady();
 
   // Split the chat to the right, then open the file in the new group: the
   // first chat and the file are both on screen.
   await chat.focusPrompt();
-  await workspace.pressSplitRight();
-  await workspace.openFileLeaf(FILE, COMPOSER_WORKSPACE);
+  await worktree.pressSplitRight();
+  await worktree.openFileLeaf(FILE, COMPOSER_WORKTREE);
 
   await chat.openFind();
   await expect(chat.find.root).toBeVisible();
@@ -253,7 +253,7 @@ test("Cmd/Ctrl+F in a chat opens the chat's find, not the find of a file beside 
   let fileFindOpened = false;
   try {
     await expect
-      .poll(() => workspace.findInFileOrPreviewBar.count(), { timeout: 1500 })
+      .poll(() => worktree.findInFileOrPreviewBar.count(), { timeout: 1500 })
       .toBeGreaterThan(0);
     fileFindOpened = true;
   } catch {

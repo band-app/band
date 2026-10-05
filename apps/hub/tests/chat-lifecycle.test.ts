@@ -54,7 +54,7 @@ function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
 
 // ---------------------------------------------------------------------------
 // Git helpers — a real git repo is required so `seedState` can register
-// a `git`-kind project whose workspaces resolve cleanly.
+// a `git`-kind repo whose worktrees resolve cleanly.
 // ---------------------------------------------------------------------------
 
 const gitEnv = {
@@ -83,7 +83,7 @@ function createGitRepo(parentDir: string, name: string): string {
 // SQLite peek — direct `panel_states` reads so a test can prove
 // `chats.create` actually wrote the saved chat-layout row to disk.
 //
-// The dockview layout row is keyed `${panelType}_${workspaceId}` per
+// The dockview layout row is keyed `${panelType}_${worktreeId}` per
 // `DockviewLayoutManager.layoutId` — mirrored here rather than re-derived
 // through tRPC so a regression that breaks the persistence path (and not
 // just the read path) is caught.
@@ -104,13 +104,13 @@ function readPanelState(
   }
 }
 
-function readChatLayoutRow(tmpHome: string, workspaceId: string): { state: string } | undefined {
-  return readPanelState(tmpHome, `chat_layout_${workspaceId}`);
+function readChatLayoutRow(tmpHome: string, worktreeId: string): { state: string } | undefined {
+  return readPanelState(tmpHome, `chat_layout_${worktreeId}`);
 }
 
 interface ChatRecord {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   name: string;
   status: "running" | "idle" | "stopped" | "error";
   labels: Record<string, string>;
@@ -123,13 +123,13 @@ interface ChatRecord {
 describe("chatLayout — populated by chats.create", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "createproj-main";
+  const worktreeId = "createproj-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-layout-create-");
     const repoPath = createGitRepo(tmpHome, "createproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "createproj",
           path: repoPath,
@@ -152,10 +152,10 @@ describe("chatLayout — populated by chats.create", () => {
 
   it("chats.create registers the chat panel in the saved chat layout", async () => {
     // Precondition: no layout row on disk yet.
-    expect(readChatLayoutRow(tmpHome, workspaceId)).toBeUndefined();
+    expect(readChatLayoutRow(tmpHome, worktreeId)).toBeUndefined();
 
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Layout-target",
     });
     expect(createRes.status).toBe(200);
@@ -164,13 +164,13 @@ describe("chatLayout — populated by chats.create", () => {
     // `chatService.create` calls `addToLayout` so a CLI-spawned chat
     // shows up in the dashboard without the user having to manually
     // add a tab — see `ChatService.create`. This server-side layout row
-    // is what `getOrCreateDefault` reads to resolve the workspace's
+    // is what `getOrCreateDefault` reads to resolve the worktree's
     // default chat; without this assertion a regression that dropped the
     // `addToLayout` write would go unnoticed. (The former `chatLayout.get`
     // tRPC read of this row was retired in issue #643 Phase 4 — clients
     // now persist center layout in localStorage — so the row is verified
     // directly on disk here rather than through the public API.)
-    const layoutRow = readChatLayoutRow(tmpHome, workspaceId);
+    const layoutRow = readChatLayoutRow(tmpHome, worktreeId);
     expect(layoutRow).toBeDefined();
     const layout = JSON.parse(layoutRow!.state) as {
       panels: Record<string, { params?: { chatId?: string } }>;
@@ -192,14 +192,14 @@ describe("chats — stop/resume status transitions", () => {
 
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "stopproj-main";
+  const worktreeId = "stopproj-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-stop-");
     const repoPath = createGitRepo(tmpHome, "stopproj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "stopproj",
           path: repoPath,
@@ -248,7 +248,7 @@ describe("chats — stop/resume status transitions", () => {
     // service-level `updateStatus("stopped")`. `abortTask` returns false
     // (no-op) and the assertion is purely about the persisted status.
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Idle stop target",
     });
     const { chat } = await trpcData<{ chat: ChatRecord }>(createRes);
@@ -259,7 +259,7 @@ describe("chats — stop/resume status transitions", () => {
     const stopData = await trpcData<{ ok: boolean }>(stopRes);
     expect(stopData.ok).toBe(true);
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const found = listData.chats.find((c) => c.id === chat.id);
     expect(found?.status).toBe("stopped");
@@ -267,7 +267,7 @@ describe("chats — stop/resume status transitions", () => {
 
   it("chats.resume flips a stopped chat back to idle", async () => {
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Resume target",
     });
     const { chat } = await trpcData<{ chat: ChatRecord }>(createRes);
@@ -278,7 +278,7 @@ describe("chats — stop/resume status transitions", () => {
     // `it` builds its own fresh chat to keep them order-independent
     // (vs. the cronjobs.test.ts pattern, which does share state).
     await trpcMutate(server.url, "chats.stop", { chatId: chat.id });
-    const afterStop = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const afterStop = await trpcQuery(server.url, "chats.list", { worktreeId });
     const afterStopData = await trpcData<{ chats: ChatRecord[] }>(afterStop);
     expect(afterStopData.chats.find((c) => c.id === chat.id)?.status).toBe("stopped");
 
@@ -287,7 +287,7 @@ describe("chats — stop/resume status transitions", () => {
     const resumeData = await trpcData<{ ok: boolean }>(resumeRes);
     expect(resumeData.ok).toBe(true);
 
-    const afterResume = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const afterResume = await trpcQuery(server.url, "chats.list", { worktreeId });
     const afterResumeData = await trpcData<{ chats: ChatRecord[] }>(afterResume);
     expect(afterResumeData.chats.find((c) => c.id === chat.id)?.status).toBe("idle");
   });
@@ -299,7 +299,7 @@ describe("chats — stop/resume status transitions", () => {
     // stop call so the tasks.list assertion below can find the failed
     // record.
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Running stop target",
     });
     const { chat } = await trpcData<{ chat: ChatRecord }>(createRes);
@@ -307,7 +307,7 @@ describe("chats — stop/resume status transitions", () => {
     // Submit a task via `chats.send`. The stub agent's turn waits for
     // `session/cancel`, so the task stays running until the stop call.
     const sendRes = await trpcMutate(server.url, "chats.send", {
-      workspaceId,
+      worktreeId,
       chatId: chat.id,
       message: "Run a long task",
     });
@@ -339,7 +339,7 @@ describe("chats — stop/resume status transitions", () => {
       .poll(
         async () => {
           const r = await trpcQuery(server.url, "tasks.list", {
-            workspaceId,
+            worktreeId,
             chatId: chat.id,
             status: "running",
           });
@@ -354,7 +354,7 @@ describe("chats — stop/resume status transitions", () => {
     // proves the abort path went all the way through `persistTask`, not
     // just the in-memory delete.
     const failedRes = await trpcQuery(server.url, "tasks.list", {
-      workspaceId,
+      worktreeId,
       chatId: chat.id,
       status: "failed",
     });

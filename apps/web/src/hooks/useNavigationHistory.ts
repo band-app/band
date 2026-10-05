@@ -3,15 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlatformCapabilities } from "@/dashboard";
 
 /**
- * Browser-like workspace history powering the title-bar back/forward buttons.
+ * Browser-like worktree history powering the title-bar back/forward buttons.
  *
- * Tracks which workspaces the user visits in a stack with a cursor.
+ * Tracks which worktrees the user visits in a stack with a cursor.
  * Navigating back/forward moves the cursor without pushing a new entry.
- * Any normal workspace visit truncates the forward stack — exactly like
+ * Any normal worktree visit truncates the forward stack — exactly like
  * a browser.
  *
- * Uses `capabilities.getWorkspaceHref()` to build the destination URL.
- * Post-#467, that's always the canonical `/workspace/$id` — there is no
+ * Uses `capabilities.getWorktreeHref()` to build the destination URL.
+ * Post-#467, that's always the canonical `/worktree/$id` — there is no
  * per-tab sub-path to restore anymore, since tab state lives in the
  * mobile layout's local React state and the desktop dockview renders
  * every panel regardless of URL.
@@ -20,13 +20,13 @@ import type { PlatformCapabilities } from "@/dashboard";
  * flags so callers can render UI controls (e.g. arrow buttons in the title bar).
  */
 
-const WS_PREFIX = "/workspace/";
+const WS_PREFIX = "/worktree/";
 
-/** Extract the decoded workspace ID from a pathname, or null if not on a workspace route. */
-function extractWorkspaceId(pathname: string): string | null {
+/** Extract the decoded worktree ID from a pathname, or null if not on a worktree route. */
+function extractWorktreeId(pathname: string): string | null {
   if (!pathname.startsWith(WS_PREFIX)) return null;
   const rest = pathname.slice(WS_PREFIX.length);
-  // The workspace ID is the first path segment (URL-encoded)
+  // The worktree ID is the first path segment (URL-encoded)
   const slash = rest.indexOf("/");
   const encoded = slash === -1 ? rest : rest.slice(0, slash);
   if (!encoded) return null;
@@ -58,9 +58,9 @@ export function useNavigationHistory(
   const [history, setHistory] = useState<HistoryState>(INITIAL_HISTORY);
   const navigatingRef = useRef(false);
 
-  // Track workspace changes → push onto the history stack (unless we caused it).
+  // Track worktree changes → push onto the history stack (unless we caused it).
   useEffect(() => {
-    const wsId = extractWorkspaceId(pathname);
+    const wsId = extractWorktreeId(pathname);
     if (!wsId) return;
 
     if (navigatingRef.current) {
@@ -69,7 +69,7 @@ export function useNavigationHistory(
     }
 
     setHistory((prev) => {
-      // Don't push if we're already looking at this workspace.
+      // Don't push if we're already looking at this worktree.
       if (prev.cursor >= 0 && prev.stack[prev.cursor] === wsId) return prev;
       // Truncate any forward entries and push.
       const stack = [...prev.stack.slice(0, prev.cursor + 1), wsId];
@@ -89,7 +89,7 @@ export function useNavigationHistory(
     });
     if (didMove && targetWsId) {
       navigatingRef.current = true;
-      const href = capabilities.getWorkspaceHref?.(targetWsId);
+      const href = capabilities.getWorktreeHref?.(targetWsId);
       if (href) routerNavigate(href);
     }
   }, [routerNavigate, capabilities]);
@@ -106,7 +106,7 @@ export function useNavigationHistory(
     });
     if (didMove && targetWsId) {
       navigatingRef.current = true;
-      const href = capabilities.getWorkspaceHref?.(targetWsId);
+      const href = capabilities.getWorktreeHref?.(targetWsId);
       if (href) routerNavigate(href);
     }
   }, [routerNavigate, capabilities]);

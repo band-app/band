@@ -1,21 +1,21 @@
 /**
- * End-to-end coverage for opening a file that lives OUTSIDE the workspace
+ * End-to-end coverage for opening a file that lives OUTSIDE the worktree
  * worktree from Quick Open (Cmd+P).
  *
  * Feature: when the Quick Open query is an absolute path to a file that
  * exists — e.g. `/tmp/notes.md` pasted in, or the absolute path a terminal /
  * chat link dispatches via `band:open-file` — the dialog resolves it against
- * the workspace (`workspace.resolvePath`) and offers to open it. A path
- * INSIDE the worktree opens as a normal workspace-relative tab; a path
+ * the worktree (`worktree.resolvePath`) and offers to open it. A path
+ * INSIDE the worktree opens as a normal worktree-relative tab; a path
  * OUTSIDE opens as an *external* tab (contents read via `host.readFile`,
  * same pipeline the CLI's `band open <abs>` uses). See `QuickOpenDialog.tsx`,
- * `workspace.resolvePath` / `editorService.resolvePath`, and
+ * `worktree.resolvePath` / `editorService.resolvePath`, and
  * `SharedDockviewLayout.handleOpenExternalFile`.
  *
  * Test architecture (per the repo's integration-test doctrine):
  *   - Boots the real production server against a fresh tmp home — no
  *     in-process React mounting, no tRPC mocking, no `page.route()`.
- *   - A real git worktree is the workspace; the "external" files are written
+ *   - A real git worktree is the worktree; the "external" files are written
  *     OUTSIDE the worktree root so they can only be reached by absolute path.
  *   - A `.ts` external file gives a deterministic CodeMirror content read;
  *     the user's literal `/tmp/…​.md` example is covered separately (markdown
@@ -26,14 +26,14 @@
  *     (`terminal-file-links.ts`) and chat file links
  *     (`ai-elements/file-link-components.tsx`) both fire. The real
  *     terminal-click variant lives in `terminal-external-file-link.spec.ts`.
- *   - All locators/actions go through the WorkspacePage / FileViewerPage
+ *   - All locators/actions go through the WorktreePage / FileViewerPage
  *     page objects.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -45,13 +45,13 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-quick-open-external-file-token";
-const PROJECT = "quick-open-external-repo";
+const REPO = "quick-open-external-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH = "feature";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 // Distinctive marker so the CodeMirror render of the `.ts` external file is
 // unambiguous.
@@ -72,16 +72,16 @@ let externalMdPath!: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
-  // A single in-worktree file so the workspace is non-empty and Quick Open's
+  // A single in-worktree file so the worktree is non-empty and Quick Open's
   // worktree search has a corpus (the external paths must NOT match it).
   writeFileSync(join(repoPath, "inside.ts"), "export const inside = 1;\n");
   git(repoPath, ["add", "."], tmpHome);
   git(repoPath, ["commit", "-m", "seed"], tmpHome);
 
-  worktreePath = join(tmpHome, `${PROJECT}-${BRANCH}`);
+  worktreePath = join(tmpHome, `${REPO}-${BRANCH}`);
   git(repoPath, ["worktree", "add", "-b", BRANCH, worktreePath], tmpHome);
 
   // Both sit at the tmp-home root — outside the repo and the worktree, so
@@ -92,9 +92,9 @@ test.beforeAll(async () => {
   writeFileSync(externalMdPath, "# task\n\nrepair the terminal\n");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [
@@ -126,41 +126,41 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
   test("typing an existing absolute path offers to open it and lands an external tab", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     // Nothing open before we begin — poll for settled state.
     await expect
-      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .poll(async () => await worktreePage.readOpenTabPaths(WORKTREE), { timeout: 5_000 })
       .not.toContain(externalTsPath);
 
-    await workspacePage.openQuickOpen();
-    await workspacePage.fillQuickOpen(externalTsPath);
+    await worktreePage.openQuickOpen();
+    await worktreePage.fillQuickOpen(externalTsPath);
 
     // The offer appears once the probe resolves, and shows the path.
-    await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
-    await expect(workspacePage.quickOpenPathItem).toContainText(externalTsPath);
+    await expect(worktreePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
+    await expect(worktreePage.quickOpenPathItem).toContainText(externalTsPath);
 
     // Positive anchor: the dialog is open before we accept + assert dismissal.
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
+    await expect(worktreePage.quickOpenDialog()).toBeVisible();
 
     // Accept the offer.
-    await workspacePage.openQuickOpenPathItem();
+    await worktreePage.openQuickOpenPathItem();
 
     // Observable outcome: the absolute path is now the active external tab,
     // the Files panel is active, and the editor shows the file's contents.
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE))?.active, {
         timeout: 15_000,
       })
       .toBe(externalTsPath);
     // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
     // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
-    await expect(workspacePage.fileTab(externalTsPath)).toBeAttached({
+    await expect(worktreePage.fileTab(externalTsPath)).toBeAttached({
       timeout: 15_000,
     });
-    await expect(workspacePage.quickOpenDialog()).toBeHidden();
+    await expect(worktreePage.quickOpenDialog()).toBeHidden();
 
     const fileViewer = new FileViewerPage(page);
     await fileViewer.expectContent(TS_MARKER);
@@ -169,16 +169,16 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
   test("a band:open-file event with an absolute .md path auto-opens it as an external tab (link path)", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     // The same event a terminal or chat file link dispatches — here the
     // user's literal example: an absolute path to a `.md` file, with a
     // `:line` suffix that `parseFileLocation` strips off the tab path.
-    await workspacePage.dispatchOpenFileEvent({
+    await worktreePage.dispatchOpenFileEvent({
       filename: `${externalMdPath}:2`,
-      workspaceId: WORKSPACE,
+      worktreeId: WORKTREE,
     });
 
     // Single external match → opened directly, the dialog never shows. The
@@ -186,65 +186,65 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
     // a preview rather than a CodeMirror buffer, so we assert the tab opened
     // and the viewer mounted rather than editor text.
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE))?.active, {
         timeout: 15_000,
       })
       .toBe(externalMdPath);
     // Positive DOM anchor (viewer mounted) before the negative dismissal check.
     await new FileViewerPage(page).expectVisible();
-    await expect(workspacePage.quickOpenDialog()).toBeHidden();
+    await expect(worktreePage.quickOpenDialog()).toBeHidden();
   });
 
   test("a band:open-file event for a non-existent absolute path reveals the dialog with no match", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     const missing = join(tmpHome!, "does-not-exist.md");
-    await workspacePage.dispatchOpenFileEvent({ filename: missing, workspaceId: WORKSPACE });
+    await worktreePage.dispatchOpenFileEvent({ filename: missing, worktreeId: WORKTREE });
 
     // Positive anchor: the dialog is revealed AND settled with the query set
     // (the missing path is seeded into the input) — so the subsequent
     // "no offer" assertion proves the resolver found nothing, not that the
     // query never arrived.
-    await expect(workspacePage.quickOpenDialog()).toBeVisible({ timeout: 15_000 });
-    await expect(workspacePage.quickOpenInput).toHaveValue(missing);
+    await expect(worktreePage.quickOpenDialog()).toBeVisible({ timeout: 15_000 });
+    await expect(worktreePage.quickOpenInput).toHaveValue(missing);
     // No file to auto-open → no external-open row (the path isn't a real file).
-    await expect(workspacePage.quickOpenPathItem).toBeHidden();
-    expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(missing);
+    await expect(worktreePage.quickOpenPathItem).toBeHidden();
+    expect(await worktreePage.readOpenTabPaths(WORKTREE)).not.toContain(missing);
   });
 
   test("typing an absolute path INSIDE the worktree opens it as a normal (relative) tab", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     // An absolute path that happens to point inside the current worktree.
     const insideAbs = join(worktreePath, "inside.ts");
-    await workspacePage.openQuickOpen();
-    await workspacePage.fillQuickOpen(insideAbs);
+    await worktreePage.openQuickOpen();
+    await worktreePage.fillQuickOpen(insideAbs);
 
-    // The offer resolves the path back to its workspace-relative form —
+    // The offer resolves the path back to its worktree-relative form —
     // NOT the absolute path — because the file lives inside the worktree.
-    await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
-    await expect(workspacePage.quickOpenPathItem).toContainText("inside.ts");
-    await workspacePage.openQuickOpenPathItem();
+    await expect(worktreePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
+    await expect(worktreePage.quickOpenPathItem).toContainText("inside.ts");
+    await worktreePage.openQuickOpenPathItem();
 
-    // Observable outcome: it opens as a NORMAL workspace tab keyed by the
+    // Observable outcome: it opens as a NORMAL worktree tab keyed by the
     // relative path (not an external tab keyed by the absolute path).
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE))?.active, {
         timeout: 15_000,
       })
       .toBe("inside.ts");
-    expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(insideAbs);
+    expect(await worktreePage.readOpenTabPaths(WORKTREE)).not.toContain(insideAbs);
     // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
     // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
-    await expect(workspacePage.fileTab("inside.ts")).toBeAttached({
+    await expect(worktreePage.fileTab("inside.ts")).toBeAttached({
       timeout: 15_000,
     });
 

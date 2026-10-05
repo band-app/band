@@ -39,6 +39,7 @@ describe("hosts migration", () => {
     const db = drizzle({ client: sqlite });
     migrate(db, { migrationsFolder: before });
 
+    // The seed uses the names from before the repo and worktree rename migration.
     sqlite.exec(`
       INSERT INTO projects (name, path, default_branch, sort_order) VALUES ('proj', '/repos/proj', 'main', 0);
       INSERT INTO worktrees (project_name, name, branch, path) VALUES ('proj', 'feat', 'feat', '/repos/proj-feat');
@@ -55,7 +56,7 @@ describe("hosts migration", () => {
     const one = (sql: string) => sqlite.prepare(sql).all();
     for (const table of [
       "worktrees",
-      "workspace_statuses",
+      "worktree_statuses",
       "usage_events",
       "usage_scan_state",
       "cronjobs",
@@ -67,10 +68,10 @@ describe("hosts migration", () => {
     expect(one("SELECT id, name, mode, status FROM hosts")).toEqual([
       { id: "local", name: "Local", mode: "attached", status: "online" },
     ]);
-    expect(one("SELECT project_name, host_id, path FROM project_hosts")).toEqual([
-      { project_name: "proj", host_id: "local", path: "/repos/proj" },
+    expect(one("SELECT repo_name, host_id, path FROM repo_hosts")).toEqual([
+      { repo_name: "proj", host_id: "local", path: "/repos/proj" },
     ]);
-    expect(one("SELECT path FROM projects")).toEqual([{ path: "/repos/proj" }]);
+    expect(one("SELECT path FROM repos")).toEqual([{ path: "/repos/proj" }]);
     expect(one("SELECT path FROM worktrees")).toEqual([{ path: "/repos/proj-feat" }]);
     expect(one("SELECT last_scanned_updated_at AS v FROM usage_scan_state")).toEqual([{ v: 5 }]);
   });

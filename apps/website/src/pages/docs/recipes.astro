@@ -5,37 +5,37 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Recipes &amp; Workflows</h1>
   <p>
     This page collects practical workflows for common development scenarios with Band.
-    Each recipe describes a concrete pattern you can adopt and adapt to your projects.
+    Each recipe describes a concrete pattern you can adopt and adapt to your repos.
   </p>
 
   <h2>Feature Branch Workflow</h2>
   <p>
-    Use Band's workspace model to isolate feature work on dedicated branches with their
+    Use Band's worktree model to isolate feature work on dedicated branches with their
     own git worktrees.
   </p>
   <ol>
-    <li>Open the Band dashboard and select your project.</li>
-    <li>Click <strong>New Workspace</strong> and enter your feature branch name (e.g., <code>feat/user-profiles</code>). Band creates a git worktree for the branch.</li>
+    <li>Open the Band dashboard and select your repo.</li>
+    <li>Click <strong>New Worktree</strong> and enter your feature branch name (e.g., <code>feat/user-profiles</code>). Band creates a git worktree for the branch.</li>
     <li>Submit a task with your feature requirements: "Implement user profile page with avatar upload, bio field, and settings form."</li>
-    <li>Review the agent's output in real time. Once the task completes, open the workspace in your IDE to inspect the changes.</li>
+    <li>Review the agent's output in real time. Once the task completes, open the worktree in your IDE to inspect the changes.</li>
     <li>Queue follow-up tasks for refinements: "Add validation to the bio field — max 500 characters — and display a character counter."</li>
     <li>When the feature is ready, create a pull request directly from the dashboard or your terminal.</li>
   </ol>
 
-  <h2>Parallel Agent Execution Across Workspaces</h2>
+  <h2>Parallel Agent Execution Across Worktrees</h2>
   <p>
-    Band allows one task per workspace, but you can run tasks across multiple workspaces
+    Band allows one task per worktree, but you can run tasks across multiple worktrees
     simultaneously. This is useful for working on independent features in parallel.
   </p>
   <ol>
-    <li>Create multiple workspaces for your project, each on a different feature branch.</li>
-    <li>Submit tasks to each workspace. Band spawns a separate agent instance for each one.</li>
-    <li>Monitor all running tasks from the dashboard. Each workspace shows its agent's status and output independently.</li>
-    <li>As tasks complete, review the results in each workspace and submit follow-up prompts as needed.</li>
+    <li>Create multiple worktrees for your repo, each on a different feature branch.</li>
+    <li>Submit tasks to each worktree. Band spawns a separate agent instance for each one.</li>
+    <li>Monitor all running tasks from the dashboard. Each worktree shows its agent's status and output independently.</li>
+    <li>As tasks complete, review the results in each worktree and submit follow-up prompts as needed.</li>
   </ol>
   <p>
     This pattern works well when you have a backlog of independent issues. Create a
-    workspace per issue, submit the task, and let the agents work in parallel.
+    worktree per issue, submit the task, and let the agents work in parallel.
   </p>
 
   <h2>Automated PR Review Workflow</h2>
@@ -43,21 +43,21 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     Use cronjobs to automatically review incoming pull requests on a schedule.
   </p>
   <ol>
-    <li>Create a project-scoped cronjob with the name "PR Review".</li>
+    <li>Create a repo-scoped cronjob with the name "PR Review".</li>
     <li>Set the prompt to: "List all open pull requests. For each one, review the diff and leave a comment summarizing potential issues, missing tests, and style concerns."</li>
     <li>Set the cron expression to <code>0 9 * * 1-5</code> (every weekday at 9 AM).</li>
-    <li>Enable the job. Every weekday morning, Band submits the review task to the default branch workspace.</li>
+    <li>Enable the job. Every weekday morning, Band submits the review task to the default branch worktree.</li>
   </ol>
 
   <h2>Backlog Processing with Multiple Agents</h2>
   <p>
-    Process a queue of issues from your issue tracker by assigning each to a workspace.
+    Process a queue of issues from your issue tracker by assigning each to a worktree.
   </p>
   <ol>
     <li>From your issue tracker, identify a batch of issues suitable for agent work (bug fixes, refactors, small features).</li>
-    <li>For each issue, create a workspace with a branch named after the issue (e.g., <code>fix/issue-142</code>).</li>
-    <li>Submit a task to each workspace referencing the issue: "Fix issue #142: the login form does not validate email format. Add regex validation and display an error message."</li>
-    <li>Band runs agents in parallel across all workspaces. Monitor progress from the dashboard.</li>
+    <li>For each issue, create a worktree with a branch named after the issue (e.g., <code>fix/issue-142</code>).</li>
+    <li>Submit a task to each worktree referencing the issue: "Fix issue #142: the login form does not validate email format. Add regex validation and display an error message."</li>
+    <li>Band runs agents in parallel across all worktrees. Monitor progress from the dashboard.</li>
     <li>As agents complete, review the changes and create pull requests for the ones that look good.</li>
   </ol>
 
@@ -69,15 +69,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
   <ol>
     <li>Ensure the Band server is reachable from your CI runner — set <code>BAND_SERVER_URL</code> and <code>BAND_TOKEN</code> if it's behind a tunnel.</li>
-    <li>Create or reuse a workspace, then send a message to its chat pane. The recommended one-shot pattern is to combine both in <code>workspaces create</code>:
-      <pre><code>band workspaces create my-app ci/auto-fix \
+    <li>Create or reuse a worktree, then send a message to its chat pane. The recommended one-shot pattern is to combine both in <code>worktrees create</code>:
+      <pre><code>band worktrees create my-app ci/auto-fix \
   --prompt "Run the full test suite and fix any failures" \
-  --output json | jq -r .workspaceId</code></pre>
+  --output json | jq -r .worktreeId</code></pre>
     </li>
     <li>Stream the chat's running task and exit when it finishes:
       <pre><code>band chats watch | jq -r 'select(.type == "session-result") | .reason'</code></pre>
     </li>
-    <li>Inspect the resulting branch (push it, open a PR) or remove the workspace if the run failed.</li>
+    <li>Inspect the resulting branch (push it, open a PR) or remove the worktree if the run failed.</li>
   </ol>
   <p>
     This pattern is useful for automated fix-and-retry workflows: if CI fails, trigger
@@ -86,17 +86,17 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>Using Band with Monorepos</h2>
   <p>
-    Band works naturally with monorepos because projects in Band map to git repositories,
-    and workspaces map to branches. For monorepos with multiple packages:
+    Band works naturally with monorepos because repos in Band map to git repositories,
+    and worktrees map to branches. For monorepos with multiple packages:
   </p>
   <ol>
-    <li>Add your monorepo as a single project in Band.</li>
-    <li>Create workspaces for each feature or fix, just as you would in a single-package repo.</li>
+    <li>Add your monorepo as a single repo in Band.</li>
+    <li>Create worktrees for each feature or fix, just as you would in a single-package repo.</li>
     <li>In your task prompts, specify which package the agent should focus on: "In the <code>packages/api</code> directory, add rate limiting to the /users endpoint."</li>
-    <li>Use your project's <code>CLAUDE.md</code> file to document monorepo conventions — workspace structure, shared dependencies, build commands — so the agent follows them automatically.</li>
+    <li>Use your repo's <code>CLAUDE.md</code> file to document monorepo conventions — worktree structure, shared dependencies, build commands — so the agent follows them automatically.</li>
   </ol>
   <p>
-    For very large monorepos, consider creating separate Band projects for independent
+    For very large monorepos, consider creating separate Band repos for independent
     sub-repositories if they have distinct git histories, or use the additional
     directories feature to give the agent access to shared configuration.
   </p>

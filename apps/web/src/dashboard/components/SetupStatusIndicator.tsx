@@ -15,7 +15,7 @@ export function SetupStatusIndicator({ setup }: Props) {
         <TooltipTrigger asChild>
           <Loader className="size-3.5 shrink-0 text-blue-600 dark:text-blue-400 animate-spin" />
         </TooltipTrigger>
-        <TooltipContent side="top">Setting up workspace...</TooltipContent>
+        <TooltipContent side="top">Setting up worktree...</TooltipContent>
       </Tooltip>
     );
   }

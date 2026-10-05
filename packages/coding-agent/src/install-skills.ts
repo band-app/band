@@ -11,7 +11,7 @@ export const OPENCODE_DEFAULT_BINARY = "opencode";
  * Resolve the *highest-priority global* skills directory for a coding-agent
  * `type` — i.e. where new SKILL.md files should be installed so the agent
  * picks them up with maximum precedence (over lower-tier global fallbacks
- * but still below project-level skills).
+ * but still below repo-level skills).
  *
  *   - `claude-code` → `~/.claude/skills` (personal scope, see
  *     https://code.claude.com/docs/en/skills).
@@ -19,7 +19,7 @@ export const OPENCODE_DEFAULT_BINARY = "opencode";
  *     `.system/` subfolder is reserved for OpenAI-shipped skills). Reads
  *     `CODEX_HOME` at call time so test overrides take effect. See
  *     https://developers.openai.com/codex/skills.
- *   - `gemini-cli` → `~/.gemini/skills` (not affected by workspace trust).
+ *   - `gemini-cli` → `~/.gemini/skills` (not affected by worktree trust).
  *     See https://geminicli.com/docs/cli/skills/.
  *   - `opencode` → `~/.config/opencode/skills`, the highest-priority
  *     *global* entry in OpenCode's resolution order, so we don't pollute

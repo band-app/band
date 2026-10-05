@@ -42,7 +42,7 @@
  *      validates (VS Code, Sublime, etc.).
  *
  *   2. Short-path tiebreaker. Among equally-scored paths, prefer the
- *      shorter one (closer to the project root). Small enough that it
+ *      shorter one (closer to the repo root). Small enough that it
  *      never overturns a real score difference.
  *
  *   Because the filename bonus can change relative ordering vs fzf's
@@ -73,7 +73,7 @@ const BONUS_FILENAME_CHAR = 3;
 
 /**
  * Length tiebreaker — among equally-scored results, prefer shorter
- * paths (closer to the project root). The factor is small enough that
+ * paths (closer to the repo root). The factor is small enough that
  * it never overturns a real score difference; for a 150-char path it
  * shifts the score by at most ~1.5. Mirrors the constant in the
  * previous DP implementation exactly.

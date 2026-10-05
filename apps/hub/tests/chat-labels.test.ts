@@ -24,13 +24,13 @@ import {
 //   • cronjobs.trigger creates a chat tagged with `band:cronId` on first
 //     fire, reuses it on subsequent fires, and recreates it cleanly when
 //     deleted between fires.
-//   • Two cronjobs in the same workspace produce two distinct chats.
+//   • Two cronjobs in the same worktree produce two distinct chats.
 
 const DEFAULT_TOKEN = "chat-labels-test-token";
 
 // ---------------------------------------------------------------------------
 // tRPC HTTP helpers — `trpcMutate` and `trpcQuery` live in
-// `./helpers/server` (shared with `workspace-remove-detached.test.ts`).
+// `./helpers/server` (shared with `worktree-remove-detached.test.ts`).
 // The wrappers below bake in `DEFAULT_TOKEN` so call sites in this suite
 // don't have to thread it through every invocation.
 // ---------------------------------------------------------------------------
@@ -87,15 +87,15 @@ interface ChatRecord {
 describe("chats — label round-trip", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "myproject-main";
+  const worktreeId = "myrepo-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
-    const repoPath = createGitRepo(tmpHome, "myproject");
+    const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "myproject",
+          name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -121,14 +121,14 @@ describe("chats — label round-trip", () => {
     const res = await fetch(`${server.url}/trpc/chats.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId, labels: { phase: "plan" } }),
+      body: JSON.stringify({ worktreeId, labels: { phase: "plan" } }),
     });
     expect(res.status).toBe(401);
   });
 
   it("creates a chat with labels and persists them through chats.list", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Tagged chat",
       labels: { phase: "plan", priority: "high" },
     });
@@ -136,7 +136,7 @@ describe("chats — label round-trip", () => {
     const data = await trpcData<{ chat: ChatRecord }>(res);
     expect(data.chat.labels).toEqual({ phase: "plan", priority: "high" });
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const found = listData.chats.find((c) => c.id === data.chat.id);
     expect(found?.labels).toEqual({ phase: "plan", priority: "high" });
@@ -144,7 +144,7 @@ describe("chats — label round-trip", () => {
 
   it("returns empty labels {} for chats created without labels (legacy parity)", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Bare chat",
     });
     expect(res.status).toBe(200);
@@ -155,7 +155,7 @@ describe("chats — label round-trip", () => {
   it("survives a server restart — labels rehydrate from SQLite", async () => {
     // Create a labeled chat
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Restart-survivor",
       labels: { kind: "rehydration-test" },
     });
@@ -166,7 +166,7 @@ describe("chats — label round-trip", () => {
     await server.close();
     server = await startServer({ tmpHome });
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const found = listData.chats.find((c) => c.id === created.id);
     expect(found?.labels).toEqual({ kind: "rehydration-test" });
@@ -174,7 +174,7 @@ describe("chats — label round-trip", () => {
 
   it("chats.update replaces the full label set", async () => {
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Update-target",
       labels: { phase: "plan" },
     });
@@ -191,7 +191,7 @@ describe("chats — label round-trip", () => {
 
   it("chats.update with labels: {} clears all labels", async () => {
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Clear-target",
       labels: { phase: "plan" },
     });
@@ -222,14 +222,14 @@ describe("chats — label round-trip", () => {
     // the validateLabels normalization, not happenstance from V8's
     // own iteration order.
     const createRes = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       name: "Sorted",
       labels: { zeta: "z", alpha: "a", mu: "m" },
     });
     expect(createRes.status).toBe(200);
     const { chat: created } = await trpcData<{ chat: ChatRecord }>(createRes);
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const found = listData.chats.find((c) => c.id === created.id);
     expect(found?.labels).toBeDefined();
@@ -244,15 +244,15 @@ describe("chats — label round-trip", () => {
 describe("chats — label validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "myproject-main";
+  const worktreeId = "myrepo-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
-    const repoPath = createGitRepo(tmpHome, "myproject");
+    const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "myproject",
+          name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -273,7 +273,7 @@ describe("chats — label validation", () => {
 
   it("rejects label keys using the reserved band: prefix from tRPC", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { "band:cronId": "cj_user_attempt" },
     });
     expect(res.status).toBe(400);
@@ -284,13 +284,13 @@ describe("chats — label validation", () => {
   it("rejects more than 20 keys", async () => {
     const labels: Record<string, string> = {};
     for (let i = 0; i < 21; i++) labels[`key${i}`] = "v";
-    const res = await trpcMutate(server.url, "chats.create", { workspaceId, labels });
+    const res = await trpcMutate(server.url, "chats.create", { worktreeId, labels });
     expect(res.status).toBe(400);
   });
 
   it("rejects keys with disallowed characters", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { "bad key!": "v" },
     });
     expect(res.status).toBe(400);
@@ -298,7 +298,7 @@ describe("chats — label validation", () => {
 
   it("rejects empty keys", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { "": "v" },
     });
     expect(res.status).toBe(400);
@@ -306,7 +306,7 @@ describe("chats — label validation", () => {
 
   it("rejects empty values", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { phase: "" },
     });
     expect(res.status).toBe(400);
@@ -315,7 +315,7 @@ describe("chats — label validation", () => {
   it("rejects values exceeding 256 chars", async () => {
     const big = "x".repeat(257);
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { phase: big },
     });
     expect(res.status).toBe(400);
@@ -323,7 +323,7 @@ describe("chats — label validation", () => {
 
   it("rejects non-printable values (control characters)", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { phase: "plan\nwith-newline" },
     });
     expect(res.status).toBe(400);
@@ -331,7 +331,7 @@ describe("chats — label validation", () => {
 
   it("accepts colons in keys (namespaced labels)", async () => {
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { "user:phase": "plan" },
     });
     expect(res.status).toBe(200);
@@ -345,7 +345,7 @@ describe("chats — label validation", () => {
     // rewrite (e.g. introducing the `u` flag) that misorders the
     // character class doesn't silently start rejecting kebab-case.
     const res = await trpcMutate(server.url, "chats.create", {
-      workspaceId,
+      worktreeId,
       labels: { "my-feature-flag": "on", priority: "p1" },
     });
     expect(res.status).toBe(200);
@@ -361,15 +361,15 @@ describe("chats — label validation", () => {
 describe("chats — legacy panel_states rows load with empty labels", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "myproject-main";
+  const worktreeId = "myrepo-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
-    const repoPath = createGitRepo(tmpHome, "myproject");
+    const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "myproject",
+          name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -400,9 +400,9 @@ describe("chats — legacy panel_states rows load with empty labels", () => {
       });
       sqlite
         .prepare(
-          "INSERT INTO panel_states (id, workspace_id, panel_type, state, labels, created_at, updated_at) VALUES (?, ?, 'chat', ?, NULL, ?, ?)",
+          "INSERT INTO panel_states (id, worktree_id, panel_type, state, labels, created_at, updated_at) VALUES (?, ?, 'chat', ?, NULL, ?, ?)",
         )
-        .run("chat_legacy_1", workspaceId, chatState, now, now);
+        .run("chat_legacy_1", worktreeId, chatState, now, now);
     } finally {
       sqlite.close();
     }
@@ -416,7 +416,7 @@ describe("chats — legacy panel_states rows load with empty labels", () => {
   });
 
   it("loads a NULL-labels row as {} through chats.list", async () => {
-    const res = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const res = await trpcQuery(server.url, "chats.list", { worktreeId });
     const data = await trpcData<{ chats: ChatRecord[] }>(res);
     const legacy = data.chats.find((c) => c.id === "chat_legacy_1");
     expect(legacy).toBeDefined();
@@ -442,14 +442,14 @@ describe("cronjobs — labeled chat dispatch", () => {
   let tmpHome: string;
   let jobId: string;
   let secondJobId: string;
-  const workspaceId = "triggerproj-main";
+  const worktreeId = "triggerproj-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "triggerproj",
           path: repoPath,
@@ -471,7 +471,7 @@ describe("cronjobs — labeled chat dispatch", () => {
       name: "Daily check",
       prompt: "Run automated check",
       cronExpression: "0 0 * * *",
-      scope: "project",
+      scope: "repo",
     });
     const data = await trpcData<{ job: { id: string } }>(createRes);
     jobId = data.job.id;
@@ -481,7 +481,7 @@ describe("cronjobs — labeled chat dispatch", () => {
       name: "Other check",
       prompt: "Run other automated check",
       cronExpression: "30 0 * * *",
-      scope: "project",
+      scope: "repo",
     });
     const secondData = await trpcData<{ job: { id: string } }>(secondRes);
     secondJobId = secondData.job.id;
@@ -503,7 +503,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     await expect
       .poll(
         async () => {
-          const res = await trpcQuery(server.url, "chats.list", { workspaceId });
+          const res = await trpcQuery(server.url, "chats.list", { worktreeId });
           const data = await trpcData<{
             chats: Array<{ id: string; status: string }>;
           }>(res);
@@ -516,7 +516,7 @@ describe("cronjobs — labeled chat dispatch", () => {
   }
 
   it("first trigger creates a chat tagged with band:cronId", async () => {
-    const beforeRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const beforeRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const beforeData = await trpcData<{ chats: ChatRecord[] }>(beforeRes);
     const matchingBefore = beforeData.chats.filter((c) => c.labels[`band:cronId`] === jobId);
     expect(matchingBefore).toHaveLength(0);
@@ -526,11 +526,11 @@ describe("cronjobs — labeled chat dispatch", () => {
       id: jobId,
     });
     expect(res.status).toBe(200);
-    const triggerData = await trpcData<{ chatId: string; workspaceId: string }>(res);
-    expect(triggerData.workspaceId).toBe(workspaceId);
+    const triggerData = await trpcData<{ chatId: string; worktreeId: string }>(res);
+    expect(triggerData.worktreeId).toBe(worktreeId);
     expect(triggerData.chatId).toMatch(/^chat_/);
 
-    const afterRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const afterRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const afterData = await trpcData<{ chats: ChatRecord[] }>(afterRes);
     const matching = afterData.chats.filter((c) => c.labels[`band:cronId`] === jobId);
     expect(matching).toHaveLength(1);
@@ -553,7 +553,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(res.status).toBe(200);
     const triggerData = await trpcData<{ chatId: string }>(res);
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const matching = listData.chats.filter((c) => c.labels[`band:cronId`] === jobId);
     expect(matching).toHaveLength(1);
@@ -570,7 +570,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     // omitting `band:cronId`) would silently orphan the chat from its
     // cronjob. `updateChat` merges existing reserved labels back into
     // every user-facing payload to keep the invariant lifecycle-wide.
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const cronChat = listData.chats.find((c) => c.labels[`band:cronId`] === jobId);
     expect(cronChat).toBeDefined();
@@ -595,7 +595,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(Object.keys(cleared.chat.labels)).toEqual([`band:cronId`]);
   });
 
-  it("a second cronjob in the same workspace gets its own chat", async () => {
+  it("a second cronjob in the same worktree gets its own chat", async () => {
     const res = await trpcMutate(server.url, "cronjobs.trigger", {
       key: "triggerproj",
       id: secondJobId,
@@ -603,7 +603,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(res.status).toBe(200);
     const triggerData = await trpcData<{ chatId: string }>(res);
 
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
 
     const firstJobChats = listData.chats.filter((c) => c.labels[`band:cronId`] === jobId);
@@ -619,7 +619,7 @@ describe("cronjobs — labeled chat dispatch", () => {
 
   it("deleting the cron chat causes the next trigger to recreate it", async () => {
     // Look up the existing cron chat for `jobId`.
-    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
     const existing = listData.chats.find((c) => c.labels[`band:cronId`] === jobId);
     expect(existing).toBeDefined();
@@ -629,7 +629,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     const removeRes = await trpcMutate(server.url, "chats.remove", { chatId: oldChatId });
     expect(removeRes.status).toBe(200);
 
-    const afterDeleteRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const afterDeleteRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const afterDeleteData = await trpcData<{ chats: ChatRecord[] }>(afterDeleteRes);
     expect(afterDeleteData.chats.filter((c) => c.labels[`band:cronId`] === jobId)).toHaveLength(0);
 
@@ -642,7 +642,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     const triggerData = await trpcData<{ chatId: string }>(triggerRes);
     expect(triggerData.chatId).not.toBe(oldChatId);
 
-    const finalRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const finalRes = await trpcQuery(server.url, "chats.list", { worktreeId });
     const finalData = await trpcData<{ chats: ChatRecord[] }>(finalRes);
     const matching = finalData.chats.filter((c) => c.labels[`band:cronId`] === jobId);
     expect(matching).toHaveLength(1);

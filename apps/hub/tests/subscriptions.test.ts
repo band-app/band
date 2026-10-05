@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import type { SubscriptionEvent } from "../src/server/infra/subscriptions/event";
@@ -21,16 +21,16 @@ import { chatService } from "../src/server/services/chat-service";
 import { loadState, saveState } from "../src/server/services/state";
 import { subscriptionService } from "../src/server/services/subscription-service";
 import { submitOrQueueTask } from "../src/server/services/task-service";
-import { workspaceService } from "../src/server/services/workspace-service";
+import { worktreeService } from "../src/server/services/worktree-service";
 import { TEST_TOKEN, writeStubScenario } from "./helpers/acp-chat";
 import { assertTempBandHome } from "./helpers/band-home";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const PROJECT = "testproject";
-const MAIN = toWorkspaceId(PROJECT, "main");
-const FEATURE = toWorkspaceId(PROJECT, "feat");
+const REPO = "testrepo";
+const MAIN = toWorktreeId(REPO, "main");
+const FEATURE = toWorktreeId(REPO, "feat");
 
 const gitEnv = {
   ...process.env,
@@ -96,7 +96,7 @@ function subscribeChat(key: string, over: Record<string, unknown> = {}) {
   const chat = chatService.create(MAIN);
   const sub = subscriptionService.create({
     chatId: chat.id,
-    workspaceId: MAIN,
+    worktreeId: MAIN,
     source: "github",
     filterKey: key,
     coalesceSeconds: 0,
@@ -117,9 +117,9 @@ beforeAll(() => {
   const featurePath = join(home, "repo-feat");
   git(repo, ["worktree", "add", "-b", "feat", featurePath]);
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [
@@ -240,7 +240,7 @@ describe("subscriptions", () => {
   it("S5: an event for a chat with a running turn queues behind it", async () => {
     const key = uniqueKey();
     const { chat } = subscribeChat(key);
-    submitOrQueueTask({ workspaceId: MAIN, chatId: chat.id, prompt: `slow-turn ${key}` });
+    submitOrQueueTask({ worktreeId: MAIN, chatId: chat.id, prompt: `slow-turn ${key}` });
     await waitFor(() => (promptsAbout(key).length === 1 ? true : undefined));
 
     subscriptionService.ingest(event(key, { summary: "arrived during the turn" }));
@@ -254,7 +254,7 @@ describe("subscriptions", () => {
     expect(promptsAbout(key)[1]).toContain("arrived during the turn");
   });
 
-  it("S6: removing a chat or a workspace deletes its subscriptions", async () => {
+  it("S6: removing a chat or a worktree deletes its subscriptions", async () => {
     const chatKey = uniqueKey();
     const { chat, sub } = subscribeChat(chatKey);
     chatService.remove(chat.id);
@@ -267,27 +267,27 @@ describe("subscriptions", () => {
     const featureChat = chatService.create(FEATURE);
     subscriptionService.create({
       chatId: featureChat.id,
-      workspaceId: FEATURE,
+      worktreeId: FEATURE,
       source: "github",
       filterKey: uniqueKey(),
     });
-    expect(subscriptionService.list({ workspaceId: FEATURE })).toHaveLength(1);
-    await workspaceService.remove({ project: PROJECT, name: "feat" });
-    expect(subscriptionService.list({ workspaceId: FEATURE })).toHaveLength(0);
+    expect(subscriptionService.list({ worktreeId: FEATURE })).toHaveLength(1);
+    await worktreeService.remove({ repo: REPO, name: "feat" });
+    expect(subscriptionService.list({ worktreeId: FEATURE })).toHaveLength(0);
   });
 
   describe("when the delivery throws", () => {
     /**
      * Takes the main worktree out of the state file, which makes
-     * `submitOrQueueTask` throw "workspace not found", and returns a
+     * `submitOrQueueTask` throw "worktree not found", and returns a
      * function that puts it back.
      */
-    function hideMainWorkspace(): () => void {
+    function hideMainWorktree(): () => void {
       const before = loadState();
       const state = loadState();
-      const project = state.projects.find((p) => p.name === PROJECT);
-      if (!project) throw new Error("seeded project is missing");
-      project.worktrees = project.worktrees.filter((wt) => wt.name !== "main");
+      const repo = state.repos.find((p) => p.name === REPO);
+      if (!repo) throw new Error("seeded repo is missing");
+      repo.worktrees = repo.worktrees.filter((wt) => wt.name !== "main");
       saveState(state);
       return () => saveState(before);
     }
@@ -295,8 +295,8 @@ describe("subscriptions", () => {
     it("keeps the events and delivers them on a retry", async () => {
       const key = uniqueKey();
       const { sub } = subscribeChat(key);
-      const restore = hideMainWorkspace();
-      subscriptionService.ingest(event(key, { summary: "sent while the workspace was gone" }));
+      const restore = hideMainWorktree();
+      subscriptionService.ingest(event(key, { summary: "sent while the worktree was gone" }));
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(promptsAbout(key)).toHaveLength(0);
       expect(subscriptionService.listEvents(sub.id)[0]?.deliveredAt).toBeNull();
@@ -309,7 +309,7 @@ describe("subscriptions", () => {
         },
         { timeoutMs: 10_000 },
       );
-      expect(message).toContain("sent while the workspace was gone");
+      expect(message).toContain("sent while the worktree was gone");
       expect(promptsAbout(key)).toHaveLength(1);
       expect(subscriptionService.listEvents(sub.id)[0]?.deliveredAt).not.toBeNull();
       expect(subscriptionService.list({ chatId: sub.chatId })[0]?.wakeups).toBe(1);
@@ -318,7 +318,7 @@ describe("subscriptions", () => {
     it("forgets the events after the last attempt, so the source can send them again", async () => {
       const key = uniqueKey();
       const { sub } = subscribeChat(key);
-      const restore = hideMainWorkspace();
+      const restore = hideMainWorktree();
       const evt = event(key, { summary: "sent again by the source" });
       subscriptionService.ingest(evt);
       await waitFor(

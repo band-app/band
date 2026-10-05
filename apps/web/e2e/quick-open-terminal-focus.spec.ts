@@ -20,7 +20,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -30,11 +30,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-quick-open-terminal-focus-token";
-const PROJECT = "quick-open-focus-repo";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "quick-open-focus-repo";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -43,7 +43,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", "main"], tmpHome);
   for (const file of ["notes-alpha.txt", "notes-beta.txt"]) {
@@ -52,9 +52,9 @@ test.beforeAll(async () => {
   git(repo, ["add", "."], tmpHome);
   git(repo, ["commit", "-m", "initial"], tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repo }],
@@ -71,21 +71,21 @@ test.afterAll(async () => {
 });
 
 test("a terminal connecting while Quick Open is open keeps the typed query", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const connectedTerminals = workspacePage.trackConnectedTerminalSockets();
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const connectedTerminals = worktreePage.trackConnectedTerminalSockets();
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
   // The default layout's terminal connects first, so its focus grab can't
   // land in the middle of the steps below.
   await expect.poll(connectedTerminals).toBeGreaterThan(0);
   const before = connectedTerminals();
 
-  await workspacePage.openQuickOpen();
-  await workspacePage.typeQuickOpen("notes-");
-  await workspacePage.pressNewTerminalShortcut();
+  await worktreePage.openQuickOpen();
+  await worktreePage.typeQuickOpen("notes-");
+  await worktreePage.pressNewTerminalShortcut();
   await expect.poll(connectedTerminals).toBeGreaterThan(before);
-  await workspacePage.continueTypingQuickOpen("alpha.txt");
+  await worktreePage.continueTypingQuickOpen("alpha.txt");
 
-  await expect(workspacePage.quickOpenInput).toBeFocused();
-  await expect(workspacePage.quickOpenInput).toHaveValue("notes-alpha.txt");
+  await expect(worktreePage.quickOpenInput).toBeFocused();
+  await expect(worktreePage.quickOpenInput).toHaveValue("notes-alpha.txt");
 });

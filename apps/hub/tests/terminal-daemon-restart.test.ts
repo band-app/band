@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deleteWorktree, seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -26,29 +26,29 @@ import { waitFor } from "./helpers/wait-for";
 // line can never satisfy the assertion; only the command's output can.
 
 const TOKEN = "terminal-daemon-restart-token";
-const PROJECT = "restartproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "restartproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 
 interface TerminalEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
 async function listTerminals(
   server: ServerHandle,
-  workspaceId = WORKSPACE_ID,
+  worktreeId = WORKTREE_ID,
 ): Promise<TerminalEntry[]> {
-  const res = await trpcQuery(server.url, "terminal.list", { workspaceId }, TOKEN);
+  const res = await trpcQuery(server.url, "terminal.list", { worktreeId }, TOKEN);
   expect(res.status).toBe(200);
   return (await trpcData<{ terminals: TerminalEntry[] }>(res)).terminals;
 }
 
-async function createTerminal(server: ServerHandle, workspaceId: string): Promise<number> {
+async function createTerminal(server: ServerHandle, worktreeId: string): Promise<number> {
   const res = await trpcMutate(
     server.url,
     "terminal.create",
-    { workspaceId, id: randomUUID() },
+    { worktreeId, id: randomUUID() },
     TOKEN,
   );
   expect(res.status).toBe(200);
@@ -62,12 +62,12 @@ describe("terminal daemon — shells survive a server restart", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-td-restart-");
-    const worktree = join(tmpHome, PROJECT);
+    const worktree = join(tmpHome, REPO);
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -91,7 +91,7 @@ describe("terminal daemon — shells survive a server restart", () => {
     const createRes = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id: terminalId },
+      { worktreeId: WORKTREE_ID, id: terminalId },
       TOKEN,
     );
     expect(createRes.status).toBe(200);
@@ -99,7 +99,7 @@ describe("terminal daemon — shells survive a server restart", () => {
     expect(created.terminalId).toBe(terminalId);
 
     const before = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -113,12 +113,12 @@ describe("terminal daemon — shells survive a server restart", () => {
 
     // Same shell: listed with the pid it was created with.
     expect(await listTerminals(server)).toEqual([
-      expect.objectContaining({ terminalId, workspaceId: WORKSPACE_ID, pid: created.pid }),
+      expect.objectContaining({ terminalId, worktreeId: WORKTREE_ID, pid: created.pid }),
     ]);
 
     // Its screen is replayed on attach, and it still runs commands.
     const after = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -134,18 +134,18 @@ describe("terminal daemon — shells survive a server restart", () => {
     await waitFor(async () => (isAlive(created.pid) ? undefined : true), { label: "shell exit" });
 
     // The restarted server still refuses a request without the token.
-    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const input = encodeURIComponent(JSON.stringify({ worktreeId: WORKTREE_ID }));
     const unauthenticated = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
     expect(unauthenticated.status).toBe(401);
   });
 });
 
-// Shells outlive the server now, so deleting a workspace has to end its
+// Shells outlive the server now, so deleting a worktree has to end its
 // shells explicitly: at once when a server is running, or at the next boot
-// when the workspace went away while none was.
-describe("terminal daemon — a deleted workspace's shells end", () => {
+// when the worktree went away while none was.
+describe("terminal daemon — a deleted worktree's shells end", () => {
   const PROJ = "gonerproj";
-  const MAIN_ID = toWorkspaceId(PROJ, "main");
+  const MAIN_ID = toWorktreeId(PROJ, "main");
   let tmpHome: string;
   let repo: string;
   let port: number;
@@ -165,7 +165,7 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
       },
     });
 
-  /** A second worktree on its own branch: a workspace that can be deleted. */
+  /** A second worktree on its own branch: a worktree that can be deleted. */
   function addWorktree(name: string): string {
     const path = join(tmpHome, `${PROJ}-${name}`);
     git(repo, ["worktree", "add", "-b", name, path]);
@@ -183,7 +183,7 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     const liveDelete = addWorktree("live-delete");
     const offlineDelete = addWorktree("offline-delete");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: PROJ,
           path: repo,
@@ -206,29 +206,29 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("workspaces.remove on a running server ends the workspace's shells", async () => {
-    const workspaceId = toWorkspaceId(PROJ, "live-delete");
-    const pid = await createTerminal(server, workspaceId);
+  it("worktrees.remove on a running server ends the worktree's shells", async () => {
+    const worktreeId = toWorktreeId(PROJ, "live-delete");
+    const pid = await createTerminal(server, worktreeId);
     expect(isAlive(pid)).toBe(true);
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: PROJ, name: "live-delete" },
+      "worktrees.remove",
+      { repo: PROJ, name: "live-delete" },
       TOKEN,
     );
     expect(res.status).toBe(200);
 
     await waitFor(async () => (isAlive(pid) ? undefined : true), { label: "shell exit" });
-    expect(await listTerminals(server, workspaceId)).toEqual([]);
+    expect(await listTerminals(server, worktreeId)).toEqual([]);
   });
 
-  it("the next boot ends shells of a workspace deleted while no server ran", async () => {
-    const workspaceId = toWorkspaceId(PROJ, "offline-delete");
+  it("the next boot ends shells of a worktree deleted while no server ran", async () => {
+    const worktreeId = toWorktreeId(PROJ, "offline-delete");
     const keptPid = await createTerminal(server, MAIN_ID);
-    const gonePid = await createTerminal(server, workspaceId);
+    const gonePid = await createTerminal(server, worktreeId);
 
-    // Delete the workspace behind the server's back: stop the server (the
+    // Delete the worktree behind the server's back: stop the server (the
     // daemon and both shells keep running), remove the worktree and its row.
     await server.close({ keepTerminalDaemon: true });
     git(repo, ["worktree", "remove", "--force", join(tmpHome, `${PROJ}-offline-delete`)]);
@@ -236,10 +236,10 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     server = await startServer({ remoteHost: false, tmpHome, port });
 
     await waitFor(async () => (isAlive(gonePid) ? undefined : true), { label: "orphan exit" });
-    // Only the deleted workspace's shell goes; the live workspace keeps its own.
+    // Only the deleted worktree's shell goes; the live worktree keeps its own.
     expect(isAlive(keptPid)).toBe(true);
     expect(await listTerminals(server, MAIN_ID)).toEqual([
-      expect.objectContaining({ workspaceId: MAIN_ID, pid: keptPid }),
+      expect.objectContaining({ worktreeId: MAIN_ID, pid: keptPid }),
     ]);
   });
 });
@@ -253,12 +253,12 @@ describe("terminal daemon — when it exits on its own", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-td-exit-");
-    const worktree = join(tmpHome, PROJECT);
+    const worktree = join(tmpHome, REPO);
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -275,7 +275,7 @@ describe("terminal daemon — when it exits on its own", () => {
   });
 
   it("an empty daemon exits as soon as its last server disconnects", async () => {
-    const pid = await createTerminal(server, WORKSPACE_ID);
+    const pid = await createTerminal(server, WORKTREE_ID);
     const [daemon] = terminalDaemons(tmpHome);
     expect(daemon).toBeDefined();
 
@@ -301,7 +301,7 @@ describe("terminal daemon — when it exits on its own", () => {
   });
 
   it("a daemon that loses its socket keeps serving its shells, then exits", async () => {
-    const pid = await createTerminal(server, WORKSPACE_ID);
+    const pid = await createTerminal(server, WORKTREE_ID);
     const [daemon] = terminalDaemons(tmpHome);
     expect(daemon).toBeDefined();
     const [{ terminalId }] = await listTerminals(server);
@@ -321,7 +321,7 @@ describe("terminal daemon — when it exits on its own", () => {
     expect(isAlive(pid)).toBe(true);
     expect(isAlive(daemon.pid)).toBe(true);
     expect(await listTerminals(server)).toEqual([
-      expect.objectContaining({ terminalId, workspaceId: WORKSPACE_ID, pid }),
+      expect.objectContaining({ terminalId, worktreeId: WORKTREE_ID, pid }),
     ]);
 
     // Once its last shell ends, the drained daemon exits.

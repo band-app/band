@@ -24,13 +24,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import WebSocket from "ws";
-import { toWorkspaceId } from "../src/dashboard";
+import { toWorktreeId } from "../src/dashboard";
 import { seedSettings, seedState } from "../tests/helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "../tests/helpers/server";
 
 const TOKEN = "terminal-typing-bench-token";
-const PROJECT = "benchproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "benchproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 
 const FLOOD_COUNTS = (process.env.BENCH_FLOODS ?? "0,1,3").split(",").map(Number);
 const FLOOD_KIND = process.env.BENCH_FLOOD ?? "saturate";
@@ -59,7 +59,7 @@ class BenchSocket {
   static async open(server: ServerHandle, terminalId: string): Promise<BenchSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/terminal?workspaceId=${encodeURIComponent(WORKSPACE_ID)}&terminalId=${terminalId}`,
+      `ws://${url.host}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${terminalId}`,
       { headers: { Cookie: `band_token=${TOKEN}` } },
     );
     await new Promise<void>((resolve, reject) => {
@@ -164,14 +164,14 @@ async function runScenario(server: ServerHandle, floods: number): Promise<void> 
 
 async function main(): Promise<void> {
   const tmpHome = createTmpHome("band-typing-bench-");
-  const worktree = join(tmpHome, PROJECT);
+  const worktree = join(tmpHome, REPO);
   mkdirSync(worktree, { recursive: true });
   // No rc files: keep zsh from running its new-user wizard.
   writeFileSync(join(tmpHome, ".zshrc"), "PROMPT='$ '\n");
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: worktree,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: worktree }],

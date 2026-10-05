@@ -15,7 +15,7 @@ const log = createLogger("terminal-ws");
 // payload minus the 2-byte status code). `ws` enforces this in
 // `_Sender.close` and *throws* — asynchronously, as an Unhandled Rejection
 // that crashes the server — when we hand it a longer string. We pass
-// dynamic error messages here (e.g. `Workspace directory does not exist: <
+// dynamic error messages here (e.g. `Worktree directory does not exist: <
 // long absolute path >`) which routinely cross the limit, so every
 // reason string is clamped to fit. We also send the full error as a JSON
 // frame *before* the close so the client still surfaces the real message
@@ -127,11 +127,11 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     return;
   }
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const workspaceId = url.searchParams.get("workspaceId");
+  const worktreeId = url.searchParams.get("worktreeId");
   const terminalId = url.searchParams.get("terminalId");
 
-  if (!workspaceId || !terminalId) {
-    safeClose(ws, 4000, "Missing workspaceId or terminalId");
+  if (!worktreeId || !terminalId) {
+    safeClose(ws, 4000, "Missing worktreeId or terminalId");
     return;
   }
 
@@ -151,7 +151,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
   }
   if (inbox.closed) return;
   if (existing) {
-    attachSession(ws, inbox, terminalId, workspaceId, false);
+    attachSession(ws, inbox, terminalId, worktreeId, false);
     return;
   }
 
@@ -211,10 +211,10 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
   }
 
   try {
-    await terminalService.spawn(workspaceId, terminalId, spawnOpts);
+    await terminalService.spawn(worktreeId, terminalId, spawnOpts);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.error("Failed to spawn terminal %s for workspace %s: %s", terminalId, workspaceId, msg);
+    log.error("Failed to spawn terminal %s for worktree %s: %s", terminalId, worktreeId, msg);
     safeClose(ws, 4001, msg);
     return;
   }
@@ -223,7 +223,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
   // The queued first message (a synthesized `attach`, a `resize`, or raw
   // input) is processed inside `attachSession` so it goes through the same
   // `attach`-intercepting path as every later message.
-  attachSession(ws, inbox, terminalId, workspaceId, true, pendingMessage);
+  attachSession(ws, inbox, terminalId, worktreeId, true, pendingMessage);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,15 +234,15 @@ function attachSession(
   ws: WebSocket,
   inbox: Inbox,
   terminalId: string,
-  workspaceId: string,
+  worktreeId: string,
   isNew: boolean,
   pendingMessage?: string,
 ): void {
   log.debug(
-    "Terminal %s: %s (workspace %s)",
+    "Terminal %s: %s (worktree %s)",
     isNew ? "connected" : "reconnected",
     terminalId,
-    workspaceId,
+    worktreeId,
   );
 
   // Live-output subscription, created by `startReplay` below. It hands over

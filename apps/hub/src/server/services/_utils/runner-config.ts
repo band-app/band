@@ -76,11 +76,11 @@ export const runnerSchema = z
       .default(DEFAULT_RUNNER_TIMEOUT_SEC),
     /**
      * How long a machine may live, counted from its spawn. Past it the reaper has the worker store
-     * its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits.
+     * its worktrees and exit, then runs `destroy`. Without it a machine lives until it exits.
      */
     maxLifetimeSec: z.number().int().min(1).max(MAX_LIFETIME_SEC).optional(),
     /**
-     * Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that
+     * Seconds after `maxLifetimeSec` the reaper waits for the worktrees to be stored. Past that
      * deadline it destroys the machine whether or not they were, and logs it as an error.
      */
     lifetimeGraceSec: z
@@ -93,7 +93,7 @@ export const runnerSchema = z
     env: z.record(envName, z.string()).default({}),
     /**
      * Hibernate hooks (plan step 3.10). With `snapshot` and `restore`, putting an ephemeral worker's
-     * workspaces to sleep also snapshots the machine's disk, and waking restores from it. `snapshot`
+     * worktrees to sleep also snapshots the machine's disk, and waking restores from it. `snapshot`
      * gets `BAND_MACHINE_HANDLE` and prints `BAND_SNAPSHOT_ID=<id>`, `restore` gets `BAND_SNAPSHOT_ID` and
      * the spawn environment, `snapshotDelete` gets `BAND_SNAPSHOT_ID` and removes it.
      */

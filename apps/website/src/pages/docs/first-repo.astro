@@ -1,0 +1,130 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Adding Your First Repo — Band Docs">
+  <h1>Adding Your First Repo</h1>
+
+  <p>
+    A repo in Band is a registered git repository. Once you add a repo, Band tracks it
+    and lets you create worktrees (isolated git worktrees) from it. You need at least one
+    repo before you can create worktrees or dispatch tasks.
+  </p>
+
+  <h2>Requirements</h2>
+
+  <p>
+    The directory you register must be a <strong>git repository</strong>. Band uses git
+    worktrees under the hood, so it needs a valid <code>.git</code> directory to work with.
+    The repository can be any size and can have any branch structure.
+  </p>
+
+  <h2>Add a repo via the dashboard</h2>
+
+  <ol>
+    <li>Open the Band dashboard.</li>
+    <li>Click the <strong>"Add Repo"</strong> button in the sidebar.</li>
+    <li>
+      In the <strong>Register Repo</strong> dialog, type the path to your
+      git repository, or click the folder icon to browse for it.
+    </li>
+    <li>Click <strong>Add Repo</strong>.</li>
+  </ol>
+
+  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-register-repo.png"
+      alt="The Register Repo dialog in the Band dashboard, with a Repository path field and a folder-picker icon."
+      width="430"
+      height="239"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Register Repo dialog &mdash; type the repository path or click the folder icon to browse.
+    </figcaption>
+  </figure>
+
+  <p>
+    The repo appears in the sidebar immediately. Band detects the repo
+    name from the repository's directory name, picks up the default branch
+    (usually <code>main</code> or <code>master</code>), and displays the number
+    of existing worktrees.
+  </p>
+
+  <h2>Add a repo via the CLI</h2>
+
+  <p>
+    You can also register a repo from your terminal using the Band CLI:
+  </p>
+
+  <pre><code>band repos add /path/to/your/repo</code></pre>
+
+  <p>For example, to register a repo located at <code>~/code/my-app</code>:</p>
+
+  <pre><code>band repos add ~/code/my-app</code></pre>
+
+  <p>
+    You can optionally assign a label to the repo to help organize your repos:
+  </p>
+
+  <pre><code>band repos add ~/code/my-app --label "work"</code></pre>
+
+  <p>
+    To verify the repo was added, list all registered repos:
+  </p>
+
+  <pre><code>band repos list</code></pre>
+
+  <p>
+    This outputs a tab-separated list showing each repo's name, path, and worktree count.
+    For structured output, add the <code>--output json</code> flag:
+  </p>
+
+  <pre><code>band repos list --output json</code></pre>
+
+  <h2>What happens when you add a repo</h2>
+
+  <p>When you register a repo, Band does the following:</p>
+
+  <ul>
+    <li>
+      <strong>Validates the repository</strong> &mdash; Confirms the path points to a valid
+      git repository with a <code>.git</code> directory.
+    </li>
+    <li>
+      <strong>Detects the default branch</strong> &mdash; Identifies the main branch
+      (e.g., <code>main</code>, <code>master</code>) so worktrees can be branched from it.
+    </li>
+    <li>
+      <strong>Discovers existing worktrees</strong> &mdash; If the repository already has git
+      worktrees, Band picks them up and displays them as worktrees.
+    </li>
+    <li>
+      <strong>Reads repo configuration</strong> &mdash; If a <code>.band/config.json</code>
+      file exists in the repository, Band reads it for setup and teardown scripts that run
+      when worktrees are created or removed.
+    </li>
+  </ul>
+
+  <h2>Removing a repo</h2>
+
+  <p>
+    If you want to unregister a repo, you can do so from the CLI:
+  </p>
+
+  <pre><code>band repos remove my-app</code></pre>
+
+  <p>
+    This removes the repo from Band's registry but does <strong>not</strong> delete the
+    repository or any of its files from disk.
+  </p>
+
+  <h2>Next step</h2>
+
+  <p>
+    With a repo registered, you are ready to
+    <a href="/docs/first-worktree">create your first worktree</a>.
+  </p>
+</DocsLayout>

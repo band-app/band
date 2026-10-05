@@ -2,7 +2,7 @@
  * End-to-end coverage for Band's keyboard shortcuts:
  *   - ⌘T opens a new terminal tab (it used to duplicate the active tab's kind).
  *   - ⌥⌘T (Ctrl+Shift+N off macOS) opens a new chat with the default agent.
- *   - ⌥⌘← / ⌥⌘→ (Ctrl+Alt+← / → off macOS) step workspace history. The
+ *   - ⌥⌘← / ⌥⌘→ (Ctrl+Alt+← / → off macOS) step worktree history. The
  *     title-bar tooltip used to advertise ⌘[ / ⌘], which only cycle panes.
  *   - ⌃⌘I (Ctrl+Alt+I off macOS) shows the chat, even from a focused terminal.
  *   - The command palette lists every bound shortcut and runs them.
@@ -18,7 +18,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -30,24 +30,24 @@ import {
   startServer,
 } from "./helpers/server";
 import { CommandPalette } from "./pages/CommandPalette";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-keyboard-shortcuts-token";
 const BRANCH = "main";
 
-// Separate projects per test: the server keeps terminals and chats alive
+// Separate repos per test: the server keeps terminals and chats alive
 // across tests in a file, which would skew the tab-count baselines.
-const PROJECT = "shortcuts-new-tabs";
-const PROJECT_A = "shortcuts-history-a";
-const PROJECT_B = "shortcuts-history-b";
-const PROJECT_CHAT = "shortcuts-show-chat";
-const PROJECT_SPLIT = "shortcuts-palette-split";
+const REPO = "shortcuts-new-tabs";
+const REPO_A = "shortcuts-history-a";
+const REPO_B = "shortcuts-history-b";
+const REPO_CHAT = "shortcuts-show-chat";
+const REPO_SPLIT = "shortcuts-palette-split";
 const LABEL = "label-shortcuts";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
-const WORKSPACE_A = toWorkspaceId(PROJECT_A, BRANCH);
-const WORKSPACE_B = toWorkspaceId(PROJECT_B, BRANCH);
-const WORKSPACE_CHAT = toWorkspaceId(PROJECT_CHAT, BRANCH);
-const WORKSPACE_SPLIT = toWorkspaceId(PROJECT_SPLIT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE_A = toWorktreeId(REPO_A, BRANCH);
+const WORKTREE_B = toWorktreeId(REPO_B, BRANCH);
+const WORKTREE_CHAT = toWorktreeId(REPO_CHAT, BRANCH);
+const WORKTREE_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH);
 
 // Wide viewport so `useIsDesktop()` reports true and the center dockview renders.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -71,10 +71,10 @@ test.beforeAll(async () => {
       worktrees: [{ branch: BRANCH, path: repoPath }],
     };
   };
-  const projects = [PROJECT, PROJECT_A, PROJECT_B, PROJECT_CHAT, PROJECT_SPLIT].map(makeRepo);
-  // Only project A carries the label, so filtering by it hides project B.
+  const repos = [REPO, REPO_A, REPO_B, REPO_CHAT, REPO_SPLIT].map(makeRepo);
+  // Only repo A carries the label, so filtering by it hides repo B.
   seedState(tmpHome, {
-    projects: projects.map((p) => (p.name === PROJECT_A ? { ...p, label: LABEL } : p)),
+    repos: repos.map((p) => (p.name === REPO_A ? { ...p, label: LABEL } : p)),
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -96,67 +96,67 @@ test.afterAll(async () => {
 test("the new-chat chord opens a chat tab and ⌘T a terminal tab, whatever tab is active", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // The default layout seeds one terminal tab and no chat.
-  await expect(workspacePage.terminalTabs()).toHaveCount(1);
-  await expect(workspacePage.chatTabs()).toHaveCount(0);
-  await workspacePage.focusTerminal();
+  await expect(worktreePage.terminalTabs()).toHaveCount(1);
+  await expect(worktreePage.chatTabs()).toHaveCount(0);
+  await worktreePage.focusTerminal();
 
-  await workspacePage.pressNewChatShortcut();
-  await expect(workspacePage.chatTabs()).toHaveCount(1);
-  await expect(workspacePage.terminalTabs()).toHaveCount(1);
-  await expect(workspacePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await worktreePage.pressNewChatShortcut();
+  await expect(worktreePage.chatTabs()).toHaveCount(1);
+  await expect(worktreePage.terminalTabs()).toHaveCount(1);
+  await expect(worktreePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
 
   // The new chat is now the active tab. ⌘T used to duplicate the active tab's
   // kind and would have opened a second chat here. Clicking its tab moves focus
   // out of the terminal, which would otherwise keep Ctrl+T for the shell.
-  await workspacePage.activateTab("chat");
-  await workspacePage.pressNewTerminalShortcut();
-  await expect(workspacePage.terminalTabs()).toHaveCount(2);
-  await expect(workspacePage.chatTabs()).toHaveCount(1);
+  await worktreePage.activateTab("chat");
+  await worktreePage.pressNewTerminalShortcut();
+  await expect(worktreePage.terminalTabs()).toHaveCount(2);
+  await expect(worktreePage.chatTabs()).toHaveCount(1);
 });
 
 test("the show-chat chord activates the chat tab from a focused terminal", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE_CHAT);
-  await workspacePage.waitForReady();
-  await workspacePage.clickChatAddTab(WORKSPACE_CHAT);
-  await expect(workspacePage.chatTabs()).toHaveCount(1);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE_CHAT);
+  await worktreePage.waitForReady();
+  await worktreePage.clickChatAddTab(WORKTREE_CHAT);
+  await expect(worktreePage.chatTabs()).toHaveCount(1);
 
-  await workspacePage.focusTerminal();
-  await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await worktreePage.focusTerminal();
+  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
 
-  await workspacePage.pressShowChatShortcut();
-  await expect(workspacePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await worktreePage.pressShowChatShortcut();
+  await expect(worktreePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
 });
 
-test("⌥⌘← / ⌥⌘→ step back and forward through visited workspaces", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE_A);
-  await workspacePage.waitForReady();
-  await workspacePage.switchWorkspace(WORKSPACE_B);
-  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_B)));
+test("⌥⌘← / ⌥⌘→ step back and forward through visited worktrees", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE_A);
+  await worktreePage.waitForReady();
+  await worktreePage.switchWorktree(WORKTREE_B);
+  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKTREE_B)));
 
   // With a terminal focused, which owns ⌘[ / ⌘] for its panes.
-  await workspacePage.focusTerminal();
-  await workspacePage.pressWorkspaceHistory("back");
-  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_A)));
+  await worktreePage.focusTerminal();
+  await worktreePage.pressWorktreeHistory("back");
+  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKTREE_A)));
 
-  await workspacePage.focusTerminal();
-  await workspacePage.pressWorkspaceHistory("forward");
-  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_B)));
+  await worktreePage.focusTerminal();
+  await worktreePage.pressWorktreeHistory("forward");
+  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKTREE_B)));
 });
 
 test("the command palette lists the shortcuts and runs them", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
-  await workspacePage.goto(WORKSPACE_A);
-  await workspacePage.waitForReady();
-  await workspacePage.switchWorkspace(WORKSPACE_B);
-  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_B)));
+  await worktreePage.goto(WORKTREE_A);
+  await worktreePage.waitForReady();
+  await worktreePage.switchWorktree(WORKTREE_B);
+  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKTREE_B)));
 
   await palette.open();
   await expect(palette.dialog).toBeVisible();
@@ -174,10 +174,10 @@ test("the command palette lists the shortcuts and runs them", async ({ page }) =
     "toggle-maximize": mac ? "⌘⇧M" : "Ctrl+Shift+M",
     "toggle-sidebar": mac ? "⌘B" : "Ctrl+B",
     "toggle-right-panel": mac ? "⌘⌥B" : "Ctrl+Alt+B",
-    "switch-workspace": mac ? "⌘K" : "Ctrl+K",
-    "workspace-go-back": mac ? "⌘⌥←" : "Ctrl+Alt+←",
-    "workspace-go-forward": mac ? "⌘⌥→" : "Ctrl+Alt+→",
-    "show-all-projects": mac ? "⌘0" : "Ctrl+0",
+    "switch-worktree": mac ? "⌘K" : "Ctrl+K",
+    "worktree-go-back": mac ? "⌘⌥←" : "Ctrl+Alt+←",
+    "worktree-go-forward": mac ? "⌘⌥→" : "Ctrl+Alt+→",
+    "show-all-repos": mac ? "⌘0" : "Ctrl+0",
     "show-chat": mac ? "⌃⌘I" : "Ctrl+Alt+I",
     "open-file-external": mac ? "⌘O" : "Ctrl+O",
     "zoom-in": mac ? "⌘=" : "Ctrl+=",
@@ -188,38 +188,38 @@ test("the command palette lists the shortcuts and runs them", async ({ page }) =
     await expect(palette.shortcut(id)).toHaveText(shortcut);
   }
 
-  await palette.run("workspace-go-back");
+  await palette.run("worktree-go-back");
   await expect(palette.dialog).toBeHidden();
-  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_A)));
+  await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKTREE_A)));
 });
 
 test("the palette's Split Right splits a terminal tab into nested panes", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
-  await workspacePage.goto(WORKSPACE_SPLIT);
-  await workspacePage.waitForReady();
-  await workspacePage.focusTerminal();
-  await expect(workspacePage.terminalPanes()).toHaveCount(1);
+  await worktreePage.goto(WORKTREE_SPLIT);
+  await worktreePage.waitForReady();
+  await worktreePage.focusTerminal();
+  await expect(worktreePage.terminalPanes()).toHaveCount(1);
 
   await palette.open();
   await palette.run("split-right");
 
-  await expect(workspacePage.terminalPanes()).toHaveCount(2);
-  await expect(workspacePage.terminalTabs()).toHaveCount(1);
+  await expect(worktreePage.terminalPanes()).toHaveCount(2);
+  await expect(worktreePage.terminalTabs()).toHaveCount(1);
 });
 
-test("the palette's Show All Projects clears the label filter", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+test("the palette's Show All Repos clears the label filter", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
-  await workspacePage.goto(WORKSPACE_A);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(WORKTREE_A);
+  await worktreePage.waitForReady();
 
-  await workspacePage.selectLabelFilter(LABEL);
-  await expect(workspacePage.projectHeader(PROJECT_A)).toBeVisible();
-  await expect(workspacePage.projectHeader(PROJECT_B)).toBeHidden();
+  await worktreePage.selectLabelFilter(LABEL);
+  await expect(worktreePage.repoHeader(REPO_A)).toBeVisible();
+  await expect(worktreePage.repoHeader(REPO_B)).toBeHidden();
 
   await palette.open();
-  await palette.run("show-all-projects");
+  await palette.run("show-all-repos");
 
-  await expect(workspacePage.projectHeader(PROJECT_B)).toBeVisible();
+  await expect(worktreePage.repoHeader(REPO_B)).toBeVisible();
 });

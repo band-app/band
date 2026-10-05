@@ -20,14 +20,14 @@
  * second test pins that.
  *
  * Architecture (repo integration doctrine): real production server, real git
- * worktree, real Chromium via `WorkspacePage`. No tRPC mocking, no route
+ * worktree, real Chromium via `WorktreePage`. No tRPC mocking, no route
  * interception, no `page.getByTestId` in the test body.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -39,10 +39,10 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-editor-state-restore-token";
-const PROJECT = "editor-state-repo";
+const REPO = "editor-state-repo";
 const BRANCH = "main";
 // A long file so there is real vertical scroll to lose/restore.
 const FILE = "long.ts";
@@ -54,7 +54,7 @@ const SHORT_BEFORE = "export const version = 1;";
 // file is then past the new end, so reopening exercises the selection clamp
 // (an unclamped out-of-range selection throws when dispatched).
 const SHORT_AFTER = "export const v = 2;";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -64,7 +64,7 @@ let repoPath: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  repoPath = join(tmpHome, PROJECT);
+  repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", BRANCH]);
   const lines = Array.from({ length: 400 }, (_, i) => `const line${i} = ${i};`).join("\n");
@@ -74,9 +74,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial"]);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -97,73 +97,73 @@ test.afterAll(async () => {
 });
 
 test("the file leaf restores cursor + scroll position across a reload", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // Open the long file. The default layout is a single terminal, so the file
   // opens as a tab in the terminal's group. Close the terminal so the file is
   // the sole leaf — otherwise on reload the terminal's nested-pane restore
   // races to grab active and can hide the file behind its tab, which is
   // orthogonal to the cursor/scroll-restore behaviour under test here.
-  await workspacePage.openFileLeaf(FILE, WORKSPACE);
-  await workspacePage.closeTerminalTab(WORKSPACE);
-  await expect(workspacePage.fileLeafVisibilityMarker(true).first()).toBeVisible({
+  await worktreePage.openFileLeaf(FILE, WORKTREE);
+  await worktreePage.closeTerminalTab(WORKTREE);
+  await expect(worktreePage.fileLeafVisibilityMarker(true).first()).toBeVisible({
     timeout: 20_000,
   });
 
   // Move the cursor to the end — the editor scrolls to the bottom (scrollTop > 0).
-  await workspacePage.focusFileEditor(FILE);
-  await workspacePage.pressEditorToDocEnd();
-  await expect.poll(() => workspacePage.editorScrollTop(), { timeout: 10_000 }).toBeGreaterThan(0);
+  await worktreePage.focusFileEditor(FILE);
+  await worktreePage.pressEditorToDocEnd();
+  await expect.poll(() => worktreePage.editorScrollTop(), { timeout: 10_000 }).toBeGreaterThan(0);
 
   // Reload — `pagehide` captures the editor state into the per-tab store.
   await page.reload();
-  await workspacePage.waitForReady();
+  await worktreePage.waitForReady();
 
   // The file leaf restores from the persisted layout AND its editor lands back
   // near the bottom, not scrolled to the top (which is what the pre-fix leaf
   // did — scrollTop 0).
-  await expect(workspacePage.fileLeafVisibilityMarker(true).first()).toBeVisible({
+  await expect(worktreePage.fileLeafVisibilityMarker(true).first()).toBeVisible({
     timeout: 20_000,
   });
-  await expect.poll(() => workspacePage.editorScrollTop(), { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(() => worktreePage.editorScrollTop(), { timeout: 20_000 }).toBeGreaterThan(0);
 });
 
 test("a reopened file leaf shows the file's current on-disk content, not a stale snapshot", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // Same setup as above: make the file the sole leaf so the reload restores
   // it as the visible tab.
-  await workspacePage.openFileLeaf(SHORT_FILE, WORKSPACE);
-  await workspacePage.closeTerminalTab(WORKSPACE);
-  const leaf = workspacePage.fileLeafVisibilityMarker(true).first();
+  await worktreePage.openFileLeaf(SHORT_FILE, WORKTREE);
+  await worktreePage.closeTerminalTab(WORKTREE);
+  const leaf = worktreePage.fileLeafVisibilityMarker(true).first();
   await expect(leaf).toBeVisible({ timeout: 20_000 });
   const viewer = new FileViewerPage(page, leaf);
   await viewer.expectContent(SHORT_BEFORE);
 
   // Put the cursor somewhere so the leaf has a position worth persisting.
-  await workspacePage.focusFileEditor(SHORT_FILE);
-  await workspacePage.pressEditorToDocEnd();
+  await worktreePage.focusFileEditor(SHORT_FILE);
+  await worktreePage.pressEditorToDocEnd();
 
   // Leave the app FIRST (pagehide captures the leaf's state while it still
   // holds version 1), and only then change the file on disk — e.g. an agent
   // editing it in the background. Changing it while the page is open could let
   // a live editor pick the new text up before the capture, which would hide
   // the bug.
-  await workspacePage.navigateAway();
+  await worktreePage.navigateAway();
   writeFileSync(join(repoPath, SHORT_FILE), `${SHORT_AFTER}\n`);
 
   // Come back. The leaf must be built from the file as it is now. The pre-fix
   // leaf persisted the whole document and rebuilt the editor from that copy,
   // so it showed version 1 here, and a save would have written it back over
   // the newer file.
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
   await expect(leaf).toBeVisible({ timeout: 20_000 });
   await viewer.expectContent(SHORT_AFTER);
   await viewer.expectNotContent(SHORT_BEFORE);
@@ -172,26 +172,26 @@ test("a reopened file leaf shows the file's current on-disk content, not a stale
 test("legacy full-document editor state is stripped from stored tab state on load", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // An entry as an earlier build left it: the whole document (and undo history)
-  // under `editorState`. It belongs to a workspace this session never opens,
+  // under `editorState`. It belongs to a worktree this session never opens,
   // the case an on-read cleanup alone would never reach.
-  const OTHER_WORKSPACE = "never-opened-workspace";
-  await workspacePage.writeTabStateEntry(OTHER_WORKSPACE, "secret.env", {
+  const OTHER_WORKTREE = "never-opened-worktree";
+  await worktreePage.writeTabStateEntry(OTHER_WORKTREE, "secret.env", {
     editorState: { doc: "API_KEY=do-not-keep-me", selection: { ranges: [], main: 0 } },
     scrollTop: 42,
   });
 
-  await workspacePage.reload();
-  await workspacePage.waitForReady();
+  await worktreePage.reload();
+  await worktreePage.waitForReady();
 
   // The document copy is gone and the rest of the entry survives, so the blob
   // was rewritten, not dropped.
   await expect
-    .poll(() => workspacePage.readTabStateEntry(OTHER_WORKSPACE, "secret.env"), {
+    .poll(() => worktreePage.readTabStateEntry(OTHER_WORKTREE, "secret.env"), {
       timeout: 10_000,
     })
     .toEqual({ scrollTop: 42 });

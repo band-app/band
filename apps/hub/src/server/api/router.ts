@@ -2,7 +2,7 @@
  * Root tRPC router for the web server's 3-tier architecture.
  *
  * Per `docs/web-architecture.md`, the API tier lives under
- * `apps/hub/src/server/api/`. Each domain (projects, workspaces, chats,
+ * `apps/hub/src/server/api/`. Each domain (repos, worktrees, chats,
  * tasks, …) owns a sub-router under `apps/hub/src/server/api/<domain>/router.ts`
  * and this file merges them via `t.mergeRouters(…)`.
  *
@@ -17,8 +17,8 @@
  * lifted, not landing order):
  *
  *   - Phase 1 (issue #312): `settings.*`.
- *   - Phase 2 (issue #313): `projects.*`.
- *   - Phase 3 (issue #314): `workspaces.*`.
+ *   - Phase 2 (issue #313): `repos.*`.
+ *   - Phase 3 (issue #314): `worktrees.*`.
  *   - Phase 4 (issue #315): `cronjobs.*`.
  *   - Phase 5 (issue #316): `chats.*`, `browsers.*`. (The `chatLayout.*` /
  *     `browserLayout.*` layout-tree namespaces added here were retired in
@@ -30,10 +30,10 @@
  *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
  *     `editor.*`, `tunnel.*`, `prereqs.*`, `modes.*`,
  *     `models.*`, `statuses.*`, `status.*`.
- *   - Phase 8 (issue #319): the final inline sub-routers — `workspace.*`
+ *   - Phase 8 (issue #319): the final inline sub-routers — `worktree.*`
  *     (singular: file ops, diff, search, git commands, agent switching),
  *     `chat.*` (singular: approval-answer pass-through), `history.*`
- *     (per-workspace browser history), and `queue.*` (queued message
+ *     (per-worktree browser history), and `queue.*` (queued message
  *     store). With these gone, the legacy `apps/web/src/trpc/` directory
  *     was removed entirely.
  *
@@ -63,9 +63,9 @@ import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
 import { pluginsRouter } from "./plugins/router";
 import { prereqsRouter } from "./prereqs/router";
-import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
+import { reposRouter } from "./repos/router";
 import { reviewsRouter } from "./reviews/router";
 import { runnersRouter } from "./runners/router";
 import { sessionsRouter } from "./sessions/router";
@@ -79,14 +79,14 @@ import { tokensRouter } from "./tokens/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
 import { vaultRouter } from "./vault/router";
-import { workspaceRouter } from "./workspace/router";
-import { workspacesRouter } from "./workspaces/router";
+import { worktreeRouter } from "./worktree/router";
+import { worktreesRouter } from "./worktrees/router";
 
 export const appRouter = t.router({
   settings: settingsRouter,
-  projects: projectsRouter,
-  workspaces: workspacesRouter,
-  workspace: workspaceRouter,
+  repos: reposRouter,
+  worktrees: worktreesRouter,
+  worktree: worktreeRouter,
   cronjobs: cronjobsRouter,
   subscriptions: subscriptionsRouter,
   chats: chatsRouter,

@@ -20,13 +20,13 @@
  * (`apps/hub/tests/fixtures/acp-stub-agent.mjs`) is the only stub: its
  * scenario scripts the requests, and its default reply names the session's
  * current model (`Heard "<prompt>" on <model>.`). Each test opens its own
- * workspace so it gets a fresh chat.
+ * worktree so it gets a fresh chat.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -43,7 +43,7 @@ const TOKEN = "e2e-chat-acp-requests-token";
 /** A label no agent ships with, so its absence from the question card shows
  *  the old "<agent> has N questions" heading is gone. */
 const AGENT_LABEL = "Stub Helper";
-const PROJECTS = [
+const REPOS = [
   "acppermission",
   "acpelicit",
   "acpquestions",
@@ -109,7 +109,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = PROJECTS.map((name) => {
+  const repos = REPOS.map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -119,7 +119,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -219,7 +219,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acppermission", "main"));
+    await chatPane.goto(toWorktreeId("acppermission", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("deploy please");
@@ -244,7 +244,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpelicit", "main"));
+    await chatPane.goto(toWorktreeId("acpelicit", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("ask me something");
@@ -268,7 +268,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpquestions", "main"));
+    await chatPane.goto(toWorktreeId("acpquestions", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -341,7 +341,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("arrow keys move a highlight through the options and Enter picks it", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpkeys", "main"));
+    await chatPane.goto(toWorktreeId("acpkeys", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -422,7 +422,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpskip", "main"));
+    await chatPane.goto(toWorktreeId("acpskip", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -449,7 +449,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("the X declines the whole set of questions", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpskipall", "main"));
+    await chatPane.goto(toWorktreeId("acpskipall", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("skip me");
@@ -472,7 +472,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("a form with no fields shows its message and answers with Submit", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpconfirm", "main"));
+    await chatPane.goto(toWorktreeId("acpconfirm", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("confirm it");
@@ -490,7 +490,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("acpmodel", "main"));
+    await chatPane.goto(toWorktreeId("acpmodel", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");

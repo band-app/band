@@ -18,8 +18,8 @@ export type DeviceType = "desktop" | "mobile";
 export interface ClientStateEntry {
   key: string;
   scope: ClientStateScope;
-  /** The workspace the key belongs to, or null for a global key. */
-  workspaceId: string | null;
+  /** The worktree the key belongs to, or null for a global key. */
+  worktreeId: string | null;
   /** The stored JSON value, or null once the key has been deleted. */
   value: unknown;
   /** Starts at 1 and goes up by one on every write, including a delete. */

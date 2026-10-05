@@ -2,7 +2,7 @@
  * Page object for the Tasks dialog.
  *
  * Same shape as `ReportsDialog` — no dedicated route; the dialog is opened
- * from the 3-dot overflow menu in the project-list bottom action bar. Owns
+ * from the 3-dot overflow menu in the repo-list bottom action bar. Owns
  * the locators for the filter controls, task cards, status badges, the
  * empty state, and the nested New Task dialog.
  *
@@ -15,7 +15,7 @@
  *     status badges (`tasks__status-badge--<status>`), empty state, and the
  *     New Task form fields. This keeps assertions off localisable copy.
  *   - `getByRole("option", { name })` for Radix select options, whose name is
- *     the option value (project name / status enum), not free product copy.
+ *     the option value (repo name / status enum), not free product copy.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -25,12 +25,12 @@ export type TaskStatus = "running" | "completed" | "failed";
 export class TasksDialog {
   /** The Tasks dialog body. */
   readonly dialog: Locator;
-  /** 3-dot overflow trigger in the project-list bottom action bar. */
+  /** 3-dot overflow trigger in the repo-list bottom action bar. */
   readonly overflowTrigger: Locator;
   /** "Tasks" entry inside the overflow dropdown. */
   readonly tasksMenuItem: Locator;
-  /** Project filter select trigger. */
-  readonly projectFilter: Locator;
+  /** Repo filter select trigger. */
+  readonly repoFilter: Locator;
   /** Status filter select trigger. */
   readonly statusFilter: Locator;
   /** Empty-state container (shown when no task matches the filters). */
@@ -39,9 +39,9 @@ export class TasksDialog {
   readonly newTaskButton: Locator;
   /** The nested New Task dialog body. */
   readonly newTaskDialog: Locator;
-  /** Project / Workspace / Prompt controls inside the New Task dialog. */
-  readonly newTaskProject: Locator;
-  readonly newTaskWorkspace: Locator;
+  /** Repo / Worktree / Prompt controls inside the New Task dialog. */
+  readonly newTaskRepo: Locator;
+  readonly newTaskWorktree: Locator;
   readonly newTaskPrompt: Locator;
   /** Session deep-link on a completed task card. */
   readonly sessionLink: Locator;
@@ -52,15 +52,15 @@ export class TasksDialog {
     private readonly token: string,
   ) {
     this.dialog = page.getByRole("dialog", { name: "Tasks" });
-    this.overflowTrigger = page.getByTestId("project-list__overflow-trigger");
+    this.overflowTrigger = page.getByTestId("repo-list__overflow-trigger");
     this.tasksMenuItem = page.getByRole("menuitem", { name: "Tasks" });
-    this.projectFilter = page.getByTestId("tasks__project-filter");
+    this.repoFilter = page.getByTestId("tasks__repo-filter");
     this.statusFilter = page.getByTestId("tasks__status-filter");
     this.emptyState = page.getByTestId("tasks__empty-state");
     this.newTaskButton = page.getByTestId("tasks__new-task-button");
     this.newTaskDialog = page.getByTestId("tasks__new-task-dialog");
-    this.newTaskProject = page.getByTestId("tasks__new-task-project");
-    this.newTaskWorkspace = page.getByTestId("tasks__new-task-workspace");
+    this.newTaskRepo = page.getByTestId("tasks__new-task-repo");
+    this.newTaskWorktree = page.getByTestId("tasks__new-task-worktree");
     this.newTaskPrompt = page.getByTestId("tasks__new-task-prompt");
     this.sessionLink = this.dialog.getByTestId("tasks__session-link");
   }
@@ -69,7 +69,7 @@ export class TasksDialog {
   async goto(): Promise<void> {
     await test.step("Open dashboard", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
-      // The dashboard fetches projects via tRPC on mount, so the action bar's
+      // The dashboard fetches repos via tRPC on mount, so the action bar's
       // click handlers may not be bound by the time `load` fires. Wait for the
       // network to settle before driving the overflow dropdown.
       await this.page.waitForLoadState("networkidle");
@@ -101,11 +101,11 @@ export class TasksDialog {
     return this.dialog.getByTestId(`tasks__status-badge--${status}`);
   }
 
-  /** Pick a project from the project filter. Pass a project name, or
-   *  "All Projects" to clear it. */
-  async filterByProject(optionName: string): Promise<void> {
-    await test.step(`Filter tasks by project "${optionName}"`, async () => {
-      await this.projectFilter.click();
+  /** Pick a repo from the repo filter. Pass a repo name, or
+   *  "All Repos" to clear it. */
+  async filterByRepo(optionName: string): Promise<void> {
+    await test.step(`Filter tasks by repo "${optionName}"`, async () => {
+      await this.repoFilter.click();
       await this.page.getByRole("option", { name: optionName }).click();
     });
   }

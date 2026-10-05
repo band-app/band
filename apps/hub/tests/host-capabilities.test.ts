@@ -139,7 +139,7 @@ beforeAll(async () => {
     codingAgents: [{ id: "opencode", type: "opencode", label: "OpenCode" }],
   });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -238,8 +238,8 @@ describe("the agent refresh runs on a host that has the agent", () => {
 });
 
 describe("the repository path on a remote host", () => {
-  const create = (hostProjectPath: string, branch: string) =>
-    mutationError("workspaces.create", { project: "proj", branch, hostId, hostProjectPath });
+  const create = (hostRepoPath: string, branch: string) =>
+    mutationError("worktrees.create", { repo: "proj", branch, hostId, hostRepoPath });
 
   it("rejects a relative path and names what to do", async () => {
     expect(await create("proj", "rel")).toMatch(/relative.*absolute path/s);
@@ -259,11 +259,11 @@ describe("the repository path on a remote host", () => {
   });
 
   it("expands ~ to the worker's home", async () => {
-    const created = await m<{ path: string }>("workspaces.create", {
-      project: "proj",
+    const created = await m<{ path: string }>("worktrees.create", {
+      repo: "proj",
       branch: "tilde",
       hostId,
-      hostProjectPath: "~/proj",
+      hostRepoPath: "~/proj",
     });
     expect(created.path).toBe(join(workerHome, ".band-worktrees", "proj", "tilde"));
   });
@@ -276,15 +276,15 @@ describe("removing a host", () => {
     expect(await hostById(hostId)).toBeDefined();
   });
 
-  it("refuses a host that still has workspaces once it is offline", async () => {
+  it("refuses a host that still has worktrees once it is offline", async () => {
     worker.child.kill("SIGKILL");
     await worker.exited;
     await waitForStatus(hostId, "offline");
-    expect(await mutationError("hosts.remove", { hostId })).toMatch(/1 workspace/);
+    expect(await mutationError("hosts.remove", { hostId })).toMatch(/1 worktree/);
     expect(await hostById(hostId)).toBeDefined();
   }, 60_000);
 
-  it("deletes an offline host with no workspaces and revokes its tokens", async () => {
+  it("deletes an offline host with no worktrees and revokes its tokens", async () => {
     const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
       hostName: "Retired",
       labels: [],

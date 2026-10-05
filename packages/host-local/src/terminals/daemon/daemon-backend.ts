@@ -54,7 +54,7 @@ export interface DaemonBackendOptions {
 }
 
 interface KnownSession {
-  workspaceId: string;
+  worktreeId: string;
   cleanupOnExit: boolean;
   /** The daemon hosting it. */
   client: DaemonClient;
@@ -124,9 +124,9 @@ export class DaemonTerminalBackend implements TerminalBackend {
       if (existing) return existing.entry;
     }
     const params = {
-      workspaceId: request.workspaceId,
+      worktreeId: request.worktreeId,
       terminalId: request.terminalId,
-      workspaceRoot: request.workspaceRoot,
+      worktreeRoot: request.worktreeRoot,
       options: request.options,
       cleanupOnExit: request.cleanupOnExit,
       // The server's env, not the daemon's: it carries per-instance values
@@ -156,8 +156,8 @@ export class DaemonTerminalBackend implements TerminalBackend {
     return (await this.find(terminalId))?.entry ?? null;
   }
 
-  async list(workspaceId: string): Promise<TerminalListEntry[]> {
-    return this.collect({ workspaceId });
+  async list(worktreeId: string): Promise<TerminalListEntry[]> {
+    return this.collect({ worktreeId });
   }
 
   async listAll(): Promise<TerminalListEntry[]> {
@@ -177,9 +177,9 @@ export class DaemonTerminalBackend implements TerminalBackend {
     return null;
   }
 
-  async killWorkspace(workspaceId: string): Promise<void> {
+  async killWorktree(worktreeId: string): Promise<void> {
     await this.connection(false);
-    await this.onEach((client) => client.request("killWorkspace", { workspaceId }), null);
+    await this.onEach((client) => client.request("killWorktree", { worktreeId }), null);
   }
 
   async getScrollback(terminalId: string, lines?: number): Promise<string | null> {
@@ -239,7 +239,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
     }
     // Remember it so a dropped daemon connection reports this viewer's exit.
     this.known.set(terminalId, {
-      workspaceId: snapshot.workspaceId,
+      worktreeId: snapshot.worktreeId,
       cleanupOnExit: snapshot.cleanupOnExit,
       client,
     });
@@ -266,7 +266,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
    * {@link handleDisconnect} report each of its sessions as exited — the same
    * path a crash takes today, so no new wire message is needed. Sessions'
    * on-disk checkpoints are left in place (only an explicit `kill` /
-   * `killWorkspace` removes them), so a pane reopened after this looks like
+   * `killWorktree` removes them), so a pane reopened after this looks like
    * one reopened after a crash: a fresh shell with its scrollback restored.
    */
   async restartDaemon(): Promise<{ killedCount: number }> {
@@ -341,7 +341,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
     return null;
   }
 
-  private async collect(params: { workspaceId?: string }): Promise<TerminalListEntry[]> {
+  private async collect(params: { worktreeId?: string }): Promise<TerminalListEntry[]> {
     await this.connection(false);
     const results = await this.onEach(async (client) => {
       const entries = await client.request("list", params);
@@ -591,8 +591,8 @@ export class DaemonTerminalBackend implements TerminalBackend {
     }
     // Each session's own `cleanupOnExit`, so a self-closing pane (a cron run)
     // whose daemon died is pruned like any other exit of that pane.
-    for (const [terminalId, { workspaceId, cleanupOnExit }] of lost) {
-      this.emitExit({ terminalId, workspaceId, exitCode: -1, killed: false, cleanupOnExit });
+    for (const [terminalId, { worktreeId, cleanupOnExit }] of lost) {
+      this.emitExit({ terminalId, worktreeId, exitCode: -1, killed: false, cleanupOnExit });
     }
   }
 
@@ -644,7 +644,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
 
   private remember(entry: TerminalListEntry, client: DaemonClient): void {
     this.known.set(entry.terminalId, {
-      workspaceId: entry.workspaceId,
+      worktreeId: entry.worktreeId,
       cleanupOnExit: entry.cleanupOnExit,
       client,
     });

@@ -22,7 +22,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -35,8 +35,8 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-todo-widget-token";
-const PROJECT = "todoproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "todoproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -50,9 +50,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -85,7 +85,7 @@ test.beforeAll(async () => {
               update: {
                 sessionUpdate: "plan",
                 entries: [
-                  { content: "Setup project", priority: "high", status: "completed" },
+                  { content: "Setup repo", priority: "high", status: "completed" },
                   { content: "Write tests", priority: "medium", status: "in_progress" },
                   { content: "Deploy to prod", priority: "low", status: "pending" },
                 ],
@@ -101,7 +101,7 @@ test.beforeAll(async () => {
               update: {
                 sessionUpdate: "plan",
                 entries: [
-                  { content: "Setup project", priority: "high", status: "completed" },
+                  { content: "Setup repo", priority: "high", status: "completed" },
                   { content: "Write tests", priority: "medium", status: "completed" },
                   { content: "Deploy to prod", priority: "low", status: "completed" },
                 ],
@@ -125,7 +125,7 @@ test.describe("Agent plan renders as the TaskListWidget", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("Plan the work");
@@ -135,7 +135,7 @@ test.describe("Agent plan renders as the TaskListWidget", () => {
     await expect(chatPane.taskListWidget).toBeVisible();
     // Every entry renders, the completed one included (the widget only
     // hides once *every* entry is completed).
-    await expect(chatPane.taskListWidget).toContainText("Setup project");
+    await expect(chatPane.taskListWidget).toContainText("Setup repo");
     await expect(chatPane.taskListWidget).toContainText("Write tests");
     await expect(chatPane.taskListWidget).toContainText("Deploy to prod");
 

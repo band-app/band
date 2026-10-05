@@ -3,7 +3,7 @@
  * (issue #535, follow-up 2).
  *
  * `host-state.ts` needs to resolve a Band browser tab's `url` /
- * `workspaceId` from a `bandTabId`. The owning data structure (the
+ * `worktreeId` from a `bandTabId`. The owning data structure (the
  * in-memory `Map<browserId, BrowserTab>` registry) lives in
  * `services/browser-service.ts` — but infra cannot depend on services.
  *
@@ -22,7 +22,7 @@ import type { BrowserRow } from "../db/queries/browsers";
 
 export interface BrowserLookupSnapshot {
   id: BrowserRow["id"];
-  workspaceId: BrowserRow["workspaceId"];
+  worktreeId: BrowserRow["worktreeId"];
   url: BrowserRow["url"];
   profileId: BrowserRow["profileId"];
 }

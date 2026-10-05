@@ -7,7 +7,7 @@ import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
  *
  * Registers Cmd+= (zoom in), Cmd+- (zoom out) and Cmd+Shift+0 (reset).
  * Plain Cmd+0 is intentionally NOT bound — that combo is owned by the
- * dashboard's "All projects" label filter (see DashboardShell), which is
+ * dashboard's "All repos" label filter (see DashboardShell), which is
  * also why reset uses the shifted variant (mirrored by the desktop View
  * menu's "Actual Size" accelerator in `apps/desktop/src/main/menu.ts`).
  *

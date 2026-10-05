@@ -47,7 +47,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -61,8 +61,8 @@ import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-virtualization-token";
-const PROJECT = "virtproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "virtproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 const CHAT_ID = "virt-chat-deterministic-id";
 const SESSION_ID = "11111111-2222-3333-4444-555555555555";
 
@@ -91,9 +91,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -126,7 +126,7 @@ test.beforeAll(async () => {
   // Hitting the real tRPC surface keeps the layout/active-session
   // bookkeeping consistent with the production code paths.
   await trpcMutate(server.url, TOKEN, "chats.create", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     id: CHAT_ID,
     agent: "claude-code",
   });
@@ -134,7 +134,7 @@ test.beforeAll(async () => {
   // chat has no agent process yet, so opening its stream attaches the
   // session through `session/load`.
   await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     chatId: CHAT_ID,
     sessionId: SESSION_ID,
   });
@@ -153,7 +153,7 @@ test.describe("Chat message-list virtualization", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // Wait for the virtualized list container to mount. Its appearance

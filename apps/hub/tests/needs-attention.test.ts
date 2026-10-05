@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { seedSettings, seedState, seedWorkspaceStatuses } from "./helpers/seed-state";
+import { seedSettings, seedState, seedWorktreeStatuses } from "./helpers/seed-state";
 import {
   createTmpHome as createCanonicalTmpHome,
   type ServerHandle,
@@ -74,7 +74,7 @@ function createGitRepo(parentDir: string, name: string): string {
   const repoPath = join(parentDir, name);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", "main"]);
-  writeFileSync(join(repoPath, "README.md"), "# Test Project\n");
+  writeFileSync(join(repoPath, "README.md"), "# Test Repo\n");
   git(repoPath, ["add", "."]);
   git(repoPath, ["commit", "-m", "initial commit"]);
   return repoPath;
@@ -180,7 +180,7 @@ describe("needs_attention — clearing via statuses.update", () => {
     tmpHome = createTmpHome();
     repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -203,12 +203,12 @@ describe("needs_attention — clearing via statuses.update", () => {
 
   it("sets needs_attention status", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "needs_attention", lastActivity: "user input needed" },
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{ agent: { status: string } }>(getRes);
     expect(data.agent.status).toBe("needs_attention");
   });
@@ -216,17 +216,17 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("clears needs_attention via clearNeedsAttention", async () => {
     // Set needs_attention first
     await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "needs_attention" },
     });
 
     // Clear it via the dedicated endpoint
     const res = await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(getRes);
     expect(data.agent.status).toBe("waiting");
     // lastActivity should be preserved from earlier update
@@ -236,24 +236,24 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("preserves other fields when clearing needs_attention", async () => {
     // Set up with full agent info
     await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "needs_attention", lastActivity: "waiting for approval" },
     });
 
     // Clear via the dedicated endpoint
     await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
     });
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{
-      workspaceId: string;
-      project: string;
+      worktreeId: string;
+      repo: string;
       branch: string;
       agent: { status: string; lastActivity: string };
     }>(getRes);
-    expect(data.workspaceId).toBe("myrepo-main");
-    expect(data.project).toBe("myrepo");
+    expect(data.worktreeId).toBe("myrepo-main");
+    expect(data.repo).toBe("myrepo");
     expect(data.branch).toBe("main");
     expect(data.agent.status).toBe("waiting");
     expect(data.agent.lastActivity).toBe("waiting for approval");
@@ -262,18 +262,18 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("clearNeedsAttention is a no-op when status is working", async () => {
     // Set status to working
     await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "working", lastActivity: "coding something" },
     });
 
     // Attempt to clear — should be a no-op
     const res = await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
     });
     expect(res.status).toBe(200);
 
     // Status should still be working
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(getRes);
     expect(data.agent.status).toBe("working");
     expect(data.agent.lastActivity).toBe("coding something");
@@ -289,7 +289,7 @@ describe("needs_attention — reset on server startup", () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -302,11 +302,11 @@ describe("needs_attention — reset on server startup", () => {
       tokenSecret: DEFAULT_TOKEN,
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
-    // Seed a workspace status with needs_attention BEFORE starting server
-    seedWorkspaceStatuses(tmpHome, [
+    // Seed a worktree status with needs_attention BEFORE starting server
+    seedWorktreeStatuses(tmpHome, [
       {
-        workspaceId: "myrepo-main",
-        project: "myrepo",
+        worktreeId: "myrepo-main",
+        repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
         agentStatus: "needs_attention",
@@ -317,7 +317,7 @@ describe("needs_attention — reset on server startup", () => {
     const server = await startServer({ tmpHome });
     try {
       // After startup, resetAgentStatuses should have cleared needs_attention
-      const res = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
       const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(res);
       expect(data.agent.status).toBe("waiting");
       // lastActivity should still be preserved
@@ -332,7 +332,7 @@ describe("needs_attention — reset on server startup", () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -345,10 +345,10 @@ describe("needs_attention — reset on server startup", () => {
       tokenSecret: DEFAULT_TOKEN,
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
-    seedWorkspaceStatuses(tmpHome, [
+    seedWorktreeStatuses(tmpHome, [
       {
-        workspaceId: "myrepo-main",
-        project: "myrepo",
+        worktreeId: "myrepo-main",
+        repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
         agentStatus: "working",
@@ -358,7 +358,7 @@ describe("needs_attention — reset on server startup", () => {
 
     const server = await startServer({ tmpHome });
     try {
-      const res = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
       const data = await trpcData<{ agent: { status: string } }>(res);
       expect(data.agent.status).toBe("waiting");
     } finally {
@@ -371,7 +371,7 @@ describe("needs_attention — reset on server startup", () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -384,10 +384,10 @@ describe("needs_attention — reset on server startup", () => {
       tokenSecret: DEFAULT_TOKEN,
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
-    seedWorkspaceStatuses(tmpHome, [
+    seedWorktreeStatuses(tmpHome, [
       {
-        workspaceId: "myrepo-main",
-        project: "myrepo",
+        worktreeId: "myrepo-main",
+        repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
         agentStatus: "waiting",
@@ -396,7 +396,7 @@ describe("needs_attention — reset on server startup", () => {
 
     const server = await startServer({ tmpHome });
     try {
-      const res = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
       const data = await trpcData<{ agent: { status: string } }>(res);
       expect(data.agent.status).toBe("waiting");
     } finally {
@@ -419,7 +419,7 @@ describe("needs_attention — status stream via WebSocket", () => {
     tmpHome = createTmpHome();
     repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -443,11 +443,11 @@ describe("needs_attention — status stream via WebSocket", () => {
   it("WebSocket snapshot reflects current status after clearing needs_attention", async () => {
     // Set needs_attention, then clear it
     await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "needs_attention" },
     });
     await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
     });
 
     // Subscribe — snapshot should show "waiting", not "needs_attention"
@@ -462,7 +462,7 @@ describe("needs_attention — status stream via WebSocket", () => {
       };
       expect(snapshotData.kind).toBe("snapshot");
       const ws = snapshotData.statuses.find(
-        (s: { workspaceId?: string }) => s.workspaceId === "myrepo-main",
+        (s: { worktreeId?: string }) => s.worktreeId === "myrepo-main",
       );
       expect(ws).toBeDefined();
       expect(ws!.agent.status).toBe("waiting");
@@ -474,7 +474,7 @@ describe("needs_attention — status stream via WebSocket", () => {
   it("WebSocket receives update event when needs_attention is cleared", async () => {
     // Set needs_attention
     await trpcMutate(server.url, "statuses.update", {
-      workspaceId: "myrepo-main",
+      worktreeId: "myrepo-main",
       agent: { status: "needs_attention" },
     });
 
@@ -486,7 +486,7 @@ describe("needs_attention — status stream via WebSocket", () => {
 
       // Now clear the status via the dedicated endpoint — should arrive as an "update" event
       await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-        workspaceId: "myrepo-main",
+        worktreeId: "myrepo-main",
       });
 
       const updateEvent = await sub.waitForEvent(
@@ -497,10 +497,10 @@ describe("needs_attention — status stream via WebSocket", () => {
 
       const eventData = updateEvent as {
         kind: string;
-        status: { workspaceId: string; agent: { status: string } };
+        status: { worktreeId: string; agent: { status: string } };
       };
       expect(eventData.kind).toBe("update");
-      expect(eventData.status.workspaceId).toBe("myrepo-main");
+      expect(eventData.status.worktreeId).toBe("myrepo-main");
       expect(eventData.status.agent.status).toBe("waiting");
     } finally {
       sub.close();
@@ -512,7 +512,7 @@ describe("needs_attention — status stream via WebSocket", () => {
 // Tests: statuses.notify — agent hook → status mapping
 //
 // The CLI's `band notify` forwards the raw hook payload here; the server
-// dispatches to the workspace's coding-agent adapter to derive the status.
+// dispatches to the worktree's coding-agent adapter to derive the status.
 // This is the authoritative test for the Claude Code event→status matrix
 // (the mapping lives in packages/coding-agent's claude-code adapter).
 // ---------------------------------------------------------------------------
@@ -526,7 +526,7 @@ describe("statuses.notify — agent hook mapping", () => {
     tmpHome = createTmpHome();
     repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -554,7 +554,7 @@ describe("statuses.notify — agent hook mapping", () => {
     if (res.status !== 200) {
       throw new Error(`statuses.notify failed: HTTP ${res.status} — ${await res.text()}`);
     }
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{ agent?: { status: string } } | null>(getRes);
     return data?.agent?.status;
   }
@@ -642,7 +642,7 @@ describe("statuses.notify — agent hook mapping", () => {
   it("stamps a recent lastActivity timestamp", async () => {
     const before = Date.now();
     await notifyStatus({ hook_event_name: "Stop" });
-    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
     const data = await trpcData<{ agent?: { lastActivity: string } } | null>(getRes);
     const stamped = data?.agent?.lastActivity;
     expect(typeof stamped).toBe("string");
@@ -658,20 +658,20 @@ describe("statuses.notify — agent hook mapping", () => {
 
   it("is a no-op for an unresolvable cwd", async () => {
     const res = await trpcMutate(server.url, "statuses.notify", {
-      cwd: "/no/such/workspace",
+      cwd: "/no/such/worktree",
       payload: { hook_event_name: "Stop" },
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean }>(res);
     expect(data.ok).toBe(true);
 
-    // Anchor the no-op claim: the bogus cwd resolves to no workspace, so
+    // Anchor the no-op claim: the bogus cwd resolves to no worktree, so
     // nothing could have been written for it.
     const resolveRes = await trpcQuery(server.url, "statuses.resolve", {
-      cwd: "/no/such/workspace",
+      cwd: "/no/such/worktree",
     });
-    const resolved = await trpcData<{ workspaceId: string | null }>(resolveRes);
-    expect(resolved.workspaceId).toBeNull();
+    const resolved = await trpcData<{ worktreeId: string | null }>(resolveRes);
+    expect(resolved.worktreeId).toBeNull();
   });
 
   it("rejects statuses.notify without the band_token cookie (401)", async () => {

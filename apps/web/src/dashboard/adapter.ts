@@ -11,11 +11,11 @@ import type {
   FormatFileResult,
   GitStatus,
   HooksStatus,
-  ListWorkspaceBranchesResult,
-  ProjectInfo,
+  ListWorktreeBranchesResult,
+  RepoInfo,
   Settings,
-  WorkspaceDiff,
-  WorkspaceStatus,
+  WorktreeDiff,
+  WorktreeStatus,
 } from "./types";
 
 export type Unsubscribe = () => void;
@@ -44,50 +44,50 @@ export interface UpdateRelease {
 }
 
 export interface DashboardAdapter {
-  // Projects
-  listProjects(): Promise<ProjectInfo[]>;
-  addProject(path: string, label?: string): Promise<void>;
-  removeProject(name: string): Promise<void>;
-  reorderProjects(names: string[]): Promise<void>;
-  updateProjectLabel(name: string, label: string | null): Promise<void>;
+  // Repos
+  listRepos(): Promise<RepoInfo[]>;
+  addRepo(path: string, label?: string): Promise<void>;
+  removeRepo(name: string): Promise<void>;
+  reorderRepos(names: string[]): Promise<void>;
+  updateRepoLabel(name: string, label: string | null): Promise<void>;
   checkPath(path: string): Promise<{ isGitRepo: boolean }>;
   gitInit(path: string): Promise<void>;
   /**
-   * Promote a "plain" project to "git": runs `git init` in the project
-   * folder and flips the project's kind. Server-side rejects if the
-   * project is already a git project. After promotion, all branch/PR/CI
-   * features become available for the existing implicit workspace.
+   * Promote a "plain" repo to "git": runs `git init` in the repo
+   * folder and flips the repo's kind. Server-side rejects if the
+   * repo is already a git repo. After promotion, all branch/PR/CI
+   * features become available for the existing implicit worktree.
    */
-  promoteProjectToGit?(name: string): Promise<void>;
+  promoteRepoToGit?(name: string): Promise<void>;
 
-  // Workspaces. `name` is the immutable workspace identity (the initial
+  // Worktrees. `name` is the immutable worktree identity (the initial
   // branch), not the live git branch — see `WorktreeInfo.name`. `create`
   // still takes `branch` because it names a *new* branch (which seeds `name`).
   // `agentMode` is how the prompt's agent is displayed (issue #682): this
   // device's mode, or the server default when omitted.
-  createWorkspace(
-    project: string,
+  createWorktree(
+    repo: string,
     branch: string,
     base?: string,
     prompt?: string,
     agentMode?: AgentMode,
-    host?: { hostId: string; hostProjectPath?: string },
+    host?: { hostId: string; hostRepoPath?: string },
   ): Promise<void>;
-  removeWorkspace(project: string, name: string): Promise<void>;
-  setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;
+  removeWorktree(repo: string, name: string): Promise<void>;
+  setWorktreePinned(repo: string, name: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
-  gitPull(project: string, name: string): Promise<GitOpResult>;
-  gitPush(project: string, name: string): Promise<GitOpResult>;
+  gitPull(repo: string, name: string): Promise<GitOpResult>;
+  gitPush(repo: string, name: string): Promise<GitOpResult>;
 
   // Browser profiles (optional). Profiles hold the browser pane's cookies;
-  // each project remembers which one its new tabs open with.
+  // each repo remembers which one its new tabs open with.
   listBrowserProfiles?(): Promise<BrowserProfileInfo[]>;
   /** Delete a profile. The desktop adapter also wipes its cookies from disk. */
   removeBrowserProfile?(profileId: string): Promise<void>;
-  /** `projectName → profileId` for every project with a non-Default profile. */
-  listProjectBrowserProfiles?(): Promise<Record<string, string>>;
-  /** `profileId: null` resets the project to the Default profile. */
-  setProjectBrowserProfile?(projectName: string, profileId: string | null): Promise<void>;
+  /** `repoName → profileId` for every repo with a non-Default profile. */
+  listRepoBrowserProfiles?(): Promise<Record<string, string>>;
+  /** `profileId: null` resets the repo to the Default profile. */
+  setRepoBrowserProfile?(repoName: string, profileId: string | null): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;
@@ -141,34 +141,34 @@ export interface DashboardAdapter {
 
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(
-    onSnapshot: (statuses: WorkspaceStatus[]) => void,
-    onUpdate: (status: WorkspaceStatus) => void,
-    onRemove: (workspaceId: string) => void,
+    onSnapshot: (statuses: WorktreeStatus[]) => void,
+    onUpdate: (status: WorktreeStatus) => void,
+    onRemove: (worktreeId: string) => void,
   ): Unsubscribe;
 
   subscribeBranchStatus(
-    onGit: (workspaceId: string, git: GitStatus) => void,
-    onCI: (workspaceId: string, ci: CIStatus) => void,
+    onGit: (worktreeId: string, git: GitStatus) => void,
+    onCI: (worktreeId: string, ci: CIStatus) => void,
   ): Unsubscribe;
 
   /** Subscribe to raw status stream events (shared SSE connection). */
   subscribeStatusEvents(handler: (event: Record<string, unknown>) => void): Unsubscribe;
 
   /**
-   * Tell the server which workspace the user is currently looking at. The
+   * Tell the server which worktree the user is currently looking at. The
    * value is process-local on the server (resets on restart) and is read by
    * the `band open` CLI command so users can fire a file at "wherever I'm
-   * focused right now" without naming the workspace explicitly.
+   * focused right now" without naming the worktree explicitly.
    *
-   * Pass `null` when no workspace is active (e.g. the user is on the
+   * Pass `null` when no worktree is active (e.g. the user is on the
    * index route). Implementations may debounce or short-circuit when the
    * value hasn't changed.
    */
-  setActiveWorkspace(workspaceId: string | null): Promise<void>;
+  setActiveWorktree(worktreeId: string | null): Promise<void>;
 
   /**
-   * Subscribe to external file-system changes inside a workspace. The
-   * server emits one event per affected parent directory (workspace-
+   * Subscribe to external file-system changes inside a worktree. The
+   * server emits one event per affected parent directory (worktree-
    * relative path; "" for the root). The FileBrowser uses this to
    * invalidate / refetch directory listings when files are touched by the
    * agent, a terminal, the IDE, or drag-and-drop.
@@ -179,7 +179,7 @@ export interface DashboardAdapter {
    * (create/delete/rename/paste), not on external file-system changes
    * (see issue #384).
    */
-  subscribeFileChanges?(workspaceId: string, handler: (path: string) => void): Unsubscribe;
+  subscribeFileChanges?(worktreeId: string, handler: (path: string) => void): Unsubscribe;
 
   // Hooks
   checkHooks(): Promise<HooksStatus>;
@@ -201,130 +201,130 @@ export interface DashboardAdapter {
   dismissUpdate?(): Promise<void>;
 
   // Agent status (optional)
-  clearNeedsAttention?(workspaceId: string): Promise<void>;
-  /** Re-read the workspace's git status now; the result arrives on the status stream. */
-  refreshBranchStatus?(workspaceId: string): Promise<void>;
+  clearNeedsAttention?(worktreeId: string): Promise<void>;
+  /** Re-read the worktree's git status now; the result arrives on the status stream. */
+  refreshBranchStatus?(worktreeId: string): Promise<void>;
 
   // Code browsing (optional)
-  getWorkspaceDiff?(
-    workspaceId: string,
+  getWorktreeDiff?(
+    worktreeId: string,
     contextLines?: number,
     diffMode?: DiffMode,
     compareBranch?: string,
-  ): Promise<WorkspaceDiff>;
+  ): Promise<WorktreeDiff>;
   /** Local and remote branches matching `query`, best matches first, at most
    *  `limit` of them. `truncated` is set when more matched. */
-  listWorkspaceBranches?(
-    workspaceId: string,
+  listWorktreeBranches?(
+    worktreeId: string,
     options?: { query?: string; limit?: number },
-  ): Promise<ListWorkspaceBranchesResult>;
-  listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
-  getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
-  saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
+  ): Promise<ListWorktreeBranchesResult>;
+  listWorktreeFiles?(worktreeId: string, path: string): Promise<FileListResult>;
+  getWorktreeFile?(worktreeId: string, path: string): Promise<FileContentResult>;
+  saveWorktreeFile?(worktreeId: string, path: string, content: string): Promise<void>;
 
   /**
    * Read a file by absolute filesystem path — used by the editor's
    * "Open File…" action for files that sit outside any registered
-   * workspace root. The server-side procedure bypasses the workspace
+   * worktree root. The server-side procedure bypasses the worktree
    * containment check; authentication still flows through the same
    * band_token cookie used by every other tRPC call.
    */
   readExternalFile?(absolutePath: string): Promise<FileContentResult>;
 
   /**
-   * Resolve an absolute (or workspace-relative) path against a workspace:
+   * Resolve an absolute (or worktree-relative) path against a worktree:
    * does it exist, is it a regular file, and does it live inside the
-   * worktree (→ `workspaceRelativePath`) or outside it (→ `external`)? Used
+   * worktree (→ `worktreeRelativePath`) or outside it (→ `external`)? Used
    * by Quick Open to decide whether a pasted / terminal-link path opens as a
-   * normal workspace file or an external tab.
+   * normal worktree file or an external tab.
    *
    * Resolves even when the path doesn't exist on disk (reports
-   * `{ exists: false }`); may REJECT when `workspaceId` is unknown.
+   * `{ exists: false }`); may REJECT when `worktreeId` is unknown.
    */
-  resolveWorkspacePath?(
-    workspaceId: string,
+  resolveWorktreePath?(
+    worktreeId: string,
     path: string,
   ): Promise<{
     exists: boolean;
     isFile: boolean;
     external: boolean;
-    workspaceRelativePath: string | null;
+    worktreeRelativePath: string | null;
   }>;
 
-  /** Write a file by absolute filesystem path. Mirror of `saveWorkspaceFile`
+  /** Write a file by absolute filesystem path. Mirror of `saveWorktreeFile`
    *  for external files. */
   saveExternalFile?(absolutePath: string, content: string): Promise<void>;
 
   /**
    * Format `content` using Prettier as if it were the file at `filePath`
-   * inside `workspaceId`. Pure function — the server doesn't read or write
+   * inside `worktreeId`. Pure function — the server doesn't read or write
    * the file. Returns `{ skipped: true, reason }` when Prettier has no
    * parser for the file's extension (or it's covered by `.prettierignore`).
    * The caller is responsible for applying the returned `formatted` string
    * back to its editor and for persisting the result via
-   * `saveWorkspaceFile` when the user explicitly saves.
+   * `saveWorktreeFile` when the user explicitly saves.
    */
-  formatWorkspaceFile?(
-    workspaceId: string,
+  formatWorktreeFile?(
+    worktreeId: string,
     filePath: string,
     content: string,
   ): Promise<FormatFileResult>;
 
   /**
-   * Create a new file at the given workspace-relative path. The file's
+   * Create a new file at the given worktree-relative path. The file's
    * parent directory must already exist. Throws if the path already
    * exists. `content` defaults to an empty string.
    */
-  createWorkspaceFile?(workspaceId: string, path: string, content?: string): Promise<void>;
+  createWorktreeFile?(worktreeId: string, path: string, content?: string): Promise<void>;
 
   /**
-   * Create a new directory at the given workspace-relative path. The
+   * Create a new directory at the given worktree-relative path. The
    * directory's parent must already exist. Throws if the path already
    * exists.
    */
-  createWorkspaceDirectory?(workspaceId: string, path: string): Promise<void>;
+  createWorktreeDirectory?(worktreeId: string, path: string): Promise<void>;
 
   /**
-   * Delete a file or directory at the given workspace-relative path.
+   * Delete a file or directory at the given worktree-relative path.
    * Directories are removed recursively. Throws if the path doesn't
    * exist or refers to a protected location (e.g. `.git`).
    */
-  deleteWorkspacePath?(workspaceId: string, path: string): Promise<{ kind: "file" | "directory" }>;
+  deleteWorktreePath?(worktreeId: string, path: string): Promise<{ kind: "file" | "directory" }>;
 
   /**
-   * Rename or move a file/directory inside the workspace. `fromPath`
-   * and `toPath` are both workspace-relative. The destination must not
+   * Rename or move a file/directory inside the worktree. `fromPath`
+   * and `toPath` are both worktree-relative. The destination must not
    * already exist and its parent directory must exist.
    */
-  renameWorkspacePath?(
-    workspaceId: string,
+  renameWorktreePath?(
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }>;
 
   /**
-   * Recursively copy a file/directory inside the workspace. `fromPath`
-   * and `toPath` are both workspace-relative. The destination must not
+   * Recursively copy a file/directory inside the worktree. `fromPath`
+   * and `toPath` are both worktree-relative. The destination must not
    * already exist and its parent directory must. Directories may not be
    * copied into themselves.
    */
-  copyWorkspacePath?(
-    workspaceId: string,
+  copyWorktreePath?(
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }>;
 
   /** Get a URL for raw file content (images, PDFs, etc.) */
-  getWorkspaceFileUrl?(workspaceId: string, path: string): string;
+  getWorktreeFileUrl?(worktreeId: string, path: string): string;
 
   // Search (optional)
-  searchWorkspaceFiles?(
-    workspaceId: string,
+  searchWorktreeFiles?(
+    worktreeId: string,
     query: string,
     limit?: number,
   ): Promise<{ files: string[] }>;
-  searchWorkspaceContent?(
-    workspaceId: string,
+  searchWorktreeContent?(
+    worktreeId: string,
     query: string,
     options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number },
   ): Promise<{ results: ContentSearchMatch[] }>;
@@ -351,7 +351,7 @@ export interface PlatformCapabilities {
    *
    * Backs the editor's "Save untitled tab" flow. `defaultName` seeds the
    * dialog's filename field (e.g. "Untitled-1.txt"); `defaultPath` seeds
-   * the starting directory (e.g. the active workspace root).
+   * the starting directory (e.g. the active worktree root).
    *
    * Bundling the dialog + write into a single capability keeps the
    * filesystem trust boundary inside the desktop shell — the renderer
@@ -364,12 +364,12 @@ export interface PlatformCapabilities {
   }): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
   /**
-   * True when the window can show the desktop through the project-list
+   * True when the window can show the desktop through the repo-list
    * sidebar: the Electron desktop shell on macOS, whose window has a
    * vibrancy layer. Gates the "Translucent sidebar" setting.
    */
   translucentSidebar?: boolean;
-  getWorkspaceHref?(workspaceId: string): string | undefined;
+  getWorktreeHref?(worktreeId: string): string | undefined;
   /** Optional navigate function for client-side routing (avoids full page reload). */
   navigate?(href: string): void;
 }

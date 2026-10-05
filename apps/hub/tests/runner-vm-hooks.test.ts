@@ -59,7 +59,7 @@ function hook(
         BAND_LABELS: "pool=vm,gpu=none",
         BAND_RUNNER_ID: "vm-runner",
         BAND_REQUEST_ID: "req-1",
-        BAND_PROJECT: "proj",
+        BAND_REPO: "proj",
         BAND_REPO_URLS: "https://github.com/example/proj.git",
         BAND_RUNNER_DIR: runnerDir,
         ...extra,
@@ -116,7 +116,7 @@ describe("hetzner hook", () => {
     expect(stub.servers).toHaveLength(1);
     const server = stub.servers[0];
     expect(res.stdout).toContain(`BAND_MACHINE_HANDLE=${server.id}\n`);
-    expect(res.stdout).toContain("BAND_HOST_PROJECT_PATH=/home/band/work/proj\n");
+    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/home/band/work/proj\n");
     expect(server).toMatchObject({
       name: "band-h-0123456789ab",
       server_type: "cx32",
@@ -276,7 +276,7 @@ describe("hetzner hook", () => {
       expect(server.labels["band.worker"]).toBe("h-0123456789ab");
       expect(res.stdout).toContain(`BAND_MACHINE_HANDLE=${server.id}\n`);
       // The repository is on the snapshot's disk already.
-      expect(res.stdout).not.toContain("BAND_HOST_PROJECT_PATH");
+      expect(res.stdout).not.toContain("BAND_HOST_REPO_PATH");
 
       const cfg = parseCloudConfig(server.user_data);
       expect(file(cfg, "/etc/band-worker.env").content).toContain(
@@ -343,7 +343,7 @@ describe("hetzner hook", () => {
       dir,
     );
     expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toContain("BAND_HOST_PROJECT_PATH=/work/proj\n");
+    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/work/proj\n");
     const cfg = parseCloudConfig(stub.servers[0].user_data);
     expect(file(cfg, "/etc/systemd/system/band-worker.service").content).toContain(
       "ghcr.io/example/band-worker:1",
@@ -496,7 +496,7 @@ describe("cloud-init template", () => {
     BAND_WORKER_ID: "h-0123456789ab",
     BAND_BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN,
     BAND_LABELS: "pool=vm",
-    BAND_PROJECT: "proj",
+    BAND_REPO: "proj",
     BAND_REPO_URLS: "https://github.com/example/proj.git",
   };
   const KEYS = ["package_update", "packages", "write_files", "runcmd"];

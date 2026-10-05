@@ -1,6 +1,6 @@
 /**
  * Read a Chrome profile's browsing history for import into Band's
- * per-workspace history (`history.import` on the web server).
+ * per-worktree history (`history.import` on the web server).
  *
  * Chrome keeps one row per URL in the `urls` table of the profile's
  * `History` DB, with a visit count and the last visit time. That matches

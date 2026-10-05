@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
  * supplied `defaultName` and `defaultPath`. Decides what `defaultPath`
  * to hand to Electron's `dialog.showSaveDialog`:
  *
- *   - Both: join `defaultPath` and `defaultName` (e.g. workspace +
+ *   - Both: join `defaultPath` and `defaultName` (e.g. worktree +
  *     "Untitled-1.txt"). This is the common case when the editor knows
  *     the active worktree.
  *   - Only `defaultPath`: hand the directory to Electron and let it

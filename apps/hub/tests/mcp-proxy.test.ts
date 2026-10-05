@@ -140,7 +140,7 @@ beforeAll(async () => {
   mkdirSync(repo, { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
   seedState(home, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: repo,
@@ -543,7 +543,7 @@ describe("tokens (S4)", () => {
 
   it("revokes a session's tokens when its chat is removed", async () => {
     const chatId = "mcp-revoke-chat";
-    await m("chats.create", { workspaceId: "proj-main", id: chatId });
+    await m("chats.create", { worktreeId: "proj-main", id: chatId });
     const { token } = await issue(["notes"], undefined, chatId);
     expect((await rpc("notes", token, listBody)).status).toBe(200);
     await m("chats.remove", { chatId });
@@ -645,7 +645,7 @@ describe("tokens (S4)", () => {
       body: JSON.stringify(listBody),
     });
     const text = await res.text();
-    expect(text).toContain("band_projects_list");
+    expect(text).toContain("band_repos_list");
     expect(text).not.toContain("band_mcp_");
   });
 });

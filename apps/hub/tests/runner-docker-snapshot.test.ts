@@ -1,7 +1,7 @@
 // Integration test for the snapshot and restore hooks of the bundled `docker` runner (plan step 3.10).
 // A real hub (the production bundle, temp BAND_HOME) runs `runners/docker` against a real docker
-// daemon. A workspace in a container sleeps, the hub snapshots the container's /work volume into an
-// image and the container goes away. A file read wakes the workspace, `restore` starts a new
+// daemon. A worktree in a container sleeps, the hub snapshots the container's /work volume into an
+// image and the container goes away. A file read wakes the worktree, `restore` starts a new
 // container whose /work holds the snapshot, and the files git does not keep (an untracked file, an
 // ignored one and one outside the checkout) are all there.
 //
@@ -45,14 +45,14 @@ const RUNNER = "docker-hib";
 // The container is idle this long before the hub puts it to sleep. The test writes its files first.
 const IDLE_MS = 8000;
 
-interface Workspace {
+interface Worktree {
   name: string;
   path: string;
   hostId?: string;
   lifecycle?: "sleeping" | "waking";
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Workspace[] }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Worktree[] }>;
 }
 interface SnapshotsList {
   snapshots: Array<{ id: string; hostId: string; snapshotId: string; sizeBytes: number | null }>;
@@ -115,8 +115,8 @@ const m = <T>(procedure: string, input: unknown) =>
     if (res.status !== 200) throw new Error(`${procedure}: HTTP ${res.status} ${await res.text()}`);
     return trpcData<T>(res);
   });
-const workspace = async (name: string) =>
-  (await q<ProjectsList>("projects.list")).projects
+const worktree = async (name: string) =>
+  (await q<ReposList>("repos.list")).repos
     .find((p) => p.name === "proj")
     ?.worktrees.find((w) => w.name === name);
 const snapshots = async () => (await q<SnapshotsList>("runners.snapshots")).snapshots;
@@ -171,7 +171,7 @@ describe.skipIf(!IMAGE)("the docker hook's snapshot and restore", () => {
 
     seedSettings(hubHome, { tokenSecret: TOKEN });
     seedState(hubHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: seed,
@@ -231,17 +231,17 @@ describe.skipIf(!IMAGE)("the docker hook's snapshot and restore", () => {
   });
 
   it("keeps an untracked file through sleep and wake (S4)", async () => {
-    await m("workspaces.create", {
-      project: "proj",
+    await m("worktrees.create", {
+      repo: "proj",
       branch: "snap",
       placement: { labels: { pool: RUNNER }, environment: { isolation: "container" } },
     });
     const wt = await waitFor(
       async () => {
-        const found = await workspace("snap");
+        const found = await worktree("snap");
         return found?.hostId ? found : undefined;
       },
-      { label: "workspace snap on a container", timeoutMs: 180_000, intervalMs: 500 },
+      { label: "worktree snap on a container", timeoutMs: 180_000, intervalMs: 500 },
     ).catch(async (err) => {
       const requests = await q<{ requests: Array<{ id: string; branch: string }> }>(
         "hostRequests.list",
@@ -291,20 +291,20 @@ describe.skipIf(!IMAGE)("the docker hook's snapshot and restore", () => {
       label: "the container is gone",
       timeoutMs: 60_000,
     });
-    expect((await workspace("snap"))?.lifecycle).toBe("sleeping");
+    expect((await worktree("snap"))?.lifecycle).toBe("sleeping");
 
-    // A file read wakes the workspace. The restore hook starts a new container from the snapshot.
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: "proj-snap",
+    // A file read wakes the worktree. The restore hook starts a new container from the snapshot.
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: "proj-snap",
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\n");
     const back = await waitFor(
       async () => {
-        const found = await workspace("snap");
+        const found = await worktree("snap");
         return found && found.lifecycle === undefined ? found : undefined;
       },
-      { label: "workspace snap is awake", timeoutMs: 120_000, intervalMs: 500 },
+      { label: "worktree snap is awake", timeoutMs: 120_000, intervalMs: 500 },
     );
     const [second] = containerOf(hostId);
     expect(second).toBeTruthy();

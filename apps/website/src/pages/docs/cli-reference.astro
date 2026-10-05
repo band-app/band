@@ -5,8 +5,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>CLI Reference</h1>
 
   <p>
-    The <code>band</code> CLI is a command-line interface for managing projects,
-    workspaces, chat panes, terminals, browser tabs, cronjobs, and tunnels. It
+    The <code>band</code> CLI is a command-line interface for managing repos,
+    worktrees, chat panes, terminals, browser tabs, cronjobs, and tunnels. It
     communicates with the Band server over HTTP and provides both human-readable and
     JSON output.
   </p>
@@ -47,7 +47,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     into tools like <code>jq</code>.
   </p>
 
-  <pre><code>band projects list --output json
+  <pre><code>band repos list --output json
 band chats list --output json | jq '.chats[].id'</code></pre>
 
   <p>
@@ -64,7 +64,7 @@ band chats list --output json | jq '.chats[].id'</code></pre>
   </p>
 
   <pre><code>band schema                       # all commands
-band schema "workspaces create"   # one command's schema</code></pre>
+band schema "worktrees create"   # one command's schema</code></pre>
 
   <p>
     The schema includes every command, its positional arguments, named flags, types, and
@@ -76,11 +76,11 @@ band schema "workspaces create"   # one command's schema</code></pre>
   <p>The CLI is organized into the following command groups:</p>
 
   <ul>
-    <li><strong><a href="/docs/cli-projects">band projects</a></strong> — Register and unregister projects.</li>
-    <li><strong><a href="/docs/cli-workspaces">band workspaces</a></strong> — Create and remove workspaces (Git worktrees).</li>
+    <li><strong><a href="/docs/cli-repos">band repos</a></strong> — Register and unregister repos.</li>
+    <li><strong><a href="/docs/cli-worktrees">band worktrees</a></strong> — Create and remove worktrees (Git worktrees).</li>
     <li><strong><a href="/docs/cli-chats">band chats</a></strong> — Send messages to coding agents and manage chat panes.</li>
-    <li><strong><a href="/docs/cli-terminals">band terminals</a></strong> — Manage PTY-backed terminal sessions inside a workspace.</li>
-    <li><strong><a href="/docs/cli-browsers">band browsers</a></strong> — Manage browser tabs inside a workspace.</li>
+    <li><strong><a href="/docs/cli-terminals">band terminals</a></strong> — Manage PTY-backed terminal sessions inside a worktree.</li>
+    <li><strong><a href="/docs/cli-browsers">band browsers</a></strong> — Manage browser tabs inside a worktree.</li>
     <li><strong><a href="/docs/cli-cronjobs">band cronjobs</a></strong> — Schedule recurring agent tasks with cron expressions.</li>
     <li><strong><a href="/docs/cli-tunnel">band tunnel</a></strong> — Start, stop, and inspect the Cloudflare tunnel.</li>
     <li><strong><a href="/docs/cli-settings">band settings</a></strong> — Print the live server settings as JSON.</li>
@@ -97,6 +97,6 @@ band schema "workspaces create"   # one command's schema</code></pre>
   </p>
 
   <pre><code>band --help
-band projects --help
+band repos --help
 band chats send --help</code></pre>
 </DocsLayout>

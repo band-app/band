@@ -9,7 +9,7 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -41,13 +41,13 @@ import { waitFor } from "./helpers/wait-for";
 // line can never satisfy the assertion; only the command's output can.
 
 const TOKEN = "terminal-daemon-build-token";
-const PROJECT = "buildproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "buildproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
@@ -60,12 +60,12 @@ describe("terminal daemon — a daemon from another build", () => {
 
   beforeEach(() => {
     tmpHome = createTmpHome("band-td-build-");
-    worktree = join(tmpHome, PROJECT);
+    worktree = join(tmpHome, REPO);
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -88,7 +88,7 @@ describe("terminal daemon — a daemon from another build", () => {
 
   async function listTerminals(): Promise<TerminalEntry[]> {
     if (!server) throw new Error("no server");
-    const res = await trpcQuery(server.url, "terminal.list", { workspaceId: WORKSPACE_ID }, TOKEN);
+    const res = await trpcQuery(server.url, "terminal.list", { worktreeId: WORKTREE_ID }, TOKEN);
     expect(res.status).toBe(200);
     return (await trpcData<{ terminals: TerminalEntry[] }>(res)).terminals;
   }
@@ -98,7 +98,7 @@ describe("terminal daemon — a daemon from another build", () => {
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id },
+      { worktreeId: WORKTREE_ID, id },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -114,7 +114,7 @@ describe("terminal daemon — a daemon from another build", () => {
   async function expectShellResponds(terminalId: string, marker: string): Promise<void> {
     if (!server) throw new Error("no server");
     const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -131,7 +131,7 @@ describe("terminal daemon — a daemon from another build", () => {
     const runDir = join(tmpHome, ".band", "run");
     const inRunDir = readdirSync(runDir).filter((name) => name.includes(".retired-"));
     const socketDir = dirname(
-      JSON.parse(readFileSync(join(runDir, "terminal-daemon-v1.pid"), "utf8")).socket,
+      JSON.parse(readFileSync(join(runDir, "terminal-daemon-v3.pid"), "utf8")).socket,
     );
     const sockets = inRunDir
       .map((name) => /\.retired-([0-9a-f]+)\.token$/.exec(name)?.[1])
@@ -154,9 +154,9 @@ describe("terminal daemon — a daemon from another build", () => {
     });
     const oldTerminalId = randomUUID();
     const oldShell = await old.spawnShell({
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: oldTerminalId,
-      workspaceRoot: worktree,
+      worktreeRoot: worktree,
     });
 
     const port = await getRandomPort();
@@ -211,7 +211,7 @@ describe("terminal daemon — a daemon from another build", () => {
     await expectShellResponds(created.terminalId, "NEW");
 
     // Terminals across two daemons still need the token.
-    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const input = encodeURIComponent(JSON.stringify({ worktreeId: WORKTREE_ID }));
     const unauthenticated = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
     expect(unauthenticated.status).toBe(401);
   });
@@ -229,9 +229,9 @@ describe("terminal daemon — a daemon from another build", () => {
     const old = await startDaemonOfBuild(tmpHome, { entry: entryCopy, buildId });
     const oldTerminalId = randomUUID();
     const oldShell = await old.spawnShell({
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: oldTerminalId,
-      workspaceRoot: worktree,
+      worktreeRoot: worktree,
     });
     rmSync(entryCopyDir, { recursive: true, force: true });
 

@@ -31,7 +31,7 @@ import { TokenExchangeError, type TokenService, tokenService } from "./token-ser
 import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
 import { workerRelayService } from "./worker-relay-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("worker-link");
 
@@ -83,7 +83,7 @@ export class WorkerLinkService {
     });
   }
 
-  /** Makes every known worker resolvable, so a workspace on an offline host still finds its host. */
+  /** Makes every known worker resolvable, so a worktree on an offline host still finds its host. */
   start(): void {
     for (const row of this.queries.listHosts(1000)) {
       if (row.id !== LOCAL_HOST_ID) this.remoteHost(row.id);
@@ -162,8 +162,8 @@ export class WorkerLinkService {
     void ephemeralLifecycleService.onConnected(session);
     // A request a runner fulfilled with this host can finish now.
     placementService.onHostOnline(workerId);
-    // Workspaces removed while the worker was away still have a checkout on it.
-    void workspaceService.finishPendingRemovals(workerId).catch((err) => {
+    // Worktrees removed while the worker was away still have a checkout on it.
+    void worktreeService.finishPendingRemovals(workerId).catch((err) => {
       log.warn(`pending removals on ${workerId}: ${err instanceof Error ? err.message : err}`);
     });
   }

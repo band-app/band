@@ -1,7 +1,7 @@
 // Preloaded into the hub process (`node --import`) in remote-loopback mode.
 //
 // On loopback the worker shares the machine's disk with the hub, so a hub
-// service that reads a remote workspace's checkout directly (existsSync,
+// service that reads a remote worktree's checkout directly (existsSync,
 // readFile, a git subprocess with that cwd) works in the test and fails in
 // production, where the worker's disk is another machine. The guard makes the
 // hub's view match production: any fs call or child process cwd under a path
@@ -9,7 +9,7 @@
 // service that swallows the error still fails the test at `close()`.
 //
 // `BAND_TEST_WORKER_PATHS_FILE` is a JSON array of worker-owned directories,
-// rewritten by the harness as workspaces move onto the worker.
+// rewritten by the harness as worktrees move onto the worker.
 // `BAND_TEST_WORKER_VIOLATIONS_FILE` collects one JSON line per violation.
 
 import { createRequire, syncBuiltinESMExports } from "node:module";

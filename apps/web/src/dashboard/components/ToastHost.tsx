@@ -117,12 +117,12 @@ function NoticeToast({ notice }: { notice: Notice }) {
  * The stack's `bottom` in CSS px when a registered obstruction in the lower
  * half of the screen overlaps its column, or `null` to keep the default
  * bottom-right position. Measures again when an obstruction registers,
- * resizes or appears (a hidden workspace becoming the active one), and when
+ * resizes or appears (a hidden worktree becoming the active one), and when
  * the window or the on-screen keyboard changes size.
  */
 function useObstructionBottom(hostRef: RefObject<HTMLElement | null>): number | null {
   const [bottom, setBottom] = useState<number | null>(null);
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
   const measureRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -135,7 +135,7 @@ function useObstructionBottom(hostRef: RefObject<HTMLElement | null>): number | 
       const viewportHeight = window.innerHeight;
       let top = Number.POSITIVE_INFINITY;
       for (const el of toastObstructions()) {
-        // Skips elements in a hidden workspace (`visibility` and
+        // Skips elements in a hidden worktree (`visibility` and
         // `content-visibility: hidden`) and in an inactive dock tab.
         if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) continue;
         const rect = el.getBoundingClientRect();
@@ -175,11 +175,11 @@ function useObstructionBottom(hostRef: RefObject<HTMLElement | null>): number | 
     };
   }, [hostRef]);
 
-  // Switching workspaces swaps `visibility`, which changes no element's size.
+  // Switching worktrees swaps `visibility`, which changes no element's size.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on each switch
   useEffect(() => {
     measureRef.current();
-  }, [activeWorkspaceId]);
+  }, [activeWorktreeId]);
 
   return bottom;
 }

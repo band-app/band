@@ -1,11 +1,11 @@
 /**
- * Workspace files service — owns file-system CRUD operations rooted at a
- * workspace's worktree path. Lifted out of `api/workspace/router.ts`
+ * Worktree files service — owns file-system CRUD operations rooted at a
+ * worktree's worktree path. Lifted out of `api/worktree/router.ts`
  * (issue #535, follow-up 1) so the router contains validation + delegation
- * only, with the actual file calls going through the workspace's host
+ * only, with the actual file calls going through the worktree's host
  * (`host.fs`).
  *
- * Every path argument is workspace-relative; the service resolves it
+ * Every path argument is worktree-relative; the service resolves it
  * against the worktree root and refuses anything that escapes the root
  * (path-traversal guard) or targets `.git` internals (corruption guard).
  *
@@ -17,12 +17,12 @@
 
 import { dirname, extname, join, resolve, sep } from "node:path";
 import type { FsStat, HostFs } from "@band-app/host-api";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import {
-  workspaceService as defaultWorkspaceService,
-  type WorkspaceService,
-} from "./workspace-service";
+  worktreeService as defaultWorktreeService,
+  type WorktreeService,
+} from "./worktree-service";
 
 /**
  * 1 MB ceiling on `getFile` reads. Editor surfaces can't usefully render
@@ -101,24 +101,24 @@ async function assertParentDirectory(fs: HostFs, parent: string, label: string):
 }
 
 export class FilesService {
-  constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
+  constructor(private readonly worktrees: WorktreeService = defaultWorktreeService) {}
 
   /**
-   * Resolve a workspace-relative path against a worktree root, refusing
+   * Resolve a worktree-relative path against a worktree root, refusing
    * anything that escapes the root. Optional `allowRoot` toggles whether
    * the root itself is a valid target (`listFiles` allows it; the mutation
    * methods do not).
    */
   private resolveInside(
-    workspaceId: string,
+    worktreeId: string,
     relative: string,
     opts: { allowRoot: boolean },
   ): { root: string; target: string; fs: HostFs } {
-    const workspace = this.workspaces.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.worktrees.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    const root = workspace.worktree.path;
+    const root = worktree.worktree.path;
     const target = resolve(join(root, relative));
     // Demand a separator after the root prefix so a sibling directory
     // with the same prefix (root=`/tmp/band-ws-abc`, target=`/tmp/band-
@@ -131,7 +131,7 @@ export class FilesService {
     if (!opts.allowRoot && target === root) {
       throw new Error("Invalid path");
     }
-    return { root, target, fs: workspace.host.fs };
+    return { root, target, fs: worktree.host.fs };
   }
 
   /**
@@ -152,9 +152,9 @@ export class FilesService {
     }
   }
 
-  async listFiles(workspaceId: string, path = ""): Promise<ListFilesResult> {
-    await ephemeralLifecycleService.ensureAwake(workspaceId);
-    const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: true });
+  async listFiles(worktreeId: string, path = ""): Promise<ListFilesResult> {
+    await ephemeralLifecycleService.ensureAwake(worktreeId);
+    const { target, fs } = this.resolveInside(worktreeId, path, { allowRoot: true });
     const dirents = await fs.list(target);
     const entries: FileEntry[] = dirents
       .map((d) => ({
@@ -168,10 +168,10 @@ export class FilesService {
     return { entries, path };
   }
 
-  async getFile(workspaceId: string, path: string): Promise<GetFileResult> {
-    await ephemeralLifecycleService.ensureAwake(workspaceId);
+  async getFile(worktreeId: string, path: string): Promise<GetFileResult> {
+    await ephemeralLifecycleService.ensureAwake(worktreeId);
     if (!path) throw new Error("Path is required");
-    const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { target, fs } = this.resolveInside(worktreeId, path, { allowRoot: false });
 
     const fileStat = await fs.stat(target, FOLLOW);
     const size = fileStat.size;
@@ -201,9 +201,9 @@ export class FilesService {
     };
   }
 
-  async saveFile(workspaceId: string, path: string, content: string): Promise<{ ok: true }> {
-    await ephemeralLifecycleService.ensureAwake(workspaceId);
-    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
+  async saveFile(worktreeId: string, path: string, content: string): Promise<{ ok: true }> {
+    await ephemeralLifecycleService.ensureAwake(worktreeId);
+    const { root, target, fs } = this.resolveInside(worktreeId, path, { allowRoot: false });
     // Refuse to write into `.git/*` — overwriting `config`, `HEAD`, or
     // a hook would corrupt the worktree or run attacker-controlled code
     // on the next git invocation. Matches the guard on delete/rename/
@@ -217,9 +217,9 @@ export class FilesService {
     return { ok: true };
   }
 
-  async createFile(workspaceId: string, path: string, content = ""): Promise<{ ok: true }> {
-    await ephemeralLifecycleService.ensureAwake(workspaceId);
-    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
+  async createFile(worktreeId: string, path: string, content = ""): Promise<{ ok: true }> {
+    await ephemeralLifecycleService.ensureAwake(worktreeId);
+    const { root, target, fs } = this.resolveInside(worktreeId, path, { allowRoot: false });
     // Same .git guard as saveFile — creating `.git/hooks/pre-commit`
     // would let an attacker run arbitrary code under the user's account
     // the next time git commits inside the worktree.
@@ -237,8 +237,8 @@ export class FilesService {
     return { ok: true };
   }
 
-  async createDirectory(workspaceId: string, path: string): Promise<{ ok: true }> {
-    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
+  async createDirectory(worktreeId: string, path: string): Promise<{ ok: true }> {
+    const { root, target, fs } = this.resolveInside(worktreeId, path, { allowRoot: false });
     // Same .git guard as createFile / saveFile.
     this.assertNotGitInternals(root, target, "create");
 
@@ -252,8 +252,8 @@ export class FilesService {
     return { ok: true };
   }
 
-  async deletePath(workspaceId: string, path: string): Promise<{ ok: true; kind: FileEntryKind }> {
-    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
+  async deletePath(worktreeId: string, path: string): Promise<{ ok: true; kind: FileEntryKind }> {
+    const { root, target, fs } = this.resolveInside(worktreeId, path, { allowRoot: false });
     this.assertNotGitInternals(root, target, "delete");
 
     let entryStat: FsStat;
@@ -274,7 +274,7 @@ export class FilesService {
   }
 
   async renamePath(
-    workspaceId: string,
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ ok: true; kind: FileEntryKind }> {
@@ -282,10 +282,10 @@ export class FilesService {
       root,
       target: fromTarget,
       fs,
-    } = this.resolveInside(workspaceId, fromPath, {
+    } = this.resolveInside(worktreeId, fromPath, {
       allowRoot: false,
     });
-    const { target: toTarget } = this.resolveInside(workspaceId, toPath, { allowRoot: false });
+    const { target: toTarget } = this.resolveInside(worktreeId, toPath, { allowRoot: false });
 
     if (fromTarget === toTarget) {
       throw new Error("Source and destination are the same");
@@ -316,7 +316,7 @@ export class FilesService {
   }
 
   async copyPath(
-    workspaceId: string,
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ ok: true; kind: FileEntryKind }> {
@@ -324,10 +324,10 @@ export class FilesService {
       root,
       target: fromTarget,
       fs,
-    } = this.resolveInside(workspaceId, fromPath, {
+    } = this.resolveInside(worktreeId, fromPath, {
       allowRoot: false,
     });
-    const { target: toTarget } = this.resolveInside(workspaceId, toPath, { allowRoot: false });
+    const { target: toTarget } = this.resolveInside(worktreeId, toPath, { allowRoot: false });
 
     if (fromTarget === toTarget) {
       throw new Error("Source and destination are the same");

@@ -59,7 +59,7 @@ export function GitStatusIndicator({ git }: Props) {
       <TooltipTrigger asChild>
         <span className="inline-flex items-center gap-0.5 font-mono text-[11px] leading-none shrink-0 pr-0.5">
           {parts.map((p) => (
-            <span key={p.kind} className={p.color} data-testid={`workspace-card__git-${p.kind}`}>
+            <span key={p.kind} className={p.color} data-testid={`worktree-card__git-${p.kind}`}>
               {p.text}
             </span>
           ))}

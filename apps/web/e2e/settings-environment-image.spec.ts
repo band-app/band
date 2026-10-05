@@ -1,12 +1,12 @@
 /**
- * Settings > Environment > Image: a project whose environment has a `build`
+ * Settings > Environment > Image: a repo whose environment has a `build`
  * shows its current image, the status and log of its latest build and a
  * "Build image" button, driven through the real Settings dialog against the
  * real server.
  *
  * Docker is the external service. The server runs the docker stub
  * (`apps/hub/tests/fixtures/docker-stub-bin.mjs`) through `BAND_DOCKER_BIN`,
- * and the projects are real git repositories because the builder reads the
+ * and the repos are real git repositories because the builder reads the
  * default branch from git.
  */
 
@@ -37,7 +37,7 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@test.com",
 };
 
-const PROJECTS: Record<string, string> = {
+const REPOS: Record<string, string> = {
   "img-ok": "FROM busybox\n",
   "img-fail": "FROM busybox\nRUN FAIL_BUILD\n",
 };
@@ -52,7 +52,7 @@ test.beforeAll(async () => {
   writeFileSync(stubState, JSON.stringify({ images: { "band-worker:latest": "sha256:worker" } }));
   const root = mkdtempSync(join(tmpdir(), "band-e2e-env-image-"));
   reposRoot = root;
-  const projects = Object.entries(PROJECTS).map(([name, dockerfile]) => {
+  const repos = Object.entries(REPOS).map(([name, dockerfile]) => {
     const path = join(root, name);
     mkdirSync(join(path, ".band"), { recursive: true });
     writeFileSync(join(path, "Dockerfile"), dockerfile);
@@ -65,7 +65,7 @@ test.beforeAll(async () => {
     execFileSync("git", ["commit", "-m", "init"], { cwd: path, env: gitEnv });
     return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({
     tmpHome,

@@ -1,7 +1,7 @@
-// Integration tests for what an agent in a remote workspace needs (plan step
+// Integration tests for what an agent in a remote worktree needs (plan step
 // 2.5): uploads and the shared dir on the worker, the worker's local relay for
 // the agent's calls to the hub, hooks through the relay, system and editor
-// calls on the worker, and removing a workspace while its worker is offline.
+// calls on the worker, and removing a worktree while its worker is offline.
 // Two real `band-worker` processes dial a real hub (the production bundle on
 // a random port with auth on). Agents are the scripted ACP stub, started by
 // the worker. Everything lives in temp dirs.
@@ -61,7 +61,7 @@ function git(cwd: string, ...args: string[]): string {
 function makeRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
-  writeFileSync(join(dir, "hello.txt"), "hello from the project\n");
+  writeFileSync(join(dir, "hello.txt"), "hello from the repo\n");
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "init");
 }
@@ -154,12 +154,12 @@ async function hostStatus(w: Worker): Promise<string | undefined> {
   return hosts.find((h) => h.id === w.hostId)?.status;
 }
 
-async function createWorkspace(w: Worker, branch: string): Promise<string> {
-  await m("workspaces.create", {
-    project: "proj",
+async function createWorktree(w: Worker, branch: string): Promise<string> {
+  await m("worktrees.create", {
+    repo: "proj",
     branch,
     hostId: w.hostId,
-    hostProjectPath: join(w.root, "proj"),
+    hostRepoPath: join(w.root, "proj"),
   });
   return `proj-${branch}`;
 }
@@ -171,7 +171,7 @@ const newChatId = () => `relay-chat-${++chatCounter}`;
 
 /** Sends one message the way the browser does and waits for the turn to end. */
 async function submit(
-  workspaceId: string,
+  worktreeId: string,
   text: string,
   files?: { mediaType: string; url: string; filename?: string }[],
   chatId = newChatId(),
@@ -180,7 +180,7 @@ async function submit(
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-    body: JSON.stringify({ workspaceId, text, files }),
+    body: JSON.stringify({ worktreeId, text, files }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   return { chatId, events: await stream.events };
@@ -201,13 +201,13 @@ function httpLog(w: Worker): HttpLine[] {
     .map((l) => JSON.parse(l) as HttpLine);
 }
 
-const listChats = (workspaceId: string) =>
-  `/trpc/chats.list?input=${encodeURIComponent(JSON.stringify({ workspaceId }))}`;
-const mcpChatsList = (workspaceId: string) => ({
+const listChats = (worktreeId: string) =>
+  `/trpc/chats.list?input=${encodeURIComponent(JSON.stringify({ worktreeId }))}`;
+const mcpChatsList = (worktreeId: string) => ({
   jsonrpc: "2.0",
   id: 1,
   method: "tools/call",
-  params: { name: "band_chats_list", arguments: { workspaceId } },
+  params: { name: "band_chats_list", arguments: { worktreeId } },
 });
 const MCP_HEADERS = { accept: "application/json, text/event-stream" };
 
@@ -222,7 +222,7 @@ beforeAll(async () => {
     defaultCodingAgent: "claude-code",
   });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -231,7 +231,7 @@ beforeAll(async () => {
       },
     ],
   });
-  // The hub's own workspace must stay local, and this file starts its own workers,
+  // The hub's own worktree must stay local, and this file starts its own workers,
   // so the loopback worker would only get in the way.
   server = await startServer({
     tmpHome: hubHome,
@@ -288,19 +288,19 @@ beforeAll(async () => {
           }),
           probe(
             "batch",
-            `/trpc/chats.list,tokens.list?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { workspaceId: "proj-relay-a" }, 1: {} }))}`,
+            `/trpc/chats.list,tokens.list?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { worktreeId: "proj-relay-a" }, 1: {} }))}`,
           ),
           probe("decoy-terminal", "/trpc/terminal.kill", {
             method: "POST",
-            body: { terminalId: "hub-terminal", workspaceId: "proj-relay-a" },
+            body: { terminalId: "hub-terminal", worktreeId: "proj-relay-a" },
             headers: { "content-type": "application/json" },
           }),
-          probe("decoy-project", "/trpc/workspaces.gitPush", {
+          probe("decoy-repo", "/trpc/worktrees.gitPush", {
             method: "POST",
-            body: { project: "proj", name: "main", workspaceId: "proj-relay-a" },
+            body: { repo: "proj", name: "main", worktreeId: "proj-relay-a" },
             headers: { "content-type": "application/json" },
           }),
-          probe("other-route", "/api/workspace-file/proj-main/hello.txt"),
+          probe("other-route", "/api/worktree-file/proj-main/hello.txt"),
           { say: "probed" },
         ],
       },
@@ -308,34 +308,34 @@ beforeAll(async () => {
         match: "^id-probe",
         steps: [
           post("b-chat-collide", "/trpc/chats.create", {
-            workspaceId: "proj-relay-b",
+            worktreeId: "proj-relay-b",
             id: "a-owned-chat",
           }),
           post("b-browser-collide", "/trpc/browsers.create", {
-            workspaceId: "proj-relay-b",
+            worktreeId: "proj-relay-b",
             id: "a-owned-browser",
           }),
           post("b-chat-into-a", "/trpc/chats.create", {
-            workspaceId: "proj-relay-a",
+            worktreeId: "proj-relay-a",
             id: "fresh-id",
           }),
           post("b-chat-own", "/trpc/chats.create", {
-            workspaceId: "proj-relay-b",
+            worktreeId: "proj-relay-b",
             id: "b-owned-chat",
           }),
           post("b-browser-own", "/trpc/browsers.create", {
-            workspaceId: "proj-relay-b",
+            worktreeId: "proj-relay-b",
             id: "b-owned-browser",
           }),
-          post("projects-remove", "/trpc/projects.remove", { name: "proj" }),
+          post("repos-remove", "/trpc/repos.remove", { name: "proj" }),
           post("tokens-list", "/trpc/tokens.list", {}),
           post("chats-unlisted", "/trpc/chats.continueInTerminal", {
             chatId: "b-owned-chat",
-            workspaceId: "proj-relay-b",
+            worktreeId: "proj-relay-b",
           }),
           post("tasks-cancel", "/trpc/tasks.cancel", { taskId: "x" }),
-          post("workspaces-remove", "/trpc/workspaces.remove", {
-            project: "proj",
+          post("worktrees-remove", "/trpc/worktrees.remove", {
+            repo: "proj",
             name: "relay-a",
           }),
           { say: "probed ids" },
@@ -365,15 +365,15 @@ afterAll(async () => {
 
 describe("uploads (S1)", () => {
   it("stores a chat upload on the worker and keeps no copy on the hub", async () => {
-    await createWorkspace(a, "relay-a");
-    await createWorkspace(b, "relay-b");
+    await createWorktree(a, "relay-a");
+    await createWorktree(b, "relay-b");
 
     const { events } = await submit("proj-relay-a", "look at this file", [
       { mediaType: "text/plain", url: dataUrl("uploaded to a worker\n"), filename: "notes.txt" },
     ]);
     expect(events.find(turnEnded)).toBeDefined();
 
-    // The agent got a path on the worker, under the worker's root and keyed by workspace.
+    // The agent got a path on the worker, under the worker's root and keyed by worktree.
     const prompts = readFileSync(a.stubLog, "utf8")
       .split("\n")
       .filter(Boolean)
@@ -403,7 +403,7 @@ describe("uploads (S1)", () => {
     expect(await served.text()).toBe("uploaded to a worker\n");
   });
 
-  it("keeps a local workspace's uploads on the hub", async () => {
+  it("keeps a local worktree's uploads on the hub", async () => {
     const { events } = await submit("proj-main", "local upload", [
       { mediaType: "text/plain", url: dataUrl("stays here\n"), filename: "local.txt" },
     ]);
@@ -439,7 +439,7 @@ describe("uploads (S1)", () => {
 });
 
 describe("the worker relay (S2)", () => {
-  it("gives the agent the relay as its server and lets it call the hub for its own workspace", async () => {
+  it("gives the agent the relay as its server and lets it call the hub for its own worktree", async () => {
     await submit("proj-relay-a", "relay-probe");
     const lines = httpLog(a);
     const by = (name: string) => lines.find((l) => l.name === name);
@@ -459,7 +459,7 @@ describe("the worker relay (S2)", () => {
     expect(by("mcp-own")?.body).toContain("chats");
   });
 
-  it("refuses a call for another worker's workspace, or the hub's", async () => {
+  it("refuses a call for another worker's worktree, or the hub's", async () => {
     const by = (name: string) => httpLog(a).find((l) => l.name === name);
     expect(by("other-worker-chats")?.status).toBe(403);
     expect(by("hub-chats")?.status).toBe(403);
@@ -478,9 +478,9 @@ describe("the worker relay (S2)", () => {
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
-    // A foreign target next to the agent's own workspaceId does not borrow its scope.
+    // A foreign target next to the agent's own worktreeId does not borrow its scope.
     expect(by("decoy-terminal")?.status).toBe(403);
-    expect(by("decoy-project")?.status).toBe(403);
+    expect(by("decoy-repo")?.status).toBe(403);
     // Nothing in a refusal gives away a credential.
     for (const line of httpLog(a)) expect(line.body).not.toContain(TEST_TOKEN);
   });
@@ -505,9 +505,9 @@ describe("the worker relay (S2)", () => {
 });
 
 describe("what an agent may call, and which ids it may take", () => {
-  it("refuses a chat or browser id that belongs to a workspace on another worker", async () => {
-    await m("chats.create", { workspaceId: "proj-relay-a", id: "a-owned-chat" });
-    await m("browsers.create", { workspaceId: "proj-relay-a", id: "a-owned-browser" });
+  it("refuses a chat or browser id that belongs to a worktree on another worker", async () => {
+    await m("chats.create", { worktreeId: "proj-relay-a", id: "a-owned-chat" });
+    await m("browsers.create", { worktreeId: "proj-relay-a", id: "a-owned-browser" });
 
     await submit("proj-relay-b", "id-probe");
     const by = (name: string) => httpLog(b).find((l) => l.name === name);
@@ -521,34 +521,32 @@ describe("what an agent may call, and which ids it may take", () => {
 
     // Worker A's chat and tab are untouched, and B's calls made nothing in A.
     const chats = await q<{ chats: Array<{ id: string }> }>("chats.list", {
-      workspaceId: "proj-relay-a",
+      worktreeId: "proj-relay-a",
     });
     expect(chats.chats.filter((c) => c.id === "a-owned-chat")).toHaveLength(1);
     expect(chats.chats.map((c) => c.id)).not.toContain("fresh-id");
-    const aChat = await q<{ chat: { workspaceId?: string } | null }>("chats.get", {
+    const aChat = await q<{ chat: { worktreeId?: string } | null }>("chats.get", {
       chatId: "a-owned-chat",
     });
     expect(JSON.stringify(aChat)).toContain("proj-relay-a");
     const bChats = await q<{ chats: Array<{ id: string }> }>("chats.list", {
-      workspaceId: "proj-relay-b",
+      worktreeId: "proj-relay-b",
     });
     expect(bChats.chats.map((c) => c.id)).not.toContain("a-owned-chat");
   });
 
   it("refuses a procedure that is not on the list, even in a router the list uses", async () => {
     const by = (name: string) => httpLog(b).find((l) => l.name === name);
-    expect(by("projects-remove")?.status).toBe(403);
+    expect(by("repos-remove")?.status).toBe(403);
     expect(by("tokens-list")?.status).toBe(403);
     expect(by("chats-unlisted")?.status).toBe(403);
     expect(by("tasks-cancel")?.status).toBe(403);
-    expect(by("workspaces-remove")?.status).toBe(403);
-    // The project and A's workspace are still there.
-    const { projects } = await q<{
-      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-    }>("projects.list");
-    expect(projects.find((p) => p.name === "proj")?.worktrees.map((w) => w.name)).toContain(
-      "relay-a",
-    );
+    expect(by("worktrees-remove")?.status).toBe(403);
+    // The repo and A's worktree are still there.
+    const { repos } = await q<{
+      repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>("repos.list");
+    expect(repos.find((p) => p.name === "proj")?.worktrees.map((w) => w.name)).toContain("relay-a");
   });
 
   it("lists only procedures the hub has", async () => {
@@ -626,7 +624,7 @@ describe("the band CLI through the relay (S2)", () => {
   };
 
   it.skipIf(!cli)(
-    "runs `band chats list` for its own workspace and is refused another's",
+    "runs `band chats list` for its own worktree and is refused another's",
     async () => {
       expect(agentEnv()?.BAND_SERVER_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       const own = await run("chats", "list", "proj-relay-a", "--output", "json");
@@ -641,16 +639,16 @@ describe("the band CLI through the relay (S2)", () => {
     },
   );
 
-  it.skipIf(!cli)("runs the commands the band skills name, for its own workspace", async () => {
+  it.skipIf(!cli)("runs the commands the band skills name, for its own worktree", async () => {
     const ws = "proj-relay-a";
     const json = async (...args: string[]) => JSON.parse(await ok(...args));
 
-    const listed = await json("workspaces", "list", "--output", "json");
+    const listed = await json("worktrees", "list", "--output", "json");
     expect(JSON.stringify(listed)).toContain(ws);
-    const worktree = (listed.workspaces as Array<{ workspaceId: string; path: string }>).find(
-      (w) => w.workspaceId === ws,
+    const worktree = (listed.worktrees as Array<{ worktreeId: string; path: string }>).find(
+      (w) => w.worktreeId === ws,
     )?.path as string;
-    expect(await ok("projects", "list", "--output", "json")).toContain("proj");
+    expect(await ok("repos", "list", "--output", "json")).toContain("proj");
 
     const chat = await json("chats", "create", ws, "--name", "skill-chat", "--output", "json");
     const chatId: string = chat.chatId ?? chat.id ?? chat.chat?.id;
@@ -658,7 +656,7 @@ describe("the band CLI through the relay (S2)", () => {
     await ok("chats", "list", ws);
     await ok("chats", "label", chatId, "topic=relay");
     await ok("chats", "unlabel", chatId, "topic");
-    await ok("chats", "send", chatId, "--workspace", ws, "--message", "hello from the relay");
+    await ok("chats", "send", chatId, "--worktree", ws, "--message", "hello from the relay");
     // The watch streams the chat's events through the relay until the turn ends or the guard stops it.
     const watched = await runWith({ killAfterMs: 20_000 }, "chats", "watch", chatId);
     expect(watched.out, watched.out).not.toContain("error:");
@@ -699,7 +697,7 @@ describe("the band CLI through the relay (S2)", () => {
       "create",
       "--chat",
       "a-owned-chat",
-      "--workspace",
+      "--worktree",
       ws,
       "--at",
       "1h",
@@ -708,7 +706,7 @@ describe("the band CLI through the relay (S2)", () => {
     );
     const subId: string = sub.subscriptions?.[0]?.id;
     expect(subId).toBeTruthy();
-    expect(await ok("subscriptions", "list", "--workspace", ws)).toContain(subId);
+    expect(await ok("subscriptions", "list", "--worktree", ws)).toContain(subId);
     await ok("subscriptions", "remove", subId);
 
     const job = await json(
@@ -722,8 +720,8 @@ describe("the band CLI through the relay (S2)", () => {
       "--cron",
       "0 0 1 1 *",
       "--scope",
-      "workspace",
-      "--workspace-id",
+      "worktree",
+      "--worktree-id",
       ws,
       "--via",
       "chat",
@@ -732,12 +730,12 @@ describe("the band CLI through the relay (S2)", () => {
     );
     const jobId: string = job.job?.id;
     expect(jobId).toBeTruthy();
-    await ok("cronjobs", "list", "--workspace", ws);
+    await ok("cronjobs", "list", "--worktree", ws);
     await ok("cronjobs", "update", ws, jobId, "--prompt", "check again");
     await ok("cronjobs", "trigger", ws, jobId);
     await ok("cronjobs", "delete", ws, jobId);
 
-    await ok("open", `${worktree}/hello.txt`, "--workspace", ws, "--no-focus");
+    await ok("open", `${worktree}/hello.txt`, "--worktree", ws, "--no-focus");
     const notified = await runWith(
       {
         cwd: worktree,
@@ -756,19 +754,19 @@ describe("the band CLI through the relay (S2)", () => {
   });
 
   it.skipIf(!cli)(
-    "creates a workspace on its own worker and removes only its own (S1)",
+    "creates a worktree on its own worker and removes only its own (S1)",
     async () => {
-      const created = await ok("workspaces", "create", "proj", "relay-cli-new", "--output", "json");
+      const created = await ok("worktrees", "create", "proj", "relay-cli-new", "--output", "json");
       expect(created).toContain("relay-cli-new");
-      const { projects } = await q<{
-        projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
-      }>("projects.list");
-      const made = projects
+      const { repos } = await q<{
+        repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+      }>("repos.list");
+      const made = repos
         .find((p) => p.name === "proj")
         ?.worktrees.find((w) => w.name === "relay-cli-new");
       expect(made?.hostId).toBe(a.hostId);
 
-      // A call that names another host is refused, and so is removing a workspace on another host.
+      // A call that names another host is refused, and so is removing a worktree on another host.
       const relay = agentEnv();
       const post = (procedure: string, body: object) =>
         fetch(`${relay?.BAND_SERVER_URL}/trpc/${procedure}`, {
@@ -779,24 +777,24 @@ describe("the band CLI through the relay (S2)", () => {
           },
           body: JSON.stringify(body),
         });
-      const elsewhere = await post("workspaces.create", {
-        project: "proj",
+      const elsewhere = await post("worktrees.create", {
+        repo: "proj",
         branch: "x",
         hostId: b.hostId,
       });
       expect(elsewhere.status).toBe(403);
-      expect(await elsewhere.text()).toContain("workspaces.create");
-      const foreign = await run("workspaces", "remove", "proj", "relay-b");
+      expect(await elsewhere.text()).toContain("worktrees.create");
+      const foreign = await run("worktrees", "remove", "proj", "relay-b");
       expect(foreign.code).not.toBe(0);
-      expect(foreign.out).toContain("workspaces.remove");
+      expect(foreign.out).toContain("worktrees.remove");
 
-      await ok("workspaces", "remove", "proj", "relay-cli-new");
+      await ok("worktrees", "remove", "proj", "relay-cli-new");
     },
   );
 
-  it.skipIf(!cli)("lists only the projects that have a workspace on its worker (S3)", async () => {
-    const out = JSON.parse((await run("workspaces", "list", "--output", "json")).out);
-    const ids = (out.workspaces as Array<{ workspaceId: string }>).map((w) => w.workspaceId);
+  it.skipIf(!cli)("lists only the repos that have a worktree on its worker (S3)", async () => {
+    const out = JSON.parse((await run("worktrees", "list", "--output", "json")).out);
+    const ids = (out.worktrees as Array<{ worktreeId: string }>).map((w) => w.worktreeId);
     expect(ids).toContain("proj-relay-a");
     expect(ids).not.toContain("proj-relay-b");
     expect(ids).not.toContain("proj-main");
@@ -804,7 +802,7 @@ describe("the band CLI through the relay (S2)", () => {
 
   it.skipIf(!cli)("prints a clear error naming a refused procedure (S4)", async () => {
     for (const [args, name] of [
-      [["projects", "remove", "proj"], "projects.remove"],
+      [["repos", "remove", "proj"], "repos.remove"],
       [["tokens", "list"], "tokens.list"],
       [["tunnel", "status"], "tunnel.status"],
     ] as const) {
@@ -850,10 +848,10 @@ describe("the band CLI on a worker", () => {
       timeoutMs: 30_000,
     });
     const created = await m<{ terminalId: string }>("terminal.create", {
-      workspaceId: "proj-relay-a",
+      worktreeId: "proj-relay-a",
     });
     const socket = await TerminalSocket.open(server, {
-      workspaceId: "proj-relay-a",
+      worktreeId: "proj-relay-a",
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -864,7 +862,7 @@ describe("the band CLI on a worker", () => {
       socket.type("band chats list proj-relay-a --output json >/dev/null; echo own=$?\r");
       await socket.waitForOutput("own=0");
 
-      // The credential is scoped: another worker's workspace, the hub's own, and admin procedures are refused.
+      // The credential is scoped: another worker's worktree, the hub's own, and admin procedures are refused.
       socket.type("band chats list proj-relay-b --output json >/dev/null 2>&1; echo other=$?\r");
       await socket.waitForOutput("other=1");
       socket.type("band chats list proj-main --output json >/dev/null 2>&1; echo hub=$?\r");
@@ -875,7 +873,7 @@ describe("the band CLI on a worker", () => {
       await socket.waitForOutput("admin=403");
 
       // The worker's session token never reaches the shell.
-      socket.type("echo ws=$BAND_WORKSPACE_ID\r");
+      socket.type("echo ws=$BAND_WORKTREE_ID\r");
       await socket.waitForOutput("ws=proj-relay-a");
       socket.type(`echo leak=$(env | grep -c -e '${TEST_TOKEN}' -e 'bws_')\r`);
       await socket.waitForOutput("leak=0");
@@ -901,7 +899,7 @@ describe("the band CLI on a worker", () => {
               PATH?: string;
               BAND_SERVER_URL?: string;
               BAND_TOKEN?: string;
-              BAND_WORKSPACE_ID?: string;
+              BAND_WORKTREE_ID?: string;
               LEAK?: boolean;
             };
           },
@@ -909,7 +907,7 @@ describe("the band CLI on a worker", () => {
       .reverse()
       .find((r) => r.env.BAND_TOKEN)?.env;
     expect(env?.PATH?.split(":")[0]).toBe(join(a.state, "bin"));
-    expect(env?.BAND_WORKSPACE_ID).toBe("proj-relay-a");
+    expect(env?.BAND_WORKTREE_ID).toBe("proj-relay-a");
     expect(env?.LEAK).toBe(false);
     const out = execFileSync(
       "sh",
@@ -931,12 +929,12 @@ describe("the band CLI on a worker", () => {
 describe("hooks through the relay (S3)", () => {
   it("delivers a hook sent from a terminal on the worker to the hub", async () => {
     // The chats that ran before ask for attention, which outranks a hook's `working` until it is cleared.
-    await m("statuses.clearNeedsAttention", { workspaceId: "proj-relay-a" });
+    await m("statuses.clearNeedsAttention", { worktreeId: "proj-relay-a" });
     const created = await m<{ terminalId: string }>("terminal.create", {
-      workspaceId: "proj-relay-a",
+      worktreeId: "proj-relay-a",
     });
     const socket = await TerminalSocket.open(server, {
-      workspaceId: "proj-relay-a",
+      worktreeId: "proj-relay-a",
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -962,24 +960,24 @@ describe("hooks through the relay (S3)", () => {
         const data = await trpc<{ agent?: { status?: string } } | null>(
           server.url,
           "statuses.get",
-          { workspaceId: "proj-relay-a" },
+          { worktreeId: "proj-relay-a" },
           "query",
         );
         return data?.agent?.status === "working" ? data.agent.status : undefined;
       },
-      { label: "hook reaches the workspace status" },
+      { label: "hook reaches the worktree status" },
     );
     expect(status).toBe("working");
   });
 
-  it("refuses a hook for a workspace on another host", async () => {
-    // Worker B's agent token must not report into worker A's workspace. The call
+  it("refuses a hook for a worktree on another host", async () => {
+    // Worker B's agent token must not report into worker A's worktree. The call
     // goes through the relay as a terminal on B would send it.
     const created = await m<{ terminalId: string }>("terminal.create", {
-      workspaceId: "proj-relay-b",
+      worktreeId: "proj-relay-b",
     });
     const socket = await TerminalSocket.open(server, {
-      workspaceId: "proj-relay-b",
+      worktreeId: "proj-relay-b",
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -999,7 +997,7 @@ describe("system and editor calls on the worker (S4)", () => {
     writeFileSync(join(worktreeOf(a, "relay-a"), "only-on-worker.txt"), "x\n");
     const opened = await m<{ ok: boolean; external: boolean; filePath: string }>(
       "editor.openFile",
-      { workspaceId: "proj-relay-a", filePath: "only-on-worker.txt" },
+      { worktreeId: "proj-relay-a", filePath: "only-on-worker.txt" },
     );
     expect(opened).toMatchObject({ ok: true, external: false, filePath: "only-on-worker.txt" });
 
@@ -1007,7 +1005,7 @@ describe("system and editor calls on the worker (S4)", () => {
     const outside = await trpcMutate(
       server.url,
       "editor.openFile",
-      { workspaceId: "proj-relay-a", filePath: join(hubRepo, "hello.txt") },
+      { worktreeId: "proj-relay-a", filePath: join(hubRepo, "hello.txt") },
       TEST_TOKEN,
     );
     expect(outside.status).toBe(404);
@@ -1016,8 +1014,8 @@ describe("system and editor calls on the worker (S4)", () => {
 
   it("formats a file with the config on the worker", async () => {
     writeFileSync(join(worktreeOf(a, "relay-a"), ".prettierrc"), JSON.stringify({ semi: false }));
-    const formatted = await m<{ formatted: string; skipped: boolean }>("workspace.formatFile", {
-      workspaceId: "proj-relay-a",
+    const formatted = await m<{ formatted: string; skipped: boolean }>("worktree.formatFile", {
+      worktreeId: "proj-relay-a",
       filePath: "x.ts",
       content: "const a = 1;\n",
     });
@@ -1026,29 +1024,29 @@ describe("system and editor calls on the worker (S4)", () => {
   });
 
   it("lists the worker's worktrees and measures them on the worker", async () => {
-    const { projects } = await q<{
-      projects: Array<{
-        project: string;
+    const { repos } = await q<{
+      repos: Array<{
+        repo: string;
         worktrees: Array<{ branch: string; path: string; hostId?: string }>;
       }>;
-    }>("services.resourcesProjects");
-    const worktrees = projects.find((p) => p.project === "proj")?.worktrees ?? [];
+    }>("services.resourcesRepos");
+    const worktrees = repos.find((p) => p.repo === "proj")?.worktrees ?? [];
     const remote = worktrees.find((w) => w.path === worktreeOf(a, "relay-a"));
     expect(remote?.hostId).toBe(a.hostId);
     expect(worktrees.find((w) => w.path === hubRepo)?.hostId).toBeUndefined();
 
     const size = await q<{
       worktrees: Array<{ path: string; sizeBytes: number; hostId?: string; error?: string }>;
-    }>("services.resourcesProjectSize", { project: "proj" });
+    }>("services.resourcesRepoSize", { repo: "proj" });
     const measured = size.worktrees.find((w) => w.path === worktreeOf(a, "relay-a"));
     expect(measured?.error).toBeUndefined();
     expect(measured?.sizeBytes).toBeGreaterThan(0);
   });
 });
 
-describe("removing a workspace while its worker is offline (S5)", () => {
+describe("removing a worktree while its worker is offline (S5)", () => {
   it("removes it at once and deletes the checkout when the worker reconnects", async () => {
-    const workspaceId = await createWorkspace(b, "relay-c");
+    const worktreeId = await createWorktree(b, "relay-c");
     const dir = worktreeOf(b, "relay-c");
     expect(existsSync(dir)).toBe(true);
 
@@ -1059,16 +1057,16 @@ describe("removing a workspace while its worker is offline (S5)", () => {
       timeoutMs: 30_000,
     });
 
-    await m("workspaces.remove", { project: "proj", name: "relay-c" });
-    const { projects } = await q<{
-      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-    }>("projects.list");
-    expect(projects.find((p) => p.name === "proj")?.worktrees.map((w) => w.name)).not.toContain(
+    await m("worktrees.remove", { repo: "proj", name: "relay-c" });
+    const { repos } = await q<{
+      repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>("repos.list");
+    expect(repos.find((p) => p.name === "proj")?.worktrees.map((w) => w.name)).not.toContain(
       "relay-c",
     );
     // The worker could not be told, so the checkout is still there.
     expect(existsSync(dir)).toBe(true);
-    expect(workspaceId).toBe("proj-relay-c");
+    expect(worktreeId).toBe("proj-relay-c");
 
     b = startWorkerProcess(b, "bwb_unused-because-the-session-token-is-saved");
     await waitFor(async () => ((await hostStatus(b)) === "online" ? true : undefined), {

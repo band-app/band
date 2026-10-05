@@ -167,7 +167,7 @@ export class RemoteHost implements Host {
       const reply = await this.rpc.request<{ chan: number }>("lsp.connect", spec);
       return duplexOf(this.rpc.channel(reply.chan));
     },
-    killWorkspace: (workspaceId) => this.rpc.call("lsp.killWorkspace", { workspaceId }),
+    killWorktree: (worktreeId) => this.rpc.call("lsp.killWorktree", { worktreeId }),
     killAll: () => this.rpc.call("lsp.killAll"),
   };
 
@@ -214,13 +214,13 @@ export class RemoteHost implements Host {
   };
 
   readonly scripts: HostScripts = {
-    command: (workspace) => this.rpc.call("scripts.command", workspace),
+    command: (worktree) => this.rpc.call("scripts.command", worktree),
     runHidden: (script, cwd, timeoutMs) =>
       this.rpc.call("scripts.runHidden", { script, cwd, timeoutMs }),
-    prepare: (workspace) => this.prepareScript(workspace),
-    copyFiles: (projectPath, worktreePath) =>
-      this.rpc.call("scripts.copyFiles", { projectPath, worktreePath }),
-    environment: (workspace) => this.rpc.call("scripts.environment", workspace),
+    prepare: (worktree) => this.prepareScript(worktree),
+    copyFiles: (repoPath, worktreePath) =>
+      this.rpc.call("scripts.copyFiles", { repoPath, worktreePath }),
+    environment: (worktree) => this.rpc.call("scripts.environment", worktree),
   };
 
   readonly relay: HostRelay = {
@@ -360,11 +360,11 @@ export class RemoteHost implements Host {
   // ---- scripts and usage --------------------------------------------------
 
   private async prepareScript(
-    workspace: Parameters<HostScripts["prepare"]>[0],
+    worktree: Parameters<HostScripts["prepare"]>[0],
   ): Promise<ScriptPlan | null> {
     const reply = await this.rpc.call<{ planId: string; command: string } | null>(
       "scripts.prepare",
-      workspace,
+      worktree,
     );
     if (!reply) return null;
     const exited = new Promise<number>((resolve) => this.plans.set(reply.planId, { resolve }));

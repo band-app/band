@@ -12,57 +12,57 @@ import { isFilePath } from "../../lib/file-path-detection";
 import { openExternalUrl } from "../../lib/open-external-url";
 
 // ---------------------------------------------------------------------------
-// Workspace context — scopes `band:open-file` dispatches to the workspace
+// Worktree context — scopes `band:open-file` dispatches to the worktree
 // that owns the chat dispatching the click.
 //
-// Multiple workspaces can be alive at once (the per-panel content cache in
-// MultiWorkspacePanelHost keeps every visited workspace's subtree
+// Multiple worktrees can be alive at once (the per-panel content cache in
+// MultiWorktreePanelHost keeps every visited worktree's subtree
 // mounted), and `dispatchOpenFile` is a window-scoped CustomEvent.
-// Without a workspace label on the event, every mounted layout's listener
-// races to open the file against its OWN active workspace — and the
+// Without a worktree label on the event, every mounted layout's listener
+// races to open the file against its OWN active worktree — and the
 // `SharedDockviewLayout` listener (the only one for the desktop dockview)
-// is bound to whichever workspace is currently focused, not the one whose
-// chat actually fired the click. The result is a cross-workspace leak:
-// click a `band-file:` link in workspace A's chat while workspace B is the
+// is bound to whichever worktree is currently focused, not the one whose
+// chat actually fired the click. The result is a cross-worktree leak:
+// click a `band-file:` link in worktree A's chat while worktree B is the
 // active tab → the file opens in B (and is persisted into B's
 // `band-open-tabs:` localStorage entry), often as a bogus path that
 // doesn't resolve on disk. See issue #539.
 //
-// The fix is to attach the chat pane's workspace id to every dispatched
+// The fix is to attach the chat pane's worktree id to every dispatched
 // event and to filter on it in every listener (same shape every other
-// cross-workspace window event in this codebase already uses — see the
+// cross-worktree window event in this codebase already uses — see the
 // `band:open-file-external`, `band:format-current-file`, and
 // `band:open-language-picker` listeners). The context exists because
 // `FileLinkedAnchor` is wired in as a static `Components` map for
-// Streamdown, so the workspace id can't be passed in via props; ChatView
-// wraps its message render in `<FileLinkWorkspaceProvider>` and the
+// Streamdown, so the worktree id can't be passed in via props; ChatView
+// wraps its message render in `<FileLinkWorktreeProvider>` and the
 // anchor reads from there at click time.
 // ---------------------------------------------------------------------------
 
-const FileLinkWorkspaceContext = createContext<string | undefined>(undefined);
+const FileLinkWorktreeContext = createContext<string | undefined>(undefined);
 
 /**
  * Wrap a subtree (typically the chat message list) so any
  * `band-file:` link clicked inside dispatches an event scoped to this
- * workspace. Without this provider the dispatched event carries no
- * workspaceId and every mounted workspace's listener will race for it.
+ * worktree. Without this provider the dispatched event carries no
+ * worktreeId and every mounted worktree's listener will race for it.
  */
-export function FileLinkWorkspaceProvider({
-  workspaceId,
+export function FileLinkWorktreeProvider({
+  worktreeId,
   children,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   children: ReactNode;
 }): ReactNode {
-  // `workspaceId` is a string primitive — `Object.is` (which Context.Provider
+  // `worktreeId` is a string primitive — `Object.is` (which Context.Provider
   // uses to decide whether consumers re-render) already short-circuits on
   // value equality, so no `useMemo` is needed to stabilise identity. The
   // Provider re-renders whenever the *value* changes; identical strings
   // across renders are a no-op for consumers.
   return (
-    <FileLinkWorkspaceContext.Provider value={workspaceId}>
+    <FileLinkWorktreeContext.Provider value={worktreeId}>
       {children}
-    </FileLinkWorkspaceContext.Provider>
+    </FileLinkWorktreeContext.Provider>
   );
 }
 
@@ -71,17 +71,17 @@ export function FileLinkWorkspaceProvider({
 // ---------------------------------------------------------------------------
 
 /**
- * Dispatch a workspace-scoped `band:open-file` event.
+ * Dispatch a worktree-scoped `band:open-file` event.
  *
- * `workspaceId` is read from `FileLinkWorkspaceContext` at click time and
+ * `worktreeId` is read from `FileLinkWorktreeContext` at click time and
  * MUST be supplied — when undefined (a `FileLinkedAnchor` rendered outside
- * a `FileLinkWorkspaceProvider`) we still dispatch, but the event detail's
- * `workspaceId` is `undefined`. Listeners treat the missing-workspace
- * case as "fall through to the active workspace" so existing call sites
+ * a `FileLinkWorktreeProvider`) we still dispatch, but the event detail's
+ * `worktreeId` is `undefined`. Listeners treat the missing-worktree
+ * case as "fall through to the active worktree" so existing call sites
  * outside chat (none today, but a forward-compat hatch) keep working.
  */
-function dispatchOpenFile(filename: string, workspaceId: string | undefined) {
-  window.dispatchEvent(new CustomEvent("band:open-file", { detail: { filename, workspaceId } }));
+function dispatchOpenFile(filename: string, worktreeId: string | undefined) {
+  window.dispatchEvent(new CustomEvent("band:open-file", { detail: { filename, worktreeId } }));
 }
 
 // ---------------------------------------------------------------------------
@@ -178,11 +178,11 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
   const { node: _node, href, children, ...rest } = props;
 
   const isBandFile = typeof href === "string" && href.startsWith("band-file:");
-  // Workspace id is read at click time so that a `MessageResponse` rendered
-  // inside two mounted workspaces routes each click to the workspace
-  // that *owns* the surrounding subtree — not whichever workspace happens
+  // Worktree id is read at click time so that a `MessageResponse` rendered
+  // inside two mounted worktrees routes each click to the worktree
+  // that *owns* the surrounding subtree — not whichever worktree happens
   // to be active when the listener fires.
-  const workspaceId = useContext(FileLinkWorkspaceContext);
+  const worktreeId = useContext(FileLinkWorktreeContext);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -190,13 +190,13 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
         e.preventDefault();
         e.stopPropagation();
         if (isBandFile) {
-          dispatchOpenFile(href.slice("band-file:".length), workspaceId);
+          dispatchOpenFile(href.slice("band-file:".length), worktreeId);
         } else {
           openExternalUrl(href);
         }
       }
     },
-    [isBandFile, href, workspaceId],
+    [isBandFile, href, worktreeId],
   );
 
   if (isBandFile) {

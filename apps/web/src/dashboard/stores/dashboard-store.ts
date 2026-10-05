@@ -5,8 +5,8 @@ import type {
   CIStatus,
   GitStatus,
   SetupStatus,
-  WorkspaceBranchStatus,
-  WorkspaceStatus,
+  WorktreeBranchStatus,
+  WorktreeStatus,
 } from "../types";
 
 /**
@@ -35,50 +35,50 @@ export function describeError(err: unknown): string {
 }
 
 export interface DashboardState {
-  statuses: Map<string, WorkspaceStatus>;
-  activeWorkspaceId: string | null;
+  statuses: Map<string, WorktreeStatus>;
+  activeWorktreeId: string | null;
   notices: Notice[];
-  branchStatuses: Map<string, WorkspaceBranchStatus>;
+  branchStatuses: Map<string, WorktreeBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
-  /** Workspaces this dashboard asked the server to remove, until the removal settles. */
-  deletingWorkspaces: ReadonlySet<string>;
+  /** Worktrees this dashboard asked the server to remove, until the removal settles. */
+  deletingWorktrees: ReadonlySet<string>;
 
-  openWorkspace: (workspaceId: string) => void;
-  clearNeedsAttention: (workspaceId: string) => void;
-  /** Ask the server to re-read the workspace's git status now (badge refresh). */
-  refreshBranchStatus: (workspaceId: string) => void;
+  openWorktree: (worktreeId: string) => void;
+  clearNeedsAttention: (worktreeId: string) => void;
+  /** Ask the server to re-read the worktree's git status now (badge refresh). */
+  refreshBranchStatus: (worktreeId: string) => void;
   /** Show `err` as an error notice. */
   setError: (err: unknown) => void;
   notify: (tone: Notice["tone"], message: string) => void;
   dismissNotice: (id: number) => void;
-  replaceAllStatuses: (statuses: WorkspaceStatus[]) => void;
-  updateStatus: (status: WorkspaceStatus) => void;
-  removeStatus: (workspaceId: string) => void;
-  setActiveWorkspace: (workspaceId: string | null) => void;
+  replaceAllStatuses: (statuses: WorktreeStatus[]) => void;
+  updateStatus: (status: WorktreeStatus) => void;
+  removeStatus: (worktreeId: string) => void;
+  setActiveWorktree: (worktreeId: string | null) => void;
   runScript: (path: string, scriptType: string) => Promise<void>;
-  gitPull: (project: string, name: string) => Promise<void>;
-  gitPush: (project: string, name: string) => Promise<void>;
-  updateGitStatus: (workspaceId: string, git: GitStatus) => void;
-  updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
-  updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
-  removeSetupStatus: (workspaceId: string) => void;
+  gitPull: (repo: string, name: string) => Promise<void>;
+  gitPush: (repo: string, name: string) => Promise<void>;
+  updateGitStatus: (worktreeId: string, git: GitStatus) => void;
+  updateCIStatus: (worktreeId: string, ci: CIStatus) => void;
+  updateSetupStatus: (worktreeId: string, status: SetupStatus) => void;
+  removeSetupStatus: (worktreeId: string) => void;
   reconcileSetupStatuses: (runningSetups: string[]) => void;
-  setDeleting: (workspaceId: string, deleting: boolean) => void;
+  setDeleting: (worktreeId: string, deleting: boolean) => void;
 }
 
 export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
 
 /**
- * Whether a workspace is being deleted: from the moment this dashboard sends
+ * Whether a worktree is being deleted: from the moment this dashboard sends
  * the removal, or while the server runs its teardown (which also covers a
  * removal started from the CLI or another window).
  */
-export function isWorkspaceDeleting(
-  state: Pick<DashboardState, "deletingWorkspaces" | "setupStatuses">,
-  workspaceId: string,
+export function isWorktreeDeleting(
+  state: Pick<DashboardState, "deletingWorktrees" | "setupStatuses">,
+  worktreeId: string,
 ): boolean {
-  if (state.deletingWorkspaces.has(workspaceId)) return true;
-  const setup = state.setupStatuses.get(workspaceId);
+  if (state.deletingWorktrees.has(worktreeId)) return true;
+  const setup = state.setupStatuses.get(worktreeId);
   return setup?.script === "teardown" && setup.state === "running";
 }
 
@@ -94,21 +94,21 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     statuses: new Map(),
     branchStatuses: new Map(),
     setupStatuses: new Map(),
-    deletingWorkspaces: new Set(),
-    activeWorkspaceId: null,
+    deletingWorktrees: new Set(),
+    activeWorktreeId: null,
     notices: [],
 
-    openWorkspace: (workspaceId: string) => {
-      set({ activeWorkspaceId: workspaceId });
-      get().clearNeedsAttention(workspaceId);
+    openWorktree: (worktreeId: string) => {
+      set({ activeWorktreeId: worktreeId });
+      get().clearNeedsAttention(worktreeId);
     },
 
-    clearNeedsAttention: (workspaceId: string) => {
-      adapter.clearNeedsAttention?.(workspaceId).catch(() => {});
+    clearNeedsAttention: (worktreeId: string) => {
+      adapter.clearNeedsAttention?.(worktreeId).catch(() => {});
     },
 
-    refreshBranchStatus: (workspaceId: string) => {
-      adapter.refreshBranchStatus?.(workspaceId).catch(() => {});
+    refreshBranchStatus: (worktreeId: string) => {
+      adapter.refreshBranchStatus?.(worktreeId).catch(() => {});
     },
 
     setError: (err: unknown) => get().notify("error", describeError(err)),
@@ -122,39 +122,39 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       set((state) => ({ notices: state.notices.filter((n) => n.id !== id) }));
     },
 
-    replaceAllStatuses: (list: WorkspaceStatus[]) => {
-      const statuses = new Map(list.map((s) => [s.workspaceId, s]));
+    replaceAllStatuses: (list: WorktreeStatus[]) => {
+      const statuses = new Map(list.map((s) => [s.worktreeId, s]));
       set({ statuses });
     },
 
-    updateStatus: (status: WorkspaceStatus) => {
+    updateStatus: (status: WorktreeStatus) => {
       set((state) => {
         const statuses = new Map(state.statuses);
-        statuses.set(status.workspaceId, status);
+        statuses.set(status.worktreeId, status);
         return { statuses };
       });
     },
 
-    removeStatus: (workspaceId: string) => {
+    removeStatus: (worktreeId: string) => {
       set((state) => {
         const statuses = new Map(state.statuses);
-        statuses.delete(workspaceId);
-        // The workspace is gone, so its teardown status goes with it. A new
-        // workspace created under the same name must not start as deleting.
-        if (!state.setupStatuses.has(workspaceId)) return { statuses };
+        statuses.delete(worktreeId);
+        // The worktree is gone, so its teardown status goes with it. A new
+        // worktree created under the same name must not start as deleting.
+        if (!state.setupStatuses.has(worktreeId)) return { statuses };
         const setupStatuses = new Map(state.setupStatuses);
-        setupStatuses.delete(workspaceId);
+        setupStatuses.delete(worktreeId);
         return { statuses, setupStatuses };
       });
     },
 
-    setActiveWorkspace: (workspaceId: string | null) => {
-      if (get().activeWorkspaceId === workspaceId) return;
-      set({ activeWorkspaceId: workspaceId });
-      // When the user navigates to a workspace, clear any pending
+    setActiveWorktree: (worktreeId: string | null) => {
+      if (get().activeWorktreeId === worktreeId) return;
+      set({ activeWorktreeId: worktreeId });
+      // When the user navigates to a worktree, clear any pending
       // needs-attention indicator — they're now looking at it.
-      if (workspaceId) {
-        get().clearNeedsAttention(workspaceId);
+      if (worktreeId) {
+        get().clearNeedsAttention(worktreeId);
       }
     },
 
@@ -166,27 +166,27 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       }
     },
 
-    gitPull: async (project: string, name: string) => {
+    gitPull: async (repo: string, name: string) => {
       try {
-        reportRefusal(await adapter.gitPull(project, name), get().notify);
+        reportRefusal(await adapter.gitPull(repo, name), get().notify);
       } catch (e) {
         get().setError(e);
       }
     },
 
-    gitPush: async (project: string, name: string) => {
+    gitPush: async (repo: string, name: string) => {
       try {
-        reportRefusal(await adapter.gitPush(project, name), get().notify);
+        reportRefusal(await adapter.gitPush(repo, name), get().notify);
       } catch (e) {
         get().setError(e);
       }
     },
 
-    updateGitStatus: (workspaceId: string, git: GitStatus) => {
+    updateGitStatus: (worktreeId: string, git: GitStatus) => {
       set((state) => {
         const branchStatuses = new Map(state.branchStatuses);
-        const existing = branchStatuses.get(workspaceId);
-        branchStatuses.set(workspaceId, {
+        const existing = branchStatuses.get(worktreeId);
+        branchStatuses.set(worktreeId, {
           git,
           ci: existing?.ci ?? { state: "none" },
         });
@@ -194,11 +194,11 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       });
     },
 
-    updateCIStatus: (workspaceId: string, ci: CIStatus) => {
+    updateCIStatus: (worktreeId: string, ci: CIStatus) => {
       set((state) => {
         const branchStatuses = new Map(state.branchStatuses);
-        const existing = branchStatuses.get(workspaceId);
-        branchStatuses.set(workspaceId, {
+        const existing = branchStatuses.get(worktreeId);
+        branchStatuses.set(worktreeId, {
           git: existing?.git ?? {
             dirty: false,
             conflict: false,
@@ -212,18 +212,18 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       });
     },
 
-    updateSetupStatus: (workspaceId: string, status: SetupStatus) => {
+    updateSetupStatus: (worktreeId: string, status: SetupStatus) => {
       set((state) => {
         const setupStatuses = new Map(state.setupStatuses);
-        setupStatuses.set(workspaceId, status);
+        setupStatuses.set(worktreeId, status);
         return { setupStatuses };
       });
     },
 
-    removeSetupStatus: (workspaceId: string) => {
+    removeSetupStatus: (worktreeId: string) => {
       set((state) => {
         const setupStatuses = new Map(state.setupStatuses);
-        setupStatuses.delete(workspaceId);
+        setupStatuses.delete(worktreeId);
         return { setupStatuses };
       });
     },
@@ -243,13 +243,13 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       });
     },
 
-    setDeleting: (workspaceId: string, deleting: boolean) => {
+    setDeleting: (worktreeId: string, deleting: boolean) => {
       set((state) => {
-        if (state.deletingWorkspaces.has(workspaceId) === deleting) return state;
-        const deletingWorkspaces = new Set(state.deletingWorkspaces);
-        if (deleting) deletingWorkspaces.add(workspaceId);
-        else deletingWorkspaces.delete(workspaceId);
-        return { deletingWorkspaces };
+        if (state.deletingWorktrees.has(worktreeId) === deleting) return state;
+        const deletingWorktrees = new Set(state.deletingWorktrees);
+        if (deleting) deletingWorktrees.add(worktreeId);
+        else deletingWorktrees.delete(worktreeId);
+        return { deletingWorktrees };
       });
     },
   }));

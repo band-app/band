@@ -55,7 +55,7 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
   ```sh
   export BAND_SERVER_URL=https://band.example.com
   export BAND_TOKEN=<token>
-  band projects list
+  band repos list
   ```
 
 ## Serve the UI from somewhere else
@@ -67,27 +67,27 @@ By default the hub serves the UI at `/`. Two settings change that.
 
 The desktop app has its own copy of the UI, so it needs neither setting.
 
-## Workspaces run on workers
+## Worktrees run on workers
 
-The image sets `BAND_LOCAL_HOST=off`, so the hub does not run workspaces in its own container. Every workspace runs on a worker, and the entrypoint creates no sample project. The host picker lists only workers, and `workspaces.create` for the `local` host is refused.
+The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The host picker lists only workers, and `worktrees.create` for the `local` host is refused.
 
-A workspace created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run workspaces in the container again.
+A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run worktrees in the container again.
 
-## Add a project
+## Add a repo
 
 Mount a repository into the container in `compose.yml` and register its container path:
 
 ```yaml
     volumes:
       - band-data:/data
-      - /srv/repos/myrepo:/projects/myrepo
+      - /srv/repos/myrepo:/repos/myrepo
 ```
 
 ```sh
-docker compose exec band band projects add /projects/myrepo
+docker compose exec band band repos add /repos/myrepo
 ```
 
-The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, terminals, git worktrees and setup scripts work in the container. With it off, the repository must also exist on the worker that runs the workspace.
+The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, terminals, git worktrees and setup scripts work in the container. With it off, the repository must also exist on the worker that runs the worktree.
 
 ## Upgrade
 
@@ -97,7 +97,7 @@ docker compose build --pull
 docker compose up -d
 ```
 
-The volume keeps projects, tokens and settings. The hub applies database migrations when it starts. Back up the volume before a major upgrade.
+The volume keeps repos, tokens and settings. The hub applies database migrations when it starts. Back up the volume before a major upgrade.
 
 ## Back up and restore
 
@@ -110,15 +110,15 @@ docker run --rm -v compose_band-data:/data -v "$PWD":/backup debian:bookworm-sli
 docker compose start band
 ```
 
-The volume name starts with the Compose project name, which is the directory name (`compose` here). Run `docker volume ls` to see yours. To restore, stop the hub and extract the archive into the volume the same way.
+The volume name starts with the Compose repo name, which is the directory name (`compose` here). Run `docker volume ls` to see yours. To restore, stop the hub and extract the archive into the volume the same way.
 
 ## Settings reference
 
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `BAND_ADMIN_TOKEN` | empty | Sets the admin token. Empty makes the first run create and print one. |
-| `BAND_LOCAL_HOST` | `off` | `on` allows workspaces on the hub's own machine and creates the sample project. |
-| `BAND_DEFAULT_HOST` | empty | Worker id used when a workspace names no host. Empty uses the only online worker. |
+| `BAND_LOCAL_HOST` | `off` | `on` allows worktrees on the hub's own machine and creates the sample repo. |
+| `BAND_DEFAULT_HOST` | empty | Worker id used when a worktree names no host. Empty uses the only online worker. |
 | `BAND_CLI_PATH` | `/opt/band/binaries/band` | The `band` CLI the hub serves to workers of its own platform. |
 | `BAND_CLI_BINARIES_DIR` | empty | Directory with `band-<platform>-<arch>` files (for example `band-linux-arm64`), served to workers of other platforms. Mount it into the container and set the variable. |
 | `BAND_SERVE_UI` | `true` | `false` serves the API only. |

@@ -2,7 +2,7 @@
  * Band browser profiles on the desktop side: one Electron session partition
  * per profile, so each profile has its own cookies, storage and cache.
  *
- * The web server stores which profiles exist and which one each project
+ * The web server stores which profiles exist and which one each repo
  * uses (`browserProfiles.*` tRPC); the desktop only needs the id. The
  * built-in Default profile (`null`) is the original `persist:band-browser`
  * partition, so tabs from before profiles existed keep their logins.

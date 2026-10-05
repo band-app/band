@@ -20,7 +20,7 @@ import {
 } from "@band-app/ui";
 import { Clock, Loader2, Pencil, Play, Plus, RefreshCw, Timer, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ProjectAvatar, type ProjectAvatarInfo } from "@/dashboard";
+import { RepoAvatar, type RepoAvatarInfo } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 
 interface CronjobRecord {
@@ -29,19 +29,19 @@ interface CronjobRecord {
   name: string;
   prompt: string;
   cronExpression: string;
-  scope: "project" | "workspace";
-  workspaceId?: string;
+  scope: "repo" | "worktree";
+  worktreeId?: string;
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
   lastRunStatus?: "completed" | "failed" | "skipped";
 }
 
-interface ProjectInfo {
+interface RepoInfo {
   name: string;
   defaultBranch: string;
-  avatar?: ProjectAvatarInfo | null;
-  worktrees: { branch: string; workspaceId?: string }[];
+  avatar?: RepoAvatarInfo | null;
+  worktrees: { branch: string; worktreeId?: string }[];
 }
 
 function relativeTime(iso: string): string {
@@ -62,7 +62,7 @@ export function CronjobsPageContent() {
   const [cronjobs, setCronjobs] = useState<CronjobRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [repoFilter, setRepoFilter] = useState<string>("all");
   const [showDialog, setShowDialog] = useState(false);
   const [editingJob, setEditingJob] = useState<CronjobRecord | null>(null);
 
@@ -86,20 +86,20 @@ export function CronjobsPageContent() {
   }, [fetchData]);
 
   const filteredCronjobs = useMemo(() => {
-    if (projectFilter === "all") return cronjobs;
+    if (repoFilter === "all") return cronjobs;
     return cronjobs.filter((job) => {
-      if (job.scope === "project") return job.fileKey === projectFilter;
-      return job.workspaceId?.startsWith(`${projectFilter}-`);
+      if (job.scope === "repo") return job.fileKey === repoFilter;
+      return job.worktreeId?.startsWith(`${repoFilter}-`);
     });
-  }, [cronjobs, projectFilter]);
+  }, [cronjobs, repoFilter]);
 
-  const projectNames = useMemo(() => {
+  const repoNames = useMemo(() => {
     const names = new Set<string>();
     for (const job of cronjobs) {
-      if (job.scope === "project") names.add(job.fileKey);
-      else if (job.workspaceId) {
-        const dash = job.workspaceId.indexOf("-");
-        if (dash > 0) names.add(job.workspaceId.slice(0, dash));
+      if (job.scope === "repo") names.add(job.fileKey);
+      else if (job.worktreeId) {
+        const dash = job.worktreeId.indexOf("-");
+        if (dash > 0) names.add(job.worktreeId.slice(0, dash));
       }
     }
     return Array.from(names).sort();
@@ -125,13 +125,13 @@ export function CronjobsPageContent() {
   return (
     <div className="flex flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2">
-        <Select value={projectFilter} onValueChange={setProjectFilter}>
+        <Select value={repoFilter} onValueChange={setRepoFilter}>
           <SelectTrigger className="h-8 w-40 text-xs">
-            <SelectValue placeholder="All Projects" />
+            <SelectValue placeholder="All Repos" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projectNames.map((name) => (
+            <SelectItem value="all">All Repos</SelectItem>
+            {repoNames.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
               </SelectItem>
@@ -321,7 +321,7 @@ function CronjobCard({
         </span>
         <span className="text-border">·</span>
         <span className="font-medium text-foreground/70">
-          {job.scope === "workspace" ? job.workspaceId : job.fileKey}
+          {job.scope === "worktree" ? job.worktreeId : job.fileKey}
         </span>
         {job.lastRunAt && (
           <>
@@ -373,13 +373,13 @@ function CronjobDialog({
   editingJob: CronjobRecord | null;
   onSaved: () => void;
 }) {
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [cronExpression, setCronExpression] = useState("");
-  const [scope, setScope] = useState<"project" | "workspace">("project");
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [scope, setScope] = useState<"repo" | "worktree">("repo");
+  const [selectedRepo, setSelectedRepo] = useState<string>("");
+  const [selectedWorktreeId, setSelectedWorktreeId] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -387,9 +387,9 @@ function CronjobDialog({
   useEffect(() => {
     if (!open) return;
     setSubmitError(null);
-    trpc.projects.list.query().then((data) => {
-      const loadedProjects = data.projects as ProjectInfo[];
-      setProjects(loadedProjects);
+    trpc.repos.list.query().then((data) => {
+      const loadedRepos = data.repos as RepoInfo[];
+      setRepos(loadedRepos);
 
       if (editingJob) {
         setName(editingJob.name);
@@ -397,49 +397,49 @@ function CronjobDialog({
         setCronExpression(editingJob.cronExpression);
         setScope(editingJob.scope);
         setEnabled(editingJob.enabled);
-        if (editingJob.scope === "project") {
-          setSelectedProject(editingJob.fileKey);
-          setSelectedWorkspaceId("");
+        if (editingJob.scope === "repo") {
+          setSelectedRepo(editingJob.fileKey);
+          setSelectedWorktreeId("");
         } else {
-          setSelectedWorkspaceId(editingJob.workspaceId ?? "");
-          const proj = loadedProjects.find((p) =>
-            p.worktrees.some((w) => w.workspaceId === editingJob.workspaceId),
+          setSelectedWorktreeId(editingJob.worktreeId ?? "");
+          const proj = loadedRepos.find((p) =>
+            p.worktrees.some((w) => w.worktreeId === editingJob.worktreeId),
           );
-          setSelectedProject(proj?.name ?? "");
+          setSelectedRepo(proj?.name ?? "");
         }
       } else {
         setName("");
         setPrompt("");
         setCronExpression("");
-        setScope("project");
-        setSelectedProject("");
-        setSelectedWorkspaceId("");
+        setScope("repo");
+        setSelectedRepo("");
+        setSelectedWorktreeId("");
         setEnabled(true);
       }
     });
   }, [open, editingJob]);
 
-  const workspaces = useMemo(() => {
-    const project = projects.find((p) => p.name === selectedProject);
+  const worktrees = useMemo(() => {
+    const repo = repos.find((p) => p.name === selectedRepo);
     return (
-      project?.worktrees.map((w) => ({
+      repo?.worktrees.map((w) => ({
         branch: w.branch,
-        workspaceId: w.workspaceId ?? `${selectedProject}-${w.branch.replaceAll("/", "-")}`,
+        worktreeId: w.worktreeId ?? `${selectedRepo}-${w.branch.replaceAll("/", "-")}`,
       })) ?? []
     );
-  }, [projects, selectedProject]);
+  }, [repos, selectedRepo]);
 
   const fileKey = useMemo(() => {
-    if (scope === "project") return selectedProject;
-    return selectedWorkspaceId;
-  }, [scope, selectedProject, selectedWorkspaceId]);
+    if (scope === "repo") return selectedRepo;
+    return selectedWorktreeId;
+  }, [scope, selectedRepo, selectedWorktreeId]);
 
   const canSubmit =
     name.trim() &&
     prompt.trim() &&
     cronExpression.trim() &&
     fileKey &&
-    (scope === "project" || selectedWorkspaceId);
+    (scope === "repo" || selectedWorktreeId);
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
@@ -462,7 +462,7 @@ function CronjobDialog({
           prompt: prompt.trim(),
           cronExpression: cronExpression.trim(),
           scope,
-          workspaceId: scope === "workspace" ? selectedWorkspaceId : undefined,
+          worktreeId: scope === "worktree" ? selectedWorktreeId : undefined,
           enabled,
         });
       }
@@ -481,15 +481,15 @@ function CronjobDialog({
     cronExpression,
     scope,
     fileKey,
-    selectedWorkspaceId,
+    selectedWorktreeId,
     enabled,
     onOpenChange,
     onSaved,
   ]);
 
-  const handleProjectChange = useCallback((value: string) => {
-    setSelectedProject(value);
-    setSelectedWorkspaceId("");
+  const handleRepoChange = useCallback((value: string) => {
+    setSelectedRepo(value);
+    setSelectedWorktreeId("");
   }, []);
 
   return (
@@ -542,31 +542,31 @@ function CronjobDialog({
             <>
               <div className="flex flex-col gap-2">
                 <Label>Scope</Label>
-                <Select value={scope} onValueChange={(v) => setScope(v as "project" | "workspace")}>
+                <Select value={scope} onValueChange={(v) => setScope(v as "repo" | "worktree")}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="project">Project (main branch)</SelectItem>
-                    <SelectItem value="workspace">Workspace (specific branch)</SelectItem>
+                    <SelectItem value="repo">Repo (main branch)</SelectItem>
+                    <SelectItem value="worktree">Worktree (specific branch)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label>Project</Label>
-                <Select value={selectedProject} onValueChange={handleProjectChange}>
-                  <SelectTrigger data-testid="cronjobs__project-select">
-                    <SelectValue placeholder="Select a project" />
+                <Label>Repo</Label>
+                <Select value={selectedRepo} onValueChange={handleRepoChange}>
+                  <SelectTrigger data-testid="cronjobs__repo-select">
+                    <SelectValue placeholder="Select a repo" />
                   </SelectTrigger>
                   <SelectContent>
-                    {projects.map((p) => (
+                    {repos.map((p) => (
                       <SelectItem key={p.name} value={p.name}>
-                        <ProjectAvatar
+                        <RepoAvatar
                           avatar={p.avatar}
                           className="size-4"
                           fallback={null}
-                          testId={`cronjobs__project-avatar--${p.name}`}
+                          testId={`cronjobs__repo-avatar--${p.name}`}
                         />
                         {p.name}
                       </SelectItem>
@@ -575,24 +575,22 @@ function CronjobDialog({
                 </Select>
               </div>
 
-              {scope === "workspace" && (
+              {scope === "worktree" && (
                 <div className="flex flex-col gap-2">
-                  <Label>Workspace</Label>
+                  <Label>Worktree</Label>
                   <Select
-                    value={selectedWorkspaceId}
-                    onValueChange={setSelectedWorkspaceId}
-                    disabled={!selectedProject}
+                    value={selectedWorktreeId}
+                    onValueChange={setSelectedWorktreeId}
+                    disabled={!selectedRepo}
                   >
                     <SelectTrigger>
                       <SelectValue
-                        placeholder={
-                          selectedProject ? "Select a workspace" : "Select a project first"
-                        }
+                        placeholder={selectedRepo ? "Select a worktree" : "Select a repo first"}
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {workspaces.map((ws) => (
-                        <SelectItem key={ws.workspaceId} value={ws.workspaceId}>
+                      {worktrees.map((ws) => (
+                        <SelectItem key={ws.worktreeId} value={ws.worktreeId}>
                           {ws.branch}
                         </SelectItem>
                       ))}

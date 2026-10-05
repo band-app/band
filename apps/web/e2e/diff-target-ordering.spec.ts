@@ -3,10 +3,10 @@
  * option ordering in the Changes tab of the right sidepanel (#643).
  *
  * Two behaviours are pinned here:
- *  1. A fresh workspace (no stored pick) compares against the project's
+ *  1. A fresh worktree (no stored pick) compares against the repo's
  *     default branch.
  *  2. The picker floats staging-style integration branches (develop,
- *     staging, …) to the top in priority order, then the project's default
+ *     staging, …) to the top in priority order, then the repo's default
  *     branch, then every other branch, most recent commit first. There is no
  *     "Uncommitted" entry: uncommitted work has its own Changes sections.
  *
@@ -16,7 +16,7 @@
  * `diff-target-picker.spec.ts`.
  *
  * The branch list reaches the picker through the real git pipeline
- * (`workspace.listBranches` → `git for-each-ref` in an on-disk worktree)
+ * (`worktree.listBranches` → `git for-each-ref` in an on-disk worktree)
  * exactly the way production does — no tRPC mocking, no `page.route`. All
  * locators and the dropdown-open dance live in `pages/ChangesPanelPage.ts`.
  */
@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git, gitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -54,7 +54,7 @@ const FILE_PATH = "file.txt";
 
 let server: ServerHandle;
 let tmpHome: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -93,7 +93,7 @@ test.beforeAll(async () => {
   writeFileSync(join(repoPath, FILE_PATH), "first line\nsecond line\nthird line\n");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -104,7 +104,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, HEAD_BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, HEAD_BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -116,9 +116,9 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Diff target defaults to the default branch on a fresh workspace", async ({ page }) => {
+test("Diff target defaults to the default branch on a fresh worktree", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   // The trigger shows the branch name (runtime data this spec seeded); no
   // pick is stored yet.
   await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH, { timeout: 15_000 });
@@ -129,7 +129,7 @@ test("Diff target dropdown pins staging branches, then default, then the most re
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
 
   // Open once; the list settles as `listBranches` resolves and the client

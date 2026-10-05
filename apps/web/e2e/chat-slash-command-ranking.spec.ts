@@ -20,7 +20,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -34,13 +34,13 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-slash-ranking-token";
-const PROJECT = "slashproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "slashproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 // Skills first and built-ins last, as Claude Code advertises them.
 const COMMANDS = [
   { name: "am-babysit", description: "Babysit a pull request, usually run via /loop" },
-  { name: "band-loop", description: "Schedule a recurring prompt against a workspace" },
+  { name: "band-loop", description: "Schedule a recurring prompt against a worktree" },
   { name: "diagnosing-bugs", description: "Diagnosis loop for hard bugs" },
   { name: "loop-status", description: "Show the running loops" },
   { name: "no-tdd-guard", description: "Allow commits without tests" },
@@ -59,9 +59,9 @@ test.beforeAll(async () => {
   const repoDir = join(tmpHome, "repo");
   mkdirSync(repoDir, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -86,7 +86,7 @@ test.afterAll(async () => {
 
 async function openChat(page: Page): Promise<ChatPanePage> {
   const chatPane = new ChatPanePage(page, server.url, TOKEN);
-  await chatPane.goto(WORKSPACE);
+  await chatPane.goto(WORKTREE);
   await chatPane.waitForReady();
   return chatPane;
 }

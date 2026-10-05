@@ -28,7 +28,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -38,11 +38,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-visible-output-token";
-const PROJECT = "visible-output";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "visible-output";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -59,9 +59,9 @@ test.beforeAll(async () => {
     env: gitEnv,
   });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -78,28 +78,28 @@ test.afterAll(async () => {
   if (workdir) rmSync(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-async function openTerminal(workspacePage: WorkspacePage): Promise<void> {
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE, true)).toBeVisible({
+async function openTerminal(worktreePage: WorktreePage): Promise<void> {
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE, true)).toBeVisible({
     timeout: 20_000,
   });
-  await workspacePage.waitForTerminalReady(20_000);
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+  await worktreePage.waitForTerminalReady(20_000);
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
 }
 
 test("a visible terminal shows a flood far past the hold threshold through to its end", async ({
   page,
 }) => {
   test.setTimeout(90_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE);
-  await openTerminal(workspacePage);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE);
+  await openTerminal(worktreePage);
 
   // `$((40+2))` keeps the typed command line from matching the marker.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     "seq 1 600000; echo VISIBLE_DONE_$((40+2))",
     /VISIBLE_DONE_42/,
     { attempts: 1, renderTimeoutMs: 30_000 },
@@ -110,13 +110,13 @@ test("a visible terminal shows a flood far past the hold threshold through to it
 
 test("a synchronized-output frame that never ends still reaches the screen", async ({ page }) => {
   test.setTimeout(60_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await openTerminal(workspacePage);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await openTerminal(worktreePage);
 
   // Begin a DEC 2026 frame and never end it. `clear` first, so the result
   // doesn't depend on what an earlier test left on this terminal.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     "clear; printf '\\033[?2026hSYNC_%s\\n' OPEN_$((40+2))",
     /SYNC_OPEN_42/,
     { attempts: 1, renderTimeoutMs: 10_000 },
@@ -127,14 +127,14 @@ test("an unfinished synchronized frame larger than the hold threshold still runs
   page,
 }) => {
   test.setTimeout(60_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE);
-  await openTerminal(workspacePage);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE);
+  await openTerminal(worktreePage);
 
   // ~350 KB inside a frame that never ends: more than the server lets go
   // unacknowledged (256 KB), so the page must not keep holding it.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     "clear; printf '\\033[?2026h'; seq 1 60000; echo BIG_FRAME_$((40+2))",
     /BIG_FRAME_42/,
     { attempts: 1, renderTimeoutMs: 20_000 },
@@ -144,16 +144,16 @@ test("an unfinished synchronized frame larger than the hold threshold still runs
 
 test("back-to-back synchronized frames each reach the screen", async ({ page }) => {
   test.setTimeout(60_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await openTerminal(workspacePage);
-  await workspacePage.recordRenderedTopRow(WORKSPACE, "FRAME_(\\d+)");
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await openTerminal(worktreePage);
+  await worktreePage.recordRenderedTopRow(WORKTREE, "FRAME_(\\d+)");
 
   // 60 redraws of the top row, ~40 ms apart, the way a fullscreen TUI
   // repaints on each wheel tick: every chunk carries one frame's content, its
   // end marker and the next frame's begin marker. Two animation frames apart,
   // so a loaded runner is unlikely to merge two redraws into one message.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     "clear; printf '\\033[?2026h'; for i in $(seq 100 159); do " +
       "printf '\\033[HFRAME_%s\\033[?2026l\\033[?2026h' $i; sleep 0.04; done; " +
       "printf '\\033[?2026l\\nFRAMES_DONE_%s\\n' $((40+2))",
@@ -163,7 +163,7 @@ test("back-to-back synchronized frames each reach the screen", async ({ page }) 
 
   // Measured: all 60 render with the tail held. With no hold, and with whole
   // chunks held until a timer (whose release also ended inside a frame), 1.
-  const frames = await workspacePage.readRenderedTopRowMatches();
+  const frames = await worktreePage.readRenderedTopRowMatches();
   expect(frames).toContain("159");
   expect(frames.length).toBeGreaterThanOrEqual(30);
 });

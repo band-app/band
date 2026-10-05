@@ -1,10 +1,10 @@
 /**
- * Settings > Environment: each project's `.band/environment.json`, parsed,
+ * Settings > Environment: each repo's `.band/environment.json`, parsed,
  * with its validation problems and which hosts meet its `requires`, driven
  * through the real Settings dialog against the real server.
  *
- * The projects point at real temp directories that hold the files, because the
- * hub reads `.band/environment.json` from a project's checkout.
+ * The repos point at real temp directories that hold the files, because the
+ * hub reads `.band/environment.json` from a repo's checkout.
  */
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -45,7 +45,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const root = mkdtempSync(join(tmpdir(), "band-e2e-env-"));
-  const projects = Object.entries(FILES).map(([name, json]) => {
+  const repos = Object.entries(FILES).map(([name, json]) => {
     const path = join(root, name);
     mkdirSync(join(path, ".band"), { recursive: true });
     if (json !== null) writeFileSync(join(path, ".band", "environment.json"), json);
@@ -56,7 +56,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
@@ -112,7 +112,7 @@ test("a devcontainer file that does not exist is reported", async ({ page }) => 
   await expect(settingsPage.environmentIssues()).toContainText("build.devcontainer");
 });
 
-test("a project without the file says so", async ({ page }) => {
+test("a repo without the file says so", async ({ page }) => {
   const settingsPage = await open(page);
   await settingsPage.expandEnvironment("env-none");
 

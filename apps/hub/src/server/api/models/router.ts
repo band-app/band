@@ -64,8 +64,8 @@ export const modelsRouter = t.router({
    * Settings page shows it per host and picks the host a refresh runs on.
    */
   availability: publicProcedure
-    .input(z.object({ workspaceId: z.string().optional() }).default({}))
-    .query(({ input }) => modelRefreshService.availability(input.workspaceId)),
+    .input(z.object({ worktreeId: z.string().optional() }).default({}))
+    .query(({ input }) => modelRefreshService.availability(input.worktreeId)),
 });
 
 export type ModelsRouter = typeof modelsRouter;

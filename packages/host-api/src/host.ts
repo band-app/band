@@ -3,11 +3,11 @@ import type { Environment, EnvironmentIssue } from "@band-app/environment";
 import type { TerminalBackend } from "./pty";
 
 /**
- * A machine that owns workspaces. Every git, file, process, PTY, search, LSP
- * and agent operation for a workspace goes through the workspace's host, so
+ * A machine that owns worktrees. Every git, file, process, PTY, search, LSP
+ * and agent operation for a worktree goes through the worktree's host, so
  * the hub never touches a worker's disk directly.
  *
- * The hub resolves a host with `HostRegistry.hostFor(workspaceId)`. Today the
+ * The hub resolves a host with `HostRegistry.hostFor(worktreeId)`. Today the
  * only implementation is `LocalHost`, which runs in the hub process.
  *
  * Failure convention: a method rejects with an `Error` when the operation
@@ -67,19 +67,19 @@ export interface HostInfo {
   home?: string;
   /** Free-form tags used for placement (`gpu`, `epic-approved`). */
   labels: string[];
-  /** Directories workspaces may live under. Empty means unrestricted. */
+  /** Directories worktrees may live under. Empty means unrestricted. */
   roots: string[];
   /** Tool versions found on the host (`node`, `git`). */
   versions: Record<string, string>;
   /**
    * Toolchain versions the host has on its PATH, as `x.y.z` (`node`, `python`,
    * `go`, `pnpm`, `uv`, `docker`, `git`). A tool that is not installed is left
-   * out. A project's `requires` in `.band/environment.json` is checked against it.
+   * out. A repo's `requires` in `.band/environment.json` is checked against it.
    */
   tools: Record<string, string>;
   capabilities: HostCapabilities;
   /**
-   * Directories the host keeps for hub files that belong to workspaces
+   * Directories the host keeps for hub files that belong to worktrees
    * (chat uploads, files an agent shares). A remote host declares them, under
    * one of its roots. A local host leaves this out, and the hub uses its own
    * `BAND_HOME`.
@@ -88,9 +88,9 @@ export interface HostInfo {
 }
 
 export interface HostDirs {
-  /** Chat uploads go in `<uploads>/<workspaceId>/`. */
+  /** Chat uploads go in `<uploads>/<worktreeId>/`. */
   uploads: string;
-  /** Files an agent shares go in `<shared>/<workspaceId>/`. */
+  /** Files an agent shares go in `<shared>/<worktreeId>/`. */
   shared: string;
 }
 
@@ -130,7 +130,7 @@ export interface HostGit {
 }
 
 export interface WorktreeSpec {
-  /** Path of the project's main checkout. */
+  /** Path of the repo's main checkout. */
   repoPath: string;
   /** Absolute path of the new worktree. */
   path: string;
@@ -284,17 +284,17 @@ export interface Duplex {
 export interface HostLsp {
   /**
    * Opens a stdio connection to the language server for `lang` in the
-   * workspace, starting it in `root` if it isn't running. Every connection to
-   * one workspace and language shares the server and receives all its output.
+   * worktree, starting it in `root` if it isn't running. Every connection to
+   * one worktree and language shares the server and receives all its output.
    * `output` ends when the server exits or the connection closes. Rejects when
    * `lang` has no server or the server cannot start.
    */
-  connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
+  connect(spec: { worktreeId: string; lang: string; root: string }): Promise<Duplex>;
   /**
-   * Signals the workspace's language servers to stop. Resolves without waiting
+   * Signals the worktree's language servers to stop. Resolves without waiting
    * for them to exit. Each connection's output ends once its server has.
    */
-  killWorkspace(workspaceId: string): Promise<void>;
+  killWorktree(worktreeId: string): Promise<void>;
   /** Stops every language server on the host. */
   killAll(): Promise<void>;
 }
@@ -373,9 +373,9 @@ export interface HostMcp {
 
 export type ScriptLabel = "setup" | "teardown";
 
-/** A `.band/config.json` script prepared to run in a workspace terminal. */
+/** A `.band/config.json` script prepared to run in a worktree terminal. */
 export interface ScriptPlan {
-  /** Shell line for `SpawnOptions.command` of a terminal in the workspace. */
+  /** Shell line for `SpawnOptions.command` of a terminal in the worktree. */
   command: string;
   /** Resolves with the script's exit code. Never rejects. */
   exited: Promise<number>;
@@ -383,48 +383,48 @@ export interface ScriptPlan {
   dispose(): void;
 }
 
-/** Where a workspace's `.band/config.json` lives. */
-export interface ScriptWorkspace {
-  projectPath: string;
+/** Where a worktree's `.band/config.json` lives. */
+export interface ScriptWorktree {
+  repoPath: string;
   worktreePath: string;
 }
 
 export interface HostScripts {
   /**
-   * The workspace's `setup` or `teardown` command, or `null` when it declares
+   * The worktree's `setup` or `teardown` command, or `null` when it declares
    * none. A valid `.band/environment.json` supplies it first (setup is its
    * `install` then `start`, teardown is its `teardown`). Otherwise it is read
    * from `.band/config.json`.
    */
-  command(workspace: ScriptWorkspace & { label: ScriptLabel }): Promise<string | null>;
+  command(worktree: ScriptWorktree & { label: ScriptLabel }): Promise<string | null>;
   /**
    * Runs `script` in `cwd` without a terminal (the Windows path, through
    * `cmd.exe`). Resolves with its exit code, or `null` when `timeoutMs` passes.
    */
   runHidden(script: string, cwd: string, timeoutMs?: number): Promise<number | null>;
   /**
-   * Reads the workspace's `.band/config.json` (worktree first, then the
-   * project checkout) and prepares its `setup` or `teardown` script. Resolves
+   * Reads the worktree's `.band/config.json` (worktree first, then the
+   * repo checkout) and prepares its `setup` or `teardown` script. Resolves
    * `null` when the config has no such script.
    */
-  prepare(workspace: {
-    projectPath: string;
+  prepare(worktree: {
+    repoPath: string;
     worktreePath: string;
     label: ScriptLabel;
   }): Promise<ScriptPlan | null>;
-  /** Copies the project's `copyFiles` and `.worktreeinclude` files into the worktree. Returns the relative paths copied. */
-  copyFiles(projectPath: string, worktreePath: string): Promise<string[]>;
+  /** Copies the repo's `copyFiles` and `.worktreeinclude` files into the worktree. Returns the relative paths copied. */
+  copyFiles(repoPath: string, worktreePath: string): Promise<string[]>;
   /**
-   * Reads and validates the workspace's `.band/environment.json` (worktree
-   * first, then the project checkout). Never rejects: a missing file gives
+   * Reads and validates the worktree's `.band/environment.json` (worktree
+   * first, then the repo checkout). Never rejects: a missing file gives
    * `source: null`, and a bad one gives its `issues`.
    */
-  environment(workspace: ScriptWorkspace): Promise<EnvironmentReport>;
+  environment(worktree: ScriptWorktree): Promise<EnvironmentReport>;
 }
 
-/** What a host found when it read a workspace's `.band/environment.json`. */
+/** What a host found when it read a worktree's `.band/environment.json`. */
 export interface EnvironmentReport {
-  /** The file that was read, or `null` when the workspace has none. */
+  /** The file that was read, or `null` when the worktree has none. */
   source: string | null;
   /** The parsed file, or `null` when there is none or it has problems. */
   environment: Environment | null;
@@ -483,7 +483,7 @@ export interface HooksStatus {
 export interface HostAgentEnv {
   /**
    * The model and effort Claude Code would use in `cwd` according to its
-   * config files and environment. Without `cwd`, project files are skipped.
+   * config files and environment. Without `cwd`, repo files are skipped.
    * `cli` adds the flags of a running CLI.
    */
   claudeDefaults(cwd?: string, cli?: ClaudeCliArgs): Promise<ClaudeDefaults>;
@@ -525,7 +525,7 @@ export interface HostAgentEnv {
 
 /** What a process started on the host may call on the hub. */
 export interface RelayScope {
-  workspaceId: string;
+  worktreeId: string;
   /** The chat the process belongs to, when it is an agent behind a chat. */
   chatId?: string;
 }
@@ -542,7 +542,7 @@ export interface HostRelay {
   /**
    * Issues a token for one process and returns the environment to start it
    * with. Calls made with the token reach the hub through the host's relay,
-   * limited to the host's own workspaces. Rejects when the host is offline.
+   * limited to the host's own worktrees. Rejects when the host is offline.
    */
   issue(scope: RelayScope): Promise<RelayGrant>;
 }

@@ -123,7 +123,7 @@ They share the same server boot, the same Express stubs (§10), the same data la
 ### Where they live and what runs them
 
 - Path: `tests/integration/api/<feature>.test.ts`.
-- Runner: your project's chosen runner (vitest, mocha, `node:test`, jest). Whatever the codebase already uses; don't introduce a second runner for backend integration tests.
+- Runner: your repo's chosen runner (vitest, mocha, `node:test`, jest). Whatever the codebase already uses; don't introduce a second runner for backend integration tests.
 - Server helper: `tests/integration/fixtures/ServerFixture.ts` (or equivalent) that spawns the real production binary on a random port against an isolated state directory. The same helper that powers the frontend tests.
 
 ### Minimal shape
@@ -840,7 +840,7 @@ Conventional tags:
 
 ## 13a. Host modes: `BAND_TEST_HOST=local|remote-loopback`
 
-The hub suite under `apps/hub/tests/` runs in two modes. `local` (the default) puts workspaces on the hub's own machine. With `BAND_TEST_HOST=remote-loopback`, `startServer` (`tests/helpers/server.ts`) also starts the real `apps/worker/bin/band-worker.mjs` against the test server, registers it through `tokens.issueWorkerBootstrap`, waits for `hosts.list` to show it online, and moves every worktree row and project path in the test's database onto that host (`tests/helpers/test-host.ts`). The same assertions then run through `RemoteHost`, the link and the worker. The worker shares the machine's disk, so its root is the OS temp dir and the test can still read what the worker wrote. The hub must not, because on a real worker that disk is another machine. `startServer` preloads `tests/helpers/worker-fs-guard.mjs` into the hub process (`NODE_OPTIONS=--import`). The guard throws on any `node:fs` call or child process `cwd` under a worktree the worker owns and under the worker's `.band-worktrees`, `.band-uploads` and `.band-shared`, and records the call in a violations file. `close()` fails the test if that file is not empty, so a service that catches the error still fails. A workspace at a project's root stays readable, since that path is also the hub's own copy of the project. A hub service that needs a remote workspace's files goes through `workspace.host`. It gets the test's `env` and the hub's `HOME`, so a stub agent or a seeded `~/.claude` behaves the same on both sides.
+The hub suite under `apps/hub/tests/` runs in two modes. `local` (the default) puts worktrees on the hub's own machine. With `BAND_TEST_HOST=remote-loopback`, `startServer` (`tests/helpers/server.ts`) also starts the real `apps/worker/bin/band-worker.mjs` against the test server, registers it through `tokens.issueWorkerBootstrap`, waits for `hosts.list` to show it online, and moves every worktree row and repo path in the test's database onto that host (`tests/helpers/test-host.ts`). The same assertions then run through `RemoteHost`, the link and the worker. The worker shares the machine's disk, so its root is the OS temp dir and the test can still read what the worker wrote. The hub must not, because on a real worker that disk is another machine. `startServer` preloads `tests/helpers/worker-fs-guard.mjs` into the hub process (`NODE_OPTIONS=--import`). The guard throws on any `node:fs` call or child process `cwd` under a worktree the worker owns and under the worker's `.band-worktrees`, `.band-uploads` and `.band-shared`, and records the call in a violations file. `close()` fails the test if that file is not empty, so a service that catches the error still fails. A worktree at a repo's root stays readable, since that path is also the hub's own copy of the repo. A hub service that needs a remote worktree's files goes through `worktree.host`. It gets the test's `env` and the hub's `HOME`, so a stub agent or a seeded `~/.claude` behaves the same on both sides.
 
 ```sh
 pnpm --filter @band-app/server build
@@ -852,8 +852,8 @@ CI runs the second command as the job "Test (remote-loopback)". The host contrac
 A test that cannot run on a worker passes `remoteHost: false` to `startServer`. The current list:
 
 - `terminal-restart-daemon`, `terminal-daemon-restart`, `terminal-daemon-build-mismatch` and `terminal-cold-restore` drive the hub's own terminal daemon. A worker runs terminals in its process (`BAND_TERMINAL_DAEMON=0`).
-- `workspace-remove-locked` and `workspace-sync-half-created-worktree` restart the hub and watch its boot-time worktree sync. On loopback the hub and the worker see the same repository path, so the hub's local sync adds a second row for a worktree that is already registered on the worker. A real worker has its own checkout path.
-- `remote-relay` keeps the hub's own workspace local and starts its own workers.
+- `worktree-remove-locked` and `worktree-sync-half-created-worktree` restart the hub and watch its boot-time worktree sync. On loopback the hub and the worker see the same repository path, so the hub's local sync adds a second row for a worktree that is already registered on the worker. A real worker has its own checkout path.
+- `remote-relay` keeps the hub's own worktree local and starts its own workers.
 - `host-capabilities` starts its own worker with a different `HOME`, and needs the hub's own machine to lack an agent that the worker has.
 - `tokens-auth` counts the hub's host rows, and the worker adds one.
 - The "disabled GitHub plugin" cases in `pr-checks` and `branch-status-pr` count calls to the `gh` stub. A worker probes `gh --version` itself when it starts.
@@ -905,7 +905,7 @@ Network is stubbed, so **data-contract drift with the real external services is 
 
 ---
 
-## 16. Adopting in a New Project — Order of Work
+## 16. Adopting in a New Repo — Order of Work
 
 1. Stand up Playwright with `globalSetup` that boots your real server. Pin locale and timezone in the config.
 2. Add `ExpressServerManager` and `CapturedRequest` utilities under `tests/integration/fixtures/utils/`.

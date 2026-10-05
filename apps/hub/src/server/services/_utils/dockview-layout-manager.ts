@@ -7,14 +7,14 @@
  *
  * Usage:
  *   const browserLayouts = new DockviewLayoutManager("browser_layout");
- *   browserLayouts.get(workspaceId);
- *   browserLayouts.addPanel(workspaceId, panelId, { ... });
+ *   browserLayouts.get(worktreeId);
+ *   browserLayouts.addPanel(worktreeId, panelId, { ... });
  */
 
 import {
-  deletePanelStatesForWorkspace,
+  deletePanelStatesForWorktree,
   insertPanelState,
-  listPanelStatesForWorkspace,
+  listPanelStatesForWorktree,
   updatePanelState,
 } from "../../infra/db/queries/panel-states";
 
@@ -175,16 +175,16 @@ export function isDockviewLayout(obj: unknown): obj is DockviewLayout {
 export class DockviewLayoutManager {
   constructor(private readonly panelType: string) {}
 
-  private layoutId(workspaceId: string): string {
-    return `${this.panelType}_${workspaceId}`;
+  private layoutId(worktreeId: string): string {
+    return `${this.panelType}_${worktreeId}`;
   }
 
   /**
-   * Get the layout tree for a workspace.
+   * Get the layout tree for a worktree.
    * Returns the parsed JSON tree or null if no layout is stored.
    */
-  get(workspaceId: string): unknown | null {
-    const rows = listPanelStatesForWorkspace(workspaceId, this.panelType);
+  get(worktreeId: string): unknown | null {
+    const rows = listPanelStatesForWorktree(worktreeId, this.panelType);
     if (rows.length === 0) return null;
     try {
       return JSON.parse(rows[0].state);
@@ -194,20 +194,20 @@ export class DockviewLayoutManager {
   }
 
   /**
-   * Save (upsert) the layout tree for a workspace.
+   * Save (upsert) the layout tree for a worktree.
    */
-  save(workspaceId: string, tree: unknown): void {
-    const id = this.layoutId(workspaceId);
+  save(worktreeId: string, tree: unknown): void {
+    const id = this.layoutId(worktreeId);
     const state = JSON.stringify(tree);
     const now = Date.now();
 
-    const rows = listPanelStatesForWorkspace(workspaceId, this.panelType);
+    const rows = listPanelStatesForWorktree(worktreeId, this.panelType);
     if (rows.length > 0) {
       updatePanelState(id, { state, updatedAt: now });
     } else {
       insertPanelState({
         id,
-        workspaceId,
+        worktreeId,
         panelType: this.panelType,
         state,
         createdAt: now,
@@ -217,10 +217,10 @@ export class DockviewLayoutManager {
   }
 
   /**
-   * Delete the layout for a workspace.
+   * Delete the layout for a worktree.
    */
-  delete(workspaceId: string): void {
-    deletePanelStatesForWorkspace(workspaceId, this.panelType);
+  delete(worktreeId: string): void {
+    deletePanelStatesForWorktree(worktreeId, this.panelType);
   }
 
   /**
@@ -229,8 +229,8 @@ export class DockviewLayoutManager {
    * Appends the panel to the first group's `views` array and adds the panel
    * entry to the `panels` map. If no layout exists, creates a fresh one-tab layout.
    */
-  addPanel(workspaceId: string, panel: PanelState): void {
-    const raw = this.get(workspaceId);
+  addPanel(worktreeId: string, panel: PanelState): void {
+    const raw = this.get(worktreeId);
 
     if (raw && isDockviewLayout(raw)) {
       // Idempotent: if the panel is already in the layout (registered in
@@ -240,7 +240,7 @@ export class DockviewLayoutManager {
       const alreadyInGrid = leafContainsView(raw.grid.root, panel.id);
       if (raw.panels[panel.id] && alreadyInGrid) {
         raw.panels[panel.id] = panel;
-        this.save(workspaceId, raw);
+        this.save(worktreeId, raw);
         return;
       }
 
@@ -252,7 +252,7 @@ export class DockviewLayoutManager {
         leaf.activeView = panel.id;
       }
 
-      this.save(workspaceId, raw);
+      this.save(worktreeId, raw);
     } else {
       // Match dockview's `toJSON()` shape exactly so the dashboard's
       // `fromJSON` round-trip succeeds. Specifically: the grid root must
@@ -286,7 +286,7 @@ export class DockviewLayoutManager {
         panels: { [panel.id]: panel },
         activeGroup: groupId,
       };
-      this.save(workspaceId, layout);
+      this.save(worktreeId, layout);
     }
   }
 
@@ -295,22 +295,22 @@ export class DockviewLayoutManager {
    *
    * Removes the panel from the `panels` map and from any group's `views` array.
    */
-  removePanel(workspaceId: string, panelId: string): void {
-    const raw = this.get(workspaceId);
+  removePanel(worktreeId: string, panelId: string): void {
+    const raw = this.get(worktreeId);
     if (!raw || !isDockviewLayout(raw)) return;
 
     delete raw.panels[panelId];
     removeFromGrid(raw.grid.root, panelId);
 
-    this.save(workspaceId, raw);
+    this.save(worktreeId, raw);
   }
 
   /**
    * List all panel IDs in the saved layout.
    * Useful for reconciling layout with live records.
    */
-  listPanelIds(workspaceId: string): string[] {
-    const raw = this.get(workspaceId);
+  listPanelIds(worktreeId: string): string[] {
+    const raw = this.get(worktreeId);
     if (!raw || !isDockviewLayout(raw)) return [];
     return Object.keys(raw.panels);
   }

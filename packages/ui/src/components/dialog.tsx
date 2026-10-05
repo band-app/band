@@ -46,7 +46,7 @@ function DialogOverlay({
 // exactly as the default variant.
 //
 // `command-palette` is the layout for the searchable command dialogs (quick
-// open, find in files, switch workspace, command palette, language picker).
+// open, find in files, switch worktree, command palette, language picker).
 // Unlike the other variants it deliberately does NOT centre vertically:
 //   - Desktop (lg+): the card is anchored in the upper third by its TOP edge
 //     with no `translate-y`, so the search input (the first child) stays at a

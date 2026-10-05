@@ -23,10 +23,10 @@ chmod 700 "$base"
 # The repository goes where the worker serves it from; the hub learns the path from the last line.
 if [ -n "${BAND_REPO_URLS:-}" ]; then
   repo="${BAND_REPO_URLS%%,*}"
-  name="$(printf '%s' "${BAND_PROJECT:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
+  name="$(printf '%s' "${BAND_REPO:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
   # With BAND_CLONE_BY_HUB the hub clones through the worker, which asks it for the credential.
   if [ -z "${BAND_CLONE_BY_HUB:-}" ]; then git clone --quiet -- "$repo" "$base/work/$name"; fi
-  echo "BAND_HOST_PROJECT_PATH=$base/work/$name"
+  echo "BAND_HOST_REPO_PATH=$base/work/$name"
 fi
 
 worker="${BAND_WORKER_BIN:-band-worker}"

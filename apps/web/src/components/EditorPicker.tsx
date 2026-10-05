@@ -126,13 +126,13 @@ const MAC_APPS: AppDef[] = [
 // EditorPicker
 // ---------------------------------------------------------------------------
 interface EditorPickerProps {
-  /** The workspace path to open. */
-  workspacePath: string;
+  /** The worktree path to open. */
+  worktreePath: string;
   /** Optional callback to copy the path. */
   onCopyPath?: () => void;
 }
 
-export function EditorPicker({ workspacePath, onCopyPath }: EditorPickerProps) {
+export function EditorPicker({ worktreePath, onCopyPath }: EditorPickerProps) {
   const { settings } = useSettingsQuery();
   const updateSettings = useUpdateSettings();
 
@@ -200,15 +200,15 @@ export function EditorPicker({ workspacePath, onCopyPath }: EditorPickerProps) {
     async (app: AppDef) => {
       if (!isDesktop) return;
       if (app.id === "finder") {
-        desktopInvoke("reveal_in_finder", { path: workspacePath }).catch(() => {});
+        desktopInvoke("reveal_in_finder", { path: worktreePath }).catch(() => {});
         return;
       }
       desktopInvoke("open_with_app", {
-        path: workspacePath,
+        path: worktreePath,
         appName: app.openWith,
       }).catch(() => {});
     },
-    [workspacePath],
+    [worktreePath],
   );
 
   // Click the main button → open with current app

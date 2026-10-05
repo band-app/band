@@ -13,25 +13,25 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
-  projectName: string;
+  repoName: string;
 }
 
 /**
- * Confirmation dialog for `projects.promoteToGit`. The action runs `git
- * init` in the project folder, which (while technically reversible by
+ * Confirmation dialog for `repos.promoteToGit`. The action runs `git
+ * init` in the repo folder, which (while technically reversible by
  * deleting `.git` manually) is enough of a state change that we want the
  * user to opt in deliberately — mirrors the pattern used by
- * `DeleteWorkspaceDialog` for similarly side-effecting actions.
+ * `DeleteWorktreeDialog` for similarly side-effecting actions.
  */
-export function PromoteToGitDialog({ open, onOpenChange, onConfirm, projectName }: Props) {
+export function PromoteToGitDialog({ open, onOpenChange, onConfirm, repoName }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]" onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
           <DialogTitle>Promote to git</DialogTitle>
           <DialogDescription>
-            This will run <code>git init -b main</code> in <strong>{projectName}</strong> and turn
-            it into a git repository.
+            This will run <code>git init -b main</code> in <strong>{repoName}</strong> and turn it
+            into a git repository.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2 text-sm">
@@ -39,7 +39,7 @@ export function PromoteToGitDialog({ open, onOpenChange, onConfirm, projectName 
             <GitBranch className="size-4 shrink-0 text-blue-500 mt-0.5" />
             <span>
               After promotion you'll be able to create branches, view diffs, and use git pull / push
-              for this project. The existing workspace stays in place.
+              for this repo. The existing worktree stays in place.
             </span>
           </div>
         </div>

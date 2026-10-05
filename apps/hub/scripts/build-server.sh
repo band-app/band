@@ -125,7 +125,7 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   for arch in $RG_ARCHES; do
     pkg="@vscode/ripgrep-${RG_HOST_PLATFORM}-${arch}"
     # Under pnpm's strict layout, the platform-specific package is hoisted
-    # only into `@vscode/ripgrep`'s own sandbox, not into the workspace's
+    # only into `@vscode/ripgrep`'s own sandbox, not into the pnpm workspace's
     # top-level node_modules — so we resolve it from the wrapper's directory.
     pkg_json="$(cd "$RG_REAL" && node -e "try{console.log(require.resolve('${pkg}/package.json'))}catch{}" 2>/dev/null || true)"
     if [ -z "$pkg_json" ]; then
@@ -151,7 +151,7 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   # bundle for SQLite — the user's `node` binary supplies it.
 
   # -----------------------------------------------------------------------
-  # Prettier — used by `workspace.formatFile` for in-process formatting.
+  # Prettier — used by `worktree.formatFile` for in-process formatting.
   # We can't bundle it: prettier's CJS shim redeclares `__filename`, which
   # collides with the esbuild banner's `const __filename` at the top of
   # the bundled output (SyntaxError: Identifier '__filename' has already

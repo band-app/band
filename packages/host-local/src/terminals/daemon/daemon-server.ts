@@ -96,8 +96,8 @@ export interface DaemonOptions {
 
 /**
  * The terminal daemon: a {@link TerminalPool} behind a Unix socket, so PTYs
- * outlive the web server. Knows nothing about workspaces, layouts or events;
- * `workspaceId` is opaque metadata used only for `list` / `killWorkspace`.
+ * outlive the web server. Knows nothing about worktrees, layouts or events;
+ * `worktreeId` is opaque metadata used only for `list` / `killWorktree`.
  *
  * Resolves with an exit code when the daemon could not take the endpoint.
  * Otherwise it serves until one of these, then calls `process.exit` itself:
@@ -533,10 +533,10 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         if (endpointLost || endpointOwnership(paths.socket, identity) === "lost") {
           throw new Error(ENDPOINT_LOST_ERROR);
         }
-        const { workspaceId, terminalId, workspaceRoot, options, cleanupOnExit, baseEnv } = request;
+        const { worktreeId, terminalId, worktreeRoot, options, cleanupOnExit, baseEnv } = request;
         spawning += 1;
         try {
-          await pool.spawn(workspaceId, terminalId, workspaceRoot, options, {
+          await pool.spawn(worktreeId, terminalId, worktreeRoot, options, {
             cleanupOnExit,
             baseEnv,
           });
@@ -551,14 +551,14 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       case "info":
         return pool.info(request.terminalId);
       case "list":
-        return request.workspaceId === undefined ? pool.listAll() : pool.list(request.workspaceId);
+        return request.worktreeId === undefined ? pool.listAll() : pool.list(request.worktreeId);
       case "kill": {
         const entry = pool.info(request.terminalId);
         pool.kill(request.terminalId);
         return entry;
       }
-      case "killWorkspace":
-        pool.killWorkspace(request.workspaceId);
+      case "killWorktree":
+        pool.killWorktree(request.worktreeId);
         return null;
       case "scrollback":
         return pool.getScrollback(request.terminalId, request.lines);
@@ -593,7 +593,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     }
     return {
       ...attached.snapshot,
-      workspaceId: entry.workspaceId,
+      worktreeId: entry.worktreeId,
       cleanupOnExit: entry.cleanupOnExit,
     };
   }
@@ -612,7 +612,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
  */
 function hasValidIds(message: Record<string, unknown>): boolean {
   if (typeof message.t !== "string") return false;
-  for (const key of ["terminalId", "workspaceId", "workspaceRoot", "data"]) {
+  for (const key of ["terminalId", "worktreeId", "worktreeRoot", "data"]) {
     if (key in message && typeof message[key] !== "string") return false;
   }
   for (const key of ["cols", "rows", "lines"]) {

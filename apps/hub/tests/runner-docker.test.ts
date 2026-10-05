@@ -1,7 +1,7 @@
 // Integration test for the bundled `docker` runner hook (plan step 3.6). A real
 // hub (the production bundle, temp BAND_HOME) runs `runners/docker` against a
 // real docker daemon. The hook starts the band-worker image in a hardened
-// container, the worker dials the hub, and the workspace becomes ready on it.
+// container, the worker dials the hub, and the worktree becomes ready on it.
 //
 // It needs a docker daemon, the worker image (docker/worker.Dockerfile) and a
 // container that can reach this machine's loopback (`--network host` on Linux,
@@ -14,7 +14,7 @@
 // daemon on the VM's loopback. BAND_DOCKER_TEST_PORT and BAND_DOCKER_TEST_GIT_PORT
 // fix the ports they listen on here, and BAND_DOCKER_TEST_HUB_URL and
 // BAND_DOCKER_TEST_GIT_URL are what the container dials (they differ from the
-// listening ports because the VM forwards its own ports back to this machine). The project's origin is a
+// listening ports because the VM forwards its own ports back to this machine). The repo's origin is a
 // `git daemon` on loopback, because the container clones the repository itself.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -43,8 +43,8 @@ interface CreateResult {
   path: string;
   provisioning?: { requestId: string };
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 interface HostsList {
   hosts: Array<{ id: string; status: string }>;
@@ -117,15 +117,15 @@ const m = <T>(procedure: string, input: unknown) =>
     if (res.status !== 200) throw new Error(`${procedure}: HTTP ${res.status} ${await res.text()}`);
     return trpcData<T>(res);
   });
-/** Waits for a workspace. On a timeout the error carries the runner's log, which says why. */
-const workspace = async (name: string) => {
+/** Waits for a worktree. On a timeout the error carries the runner's log, which says why. */
+const worktree = async (name: string) => {
   try {
     return await waitFor(
       async () =>
-        (await q<ProjectsList>("projects.list")).projects
+        (await q<ReposList>("repos.list")).repos
           .find((p) => p.name === "proj")
           ?.worktrees.find((w) => w.name === name),
-      { label: `workspace ${name} exists`, timeoutMs: 180_000, intervalMs: 500 },
+      { label: `worktree ${name} exists`, timeoutMs: 180_000, intervalMs: 500 },
     );
   } catch (err) {
     const requests = await q<{
@@ -216,7 +216,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
 
     seedSettings(hubHome, { tokenSecret: TOKEN });
     seedState(hubHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: seed,
@@ -276,24 +276,24 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   });
 
-  it("runs each container workspace in its own hardened container (S1, S2, S3)", async () => {
+  it("runs each container worktree in its own hardened container (S1, S2, S3)", async () => {
     const placement = {
       labels: { pool: "docker" },
       environment: { isolation: "container", resources: { cpu: 1, memory: "512Mi" } },
     };
-    const a = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const a = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "docker-a",
       placement,
     });
-    const b = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const b = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "docker-b",
       placement,
     });
     expect(a.provisioning?.requestId).toBeTruthy();
     expect(b.provisioning?.requestId).toBeTruthy();
-    const [wa, wb] = await Promise.all([workspace("docker-a"), workspace("docker-b")]);
+    const [wa, wb] = await Promise.all([worktree("docker-a"), worktree("docker-b")]);
     expect(wa.hostId).not.toBe(wb.hostId);
 
     const hosts = (await q<HostsList>("hosts.list")).hosts;
@@ -342,8 +342,8 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       username: "band-bot",
       value: PRIVATE_TOKEN,
     });
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "secret",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "secret",
       branch: "private-a",
       placement: { labels: { pool: "docker" }, environment: { isolation: "container" } },
     });
@@ -351,10 +351,10 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     expect(requestId).toBeTruthy();
     const wt = await waitFor(
       async () =>
-        (await q<ProjectsList>("projects.list")).projects
+        (await q<ReposList>("repos.list")).repos
           .find((p) => p.name === "secret")
           ?.worktrees.find((w) => w.name === "private-a"),
-      { label: "private workspace exists", timeoutMs: 180_000, intervalMs: 500 },
+      { label: "private worktree exists", timeoutMs: 180_000, intervalMs: 500 },
     );
     const [container] = containerOf(wt.hostId as string);
     expect(docker("exec", container, "cat", "/work/secret/private.txt")).toBe("private");
@@ -370,7 +370,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
   }, 300_000);
 
   it("removes the container and its volume on destroy (S1)", async () => {
-    const w = await workspace("docker-a");
+    const w = await worktree("docker-a");
     const hostId = w.hostId as string;
     const [container] = containerOf(hostId);
     expect(container).toBeTruthy();
@@ -392,7 +392,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
   }, 60_000);
 
   it("records the container id as the machine handle, lists it in status, and reaps a stray (3.7)", async () => {
-    const w = await workspace("docker-b");
+    const w = await worktree("docker-b");
     const hostId = w.hostId as string;
     const [short] = containerOf(hostId);
     const full = docker("inspect", "--format", "{{.Id}}", short);
@@ -439,7 +439,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
         { label: "the stray container is removed", timeoutMs: 60_000, intervalMs: 500 },
       );
       expect(docker("ps", "--quiet", "--no-trunc", "--filter", `id=${foreign}`)).toBe(foreign);
-      // The workspace's own container was not taken for a stray.
+      // The worktree's own container was not taken for a stray.
       expect(containerOf(hostId)).toEqual([short]);
     } finally {
       for (const id of [orphan, foreign]) {
@@ -452,15 +452,15 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     }
   }, 120_000);
 
-  it("runs the project's environment image, else the worker base image", async () => {
+  it("runs the repo's environment image, else the worker base image", async () => {
     const spawnHook = join(import.meta.dirname, "../../../runners/docker/spawn.sh");
     const destroyHook = join(import.meta.dirname, "../../../runners/docker/destroy.sh");
-    const projectTag = "band-env-test/proj:ready";
-    docker("tag", IMAGE, projectTag);
+    const repoTag = "band-env-test/proj:ready";
+    docker("tag", IMAGE, repoTag);
     const hubUrl = process.env.BAND_DOCKER_TEST_HUB_URL ?? server.url;
     const started: string[] = [];
     try {
-      for (const projectImage of [projectTag, "band-env-test/proj:missing", ""]) {
+      for (const repoImage of [repoTag, "band-env-test/proj:missing", ""]) {
         const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
           hostName: "image check",
         });
@@ -475,12 +475,12 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
             BAND_BOOTSTRAP_TOKEN: issued.token,
             BAND_DOCKER_IMAGE: IMAGE,
             BAND_DOCKER_NETWORK: NETWORK,
-            BAND_PROJECT_IMAGE: projectImage,
+            BAND_REPO_IMAGE: repoImage,
           },
         });
         const [container] = containerOf(issued.hostId);
         const image = JSON.parse(docker("inspect", container))[0].Config.Image as string;
-        expect(image).toBe(projectImage === projectTag ? projectTag : IMAGE);
+        expect(image).toBe(repoImage === repoTag ? repoTag : IMAGE);
       }
     } finally {
       for (const hostId of started) {
@@ -493,7 +493,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
         });
       }
       try {
-        docker("rmi", projectTag);
+        docker("rmi", repoTag);
       } catch {
         // Already gone.
       }

@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { launchDaemon } from "@band-app/host-local/terminals/daemon/launch";
 import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -28,8 +28,8 @@ import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 // failure as a broken/missing prebuild, no mocking involved.
 
 const TOKEN = "terminal-daemon-nodepty-token";
-const PROJECT = "noptyproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "noptyproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 describe("terminal daemon — node-pty fails to load", () => {
@@ -75,12 +75,12 @@ describe("terminal daemon — node-pty fails to load", () => {
 
   it("the server's next spawn recovers after a daemon with the same run dir failed to load node-pty", async () => {
     tmpHome = createTmpHome("band-td-nopty-server-");
-    const worktree = `${tmpHome}/${PROJECT}`;
+    const worktree = `${tmpHome}/${REPO}`;
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -104,7 +104,7 @@ describe("terminal daemon — node-pty fails to load", () => {
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id: randomUUID() },
+      { worktreeId: WORKTREE_ID, id: randomUUID() },
       TOKEN,
     );
     expect(res.status).toBe(200);

@@ -57,20 +57,20 @@ describe("parseGitRemoteUrl", () => {
   });
 
   it("parses GitHub Enterprise SSH URL", () => {
-    const result = parseGitRemoteUrl("git@github.acme.com:team/project.git");
+    const result = parseGitRemoteUrl("git@github.acme.com:team/repo.git");
     expect(result).toEqual({
       host: "github.acme.com",
       owner: "team",
-      repo: "project",
+      repo: "repo",
     });
   });
 
   it("parses GitHub Enterprise HTTPS URL", () => {
-    const result = parseGitRemoteUrl("https://github.acme.com/team/project.git");
+    const result = parseGitRemoteUrl("https://github.acme.com/team/repo.git");
     expect(result).toEqual({
       host: "github.acme.com",
       owner: "team",
-      repo: "project",
+      repo: "repo",
     });
   });
 
@@ -95,7 +95,7 @@ describe("parseGitRemoteUrl", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildBatchedCIQuery", () => {
-  it("builds a query for a single workspace", () => {
+  it("builds a query for a single worktree", () => {
     const query = buildBatchedCIQuery([
       {
         alias: "ws_0",
@@ -117,7 +117,7 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain("workflowRun {");
   });
 
-  it("builds a query for multiple workspaces", () => {
+  it("builds a query for multiple worktrees", () => {
     const query = buildBatchedCIQuery([
       {
         alias: "ws_0",
@@ -540,7 +540,7 @@ describe("parseBatchedCIResponse", () => {
     expect(ci?.url).toBe("https://github.com/o/r/actions/runs/2");
   });
 
-  it("handles multiple workspaces in one response", () => {
+  it("handles multiple worktrees in one response", () => {
     const data = {
       ws_0: {
         pullRequests: { nodes: [] },

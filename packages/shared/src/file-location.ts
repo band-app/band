@@ -67,7 +67,7 @@ export function parseFileLocation(raw: string): FileLocation {
  * Whether `filePath` is an absolute filesystem path — a POSIX path
  * (`/tmp/x`), a Windows drive path (`C:\x` or `C:/x`), or a Windows UNC
  * path (`\\host\share`). Used by Quick Open to decide whether a query
- * could refer to a file outside the workspace worktree.
+ * could refer to a file outside the worktree worktree.
  *
  * This runs in the browser where `node:path` isn't available, so it can't
  * defer to `path.isAbsolute`; the server re-checks with the real

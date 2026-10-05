@@ -26,26 +26,26 @@ export interface ViewportInfo {
 }
 
 /**
- * The elements that sit on a screen edge (the mobile workspace header with its
+ * The elements that sit on a screen edge (the mobile worktree header with its
  * panel menu button, the editor area and the tree sheets, the
  * dashboard action bar in each of its three homes, the Settings drawer footer)
  * and the chat composer controls that must fit a phone-width screen. Measures them for layout assertions; the
  * chat itself is driven through `ChatPanePage`, the fly-out through
- * `WorkspacePage` and the Settings dialog through `SettingsPage`.
+ * `WorktreePage` and the Settings dialog through `SettingsPage`.
  */
 export class MobileLayoutPage {
-  /** The mobile workspace header row (project list, workspace switcher,
+  /** The mobile worktree header row (repo list, worktree switcher,
    *  Explorer / Changes). */
   readonly header: Locator;
-  /** The workspace switcher button in the middle of the header. */
-  readonly workspaceSwitcher: Locator;
-  /** The header label's first row: the workspace (worktree) name. */
-  readonly headerWorkspaceName: Locator;
-  /** The header label's second row: the project name. */
-  readonly headerProjectName: Locator;
+  /** The worktree switcher button in the middle of the header. */
+  readonly worktreeSwitcher: Locator;
+  /** The header label's first row: the worktree (worktree) name. */
+  readonly headerWorktreeName: Locator;
+  /** The header label's second row: the repo name. */
+  readonly headerRepoName: Locator;
   /** The header label, both rows. */
   readonly headerLabel: Locator;
-  /** The top row of the project-list fly-out (label filter, add project). */
+  /** The top row of the repo-list fly-out (label filter, add repo). */
   readonly flyoutTopBar: Locator;
   /** The vertical 3-dot button at the right of the header; it opens the
    *  panel menu (Explorer, Changes, plugin tabs) as a bottom drawer. */
@@ -56,15 +56,15 @@ export class MobileLayoutPage {
   readonly changesItemBadge: Locator;
   /** The editor area under the header; it reaches the bottom screen edge. */
   readonly main: Locator;
-  /** The bottom tab bar the mobile workspace used to have. */
+  /** The bottom tab bar the mobile worktree used to have. */
   readonly legacyBottomBar: Locator;
   /** The action bar of the full-screen mobile dashboard. */
   readonly dashboardActionBar: Locator;
-  /** The action bar inside the mobile project-list fly-out. */
+  /** The action bar inside the mobile repo-list fly-out. */
   readonly flyoutActionBar: Locator;
-  /** The wide-layout project-list sidebar column. */
+  /** The wide-layout repo-list sidebar column. */
   readonly sidebar: Locator;
-  /** The action bar at the foot of the wide-layout project-list sidebar. */
+  /** The action bar at the foot of the wide-layout repo-list sidebar. */
   readonly sidebarActionBar: Locator;
   /** The wide-layout column right of the sidebar (tabs, chat, side panel). */
   readonly appShellMain: Locator;
@@ -86,36 +86,32 @@ export class MobileLayoutPage {
     private readonly baseUrl: string,
     private readonly token: string,
   ) {
-    this.header = page.getByTestId("mobile-workspace__header");
-    this.workspaceSwitcher = page.getByTestId("mobile-workspace__switcher");
-    this.headerWorkspaceName = this.workspaceSwitcher.getByTestId("workspace-label__name");
-    this.headerProjectName = this.workspaceSwitcher.getByTestId("workspace-label__project");
-    this.headerLabel = this.workspaceSwitcher.getByTestId("workspace-label");
-    this.flyoutTopBar = page
-      .getByTestId("project-list-flyout")
-      .getByTestId("project-list__top-bar");
-    this.menuButton = page.getByTestId("mobile-workspace__header-menu");
-    this.menuBody = page.getByTestId("mobile-workspace__menu-body");
-    this.changesItemBadge = page.getByTestId("mobile-workspace__menu-changes-badge");
-    this.main = page.getByTestId("mobile-workspace__main");
-    this.legacyBottomBar = page.getByTestId("mobile-workspace__bottom-bar");
-    this.dashboardActionBar = page
-      .getByTestId("project-list__action-bar")
-      .filter({ visible: true });
+    this.header = page.getByTestId("mobile-worktree__header");
+    this.worktreeSwitcher = page.getByTestId("mobile-worktree__switcher");
+    this.headerWorktreeName = this.worktreeSwitcher.getByTestId("worktree-label__name");
+    this.headerRepoName = this.worktreeSwitcher.getByTestId("worktree-label__repo");
+    this.headerLabel = this.worktreeSwitcher.getByTestId("worktree-label");
+    this.flyoutTopBar = page.getByTestId("repo-list-flyout").getByTestId("repo-list__top-bar");
+    this.menuButton = page.getByTestId("mobile-worktree__header-menu");
+    this.menuBody = page.getByTestId("mobile-worktree__menu-body");
+    this.changesItemBadge = page.getByTestId("mobile-worktree__menu-changes-badge");
+    this.main = page.getByTestId("mobile-worktree__main");
+    this.legacyBottomBar = page.getByTestId("mobile-worktree__bottom-bar");
+    this.dashboardActionBar = page.getByTestId("repo-list__action-bar").filter({ visible: true });
     this.flyoutActionBar = page
-      .getByTestId("project-list-flyout")
-      .getByTestId("project-list__action-bar")
+      .getByTestId("repo-list-flyout")
+      .getByTestId("repo-list__action-bar")
       .filter({ visible: true });
     this.sidebar = page.getByTestId("app-shell__sidebar");
     this.sidebarActionBar = page
       .getByTestId("app-shell__sidebar")
-      .getByTestId("project-list__action-bar")
+      .getByTestId("repo-list__action-bar")
       .filter({ visible: true });
     this.appShellMain = page.getByTestId("app-shell__main");
     this.navOverlay = page.getByTestId("app-shell__nav-overlay");
     this.reinstallNotice = page.getByTestId("reinstall-home-screen-notice");
-    this.explorerSheetBody = page.getByTestId("mobile-workspace__explorer-body");
-    this.changesSheetBody = page.getByTestId("mobile-workspace__changes-body");
+    this.explorerSheetBody = page.getByTestId("mobile-worktree__explorer-body");
+    this.changesSheetBody = page.getByTestId("mobile-worktree__changes-body");
     this.composer = page.getByTestId("chat-pane__composer").filter({ visible: true });
     this.submitButton = page.getByTestId("prompt-input__submit-button").filter({ visible: true });
     this.modelMenu = page.getByTestId("chat-pane__model-menu").filter({ visible: true });
@@ -129,7 +125,7 @@ export class MobileLayoutPage {
     return `${baseUrl}/?token=${token}`;
   }
 
-  /** Open the dashboard (the project list, full screen on mobile). */
+  /** Open the dashboard (the repo list, full screen on mobile). */
   async gotoDashboard(): Promise<void> {
     await test.step("Navigate to the dashboard", async () => {
       await this.page.goto(MobileLayoutPage.dashboardUrl(this.baseUrl, this.token));
@@ -140,12 +136,12 @@ export class MobileLayoutPage {
    *  `<pluginId>-<tabId>` slug (the GitHub Checks tab is
    *  `github-pull-request`). */
   menuItem(item: string): Locator {
-    return this.page.getByTestId(`mobile-workspace__menu-${item}`);
+    return this.page.getByTestId(`mobile-worktree__menu-${item}`);
   }
 
   /** Open the panel menu's bottom drawer from the header's 3-dot button. */
   async openMenu(): Promise<void> {
-    await test.step("Open the workspace panel menu", async () => {
+    await test.step("Open the worktree panel menu", async () => {
       await this.menuButton.click();
       await expect(this.menuBody).toBeVisible();
     });
@@ -164,7 +160,7 @@ export class MobileLayoutPage {
 
   /** The body of a plugin tab's bottom sheet. */
   pluginSheetBody(slug: string): Locator {
-    return this.page.getByTestId(`mobile-workspace__plugin--${slug}-body`);
+    return this.page.getByTestId(`mobile-worktree__plugin--${slug}-body`);
   }
 
   /** Open a plugin tab's bottom sheet through the panel menu. */

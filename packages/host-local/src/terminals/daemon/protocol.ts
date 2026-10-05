@@ -24,7 +24,7 @@ import type {
  * The hello / mismatch / shutdown exchange is the one part that must never
  * change: it is how a newer server asks an older daemon to exit.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 3;
 
 /** Daemon exit code for "a live daemon already owns the endpoint"; the launcher connects to it. */
 export const EXIT_ENDPOINT_OCCUPIED = 20;
@@ -169,9 +169,9 @@ export type HelloReply =
   | { t: "rejected"; reason: string };
 
 export interface SpawnParams {
-  workspaceId: string;
+  worktreeId: string;
   terminalId: string;
-  workspaceRoot: string;
+  worktreeRoot: string;
   options?: SpawnOptions;
   cleanupOnExit?: boolean;
   baseEnv: Record<string, string>;
@@ -181,9 +181,9 @@ export interface SpawnParams {
 export interface DaemonRequests {
   spawn: [SpawnParams, TerminalListEntry];
   info: [{ terminalId: string }, TerminalListEntry | null];
-  list: [{ workspaceId?: string }, TerminalListEntry[]];
+  list: [{ worktreeId?: string }, TerminalListEntry[]];
   kill: [{ terminalId: string }, TerminalListEntry | null];
-  killWorkspace: [{ workspaceId: string }, null];
+  killWorktree: [{ worktreeId: string }, null];
   scrollback: [{ terminalId: string; lines?: number }, string | null];
   write: [{ terminalId: string; data: string }, boolean];
   /**
@@ -192,7 +192,7 @@ export interface DaemonRequests {
    */
   attach: [
     { terminalId: string; cols?: number; rows?: number },
-    (TerminalSnapshot & { workspaceId: string; cleanupOnExit: boolean }) | null,
+    (TerminalSnapshot & { worktreeId: string; cleanupOnExit: boolean }) | null,
   ];
   ping: [Record<string, never>, { pid: number; sessions: number }];
 }

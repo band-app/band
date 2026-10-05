@@ -16,7 +16,7 @@ impl ApiClient {
 
     /// Build the client from an already-loaded `Settings` snapshot.
     /// Lets callers that need to read settings for other reasons (e.g.
-    /// `cmd_workspaces_create` walking the `--via` precedence chain)
+    /// `cmd_worktrees_create` walking the `--via` precedence chain)
     /// share a single load — the file is small but the syscall pair
     /// (`stat` + `read`) adds up if we do it twice per CLI invocation.
     pub(crate) fn from_loaded_settings(settings: state::Settings) -> Self {

@@ -26,7 +26,7 @@ import {
   environmentBuildQueries,
   MAX_LOG_BYTES,
 } from "../infra/db/queries/environment-builds";
-import { ProjectQueries } from "../infra/db/queries/projects";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { hostRegistry } from "../infra/host/registry";
 import { settingsService } from "./settings-service";
 
@@ -63,7 +63,7 @@ export interface BuildResult {
   build: EnvironmentBuildView;
   /** A ready image already exists for the key, so nothing was built. */
   cacheHit: boolean;
-  /** A build for this project was already running, and this is it. */
+  /** A build for this repo was already running, and this is it. */
   alreadyRunning: boolean;
 }
 
@@ -114,8 +114,8 @@ class BuildLog {
 
 interface Plan {
   host: Host;
-  projectPath: string;
-  project: string;
+  repoPath: string;
+  repo: string;
   environment: Environment;
   ref: string;
   commit: string;
@@ -126,8 +126,8 @@ interface Plan {
 }
 
 /**
- * Builds and caches an environment image per project (plan step 3.2): the
- * worker base (layer 1), the project toolchain from `build` (layer 2) and the
+ * Builds and caches an environment image per repo (plan step 3.2): the
+ * worker base (layer 1), the repo toolchain from `build` (layer 2) and the
  * result of `install` at the default branch. The image is tagged by a hash of
  * the environment file, what it references, the lockfiles and the worker base.
  * A build that fails never replaces the last ready image.
@@ -140,7 +140,7 @@ interface Plan {
  */
 export class EnvironmentBuildService {
   private readonly queries = environmentBuildQueries;
-  private readonly projects = new ProjectQueries();
+  private readonly repos = new RepoQueries();
   private readonly active = new Map<string, string>();
   private readonly preparing = new Map<string, Promise<BuildResult>>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -162,45 +162,45 @@ export class EnvironmentBuildService {
     this.timer = null;
   }
 
-  status(project: string): EnvironmentImageStatus {
-    this.requireProject(project);
-    const latest = this.queries.latest(project);
-    const current = this.queries.current(project);
+  status(repo: string): EnvironmentImageStatus {
+    this.requireRepo(repo);
+    const latest = this.queries.latest(repo);
+    const current = this.queries.current(repo);
     return {
       builder: this.builderConfig(),
       current: current ? view(current, false) : null,
       latest: latest ? view(latest, true) : null,
-      builds: this.queries.list(project, 10).map((r) => view(r, false)),
+      builds: this.queries.list(repo, 10).map((r) => view(r, false)),
     };
   }
 
-  /** The image a runner should boot for the project, or null before the first ready build. */
-  currentImage(project: string): string | null {
-    return this.queries.current(project)?.image ?? null;
+  /** The image a runner should boot for the repo, or null before the first ready build. */
+  currentImage(repo: string): string | null {
+    return this.queries.current(repo)?.image ?? null;
   }
 
   /**
-   * Starts a build of the project's environment at the default branch, or
+   * Starts a build of the repo's environment at the default branch, or
    * reports that one is running or already cached. Returns once the build has
    * started. The build row carries its progress.
    */
   async build(
-    project: string,
+    repo: string,
     options: { trigger?: "manual" | "auto"; force?: boolean } = {},
   ): Promise<BuildResult> {
-    const runningId = this.active.get(project);
+    const runningId = this.active.get(repo);
     if (runningId) {
       const row = this.queries.get(runningId);
       if (row) return { build: view(row, false), cacheHit: false, alreadyRunning: true };
     }
-    const pending = this.preparing.get(project);
+    const pending = this.preparing.get(repo);
     if (pending) return pending;
-    const promise = this.prepareAndStart(project, options.trigger ?? "manual", !!options.force);
-    this.preparing.set(project, promise);
+    const promise = this.prepareAndStart(repo, options.trigger ?? "manual", !!options.force);
+    this.preparing.set(repo, promise);
     try {
       return await promise;
     } finally {
-      this.preparing.delete(project);
+      this.preparing.delete(repo);
     }
   }
 
@@ -222,29 +222,29 @@ export class EnvironmentBuildService {
     };
   }
 
-  private requireProject(project: string): { path: string; defaultBranch: string } {
-    const location = this.projects.findLocation(project);
+  private requireRepo(repo: string): { path: string; defaultBranch: string } {
+    const location = this.repos.findLocation(repo);
     if (!location) {
-      throw new TRPCError({ code: "NOT_FOUND", message: `Project not found: ${project}` });
+      throw new TRPCError({ code: "NOT_FOUND", message: `Repo not found: ${repo}` });
     }
     return location;
   }
 
   private async prepareAndStart(
-    project: string,
+    repo: string,
     trigger: "manual" | "auto",
     force: boolean,
   ): Promise<BuildResult> {
-    const plan = await this.plan(project);
+    const plan = await this.plan(repo);
     if (!force) {
-      const cached = this.queries.readyForKey(project, plan.key, plan.host.id);
+      const cached = this.queries.readyForKey(repo, plan.key, plan.host.id);
       if (cached?.image && (await this.imageExists(plan.host, cached.image))) {
         return { build: view(cached, false), cacheHit: true, alreadyRunning: false };
       }
     }
     const row: EnvironmentBuildRow = {
       id: randomUUID(),
-      project,
+      repo,
       key: plan.key,
       status: "building",
       image: null,
@@ -257,14 +257,14 @@ export class EnvironmentBuildService {
       endedAt: null,
     };
     this.queries.insert(row);
-    this.active.set(project, row.id);
+    this.active.set(repo, row.id);
     void this.run(row, plan);
     return { build: view(row, false), cacheHit: false, alreadyRunning: false };
   }
 
   /** Reads the environment at the default branch and works out the key. Rejects with a message for the caller. */
-  private async plan(project: string): Promise<Plan> {
-    const location = this.requireProject(project);
+  private async plan(repo: string): Promise<Plan> {
+    const location = this.requireRepo(repo);
     const cfg = this.builderConfig();
     let host: Host;
     try {
@@ -275,19 +275,19 @@ export class EnvironmentBuildService {
         message: `environmentBuilder.hostId "${cfg.hostId}" is not a known host`,
       });
     }
-    const projectPath = hostRegistry.projectPathOn(project, host.id, location.path);
-    if (projectPath === null) {
+    const repoPath = hostRegistry.repoPathOn(repo, host.id, location.path);
+    if (repoPath === null) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: `Project "${project}" has no checkout on host "${host.id}"`,
+        message: `Repo "${repo}" has no checkout on host "${host.id}"`,
       });
     }
 
     await this.requireDocker(host);
 
-    const ref = await this.resolveRef(host, projectPath, location.defaultBranch);
-    const commit = (await this.git(host, projectPath, ["rev-parse", ref])).trim();
-    const text = await this.git(host, projectPath, ["show", `${ref}:${ENVIRONMENT_FILE}`]).catch(
+    const ref = await this.resolveRef(host, repoPath, location.defaultBranch);
+    const commit = (await this.git(host, repoPath, ["rev-parse", ref])).trim();
+    const text = await this.git(host, repoPath, ["show", `${ref}:${ENVIRONMENT_FILE}`]).catch(
       () => {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -312,7 +312,7 @@ export class EnvironmentBuildService {
       });
     }
     const references = await checkReferences(environment, (path) =>
-      this.git(host, projectPath, ["cat-file", "-e", `${ref}:${path}`]).then(
+      this.git(host, repoPath, ["cat-file", "-e", `${ref}:${path}`]).then(
         () => true,
         () => false,
       ),
@@ -329,7 +329,7 @@ export class EnvironmentBuildService {
     for (const input of keyInputs(environment)) {
       try {
         files[input.path] = (
-          await this.git(host, projectPath, ["rev-parse", `${ref}:${input.path}`])
+          await this.git(host, repoPath, ["rev-parse", `${ref}:${input.path}`])
         ).trim();
       } catch {
         if (input.required) {
@@ -343,23 +343,23 @@ export class EnvironmentBuildService {
     const key = imageKey({ files, image: environment.build.image, workerBase });
     return {
       host,
-      projectPath,
-      project,
+      repoPath,
+      repo,
       environment,
       ref,
       commit,
       key,
-      tag: imageTag(project, key, cfg.registry ?? undefined),
+      tag: imageTag(repo, key, cfg.registry ?? undefined),
       workerImage: cfg.workerImage,
       registry: cfg.registry ?? undefined,
     };
   }
 
-  private async resolveRef(host: Host, projectPath: string, branch: string): Promise<string> {
-    // `origin/<branch>` follows the fetch the branch poller does. A project with
+  private async resolveRef(host: Host, repoPath: string, branch: string): Promise<string> {
+    // `origin/<branch>` follows the fetch the branch poller does. A repo with
     // no remote has only the local branch.
     for (const candidate of [`origin/${branch}`, branch]) {
-      const ok = await this.git(host, projectPath, ["rev-parse", "--verify", candidate]).then(
+      const ok = await this.git(host, repoPath, ["rev-parse", "--verify", candidate]).then(
         () => true,
         () => false,
       );
@@ -367,7 +367,7 @@ export class EnvironmentBuildService {
     }
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Default branch "${branch}" was not found in ${projectPath}`,
+      message: `Default branch "${branch}" was not found in ${repoPath}`,
     });
   }
 
@@ -435,9 +435,7 @@ export class EnvironmentBuildService {
     const container = `band-env-${row.id.slice(0, 12)}`;
     let failure: string | null = null;
     try {
-      log.add(
-        `Building ${plan.tag} for ${plan.project} at ${plan.ref} (${plan.commit.slice(0, 12)})`,
-      );
+      log.add(`Building ${plan.tag} for ${plan.repo} at ${plan.ref} (${plan.commit.slice(0, 12)})`);
       log.flush();
       tmp = await plan.host.fs.mkdtemp("band-env-");
       await this.exportCheckout(plan, tmp, log);
@@ -459,7 +457,7 @@ export class EnvironmentBuildService {
     await this.exec(
       plan.host,
       "docker",
-      ["rmi", toolchainTag(plan.project, plan.key), layeredTag(plan.project, plan.key)],
+      ["rmi", toolchainTag(plan.repo, plan.key), layeredTag(plan.repo, plan.key)],
       log,
       { quiet: true },
     ).catch(() => undefined);
@@ -481,7 +479,7 @@ export class EnvironmentBuildService {
         });
       }
     } finally {
-      this.active.delete(plan.project);
+      this.active.delete(plan.repo);
     }
   }
 
@@ -527,20 +525,20 @@ export class EnvironmentBuildService {
     await plan.host.fs.mkdir(src);
     const index = posix.join(tmp, "index");
     await this.exec(plan.host, "git", ["read-tree", plan.ref], log, {
-      cwd: plan.projectPath,
+      cwd: plan.repoPath,
       env: { GIT_INDEX_FILE: index },
     });
     await this.exec(plan.host, "git", ["checkout-index", "--all", `--prefix=${src}/`], log, {
-      cwd: plan.projectPath,
+      cwd: plan.repoPath,
       env: { GIT_INDEX_FILE: index },
     });
   }
 
-  /** Layer 2: returns the tag of an image holding the project's toolchain. */
+  /** Layer 2: returns the tag of an image holding the repo's toolchain. */
   private async buildToolchain(plan: Plan, tmp: string, log: BuildLog): Promise<string> {
     const build = plan.environment.build;
     const src = posix.join(tmp, "src");
-    const tag = toolchainTag(plan.project, plan.key);
+    const tag = toolchainTag(plan.repo, plan.key);
     if (build?.dockerfile !== undefined) {
       await this.exec(
         plan.host,
@@ -588,7 +586,7 @@ export class EnvironmentBuildService {
     });
     // The layer's `COPY root/ /` creates /work with a mode every uid can write.
     await plan.host.fs.mkdir(posix.join(dir, "root", "work"), { recursive: true });
-    const tag = layeredTag(plan.project, plan.key);
+    const tag = layeredTag(plan.repo, plan.key);
     await this.exec(plan.host, "docker", ["build", "--tag", tag, dir], log);
     return tag;
   }
@@ -634,7 +632,7 @@ export class EnvironmentBuildService {
   // ---- auto trigger ----------------------------------------------------------
 
   /**
-   * Rebuilds the projects that have been built before when the default
+   * Rebuilds the repos that have been built before when the default
    * branch's environment files or lockfiles changed. A key that already failed
    * is not retried until the files change again.
    */
@@ -652,20 +650,20 @@ export class EnvironmentBuildService {
   private ticking = false;
 
   private async autoTickOnce(): Promise<void> {
-    for (const project of this.queries.projectsWithBuilds()) {
-      if (this.active.has(project) || this.preparing.has(project)) continue;
-      if (!this.projects.findLocation(project)) continue;
+    for (const repo of this.queries.reposWithBuilds()) {
+      if (this.active.has(repo) || this.preparing.has(repo)) continue;
+      if (!this.repos.findLocation(repo)) continue;
       try {
-        const plan = await this.plan(project);
-        const latest = this.queries.latest(project);
+        const plan = await this.plan(repo);
+        const latest = this.queries.latest(repo);
         if (latest?.key === plan.key) continue;
-        if (this.queries.readyForKey(project, plan.key, plan.host.id)) continue;
-        await this.build(project, { trigger: "auto" });
+        if (this.queries.readyForKey(repo, plan.key, plan.host.id)) continue;
+        await this.build(repo, { trigger: "auto" });
       } catch (err) {
         const message = (err as Error).message;
-        if (!this.warned.has(`${project}:${message}`)) {
-          this.warned.add(`${project}:${message}`);
-          console.warn("environment image auto build for %s skipped: %s", project, message);
+        if (!this.warned.has(`${repo}:${message}`)) {
+          this.warned.add(`${repo}:${message}`);
+          console.warn("environment image auto build for %s skipped: %s", repo, message);
         }
       }
     }

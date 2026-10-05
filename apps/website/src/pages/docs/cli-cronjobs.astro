@@ -7,7 +7,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     The <code>band cronjobs</code> command group manages scheduled recurring tasks. A
     cronjob is a saved <code>(cron expression, prompt)</code> pair attached to either a
-    project or a specific workspace. When the cron expression fires, Band sends the
+    repo or a specific worktree. When the cron expression fires, Band sends the
     prompt to a chat pane in that scope.
   </p>
 
@@ -15,7 +15,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     Every cronjob lives under a <strong>storage key</strong>:
-    a project name (for project-scoped jobs) or a workspace ID (for workspace-scoped
+    a repo name (for repo-scoped jobs) or a worktree ID (for worktree-scoped
     jobs). Inside that key the cronjob has a generated string ID like
     <code>cj_1234567890</code>. All update / delete / trigger commands take both the key
     and the ID.
@@ -24,23 +24,23 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>List cronjobs</h2>
 
   <pre><code>band cronjobs list
-band cronjobs list --project my-app           # filter by project
-band cronjobs list --workspace ws_abc123       # filter by workspace</code></pre>
+band cronjobs list --repo my-app           # filter by repo
+band cronjobs list --worktree ws_abc123       # filter by worktree</code></pre>
 
   <p>Example output:</p>
 
   <pre><code>ID              NAME              CRON          SCOPE      STATE     LAST RUN
-cj_1701400000   review-prs        0 9 * * *     project    enabled   ok
-cj_1701400123   weekly-deps       0 0 * * 1     project    enabled   ok
-cj_1701400456   integration       0 */6 * * *   workspace  disabled  -</code></pre>
+cj_1701400000   review-prs        0 9 * * *     repo    enabled   ok
+cj_1701400123   weekly-deps       0 0 * * 1     repo    enabled   ok
+cj_1701400456   integration       0 */6 * * *   worktree  disabled  -</code></pre>
 
   <h2>Create a cronjob</h2>
 
   <p>
     The storage key is positional; everything else is named. <code>--name</code>,
     <code>--prompt</code>, and <code>--cron</code> are required. The default scope is
-    <code>project</code>; pass <code>--scope workspace --workspace-id &lt;id&gt;</code>
-    for a workspace-scoped job.
+    <code>repo</code>; pass <code>--scope worktree --worktree-id &lt;id&gt;</code>
+    for a worktree-scoped job.
   </p>
 
   <pre><code>band cronjobs create my-app \
@@ -48,21 +48,21 @@ cj_1701400456   integration       0 */6 * * *   workspace  disabled  -</code></p
   --prompt "Review all open pull requests and post a summary" \
   --cron "0 9 * * *"
 
-# Workspace-scoped (key is the workspace ID; --scope and --workspace-id required)
+# Worktree-scoped (key is the worktree ID; --scope and --worktree-id required)
 band cronjobs create ws_abc123 \
-  --scope workspace --workspace-id ws_abc123 \
+  --scope worktree --worktree-id ws_abc123 \
   --name "ci-watch" \
   --prompt "Check CI status and report failures" \
   --cron "*/15 * * * *"</code></pre>
 
   <p>Options:</p>
   <ul>
-    <li><code>key</code> (positional, required) — project name or workspace ID, depending on scope.</li>
+    <li><code>key</code> (positional, required) — repo name or worktree ID, depending on scope.</li>
     <li><code>--name &lt;name&gt;</code> — human-readable name (required).</li>
     <li><code>--prompt &lt;text&gt;</code> — prompt sent to the agent (required).</li>
     <li><code>--cron &lt;expr&gt;</code> — 5-field cron expression (required).</li>
-    <li><code>--scope project|workspace</code> — defaults to <code>project</code>.</li>
-    <li><code>--workspace-id &lt;id&gt;</code> — required when scope is <code>workspace</code>.</li>
+    <li><code>--scope repo|worktree</code> — defaults to <code>repo</code>.</li>
+    <li><code>--worktree-id &lt;id&gt;</code> — required when scope is <code>worktree</code>.</li>
     <li><code>--disabled</code> — start the job disabled.</li>
   </ul>
 
@@ -116,7 +116,7 @@ band cronjobs update my-app cj_1701400000 --disable</code></pre>
     {
       "id": "cj_1701400000",
       "key": "my-app",
-      "scope": "project",
+      "scope": "repo",
       "name": "review-prs",
       "prompt": "Review all open pull requests and post a summary",
       "cronExpression": "0 9 * * *",

@@ -42,8 +42,8 @@ interface CreateResult {
   path: string;
   provisioning?: { requestId: string };
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 interface HostsList {
   hosts: Array<{ id: string; status: string; labels: string[] }>;
@@ -96,16 +96,16 @@ const workerRunner = (id: string, isolation: string, pool: string, maxConcurrent
 });
 const setRunners = (runners: unknown[]) => m("settings.update", { runners });
 const place = (branch: string, placement: Record<string, unknown>) =>
-  m<CreateResult>("workspaces.create", { project: "proj", branch, placement });
+  m<CreateResult>("worktrees.create", { repo: "proj", branch, placement });
 const createRaw = (branch: string, placement: Record<string, unknown>) =>
-  trpcMutate(server.url, "workspaces.create", { project: "proj", branch, placement }, TOKEN);
-const workspace = (name: string) =>
+  trpcMutate(server.url, "worktrees.create", { repo: "proj", branch, placement }, TOKEN);
+const worktree = (name: string) =>
   waitFor(
     async () =>
-      (await q<ProjectsList>("projects.list")).projects
+      (await q<ReposList>("repos.list")).repos
         .find((p) => p.name === "proj")
         ?.worktrees.find((w) => w.name === name),
-    { label: `workspace ${name} exists`, timeoutMs: 90_000, intervalMs: 250 },
+    { label: `worktree ${name} exists`, timeoutMs: 90_000, intervalMs: 250 },
   );
 const hostLabels = async (hostId: string) =>
   (await q<HostsList>("hosts.list")).hosts.find((h) => h.id === hostId)?.labels ?? [];
@@ -121,7 +121,7 @@ beforeAll(async () => {
   git(hubRepo, "commit", "-q", "-m", "init");
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -156,7 +156,7 @@ afterAll(async () => {
 });
 
 describe("container isolation", () => {
-  it("starts a worker of its own for each workspace and never shares it (S3)", async () => {
+  it("starts a worker of its own for each worktree and never shares it (S3)", async () => {
     await setRunners([workerRunner("boxes", "container", "iso", 2)]);
     const environment = { isolation: "container" };
     const a = await place("iso-a", { labels: { pool: "iso" }, environment });
@@ -164,32 +164,32 @@ describe("container isolation", () => {
     expect(a.provisioning?.requestId).toBeTruthy();
     expect(b.provisioning?.requestId).toBeTruthy();
 
-    const [wa, wb] = await Promise.all([workspace("iso-a"), workspace("iso-b")]);
+    const [wa, wb] = await Promise.all([worktree("iso-a"), worktree("iso-b")]);
     expect(wa.hostId).toMatch(/^h-/);
     expect(wb.hostId).toMatch(/^h-/);
     expect(wa.hostId).not.toBe(wb.hostId);
     // The host is marked as exclusive.
     expect(await hostLabels(wa.hostId as string)).toContain("band.isolation=container");
 
-    // Another container workspace with the same labels still gets a new worker,
+    // Another container worktree with the same labels still gets a new worker,
     // although two online ones match the labels.
     const c = await place("iso-c", { labels: { pool: "iso" }, environment });
     expect(c.provisioning?.requestId).toBeTruthy();
-    const wc = await workspace("iso-c");
+    const wc = await worktree("iso-c");
     expect([wa.hostId, wb.hostId]).not.toContain(wc.hostId);
 
-    // A worktree workspace asking for the same labels does not land on a container worker.
+    // A worktree worktree asking for the same labels does not land on a container worker.
     const d = await place("iso-d", { labels: { pool: "iso" } });
     expect(d.provisioning?.requestId).toBeTruthy();
-    const wd = await workspace("iso-d");
+    const wd = await worktree("iso-d");
     expect([wa.hostId, wb.hostId, wc.hostId]).not.toContain(wd.hostId);
   }, 180_000);
 });
 
 describe("worktree isolation", () => {
-  // A worker a runner starts is ephemeral and belongs to the workspace it was started for
+  // A worker a runner starts is ephemeral and belongs to the worktree it was started for
   // (step 3.5). A worker someone registered by hand is shared.
-  it("lets two workspaces share one registered worker (S3)", async () => {
+  it("lets two worktrees share one registered worker (S3)", async () => {
     await setRunners([]);
     const root = tmp("band-isolation-root-");
     const repo = join(root, "proj");
@@ -229,16 +229,16 @@ describe("worktree isolation", () => {
 
     const placement = { labels: { pool: "shared" } };
     for (const branch of ["wt-a", "wt-b"]) {
-      const res = await m<CreateResult>("workspaces.create", {
-        project: "proj",
+      const res = await m<CreateResult>("worktrees.create", {
+        repo: "proj",
         branch,
         placement,
-        hostProjectPath: repo,
+        hostRepoPath: repo,
       });
       expect(res.provisioning).toBeUndefined();
       expect(res.path).not.toBe("");
     }
-    const [wa, wb] = await Promise.all([workspace("wt-a"), workspace("wt-b")]);
+    const [wa, wb] = await Promise.all([worktree("wt-a"), worktree("wt-b")]);
     expect(wa.hostId).toBe(issued.hostId);
     expect(wb.hostId).toBe(issued.hostId);
     expect(await hostLabels(issued.hostId)).not.toContain("band.isolation=container");
@@ -246,7 +246,7 @@ describe("worktree isolation", () => {
 });
 
 describe("levels no runner offers", () => {
-  it("refuses a vm workspace with the reason when no runner declares vm (S4)", async () => {
+  it("refuses a vm worktree with the reason when no runner declares vm (S4)", async () => {
     await setRunners([
       workerRunner("c", "container", "none"),
       workerRunner("w", "process", "none"),
@@ -258,7 +258,7 @@ describe("levels no runner offers", () => {
     expect((await q<{ requests: HostRequest[] }>("hostRequests.list")).requests).toEqual([]);
   });
 
-  it("refuses a container workspace when only process runners exist (S4)", async () => {
+  it("refuses a container worktree when only process runners exist (S4)", async () => {
     await setRunners([workerRunner("w", "process", "none")]);
     const res = await createRaw("container-none", { environment: { isolation: "container" } });
     expect(res.status).toBe(500);

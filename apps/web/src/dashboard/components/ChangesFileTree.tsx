@@ -12,7 +12,7 @@ import { writeClipboardText } from "../../lib/clipboard";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
-import { joinWorkspacePath } from "../lib/workspace-path";
+import { joinWorktreePath } from "../lib/worktree-path";
 import type { ChangeEntry } from "../types";
 import { FileStatusBadge } from "./FileStatusBadge";
 
@@ -41,11 +41,11 @@ interface ChangesFileTreeProps {
   activeFile?: string | null;
   actions?: ChangesTreeAction[];
   /**
-   * Absolute filesystem path of the workspace root. When provided, the
+   * Absolute filesystem path of the worktree root. When provided, the
    * right-click menu offers "Copy absolute path"; when omitted (e.g. still
    * loading) that item is hidden but "Copy relative path" remains.
    */
-  workspacePath?: string;
+  worktreePath?: string;
 }
 
 interface ChangesTreeNodeProps {
@@ -56,7 +56,7 @@ interface ChangesTreeNodeProps {
   onSelectFile: (entry: ChangeEntry) => void;
   onSelectFilePinned?: (entry: ChangeEntry) => void;
   actions: ChangesTreeAction[];
-  workspacePath?: string;
+  worktreePath?: string;
   activeFile?: string | null;
 }
 
@@ -94,7 +94,7 @@ function ChangesTreeNode({
   onSelectFile,
   onSelectFilePinned,
   actions,
-  workspacePath,
+  worktreePath,
   activeFile,
 }: ChangesTreeNodeProps) {
   const isDir = node.children !== undefined;
@@ -147,7 +147,7 @@ function ChangesTreeNode({
       <button
         ref={isActive ? btnRef : undefined}
         type="button"
-        // data-band-active marks this button so the workspace-level
+        // data-band-active marks this button so the worktree-level
         // ⇧⌘G "focus Changes" handler can target it from outside the
         // file tree.
         data-band-active={isActive ? "true" : undefined}
@@ -218,13 +218,11 @@ function ChangesTreeNode({
             <ClipboardCopy className="size-4" />
             Copy relative path
           </ContextMenuItem>
-          {workspacePath && (
+          {worktreePath && (
             <ContextMenuItem
               data-testid="changes-tree__copy-absolute-path"
               onSelect={() =>
-                menu.queue(
-                  () => void writeClipboardText(joinWorkspacePath(workspacePath, node.path)),
-                )
+                menu.queue(() => void writeClipboardText(joinWorktreePath(worktreePath, node.path)))
               }
             >
               <ClipboardCopy className="size-4" />
@@ -258,7 +256,7 @@ function ChangesTreeNode({
             onSelectFile={onSelectFile}
             onSelectFilePinned={onSelectFilePinned}
             actions={actions}
-            workspacePath={workspacePath}
+            worktreePath={worktreePath}
             activeFile={activeFile}
           />
         ))}
@@ -288,7 +286,7 @@ export function ChangesFileTree({
   onSelectFilePinned,
   activeFile,
   actions = NO_ACTIONS,
-  workspacePath,
+  worktreePath,
 }: ChangesFileTreeProps) {
   const tree = useMemo(() => buildFileTree(entries), [entries]);
 
@@ -351,7 +349,7 @@ export function ChangesFileTree({
           onSelectFile={onSelectFile}
           onSelectFilePinned={onSelectFilePinned}
           actions={actions}
-          workspacePath={workspacePath}
+          worktreePath={worktreePath}
           activeFile={activeFile}
         />
       ))}

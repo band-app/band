@@ -12,7 +12,7 @@ import { guardedHandler, isTrustedSender } from "../src/main/ipc/sender-guard.ts
 const TRUSTED = ["app://local"];
 
 function makeWindow() {
-  const mainFrame = { url: "app://local/workspace/abc" };
+  const mainFrame = { url: "app://local/worktree/abc" };
   const webContents = { mainFrame };
   return { win: { isDestroyed: () => false, webContents }, webContents, mainFrame };
 }

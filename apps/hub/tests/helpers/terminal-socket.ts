@@ -41,13 +41,13 @@ export class TerminalSocket {
   static async open(
     server: ServerHandle,
     {
-      workspaceId,
+      worktreeId,
       terminalId,
       token,
       maxOutputChars = Number.POSITIVE_INFINITY,
       flow = false,
     }: {
-      workspaceId: string;
+      worktreeId: string;
       terminalId: string;
       token: string;
       /** Keep only this much of the output, for terminals that print a flood. */
@@ -62,7 +62,7 @@ export class TerminalSocket {
   ): Promise<TerminalSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${terminalId}`,
+      `ws://${url.host}/terminal?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${terminalId}`,
       { headers: { Cookie: `band_token=${token}` } },
     );
     const socket = new TerminalSocket(ws, maxOutputChars);

@@ -32,7 +32,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -41,11 +41,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-replay-width-sync-token";
-const PROJECT = "alpha-replay-width";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-replay-width";
+const WORKTREE = toWorktreeId(REPO, "main");
 const MARKER = "SCATTERZEBRA";
 
 // Start narrow so the first session fits the terminal to a small column count;
@@ -80,9 +80,9 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = makeGitWorkdir("band-replay-width-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -105,21 +105,21 @@ test.describe("Terminal reconnect replay width-sync", () => {
   test("a fresh wide client reconnecting to a narrow mirror renders without reflow scatter", async ({
     page,
   }) => {
-    // Terminal-heavy: two full workspace mounts + rendered-text polls.
+    // Terminal-heavy: two full worktree mounts + rendered-text polls.
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     // --- Session 1: fit to a NARROW width and draw an alt-screen paragraph ---
-    await workspacePage.setViewport(NARROW.width, NARROW.height);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+    await worktreePage.setViewport(NARROW.width, NARROW.height);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
 
     // Calibrate against the ACTUAL fitted width so the marker sits just past
     // the narrow wrap boundary regardless of platform font metrics.
-    const narrowCols = await workspacePage.terminalCols(WORKSPACE);
+    const narrowCols = await worktreePage.terminalCols(WORKTREE);
     expect(narrowCols).toBeGreaterThan(0);
 
     // Author a paragraph whose unique MARKER starts a few columns PAST the
@@ -139,8 +139,8 @@ test.describe("Terminal reconnect replay width-sync", () => {
     // paragraph), so a retype is safe. This both runs the draw AND waits for
     // the marker to render (proving the DOM renderer is active) before we tear
     // the client down.
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE,
+    await worktreePage.runInTerminalUntilRendered(
+      WORKTREE,
       `bash ${drawScript}`,
       new RegExp(MARKER),
     );
@@ -149,19 +149,19 @@ test.describe("Terminal reconnect replay width-sync", () => {
     // Navigating away tears down the xterm + socket; the server keeps the PTY
     // (and its narrow mirror). Widening the viewport now affects only the FRESH
     // client mounted next.
-    await workspacePage.navigateToBlank();
-    await workspacePage.setViewport(WIDE.width, WIDE.height);
+    await worktreePage.navigateToBlank();
+    await worktreePage.setViewport(WIDE.width, WIDE.height);
 
     // --- Session 2: a fresh WIDE client reconnects and replays ---
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
 
     // The wide client is genuinely wider than the mirror was — otherwise the
     // test proves nothing.
     await expect
-      .poll(() => workspacePage.terminalCols(WORKSPACE), { timeout: 20_000 })
+      .poll(() => worktreePage.terminalCols(WORKTREE), { timeout: 20_000 })
       .toBeGreaterThan(narrowCols + MARKER.length);
 
     // Assert on a SINGLE atomically-captured rows snapshot so the positive
@@ -174,7 +174,7 @@ test.describe("Terminal reconnect replay width-sync", () => {
     await expect
       .poll(
         async () => {
-          const rows = await workspacePage.readTerminalRenderedRows(WORKSPACE);
+          const rows = await worktreePage.readTerminalRenderedRows(WORKTREE);
           const joined = rows.join("\n");
           return {
             hasMarker: joined.includes(MARKER),

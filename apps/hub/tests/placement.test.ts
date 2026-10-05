@@ -1,6 +1,6 @@
 // Integration tests for placement and host requests (plan step 3.3): a real
 // `band-worker` process dials a real hub (the production bundle on a random
-// port, temp BAND_HOME). `workspaces.create` with `placement` goes to a worker
+// port, temp BAND_HOME). `worktrees.create` with `placement` goes to a worker
 // whose labels fit, or records a host request that a test "runner" leases over
 // tRPC and fulfils by starting a second real worker.
 
@@ -25,7 +25,7 @@ const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs")
 
 interface HostRequest {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   status: "pending" | "leased" | "fulfilled" | "failed" | "cancelled";
   leasedBy: string | null;
   hostId: string | null;
@@ -36,8 +36,8 @@ interface CreateResult {
   path: string;
   provisioning?: { requestId: string };
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 
 const scratch: string[] = [];
@@ -117,13 +117,13 @@ async function startWorker(name: string, labels: string, waitOnline = true, shar
     return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
   };
   if (waitOnline) await waitFor(online, { label: `${name} online`, timeoutMs: 20_000 });
-  return { hostId: issued.hostId, root, projectPath: join(root, "proj") };
+  return { hostId: issued.hostId, root, repoPath: join(root, "proj") };
 }
 
 const requests = async () => (await q<{ requests: HostRequest[] }>("hostRequests.list")).requests;
 const request = async (id: string) => (await requests()).find((r) => r.id === id);
-const workspaceHost = async (name: string) =>
-  (await q<ProjectsList>("projects.list")).projects
+const worktreeHost = async (name: string) =>
+  (await q<ReposList>("repos.list")).repos
     .find((p) => p.name === "proj")
     ?.worktrees.find((w) => w.name === name);
 
@@ -134,7 +134,7 @@ beforeAll(async () => {
   makeRepo(hubRepo);
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -155,44 +155,44 @@ afterAll(async () => {
 describe("placement onto an online host", () => {
   it("assigns a worker whose labels match at once (S1)", async () => {
     const home = await startWorker("Home box", "zone=home");
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "placed-home",
       placement: { labels: { zone: "home" } },
-      hostProjectPath: home.projectPath,
+      hostRepoPath: home.repoPath,
     });
     expect(created.provisioning).toBeUndefined();
     expect(created.path).toBe(join(home.root, ".band-worktrees", "proj", "placed-home"));
-    expect((await workspaceHost("placed-home"))?.hostId).toBe(home.hostId);
+    expect((await worktreeHost("placed-home"))?.hostId).toBe(home.hostId);
     expect(await requests()).toEqual([]);
   });
 
   it("prefers the least loaded of several matching workers", async () => {
     const a = await startWorker("Pool A", "pool=gpu");
     const b = await startWorker("Pool B", "pool=gpu", true, a.root);
-    const first = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const first = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "pool-1",
       placement: { labels: { pool: "gpu" } },
-      hostProjectPath: a.projectPath,
+      hostRepoPath: a.repoPath,
     });
-    const firstHost = (await workspaceHost("pool-1"))?.hostId;
+    const firstHost = (await worktreeHost("pool-1"))?.hostId;
     expect([a.hostId, b.hostId]).toContain(firstHost);
     expect(first.path).not.toBe("");
-    // The next workspace goes to the other worker.
+    // The next worktree goes to the other worker.
     const other = firstHost === a.hostId ? b : a;
-    await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "pool-2",
       placement: { labels: { pool: "gpu" } },
-      hostProjectPath: a.projectPath,
+      hostRepoPath: a.repoPath,
     });
-    expect((await workspaceHost("pool-2"))?.hostId).toBe(other.hostId);
+    expect((await worktreeHost("pool-2"))?.hostId).toBe(other.hostId);
   });
 
   it("honours requires against the worker's facts", async () => {
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "needs-future-node",
       placement: { labels: { zone: "home" }, requires: { node: ">=999" } },
     });
@@ -203,8 +203,8 @@ describe("placement onto an online host", () => {
 
 describe("a host request", () => {
   it("shows provisioning, then completes when a runner fulfils it with a connecting worker (S2)", async () => {
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "needs-cloud",
       placement: { labels: { zone: "cloud" } },
     });
@@ -212,7 +212,7 @@ describe("a host request", () => {
     expect(requestId).toBeTruthy();
     expect(created.path).toBe("");
     expect((await request(requestId))?.status).toBe("pending");
-    expect(await workspaceHost("needs-cloud")).toBeUndefined();
+    expect(await worktreeHost("needs-cloud")).toBeUndefined();
 
     // A runner that offers zone=cloud takes the lease and starts a machine.
     const leased = await m<{ request: HostRequest | null }>("hostRequests.lease", {
@@ -227,10 +227,10 @@ describe("a host request", () => {
       requestId,
       runnerId: "test-runner",
       hostId: cloud.hostId,
-      hostProjectPath: cloud.projectPath,
+      hostRepoPath: cloud.repoPath,
     });
-    const wt = await waitFor(() => workspaceHost("needs-cloud"), {
-      label: "workspace exists",
+    const wt = await waitFor(() => worktreeHost("needs-cloud"), {
+      label: "worktree exists",
       timeoutMs: 20_000,
     });
     expect(wt.hostId).toBe(cloud.hostId);
@@ -239,8 +239,8 @@ describe("a host request", () => {
   });
 
   it("waits for a fulfilled host that is not online yet", async () => {
-    const created = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const created = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "needs-late",
       placement: { labels: { zone: "late" } },
     });
@@ -251,10 +251,10 @@ describe("a host request", () => {
       requestId,
       runnerId: "runner-2",
       hostId: late.hostId,
-      hostProjectPath: late.projectPath,
+      hostRepoPath: late.repoPath,
     });
-    const wt = await waitFor(() => workspaceHost("needs-late"), {
-      label: "workspace exists",
+    const wt = await waitFor(() => worktreeHost("needs-late"), {
+      label: "worktree exists",
       timeoutMs: 20_000,
     });
     expect(wt.hostId).toBe(late.hostId);
@@ -263,8 +263,8 @@ describe("a host request", () => {
   it("never gives one request to two concurrent leases (S3)", async () => {
     const ids: string[] = [];
     for (const branch of ["lease-a", "lease-b"]) {
-      const c = await m<CreateResult>("workspaces.create", {
-        project: "proj",
+      const c = await m<CreateResult>("worktrees.create", {
+        repo: "proj",
         branch,
         placement: { labels: { zone: "nowhere" } },
       });
@@ -285,8 +285,8 @@ describe("a host request", () => {
   });
 
   it("makes an expired lease leasable again and refuses the old holder (S3)", async () => {
-    const c = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const c = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "lease-expiry",
       placement: { labels: { zone: "elsewhere" } },
     });
@@ -335,8 +335,8 @@ describe("a host request", () => {
   });
 
   it("cancels a request (S4)", async () => {
-    const c = await m<CreateResult>("workspaces.create", {
-      project: "proj",
+    const c = await m<CreateResult>("worktrees.create", {
+      repo: "proj",
       branch: "to-cancel",
       placement: { labels: { zone: "never" } },
     });
@@ -349,17 +349,17 @@ describe("a host request", () => {
       filter: { labels: { zone: "never" } },
     });
     expect(leased.request).toBeNull();
-    expect(await workspaceHost("to-cancel")).toBeUndefined();
+    expect(await worktreeHost("to-cancel")).toBeUndefined();
   });
 
-  it("returns the open request when the same workspace is asked for twice", async () => {
+  it("returns the open request when the same worktree is asked for twice", async () => {
     const input = {
-      project: "proj",
+      repo: "proj",
       branch: "twice",
       placement: { labels: { zone: "nope" } },
     };
-    const a = await m<CreateResult>("workspaces.create", input);
-    const b = await m<CreateResult>("workspaces.create", input);
+    const a = await m<CreateResult>("worktrees.create", input);
+    const b = await m<CreateResult>("worktrees.create", input);
     expect(b.provisioning?.requestId).toBe(a.provisioning?.requestId);
     await m("hostRequests.cancel", { requestId: a.provisioning?.requestId });
   });
@@ -379,8 +379,8 @@ describe("a host request", () => {
   it("refuses hostId together with placement", async () => {
     const both = await trpcMutate(
       server.url,
-      "workspaces.create",
-      { project: "proj", branch: "both", hostId: "local", placement: {} },
+      "worktrees.create",
+      { repo: "proj", branch: "both", hostId: "local", placement: {} },
       TOKEN,
     );
     expect(both.status).toBe(500);

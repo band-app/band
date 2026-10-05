@@ -73,7 +73,7 @@ describe("parseTabState", () => {
   it("rejects isUntitled:true on a path without the untitled prefix (defensive)", () => {
     // A future bug or a hand-edited localStorage payload could flag a
     // real file as untitled. The parser strips the flag rather than
-    // letting a workspace path masquerade as a scratch buffer — that
+    // letting a worktree path masquerade as a scratch buffer — that
     // would break `isUntitledPath` checks elsewhere in the code.
     const result = parseTabState(
       JSON.stringify({
@@ -161,7 +161,7 @@ describe("initialUntitledCounter", () => {
 
   it("returns the highest N from existing untitled tabs", () => {
     // Order doesn't matter — the counter is "monotonic, never reused"
-    // across the workspace's lifetime, so the next untitled tab should
+    // across the worktree's lifetime, so the next untitled tab should
     // get N+1 regardless of which slots are currently occupied.
     expect(
       initialUntitledCounter([
@@ -173,7 +173,7 @@ describe("initialUntitledCounter", () => {
   });
 
   it("ignores tabs without the untitled flag (defensive)", () => {
-    // A workspace path that happens to look like the synthetic key
+    // A worktree path that happens to look like the synthetic key
     // shouldn't shift the counter — the flag is the source of truth.
     expect(
       initialUntitledCounter([{ filePath: "untitled:99", untitledLabel: "Untitled-99" }]),

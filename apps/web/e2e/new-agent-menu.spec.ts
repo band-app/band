@@ -16,7 +16,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -27,11 +27,11 @@ import {
   startServer,
 } from "./helpers/server";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-new-agent-menu-token";
-const PROJECT = "agentproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "agentproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -54,9 +54,9 @@ test.beforeAll(async () => {
   const codexCli = writeAgentCliStub("stub-codex.sh", "CODEX_STUB_STARTED");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -95,32 +95,32 @@ test.describe("New agent menu", () => {
     const guiContext = await browser.newContext();
     const tuiContext = await browser.newContext();
     try {
-      const gui = new WorkspacePage(await guiContext.newPage(), server.url, TOKEN);
-      const tui = new WorkspacePage(await tuiContext.newPage(), server.url, TOKEN);
+      const gui = new WorktreePage(await guiContext.newPage(), server.url, TOKEN);
+      const tui = new WorktreePage(await tuiContext.newPage(), server.url, TOKEN);
 
-      await gui.goto(WORKSPACE);
+      await gui.goto(WORKTREE);
       await gui.setDeviceAgentMode("gui");
-      await expect(gui.chatAddTabButton(WORKSPACE)).toBeVisible();
+      await expect(gui.chatAddTabButton(WORKTREE)).toBeVisible();
       await expect(gui.terminalTabs()).toHaveCount(1);
       await expect(gui.chatTabs()).toHaveCount(0);
 
-      await gui.startAgentViaMenu(WORKSPACE);
+      await gui.startAgentViaMenu(WORKTREE);
       await expect(gui.chatTabs()).toHaveCount(1);
       await expect(gui.terminalTabs()).toHaveCount(1);
 
       // The second browser sees the first one's chat (live sync), then starts
       // its own agent as a terminal.
-      await tui.goto(WORKSPACE);
+      await tui.goto(WORKTREE);
       await tui.setDeviceAgentMode("tui");
-      await expect(tui.chatAddTabButton(WORKSPACE)).toBeVisible();
+      await expect(tui.chatAddTabButton(WORKTREE)).toBeVisible();
       await expect(tui.chatTabs()).toHaveCount(1);
       await expect(tui.terminalTabs()).toHaveCount(1);
 
-      await tui.startAgentViaMenu(WORKSPACE, "codex");
+      await tui.startAgentViaMenu(WORKTREE, "codex");
       await expect(tui.terminalTabs()).toHaveCount(2);
       await expect(tui.chatTabs()).toHaveCount(1);
       await expect
-        .poll(() => tui.readTerminalRenderedText(WORKSPACE), { timeout: 15_000 })
+        .poll(() => tui.readTerminalRenderedText(WORKTREE), { timeout: 15_000 })
         .toContain("CODEX_STUB_STARTED");
 
       // The GUI browser shows the new session in the mode it runs in.

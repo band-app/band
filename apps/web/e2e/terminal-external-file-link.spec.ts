@@ -1,10 +1,10 @@
 /**
  * End-to-end coverage for clicking a terminal link that points at a file
- * OUTSIDE the workspace worktree.
+ * OUTSIDE the worktree worktree.
  *
  * Feature: a file-path reference printed in the terminal is a clickable link
  * (see `lib/terminal-file-links.ts`). The existing `terminal-file-links.spec`
- * covers a workspace-relative path resolving into the Files panel. This spec
+ * covers a worktree-relative path resolving into the Files panel. This spec
  * covers the sibling case the user asked for: an ABSOLUTE path to a file that
  * lives outside the worktree (e.g. `/tmp/band-terminal-repair-task.md`).
  * Clicking it dispatches the same `band:open-file` event, which Quick Open
@@ -14,7 +14,7 @@
  *
  * Boots the production server bundle against a tmp `~/.band/`, opens a real
  * terminal (real PTY), prints an absolute path to a file that exists outside
- * the workspace, clicks the rendered link, and asserts the file lands open as
+ * the worktree, clicks the rendered link, and asserts the file lands open as
  * an external tab (Files tab active + the absolute path persisted into the
  * open-tabs localStorage entry).
  *
@@ -28,7 +28,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -37,11 +37,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-external-file-link-token";
-const PROJECT = "alpha-terminal-external-link";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-terminal-external-link";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // (which hosts the terminal container) renders.
@@ -49,9 +49,9 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
-/** The project path — the PTY spawns with cwd = the project path. */
+/** The repo path — the PTY spawns with cwd = the repo path. */
 let workdir: string;
-/** A directory OUTSIDE the workspace holding the external file. */
+/** A directory OUTSIDE the worktree holding the external file. */
 let externalDir: string;
 /** Absolute path to the external file the terminal link points at. */
 let externalPath: string;
@@ -74,9 +74,9 @@ test.beforeAll(async () => {
   writeFileSync(externalPath, "# notes\n\noutside the worktree\n", "utf-8");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -106,32 +106,32 @@ test.describe("Terminal links to files outside the worktree", () => {
     // other terminal specs use under CI worker contention.
     test.setTimeout(120_000);
 
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(75_000);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(75_000);
 
     // Positive anchor: the external file is not open before the click.
     await expect
-      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .poll(async () => await worktreePage.readOpenTabPaths(WORKTREE), { timeout: 5_000 })
       .not.toContain(externalPath);
 
     // Print the absolute path on its own line; the shell echoes it as a bare
     // output line the link provider turns into a clickable link.
-    await workspacePage.runInTerminal(`echo ${externalPath}`);
-    await workspacePage.clickTerminalFileLink(externalPath);
+    await worktreePage.runInTerminal(`echo ${externalPath}`);
+    await worktreePage.clickTerminalFileLink(externalPath);
 
     // Observable outcome: the click routed the absolute path through Quick
     // Open, which opened it as an external tab (Files tab active + the
-    // absolute path persisted into the workspace's open-tabs entry).
+    // absolute path persisted into the worktree's open-tabs entry).
     // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
     // the per-path `center-file-tab--<path>` leaf. Describe is skipped.
-    await expect(workspacePage.fileTab(externalPath)).toBeAttached({
+    await expect(worktreePage.fileTab(externalPath)).toBeAttached({
       timeout: 15_000,
     });
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE))?.active, {
         timeout: 15_000,
       })
       .toBe(externalPath);

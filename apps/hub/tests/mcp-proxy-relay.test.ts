@@ -109,7 +109,7 @@ beforeAll(async () => {
     defaultCodingAgent: "claude-code",
   });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -164,7 +164,7 @@ beforeAll(async () => {
   const workerRepo = join(root, "proj");
   mkdirSync(workerRepo, { recursive: true });
   git(workerRepo, "init", "-q", "-b", "main");
-  writeFileSync(join(workerRepo, "hello.txt"), "hello from the project\n");
+  writeFileSync(join(workerRepo, "hello.txt"), "hello from the repo\n");
   git(workerRepo, "add", ".");
   git(workerRepo, "commit", "-q", "-m", "init");
   httpLogFile = join(workerHome, "http-log.jsonl");
@@ -296,11 +296,11 @@ beforeAll(async () => {
     },
     { label: "worker online", timeoutMs: 20_000 },
   );
-  await m("workspaces.create", {
-    project: "proj",
+  await m("worktrees.create", {
+    repo: "proj",
     branch: "mcp",
     hostId: issued.hostId,
-    hostProjectPath: workerRepo,
+    hostRepoPath: workerRepo,
   });
 
   const chatId = "mcp-relay-chat";
@@ -308,7 +308,7 @@ beforeAll(async () => {
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-    body: JSON.stringify({ workspaceId: "proj-mcp", text: "mcp-probe" }),
+    body: JSON.stringify({ worktreeId: "proj-mcp", text: "mcp-probe" }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   await stream.events;

@@ -2,7 +2,7 @@
  * Segment-aware containment check for POSIX-style paths.
  *
  * Returns the path of `child` relative to `parent` when `child` is
- * inside `parent`, or `null` when it isn't. Workspace paths in Band
+ * inside `parent`, or `null` when it isn't. Worktree paths in Band
  * are always POSIX-style (forward slashes), so we operate on raw
  * string segments rather than pulling in `node:path` — this helper is
  * imported by browser-running components where `path` isn't available
@@ -25,7 +25,7 @@
  * collision.
  *
  * Backs the untitled save flow's "did the user pick a path inside
- * the workspace?" decision in `CodeBrowserView.handleSaveUntitled`.
+ * the worktree?" decision in `CodeBrowserView.handleSaveUntitled`.
  * Pure function, no I/O — easy to unit-test.
  */
 export function pathInside(parent: string, child: string): string | null {

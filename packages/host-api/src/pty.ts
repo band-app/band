@@ -8,7 +8,7 @@
 export interface SpawnOptions {
   /** Shell command to auto-run after the PTY spawns. */
   command?: string;
-  /** Working directory, resolved relative to the workspace root. */
+  /** Working directory, resolved relative to the worktree root. */
   cwd?: string;
   /** Extra environment variables merged into the base env. */
   env?: Record<string, string>;
@@ -20,9 +20,9 @@ export interface SpawnOptions {
  */
 export interface TerminalExitEvent {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   exitCode: number;
-  /** True when the exit came from a kill (`kill`, `killWorkspace`, daemon restart). */
+  /** True when the exit came from a kill (`kill`, `killWorktree`, daemon restart). */
   killed: boolean;
   cleanupOnExit: boolean;
 }
@@ -30,7 +30,7 @@ export interface TerminalExitEvent {
 /** Metadata about a live terminal, with no reference to the PTY itself. */
 export interface TerminalListEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
   scrollbackLength: number;
   title: string;
@@ -39,10 +39,10 @@ export interface TerminalListEntry {
 }
 
 export interface TerminalSpawnRequest {
-  workspaceId: string;
+  worktreeId: string;
   terminalId: string;
   /** Absolute worktree path; `options.cwd` resolves inside it. */
-  workspaceRoot: string;
+  worktreeRoot: string;
   options?: SpawnOptions;
   cleanupOnExit?: boolean;
 }
@@ -74,11 +74,11 @@ export interface TerminalBackend {
   spawn(request: TerminalSpawnRequest): Promise<TerminalListEntry>;
   /** Metadata for one live terminal, or `null` if it isn't live. */
   info(terminalId: string): Promise<TerminalListEntry | null>;
-  list(workspaceId: string): Promise<TerminalListEntry[]>;
+  list(worktreeId: string): Promise<TerminalListEntry[]>;
   listAll(): Promise<TerminalListEntry[]>;
   /** Kill one terminal. Resolves with its entry, or `null` if it wasn't live. */
   kill(terminalId: string): Promise<TerminalListEntry | null>;
-  killWorkspace(workspaceId: string): Promise<void>;
+  killWorktree(worktreeId: string): Promise<void>;
   getScrollback(terminalId: string, lines?: number): Promise<string | null>;
   /** Resolves `false` when the terminal isn't live. */
   write(terminalId: string, data: string): Promise<boolean>;

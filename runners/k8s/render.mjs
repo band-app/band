@@ -60,10 +60,10 @@ export function resolveConfig(env) {
 
   const repo = (env.BAND_REPO_URLS || "").split(",")[0] || "";
   if (repo.startsWith("/")) {
-    fail(`the project has no origin URL a pod can clone (got ${repo})`);
+    fail(`the repo has no origin URL a pod can clone (got ${repo})`);
   }
-  const project = String(env.BAND_PROJECT || "repo").replace(/[^A-Za-z0-9_.-]/g, "_");
-  const repoName = ["", ".", ".."].includes(project) ? "repo" : project;
+  const repoSlug = String(env.BAND_REPO || "repo").replace(/[^A-Za-z0-9_.-]/g, "_");
+  const repoName = ["", ".", ".."].includes(repoSlug) ? "repo" : repoSlug;
 
   return {
     name,
@@ -72,7 +72,7 @@ export function resolveConfig(env) {
     workerId,
     hubUrl: need("BAND_HUB_URL"),
     token: env.BAND_BOOTSTRAP_TOKEN || "",
-    image: env.BAND_PROJECT_IMAGE || env.BAND_K8S_IMAGE || "band-worker",
+    image: env.BAND_REPO_IMAGE || env.BAND_K8S_IMAGE || "band-worker",
     pullPolicy: env.BAND_K8S_PULL_POLICY || "",
     pullSecret: env.BAND_K8S_PULL_SECRET || "",
     caConfigMap: env.BAND_K8S_CA_CONFIGMAP || "",

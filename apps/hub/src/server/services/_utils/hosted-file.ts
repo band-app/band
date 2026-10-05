@@ -7,18 +7,18 @@ export interface HostedFile {
 }
 
 /**
- * Opens a file the hub keeps on a remote workspace's worker: a chat upload or
- * a file the agent shared. Returns null when the workspace is local (the hub
+ * Opens a file the hub keeps on a remote worktree's worker: a chat upload or
+ * a file the agent shared. Returns null when the worktree is local (the hub
  * serves its own disk), the host declares no such directory, or the file is
  * missing. Only the file's own name counts, so a name cannot leave the
- * workspace's directory.
+ * worktree's directory.
  */
 export async function openHostedFile(
   kind: "uploads" | "shared",
-  workspaceId: string,
+  worktreeId: string,
   rawName: string,
 ): Promise<HostedFile | null> {
-  const host = hostRegistry.hostFor(workspaceId);
+  const host = hostRegistry.hostFor(worktreeId);
   if (host.id === hostRegistry.local.id) return null;
   let name: string;
   try {
@@ -30,7 +30,7 @@ export async function openHostedFile(
   try {
     const dirs = (await host.info()).dirs;
     if (!dirs) return null;
-    const path = join(dirs[kind], workspaceId, name);
+    const path = join(dirs[kind], worktreeId, name);
     const stat = await host.fs.stat(path, { followSymlinks: true });
     if (stat.kind !== "file") return null;
     return { size: stat.size, stream: host.fs.readStream(path) };

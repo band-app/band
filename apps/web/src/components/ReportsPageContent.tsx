@@ -62,9 +62,9 @@ interface ReportsSummary {
   bucketSize: BucketSize;
   total: AggregateRow;
   byModel: AggregateRow[];
-  byProject: AggregateRow[];
+  byRepo: AggregateRow[];
   byAgent: AggregateRow[];
-  byWorkspace: AggregateRow[];
+  byWorktree: AggregateRow[];
   byBucket: AggregateRow[];
 }
 
@@ -358,11 +358,11 @@ export function ReportsPageContent() {
                 emptyLabel="No model data yet."
               />
               <BreakdownTable
-                title="By project"
-                rows={summary.byProject}
+                title="By repo"
+                rows={summary.byRepo}
                 totalCost={totalCost}
-                testId="reports__by-project"
-                emptyLabel="No project data yet."
+                testId="reports__by-repo"
+                emptyLabel="No repo data yet."
               />
               <BreakdownTable
                 title="By agent"
@@ -372,11 +372,11 @@ export function ReportsPageContent() {
                 emptyLabel="No agent data yet."
               />
               <BreakdownTable
-                title="By workspace"
-                rows={summary.byWorkspace}
+                title="By worktree"
+                rows={summary.byWorktree}
                 totalCost={totalCost}
-                testId="reports__by-workspace"
-                emptyLabel="No workspace data yet."
+                testId="reports__by-worktree"
+                emptyLabel="No worktree data yet."
               />
             </div>
           </div>

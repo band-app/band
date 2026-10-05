@@ -1,27 +1,27 @@
 ---
 name: band-loop
 version: 0.1.0
-description: Schedule a recurring prompt against a Band workspace's coding agent via a cronjob, with an optional self-deleting "stop when criteria is met" wrapper. Use when the user wants to "loop on X every 10m", "keep retrying until Y", "poll the deploy every 5 minutes", "check in every hour until tests pass", "run this prompt on a recurring interval", or otherwise asks for an iterative/repeating agent task. Wraps `band cronjobs create` so the agent re-runs the same prompt on a fixed cadence (default 10m), and optionally appends a stop-condition that makes the agent delete its own cronjob with `band cronjobs delete` when done. Caps loop lifetime at 7 days by default to match the safety horizon Claude Code's built-in `/loop` uses.
+description: Schedule a recurring prompt against a Band worktree's coding agent via a cronjob, with an optional self-deleting "stop when criteria is met" wrapper. Use when the user wants to "loop on X every 10m", "keep retrying until Y", "poll the deploy every 5 minutes", "check in every hour until tests pass", "run this prompt on a recurring interval", or otherwise asks for an iterative/repeating agent task. Wraps `band cronjobs create` so the agent re-runs the same prompt on a fixed cadence (default 10m), and optionally appends a stop-condition that makes the agent delete its own cronjob with `band cronjobs delete` when done. Caps loop lifetime at 7 days by default to match the safety horizon Claude Code's built-in `/loop` uses.
 allowed-tools: Bash
 argument-hint: <prompt> [--every <duration>] [--until <stop condition>] [--max-iterations <n>] [--via chat|terminal]
 ---
 
 # Band Loop
 
-Recurring agent tasks via `band cronjobs`. The agent fires on a cron schedule against a target workspace — dispatching each iteration to the workspace's chat pane (default) or the agent's terminal CLI (`--via terminal`) — optionally checks a stop condition each iteration, and deletes its own cronjob when the condition is met.
+Recurring agent tasks via `band cronjobs`. The agent fires on a cron schedule against a target worktree — dispatching each iteration to the worktree's chat pane (default) or the agent's terminal CLI (`--via terminal`) — optionally checks a stop condition each iteration, and deletes its own cronjob when the condition is met.
 
 This is the **native answer** for users who reach for Claude Code's built-in `/loop`: that command is gated behind `scheduledTasksEnabled`, which is always `false` in SDK / Band sessions. `band cronjobs` runs server-side and survives session restarts.
 
 This skill is focused on the **scheduled-loop pattern**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, tunnel, settings (also documents `band cronjobs` for general CRUD).
-- **`band-start`** — create a new workspace and kick off the first agent task.
-- **`band-chat`** — chat panes inside a workspace (the loop's prompt is dispatched to a chat).
+- **`band`** — worktrees, repos, tunnel, settings (also documents `band cronjobs` for general CRUD).
+- **`band-start`** — create a new worktree and kick off the first agent task.
+- **`band-chat`** — chat panes inside a worktree (the loop's prompt is dispatched to a chat).
 
 ## Prerequisites
 
 - The Band server must be running (started by the Band dashboard app).
-- A target workspace must exist (use **`band-start`** to create one first if needed).
+- A target worktree must exist (use **`band-start`** to create one first if needed).
 
 ## JSON Output
 
@@ -34,16 +34,16 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ### 1. Resolve the loop target
 
-A cronjob is scoped to either a **project** or a **workspace**. For an agent loop you almost always want **workspace scope** so the prompt fires into the same chat over and over:
+A cronjob is scoped to either a **repo** or a **worktree**. For an agent loop you almost always want **worktree scope** so the prompt fires into the same chat over and over:
 
 ```sh
-# Auto-detect the workspace ID from cwd
-ws_id=$(band workspaces list --output json \
-  | jq -r --arg cwd "$PWD" '.workspaces[] | select(.path == $cwd) | .id' \
+# Auto-detect the worktree ID from cwd
+ws_id=$(band worktrees list --output json \
+  | jq -r --arg cwd "$PWD" '.worktrees[] | select(.path == $cwd) | .id' \
   | head -1)
 ```
 
-If the user is outside a workspace cwd, ask them which workspace to target (or run `band workspaces list` and pick one).
+If the user is outside a worktree cwd, ask them which worktree to target (or run `band worktrees list` and pick one).
 
 ### 2. Parse the interval into a cron expression
 
@@ -95,19 +95,19 @@ The `<key>` and `<cronjob_id>` placeholders must be substituted after the cronjo
 
 ### 4. Create the cronjob
 
-`band cronjobs create` requires `--name`, `--prompt`, and `--cron`. For workspace-scoped loops, set `--scope workspace` and pass the workspace ID twice (once positionally as `key`, once as `--workspace-id`).
+`band cronjobs create` requires `--name`, `--prompt`, and `--cron`. For worktree-scoped loops, set `--scope worktree` and pass the worktree ID twice (once positionally as `key`, once as `--worktree-id`).
 
-**Dispatch target (`--via`).** Each iteration dispatches to either the workspace's chat pane (`--via chat`) or the agent's **headless** CLI in a fresh PTY (`--via terminal`). Omit the flag to inherit the caller's context: the CLI resolves it via the same precedence as `band workspaces create` (`--via` flag → `BAND_DISPATCH` env → `.band/config.json`/`~/.band/settings.json` config → `terminal`), while the web UI / server default is `chat`. So a loop set up from a chat agent stays on chat and one set up from a terminal runs in a terminal. Two things to know about `--via terminal` loops:
+**Dispatch target (`--via`).** Each iteration dispatches to either the worktree's chat pane (`--via chat`) or the agent's **headless** CLI in a fresh PTY (`--via terminal`). Omit the flag to inherit the caller's context: the CLI resolves it via the same precedence as `band worktrees create` (`--via` flag → `BAND_DISPATCH` env → `.band/config.json`/`~/.band/settings.json` config → `terminal`), while the web UI / server default is `chat`. So a loop set up from a chat agent stays on chat and one set up from a terminal runs in a terminal. Two things to know about `--via terminal` loops:
 
 - The pane runs the agent's **non-interactive one-shot** mode (`claude -p …`, `codex exec …`, etc.), not the interactive REPL — so it runs the task, streams output, and **exits**. The pane is therefore **self-closing** (runs, then closes when the agent finishes), so a frequent loop doesn't pile up panes (≈1 live pane per loop). Its output isn't retained after completion (the outcome is in the cronjob's `lastRunStatus`).
 - An iteration is **skipped** (recorded `skipped`) if the previous run's pane is still active, so an agent that runs longer than the interval is never interrupted mid-work.
 
-For workspace-scoped loops:
+For worktree-scoped loops:
 
 ```sh
 job=$(band cronjobs create "$ws_id" \
-  --scope workspace \
-  --workspace-id "$ws_id" \
+  --scope worktree \
+  --worktree-id "$ws_id" \
   --name "Loop: <short summary>" \
   --cron "*/10 * * * *" \
   --prompt "<placeholder — will be updated in step 5>" \
@@ -159,15 +159,15 @@ Tell the user:
 - How to inspect and abort manually:
 
   ```sh
-  band cronjobs list --workspace <ws_id>
+  band cronjobs list --worktree <ws_id>
   band cronjobs trigger <key> <cronjob_id>   # fire it once right now
   band cronjobs delete  <key> <cronjob_id>   # stop the loop
   ```
 
-- That the agent's output for each iteration streams to the workspace's chat — tail it with:
+- That the agent's output for each iteration streams to the worktree's chat — tail it with:
 
   ```sh
-  cd <workspace-path>
+  cd <worktree-path>
   band chats watch
   ```
 
@@ -175,7 +175,7 @@ Tell the user:
 
 ### Open-ended loop, every 10 minutes
 
-User input: `Loop on improving test coverage in this workspace every 10 minutes`
+User input: `Loop on improving test coverage in this worktree every 10 minutes`
 
 1. Resolve `ws_id` from cwd.
 2. Interval `10m` → cron `*/10 * * * *`.
@@ -184,10 +184,10 @@ User input: `Loop on improving test coverage in this workspace every 10 minutes`
 
    ```sh
    band cronjobs create "$ws_id" \
-     --scope workspace --workspace-id "$ws_id" \
+     --scope worktree --worktree-id "$ws_id" \
      --name "Loop: improve test coverage" \
      --cron "*/10 * * * *" \
-     --prompt "Improve test coverage in this workspace. Pick the lowest-coverage file each iteration and add tests; commit when green."
+     --prompt "Improve test coverage in this worktree. Pick the lowest-coverage file each iteration and add tests; commit when green."
    ```
 
 5. Report cronjob ID, schedule, and `band chats watch` instructions.
@@ -202,7 +202,7 @@ User input: `Every hour, check whether the deploy in #ops-deploys turned green. 
 
    ```sh
    job=$(band cronjobs create "$ws_id" \
-     --scope workspace --workspace-id "$ws_id" \
+     --scope worktree --worktree-id "$ws_id" \
      --name "Loop: poll deploy until green" \
      --cron "7 * * * *" \
      --prompt "<placeholder>" \
@@ -234,7 +234,7 @@ User input: `Every hour, check whether the deploy in #ops-deploys turned green. 
 
 ```sh
 # Find the cronjob
-band cronjobs list --workspace "$ws_id"
+band cronjobs list --worktree "$ws_id"
 
 # Delete it
 band cronjobs delete "$ws_id" cj_1234567890
@@ -243,7 +243,7 @@ band cronjobs delete "$ws_id" cj_1234567890
 ## Invariants
 
 - The cronjob's `--prompt` is what the agent sees on every firing — keep it self-contained (no shell variables, no implicit "previous iteration" context).
-- Workspace-scoped cronjobs (`--scope workspace --workspace-id <ws_id>`) dispatch into the workspace — the cronjob's dedicated chat pane by default, or a fresh terminal pane with `--via terminal`. Project-scoped jobs fire against the project's main-branch workspace.
+- Worktree-scoped cronjobs (`--scope worktree --worktree-id <ws_id>`) dispatch into the worktree — the cronjob's dedicated chat pane by default, or a fresh terminal pane with `--via terminal`. Repo-scoped jobs fire against the repo's main-branch worktree.
 - `--via terminal` loops run the agent's headless CLI in a self-closing PTY per iteration and skip a tick while the previous run is still active — the self-deleting stop-condition pattern still works, since the agent runs `band cronjobs delete` from inside the headless run just as it would from a chat.
 - The self-deleting pattern requires the agent itself to run `band cronjobs delete` — the cron engine has no built-in stop condition. The agent needs `band` on its `PATH` (true by default after `band` is installed).
 - Cap loop lifetime at **7 days** unless the user explicitly overrides — same horizon as Claude Code's `/loop`.
@@ -253,7 +253,7 @@ band cronjobs delete "$ws_id" cj_1234567890
 
 - General `band cronjobs` CRUD (list / update / trigger / delete) is also documented under the **`band`** skill.
 - To send a one-off message to a chat instead of a recurring one, use **`band-chat`** (`band chats send`).
-- To create the workspace the loop runs against, see **`band-start`**.
+- To create the worktree the loop runs against, see **`band-start`**.
 
 ## Configuration
 

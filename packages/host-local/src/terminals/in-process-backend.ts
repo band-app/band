@@ -15,8 +15,8 @@ export class InProcessTerminalBackend implements TerminalBackend {
   constructor(private readonly pool: TerminalPool = new TerminalPool()) {}
 
   async spawn(request: TerminalSpawnRequest): Promise<TerminalListEntry> {
-    const { workspaceId, terminalId, workspaceRoot, options, cleanupOnExit } = request;
-    await this.pool.spawn(workspaceId, terminalId, workspaceRoot, options, { cleanupOnExit });
+    const { worktreeId, terminalId, worktreeRoot, options, cleanupOnExit } = request;
+    await this.pool.spawn(worktreeId, terminalId, worktreeRoot, options, { cleanupOnExit });
     const entry = this.pool.info(terminalId);
     if (!entry) throw new Error(`Terminal exited during spawn: ${terminalId}`);
     return entry;
@@ -26,8 +26,8 @@ export class InProcessTerminalBackend implements TerminalBackend {
     return this.pool.info(terminalId);
   }
 
-  async list(workspaceId: string): Promise<TerminalListEntry[]> {
-    return this.pool.list(workspaceId);
+  async list(worktreeId: string): Promise<TerminalListEntry[]> {
+    return this.pool.list(worktreeId);
   }
 
   async listAll(): Promise<TerminalListEntry[]> {
@@ -40,8 +40,8 @@ export class InProcessTerminalBackend implements TerminalBackend {
     return entry;
   }
 
-  async killWorkspace(workspaceId: string): Promise<void> {
-    this.pool.killWorkspace(workspaceId);
+  async killWorktree(worktreeId: string): Promise<void> {
+    this.pool.killWorktree(worktreeId);
   }
 
   async getScrollback(terminalId: string, lines?: number): Promise<string | null> {

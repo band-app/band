@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Leaf instance id generators + "freshly created" trackers.
 //
-// Shared by the unified center dockview (`WorkspaceCenterDockview`) and the
+// Shared by the unified center dockview (`WorktreeCenterDockview`) and the
 // legacy per-app inner dockviews still used by the mobile layout
 // (`DockviewChatContainer` / `DockviewTerminalContainer` /
 // `DockviewBrowserContainer`). Extracted here so both worlds mint ids the

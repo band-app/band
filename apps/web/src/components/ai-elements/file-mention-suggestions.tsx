@@ -5,7 +5,7 @@ import { trpc } from "../../lib/trpc-client";
 import { usePromptInputContext } from "./prompt-input";
 
 interface FileMentionSuggestionsProps {
-  workspaceId: string;
+  worktreeId: string;
 }
 
 /**
@@ -34,7 +34,7 @@ function getMentionContext(inputValue: string): { prefix: string; query: string 
   return null;
 }
 
-export function FileMentionSuggestions({ workspaceId }: FileMentionSuggestionsProps) {
+export function FileMentionSuggestions({ worktreeId }: FileMentionSuggestionsProps) {
   const { inputValue, setTextareaValue } = usePromptInputContext();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [files, setFiles] = useState<string[]>([]);
@@ -60,8 +60,8 @@ export function FileMentionSuggestions({ workspaceId }: FileMentionSuggestionsPr
 
     const delay = query ? 150 : 0;
     debounceRef.current = setTimeout(() => {
-      trpc.workspace.searchFiles
-        .query({ workspaceId, query, limit: 15 })
+      trpc.worktree.searchFiles
+        .query({ worktreeId, query, limit: 15 })
         .then((result) => {
           if (!cancelled) {
             setFiles(result.files);
@@ -78,7 +78,7 @@ export function FileMentionSuggestions({ workspaceId }: FileMentionSuggestionsPr
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [isOpen, query, workspaceId]);
+  }, [isOpen, query, worktreeId]);
 
   // Scroll selected item into view
   useEffect(() => {

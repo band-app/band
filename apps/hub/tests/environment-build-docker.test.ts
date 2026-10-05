@@ -86,7 +86,7 @@ suite("with a real Docker daemon", () => {
     });
     mkdirSync(join(home, ".band"), { recursive: true });
     seedState(home, {
-      projects: [
+      repos: [
         {
           name: "realproj",
           path: repo,
@@ -126,7 +126,7 @@ suite("with a real Docker daemon", () => {
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("builds an image with the toolchain, the worker and the installed workspace, and caches it", async () => {
+  it("builds an image with the toolchain, the worker and the installed worktree, and caches it", async () => {
     const done = await buildAndWait("realproj");
     expect(done.status, `${done.error}\n${done.log}`).toBe("ready");
     const image = done.image as string;
@@ -138,7 +138,7 @@ suite("with a real Docker daemon", () => {
     expect(run("cat /opt/band/worker/marker").trim()).toBe("worker");
     expect(run("test -x /usr/local/bin/band-worker && echo yes").trim()).toBe("yes");
     expect(run("cat /workspace/installed.txt").trim()).toBe("installed");
-    // The default-branch snapshot is in the workspace, without a .git.
+    // The default-branch snapshot is in the worktree, without a .git.
     expect(run("cat /workspace/pnpm-lock.yaml").trim()).toBe("lockfileVersion: 1");
     expect(run("test -e /workspace/.git && echo git || echo none").trim()).toBe("none");
     expect(

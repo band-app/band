@@ -23,13 +23,13 @@
  *     lines (20 survive) — a genuine result-set change — while the last row
  *     (an even line) survives without unmounting: the exact stale-selection
  *     trap.
- *   - All interactions go through the WorkspacePage page object.
+ *   - All interactions go through the WorktreePage page object.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -40,14 +40,14 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-search-files-select-first-token";
 
-const PROJECT = "search-files-repo";
+const REPO = "search-files-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH = "feature";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 const HAYSTACK = "haystack.txt";
 const LINE_COUNT = 40;
@@ -62,7 +62,7 @@ let tmpHome: string | undefined;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
 
@@ -78,13 +78,13 @@ test.beforeAll(async () => {
   git(repoPath, ["add", "."], tmpHome);
   git(repoPath, ["commit", "-m", "seed search-files corpus"], tmpHome);
 
-  const worktreePath = join(tmpHome, `${PROJECT}-${BRANCH}`);
+  const worktreePath = join(tmpHome, `${REPO}-${BRANCH}`);
   git(repoPath, ["worktree", "add", "-b", BRANCH, worktreePath], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [
@@ -116,34 +116,34 @@ test.describe("Search in Files selection reset on query change", () => {
     // Navigating to the last of 40 rows is ~40 sequential ArrowDown round-trips
     // plus an up-to-8s stability poll; give slow CI headroom over the 30s default.
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
-    await workspacePage.openSearchFiles();
+    await worktreePage.openSearchFiles();
 
     // Query 1: "alpha" — matches every line (40 rows).
-    await workspacePage.typeSearchFiles("alpha");
-    await expect.poll(() => workspacePage.searchFilesItems.count()).toBe(LINE_COUNT);
+    await worktreePage.typeSearchFiles("alpha");
+    await expect.poll(() => worktreePage.searchFilesItems.count()).toBe(LINE_COUNT);
 
     // The deepest row (the last even line) is a survivor of the "alpha beta"
     // refinement. Grab it dynamically and drive the selection down to it, so a
     // non-first row is selected with the list scrolled off the top.
-    const itemsBefore = await workspacePage.searchFilesItemValues();
+    const itemsBefore = await worktreePage.searchFilesItemValues();
     const target = itemsBefore[itemsBefore.length - 1];
     expect(target).toContain("beta"); // survives the refinement (still mounts)
     expect(target).not.toBe(itemsBefore[0]); // not already the first row
 
-    await workspacePage.navigateSearchFilesTo(target);
-    await expect.poll(() => workspacePage.selectedSearchFilesValue()).toBe(target);
-    await expect.poll(() => workspacePage.searchFilesListScrollTop()).toBeGreaterThan(0);
+    await worktreePage.navigateSearchFilesTo(target);
+    await expect.poll(() => worktreePage.selectedSearchFilesValue()).toBe(target);
+    await expect.poll(() => worktreePage.searchFilesListScrollTop()).toBeGreaterThan(0);
 
     // Query 2: refine to "alpha beta" by APPENDING " beta" so `target` stays
     // continuously mounted — the 20 odd-line matches drop out (20 survive), but
     // `target` survives and is no longer first. Pre-fix, the highlight would
     // stay on `target` (it never unmounted) and the list stay scrolled down.
-    await workspacePage.appendSearchFiles(" beta");
-    await expect.poll(() => workspacePage.searchFilesItems.count()).toBe(LINE_COUNT / 2);
+    await worktreePage.appendSearchFiles(" beta");
+    await expect.poll(() => worktreePage.searchFilesItems.count()).toBe(LINE_COUNT / 2);
 
     // Post-fix: once the new result set settles, the selection is on the FIRST
     // row and the list is scrolled to the top. We wait for the *settled*
@@ -151,34 +151,34 @@ test.describe("Search in Files selection reset on query change", () => {
     // highlights the first row while React re-renders, then snaps the highlight
     // back to the stale surviving row (`target`), so a plain `expect.poll` for
     // "selection is first" would pass on that transient and miss the bug.
-    const settled = await workspacePage.settledSelectedSearchFilesValue();
-    const items = await workspacePage.searchFilesItemValues();
+    const settled = await worktreePage.settledSelectedSearchFilesValue();
+    const items = await worktreePage.searchFilesItemValues();
     expect(settled).toBe(items[0]);
     expect(settled).not.toBe(target);
-    await expect.poll(() => workspacePage.searchFilesListScrollTop()).toBe(0);
+    await expect.poll(() => worktreePage.searchFilesListScrollTop()).toBe(0);
   });
 
   test("arrow keys move the selection and Enter opens the highlighted (first) result", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
-    await workspacePage.openSearchFiles();
-    await workspacePage.typeSearchFiles("alpha beta");
-    await expect.poll(() => workspacePage.searchFilesItems.count()).toBe(LINE_COUNT / 2);
+    await worktreePage.openSearchFiles();
+    await worktreePage.typeSearchFiles("alpha beta");
+    await expect.poll(() => worktreePage.searchFilesItems.count()).toBe(LINE_COUNT / 2);
 
     // Fresh results → first row selected.
-    const items = await workspacePage.searchFilesItemValues();
+    const items = await worktreePage.searchFilesItemValues();
     const firstValue = items[0];
-    await expect.poll(() => workspacePage.selectedSearchFilesValue()).toBe(firstValue);
+    await expect.poll(() => worktreePage.selectedSearchFilesValue()).toBe(firstValue);
 
     // Down then up returns to the first row — keyboard navigation still works.
-    await workspacePage.pressSearchFilesKey("ArrowDown");
-    await expect.poll(() => workspacePage.selectedSearchFilesValue()).toBe(items[1]);
-    await workspacePage.pressSearchFilesKey("ArrowUp");
-    await expect.poll(() => workspacePage.selectedSearchFilesValue()).toBe(firstValue);
+    await worktreePage.pressSearchFilesKey("ArrowDown");
+    await expect.poll(() => worktreePage.selectedSearchFilesValue()).toBe(items[1]);
+    await worktreePage.pressSearchFilesKey("ArrowUp");
+    await expect.poll(() => worktreePage.selectedSearchFilesValue()).toBe(firstValue);
 
     // Enter opens the highlighted (first) match. The value is `file:line:content`;
     // the open is observable through the persisted open-tabs state, whose active
@@ -186,12 +186,12 @@ test.describe("Search in Files selection reset on query change", () => {
     // Assert the positive new state (the tab opened) first, then that the
     // dialog closed.
     const firstFile = firstValue.split(":")[0];
-    await workspacePage.pressSearchFilesKey("Enter");
+    await worktreePage.pressSearchFilesKey("Enter");
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE))?.active, {
         timeout: 15_000,
       })
       .toContain(firstFile);
-    await expect(workspacePage.searchFilesDialog()).toBeHidden();
+    await expect(worktreePage.searchFilesDialog()).toBeHidden();
   });
 });

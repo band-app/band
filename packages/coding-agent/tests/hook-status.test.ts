@@ -1,5 +1,5 @@
 /**
- * Tests for the agent hook → workspace status dispatcher
+ * Tests for the agent hook → worktree status dispatcher
  * (`packages/coding-agent/src/hook-status.ts`) and the Claude Code mapper it
  * dispatches to.
  *

@@ -3,7 +3,7 @@
  *
  * A git credential helper on the worker asks for the credential of one remote
  * with `git.credential`. The hub answers only for a remote of a repository
- * placed on that worker: a project with a checkout or a workspace on the
+ * placed on that worker: a repo with a checkout or a worktree on the
  * worker (its remotes, read from the hub's checkout, never from the
  * worker's own, which its agents can edit), or a clone the hub is about to make there (`expectRemote`). Anything
  * else is refused, so a worker cannot fish for the token of a repository it
@@ -21,7 +21,7 @@ import {
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
-import { ProjectQueries } from "../infra/db/queries/projects";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { hostRegistry } from "../infra/host/registry";
 import {
   type GitTokenSource,
@@ -39,11 +39,11 @@ const RPC_FORBIDDEN = -32003;
 const REMOTE_V = /^\s*\S+\s+(\S+)\s+\((?:fetch|push)\)\s*$/;
 
 interface PlacedRemote extends RemoteKey {
-  project: string | null;
+  repo: string | null;
 }
 
 export class GitCredentialService {
-  private readonly projects = new ProjectQueries();
+  private readonly repos = new RepoQueries();
   /** Remotes the hub will clone onto a worker that has no checkout yet, by worker id. */
   private readonly expected = new Map<string, PlacedRemote[]>();
 
@@ -54,11 +54,11 @@ export class GitCredentialService {
   }
 
   /** Allows `url` for the worker's credential requests before it has a checkout of the repository. */
-  expectRemote(workerId: string, url: string, project: string | null): void {
+  expectRemote(workerId: string, url: string, repo: string | null): void {
     const key = isHttpUrl(url) ? parseRemoteUrl(url) : null;
     if (!key) return;
     const list = this.expected.get(workerId) ?? [];
-    list.push({ ...key, project });
+    list.push({ ...key, repo });
     this.expected.set(workerId, list);
   }
 
@@ -67,10 +67,10 @@ export class GitCredentialService {
   }
 
   /** True when the vault holds a credential the hub would hand out for this remote URL. */
-  async hasCredentialFor(url: string, project: string | null): Promise<boolean> {
+  async hasCredentialFor(url: string, repo: string | null): Promise<boolean> {
     const key = isHttpUrl(url) ? parseRemoteUrl(url) : null;
     if (!key) return false;
-    return (await this.source.lookup({ ...key, project, peek: true })) !== null;
+    return (await this.source.lookup({ ...key, repo, peek: true })) !== null;
   }
 
   private async handle(workerId: string, params: unknown): Promise<GitCredentialReply> {
@@ -88,7 +88,7 @@ export class GitCredentialService {
       );
       throw new RpcError(RPC_FORBIDDEN, "that repository is not placed on this worker");
     }
-    const credential = await this.source.lookup({ ...key, project: placed.project });
+    const credential = await this.source.lookup({ ...key, repo: placed.repo });
     if (!credential) {
       log.info(`no credential for ${where} (${protocol}) for worker ${workerId}`);
       return { found: false };
@@ -104,17 +104,17 @@ export class GitCredentialService {
     if (expected) return expected;
     // Only the hub's own checkout is trusted. The worker's checkout is writable by its agents,
     // which could add a remote to it and so claim any repository the vault covers.
-    for (const { project } of this.projects.projectsOnHost(workerId)) {
-      for (const remote of await this.remotesOf(project)) {
-        if (same(remote)) return { ...remote, project };
+    for (const { repo } of this.repos.reposOnHost(workerId)) {
+      for (const remote of await this.remotesOf(repo)) {
+        if (same(remote)) return { ...remote, repo };
       }
     }
     return null;
   }
 
-  /** The remotes of a project's repository, read from the hub's checkout. */
-  private async remotesOf(project: string): Promise<RemoteKey[]> {
-    const local = loadState().projects.find((p) => p.name === project)?.path;
+  /** The remotes of a repo's repository, read from the hub's checkout. */
+  private async remotesOf(repo: string): Promise<RemoteKey[]> {
+    const local = loadState().repos.find((p) => p.name === repo)?.path;
     if (!local) return [];
     try {
       const { stdout } = await hostRegistry.local.git.exec(["remote", "-v"], local);

@@ -20,7 +20,7 @@ pub struct Settings {
     #[serde(rename = "autoStartTunnel", skip_serializing_if = "Option::is_none")]
     pub auto_start_tunnel: Option<bool>,
     /// CLI-specific preferences. Today the only field is `defaultVia`,
-    /// which is the user-level fallback for `band workspaces create
+    /// which is the user-level fallback for `band worktrees create
     /// --prompt` dispatch (issue #551). Stored as a free-form JSON value
     /// so future per-CLI keys can be added without churning this struct.
     #[serde(skip_serializing_if = "Option::is_none")]

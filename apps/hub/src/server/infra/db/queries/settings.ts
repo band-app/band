@@ -80,7 +80,7 @@ export interface CachedAgentModel {
 }
 
 /**
- * A user-defined label for grouping/filtering projects in the dashboard.
+ * A user-defined label for grouping/filtering repos in the dashboard.
  */
 export interface LabelDefinition {
   id: string;
@@ -132,7 +132,7 @@ export interface Settings {
   /** Dashboard theme preference. */
   theme?: "system" | "light" | "dark";
   /**
-   * Translucent project-list sidebar in the macOS desktop app. Mirrors
+   * Translucent repo-list sidebar in the macOS desktop app. Mirrors
    * `dashboard/types.ts::Settings.translucentSidebar`.
    */
   translucentSidebar?: boolean;
@@ -167,7 +167,7 @@ export interface Settings {
   usagePollingEnabled?: boolean;
   /**
    * CLI-scoped preferences (issue #551). Today only `defaultVia` is
-   * recognized — the user-level fallback for `band workspaces create
+   * recognized — the user-level fallback for `band worktrees create
    * --prompt` dispatch when no `--via` flag, `BAND_DISPATCH` env var,
    * or repo `.band/config.json` value is set.
    */
@@ -299,7 +299,7 @@ const settingsCache = new Map<string, CachedSettings>();
  * defaults, and token generation on top.
  *
  * NOTE on the "queries" naming: this class lives under `server/infra/db/queries/`
- * to mirror the relational query classes (`ProjectsQueries`, `WorkspacesQueries`,
+ * to mirror the relational query classes (`ReposQueries`, `WorktreesQueries`,
  * …) even though there's no database involved — settings are persisted as a
  * single JSON document, not relational rows. "Queries" here refers to the
  * architecture pattern (typed, store-agnostic data-access) rather than SQL.

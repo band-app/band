@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -53,7 +53,7 @@ const MODIFIED_LINES = [
 
 let server: ServerHandle;
 let tmpHome: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -67,7 +67,7 @@ test.beforeAll(async () => {
   writeFileSync(join(repoPath, FILE_PATH), `${MODIFIED_LINES.join("\n")}\n`);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -78,7 +78,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -93,7 +93,7 @@ test.afterAll(async () => {
 for (const mode of ["unified", "split"] satisfies DiffViewMode[]) {
   test(`Overview ruler marks each change and jumps to it (${mode} mode)`, async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(workspaceId);
+    await changes.goto(worktreeId);
     await changes.openDiff(FILE_PATH, mode);
 
     await expect(changes.rulerMarkers("added")).toHaveCount(1);
@@ -129,7 +129,7 @@ for (const mode of ["unified", "split"] satisfies DiffViewMode[]) {
 
 test("Overview ruler scrolls the diff by slider drag and track click", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await changes.openDiff(FILE_PATH, "unified");
   await expect(changes.rulerMarkers("removed")).toHaveCount(1);
   await expect.poll(() => changes.diffScrollTop()).toBe(0);

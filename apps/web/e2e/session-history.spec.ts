@@ -11,19 +11,19 @@
  * What's covered here:
  *
  *   1. Empty state ("No sessions yet") when the agent has no sessions for
- *      the workspace.
+ *      the worktree.
  *   2. After a real message, the session shows up in the dropdown under
  *      its first prompt; "New session" clears the chat to the empty state;
  *      picking the past session brings its messages back.
  *
- * Each test uses its own workspace, because the stub filters `session/list`
+ * Each test uses its own worktree, because the stub filters `session/list`
  * by working directory, so the tests don't depend on running order.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -37,8 +37,8 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-session-history-token";
-const EMPTY_PROJECT = "histempty";
-const FLOW_PROJECT = "histflow";
+const EMPTY_REPO = "histempty";
+const FLOW_REPO = "histflow";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -48,7 +48,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const projects = [EMPTY_PROJECT, FLOW_PROJECT].map((name) => {
+  const repos = [EMPTY_REPO, FLOW_REPO].map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -58,7 +58,7 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -82,16 +82,16 @@ test.afterAll(async () => {
 });
 
 test.describe("Session history dropdown", () => {
-  test("empty state — opening the dropdown on a fresh workspace shows 'No sessions yet'", async ({
+  test("empty state — opening the dropdown on a fresh worktree shows 'No sessions yet'", async ({
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId(EMPTY_PROJECT, "main"));
+    await chatPane.goto(toWorktreeId(EMPTY_REPO, "main"));
     await chatPane.waitForReady();
 
     await chatPane.openSessionHistory();
 
-    // The agent has no sessions for this workspace's directory yet.
+    // The agent has no sessions for this worktree's directory yet.
     await expect(chatPane.sessionHistoryEmpty).toBeVisible();
   });
 
@@ -99,7 +99,7 @@ test.describe("Session history dropdown", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId(FLOW_PROJECT, "main"));
+    await chatPane.goto(toWorktreeId(FLOW_REPO, "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("remember this conversation");

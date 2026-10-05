@@ -29,7 +29,7 @@ const log = createLogger("git");
  * `branch` is always non-empty for non-bare worktrees: detached-HEAD
  * states fall back to either `resolveDetachedBranch` (if mid-rebase) or
  * `detachedShaLabel` (a `detached-<short-sha>` synthetic label). See the
- * `WorkspaceCard` chain in `detachedShaLabel` below for the invariants
+ * `WorktreeCard` chain in `detachedShaLabel` below for the invariants
  * the rest of the app relies on.
  */
 export interface WorktreeInfo {
@@ -53,7 +53,7 @@ export interface RepoInfo {
 
 /**
  * The pull request the sidebar's PR badge shows (`PullRequestBadge`). A
- * workspace has at most one: its branch's open PR, else the most recently
+ * worktree has at most one: its branch's open PR, else the most recently
  * updated merged one, else the most recently updated closed one.
  */
 export interface PullRequestSummary {
@@ -66,7 +66,7 @@ export interface PullRequestSummary {
 
 /**
  * Prefix used by `detachedShaLabel`. Exported so callers that need to
- * recognise the synthetic label (e.g. `workspaces.remove` skipping
+ * recognise the synthetic label (e.g. `worktrees.remove` skipping
  * `git branch -D` for a non-real ref) can do so without re-spelling
  * the literal `"detached-"` in two places.
  */
@@ -120,25 +120,25 @@ export function parseGitRemoteUrl(url: string): RepoInfo | null {
  * (e.g. a checked-out tag, a raw commit SHA, or a post-rebase/post-bisect
  * state). The label must be:
  *
- *   1. **Non-empty** — `WorkspaceCard` renders `worktree.branch` as-is, so an
+ *   1. **Non-empty** — `WorktreeCard` renders `worktree.branch` as-is, so an
  *      empty string shows as a blank label next to the branch icon and the
  *      dirty-tree "M" badge.
- *   2. **Unique per worktree** — workspace IDs are derived from
- *      `${projectName}-${branch}` via `toWorkspaceId`. Two detached worktrees
+ *   2. **Unique per worktree** — worktree IDs are derived from
+ *      `${repoName}-${branch}` via `toWorktreeId`. Two detached worktrees
  *      with the empty string collide to the same ID, which breaks selection,
- *      pinning, and the `data-testid` hook on `WorkspaceCard`. Embedding the
+ *      pinning, and the `data-testid` hook on `WorktreeCard`. Embedding the
  *      short commit SHA disambiguates them.
- *   3. **Filesystem- and URL-safe** — `workspaceId` is used as a path
- *      component in `workspace-prompts/<id>.json` and `shared/<id>/...`, and
+ *   3. **Filesystem- and URL-safe** — `worktreeId` is used as a path
+ *      component in `workspace-prompts/<id>.json` (the older name stays on disk) and `shared/<id>/...`, and
  *      as a URL segment via `encodeURIComponent`. We stick to `[a-z0-9-]` so
  *      no encoding surprises leak through. (Bug surfaced when a user had
- *      ~9 worktrees in detached-HEAD states — see the WorkspaceCard chain
+ *      ~9 worktrees in detached-HEAD states — see the WorktreeCard chain
  *      starting at the empty-branch return below.)
  *
  * If the porcelain `HEAD` line was missing (extremely unusual — git emits it
  * for every worktree, including bare ones), we fall back to a non-empty
  * generic marker so the label still renders and the caller's ID derivation
- * doesn't collapse to `${projectName}-`. Different worktrees in that state
+ * doesn't collapse to `${repoName}-`. Different worktrees in that state
  * would still collide, but git doesn't actually produce empty `HEAD` lines
  * in practice — the marker is defensive, not load-bearing.
  */
@@ -152,8 +152,8 @@ function detachedShaLabel(head: string): string {
  * original branch name from git's rebase state files. Returns the empty
  * string for any other detached state (checked-out tag, raw SHA, finished/
  * aborted rebase) — callers must fall back to `detachedShaLabel` in that
- * case, otherwise the empty string flows into `toWorkspaceId` and produces
- * colliding workspace IDs (see `detachedShaLabel` for the full chain).
+ * case, otherwise the empty string flows into `toWorktreeId` and produces
+ * colliding worktree IDs (see `detachedShaLabel` for the full chain).
  */
 async function resolveDetachedBranch(worktreePath: string): Promise<string> {
   const dotGit = join(worktreePath, ".git");
@@ -279,7 +279,7 @@ function isPlaceholderHead(head: string): boolean {
  *
  * Leaves out a worktree `git worktree add` is still creating (detached at the
  * placeholder `HEAD`). Listed, it would be labelled `detached-0000000`, and a
- * sync would save that as the immutable `name` of the workspace being created.
+ * sync would save that as the immutable `name` of the worktree being created.
  */
 export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   const output = await execGit(["worktree", "list", "--porcelain"], repoPath);
@@ -351,7 +351,7 @@ export async function getRepoInfo(
     }
     return parsed;
   } catch (err) {
-    // `getRepoInfo` is best-effort metadata: a project directory may legitimately
+    // `getRepoInfo` is best-effort metadata: a repo directory may legitimately
     // not be a git checkout, or may lack an `origin` remote. Those are expected
     // steady states, not error paths — log at debug so the server log isn't
     // spammed every CI poll tick. See issue #458.

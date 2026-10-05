@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { extractVersion } from "@band-app/environment";
 import { prependBinDirs } from "./path";
 
-/** The tools a project's `requires` can name, with the binary and arguments that print each one's version. */
+/** The tools a repo's `requires` can name, with the binary and arguments that print each one's version. */
 const PROBES: ReadonlyArray<{ tool: string; bin: string; args: string[] }> = [
   { tool: "node", bin: "node", args: ["--version"] },
   { tool: "python", bin: "python3", args: ["--version"] },

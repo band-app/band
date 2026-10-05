@@ -1,7 +1,7 @@
 /**
  * Loop and noise guards for subscriptions (plan step S.4), through the real
  * server: signed `POST /api/hooks/github` deliveries, a real `git push` from
- * a workspace through `workspace.gitPush`, and the `gh` Express stub
+ * a worktree through `worktree.gitPush`, and the `gh` Express stub
  * (`BAND_GH_BIN`) for GitHub. The coding agent is the scripted ACP stub.
  */
 
@@ -11,7 +11,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
-import { seedAcpHome, startAcpServer, stubRequests, trpc, WORKSPACE_ID } from "./helpers/acp-chat";
+import { seedAcpHome, startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
@@ -47,7 +47,7 @@ function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
-/** Boots the server on a home whose `testproject` workspace is a git checkout with an origin. */
+/** Boots the server on a home whose `testrepo` worktree is a git checkout with an origin. */
 async function boot() {
   const stub = await ghStub.start();
   stubs.push(stub);
@@ -78,7 +78,7 @@ async function boot() {
 let seq = 0;
 async function newChat(url: string): Promise<string> {
   const id = `guards-${Date.now()}-${seq++}`;
-  await trpc(url, "chats.create", { workspaceId: WORKSPACE_ID, id });
+  await trpc(url, "chats.create", { worktreeId: WORKTREE_ID, id });
   return id;
 }
 
@@ -144,14 +144,14 @@ describe("subscription guards", () => {
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "agent work"]);
     const bandSha = git(repo, ["rev-parse", "HEAD"]);
-    await trpc(url, "workspace.gitPush", { workspaceId: WORKSPACE_ID });
+    await trpc(url, "worktree.gitPush", { worktreeId: WORKTREE_ID });
 
     await trpc(url, "subscriptions.create", {
       source: "github",
       repo: FULL,
       branch: "main",
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     for (const sha of [humanSha, bandSha]) {
@@ -185,14 +185,14 @@ describe("subscription guards", () => {
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "agent work"]);
     const bandSha = git(repo, ["rev-parse", "HEAD"]);
-    await trpc(url, "workspace.gitPush", { workspaceId: WORKSPACE_ID });
+    await trpc(url, "worktree.gitPush", { worktreeId: WORKTREE_ID });
 
     const sub = await trpc<{ id: string }>(url, "subscriptions.create", {
       source: "github",
       repo: FULL,
       pr: 3,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     const syncPayload = (sha: string) => ({
@@ -232,7 +232,7 @@ describe("subscription guards", () => {
       repo: FULL,
       pr: 7,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     expect(sub.allowedSenders).toEqual(["acme", "maintainer"]);
@@ -275,7 +275,7 @@ describe("subscription guards", () => {
       repo: FULL,
       pr: 9,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
       allowedSenders: ["Bob"],
     });
@@ -294,7 +294,7 @@ describe("subscription guards", () => {
       source: "github",
       repo: FULL,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     };
     const pr = await trpc<Listed>(url, "subscriptions.create", { ...base, pr: 11 });

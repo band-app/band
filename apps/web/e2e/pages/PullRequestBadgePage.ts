@@ -1,22 +1,22 @@
 /**
- * Page object for the PR badge in a sidebar workspace row
+ * Page object for the PR badge in a sidebar worktree row
  * (`dashboard/components/PullRequestBadge.tsx`): the PR number as an
- * outlined tag, `workspace-card__pr-badge` (its `data-tone` is the CI color:
+ * outlined tag, `worktree-card__pr-badge` (its `data-tone` is the CI color:
  * `failure`, `pending`, `success`, `neutral`, `merged` or `closed`), and its
  * popover `pr-popover`, with `pr-popover__number` (the same tag, with the
  * same `data-tone`), `__status`, `__draft`, `__title`, `__open` and
  * `__copy`. The status element's `data-status` is the CI state
  * (or `merged` / `closed`), and the copy button has `data-copied` while it
  * shows its confirmation. A row without a PR shows the CI icon
- * `workspace-card__ci-icon` instead. `badgeOutline` and `popoverOutline`
+ * `worktree-card__ci-icon` instead. `badgeOutline` and `popoverOutline`
  * read a tag's computed border, and `rowHeight` a sidebar row's height.
  *
- * Navigation, the workspace card and clipboard capture are delegated to
- * `WorkspacePage`.
+ * Navigation, the worktree card and clipboard capture are delegated to
+ * `WorktreePage`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { WorkspacePage } from "./WorkspacePage";
+import { WorktreePage } from "./WorktreePage";
 
 /** A tag's border width, style and color, and corner radius. */
 export interface TagOutline {
@@ -47,14 +47,14 @@ export class PullRequestBadgePage {
   readonly openButton: Locator;
   readonly copyButton: Locator;
 
-  readonly workspace: WorkspacePage;
+  readonly worktree: WorktreePage;
 
   constructor(
     private readonly page: Page,
     baseUrl: string,
     token: string,
   ) {
-    this.workspace = new WorkspacePage(page, baseUrl, token);
+    this.worktree = new WorktreePage(page, baseUrl, token);
     this.popover = page.getByTestId("pr-popover");
     this.popoverNumber = page.getByTestId("pr-popover__number");
     this.popoverStatus = page.getByTestId("pr-popover__status");
@@ -64,20 +64,20 @@ export class PullRequestBadgePage {
     this.copyButton = page.getByTestId("pr-popover__copy");
   }
 
-  /** Open a workspace and wait until the sidebar and plugin tabs are in. */
-  async goto(workspaceId: string): Promise<void> {
-    await this.workspace.gotoAndWaitForPlugins(workspaceId);
-    await this.workspace.waitForReady();
+  /** Open a worktree and wait until the sidebar and plugin tabs are in. */
+  async goto(worktreeId: string): Promise<void> {
+    await this.worktree.gotoAndWaitForPlugins(worktreeId);
+    await this.worktree.waitForReady();
   }
 
-  /** The PR badge in `workspaceId`'s sidebar row. */
-  badge(workspaceId: string): Locator {
-    return this.workspace.workspaceCard(workspaceId).getByTestId("workspace-card__pr-badge");
+  /** The PR badge in `worktreeId`'s sidebar row. */
+  badge(worktreeId: string): Locator {
+    return this.worktree.worktreeCard(worktreeId).getByTestId("worktree-card__pr-badge");
   }
 
-  /** The CI icon in `workspaceId`'s row, shown when its branch has no PR. */
-  ciIcon(workspaceId: string): Locator {
-    return this.workspace.workspaceCard(workspaceId).getByTestId("workspace-card__ci-icon");
+  /** The CI icon in `worktreeId`'s row, shown when its branch has no PR. */
+  ciIcon(worktreeId: string): Locator {
+    return this.worktree.worktreeCard(worktreeId).getByTestId("worktree-card__ci-icon");
   }
 
   /**
@@ -95,13 +95,13 @@ export class PullRequestBadgePage {
   }
 
   /** The badge's rendered text color, as the browser computed it. */
-  async badgeColor(workspaceId: string): Promise<string> {
-    return this.badge(workspaceId).evaluate((el) => getComputedStyle(el).color);
+  async badgeColor(worktreeId: string): Promise<string> {
+    return this.badge(worktreeId).evaluate((el) => getComputedStyle(el).color);
   }
 
   /** The badge's tag outline as the browser computed it. */
-  async badgeOutline(workspaceId: string): Promise<TagOutline> {
-    return readOutline(this.badge(workspaceId));
+  async badgeOutline(worktreeId: string): Promise<TagOutline> {
+    return readOutline(this.badge(worktreeId));
   }
 
   /** The popover number's tag outline as the browser computed it. */
@@ -109,16 +109,16 @@ export class PullRequestBadgePage {
     return readOutline(this.popoverNumber);
   }
 
-  /** The rendered height of `workspaceId`'s sidebar row, in CSS pixels. */
-  async rowHeight(workspaceId: string): Promise<number> {
-    const box = await this.workspace.workspaceCard(workspaceId).boundingBox();
-    if (!box) throw new Error(`workspace row ${workspaceId} is not rendered`);
+  /** The rendered height of `worktreeId`'s sidebar row, in CSS pixels. */
+  async rowHeight(worktreeId: string): Promise<number> {
+    const box = await this.worktree.worktreeCard(worktreeId).boundingBox();
+    if (!box) throw new Error(`worktree row ${worktreeId} is not rendered`);
     return box.height;
   }
 
-  async hoverBadge(workspaceId: string): Promise<void> {
-    await test.step(`Hover the PR badge of ${workspaceId}`, async () => {
-      await this.badge(workspaceId).hover();
+  async hoverBadge(worktreeId: string): Promise<void> {
+    await test.step(`Hover the PR badge of ${worktreeId}`, async () => {
+      await this.badge(worktreeId).hover();
       await expect(this.popover).toBeVisible();
     });
   }
@@ -130,15 +130,15 @@ export class PullRequestBadgePage {
   }
 
   /**
-   * Reach the badge from the keyboard: focus the workspace row, then Tab to
+   * Reach the badge from the keyboard: focus the worktree row, then Tab to
    * the badge, the row's next focusable element.
    */
-  async focusBadgeWithKeyboard(workspaceId: string): Promise<void> {
-    await test.step(`Tab to the PR badge of ${workspaceId}`, async () => {
-      await expect(this.badge(workspaceId)).toBeVisible();
-      await this.workspace.workspaceCard(workspaceId).focus();
+  async focusBadgeWithKeyboard(worktreeId: string): Promise<void> {
+    await test.step(`Tab to the PR badge of ${worktreeId}`, async () => {
+      await expect(this.badge(worktreeId)).toBeVisible();
+      await this.worktree.worktreeCard(worktreeId).focus();
       await this.page.keyboard.press("Tab");
-      await expect(this.badge(workspaceId)).toBeFocused();
+      await expect(this.badge(worktreeId)).toBeFocused();
     });
   }
 
@@ -148,9 +148,9 @@ export class PullRequestBadgePage {
     });
   }
 
-  async clickBadge(workspaceId: string): Promise<void> {
-    await test.step(`Click the PR badge of ${workspaceId}`, async () => {
-      await this.badge(workspaceId).click();
+  async clickBadge(worktreeId: string): Promise<void> {
+    await test.step(`Click the PR badge of ${worktreeId}`, async () => {
+      await this.badge(worktreeId).click();
     });
   }
 

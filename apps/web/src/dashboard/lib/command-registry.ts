@@ -40,9 +40,9 @@ export interface CommandRegistryDeps {
   findInFile: () => void;
   /**
    * Format the file in the currently-active editor tab. Implementations
-   * read the current `{workspaceId, filePath}` from their own refs at call
+   * read the current `{worktreeId, filePath}` from their own refs at call
    * time and dispatch the `band:format-current-file` event with that detail
-   * — the keyboard shortcut handler in DockviewWorkspaceLayout does the
+   * — the keyboard shortcut handler in DockviewWorktreeLayout does the
    * same thing, so the palette and shortcut paths stay symmetric.
    */
   formatCurrentFile: () => void;
@@ -50,34 +50,34 @@ export interface CommandRegistryDeps {
    * Open a new untitled (scratch) editor tab. Mirrors the ⌘N shortcut
    * and the "New Untitled File" button in the Files toolbar; backed by
    * the `band:new-untitled-tab` event so the action stays loosely
-   * coupled to whichever workspace happens to be active.
+   * coupled to whichever worktree happens to be active.
    */
   newUntitledTab: () => void;
   /**
    * Open the searchable language-mode picker for the currently-active
    * editor tab. Implementations dispatch `band:open-language-picker`
-   * with `{workspaceId, filePath}` so the matching FileViewer listener
+   * with `{worktreeId, filePath}` so the matching FileViewer listener
    * opens the dialog (same pattern as `formatCurrentFile`).
    */
   changeLanguageMode: () => void;
   /**
    * Step the active editor's navigation history backward/forward.
-   * Implementations read the active `workspaceId` from a ref and dispatch
-   * `band:editor-go-back` / `band:editor-go-forward` with `{workspaceId}` so
-   * only the active workspace's CodeBrowserView acts — hidden sibling
-   * workspaces stay mounted and would otherwise step their own history
+   * Implementations read the active `worktreeId` from a ref and dispatch
+   * `band:editor-go-back` / `band:editor-go-forward` with `{worktreeId}` so
+   * only the active worktree's CodeBrowserView acts — hidden sibling
+   * worktrees stay mounted and would otherwise step their own history
    * stacks too (same pattern as `formatCurrentFile`, see issue #539).
    */
   editorGoBack: () => void;
   editorGoForward: () => void;
   /**
-   * Add a new leaf of the given kind to the active workspace's active group.
+   * Add a new leaf of the given kind to the active worktree's active group.
    * Mirrors the ⌘T / ⌥⌘T / ⇧⌘B shortcuts in SharedDockviewLayout.
    */
   newLeaf: (kind: "term" | "chat" | "browser") => void;
-  /** Open the workspace picker (⌘K). */
-  openWorkspacePicker: () => void;
-  /** Close the active tab of the active workspace (⌘W). */
+  /** Open the worktree picker (⌘K). */
+  openWorktreePicker: () => void;
+  /** Close the active tab of the active worktree (⌘W). */
   closeActiveTab: () => void;
   /** Split the active tab (⌘D / ⌘⇧D). A terminal splits into nested panes. */
   splitActiveTab: (direction: "right" | "below") => void;
@@ -232,8 +232,8 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     },
     {
       // Format the file in the currently-active editor tab via Prettier.
-      // The deps callback (wired in DockviewWorkspaceLayout) reads the
-      // current `{workspaceId, filePath}` from refs and dispatches the
+      // The deps callback (wired in DockviewWorktreeLayout) reads the
+      // current `{worktreeId, filePath}` from refs and dispatches the
       // event with detail, so the matching FileViewer responds. The
       // keyboard handler dispatches the same event with the same detail
       // shape — both paths funnel through one FileViewer listener.
@@ -350,32 +350,32 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-right-panel")),
     },
     {
-      id: "switch-workspace",
-      label: "Switch Workspace…",
+      id: "switch-worktree",
+      label: "Switch Worktree…",
       shortcut: "Cmd+K",
-      action: () => deps.openWorkspacePicker(),
+      action: () => deps.openWorktreePicker(),
     },
     {
       // ⌥⌘← / ⌥⌘→, copied from Orca's worktree history. AppShell owns the
       // history stack and listens for these events and the keys.
-      id: "workspace-go-back",
-      label: "Previous Workspace",
+      id: "worktree-go-back",
+      label: "Previous Worktree",
       shortcut: "Cmd+Alt+←",
-      action: () => window.dispatchEvent(new CustomEvent("band:workspace-go-back")),
+      action: () => window.dispatchEvent(new CustomEvent("band:worktree-go-back")),
     },
     {
-      id: "workspace-go-forward",
-      label: "Next Workspace",
+      id: "worktree-go-forward",
+      label: "Next Worktree",
       shortcut: "Cmd+Alt+→",
-      action: () => window.dispatchEvent(new CustomEvent("band:workspace-go-forward")),
+      action: () => window.dispatchEvent(new CustomEvent("band:worktree-go-forward")),
     },
     {
       // ⌘1..9 pick the Nth label; they depend on the user's labels, so only
-      // "All projects" is listed here.
-      id: "show-all-projects",
-      label: "Show All Projects",
+      // "All repos" is listed here.
+      id: "show-all-repos",
+      label: "Show All Repos",
       shortcut: "Cmd+0",
-      action: () => window.dispatchEvent(new CustomEvent("band:show-all-projects")),
+      action: () => window.dispatchEvent(new CustomEvent("band:show-all-repos")),
     },
     {
       id: "open-file-external",
@@ -421,17 +421,17 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
         ]
       : []),
     {
-      // ⌃0 — reveal the project-list sidebar (which lives outside the
+      // ⌃0 — reveal the repo-list sidebar (which lives outside the
       // dockview) and move keyboard focus into the list. `band:show-sidebar`
       // expands the sidebar if it's collapsed; DashboardShell's
-      // `band:focus-projects` listener then focuses the list.
-      id: "focus-projects",
-      label: "Focus Projects",
+      // `band:focus-repos` listener then focuses the list.
+      id: "focus-repos",
+      label: "Focus Repos",
       shortcut: "Ctrl+0",
       action: () => {
         window.dispatchEvent(new CustomEvent("band:show-sidebar"));
         queueMicrotask(() => {
-          window.dispatchEvent(new CustomEvent("band:focus-projects"));
+          window.dispatchEvent(new CustomEvent("band:focus-repos"));
         });
       },
     },

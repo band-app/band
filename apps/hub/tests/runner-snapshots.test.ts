@@ -40,21 +40,21 @@ const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs")
 const LOCAL_HOOKS = join(import.meta.dirname, "../../../runners/local");
 const IDLE_MS = 2500;
 
-interface Workspace {
+interface Worktree {
   name: string;
   path: string;
   hostId?: string;
   lifecycle?: "sleeping" | "waking";
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Workspace[] }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Worktree[] }>;
 }
 interface SnapshotsList {
   snapshots: Array<{
     id: string;
     runnerId: string;
     hostId: string;
-    workspaceIds: string[];
+    worktreeIds: string[];
     snapshotId: string;
     sizeBytes: number | null;
     restoredAt: number | null;
@@ -82,7 +82,7 @@ function git(cwd: string, ...args: string[]): string {
   });
 }
 
-function makeProject(base: string, name: string): { origin: string; checkout: string } {
+function makeRepo(base: string, name: string): { origin: string; checkout: string } {
   const origin = join(base, `${name}-origin.git`);
   mkdirSync(origin, { recursive: true });
   git(origin, "init", "-q", "--bare", "-b", "main");
@@ -115,7 +115,7 @@ exec "$LOCAL_HOOKS/destroy.sh"
 `,
   "snapshot.sh": `${SHARED}
 id="snap-$BAND_WORKER_ID-$(date +%s)-$$"
-log "snapshot worker=$BAND_WORKER_ID handle=\${BAND_MACHINE_HANDLE:-} workspaces=\${BAND_WORKSPACE_IDS:-} id=$id"
+log "snapshot worker=$BAND_WORKER_ID handle=\${BAND_MACHINE_HANDLE:-} worktrees=\${BAND_WORKTREE_IDS:-} id=$id"
 mkdir -p "$FAKE_SNAPDIR"
 cp -R "$base" "$FAKE_SNAPDIR/$id"
 echo "BAND_SNAPSHOT_ID=$id"
@@ -162,9 +162,9 @@ const m = <T>(procedure: string, input: unknown) =>
     return trpcData<T>(res);
   });
 
-const workspace = async (project: string, name: string) =>
-  (await q<ProjectsList>("projects.list")).projects
-    .find((p) => p.name === project)
+const findWorktree = async (repo: string, name: string) =>
+  (await q<ReposList>("repos.list")).repos
+    .find((p) => p.name === repo)
     ?.worktrees.find((w) => w.name === name);
 const snapshots = async () => (await q<SnapshotsList>("runners.snapshots")).snapshots;
 
@@ -174,7 +174,7 @@ const hookLines = (hook: string) =>
     .filter((l) => l.startsWith(`${hook} `));
 const field = (line: string, key: string) => new RegExp(`${key}=(\\S*)`).exec(line)?.[1] ?? "";
 
-/** Sleep stores the git state first and then takes the snapshot, so a sleeping workspace may not have one yet. */
+/** Sleep stores the git state first and then takes the snapshot, so a sleeping worktree may not have one yet. */
 const snapshotTaken = (hostId: string) =>
   waitFor(async () => hookLines("snapshot").find((l) => field(l, "worker") === hostId), {
     label: `snapshot of ${hostId}`,
@@ -184,28 +184,32 @@ const snapshotTaken = (hostId: string) =>
 
 const runnerBase = (hostId: string) => join(hubHome, ".band", "runners", "hib", hostId);
 
-const sleeping = (project: string, name: string) =>
+const sleeping = (repo: string, name: string) =>
   waitFor(
-    async () => ((await workspace(project, name))?.lifecycle === "sleeping" ? true : undefined),
-    { label: `${project}-${name} sleeps`, timeoutMs: 90_000, intervalMs: 250 },
+    async () => ((await findWorktree(repo, name))?.lifecycle === "sleeping" ? true : undefined),
+    {
+      label: `${repo}-${name} sleeps`,
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    },
   );
-const awake = (project: string, name: string) =>
+const awake = (repo: string, name: string) =>
   waitFor(
     async () => {
-      const wt = await workspace(project, name);
+      const wt = await findWorktree(repo, name);
       return wt && wt.lifecycle === undefined ? wt : undefined;
     },
-    { label: `${project}-${name} awake`, timeoutMs: 90_000, intervalMs: 250 },
+    { label: `${repo}-${name} awake`, timeoutMs: 90_000, intervalMs: 250 },
   );
 
-async function createWorkspace(project: string, branch: string): Promise<Workspace> {
-  await m("workspaces.create", { project, branch, placement: { labels: { pool: "hib" } } });
+async function createWorktree(repo: string, branch: string): Promise<Worktree> {
+  await m("worktrees.create", { repo, branch, placement: { labels: { pool: "hib" } } });
   return waitFor(
     async () => {
-      const wt = await workspace(project, branch);
+      const wt = await findWorktree(repo, branch);
       return wt?.hostId ? wt : undefined;
     },
-    { label: `${project}-${branch} on a worker`, timeoutMs: 90_000, intervalMs: 250 },
+    { label: `${repo}-${branch} on a worker`, timeoutMs: 90_000, intervalMs: 250 },
   );
 }
 
@@ -222,7 +226,7 @@ beforeAll(async () => {
   hubHome = createTmpHome("band-snapshots-hub-");
   scratch.push(hubHome);
   const base = tmp("band-snapshots-repos-");
-  a = makeProject(base, "proja");
+  a = makeRepo(base, "proja");
   hooksDir = tmp("band-snapshots-hooks-");
   fakeLog = join(hooksDir, "hooks.log");
   snapDir = join(hooksDir, "snapshots");
@@ -238,7 +242,7 @@ beforeAll(async () => {
     defaultCodingAgent: "claude-code",
   });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proja",
         path: a.checkout,
@@ -300,7 +304,7 @@ afterAll(async () => {
 
 describe("a runner with snapshot hooks", () => {
   it("snapshots on sleep and restores the machine on wake (S1)", async () => {
-    const wt = await createWorkspace("proja", "snap-a");
+    const wt = await createWorktree("proja", "snap-a");
     const hostId = wt.hostId as string;
     leaveWork(wt.path, "a");
     // `spawn` prints a handle of its own first, and the `local` hook then prints the worker's pid. The last one counts.
@@ -309,11 +313,11 @@ describe("a runner with snapshot hooks", () => {
 
     await sleeping("proja", "snap-a");
 
-    // The hook got the machine handle spawn printed and the workspaces the host held.
+    // The hook got the machine handle spawn printed and the worktrees the host held.
     const taken = await snapshotTaken(hostId);
     expect(field(taken as string, "worker")).toBe(hostId);
     expect(field(taken as string, "handle")).toBe(handle);
-    expect(field(taken as string, "workspaces")).toBe("proja-snap-a");
+    expect(field(taken as string, "worktrees")).toBe("proja-snap-a");
     // The hub records the snapshot once the hook has exited, which is after the hook's own log line.
     const recorded = await waitFor(
       async () => {
@@ -326,7 +330,7 @@ describe("a runner with snapshot hooks", () => {
     expect(recorded[0]).toMatchObject({
       runnerId: "hib",
       hostId,
-      workspaceIds: ["proja-snap-a"],
+      worktreeIds: ["proja-snap-a"],
       snapshotId: field(taken as string, "id"),
       sizeBytes: 1234,
       restoredAt: null,
@@ -343,9 +347,9 @@ describe("a runner with snapshot hooks", () => {
     });
     expect(existsSync(join(snapDir, field(taken as string, "id")))).toBe(true);
 
-    // A file read wakes the workspace. The restore hook gets the snapshot, with a new bootstrap token.
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: "proja-snap-a",
+    // A file read wakes the worktree. The restore hook gets the snapshot, with a new bootstrap token.
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: "proja-snap-a",
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited a\n");
@@ -376,7 +380,7 @@ describe("a runner with snapshot hooks", () => {
   }, 240_000);
 
   it("falls back to a fresh machine with git and sessions when restore fails (S2)", async () => {
-    const wt = await createWorkspace("proja", "snap-b");
+    const wt = await createWorktree("proja", "snap-b");
     const hostId = wt.hostId as string;
     leaveWork(wt.path, "b");
     await sleeping("proja", "snap-b");
@@ -385,8 +389,8 @@ describe("a runner with snapshot hooks", () => {
 
     writeFileSync(failRestore, "");
     try {
-      const file = await q<{ content: string }>("workspace.getFile", {
-        workspaceId: "proja-snap-b",
+      const file = await q<{ content: string }>("worktree.getFile", {
+        worktreeId: "proja-snap-b",
         path: "hello.txt",
       });
       expect(file.content).toBe("hello\nedited b\n");
@@ -420,9 +424,9 @@ describe("a runner with snapshot hooks", () => {
   it("keeps the newest snapshot and deletes the older ones through the hook (S3)", async () => {
     const before = hookLines("snapshot-delete").length;
     // Each worker may sleep, and its machine be destroyed, while the next one starts.
-    const one = await createWorkspace("proja", "snap-c");
+    const one = await createWorktree("proja", "snap-c");
     leaveWork(one.path, "c");
-    const two = await createWorkspace("proja", "snap-d");
+    const two = await createWorktree("proja", "snap-d");
     leaveWork(two.path, "d");
     expect(one.hostId).not.toBe(two.hostId);
     await sleeping("proja", "snap-c");
@@ -453,10 +457,10 @@ describe("a runner with snapshot hooks", () => {
     expect(existsSync(join(snapDir, field(older, "id")))).toBe(false);
     expect(existsSync(join(snapDir, field(newer, "id")))).toBe(true);
 
-    // The workspace whose snapshot is gone still wakes, from the git state sleep stored.
+    // The worktree whose snapshot is gone still wakes, from the git state sleep stored.
     const lost = field(older, "worker") === one.hostId ? "snap-c" : "snap-d";
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: `proja-${lost}`,
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: `proja-${lost}`,
       path: "hello.txt",
     });
     expect(file.content).toBe(`hello\nedited ${lost === "snap-c" ? "c" : "d"}\n`);

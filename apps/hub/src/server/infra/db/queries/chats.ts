@@ -18,7 +18,7 @@
 import { createLogger } from "@band-app/logger";
 import {
   deletePanelState,
-  deletePanelStatesForWorkspace,
+  deletePanelStatesForWorktree,
   insertPanelState,
   listPanelStates,
   resetPanelStatesToIdle,
@@ -47,7 +47,7 @@ export type ChatStatus = "running" | "idle" | "stopped" | "error";
  */
 export interface ChatRow {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   name: string;
   agent: string;
   model: string | undefined;
@@ -86,7 +86,7 @@ export interface ChatUpdatePatch {
 /**
  * Shape of the JSON blob stored in `panel_states.state` for chat rows.
  *
- * Mirrors `ChatRow` minus the `id`/`workspaceId`/`labels` keys (those live
+ * Mirrors `ChatRow` minus the `id`/`worktreeId`/`labels` keys (those live
  * on the row itself). Optional fields are nullable on disk so the column
  * stays compact when the chat has never had a session etc.
  */
@@ -185,7 +185,7 @@ export class ChatQueries {
   insert(row: ChatRow & { createdAt: number; updatedAt: number }): void {
     insertPanelState({
       id: row.id,
-      workspaceId: row.workspaceId,
+      worktreeId: row.worktreeId,
       panelType: CHAT_PANEL_TYPE,
       state: serializeState(row),
       labels: serializeLabels(row.labels),
@@ -245,9 +245,9 @@ export class ChatQueries {
     deletePanelState(id);
   }
 
-  /** Delete every chat row for a workspace. */
-  removeAllForWorkspace(workspaceId: string): void {
-    deletePanelStatesForWorkspace(workspaceId, CHAT_PANEL_TYPE);
+  /** Delete every chat row for a worktree. */
+  removeAllForWorktree(worktreeId: string): void {
+    deletePanelStatesForWorktree(worktreeId, CHAT_PANEL_TYPE);
   }
 
   /**
@@ -258,7 +258,7 @@ export class ChatQueries {
    * caller. The service hydrates lazily (`ensureInitialized`) on the
    * first read, so a single corrupted blob would otherwise turn a
    * `chats.list` request into a 500 on every request after a deploy.
-   * Skipping the bad row keeps the rest of the workspace's chats
+   * Skipping the bad row keeps the rest of the worktree's chats
    * usable; operators get the broken `id` in the warning so they can
    * inspect or delete the row manually. Matches `parseLabels`, which
    * already drops invalid labels via the same warn-and-fallback pattern.
@@ -272,14 +272,14 @@ export class ChatQueries {
         parsed = JSON.parse(row.state) as ChatStateBlob;
       } catch (err) {
         log.warn(
-          { chatId: row.id, workspaceId: row.workspaceId, err },
+          { chatId: row.id, worktreeId: row.worktreeId, err },
           "chat row state failed to parse as JSON, skipping",
         );
         continue;
       }
       out.push({
         id: row.id,
-        workspaceId: row.workspaceId,
+        worktreeId: row.worktreeId,
         name: parsed.name,
         agent: parsed.agent,
         model: parsed.model ?? undefined,

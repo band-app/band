@@ -2,8 +2,8 @@
 //
 // A cronjob can dispatch its prompt to the agent's *headless* CLI in a fresh
 // PTY pane (`via: "terminal"`) instead of the chat pane (`via: "chat"`,
-// default), reusing the same `via` model as `workspaces.create` (#551). Unlike
-// workspace-create (which opens the interactive REPL), a cron uses the headless
+// default), reusing the same `via` model as `worktrees.create` (#551). Unlike
+// worktree-create (which opens the interactive REPL), a cron uses the headless
 // one-shot invocation (`claude -p …`) so the pane runs to completion and exits
 // — see the `-p` regression assertion below. These tests drive the *manual*
 // `cronjobs.trigger` route because it shares the exact dispatch path with the
@@ -25,7 +25,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -37,7 +37,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
-import { listTasksForWorkspace } from "./helpers/tasks";
+import { listTasksForWorktree } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 // ---------------------------------------------------------------------------
@@ -119,16 +119,16 @@ function writeSleepingVendorCli(tmpHome: string, name: string, seconds: number):
 
 interface TerminalListEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
 async function listTerminals(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   token: string,
 ): Promise<TerminalListEntry[]> {
-  const res = await trpcQuery(serverUrl, "terminal.list", { workspaceId }, token);
+  const res = await trpcQuery(serverUrl, "terminal.list", { worktreeId }, token);
   // Read the body first so a non-200 surfaces the server's error text, not just
   // the status — matches the pattern in the sibling terminal specs.
   const body = await res.text();
@@ -139,7 +139,7 @@ async function listTerminals(
 
 interface TriggerResponse {
   via: "chat" | "terminal";
-  workspaceId: string;
+  worktreeId: string;
   terminalId?: string;
   taskId?: string;
   chatId?: string;
@@ -162,7 +162,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     logPath = join(tmpHome, "cron-invocation.log");
     const stubBin = writeLoggingVendorCli(tmpHome, "stub-claude.sh", logPath);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "viacron",
           path: repoPath,
@@ -187,7 +187,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
         name: "Terminal cron",
         prompt: "run the terminal check",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -217,7 +217,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     expect(data.via).toBe("terminal");
     expect(typeof data.terminalId).toBe("string");
     expect(data.terminalId!.length).toBeGreaterThan(0);
-    expect(data.workspaceId).toBe("viacron-main");
+    expect(data.worktreeId).toBe("viacron-main");
     expect(data.taskId).toBeUndefined();
 
     // The stub vendor CLI logged its argv (one atomic line per spawn) to a file
@@ -245,11 +245,11 @@ describe("cronjobs.trigger via=terminal happy path", () => {
 
     // Self-close: the command ended with `exit`, so the pane closes when the
     // (fast) stub finishes, and the `cleanupOnExit` hook prunes it from the
-    // pool. No terminal should remain for the workspace.
-    const workspaceId = toWorkspaceId("viacron", "main");
+    // pool. No terminal should remain for the worktree.
+    const worktreeId = toWorktreeId("viacron", "main");
     const remaining = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.length === 0 ? list : undefined;
       },
       { label: "self-closing cron terminal pruned" },
@@ -277,7 +277,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
     const repoPath = createGitRepo(tmpHome, "overlapcron");
     const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "overlapcron",
           path: repoPath,
@@ -302,7 +302,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
         name: "Overlapping terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -331,10 +331,10 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
 
     // Wait until the PTY is registered so the overlap check has something to
     // observe, then fire the second trigger while the stub is still sleeping.
-    const workspaceId = toWorkspaceId("overlapcron", "main");
+    const worktreeId = toWorktreeId("overlapcron", "main");
     await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.some((t) => t.terminalId === firstData.terminalId) ? list : undefined;
       },
       { label: "first cron terminal registered" },
@@ -369,7 +369,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     tmpHome = createTmpHome("band-cron-via-chat-");
     const repoPath = createGitRepo(tmpHome, "chatcron");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "chatcron",
           path: repoPath,
@@ -393,7 +393,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
         name: "Chat cron",
         prompt: "chat dispatch work",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
       },
       TOKEN,
     );
@@ -423,16 +423,16 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     expect(typeof data.taskId).toBe("string");
     expect(data.terminalId).toBeUndefined();
     // Assert the full chat-branch shape so a field rename/drop is caught: the
-    // union also carries workspaceId + chatId.
-    expect(data.workspaceId).toBe("chatcron-main");
+    // union also carries worktreeId + chatId.
+    expect(data.worktreeId).toBe("chatcron-main");
     expect(typeof data.chatId).toBe("string");
 
-    const workspaceId = toWorkspaceId("chatcron", "main");
+    const worktreeId = toWorktreeId("chatcron", "main");
 
     // Positive anchor: the chat task actually landed.
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);
+        const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
         return list.find((t) => t.prompt === "chat dispatch work") ? list : undefined;
       },
       { label: "chat task submitted for default via" },
@@ -448,7 +448,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
       .toEqual(["chat dispatch work"]);
 
     // No PTY: chat dispatch never touches the terminal pool.
-    const terminals = await listTerminals(server.url, workspaceId, TOKEN);
+    const terminals = await listTerminals(server.url, worktreeId, TOKEN);
     expect(terminals).toEqual([]);
   });
 });
@@ -472,7 +472,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     tmpHome = createTmpHome("band-cron-via-fallback-");
     const repoPath = createGitRepo(tmpHome, "fbcron");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "fbcron",
           path: repoPath,
@@ -496,7 +496,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
         name: "Fallback cron",
         prompt: "should fall back to chat",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -527,8 +527,8 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
     // Assert the full fallback shape: it lands on the chat branch, so
-    // workspaceId + chatId are present just like a native via=chat trigger.
-    expect(data.workspaceId).toBe("fbcron-main");
+    // worktreeId + chatId are present just like a native via=chat trigger.
+    expect(data.worktreeId).toBe("fbcron-main");
     expect(typeof data.chatId).toBe("string");
   });
 });
@@ -554,7 +554,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const repoPath = createGitRepo(tmpHome, "delcron");
     const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "delcron",
           path: repoPath,
@@ -579,7 +579,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
         name: "Deletable terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -605,12 +605,12 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const triggerData = await trpcData<TriggerResponse>(trigger);
     expect(triggerData.via).toBe("terminal");
 
-    const workspaceId = toWorkspaceId("delcron", "main");
+    const worktreeId = toWorktreeId("delcron", "main");
 
     // Positive anchor: the PTY is live (the stub is still sleeping).
     await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.some((t) => t.terminalId === triggerData.terminalId) ? list : undefined;
       },
       { label: "cron terminal registered before delete" },
@@ -631,7 +631,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
 
     const remaining = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.every((t) => t.terminalId !== triggerData.terminalId) ? list : undefined;
       },
       { label: "cron terminal removed after delete" },
@@ -643,7 +643,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
 // ---------------------------------------------------------------------------
 // Auth — `cronjobs.trigger` is part of this PR's changed contract (now async,
 // returns a chat|terminal union), so this file owns the 401 guard for that
-// surface. Mirrors the auth block in `workspace-create-via.test.ts`.
+// surface. Mirrors the auth block in `worktree-create-via.test.ts`.
 // ---------------------------------------------------------------------------
 
 describe("cronjobs.trigger — auth", () => {
@@ -655,7 +655,7 @@ describe("cronjobs.trigger — auth", () => {
     tmpHome = createTmpHome("band-cron-via-auth-");
     const repoPath = createGitRepo(tmpHome, "authcron");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "authcron",
           path: repoPath,
@@ -706,7 +706,7 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
     const repoPath = createGitRepo(tmpHome, "racecron");
     const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "racecron",
           path: repoPath,
@@ -731,7 +731,7 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
         name: "Racing terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "project",
+        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -759,11 +759,11 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
     // would mean two PTYs raced past the guard).
     expect(statuses).toEqual([200, 409]);
 
-    // And the workspace holds exactly one terminal — no orphan.
-    const workspaceId = toWorkspaceId("racecron", "main");
+    // And the worktree holds exactly one terminal — no orphan.
+    const worktreeId = toWorktreeId("racecron", "main");
     const terminals = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.length >= 1 ? list : undefined;
       },
       { label: "one cron terminal registered" },
@@ -773,32 +773,32 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
 });
 
 // ---------------------------------------------------------------------------
-// via=terminal — workspace-scoped job resolves to its own workspaceId (not the
-// project's default-branch workspace). All other blocks use scope="project";
-// this exercises `resolveWorkspaceId`'s workspace branch (returns
-// `job.workspaceId` directly) with a terminal dispatch, on a NON-default
+// via=terminal — worktree-scoped job resolves to its own worktreeId (not the
+// repo's default-branch worktree). All other blocks use scope="repo";
+// this exercises `resolveWorktreeId`'s worktree branch (returns
+// `job.worktreeId` directly) with a terminal dispatch, on a NON-default
 // branch so the two resolutions are distinguishable.
 // ---------------------------------------------------------------------------
 
-describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
+describe("cronjobs.trigger via=terminal on a worktree-scoped job", () => {
   const TOKEN = "cron-via-wsscope-token";
   const STUB_SLEEP_SECONDS = 6;
   let server: ServerHandle;
   let tmpHome: string;
   let jobId: string;
-  const FEATURE_WS = toWorkspaceId("wsscron", "feature");
+  const FEATURE_WS = toWorktreeId("wsscron", "feature");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cron-via-wsscope-");
     const repoPath = createGitRepo(tmpHome, "wsscron");
-    // A real second worktree on a non-default branch so `workspaceService
+    // A real second worktree on a non-default branch so `worktreeService
     // .resolve(FEATURE_WS)` finds a path and the resolved id ("wsscron-feature")
-    // differs from the project default ("wsscron-main").
+    // differs from the repo default ("wsscron-main").
     const featurePath = join(tmpHome, "wsscron-feature-wt");
     git(repoPath, ["worktree", "add", featurePath, "-b", "feature"]);
     const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "wsscron",
           path: repoPath,
@@ -818,17 +818,17 @@ describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
     });
     server = await startServer({ tmpHome });
 
-    // Storage key for a workspace-scoped cron is the workspace id itself.
+    // Storage key for a worktree-scoped cron is the worktree id itself.
     const res = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
         key: FEATURE_WS,
-        name: "Workspace-scoped terminal cron",
-        prompt: "workspace scoped work",
+        name: "Worktree-scoped terminal cron",
+        prompt: "worktree scoped work",
         cronExpression: "0 0 * * *",
-        scope: "workspace",
-        workspaceId: FEATURE_WS,
+        scope: "worktree",
+        worktreeId: FEATURE_WS,
         via: "terminal",
       },
       TOKEN,
@@ -843,7 +843,7 @@ describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("dispatches the terminal into the job's own workspace", async () => {
+  it("dispatches the terminal into the job's own worktree", async () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
@@ -854,17 +854,17 @@ describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
     const data = await trpcData<TriggerResponse>(res);
     expect(data.via).toBe("terminal");
     expect(typeof data.terminalId).toBe("string");
-    // The workspace branch returns the job's workspaceId verbatim — the feature
-    // workspace, NOT the project's default "wsscron-main".
-    expect(data.workspaceId).toBe(FEATURE_WS);
+    // The worktree branch returns the job's worktreeId verbatim — the feature
+    // worktree, NOT the repo's default "wsscron-main".
+    expect(data.worktreeId).toBe(FEATURE_WS);
 
-    // And the PTY is registered under that same workspace.
+    // And the PTY is registered under that same worktree.
     const terminals = await waitFor(
       async () => {
         const list = await listTerminals(server.url, FEATURE_WS, TOKEN);
         return list.some((t) => t.terminalId === data.terminalId) ? list : undefined;
       },
-      { label: "terminal registered under the feature workspace" },
+      { label: "terminal registered under the feature worktree" },
     );
     expect(terminals.some((t) => t.terminalId === data.terminalId)).toBe(true);
   });

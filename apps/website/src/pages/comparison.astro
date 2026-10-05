@@ -44,7 +44,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <td class="py-3 text-muted-foreground">IDE's agent only</td>
               </tr>
               <tr>
-                <td class="py-3 pr-6 text-muted-foreground">Workspace isolation</td>
+                <td class="py-3 pr-6 text-muted-foreground">Worktree isolation</td>
                 <td class="py-3 pr-6 text-success">Git worktrees</td>
                 <td class="py-3 pr-6 text-muted-foreground">Manual setup</td>
                 <td class="py-3 text-muted-foreground">Manual setup</td>
@@ -94,7 +94,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           <h2 class="text-2xl font-bold text-text">Band vs. running agents directly in the terminal</h2>
           <p class="mt-4 leading-relaxed text-muted-foreground">
             Running a coding agent directly in a terminal window works fine for a single task. But as soon as you're
-            managing multiple agents across different projects, the complexity grows quickly.
+            managing multiple agents across different repos, the complexity grows quickly.
           </p>
           <div class="mt-6 grid gap-4 md:grid-cols-2">
             <div class="rounded-xl border border-border bg-card/50 p-5">
@@ -127,7 +127,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               <ul class="mt-3 space-y-2 text-sm text-muted-foreground">
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
-                  One-click workspace creation with isolated worktrees
+                  One-click worktree creation with isolated worktrees
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
@@ -135,7 +135,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
-                  Real-time status for every workspace
+                  Real-time status for every worktree
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
@@ -161,7 +161,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             <div class="rounded-xl border border-border bg-card/50 p-5">
               <h3 class="font-semibold text-text">IDE lock-in</h3>
               <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-                IDE-native agents tie you to that editor. If you use VS Code for web projects and Xcode for iOS,
+                IDE-native agents tie you to that editor. If you use VS Code for web repos and Xcode for iOS,
                 you need separate agent setups. Band gives you one dashboard regardless of which editor you're using.
               </p>
             </div>
@@ -169,14 +169,14 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               <h3 class="font-semibold text-text">Agent lock-in</h3>
               <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
                 IDE-native features typically only support the IDE's own agent. With Band, you can use Claude Code
-                in one workspace and Cursor in another, choosing the best agent for each task.
+                in one worktree and Cursor in another, choosing the best agent for each task.
               </p>
             </div>
             <div class="rounded-xl border border-border bg-card/50 p-5">
-              <h3 class="font-semibold text-text">No cross-project visibility</h3>
+              <h3 class="font-semibold text-text">No cross-repo visibility</h3>
               <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-                IDE agents work within a single project window. Band shows you agent activity across all your
-                projects in one place, making it easy to manage multiple parallel tasks.
+                IDE agents work within a single repo window. Band shows you agent activity across all your
+                repos in one place, making it easy to manage multiple parallel tasks.
               </p>
             </div>
           </div>

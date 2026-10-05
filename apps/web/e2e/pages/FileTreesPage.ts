@@ -1,5 +1,5 @@
 /**
- * Page object for the two workspace file trees and their right-click
+ * Page object for the two worktree file trees and their right-click
  * "Copy relative path" / "Copy absolute path" context-menu actions:
  *
  *   - Files view  → `FileBrowser` (the Explorer section of the right
@@ -10,7 +10,7 @@
  * Both trees moved out of the center dockview and into the persistent right
  * sidepanel in #643 Phase 2 (`RightSidepanel.tsx`, rendered in `__root.tsx`).
  * The sidepanel is visible by default; `openFilesTab` / `openChangesTab`
- * therefore reveal it (via `WorkspacePage.revealRightPanel`) and interact with
+ * therefore reveal it (via `WorktreePage.revealRightPanel`) and interact with
  * the always-mounted tree rows rather than clicking a center tab.
  *
  * Row buttons carry a `data-testid` of `file-tree__row--<path>` /
@@ -21,29 +21,29 @@
  * This is a SECONDARY page object: it owns no routes and constructs no URLs,
  * so it intentionally does NOT follow the `(page, baseUrl, …)` + `goto()`
  * convention of primary page objects. All navigation (URL construction,
- * `goto`) and clipboard capture live on `WorkspacePage`, which is passed in and
+ * `goto`) and clipboard capture live on `WorktreePage`, which is passed in and
  * delegated to for revealing the sidepanel rather than re-deriving its testids
  * here.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
 import { FILE_VIEWER_ROOT_TESTID } from "./FileViewerPage";
-import type { WorkspacePage } from "./WorkspacePage";
+import type { WorktreePage } from "./WorktreePage";
 
 export class FileTreesPage {
   constructor(
     private readonly page: Page,
-    private readonly workspace: WorkspacePage,
+    private readonly worktree: WorktreePage,
   ) {}
 
   /** A row in the Files tree (`FileBrowser`), keyed by its
-   *  workspace-relative path. */
+   *  worktree-relative path. */
   fileTreeRow(path: string): Locator {
     return this.page.getByTestId(`file-tree__row--${path}`);
   }
 
   /** A row in the Changes tree (`ChangesFileTree`), keyed by its
-   *  workspace-relative path. */
+   *  worktree-relative path. */
   changesTreeRow(path: string): Locator {
     return this.page.getByTestId(`changes-tree__row--${path}`);
   }
@@ -75,8 +75,8 @@ export class FileTreesPage {
    *  moved the tree here from the removed `center-tab--files` singleton). */
   async openFilesTab(path: string): Promise<void> {
     await test.step("Open the Explorer section (right sidepanel)", async () => {
-      await this.workspace.revealRightPanel();
-      await this.workspace.explorerSection.waitFor({ state: "visible", timeout: 15_000 });
+      await this.worktree.revealRightPanel();
+      await this.worktree.explorerSection.waitFor({ state: "visible", timeout: 15_000 });
       await this.fileTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
@@ -88,10 +88,10 @@ export class FileTreesPage {
    *  the tree here from the removed `center-tab--changes` singleton). */
   async openChangesTab(path: string): Promise<void> {
     await test.step("Open the Changes section (right sidepanel)", async () => {
-      await this.workspace.revealRightPanel();
+      await this.worktree.revealRightPanel();
       // The panel defaults to Explorer; select Changes so its body mounts.
-      await this.workspace.selectRightPanelTab("changes");
-      await this.workspace.changesSection.waitFor({ state: "visible", timeout: 15_000 });
+      await this.worktree.selectRightPanelTab("changes");
+      await this.worktree.changesSection.waitFor({ state: "visible", timeout: 15_000 });
       await this.changesTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
@@ -244,7 +244,7 @@ export class FileTreesPage {
 
   /** Drag a Files-tree row onto the empty area below the rows (the root). */
   async dragRowToRoot(from: string): Promise<void> {
-    await test.step(`Drag ${from} to the workspace root`, async () => {
+    await test.step(`Drag ${from} to the worktree root`, async () => {
       const box = await this.treeRoot.boundingBox();
       const lastRow = await this.page
         .getByTestId(/^file-tree__row--/)

@@ -1,4 +1,4 @@
-/// Validate a user-provided name (project name, branch name, etc.).
+/// Validate a user-provided name (repo name, branch name, etc.).
 ///
 /// Rejects empty strings, control characters, path traversals, and excessively long inputs.
 pub fn validate_name(value: &str, label: &str) -> Result<(), String> {
@@ -17,7 +17,7 @@ pub fn validate_name(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate a user-provided filesystem path (e.g. for `projects add`).
+/// Validate a user-provided filesystem path (e.g. for `repos add`).
 ///
 /// Rejects empty strings, control characters, and excessively long inputs.
 pub fn validate_path(value: &str, label: &str) -> Result<(), String> {

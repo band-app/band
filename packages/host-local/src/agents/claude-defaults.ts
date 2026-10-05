@@ -12,7 +12,7 @@
  *     entry in `modelSettings`, the top-level `effortLevel` setting, then the
  *     model's own default effort (a table inside the CLI).
  *
- * Settings merge from `~/.claude/settings.json`, the project's
+ * Settings merge from `~/.claude/settings.json`, the repo's
  * `.claude/settings.json` and `.claude/settings.local.json`, any `--settings`
  * file on the CLI's command line (a wrapper script such as one that points
  * Claude Code at a gateway adds one), and managed settings. A settings file's
@@ -72,7 +72,7 @@ function readSettings(source: string, cwd: string | undefined): ClaudeSettings |
 
 /** Settings in the CLI's precedence order, lowest first, merged. `env` and
  *  `modelSettings` merge per key; everything else is replaced. Without a
- *  `cwd` there are no project settings. */
+ *  `cwd` there are no repo settings. */
 function mergedSettings(
   cwd: string | undefined,
   env: NodeJS.ProcessEnv,
@@ -157,7 +157,7 @@ export function configuredClaudeDefaults(opts: {
   return { model, effort };
 }
 
-/** Claude Code's project directory name: the real path of the cwd (macOS
+/** Claude Code's repo directory name: the real path of the cwd (macOS
  *  `/tmp` is `/private/tmp`), every non-alphanumeric → `-`. */
 function transcriptPath(env: NodeJS.ProcessEnv, cwd: string, sessionId: string): string {
   let real = cwd;

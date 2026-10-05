@@ -2,7 +2,7 @@
  * The mobile layout never lets the document itself scroll; only the panes
  * inside it do. On iOS a scrolled document opened a gap between the composer
  * and the software keyboard and slid the header under iOS 26's top-edge blur
- * (`useAppHeight` in `MobileWorkspaceShell.tsx` undoes any document scroll).
+ * (`useAppHeight` in `MobileWorktreeShell.tsx` undoes any document scroll).
  * Also checks that the page head links the web app manifest, which keeps
  * every Band URL inside the home-screen app.
  *
@@ -19,7 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -34,8 +34,8 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 import { MobileLayoutPage } from "./pages/MobileLayoutPage";
 
 const TOKEN = "e2e-mobile-document-scroll-token";
-const PROJECT = "docscroll";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "docscroll";
+const WORKTREE = toWorktreeId(REPO, "main");
 const LONG_ANSWER = Array.from(
   { length: 60 },
   (_, i) => `Paragraph ${i + 1} of a long answer that the transcript has to scroll through.`,
@@ -46,12 +46,12 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repoDir = join(tmpHome, PROJECT);
+  const repoDir = join(tmpHome, REPO);
   mkdirSync(repoDir, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -88,7 +88,7 @@ test("the page head links the web app manifest", async ({ page }) => {
 test("the document stays at scroll 0 while the chat transcript scrolls", async ({ page }) => {
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(WORKSPACE);
+  await chat.goto(WORKTREE);
   await chat.waitForReady();
   await chat.typeMessage("Write a long answer");
   await chat.tapSend();
@@ -120,7 +120,7 @@ test("a scroll made while a sheet locks the page is kept until the sheet closes"
 }) => {
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
-  await chat.goto(WORKSPACE);
+  await chat.goto(WORKTREE);
   await chat.waitForReady();
   await layout.openSheet("explorer");
 

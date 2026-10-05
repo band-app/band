@@ -4,7 +4,7 @@
  */
 
 /** Bump on any change that an older peer would misread. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const DEFAULT_HEARTBEAT_MS = 15_000;
 /** A peer is lost after this many heartbeat intervals with no frame received. */

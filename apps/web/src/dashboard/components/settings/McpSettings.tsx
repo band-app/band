@@ -16,7 +16,7 @@ const VAULT_KEY = ["mcp.vault-items"] as const;
 const AUDIT_PAGE = 20;
 const POLL_MS = 1000;
 
-type ScopeMode = "all" | "projects" | "hosts";
+type ScopeMode = "all" | "repos" | "hosts";
 
 /** One environment variable of a stdio server: a literal, or the id of a vault item. */
 interface EnvRow {
@@ -46,7 +46,7 @@ interface FormState {
   readOnly: boolean;
   enabled: boolean;
   scopeMode: ScopeMode;
-  scopeProjects: string[];
+  scopeRepos: string[];
   scopeHosts: string[];
 }
 
@@ -68,7 +68,7 @@ const EMPTY_FORM: FormState = {
   readOnly: false,
   enabled: true,
   scopeMode: "all",
-  scopeProjects: [],
+  scopeRepos: [],
   scopeHosts: [],
 };
 
@@ -94,16 +94,16 @@ function formFor(server: McpServer): FormState {
     allowed: server.allowTools ?? [],
     readOnly: server.readOnly,
     enabled: server.enabled,
-    scopeMode: server.scopeProjects ? "projects" : server.scopeHosts ? "hosts" : "all",
-    scopeProjects: server.scopeProjects ?? [],
+    scopeMode: server.scopeRepos ? "repos" : server.scopeHosts ? "hosts" : "all",
+    scopeRepos: server.scopeRepos ?? [],
     scopeHosts: server.scopeHosts ?? [],
   };
 }
 
 function scopeSummary(server: McpServer): string {
-  if (server.scopeProjects) return `Projects: ${server.scopeProjects.join(", ") || "none"}`;
+  if (server.scopeRepos) return `Repos: ${server.scopeRepos.join(", ") || "none"}`;
   if (server.scopeHosts) return `Hosts: ${server.scopeHosts.join(", ") || "none"}`;
-  return "All workspaces";
+  return "All worktrees";
 }
 
 /** What the hub is sent for a stdio server's process. Rows with no name are dropped. */
@@ -165,11 +165,11 @@ export function McpSettings() {
     queryFn: async () => (await trpc.vault.list.query()).items,
     enabled: servers.isSuccess && form !== null,
   });
-  const projects = useQuery({
-    queryKey: ["mcp.projects"],
+  const repos = useQuery({
+    queryKey: ["mcp.repos"],
     queryFn: async () =>
-      ((await trpc.projects.list.query()).projects as Array<{ name: string }>).map((p) => p.name),
-    enabled: form?.scopeMode === "projects",
+      ((await trpc.repos.list.query()).repos as Array<{ name: string }>).map((p) => p.name),
+    enabled: form?.scopeMode === "repos",
   });
   // Scope choices, the stdio host picker and the status of a stdio server's host.
   const hosts = useQuery({
@@ -298,7 +298,7 @@ export function McpSettings() {
       allowTools: form.allowAll ? null : form.allowed,
       readOnly: form.readOnly,
       enabled: form.enabled,
-      scopeProjects: form.scopeMode === "projects" ? form.scopeProjects : null,
+      scopeRepos: form.scopeMode === "repos" ? form.scopeRepos : null,
       scopeHosts: form.scopeMode === "hosts" ? form.scopeHosts : null,
     };
     try {
@@ -816,8 +816,8 @@ export function McpSettings() {
               <legend className="text-sm font-medium">Scope</legend>
               {(
                 [
-                  ["all", "All workspaces"],
-                  ["projects", "Selected projects"],
+                  ["all", "All worktrees"],
+                  ["repos", "Selected repos"],
                   ["hosts", "Selected hosts"],
                 ] as const
               ).map(([mode, label]) => (
@@ -836,20 +836,20 @@ export function McpSettings() {
                 <input type="radio" name="mcp-scope" disabled aria-label="Scope: Missions" />
                 Missions (not available yet)
               </label>
-              {form.scopeMode === "projects"
-                ? (projects.data ?? []).map((project) => (
-                    <label key={project} className="ml-6 flex items-center gap-2 text-sm">
+              {form.scopeMode === "repos"
+                ? (repos.data ?? []).map((repo) => (
+                    <label key={repo} className="ml-6 flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
-                        aria-label={`Project ${project}`}
-                        checked={form.scopeProjects.includes(project)}
+                        aria-label={`Repo ${repo}`}
+                        checked={form.scopeRepos.includes(repo)}
                         onChange={(e) =>
                           patch({
-                            scopeProjects: toggle(form.scopeProjects, project, e.target.checked),
+                            scopeRepos: toggle(form.scopeRepos, repo, e.target.checked),
                           })
                         }
                       />
-                      {project}
+                      {repo}
                     </label>
                   ))
                 : null}

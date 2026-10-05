@@ -25,7 +25,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "../e2e/helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -43,8 +43,8 @@ import { HubUnreachablePage } from "./pages/HubUnreachablePage";
 
 const LOCAL_TOKEN = "desktop-e2e-local-token";
 const REMOTE_TOKEN = "desktop-e2e-remote-token";
-const LOCAL_WORKSPACE = toWorkspaceId("localproj", "main");
-const REMOTE_WORKSPACE = toWorkspaceId("remoteproj", "main");
+const LOCAL_WORKTREE = toWorktreeId("localproj", "main");
+const REMOTE_WORKTREE = toWorktreeId("remoteproj", "main");
 const LOCAL_REPLY = "Reply from the local hub";
 const REMOTE_REPLY = "Reply from the remote hub";
 
@@ -53,16 +53,16 @@ interface HubHome {
   port: number;
 }
 
-/** A HOME with one project, a token, a coding agent and the scripted reply. */
-async function seedHome(project: string, reply: string, token: string): Promise<HubHome> {
+/** A HOME with one repo, a token, a coding agent and the scripted reply. */
+async function seedHome(repoName: string, reply: string, token: string): Promise<HubHome> {
   const home = createTmpHome();
   const repo = join(home, "repo");
   mkdirSync(repo, { recursive: true });
   writeFileSync(join(repo, "README.md"), "# fixture\n");
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: project,
+        name: repoName,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repo }],
@@ -144,8 +144,8 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     // The local hub was spawned and answers with the token.
     await expect.poll(() => localHubAnswers(hub.port, LOCAL_TOKEN), { timeout: 30_000 }).toBe(true);
 
-    await dashboard.expectProjectListed("localproj");
-    await dashboard.openWorkspace(LOCAL_WORKSPACE);
+    await dashboard.expectRepoListed("localproj");
+    await dashboard.openWorktree(LOCAL_WORKTREE);
 
     // The scripted agent can't run in a packaged app (see `launchDesktop`).
     if (!isPackagedRun()) {
@@ -157,11 +157,11 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
 
     // S3: a reload and a deep link keep the route.
     const route = new URL(dashboard.url()).pathname;
-    expect(route).toBe(`/workspace/${encodeURIComponent(LOCAL_WORKSPACE)}`);
+    expect(route).toBe(`/worktree/${encodeURIComponent(LOCAL_WORKTREE)}`);
     await dashboard.reload();
     expect(new URL(dashboard.url()).pathname).toBe(route);
     await dashboard.chat.waitForReady();
-    await dashboard.gotoDeepLink(LOCAL_WORKSPACE);
+    await dashboard.gotoDeepLink(LOCAL_WORKTREE);
     expect(new URL(dashboard.url()).pathname).toBe(route);
     await dashboard.chat.waitForReady();
 
@@ -183,9 +183,9 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
 
     expect(dashboard.url()).toMatch(/^app:\/\/h-[0-9a-f]{12}\//);
 
-    // The remote hub's workspace is listed, not the (unseeded) local one.
-    await dashboard.expectProjectListed("remoteproj");
-    await dashboard.openWorkspace(REMOTE_WORKSPACE);
+    // The remote hub's worktree is listed, not the (unseeded) local one.
+    await dashboard.expectRepoListed("remoteproj");
+    await dashboard.openWorktree(REMOTE_WORKTREE);
     await dashboard.chat.typeMessage("hello remote");
     await dashboard.chat.submit();
     await expect(dashboard.chat.assistantMessage(REMOTE_REPLY)).toBeVisible({ timeout: 30_000 });
@@ -225,7 +225,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     await unreachable.clickUseLocal();
     const dashboard = new DesktopDashboardPage(app.window);
     await expect.poll(() => dashboard.url(), { timeout: 60_000 }).toMatch(/^app:\/\/local\//);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.expectRepoListed("localproj");
     expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(true);
     expect(app.cspViolations).toEqual([]);
   });
@@ -234,7 +234,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     const { app, hub } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
     const picker = new HubPickerPage(app.window);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.expectRepoListed("localproj");
     await dashboard.writeStorage("e2e-marker", "local");
     const localUrl = dashboard.url();
 
@@ -249,7 +249,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     await expect
       .poll(() => dashboard.url(), { timeout: 30_000 })
       .toMatch(/^app:\/\/h-[0-9a-f]{12}\//);
-    await dashboard.expectProjectListed("remoteproj");
+    await dashboard.expectRepoListed("remoteproj");
     // The other hub's storage is not visible here.
     expect(await dashboard.readStorage("e2e-marker")).toBeNull();
     // The local hub was stopped.
@@ -261,7 +261,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     await picker.open();
     await picker.chooseLocal();
     await expect.poll(() => dashboard.url(), { timeout: 60_000 }).toMatch(/^app:\/\/local\//);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.expectRepoListed("localproj");
     expect(await dashboard.readStorage("e2e-marker")).toBe("local");
     await expect.poll(() => localHubAnswers(hub.port, LOCAL_TOKEN), { timeout: 30_000 }).toBe(true);
   });
@@ -269,7 +269,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
   test("the window cannot be navigated away from app:// or opened into another window", async () => {
     const { app } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.expectRepoListed("localproj");
     const windowsBefore = app.windowCount();
 
     await dashboard.navigateTo("app://h-000000000000/");
@@ -280,8 +280,8 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     // A fresh in-app navigation queues behind the attempts above, so once the
     // dashboard renders again a wrongly allowed navigation or window would
     // already have shown up.
-    await dashboard.gotoDeepLink(LOCAL_WORKSPACE);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.gotoDeepLink(LOCAL_WORKTREE);
+    await dashboard.expectRepoListed("localproj");
     expect(dashboard.url()).toContain("app://local/");
     expect(dashboard.url()).not.toContain("h-000000000000");
     expect(app.windowCount()).toBe(windowsBefore);
@@ -290,8 +290,8 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
   test("browser panes still attach their <webview> guests under app://", async () => {
     const { app } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
-    await dashboard.expectProjectListed("localproj");
-    await dashboard.gotoDeepLink(LOCAL_WORKSPACE);
+    await dashboard.expectRepoListed("localproj");
+    await dashboard.gotoDeepLink(LOCAL_WORKTREE);
     await dashboard.openBrowserTab();
     expect(await dashboard.expectBrowserGuestAttached()).toBeGreaterThan(0);
     expect(app.cspViolations).toEqual([]);
@@ -300,8 +300,8 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
   test("a terminal opens under app:// and runs a command", async () => {
     const { app } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
-    await dashboard.expectProjectListed("localproj");
-    const terminal = await dashboard.openTerminal(LOCAL_WORKSPACE);
+    await dashboard.expectRepoListed("localproj");
+    const terminal = await dashboard.openTerminal(LOCAL_WORKTREE);
     // The sum is computed by the shell, so the result line can't be the echoed command.
     await terminal.typeLine("echo band-e2e-$((40 + 2))");
     await expect
@@ -313,7 +313,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
   test("the folder picker IPC returns the path of a stubbed dialog result", async () => {
     const { app, hub } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
-    await dashboard.expectProjectListed("localproj");
+    await dashboard.expectRepoListed("localproj");
     const folder = join(hub.home, "repo");
     // The real dialog is a native macOS sheet nobody can click in CI.
     await app.stubOpenDialog([folder]);

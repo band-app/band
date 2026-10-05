@@ -6,7 +6,7 @@ import { publicProcedure, t } from "../trpc";
  * Browser-history sub-router — migrated out of the legacy
  * `apps/web/src/trpc/router.ts` as part of Phase 8 (issue #319).
  *
- * Persistent per-workspace visit log. Surfaced as `trpc.history.*` and
+ * Persistent per-worktree visit log. Surfaced as `trpc.history.*` and
  * consumed by:
  *   - `BrowserPanel` listeners — call `record` on each committed
  *     navigation and `updateMeta` when `page-title-updated` fires.
@@ -16,7 +16,7 @@ import { publicProcedure, t } from "../trpc";
  *   - `ChromeImportDialog` — calls `import` with the history the desktop
  *     app read from a Chrome profile.
  *
- * Visits are upserted on (workspaceId, url) — see the dedupe / frecency
+ * Visits are upserted on (worktreeId, url) — see the dedupe / frecency
  * rules in `infra/db/queries/browser-history.ts`. The router goes
  * through `services/browser-history-service.ts` so the API tier never
  * imports infra directly.
@@ -84,7 +84,7 @@ export const historyRouter = t.router({
   record: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         url: z.string().min(1).max(MAX_URL_LENGTH),
         title: z.string().max(MAX_TITLE_LENGTH).optional(),
         faviconUrl: faviconUrlSchema.optional(),
@@ -92,7 +92,7 @@ export const historyRouter = t.router({
     )
     .mutation(({ input }) => {
       const recorded = browserHistoryService.recordVisit({
-        workspaceId: input.workspaceId,
+        worktreeId: input.worktreeId,
         url: input.url,
         title: input.title,
         faviconUrl: input.faviconUrl,
@@ -103,7 +103,7 @@ export const historyRouter = t.router({
   updateMeta: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         url: z.string().min(1).max(MAX_URL_LENGTH),
         title: z.string().max(MAX_TITLE_LENGTH).optional(),
         faviconUrl: faviconUrlSchema.optional(),
@@ -111,7 +111,7 @@ export const historyRouter = t.router({
     )
     .mutation(({ input }) => {
       browserHistoryService.updateVisitMeta({
-        workspaceId: input.workspaceId,
+        worktreeId: input.worktreeId,
         url: input.url,
         title: input.title,
         faviconUrl: input.faviconUrl,
@@ -122,13 +122,13 @@ export const historyRouter = t.router({
   list: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         limit: z.number().int().positive().max(500).optional(),
         offset: z.number().int().nonnegative().optional(),
       }),
     )
     .query(({ input }) => {
-      const entries = browserHistoryService.listHistory(input.workspaceId, {
+      const entries = browserHistoryService.listHistory(input.worktreeId, {
         limit: input.limit,
         offset: input.offset,
       });
@@ -138,14 +138,14 @@ export const historyRouter = t.router({
   search: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         query: z.string(),
         limit: z.number().int().positive().max(50).optional(),
       }),
     )
     .query(({ input }) => {
       const entries = browserHistoryService.searchHistory(
-        input.workspaceId,
+        input.worktreeId,
         input.query,
         input.limit ?? 8,
       );
@@ -154,19 +154,19 @@ export const historyRouter = t.router({
 
   delete: publicProcedure
     // `positive()` rather than `nonnegative()` — autoincrement ids
-    // start at 1. `workspaceId` scopes the delete so a caller that
-    // knows a row id from a *different* workspace can't reach into
+    // start at 1. `worktreeId` scopes the delete so a caller that
+    // knows a row id from a *different* worktree can't reach into
     // it.
-    .input(z.object({ id: z.number().int().positive(), workspaceId: z.string().min(1) }))
+    .input(z.object({ id: z.number().int().positive(), worktreeId: z.string().min(1) }))
     .mutation(({ input }) => {
-      browserHistoryService.deleteHistoryEntry(input.id, input.workspaceId);
+      browserHistoryService.deleteHistoryEntry(input.id, input.worktreeId);
       return { ok: true };
     }),
 
   import: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         entries: z
           .array(
             z.object({
@@ -180,20 +180,20 @@ export const historyRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const imported = browserHistoryService.importVisits(input.workspaceId, input.entries);
+      const imported = browserHistoryService.importVisits(input.worktreeId, input.entries);
       return { imported };
     }),
 
   clear: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string().min(1),
+        worktreeId: z.string().min(1),
         range: clearRangeSchema,
       }),
     )
     .mutation(({ input }) => {
       const deleted = browserHistoryService.clearHistory(
-        input.workspaceId,
+        input.worktreeId,
         input.range satisfies ClearRange,
       );
       return { deleted };

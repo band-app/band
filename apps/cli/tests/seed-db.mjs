@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Seed the SQLite database for CLI integration tests.
-// Usage: node seed-db.mjs <band_dir> <project_name> <project_path> <default_branch> [settings_json]
+// Usage: node seed-db.mjs <band_dir> <repo_name> <repo_path> <default_branch> [settings_json]
 //
-// Creates band.db with Drizzle migrations applied, a single project row,
+// Creates band.db with Drizzle migrations applied, a single repo row,
 // and optionally writes settings to settings.json.
 //
 // Uses Node's built-in `node:sqlite` (Stability 1.2 RC, available unflagged
@@ -13,11 +13,11 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const [bandDir, projectName, projectPath, defaultBranch, settingsJson] =
+const [bandDir, repoName, repoPath, defaultBranch, settingsJson] =
   process.argv.slice(2);
-if (!bandDir || !projectName || !projectPath || !defaultBranch) {
+if (!bandDir || !repoName || !repoPath || !defaultBranch) {
   console.error(
-    "Usage: node seed-db.mjs <band_dir> <project_name> <project_path> <default_branch> [settings_json]"
+    "Usage: node seed-db.mjs <band_dir> <repo_name> <repo_path> <default_branch> [settings_json]"
   );
   process.exit(1);
 }
@@ -83,14 +83,14 @@ for (const folder of migrationFolders) {
   ).run(hash, folderMillis(folder), folder, appliedAt);
 }
 
-// Seed the test project and its default worktree.
+// Seed the test repo and its default worktree.
 db.prepare(
-  "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
-).run(projectName, projectPath, defaultBranch);
+  "INSERT INTO repos (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
+).run(repoName, repoPath, defaultBranch);
 
 db.prepare(
-  "INSERT INTO worktrees (project_name, branch, path) VALUES (?, ?, ?)"
-).run(projectName, defaultBranch, projectPath);
+  "INSERT INTO worktrees (repo_name, branch, path) VALUES (?, ?, ?)"
+).run(repoName, defaultBranch, repoPath);
 
 db.close();
 

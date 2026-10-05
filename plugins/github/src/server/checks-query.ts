@@ -287,7 +287,7 @@ const LIST_ORDER: Record<CheckState, number> = {
   skipped: 6,
 };
 
-// failure > running > pending > cancelled > success, as the workspace card's
+// failure > running > pending > cancelled > success, as the worktree card's
 // CI badge aggregates.
 const AGGREGATE_PRIORITY: Partial<Record<CheckState, number>> = {
   failure: 4,

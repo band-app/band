@@ -114,16 +114,16 @@ afterAll(async () => {
   rmSync(tmpHome, { recursive: true, force: true });
 });
 
-describe("workspace.getMaximizedState", () => {
+describe("worktree.getMaximizedState", () => {
   it("returns 401 without a token", async () => {
-    const res = await fetch(`${server.url}/trpc/workspace.getMaximizedState`);
+    const res = await fetch(`${server.url}/trpc/worktree.getMaximizedState`);
     expect(res.status).toBe(401);
   });
 
   it("returns null when no state has been saved", async () => {
     const url =
-      `${server.url}/trpc/workspace.getMaximizedState?input=${
-        encodeURIComponent(JSON.stringify({ workspaceId: "ws-1" }))
+      `${server.url}/trpc/worktree.getMaximizedState?input=${
+        encodeURIComponent(JSON.stringify({ worktreeId: "ws-1" }))
       }`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${TOKEN}` } });
     expect(res.status).toBe(200);
@@ -188,13 +188,13 @@ Frontend tests boot the **same** server backend tests boot. The page they drive 
 
 If a feature's behaviour depends on an external service (GitHub API, agent process, etc.), stub **that external service** with an Express fixture on a random port, exactly the same way a backend test would. The server reads its URL from an env var at request time and the test fixture overrides the env var.
 
-> **Legacy carve-out:** `apps/web/e2e/helpers/trpc-mock.ts` exists and the two `workspace-switch-*.spec.ts` files use it. Treat that as technical debt to be migrated, **not** as a pattern to copy.
+> **Legacy carve-out:** `apps/web/e2e/helpers/trpc-mock.ts` exists and the two `worktree-switch-*.spec.ts` files use it. Treat that as technical debt to be migrated, **not** as a pattern to copy.
 
 ### Minimal shape
 
 ```ts
 import { rmSync } from "node:fs";
-import { toWorkspaceId } from "@band-app/dashboard-core";
+import { toWorktreeId } from "@band-app/dashboard-core";
 import { expect, test } from "@playwright/test";
 import {
   createTmpHome,
@@ -203,11 +203,11 @@ import {
   startServer,
   type ServerHandle,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 import { catalogStub } from "./fixtures/catalog";
 
 const TOKEN = "e2e-maximize-state-token";
-const WORKSPACE_A = toWorkspaceId("alpha", "main");
+const WORKTREE_A = toWorktreeId("alpha", "main");
 
 // Wide viewport so useIsDesktop() reports true and the shared dockview renders.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -218,7 +218,7 @@ let catalog: Awaited<ReturnType<typeof catalogStub.start>>;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [{ name: "alpha", path: "/tmp/fake/alpha",
+  seedState(tmpHome, { repos: [{ name: "alpha", path: "/tmp/fake/alpha",
     defaultBranch: "main", worktrees: [{ branch: "main", path: "/tmp/fake/alpha" }] }] });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   catalog = await catalogStub.start();
@@ -235,11 +235,11 @@ test.afterAll(async () => {
 });
 
 test.describe("Maximize state", () => {
-  test("Maximizing a pane persists it across workspace switches", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.maximizePanel();
-    await expect(workspacePage.restoreButton).toBeVisible();
+  test("Maximizing a pane persists it across worktree switches", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.maximizePanel();
+    await expect(worktreePage.restoreButton).toBeVisible();
     // …drive the rest of the scenario via page-object methods…
   });
 });
@@ -252,10 +252,10 @@ test.describe("Maximize state", () => {
 Tests **never** call `page.getByRole()` / `page.getByTestId()` / `page.goto()` directly in the test body *(enforces TEST-21)*. Everything goes through page objects (one per route/page) and component objects (one per section of a page).
 
 ```ts
-// apps/web/e2e/pages/WorkspacePage.ts
+// apps/web/e2e/pages/WorktreePage.ts
 import { type Locator, type Page, test } from "@playwright/test";
 
-export class WorkspacePage {
+export class WorktreePage {
   readonly maximizeButton: Locator;
   readonly restoreButton: Locator;
 
@@ -268,8 +268,8 @@ export class WorkspacePage {
     this.restoreButton = page.getByRole("button", { name: "Restore" });
   }
 
-  async goto(workspaceId: string) {
-    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}/code?token=${this.token}`;
+  async goto(worktreeId: string) {
+    const url = `${this.baseUrl}/worktree/${encodeURIComponent(worktreeId)}/code?token=${this.token}`;
     await test.step(`Navigate to ${url}`, async () => {
       await this.page.goto(url);
     });
@@ -281,12 +281,12 @@ export class WorkspacePage {
     });
   }
 
-  async readMaximizedGroup(workspaceId: string): Promise<string | undefined> {
+  async readMaximizedGroup(worktreeId: string): Promise<string | undefined> {
     return await this.page.evaluate(([id]) => {
       const raw = localStorage.getItem(`band:dockview-active:${id}`);
       if (!raw) return undefined;
       return JSON.parse(raw).maximizedGroup;
-    }, [workspaceId]);
+    }, [worktreeId]);
   }
 }
 ```
@@ -303,7 +303,7 @@ A page object always *(enforces TEST-22)*:
 For elements your codebase owns, allowed in **decreasing preference** *(enforces TEST-23)*:
 
 1. **`getByRole("button", { name: "Maximize" })`** — when the role + a system-controlled name (e.g. ARIA label set in code) is enough.
-2. **`getByTestId("workspace__maximize-button")`** — default when role alone is ambiguous, or when name would be localised user copy. **BEM convention**: `page__element`.
+2. **`getByTestId("worktree__maximize-button")`** — default when role alone is ambiguous, or when name would be localised user copy. **BEM convention**: `page__element`.
 3. **`getByText(value)`** — only for runtime data the test itself supplied.
 
 Banned:
@@ -312,12 +312,12 @@ Banned:
 - Element IDs.
 - `getByRole("link", { name: "Continue" })` when "Continue" is localisable product copy *(enforces TEST-26)*.
 
-**Adding test hooks to production code.** `data-testid` attributes on JSX are the only production-code change tests are allowed to make *(enforces TEST-1)*. Use BEM: `workspace__maximize-button`, `cart-drawer__item-row`.
+**Adding test hooks to production code.** `data-testid` attributes on JSX are the only production-code change tests are allowed to make *(enforces TEST-1)*. Use BEM: `worktree__maximize-button`, `cart-drawer__item-row`.
 
 ### Driving and asserting
 
-- **Drive via the page object.** `await workspacePage.maximizePanel()`.
-- **Assert via the page object.** `await expect(workspacePage.restoreButton).toBeVisible()`.
+- **Drive via the page object.** `await worktreePage.maximizePanel()`.
+- **Assert via the page object.** `await expect(worktreePage.restoreButton).toBeVisible()`.
 - **Wait properly** *(enforces TEST-24)*. `expect(locator).toBeVisible()` and friends auto-retry. Use `expect.poll(() => …)` for non-Playwright assertions (e.g. `localStorage`). Never `page.waitForTimeout(N)` for synchronisation.
 - **Negative assertions need a positive anchor** *(enforces TEST-25)*. Prove the alternate state actually rendered before asserting the absence of the previous one.
 - **Don't assert text equality on localised copy** *(enforces TEST-26)*. Assert on a `data-testid`, an ARIA attribute, or a `localStorage` value.
@@ -411,7 +411,7 @@ catalog.setGetProductResponse({ id: "p1", name: "Foo" }, {
   onRequest: r => captured.push(r),
 });
 
-await workspacePage.openProduct("p1");
+await worktreePage.openProduct("p1");
 
 await expect.poll(() => captured).toHaveLength(1);
 expect(captured[0]).toEqual({
@@ -438,7 +438,7 @@ export function createProductResponse(overrides: Partial<ProductBody> = {}): Pro
 
 Band uses SQLite inside `~/.band/band.db`. Each test gets a fresh DB by virtue of the tmp home — no testcontainers needed *(enforces TEST-34)*. The server runs migrations against it during boot. Test isolation comes from each test owning its own home directory.
 
-For projects with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/integration-testing.md` *(enforces TEST-35)*: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
+For repos with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/integration-testing.md` *(enforces TEST-35)*: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
 
 ---
 

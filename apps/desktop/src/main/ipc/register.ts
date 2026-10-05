@@ -171,7 +171,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // ---- Browser profiles ----
   // Reads Chrome's profile list, cookie DB and history DB on this Mac, from
   // the import dialog only. Cookies come back as counts; history entries
-  // come back for the renderer to store in the workspace's history.
+  // come back for the renderer to store in the worktree's history.
   handle(Channels.browserChromeProfiles, () => listChromeImportProfiles());
   handle(Channels.browserChromeRunning, () => chromeRunningStatus());
   handle(Channels.browserChromeImport, (args: BrowserChromeImportArgs) =>

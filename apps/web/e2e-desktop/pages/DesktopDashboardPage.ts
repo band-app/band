@@ -1,7 +1,7 @@
 /**
  * Page object for the dashboard inside the desktop window. The window is
  * already on `app://`, so navigation is in-app: the chat page object's `goto`
- * loads a workspace route on the window's own origin.
+ * loads a worktree route on the window's own origin.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -21,24 +21,24 @@ export class DesktopDashboardPage {
     return this.page.url();
   }
 
-  /** A workspace's card in the sidebar. */
-  workspaceCard(workspaceId: string): Locator {
-    return this.page.getByTestId(`project-list__workspace-card--${workspaceId}`);
+  /** A worktree's card in the sidebar. */
+  worktreeCard(worktreeId: string): Locator {
+    return this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
   }
 
-  /** A project's header row in the sidebar. */
-  projectHeader(projectName: string): Locator {
-    return this.page.getByTestId(`project-list__project-header--${projectName}`);
+  /** A repo's header row in the sidebar. */
+  repoHeader(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-header--${repoName}`);
   }
 
-  /** Open a workspace and wait for its chat pane (a deep link, as a bookmarked route would). */
-  async openWorkspace(workspaceId: string): Promise<void> {
-    await test.step(`Open workspace ${workspaceId}`, async () => {
-      await this.gotoDeepLink(workspaceId);
-      // A workspace with no tabs shows an empty state with "New agent"; one
+  /** Open a worktree and wait for its chat pane (a deep link, as a bookmarked route would). */
+  async openWorktree(worktreeId: string): Promise<void> {
+    await test.step(`Open worktree ${worktreeId}`, async () => {
+      await this.gotoDeepLink(worktreeId);
+      // A worktree with no tabs shows an empty state with "New agent"; one
       // with tabs has the "+" button the chat page object uses.
-      const emptyStateAgent = this.page.getByTestId("workspace-center__empty-new-agent");
-      const plus = this.page.getByTestId("workspace-center__new-tab-button").first();
+      const emptyStateAgent = this.page.getByTestId("worktree-center__empty-new-agent");
+      const plus = this.page.getByTestId("worktree-center__new-tab-button").first();
       await expect(plus.or(emptyStateAgent).first()).toBeVisible({ timeout: 30_000 });
       if (await emptyStateAgent.isVisible()) {
         // The button opens a menu of the configured agents.
@@ -49,14 +49,14 @@ export class DesktopDashboardPage {
     });
   }
 
-  /** Show the workspace's terminal, opening one if the workspace has no tabs. */
-  async openTerminal(workspaceId: string): Promise<TerminalSurface> {
+  /** Show the worktree's terminal, opening one if the worktree has no tabs. */
+  async openTerminal(worktreeId: string): Promise<TerminalSurface> {
     return await test.step("Open a terminal tab", async () => {
-      await this.gotoDeepLink(workspaceId);
-      const terminal = new TerminalSurface(this.page, workspaceId);
-      // A workspace opens with a terminal tab unless its tabs are empty, which
+      await this.gotoDeepLink(worktreeId);
+      const terminal = new TerminalSurface(this.page, worktreeId);
+      // A worktree opens with a terminal tab unless its tabs are empty, which
       // shows the "New terminal" button instead.
-      const emptyStateTerminal = this.page.getByTestId("workspace-center__empty-new-term");
+      const emptyStateTerminal = this.page.getByTestId("worktree-center__empty-new-term");
       await expect(terminal.input.or(emptyStateTerminal).first()).toBeVisible({ timeout: 30_000 });
       if (await emptyStateTerminal.isVisible()) await emptyStateTerminal.click();
       await expect(terminal.input).toBeAttached({ timeout: 30_000 });
@@ -64,7 +64,7 @@ export class DesktopDashboardPage {
     });
   }
 
-  /** Call the folder picker's IPC, the way the "Register Project" browse button does. */
+  /** Call the folder picker's IPC, the way the "Register Repo" browse button does. */
   async pickFolderViaIpc(): Promise<string | null> {
     return await this.page.evaluate(async () => {
       const bridge = (
@@ -76,10 +76,10 @@ export class DesktopDashboardPage {
     });
   }
 
-  /** Load a workspace route as a fresh navigation, the way a deep link does. */
-  async gotoDeepLink(workspaceId: string): Promise<void> {
-    await test.step(`Deep link to /workspace/${workspaceId}`, async () => {
-      const url = new URL(`/workspace/${encodeURIComponent(workspaceId)}`, this.page.url());
+  /** Load a worktree route as a fresh navigation, the way a deep link does. */
+  async gotoDeepLink(worktreeId: string): Promise<void> {
+    await test.step(`Deep link to /worktree/${worktreeId}`, async () => {
+      const url = new URL(`/worktree/${encodeURIComponent(worktreeId)}`, this.page.url());
       await this.page.goto(url.toString());
     });
   }
@@ -90,9 +90,9 @@ export class DesktopDashboardPage {
     });
   }
 
-  /** The hub's project shows in the sidebar, which proves the UI reached the hub. */
-  async expectProjectListed(projectName: string): Promise<void> {
-    await expect(this.projectHeader(projectName)).toBeVisible({ timeout: 30_000 });
+  /** The hub's repo shows in the sidebar, which proves the UI reached the hub. */
+  async expectRepoListed(repoName: string): Promise<void> {
+    await expect(this.repoHeader(repoName)).toBeVisible({ timeout: 30_000 });
   }
 
   /** Write a value to this origin's localStorage. */
@@ -119,19 +119,19 @@ export class DesktopDashboardPage {
 
   /**
    * Open a browser tab from the "+" menu, or from the "New browser" button when
-   * the workspace has no tabs. A workspace normally opens with a terminal tab.
+   * the worktree has no tabs. A worktree normally opens with a terminal tab.
    */
   async openBrowserTab(): Promise<void> {
     await test.step("Open a browser tab", async () => {
-      const emptyState = this.page.getByTestId("workspace-center__empty-new-browser");
-      const plus = this.page.getByTestId("workspace-center__new-tab-button").first();
+      const emptyState = this.page.getByTestId("worktree-center__empty-new-browser");
+      const plus = this.page.getByTestId("worktree-center__new-tab-button").first();
       await expect(plus.or(emptyState).first()).toBeVisible({ timeout: 30_000 });
       if (await emptyState.isVisible()) {
         await emptyState.click();
         return;
       }
       await plus.click();
-      await this.page.getByTestId("workspace-center__new-tab--browser").click();
+      await this.page.getByTestId("worktree-center__new-tab--browser").click();
     });
   }
 

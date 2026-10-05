@@ -1,5 +1,5 @@
 /**
- * The review panel's backend: `reviews.forWorkspace` and `reviews.merge`,
+ * The review panel's backend: `reviews.forWorktree` and `reviews.merge`,
  * served by the bundled GitHub plugin through the plugin host.
  *
  * Real server, real git repos with a github.com `origin`, and a fake `gh`
@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GhInvocation, type GhStub, ghStub } from "./fixtures/gh-stub";
 import {
@@ -46,7 +46,7 @@ const gitEnv = {
 };
 
 /**
- * Where the plugin's `gh` runs. For a workspace on a worker the hub has no
+ * Where the plugin's `gh` runs. For a worktree on a worker the hub has no
  * checkout to run in, and the calls name the repository, so it uses a dir of
  * its own. Locally it is the worktree.
  */
@@ -76,20 +76,20 @@ function addWorktree(repo: string, parent: string, branch: string): string {
   return path;
 }
 
-async function forWorkspace(server: ServerHandle, workspaceId: string) {
-  const res = await trpcQuery(server.url, "reviews.forWorkspace", { workspaceId }, TOKEN);
+async function forWorktree(server: ServerHandle, worktreeId: string) {
+  const res = await trpcQuery(server.url, "reviews.forWorktree", { worktreeId }, TOKEN);
   expect(res.status).toBe(200);
   return trpcData<Record<string, unknown>>(res);
 }
 
-const PROJECT = "widgets";
+const REPO = "widgets";
 const PR_BRANCH = "feat/login";
 const BRANCH_ONLY = "feat/no-pr";
 const FAILING_BRANCH = "feat/gh-down";
 const MERGE_BRANCH = "feat/merge-me";
 const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 
-describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
+describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   let tmpHome: string;
   let server: ServerHandle;
   let stub: GhStub;
@@ -100,7 +100,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     tmpHome = createTmpHome("band-pr-checks-");
     const repo = createRepo(
       tmpHome,
-      PROJECT,
+      REPO,
       `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
     );
     prWorktree = addWorktree(repo, tmpHome, PR_BRANCH);
@@ -112,9 +112,9 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     const gitlab = createRepo(tmpHome, "on-gitlab", "https://gitlab.com/acme/widgets.git");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repo,
           defaultBranch: "main",
           worktrees: [
@@ -269,7 +269,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
       ],
     };
 
-    const data = await forWorkspace(server, toWorkspaceId(PROJECT, PR_BRANCH));
+    const data = await forWorktree(server, toWorktreeId(REPO, PR_BRANCH));
 
     expect(data).toEqual({
       status: "ok",
@@ -291,7 +291,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     });
 
     // One `gh api graphql` call per lookup, against github.com (no
-    // --hostname), run in the workspace's worktree with prompts disabled.
+    // --hostname), run in the worktree's worktree with prompts disabled.
     expect(requests).toHaveLength(1);
     expect(requests[0].positional).toEqual(["api", "graphql"]);
     expect(requests[0].fields).toEqual({
@@ -336,7 +336,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
       }),
     );
 
-    const data = await forWorkspace(server, toWorkspaceId(PROJECT, BRANCH_ONLY));
+    const data = await forWorktree(server, toWorktreeId(REPO, BRANCH_ONLY));
 
     expect(data).toEqual({
       status: "ok",
@@ -384,7 +384,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
       }),
     );
 
-    const data = await forWorkspace(server, toWorkspaceId(PROJECT, "main"));
+    const data = await forWorktree(server, toWorktreeId(REPO, "main"));
 
     expect(data.review).toBeNull();
     expect(data.checks).toEqual({
@@ -408,18 +408,18 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
   it("reports a gh failure as an error result with gh's message", async () => {
     stub.setReviewQueryError(FAKE_REPO, FAILING_BRANCH, "HTTP 401: Bad credentials\n");
 
-    const data = await forWorkspace(server, toWorkspaceId(PROJECT, FAILING_BRANCH));
+    const data = await forWorktree(server, toWorktreeId(REPO, FAILING_BRANCH));
 
     expect(data).toEqual({ status: "error", message: "HTTP 401: Bad credentials" });
   });
 
-  it("reports projects the plugin can't serve as unavailable", async () => {
-    expect(await forWorkspace(server, toWorkspaceId("local-only", "main"))).toEqual({
+  it("reports repos the plugin can't serve as unavailable", async () => {
+    expect(await forWorktree(server, toWorktreeId("local-only", "main"))).toEqual({
       status: "unavailable",
       reason: "no-remote",
-      message: "The project has no origin remote.",
+      message: "The repo has no origin remote.",
     });
-    expect(await forWorkspace(server, toWorkspaceId("on-gitlab", "main"))).toEqual({
+    expect(await forWorktree(server, toWorktreeId("on-gitlab", "main"))).toEqual({
       status: "unavailable",
       reason: "no-provider",
       message: "No enabled plugin handles gitlab.com.",
@@ -438,7 +438,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { workspaceId: toWorkspaceId(PROJECT, MERGE_BRANCH), method: "squash" },
+      { worktreeId: toWorktreeId(REPO, MERGE_BRANCH), method: "squash" },
       TOKEN,
     );
 
@@ -470,7 +470,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { workspaceId: toWorkspaceId(PROJECT, MERGE_FAIL_BRANCH), method: "merge" },
+      { worktreeId: toWorktreeId(REPO, MERGE_FAIL_BRANCH), method: "merge" },
       TOKEN,
     );
 
@@ -494,7 +494,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { workspaceId: toWorkspaceId(PROJECT, BRANCH_ONLY), method: "merge" },
+      { worktreeId: toWorktreeId(REPO, BRANCH_ONLY), method: "merge" },
       TOKEN,
     );
 
@@ -502,27 +502,27 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
     expect(merges).toEqual([]);
   });
 
-  it("returns 404 for an unknown workspace and 401 without a token", async () => {
+  it("returns 404 for an unknown worktree and 401 without a token", async () => {
     const missing = await trpcQuery(
       server.url,
-      "reviews.forWorkspace",
-      { workspaceId: "nope-main" },
+      "reviews.forWorktree",
+      { worktreeId: "nope-main" },
       TOKEN,
     );
     expect(missing.status).toBe(404);
 
     const anonymous = await fetch(
-      `${server.url}/trpc/reviews.forWorkspace?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: toWorkspaceId(PROJECT, PR_BRANCH) }),
+      `${server.url}/trpc/reviews.forWorktree?input=${encodeURIComponent(
+        JSON.stringify({ worktreeId: toWorktreeId(REPO, PR_BRANCH) }),
       )}`,
     );
     expect(anonymous.status).toBe(401);
   });
 
-  it("lists the GitHub plugin as active once a github.com project used it", async () => {
-    // Any review lookup on a github.com project activates the plugin, whether
+  it("lists the GitHub plugin as active once a github.com repo used it", async () => {
+    // Any review lookup on a github.com repo activates the plugin, whether
     // or not gh then answers.
-    await forWorkspace(server, toWorkspaceId(PROJECT, "main"));
+    await forWorktree(server, toWorktreeId(REPO, "main"));
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
     expect(res.status).toBe(200);
@@ -533,7 +533,7 @@ describe("reviews.forWorkspace and reviews.merge (GitHub plugin)", () => {
         version: "0.1.0",
         status: "active",
         error: null,
-        slots: ["workspace.sideTabs"],
+        slots: ["worktree.sideTabs"],
       },
     ]);
   });
@@ -548,13 +548,13 @@ describe("a disabled GitHub plugin", () => {
     tmpHome = createTmpHome("band-pr-checks-disabled-");
     const repo = createRepo(
       tmpHome,
-      PROJECT,
+      REPO,
       `https://github.com/${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
     );
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repo,
           defaultBranch: "main",
           worktrees: [{ name: "main", branch: "main", path: repo }],
@@ -575,7 +575,7 @@ describe("a disabled GitHub plugin", () => {
   });
 
   it("never activates and never runs gh", async () => {
-    expect(await forWorkspace(server, toWorkspaceId(PROJECT, "main"))).toEqual({
+    expect(await forWorktree(server, toWorktreeId(REPO, "main"))).toEqual({
       status: "unavailable",
       reason: "no-provider",
       message: "No enabled plugin handles github.com.",
@@ -589,7 +589,7 @@ describe("a disabled GitHub plugin", () => {
         version: "0.1.0",
         status: "disabled",
         error: null,
-        slots: ["workspace.sideTabs"],
+        slots: ["worktree.sideTabs"],
       },
     ]);
     // `stub.requests` logs every gh call on any route; the enabled suite's

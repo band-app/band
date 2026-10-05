@@ -32,7 +32,7 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
   const appsStrategies = [
     // cwd = apps/hub/ (Vite dev and production server)
     resolve(cwd, ".."),
-    // cwd = project root (fallback)
+    // cwd = repo root (fallback)
     resolve(cwd, "apps"),
     // From this source file in dev (packages/host-local/src/process/ → apps/)
     resolve(dirname, "..", "..", "..", "..", "apps"),

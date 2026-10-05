@@ -7,7 +7,7 @@
  * room is in viewport pixels, while the app zoom (CSS `zoom` on <html>, set
  * with Ctrl+=) scales every CSS pixel inside the menu. Before the fix a
  * 130% menu came out 30% taller than the room it was given and ran off the
- * window, and the project menu's "Set label" submenu had no cap at all. The
+ * window, and the repo menu's "Set label" submenu had no cap at all. The
  * zoom also scaled `vh`, so the 70vh command palette and the 80vh toolbar
  * dialogs ran past the bottom edge. The chat's model submenus are covered in
  * chat-model-submenu-overflow.spec.ts.
@@ -19,7 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { expectInsideViewport } from "./helpers/geometry";
 import {
@@ -34,10 +34,10 @@ import {
 import { CommandPalette } from "./pages/CommandPalette";
 import { ReportsDialog } from "./pages/ReportsDialog";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-menu-viewport-overflow-token";
-const PROJECT = "menuoverflow";
+const REPO = "menuoverflow";
 const pad = (n: number) => String(n).padStart(2, "0");
 const LABELS = Array.from({ length: 30 }, (_, i) => ({
   id: `label-${pad(i + 1)}`,
@@ -60,12 +60,12 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repoDir = join(tmpHome, PROJECT);
+  const repoDir = join(tmpHome, REPO);
   mkdirSync(repoDir, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -90,40 +90,40 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("the project menu's Set label submenu stays inside the window and scrolls to its last label", async ({
+test("the repo menu's Set label submenu stays inside the window and scrolls to its last label", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
-  await workspacePage.zoomInBy(3);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.zoomInBy(3);
 
-  await workspacePage.openProjectContextMenu(PROJECT);
-  await expect(workspacePage.contextMenu.first()).toBeVisible();
-  await workspacePage.openSetLabelSubmenu();
-  await expectInsideViewport(workspacePage.labelSubmenu, viewport);
+  await worktreePage.openRepoContextMenu(REPO);
+  await expect(worktreePage.contextMenu.first()).toBeVisible();
+  await worktreePage.openSetLabelSubmenu();
+  await expectInsideViewport(worktreePage.labelSubmenu, viewport);
 
-  const last = workspacePage.labelSubmenuOption(LAST_LABEL.name);
-  await workspacePage.focusLastLabelSubmenuOption();
+  const last = worktreePage.labelSubmenuOption(LAST_LABEL.name);
+  await worktreePage.focusLastLabelSubmenuOption();
   await expect(last).toBeFocused();
   await expect(last).toBeInViewport({ ratio: 1 });
 
-  await workspacePage.scrollLabelSubmenuToTop();
-  await expect(workspacePage.labelSubmenuOption(LABELS[0].name)).toBeInViewport();
+  await worktreePage.scrollLabelSubmenuToTop();
+  await expect(worktreePage.labelSubmenuOption(LABELS[0].name)).toBeInViewport();
   await expect(last).not.toBeInViewport();
-  await workspacePage.clickLabelSubmenuOption(LAST_LABEL.name);
+  await worktreePage.clickLabelSubmenuOption(LAST_LABEL.name);
 
-  // Filtering the sidebar by that label still shows the project.
-  await workspacePage.selectLabelFilter(LAST_LABEL.id);
-  await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
+  // Filtering the sidebar by that label still shows the repo.
+  await worktreePage.selectLabelFilter(LAST_LABEL.id);
+  await expect(worktreePage.repoHeader(REPO)).toBeVisible();
 });
 
 test("the Default agent select stays inside the window and scrolls to its last agent", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
-  await workspacePage.zoomInBy(3);
+  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.zoomInBy(3);
 
   await settingsPage.openDialog("agents");
   await expectInsideViewport(settingsPage.dialog, viewport);
@@ -143,11 +143,11 @@ test("the Default agent select stays inside the window and scrolls to its last a
 });
 
 test("the command palette and a toolbar dialog stay inside the window", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
   const reports = new ReportsDialog(page, server.url, TOKEN);
-  await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
-  await workspacePage.zoomInBy(3);
+  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.zoomInBy(3);
 
   await palette.open();
   await expect(palette.dialog).toBeVisible();
@@ -156,6 +156,6 @@ test("the command palette and a toolbar dialog stay inside the window", async ({
 
   // Reopening the dashboard keeps the zoom, which lives in client state.
   await reports.open();
-  await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(1.3, 5);
+  await expect.poll(() => worktreePage.readAppZoom()).toBeCloseTo(1.3, 5);
   await expectInsideViewport(reports.dialog, viewport);
 });

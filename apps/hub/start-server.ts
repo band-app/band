@@ -70,7 +70,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
-import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
+import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
@@ -93,7 +93,7 @@ import {
   workerLinkService,
 } from "./src/server/services/worker-link-service.ts";
 import { workerRelayService } from "./src/server/services/worker-relay-service.ts";
-import { workspaceService } from "./src/server/services/workspace-service.ts";
+import { worktreeService } from "./src/server/services/worktree-service.ts";
 
 // ---------------------------------------------------------------------------
 // Crash handlers — log to file since stdout/stderr may be piped to a log file
@@ -174,7 +174,7 @@ const SERVER_ROOT = import.meta.dirname;
 // exists wins:
 //
 //   1. `--ui-dir <path>`, or `BAND_UI_DIR`: an explicit directory.
-//   2. The web workspace's own build output, so `node apps/hub/dist/
+//   2. The web worktree's own build output, so `node apps/hub/dist/
 //      start-server.mjs` in a checkout serves whatever `pnpm build` last
 //      produced for the UI.
 //   3. `client/` beside the bundle, which is where the desktop app, the
@@ -202,7 +202,7 @@ function resolveUiDir(): string {
 
 const clientDir = resolveUiDir();
 
-// Dev only: the UI workspace Vite serves from source.
+// Dev only: the UI worktree Vite serves from source.
 const uiRoot = process.env.BAND_UI_ROOT
   ? resolve(process.env.BAND_UI_ROOT)
   : resolve(SERVER_ROOT, "..", "web");
@@ -415,18 +415,18 @@ function serveStaticFile(
 }
 
 /**
- * Serves a chat upload or a shared file that lives on a remote workspace's
+ * Serves a chat upload or a shared file that lives on a remote worktree's
  * worker, by streaming it through the host. Resolves false for a local
- * workspace, whose files the caller serves from the hub's disk.
+ * worktree, whose files the caller serves from the hub's disk.
  */
 async function serveHostedFile(
   res: ServerResponse,
   kind: "uploads" | "shared",
-  workspaceId: string,
+  worktreeId: string,
   rawName: string,
 ): Promise<boolean> {
-  if (hostRegistry.hostFor(workspaceId).id === hostRegistry.local.id) return false;
-  const file = await openHostedFile(kind, workspaceId, rawName);
+  if (hostRegistry.hostFor(worktreeId).id === hostRegistry.local.id) return false;
+  const file = await openHostedFile(kind, worktreeId, rawName);
   if (!file) {
     res.writeHead(404);
     res.end("Not found");
@@ -446,25 +446,25 @@ async function serveHostedFile(
 }
 
 /**
- * Serve a file from a workspace by workspaceId and nested file path.
+ * Serve a file from a worktree by worktreeId and nested file path.
  * Used for binary file previews (images, PDFs) in the file viewer.
  */
-async function serveWorkspaceFile(
+async function serveWorktreeFile(
   res: ServerResponse,
-  workspaceId: string,
+  worktreeId: string,
   rawPath: string,
 ): Promise<void> {
-  const workspace = workspaceService.resolve(workspaceId);
-  if (!workspace) {
+  const worktree = worktreeService.resolve(worktreeId);
+  if (!worktree) {
     res.writeHead(404);
-    res.end("Workspace not found");
+    res.end("Worktree not found");
     return;
   }
 
-  const root = workspace.worktree.path;
+  const root = worktree.worktree.path;
   const target = resolve(join(root, rawPath));
 
-  // Path traversal protection: target must be within workspace root.
+  // Path traversal protection: target must be within worktree root.
   // Use `sep` (not a hard-coded `/`) so the prefix check still works on
   // Windows where the resolved path uses backslashes — same shape as
   // `FilesService.resolveInside`.
@@ -475,7 +475,7 @@ async function serveWorkspaceFile(
   }
 
   try {
-    const { fs } = workspace.host;
+    const { fs } = worktree.host;
     const fileStat = await fs.stat(target, { followSymlinks: true });
     const contentType = mimeTypeFromFilename(basename(target));
     res.writeHead(200, {
@@ -736,7 +736,7 @@ async function main() {
   // The shared `tokenSecret` becomes the admin device token. This needs the
   // `tokens` table, so it runs after the migrations.
   tokenService.ensureSharedToken(persistedToken);
-  // Known workers become resolvable hosts, before any workspace asks for one.
+  // Known workers become resolvable hosts, before any worktree asks for one.
   workerLinkService.start();
   placementService.start();
   environmentBuildService.start();
@@ -895,8 +895,8 @@ async function main() {
     if (handleAuth(req, res)) return;
 
     // Serve uploaded files (images, attachments)
-    // A local upload is `/api/uploads/<name>`. One on a remote workspace's
-    // worker is `/api/uploads/<workspaceId>/<name>`.
+    // A local upload is `/api/uploads/<name>`. One on a remote worktree's
+    // worker is `/api/uploads/<worktreeId>/<name>`.
     if (req.url?.startsWith("/api/uploads/")) {
       const rest = req.url.slice("/api/uploads/".length);
       const slashIdx = rest.indexOf("/");
@@ -915,19 +915,19 @@ async function main() {
       return;
     }
 
-    // Serve a project's cached GitHub owner avatar — URL: /api/project-avatar/<projectName>
-    // (see `ProjectAvatarService`). 404 means "render the fallback icon".
-    const projectAvatarMatch = req.url?.match(/^\/api\/project-avatar\/([^/?]+)(?:\?|$)/);
-    if (projectAvatarMatch && req.method === "GET") {
-      let projectName: string;
+    // Serve a repo's cached GitHub owner avatar — URL: /api/repo-avatar/<repoName>
+    // (see `RepoAvatarService`). 404 means "render the fallback icon".
+    const repoAvatarMatch = req.url?.match(/^\/api\/repo-avatar\/([^/?]+)(?:\?|$)/);
+    if (repoAvatarMatch && req.method === "GET") {
+      let repoName: string;
       try {
-        projectName = decodeURIComponent(projectAvatarMatch[1]);
+        repoName = decodeURIComponent(repoAvatarMatch[1]);
       } catch {
         res.writeHead(400);
         res.end("Bad request");
         return;
       }
-      const avatar = await projectAvatarService.image(projectName);
+      const avatar = await repoAvatarService.image(repoName);
       if (!avatar) {
         res.writeHead(404, { "Cache-Control": "no-store" });
         res.end("Not found");
@@ -948,7 +948,7 @@ async function main() {
       return;
     }
 
-    // Serve agent-shared files — URL: /api/shared/<workspaceId>/<filename>
+    // Serve agent-shared files — URL: /api/shared/<worktreeId>/<filename>
     if (req.url?.startsWith("/api/shared/")) {
       const rest = req.url.slice("/api/shared/".length);
       const slashIdx = rest.indexOf("/");
@@ -968,9 +968,9 @@ async function main() {
       return;
     }
 
-    // Serve workspace files (images, PDFs, etc.) — URL: /api/workspace-file/<workspaceId>/<path...>
-    if (req.url?.startsWith("/api/workspace-file/")) {
-      const rest = req.url.slice("/api/workspace-file/".length);
+    // Serve worktree files (images, PDFs, etc.) — URL: /api/worktree-file/<worktreeId>/<path...>
+    if (req.url?.startsWith("/api/worktree-file/")) {
+      const rest = req.url.slice("/api/worktree-file/".length);
       const slashIdx = rest.indexOf("/");
       if (slashIdx === -1) {
         res.writeHead(400);
@@ -984,22 +984,22 @@ async function main() {
         res.end("Bad request");
         return;
       }
-      await serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
+      await serveWorktreeFile(res, wId, decodeURIComponent(filePath));
       return;
     }
 
     // CDP screencast experiment: list Band browser tabs (DB-backed) for
-    // a workspace. The web client renders one dockview panel per tab and
+    // a worktree. The web client renders one dockview panel per tab and
     // streams via /cdp?bandTabId=<id> when the user picks one.
     if (req.url?.startsWith("/api/cdp/tabs")) {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      const workspaceId = url.searchParams.get("workspaceId");
-      if (!workspaceId) {
+      const worktreeId = url.searchParams.get("worktreeId");
+      if (!worktreeId) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ tabs: [], error: "Missing workspaceId" }));
+        res.end(JSON.stringify({ tabs: [], error: "Missing worktreeId" }));
         return;
       }
-      const tabs = browserService.list(workspaceId).map((b) => ({
+      const tabs = browserService.list(worktreeId).map((b) => ({
         id: b.id,
         url: b.url,
         title: b.name,
@@ -1408,7 +1408,7 @@ async function main() {
   // Advertise this server's own URL to every child process we fork
   // (coding-agent subprocesses, terminal PTYs, setup scripts). A nested
   // `band` CLI invocation — e.g. the `band-start` skill running `band
-  // workspaces create --prompt …` from inside a chat-hosted agent, or a
+  // worktrees create --prompt …` from inside a chat-hosted agent, or a
   // user typing `band …` in a terminal pane — reads `BAND_SERVER_URL`
   // (see `apps/cli/src/api.rs`) to decide which server to call. Without
   // it the CLI falls back to its hardcoded `127.0.0.1:3456`, which is
@@ -1468,7 +1468,7 @@ async function main() {
   //     listen callback. Until it does, the worst case is that
   //     `tasks.list` reports a stale row as `running` for a few ms.
   //   - `resetAgentStatuses` is similar — at-most a brief window where
-  //     `workspaceStatuses.agentStatus` looks busy.
+  //     `worktreeStatuses.agentStatus` looks busy.
   //   - `startTaskPruneScheduler` and `cronjobService.start` just bind
   //     interval timers; the user can wait the few ms before their
   //     cron fires.
@@ -1555,7 +1555,7 @@ async function main() {
       }
 
       // Terminals outlive this server in the terminal daemon; drop the ones
-      // whose workspace was deleted while no server was running.
+      // whose worktree was deleted while no server was running.
       await terminalService.reconcile().catch((err) => {
         console.error("Failed to reconcile terminals:", err);
       });
@@ -1571,7 +1571,7 @@ async function main() {
 
       // Activate the bundled plugins that ask for `onStartup`. The rest
       // activate lazily, e.g. the GitHub plugin on the first review lookup
-      // for a github.com project.
+      // for a github.com repo.
       await pluginHost.start().catch((err) => {
         console.error("Failed to start plugins:", err);
       });

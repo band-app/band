@@ -2,7 +2,7 @@
 // Terminal file links
 //
 // Detects file-path references in terminal output and turns them into
-// clickable xterm links. Clicking one dispatches the same workspace-scoped
+// clickable xterm links. Clicking one dispatches the same worktree-scoped
 // `band:open-file` event the chat renderer uses (see
 // `ai-elements/file-link-components.tsx`), which routes the path into Quick
 // Open so the file lands in the file browser.

@@ -101,7 +101,7 @@ async function workerToken(labels: string[]): Promise<string> {
 beforeAll(async () => {
   home = createTmpHome("band-contexts-");
   scratch.push(home);
-  seedState(home, { projects: [] });
+  seedState(home, { repos: [] });
   seedSettings(home, { tokenSecret: ADMIN });
   server = await startServer({
     remoteHost: false,

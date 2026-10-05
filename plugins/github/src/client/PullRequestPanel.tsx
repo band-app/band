@@ -1,5 +1,5 @@
-import type { ChecksReport, ReviewInfo, WorkspaceReview } from "@band-app/plugin-api";
-import { useClientPluginHost, type WorkspaceSideTabProps } from "@band-app/plugin-api/client";
+import type { ChecksReport, ReviewInfo, WorktreeReview } from "@band-app/plugin-api";
+import { useClientPluginHost, type WorktreeSideTabProps } from "@band-app/plugin-api/client";
 import {
   cn,
   DropdownMenu,
@@ -17,7 +17,7 @@ import { MergeControl } from "./MergeControl";
 const POLL_RUNNING_MS = 30_000;
 const POLL_SETTLED_MS = 120_000;
 
-function pollInterval(data: WorkspaceReview | undefined): number {
+function pollInterval(data: WorktreeReview | undefined): number {
   if (
     data?.status === "ok" &&
     (data.checks.state === "running" || data.checks.state === "pending")
@@ -28,12 +28,12 @@ function pollInterval(data: WorkspaceReview | undefined): number {
 }
 
 /**
- * The pull request for the workspace's branch with its checks. When the
+ * The pull request for the worktree's branch with its checks. When the
  * branch has no pull request, the GitHub Actions jobs on the branch head.
  */
-export function PullRequestPanel({ workspaceId, visible }: WorkspaceSideTabProps) {
+export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) {
   const host = useClientPluginHost();
-  const query = host.useWorkspaceReview(workspaceId, {
+  const query = host.useWorktreeReview(worktreeId, {
     enabled: visible,
     refetchInterval: visible ? pollInterval : false,
   });
@@ -79,12 +79,12 @@ export function PullRequestPanel({ workspaceId, visible }: WorkspaceSideTabProps
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto" data-testid="pr-checks">
       {data.review ? (
-        <ReviewHeader workspaceId={workspaceId} review={data.review} refresh={refresh} />
+        <ReviewHeader worktreeId={worktreeId} review={data.review} refresh={refresh} />
       ) : (
         <BranchHeader branch={data.branch} checks={data.checks} refresh={refresh} />
       )}
       <ChecksSection
-        workspaceId={workspaceId}
+        worktreeId={worktreeId}
         branch={data.branch}
         review={data.review}
         checks={data.checks}
@@ -95,11 +95,11 @@ export function PullRequestPanel({ workspaceId, visible }: WorkspaceSideTabProps
 }
 
 function ReviewHeader({
-  workspaceId,
+  worktreeId,
   review,
   refresh,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   review: ReviewInfo;
   refresh: ReactNode;
 }) {
@@ -156,7 +156,7 @@ function ReviewHeader({
       <p className="text-[11px] text-muted-foreground" data-testid="pr-checks__updated">
         PR updated {new Date(review.updatedAt).toLocaleString()}
       </p>
-      <MergeControl workspaceId={workspaceId} review={review} />
+      <MergeControl worktreeId={worktreeId} review={review} />
     </div>
   );
 }

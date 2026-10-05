@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Bounded, because every unplaced `workspaces.create` stores its placement in a row. */
+/** Bounded, because every unplaced `worktrees.create` stores its placement in a row. */
 const shortMap = z
   .record(z.string().min(1).max(100), z.string().max(200))
   .refine((m) => Object.keys(m).length <= 50, "at most 50 entries");

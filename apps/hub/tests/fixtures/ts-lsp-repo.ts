@@ -1,9 +1,9 @@
 /**
- * A TypeScript git repo whose workspace can run a real language server.
+ * A TypeScript git repo whose worktree can run a real language server.
  *
  * Band's LSP manager (`packages/host-local/src/lsp/lsp-manager.ts`) spawns
  * `typescript-language-server` from `<worktree>/node_modules/.bin` (or the
- * shell PATH), and the server loads `typescript` from the project. The repo's
+ * shell PATH), and the server loads `typescript` from the repo. The repo's
  * `node_modules` links both to the packages this app already installs, so a
  * test gets the real language server with no install step and nothing
  * mocked. `node_modules` is git-ignored so it never shows up as a change.
@@ -29,7 +29,7 @@ function git(cwd: string, args: string[]): void {
 
 /**
  * Create the repo at `repoPath` on branch `branch`, commit `committed`
- * (workspace-relative path to content), then write `working` over it
+ * (worktree-relative path to content), then write `working` over it
  * uncommitted. Returns the commit's SHA.
  */
 export function createTsLspRepo(opts: {
