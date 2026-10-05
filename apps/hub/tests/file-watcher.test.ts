@@ -14,107 +14,22 @@
 // and asserting that the right events arrive (and nothing leaks across
 // workspaces).
 
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
+const _PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "file-watcher-test-token";
 
 // ---------------------------------------------------------------------------
 // Server helpers
 // ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-file-watcher-test-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const home = opts.tmpHome;
-  const port = await getRandomPort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Git helpers — used to build a realistic worktree
@@ -269,7 +184,7 @@ describe("file-watcher — external file change events", () => {
   const workspaceId = "myrepo-main";
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-file-watcher-test-");
     repoPath = createGitRepo(tmpHome, "myrepo");
     otherRepoPath = createGitRepo(tmpHome, "otherrepo");
     seedState(tmpHome, {
@@ -294,7 +209,7 @@ describe("file-watcher — external file change events", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("emits a file-change event when a file is created at the workspace root", async () => {

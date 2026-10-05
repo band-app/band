@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer } from "./helpers/acp-chat";
@@ -12,6 +12,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "cronjob-test-token";
 
@@ -69,7 +70,7 @@ describe("tRPC — cronjobs CRUD", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("cronjobs.list returns empty list initially", async () => {
@@ -385,7 +386,7 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("removes project-scoped cronjobs when project is removed", async () => {
@@ -438,24 +439,6 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
 // ---------------------------------------------------------------------------
 // Cronjobs trigger
 // ---------------------------------------------------------------------------
-
-/** Every path under `dir` with its mtime, for failure messages. */
-function listFiles(dir: string): string {
-  const lines: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      lines.push(`${statSync(p, { throwIfNoEntry: false })?.mtime.toISOString() ?? "gone"} ${p}`);
-      if (e.isDirectory()) walk(p);
-    }
-  };
-  try {
-    walk(dir);
-  } catch {
-    // The home vanished or changed mid-walk; list what was seen.
-  }
-  return lines.join("\n");
-}
 
 describe("tRPC — cronjobs.trigger", () => {
   // How long the conflict test polls `tasks.list` for the first trigger's
@@ -511,18 +494,7 @@ describe("tRPC — cronjobs.trigger", () => {
 
   afterAll(async () => {
     await server.close();
-    try {
-      rmSync(tmpHome, { recursive: true, force: true });
-    } catch (err) {
-      // ENOTEMPTY means a process was still writing into the home. Name the
-      // files it touched so the next CI failure shows the writer.
-      throw new Error(
-        `could not remove ${tmpHome}: ${(err as Error).message}\n${listFiles(tmpHome)}`,
-        {
-          cause: err,
-        },
-      );
-    }
+    removeTmpHome(tmpHome);
   });
 
   it("triggers a cronjob and creates a task", async () => {

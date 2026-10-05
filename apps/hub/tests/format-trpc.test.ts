@@ -1,99 +1,18 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
 // End-to-end test for `workspace.formatFile`: boots the real server, drives
 // the procedure over HTTP, asserts success / soft-skip / hard-error paths.
 // The procedure is pure — content goes in, formatted content comes back —
 // so the test deliberately confirms the *on-disk* file is left alone.
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
+const _PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "format-trpc-test-token";
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-format-trpc-test-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const { tmpHome } = opts;
-  const port = await getRandomPort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.stdout!.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
 
 const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
 
@@ -134,7 +53,7 @@ describe("workspace.formatFile (tRPC)", () => {
   let repoPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-format-trpc-test-");
 
     repoPath = join(tmpHome, "repo");
     mkdirSync(repoPath, { recursive: true });
@@ -162,7 +81,7 @@ describe("workspace.formatFile (tRPC)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("formats a JS string via Prettier and leaves the file on disk untouched", async () => {

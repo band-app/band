@@ -10,10 +10,8 @@
 //      server, then read the DB to confirm only the recent rows survived.
 //      A second boot against the same DB asserts the prune is idempotent.
 
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
@@ -21,9 +19,13 @@ import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_RETENTION_MS } from "../src/server/infra/db/queries/tasks";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createCanonicalTmpHome,
+  type ServerHandle,
+  startServer as startCanonicalServer,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "task-cleanup-test-token";
 const MIGRATIONS_FOLDER = join(
   import.meta.dirname,
@@ -39,97 +41,12 @@ const MIGRATIONS_FOLDER = join(
 // Server lifecycle (mirrors the pattern used in `tasks-crud.test.ts`)
 // ---------------------------------------------------------------------------
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
 function createTmpHome(prefix: string): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
+  return createCanonicalTmpHome(prefix);
 }
 
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const { tmpHome } = opts;
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: tmpHome,
-          close: () =>
-            // SIGTERM first, but fall back to SIGKILL after 5s so a server
-            // stuck in a DB lock can't hang `afterAll` indefinitely.
-            new Promise<void>((r) => {
-              const fallback = setTimeout(() => {
-                child.kill("SIGKILL");
-              }, 5_000);
-              child.on("exit", () => {
-                clearTimeout(fallback);
-                r();
-              });
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
+function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
+  return startCanonicalServer({ tmpHome: opts.tmpHome });
 }
 
 const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
@@ -296,7 +213,7 @@ describe("workspace task cleanup on removal (issue #416)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("deletes the workspace's tasks and leaves other workspaces untouched", async () => {
@@ -350,7 +267,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
   });
 
   afterAll(() => {
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("removes old tasks while keeping recent ones; orphaned rows fall back to startedAt; reruns are idempotent", async () => {

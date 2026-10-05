@@ -10,102 +10,29 @@
  * This package uses vitest.
  */
 
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createCanonicalTmpHome,
+  type ServerHandle,
+  startServer as startCanonicalServer,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const TOKEN = "test-token-resources";
 const PROJECT = "resources-fixture";
 const BRANCH = "main";
 const SEED_FILE_BYTES = 1024 * 1024; // 1 MiB
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
 function createTmpHome(): string {
-  // `mkdtempSync` on macOS returns a path under `/var/folders/...`
-  // but the OS canonical form is `/private/var/folders/...`. `git`
-  // and `du` will follow that symlink and report the canonical
-  // path, which then mismatches our assertions. Canonicalise at
-  // construction so the seed path matches what subprocesses see.
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-test-resources-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
+  return createCanonicalTmpHome("band-test-resources-");
 }
 
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const port = await getRandomPort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: opts.tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.stdout!.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: opts.tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code}.\nstderr: ${stderr}`));
-      }
-    });
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
+function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
+  return startCanonicalServer({ tmpHome: opts.tmpHome, remoteHost: false });
 }
 
 async function trpcQuery(
@@ -177,7 +104,7 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
 
   afterAll(async () => {
     if (typeof server !== "undefined") await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("resourcesServer returns a process snapshot with positive pid + memory", async () => {
