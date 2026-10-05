@@ -33,6 +33,7 @@ import type {
   HostGit,
   HostInfo,
   HostLsp,
+  HostMcp,
   HostScripts,
   HostSearch,
   HostWorktree,
@@ -55,6 +56,7 @@ import {
   reportedClaudeDefaults,
 } from "./agents/claude-defaults";
 import { checkHooks, installHooks } from "./agents/hooks-install";
+import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorkspaceServers } from "./lsp/lsp-manager";
@@ -113,6 +115,9 @@ export class LocalHost implements Host {
   readonly acp: HostAcp = {
     resolveLaunch: (def: AcpAgentDefinition) => resolveAcpLaunch(def),
     spawn: (launch, cwd) => spawnAgentProcess(launch, cwd),
+  };
+  readonly mcp: HostMcp = {
+    openStdio: (spec) => openMcpStdio(spec),
   };
   readonly scripts: HostScripts = {
     command: (workspace) => scriptCommand(this, workspace),
