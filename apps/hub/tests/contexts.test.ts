@@ -101,7 +101,7 @@ async function workerToken(labels: string[]): Promise<string> {
 beforeAll(async () => {
   home = createTmpHome("band-contexts-");
   scratch.push(home);
-  seedState(home, {});
+  seedState(home, { projects: [] });
   seedSettings(home, { tokenSecret: ADMIN });
   server = await startServer({
     remoteHost: false,
@@ -124,7 +124,7 @@ describe("context repos over git smart HTTP", () => {
     await m("context.create", { name: "user" });
     await m("context.create", { name: "alpha" });
 
-    const repo = join(home, "context", "alpha.git");
+    const repo = join(home, ".band", "context", "alpha.git");
     expect(existsSync(join(repo, "HEAD"))).toBe(true);
     // No sample hooks from a template, and git is told not to look for any.
     expect(existsSync(join(repo, "hooks"))).toBe(false);
@@ -316,10 +316,14 @@ describe("a context linked to a remote", () => {
     git(clone, "commit", "-qm", "hub side");
     gitAs(ADMIN, clone, "push", "-q", "origin", "HEAD");
     // Both sides have moved. The hub's own debounced push comes 2 s later, so this sync runs first.
-    const result = await m<{ diverged: string[]; error?: string }>("context.sync", { name: "borko" });
+    const result = await m<{ diverged: string[]; error?: string }>("context.sync", {
+      name: "borko",
+    });
     expect(result.error).toBeUndefined();
     expect(result.diverged).toEqual(["main"]);
-    const list = await q<{ contexts: Array<{ name: string; syncError: string | null }> }>("context.list");
+    const list = await q<{ contexts: Array<{ name: string; syncError: string | null }> }>(
+      "context.list",
+    );
     expect(list.contexts.find((c) => c.name === "borko")?.syncError).toMatch(/main/);
     expect(remoteLog()[0]).toBe("remote side");
   });
@@ -339,13 +343,13 @@ describe("a context linked to a remote", () => {
       ADMIN,
     );
     expect(missing.status).toBe(400);
-    expect(existsSync(join(home, "context", "ghost.git"))).toBe(false);
+    expect(existsSync(join(home, ".band", "context", "ghost.git"))).toBe(false);
   });
 
   it("removes a context and its repo", async () => {
     await m("context.remove", { name: "borko" });
-    expect(existsSync(join(home, "context", "borko.git"))).toBe(false);
-    expect(readdirSync(join(home, "context")).includes("borko.git")).toBe(false);
+    expect(existsSync(join(home, ".band", "context", "borko.git"))).toBe(false);
+    expect(readdirSync(join(home, ".band", "context")).includes("borko.git")).toBe(false);
     const gone = await fetch(`${gitUrl("borko")}/info/refs?service=git-upload-pack`, {
       headers: { Authorization: `Bearer ${ADMIN}` },
     });
@@ -435,7 +439,9 @@ describe("media store", () => {
       body: big,
     });
     expect(over.status).toBe(413);
-    expect(readdirSync(join(home, "media")).filter((f) => f.startsWith(".upload-"))).toEqual([]);
+    expect(
+      readdirSync(join(home, ".band", "media")).filter((f) => f.startsWith(".upload-")),
+    ).toEqual([]);
 
     expect((await fetch(`${server.url}/media/${sha(png)}`)).status).toBe(401);
     expect(
