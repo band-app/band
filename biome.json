@@ -135,6 +135,7 @@
         "apps/hub/src/server/services/_utils/runner-config.ts",
         "apps/hub/src/server/services/_utils/vault-crypto.ts",
         "apps/hub/src/server/services/context-service.ts",
+        "apps/hub/src/server/services/context-store.ts",
         "apps/hub/src/server/services/context-browser-service.ts",
         "apps/hub/src/server/services/media-service.ts",
         "apps/hub/src/server/api/context/git-http.ts",

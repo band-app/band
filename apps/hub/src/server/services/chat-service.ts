@@ -29,6 +29,7 @@ import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
 import { agentSessionService } from "./agent-session-service";
+import { contextCaptureService } from "./context-capture-service";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 
@@ -537,6 +538,9 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
+    // Capture reads the log, so it runs before the log is dropped.
+    contextCaptureService.captureChat(session);
+
     // Stop the agent process and drop the chat's event log
     agentSessionService.stop(chatId);
     agentSessionService.deleteLog(chatId);
@@ -578,7 +582,7 @@ export class ChatService {
    * skip the DB delete and leak the rows (and the agents would never be
    * killed).
    */
-  removeAllForWorktree(worktreeId: string): void {
+  removeAllForWorktree(worktreeId: string, repo?: string): void {
     this.ensureInitialized();
 
     const ids = this.worktreeChats.get(worktreeId);
@@ -593,6 +597,8 @@ export class ChatService {
       // needed and a future refactor of the loop can't desync the two
       // indexes.
       for (const chatId of [...ids]) {
+        const chat = this.chatSessions.get(chatId);
+        if (chat) contextCaptureService.captureChat(chat, repo);
         agentSessionService.stop(chatId);
         agentSessionService.deleteLog(chatId);
         this.removeFromIndex(chatId);

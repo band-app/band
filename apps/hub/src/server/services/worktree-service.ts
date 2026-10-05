@@ -893,7 +893,7 @@ export class WorktreeService {
     // tears down the saved layout as part of the same call (see
     // `ChatService.removeAllForWorktree`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    chatService.removeAllForWorktree(worktreeId);
+    chatService.removeAllForWorktree(worktreeId, input.repo);
     agentSessionRegistry.removeAllForWorktree(worktreeId);
 
     // Clean up all browser tabs + layout. Same contract as chats —
