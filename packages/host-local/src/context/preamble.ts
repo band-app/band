@@ -9,7 +9,8 @@
  * leave, up to a fixed reserve.
  */
 
-import { readdir, readFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ContextPreamble, ContextPreambleRequest, ContextSpec } from "@band-app/host-api";
 
@@ -29,6 +30,8 @@ interface Loaded {
 
 async function readText(path: string): Promise<string | null> {
   try {
+    // A context repo can hold a symlink to a host file. Read regular files only.
+    if (!(await lstat(path)).isFile()) return null;
     const buf = await readFile(path);
     return buf.subarray(0, MAX_FILE_BYTES).toString("utf8");
   } catch {
@@ -70,7 +73,7 @@ function allocate(sizes: number[], budget: number): number[] {
 async function indexLines(root: string, label: string): Promise<string[]> {
   const out: string[] = [];
   async function walk(dir: string, rel: string, depth: number): Promise<void> {
-    let entries: import("node:fs").Dirent[];
+    let entries: Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {

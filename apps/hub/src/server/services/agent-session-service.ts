@@ -1028,9 +1028,16 @@ export class AgentSessionService {
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
     // Read after the pull, so the agent starts on the newest files the host has.
-    rt.preamble = await contextPreambleService.forWorktree(chat.worktreeId);
-    if (rt.preamble && injectionFor(def.type, rt.preamble) === null) {
-      log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
+    // Only a call that starts a process or attaches a session uses it, so skip the host call otherwise.
+    const target = chat.activeSessionId;
+    const attachedAlready = Boolean(target && rt.sessionId === target && rt.process?.alive);
+    const viewNeedsNothing =
+      purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
+    if (!attachedAlready && !viewNeedsNothing) {
+      rt.preamble = await contextPreambleService.forWorktree(chat.worktreeId);
+      if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
+        log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
+      }
     }
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;

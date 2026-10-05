@@ -18,7 +18,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   ContextConflict,
@@ -157,7 +157,14 @@ export class ContextSync {
   async preamble(request: ContextPreambleRequest): Promise<ContextPreamble> {
     const result = await buildPreamble(request, (spec) => this.dirOf(spec));
     // Claude Code's auto memory writes here, so the directory has to exist before the session.
-    if (result.memoryDir) await mkdir(result.memoryDir, { recursive: true });
+    if (result.memoryDir) {
+      // A pushed `memory` symlink would point the agent's memory writes at another host directory.
+      const existing = await lstat(result.memoryDir).catch(() => null);
+      if (existing?.isSymbolicLink()) {
+        return { ...result, memoryDir: null };
+      }
+      await mkdir(result.memoryDir, { recursive: true });
+    }
     return result;
   }
 

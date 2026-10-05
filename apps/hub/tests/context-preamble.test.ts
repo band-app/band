@@ -156,17 +156,20 @@ describe("session preamble", () => {
 
   it("S1: an over-budget file is cut with a pointer to the full file", async () => {
     await write("user", "preferences.md", bigPreferences);
-    const chatId = await turn(server.url, "testrepo-main", "claude-code");
-    const text = appended(newSession(home, chatId));
-    expect(text.split("\n").length).toBeLessThanOrEqual(200);
-    expect(text).toContain("rule 0");
-    expect(text).not.toContain("rule 399");
-    expect(text).toMatch(
-      /\[Cut: \d+ more lines\. Read the full file at .*context\/user\/preferences\.md\]/,
-    );
-    // The notes still fit beside the long file.
-    expect(text).toContain("The release train leaves on Fridays.");
-    await write("user", "preferences.md", "# Preferences\nAlways use pnpm.\n");
+    try {
+      const chatId = await turn(server.url, "testrepo-main", "claude-code");
+      const text = appended(newSession(home, chatId));
+      expect(text.split("\n").length).toBeLessThanOrEqual(200);
+      expect(text).toContain("rule 0");
+      expect(text).not.toContain("rule 399");
+      expect(text).toMatch(
+        /\[Cut: \d+ more lines\. Read the full file at .*context\/user\/preferences\.md\]/,
+      );
+      // The notes still fit beside the long file.
+      expect(text).toContain("The release train leaves on Fridays.");
+    } finally {
+      await write("user", "preferences.md", "# Preferences\nAlways use pnpm.\n");
+    }
   });
 
   it("S2: Claude gets _meta.systemPrompt.append and autoMemoryDirectory in the session settings", async () => {
@@ -201,17 +204,20 @@ describe("session preamble", () => {
 
   it("S4: with the preamble off for the project, nothing is injected", async () => {
     await m("context.update", { name: "acme", preamble: false });
-    for (const agent of ["claude-code", "codex"]) {
-      const chatId = await turn(server.url, "testrepo-main", agent);
-      const req = newSession(home, chatId);
-      expect(req.params._meta, agent).toBeUndefined();
-      expect(req.env.CODEX_CONFIG, agent).toBeUndefined();
+    try {
+      for (const agent of ["claude-code", "codex"]) {
+        const chatId = await turn(server.url, "testrepo-main", agent);
+        const req = newSession(home, chatId);
+        expect(req.params._meta, agent).toBeUndefined();
+        expect(req.env.CODEX_CONFIG, agent).toBeUndefined();
+      }
+      const { contexts } = await q<{ contexts: Array<{ name: string; preamble: boolean }> }>(
+        "context.list",
+      );
+      expect(contexts.find((c) => c.name === "acme")?.preamble).toBe(false);
+    } finally {
+      await m("context.update", { name: "acme", preamble: true });
     }
-    const { contexts } = await q<{ contexts: Array<{ name: string; preamble: boolean }> }>(
-      "context.list",
-    );
-    expect(contexts.find((c) => c.name === "acme")?.preamble).toBe(false);
-    await m("context.update", { name: "acme", preamble: true });
   });
 });
 
