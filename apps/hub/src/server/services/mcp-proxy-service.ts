@@ -73,6 +73,10 @@ export interface McpServerView {
   readOnly: boolean;
   readOnlyTools: string[];
   enabled: boolean;
+  /** Project names that get the server, or null for every project. */
+  scopeProjects: string[] | null;
+  /** Host ids that get the server, or null for every host. */
+  scopeHosts: string[] | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -95,6 +99,8 @@ export interface McpServerInput {
   readOnly?: boolean;
   readOnlyTools?: string[];
   enabled?: boolean;
+  scopeProjects?: string[] | null;
+  scopeHosts?: string[] | null;
 }
 
 export type McpAuthResult =
@@ -179,6 +185,16 @@ function checkCwd(cwd: string | null | undefined): string | null {
   return cwd;
 }
 
+function checkScope(label: string, list: string[] | null | undefined): string[] | null {
+  if (list === null || list === undefined) return null;
+  if (list.length > 200) throw new McpProxyInputError(`${label} has more than 200 entries.`);
+  const names = list.map((n) => n.trim());
+  if (names.some((n) => n === "" || n.length > 200)) {
+    throw new McpProxyInputError(`${label} holds an empty or overlong entry.`);
+  }
+  return [...new Set(names)];
+}
+
 function view(row: McpServerRow): McpServerView {
   return { ...row };
 }
@@ -233,6 +249,22 @@ export class McpProxyService {
     return row?.enabled ? view(row) : undefined;
   }
 
+  /**
+   * The enabled servers a session in `project` on `hostId` may use. A server
+   * with a scope list the session is not in is left out.
+   */
+  serversForSession(project: string, hostId: string): McpServerView[] {
+    return this.queries
+      .listServers()
+      .filter(
+        (row) =>
+          row.enabled &&
+          (!row.scopeProjects || row.scopeProjects.includes(project)) &&
+          (!row.scopeHosts || row.scopeHosts.includes(hostId)),
+      )
+      .map(view);
+  }
+
   addServer(input: McpServerInput): McpServerView {
     const name = input.name.trim();
     if (!SERVER_NAME.test(name)) {
@@ -252,6 +284,8 @@ export class McpProxyService {
       readOnly: input.readOnly ?? false,
       readOnlyTools: checkToolList("readOnlyTools", input.readOnlyTools ?? []),
       enabled: input.enabled ?? true,
+      scopeProjects: checkScope("scopeProjects", input.scopeProjects),
+      scopeHosts: checkScope("scopeHosts", input.scopeHosts),
       createdAt: now,
       updatedAt: now,
     };
@@ -334,6 +368,11 @@ export class McpProxyService {
       next.readOnlyTools = checkToolList("readOnlyTools", patch.readOnlyTools);
     }
     if (patch.enabled !== undefined) next.enabled = patch.enabled;
+    if (patch.scopeProjects !== undefined) {
+      next.scopeProjects = checkScope("scopeProjects", patch.scopeProjects);
+    }
+    if (patch.scopeHosts !== undefined)
+      next.scopeHosts = checkScope("scopeHosts", patch.scopeHosts);
     this.queries.updateServer(name, next);
     this.toolCache.delete(row.id);
     // New destination or credential: tokens issued for the old one must not carry over.

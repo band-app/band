@@ -735,6 +735,10 @@ export const mcpServers = sqliteTable(
       .notNull()
       .default([]),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    // Which agent sessions get this server (plan step 4.3). Null means no
+    // limit on that axis. A session needs to match both lists that are set.
+    scopeProjects: text("scope_projects", { mode: "json" }).$type<string[] | null>(),
+    scopeHosts: text("scope_hosts", { mode: "json" }).$type<string[] | null>(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
