@@ -26,6 +26,7 @@ import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
+import { writeBrief } from "./_utils/write-brief";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `worktreeService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
@@ -161,6 +162,9 @@ export const worktreeCreateInput = z.object({
   // The project (id or name) the worktree belongs to (plan step 6.1). The repo must be one
   // of the project's. The agents in the worktree use that project's context.
   projectId: z.string().min(1).optional(),
+  // Markdown written to `.am/BRIEF.md` in the new worktree, which git ignores (plan step 6.3).
+  // It rides in the stored create call, so a worktree placed after provisioning gets it too.
+  brief: z.string().max(100_000).optional(),
 });
 export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
 
@@ -627,6 +631,17 @@ export class WorktreeService {
       log.warn({ err, worktreeId }, "copyWorktreeFiles raised — continuing");
     }
 
+    if (input.brief) {
+      try {
+        await writeBrief(host, worktreePath, input.brief, remote);
+      } catch (err) {
+        // A worker that starts without its brief would work blind, so fail the create.
+        throw new Error(
+          `The worktree was created, but its brief could not be written: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     // How the prompt's agent is displayed (issue #682): the caller's
     // `agentMode`, else its legacy `via`, else `agents.defaultMode`.
     const agentMode =
@@ -635,7 +650,12 @@ export class WorktreeService {
     // Materialize the default chat pane so the worktree surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt. A `gui`
     // prompt runs in it.
-    const defaultChat = chatService.getOrCreateDefault(worktreeId);
+    let defaultChat = chatService.getOrCreateDefault(worktreeId);
+    // A dispatched worker runs on the model of its lane from its first session, which the chat's
+    // own model decides (plan step 6.3).
+    if (input.brief && input.model && agentMode === "gui") {
+      defaultChat = chatService.update(defaultChat.id, { model: input.model }) ?? defaultChat;
+    }
 
     // The setup command runs in its own terminal tab, in parallel with the
     // agent: the prompt goes out now rather than after setup, so a slow or

@@ -591,6 +591,137 @@ function PolicySection({
   );
 }
 
+function DispatchSection({ project, canEdit }: { project: Project; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const dispatches = useQuery({
+    queryKey: ["projects.dispatches", project.id],
+    queryFn: () => trpc.projects.dispatches.query({ project: project.id }),
+    refetchInterval: 2000,
+  });
+  const groups = useQuery({
+    queryKey: ["projects.groups", project.id],
+    queryFn: () => trpc.projects.groups.query({ project: project.id }),
+    refetchInterval: 5000,
+  });
+  const decide = async (id: string, action: "approve" | "reject") => {
+    setError(null);
+    setBusy(id);
+    try {
+      if (action === "approve") await trpc.projects.approveDispatch.mutate({ requestId: id });
+      else await trpc.projects.rejectDispatch.mutate({ requestId: id });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+      await queryClient.invalidateQueries({ queryKey: ["projects.dispatches", project.id] });
+      await queryClient.invalidateQueries({ queryKey: ["projects.groups", project.id] });
+      await queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+    }
+  };
+  const requests = dispatches.data?.dispatches ?? [];
+  const waiting = requests.filter((r) => r.status === "pending");
+  const failed = requests.filter((r) => r.status === "failed");
+
+  return (
+    <>
+      <section className="space-y-2" data-testid="projects__dispatches">
+        <h3 className="text-sm font-medium">Dispatch requests</h3>
+        {waiting.length === 0 && failed.length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="projects__no-dispatches">
+            Nothing waits for approval.
+          </p>
+        ) : null}
+        {[...waiting, ...failed].map((r) => (
+          <div
+            key={r.id}
+            className="space-y-1 rounded-md border p-3"
+            data-testid="projects__dispatch"
+            data-dispatch={r.id}
+            data-status={r.status}
+          >
+            <p className="text-sm font-medium" data-testid="projects__dispatch-title">
+              {r.title}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {r.mode === "single" ? "One repo" : `Group, mode ${r.mode}`}: {r.repos.join(", ")} on
+              branch {r.branch}. {r.scenarios.length} acceptance scenario
+              {r.scenarios.length === 1 ? "" : "s"}.
+            </p>
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-xs">{r.brief}</pre>
+            {r.status === "failed" ? (
+              <p className="text-xs text-destructive" data-testid="projects__dispatch-error">
+                {r.error}
+              </p>
+            ) : canEdit ? (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  data-testid="projects__dispatch-approve"
+                  disabled={busy !== null}
+                  onClick={() => decide(r.id, "approve")}
+                >
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="projects__dispatch-reject"
+                  disabled={busy !== null}
+                  onClick={() => decide(r.id, "reject")}
+                >
+                  Reject
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+        <ErrorLine message={error} />
+      </section>
+
+      <section className="space-y-2" data-testid="projects__groups">
+        <h3 className="text-sm font-medium">Task groups</h3>
+        {(groups.data?.groups ?? []).length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="projects__no-groups">
+            No task groups yet.
+          </p>
+        ) : null}
+        {(groups.data?.groups ?? []).map((g) => (
+          <div
+            key={g.id}
+            className="space-y-1 rounded-md border p-3"
+            data-testid="projects__group"
+            data-group={g.id}
+            data-branch={g.branch}
+            data-mode={g.mode}
+          >
+            <p className="text-sm font-medium">{g.title}</p>
+            <p className="text-xs text-muted-foreground">
+              Branch {g.branch}, mode {g.mode}. Pull requests merge in this order:
+            </p>
+            <ol className="list-decimal pl-5 text-sm">
+              {g.members.map((m) => (
+                <li
+                  key={m.repo}
+                  data-testid="projects__group-member"
+                  data-repo={m.repo}
+                  data-order={m.mergeOrder}
+                >
+                  {m.repo}
+                  {m.worktreeId ? `, worktree ${m.worktreeId}` : ", waiting for a host"}
+                  {m.hostId ? `, host ${m.hostId}` : ""}
+                  {m.prNumber ? `, PR #${m.prNumber}` : ""}
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
 function ProjectDetail({
   project,
   canEdit,
@@ -822,6 +953,8 @@ function ProjectDetail({
           </div>
         ))}
       </section>
+
+      <DispatchSection project={project} canEdit={canEdit} />
 
       <ErrorLine message={error} />
       {editing ? <EditProjectDialog project={project} open onOpenChange={setEditing} /> : null}
