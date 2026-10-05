@@ -1,9 +1,10 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "4f60f38a-e896-4bf4-bdd9-a2de36858cc2",
+  "id": "0c2eb45f-ca3d-4691-93a2-09d2c71451ad",
   "prevIds": [
-    "78a865de-0183-4bf1-88e4-d1ab4963927f"
+    "78a865de-0183-4bf1-88e4-d1ab4963927f",
+    "0a7c1a46-708a-41f1-a3ae-e54711dc9173"
   ],
   "ddl": [
     {
@@ -84,6 +85,10 @@
     },
     {
       "name": "runner_machines",
+      "entityType": "tables"
+    },
+    {
+      "name": "runner_snapshots",
       "entityType": "tables"
     },
     {
@@ -1820,6 +1825,106 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "runner_id",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "machine_id",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "workspace_ids",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "snapshot_id",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "size_bytes",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "restored_at",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "runner_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "subscription_id",
       "entityType": "columns",
       "table": "subscription_cursors"
@@ -3214,6 +3319,15 @@
     },
     {
       "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "runner_snapshots_pk",
+      "table": "runner_snapshots",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
         "subscription_id"
       ],
       "nameExplicit": false,
@@ -3673,6 +3787,38 @@
       "name": "runner_machines_worker_idx",
       "entityType": "indexes",
       "table": "runner_machines"
+    },
+    {
+      "columns": [
+        {
+          "value": "host_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "runner_snapshots_host_idx",
+      "entityType": "indexes",
+      "table": "runner_snapshots"
+    },
+    {
+      "columns": [
+        {
+          "value": "runner_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "runner_snapshots_runner_idx",
+      "entityType": "indexes",
+      "table": "runner_snapshots"
     },
     {
       "columns": [
