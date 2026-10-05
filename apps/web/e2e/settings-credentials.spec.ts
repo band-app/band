@@ -1,6 +1,7 @@
 /**
  * Settings > Credentials (plan step 4.1): add an API key whose value is write-only, connect an
- * OAuth-protected server through the consent window, and delete both. The authorization server is
+ * OAuth-protected server through the consent window (started from the MCP form, plan step 4.5),
+ * and delete both. The authorization server is
  * a real local Express stub with discovery, dynamic client registration and PKCE
  * (`apps/hub/tests/fixtures/oauth-stub.ts`). Real hub, temp BAND_HOME.
  * `apps/hub/tests/vault.test.ts` covers encryption, rotation, refresh and revocation.
@@ -45,7 +46,7 @@ test.afterAll(async () => {
 test("adds an API key whose value is never shown again, then deletes it", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("credentials");
 
   await settingsPage.addCredential("E2E_API_KEY", SECRET);
   const row = settingsPage.credentialRow("E2E_API_KEY");
@@ -59,17 +60,49 @@ test("adds an API key whose value is never shown again, then deletes it", async 
   await expect(row).toHaveCount(0);
 });
 
+test("adds a git credential on the Credentials page, and the MCP form does not offer it", async ({
+  page,
+}) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog("credentials");
+
+  await settingsPage.addGitCredential(
+    "E2E_GIT_TOKEN",
+    "ghp_E2E_GIT_SECRET_123",
+    "github.com",
+    "acme/*",
+  );
+  const row = settingsPage.credentialRow("E2E_GIT_TOKEN");
+  await settingsPage.expectRowVisible(row);
+  await expect(row).toHaveAttribute("data-kind", "git");
+  await expect(settingsPage.dialog).not.toContainText("ghp_E2E_GIT_SECRET_123");
+
+  // A git credential cannot authenticate an MCP server, so the picker leaves it out.
+  await settingsPage.openSection("mcp");
+  await settingsPage.dialog.getByTestId("settings__mcp-add").click();
+  await expect(settingsPage.mcpCredentialOptions().first()).toBeAttached();
+  await expect(
+    settingsPage.mcpCredentialOptions().filter({ hasText: "E2E_GIT_TOKEN" }),
+  ).toHaveCount(0);
+
+  await settingsPage.openSection("credentials");
+  await settingsPage.deleteCredential("E2E_GIT_TOKEN");
+  await expect(row).toHaveCount(0);
+});
+
 test("connects an OAuth server through the consent window, then deletes and revokes it", async ({
   page,
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("mcp");
 
-  const consent = await settingsPage.connectService("e2e-mcp", oauth.resourceUrl);
+  const consent = await settingsPage.connectMcpOAuth("e2e-mcp", oauth.resourceUrl);
   // The stub consents at once and redirects the window back to the hub's callback.
   await settingsPage.expectOAuthCallbackConnected(consent);
 
+  await settingsPage.openSection("credentials");
   const row = settingsPage.credentialRow("e2e-mcp");
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-kind", "oauth");
@@ -85,9 +118,10 @@ test("connects an OAuth server through the consent window, then deletes and revo
 test("shows the hub's refusal when a server cannot be reached", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("mcp");
 
-  await settingsPage.connectService("nowhere", "http://127.0.0.1:1/mcp");
-  await expect(settingsPage.credentialError()).toBeVisible();
+  await settingsPage.connectMcpOAuth("nowhere", "http://127.0.0.1:1/mcp");
+  await expect(settingsPage.mcpError()).toBeVisible();
+  await settingsPage.openSection("credentials");
   await expect(settingsPage.credentialRow("nowhere")).toHaveCount(0);
 });

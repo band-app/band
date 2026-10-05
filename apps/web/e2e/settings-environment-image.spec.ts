@@ -84,7 +84,7 @@ test.afterAll(async () => {
 test("building an image shows the log and makes it the current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("environment");
   await settingsPage.expandEnvironment("img-ok");
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
@@ -102,7 +102,7 @@ test("building an image shows the log and makes it the current image", async ({ 
 test("a failed build shows its error and leaves no current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("environment");
   await settingsPage.expandEnvironment("img-fail");
 
   await settingsPage.buildEnvironmentImage();

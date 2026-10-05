@@ -100,7 +100,7 @@ test("lists the runner and shows the log of a run that failed", async ({ page })
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("runners");
 
   const runner = settingsPage.runnerRow("moon-runner");
   await settingsPage.expectRowVisible(runner);
@@ -126,13 +126,14 @@ test("lists a machine the runner started, and an admin destroys it", async ({ pa
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("runners");
 
   const machine = settingsPage.runnerMachines("ghost-runner");
   await expect(machine).toHaveCount(1, { timeout: 30_000 });
   await expect(machine).toHaveAttribute("data-state", "spawning");
   await expect(settingsPage.machineAge(machine)).toBeVisible();
-  await expect(machine).toContainText("ghost-h-");
+  // The list refetches every 5 s, and the handle is recorded a moment after the row first shows.
+  await expect(machine).toContainText("ghost-h-", { timeout: 15_000 });
 
   await settingsPage.destroyMachine(machine);
   await expect(machine).toHaveAttribute("data-state", "destroyed", { timeout: 15_000 });

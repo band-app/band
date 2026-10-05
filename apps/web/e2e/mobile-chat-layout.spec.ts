@@ -74,7 +74,6 @@ const narrowProject = (width: number) => `narrow${width}`;
 const PHONE_COMPOSER_PADDING_BOTTOM = 8;
 const COMPOSER_PADDING_BOTTOM = 16;
 // `lg:pb-3` on the Settings DialogFooter, where the dialog is a floating card.
-const SETTINGS_CARD_FOOTER_PADDING = 12;
 // The full-screen dashboard's minimum bottom gap, `max(1rem, inset)`.
 const DASHBOARD_BOTTOM_GAP = 16;
 // A 1x1 PNG, the smallest image the composer accepts as an attachment.
@@ -290,12 +289,12 @@ test.describe("safe-area insets in a home-screen app", () => {
     expect(content.paddingBottom).toBe(SAFE_AREA_BOTTOM);
   });
 
-  test("the Settings drawer footer pads the home indicator", async () => {
+  test("the Settings footer pads the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const settings = new SettingsPage(page, server.url, TOKEN);
     await settings.goto();
     await settings.openDialog();
-    await expect(settings.dialog).toHaveAttribute("data-variant", "bottom-sheet");
+    await expect(settings.dialog).toHaveAttribute("data-variant", "fullscreen");
 
     const footer = await layout.readLayout(settings.footer);
     expect(footer.paddingBottom).toBe(SAFE_AREA_BOTTOM);
@@ -346,17 +345,17 @@ test.describe("safe-area insets in a wide home-screen app", () => {
     expect(composer.paddingBottom).toBe(COMPOSER_PADDING_BOTTOM);
   });
 
-  test("the Settings card keeps its own footer padding", async () => {
+  test("the Settings footer pads the home indicator on a wide screen too", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const settings = new SettingsPage(page, server.url, TOKEN);
     await settings.goto();
     await settings.openDialog();
-    // A floating card: it does not reach the bottom screen edge.
+    // Full screen: the footer reaches the bottom screen edge.
     const box = await settings.dialogBox();
-    expect(box.y + box.height).toBeLessThan(TABLET.height - SAFE_AREA_BOTTOM);
+    expect(Math.round(box.y + box.height)).toBe(TABLET.height);
 
     const footer = await layout.readLayout(settings.footer);
-    expect(footer.paddingBottom).toBe(SETTINGS_CARD_FOOTER_PADDING);
+    expect(footer.paddingBottom).toBe(SAFE_AREA_BOTTOM);
   });
 });
 

@@ -9,6 +9,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { McpProxyInputError, McpServerNotFoundError } from "../../errors";
 import { mcpProxyService } from "../../services/mcp-proxy-service";
+import { testMcpConnection, testStdioConnection } from "../../services/mcp-test-service";
 import { adminProcedure, t } from "../trpc";
 
 const name = z.string().trim().min(1).max(63);
@@ -97,9 +98,71 @@ export const mcpServersRouter = t.router({
     .input(z.object({ sessionId: z.string().min(1).max(200) }))
     .mutation(({ input }) => ({ revoked: mcpProxyService.revokeSession(input.sessionId) })),
 
+  /**
+   * Connects to an upstream and lists its tools, unfiltered (Settings > MCP). Takes a saved
+   * server's `name`, or the `url` and credential fields of a form that is not saved yet.
+   */
+  test: adminProcedure
+    .input(
+      z.union([
+        z.object({ name }),
+        z.object({
+          transport: z.literal("stdio"),
+          hostId: z.string().min(1).max(100),
+          command: z.string().min(1).max(1000),
+          args: settings.args,
+          env: settings.env,
+          cwd: settings.cwd,
+        }),
+        z.object({
+          url: z.string().url().max(2000),
+          vaultItemId: settings.vaultItemId,
+          headerName: settings.headerName,
+          headerPrefix: settings.headerPrefix,
+        }),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const asStdio = (s: {
+        id?: string;
+        name?: string;
+        hostId: string | null;
+        command: string | null;
+        args?: string[];
+        env?: z.infer<typeof envEntry>[];
+        cwd?: string | null;
+      }) => ({
+        id: s.id ?? "m-test",
+        name: s.name ?? "test",
+        hostId: s.hostId,
+        command: s.command,
+        args: s.args ?? [],
+        env: s.env ?? [],
+        cwd: s.cwd ?? null,
+      });
+      if ("name" in input) {
+        const saved = guard(() => {
+          const found = mcpProxyService.listServers().find((s) => s.name === input.name);
+          if (!found) throw new McpServerNotFoundError(input.name);
+          return found;
+        });
+        if (saved.transport === "stdio") return testStdioConnection(asStdio(saved));
+        return testMcpConnection(guard(() => mcpProxyService.connectionView(saved)));
+      }
+      if ("transport" in input) return testStdioConnection(asStdio(input));
+      return testMcpConnection(guard(() => mcpProxyService.connectionView(input)));
+    }),
+
   audit: adminProcedure
     .input(
-      z.object({ server: name.optional(), limit: z.number().int().min(1).max(500).default(100) }),
+      z.object({
+        server: name.optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+        offset: z.number().int().min(0).max(100_000).default(0),
+      }),
     )
-    .query(({ input }) => ({ entries: mcpProxyService.listAudit(input.limit, input.server) })),
+    .query(({ input }) => {
+      const rows = mcpProxyService.listAudit(input.limit + 1, input.server, input.offset);
+      return { entries: rows.slice(0, input.limit), hasMore: rows.length > input.limit };
+    }),
 });

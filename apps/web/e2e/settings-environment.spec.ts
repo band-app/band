@@ -71,7 +71,7 @@ test.afterAll(async () => {
 async function open(page: Page): Promise<SettingsPage> {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("environment");
   return settingsPage;
 }
 

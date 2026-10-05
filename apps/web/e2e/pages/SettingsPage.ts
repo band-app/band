@@ -34,6 +34,24 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { AGENT_MODE_KEY } from "@/dashboard";
 
+/** Ids of the pages in the settings sidebar (`SETTINGS_SECTIONS` in `SettingsPage.tsx`). */
+export type SettingsNavId =
+  | "appearance"
+  | "general"
+  | "hub"
+  | "browser"
+  | "hosts"
+  | "credentials"
+  | "mcp"
+  | "runners"
+  | "environment"
+  | "labels"
+  | "agents"
+  | "usage"
+  | "notifications"
+  | "web-server"
+  | "terminal";
+
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
   readonly dialog: Locator;
@@ -78,7 +96,7 @@ export class SettingsPage {
    * hydration-swallowed first click (see `goto`) can drop the event, so
    * re-click until the dialog is actually visible.
    */
-  async openDialog(): Promise<void> {
+  async openDialog(section?: SettingsNavId): Promise<void> {
     await test.step("Open Settings dialog from the bottom action bar", async () => {
       await expect(this.settingsButton).toBeVisible();
       await expect
@@ -91,6 +109,48 @@ export class SettingsPage {
           { timeout: 10_000 },
         )
         .toBe(true);
+      if (section) await this.openSection(section);
+    });
+  }
+
+  /** Selects a page in the settings sidebar. Each page shows one section. */
+  async openSection(section: SettingsNavId): Promise<void> {
+    await test.step(`Open the ${section} settings page`, async () => {
+      await this.dialog.getByTestId(`settings__nav-${section}`).click();
+      await expect(this.dialog.getByTestId(`settings__nav-${section}`)).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    });
+  }
+
+  /** Types into the sidebar's search box. */
+  async searchSections(query: string): Promise<void> {
+    await test.step(`Search the settings pages for "${query}"`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Search settings" }).fill(query);
+    });
+  }
+
+  /** One sidebar entry per page that matches the search. */
+  navEntries(): Locator {
+    return this.dialog.getByTestId("settings-page__nav").locator("[data-testid^='settings__nav-']");
+  }
+
+  navEntry(section: SettingsNavId): Locator {
+    return this.dialog.getByTestId(`settings__nav-${section}`);
+  }
+
+  /** Bounding box of the sidebar. */
+  async navBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await this.dialog.getByTestId("settings-page__nav").boundingBox();
+    if (!box) throw new Error("The settings sidebar has no bounding box (not visible)");
+    return box;
+  }
+
+  /** Clicks "Back to app", which closes the settings. */
+  async backToApp(): Promise<void> {
+    await test.step("Go back to the app", async () => {
+      await this.dialog.getByTestId("settings-page__back").click();
     });
   }
 
@@ -423,6 +483,25 @@ export class SettingsPage {
     return row.getByTestId("settings__credential-oauth");
   }
 
+  /** Adds a git credential for `host` and a repository pattern, from the "Add a key" form. */
+  async addGitCredential(name: string, value: string, host: string, pathPattern: string) {
+    await test.step(`Add the git credential ${name}`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Credential name" }).fill(name);
+      await this.dialog
+        .getByRole("combobox", { name: "Credential kind" })
+        .selectOption({ label: "Git credential (access token)" });
+      await this.dialog.getByRole("textbox", { name: "Git host" }).fill(host);
+      await this.dialog.getByRole("textbox", { name: "Git path pattern" }).fill(pathPattern);
+      await this.dialog.getByLabel("Credential value").fill(value);
+      await this.dialog.getByTestId("settings__credential-add").click();
+    });
+  }
+
+  /** The options of the credential picker in the MCP add form. */
+  mcpCredentialOptions(): Locator {
+    return this.dialog.getByRole("combobox", { name: "MCP credential" }).getByRole("option");
+  }
+
   /** The error shown under the Credentials section. */
   credentialError(): Locator {
     return this.dialog.getByTestId("settings__credential-error");
@@ -445,17 +524,23 @@ export class SettingsPage {
   }
 
   /**
-   * Fills the "Connect a service" form and clicks Connect. Returns the window the hub sends to the
-   * consent page, which the caller follows.
+   * Opens the MCP add form, fills the name and URL and clicks "Connect with OAuth". Returns the window
+   * the hub sends to the consent page, which the caller follows.
    */
-  async connectService(name: string, serverUrl: string): Promise<Page> {
-    return await test.step(`Connect ${name}`, async () => {
-      await this.dialog.getByRole("textbox", { name: "Connection name" }).fill(name);
-      await this.dialog.getByRole("textbox", { name: "Server URL" }).fill(serverUrl);
+  async connectMcpOAuth(name: string, serverUrl: string): Promise<Page> {
+    return await test.step(`Connect ${name} with OAuth`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(name);
+      await this.dialog.getByRole("textbox", { name: "MCP server URL" }).fill(serverUrl);
       const popup = this.page.waitForEvent("popup");
-      await this.dialog.getByTestId("settings__credential-connect").click();
+      await this.dialog.getByTestId("settings__mcp-connect-oauth").click();
       return await popup;
     });
+  }
+
+  /** The error shown under the MCP section. */
+  mcpError(): Locator {
+    return this.dialog.getByTestId("settings__mcp-error");
   }
 
   /** Waits for the consent window to land on the hub's callback page and report success. */
@@ -472,6 +557,129 @@ export class SettingsPage {
     await test.step(`Delete the credential ${name}`, async () => {
       await this.dialog.getByRole("button", { name: `Delete credential ${name}` }).click();
     });
+  }
+
+  /** One row per MCP server. `data-testid` set in `McpSettings.tsx`. */
+  mcpServerRow(name: string): Locator {
+    return this.dialog.getByTestId("settings__mcp-server").filter({
+      has: this.page.getByTestId("settings__mcp-server-name").getByText(name, { exact: true }),
+    });
+  }
+
+  /** Opens the add form, fills it and clicks Test connection. */
+  async startMcpServer(name: string, url: string, credential: string): Promise<void> {
+    await test.step(`Fill in the MCP server ${name}`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(name);
+      await this.dialog.getByRole("textbox", { name: "MCP server URL" }).fill(url);
+      await this.dialog
+        .getByRole("combobox", { name: "MCP credential" })
+        .selectOption({ label: `${credential} (API key)` });
+    });
+  }
+
+  /** Opens the add form and fills a stdio server: a process on a host, with one vault-backed env variable. */
+  async startMcpStdioServer(opts: {
+    name: string;
+    hostId: string;
+    command: string;
+    args: string[];
+    cwd: string;
+    envName: string;
+    envVaultItem: string;
+  }): Promise<void> {
+    await test.step(`Fill in the stdio MCP server ${opts.name}`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(opts.name);
+      await this.dialog
+        .getByRole("combobox", { name: "MCP transport" })
+        .selectOption({ label: "Process on a host (stdio)" });
+      await this.dialog
+        .getByRole("combobox", { name: "MCP host" })
+        .selectOption({ value: opts.hostId });
+      await this.dialog.getByRole("textbox", { name: "MCP command" }).fill(opts.command);
+      await this.dialog.getByRole("textbox", { name: "MCP arguments" }).fill(opts.args.join("\n"));
+      await this.dialog.getByRole("textbox", { name: "MCP working directory" }).fill(opts.cwd);
+      await this.dialog.getByTestId("settings__mcp-env-add").click();
+      await this.dialog
+        .getByRole("textbox", { name: "Environment variable 1 name" })
+        .fill(opts.envName);
+      await this.dialog
+        .getByRole("combobox", { name: "Environment variable 1 source" })
+        .selectOption({ label: "Vault item" });
+      await this.dialog
+        .getByRole("combobox", { name: "Environment variable 1 vault item" })
+        .selectOption({ label: opts.envVaultItem });
+    });
+  }
+
+  /** The status line of a server row: `data-state` is ok, other or disabled. */
+  mcpServerStatus(name: string): Locator {
+    return this.mcpServerRow(name).getByTestId("settings__mcp-status");
+  }
+
+  /** Clicks Test connection and waits for the hub's answer. */
+  async testMcpConnection(): Promise<void> {
+    await test.step("Test the MCP connection", async () => {
+      await this.dialog.getByTestId("settings__mcp-test").click();
+    });
+  }
+
+  mcpTestResult(): Locator {
+    return this.dialog.getByTestId("settings__mcp-test-result");
+  }
+
+  /** Limits the server to exactly these tools, after a successful test. */
+  async allowOnlyMcpTools(tools: string[]): Promise<void> {
+    await test.step(`Allow only ${tools.join(", ")}`, async () => {
+      await this.dialog.getByRole("checkbox", { name: "Allow every tool" }).uncheck();
+      const boxes = this.dialog.getByTestId("settings__mcp-tools").getByRole("checkbox");
+      const count = await boxes.count();
+      for (let i = 0; i < count; i++) await boxes.nth(i).uncheck();
+      for (const tool of tools) {
+        await this.dialog.getByRole("checkbox", { name: `Allow tool ${tool}` }).check();
+      }
+    });
+  }
+
+  /** Scopes the server to one project. */
+  async scopeMcpToProject(project: string): Promise<void> {
+    await test.step(`Scope the MCP server to ${project}`, async () => {
+      await this.dialog.getByRole("radio", { name: "Scope: Selected projects" }).check();
+      await this.dialog.getByRole("checkbox", { name: `Project ${project}` }).check();
+    });
+  }
+
+  mcpMissionsScope(): Locator {
+    return this.dialog.getByRole("radio", { name: "Scope: Missions" });
+  }
+
+  async saveMcpServer(): Promise<void> {
+    await test.step("Save the MCP server", async () => {
+      await this.dialog.getByTestId("settings__mcp-save").click();
+    });
+  }
+
+  async openMcpAudit(name: string): Promise<void> {
+    await test.step(`Open the audit log of ${name}`, async () => {
+      await this.dialog.getByRole("button", { name: `Audit log of ${name}` }).click();
+    });
+  }
+
+  mcpAuditTools(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-tool");
+  }
+
+  mcpAuditSessions(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-session");
+  }
+
+  mcpAuditEntries(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-entry");
+  }
+
+  mcpDenied(): Locator {
+    return this.dialog.getByTestId("settings__mcp-denied");
   }
 
   /** One row per configured runner. `data-testid` set in `RunnersSettings.tsx`. */

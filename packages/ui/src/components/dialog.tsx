@@ -92,6 +92,10 @@ const DIALOG_CONTENT_VARIANTS = {
     "lg:inset-auto lg:top-[50%] lg:left-[50%] lg:bottom-auto lg:w-full lg:max-w-lg lg:max-h-[calc(85vh/var(--app-zoom,1))] lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-lg lg:border-b",
     "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
   ].join(" "),
+  // Covers the whole window (Settings). No rounding, border or backdrop gap; the content lays
+  // itself out as a flex column and scrolls inside.
+  fullscreen:
+    "fixed inset-0 z-50 flex h-[calc(100dvh/var(--app-zoom,1))] w-full max-w-none flex-col bg-background outline-none duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
   "command-palette": [
     // Shared
     "fixed z-50 flex flex-col border-border bg-background shadow-lg outline-none",

@@ -29,7 +29,6 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-dialog-border-token";
@@ -75,18 +74,6 @@ test.afterAll(async () => {
 
 test.describe("Dialog edges use the theme border colour", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
-
-  test("Settings (bottom-sheet variant) has a --border edge, not a white one", async ({ page }) => {
-    const settingsPage = new SettingsPage(page, server.url, TOKEN);
-
-    await settingsPage.goto();
-    await settingsPage.openDialog();
-    await expect(settingsPage.dialog).toHaveAttribute("data-variant", "bottom-sheet");
-
-    const colors = await readEdgeColors(settingsPage.dialog);
-    expect(colors.themeBorder).not.toBe(colors.foreground);
-    expect(colors.edge).toBe(colors.themeBorder);
-  });
 
   test("Quick Open (command-palette variant) has a --border edge, not a white one", async ({
     page,

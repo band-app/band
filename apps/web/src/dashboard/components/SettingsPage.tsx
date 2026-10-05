@@ -11,7 +11,6 @@ import {
   Dialog,
   DialogContent,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   Input,
   Label,
@@ -23,7 +22,7 @@ import {
   Switch,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";
@@ -41,9 +40,10 @@ import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
+import { McpSettings } from "./settings/McpSettings";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
-import { SettingsSection } from "./settings/SettingsSection";
+import { SettingsPageContext, SettingsSection } from "./settings/SettingsSection";
 
 const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] =
   [
@@ -68,6 +68,129 @@ const MODEL_DEFAULT_SENTINEL = "__band_default__";
 // so the value is unambiguous in source — a literal renders as an
 // invisible character in editors and diffs.
 const ID_DELIMITER = "\u001f";
+
+type SettingsSectionId =
+  | "appearance"
+  | "general"
+  | "hub"
+  | "browser"
+  | "hosts"
+  | "credentials"
+  | "mcp"
+  | "runners"
+  | "environment"
+  | "labels"
+  | "agents"
+  | "usage"
+  | "notifications"
+  | "web-server"
+  | "terminal";
+
+interface SettingsSectionMeta {
+  id: SettingsSectionId;
+  title: string;
+  subtitle: string;
+  group: string;
+  /** Only shown in the desktop app. */
+  desktopOnly?: boolean;
+}
+
+/** The pages of the full-screen settings, in nav order. Each shows one section. */
+const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
+  {
+    id: "appearance",
+    title: "Appearance",
+    subtitle: "Theme, zoom and how the app looks.",
+    group: "Interface",
+  },
+  {
+    id: "notifications",
+    title: "Notifications",
+    subtitle: "Sounds and alerts when an agent needs you.",
+    group: "Interface",
+  },
+  {
+    id: "general",
+    title: "General",
+    subtitle: "Workspace defaults and editor behavior.",
+    group: "Set up",
+  },
+  {
+    id: "hub",
+    title: "Hub",
+    subtitle: "Which hub this desktop app talks to.",
+    group: "Set up",
+    desktopOnly: true,
+  },
+  {
+    id: "web-server",
+    title: "Web Server",
+    subtitle: "The port and access settings of the hub's web server.",
+    group: "Set up",
+  },
+  {
+    id: "terminal",
+    title: "Terminal",
+    subtitle: "Terminal service and shell behavior.",
+    group: "Set up",
+  },
+  {
+    id: "browser",
+    title: "Browser",
+    subtitle: "Browser pane options and cookie profiles.",
+    group: "Set up",
+  },
+  {
+    id: "agents",
+    title: "Coding Agents",
+    subtitle: "Enable the agents you have installed.",
+    group: "AI capabilities",
+  },
+  {
+    id: "mcp",
+    title: "MCP",
+    subtitle:
+      "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
+    group: "AI capabilities",
+  },
+  {
+    id: "credentials",
+    title: "Credentials",
+    subtitle: "Keys and OAuth connections the hub stores encrypted.",
+    group: "AI capabilities",
+  },
+  {
+    id: "hosts",
+    title: "Hosts",
+    subtitle: "Machines that run workspaces, and the tokens that reach the hub.",
+    group: "Infrastructure",
+  },
+  {
+    id: "runners",
+    title: "Runners",
+    subtitle: "How the hub starts workers on demand.",
+    group: "Infrastructure",
+  },
+  {
+    id: "environment",
+    title: "Environment",
+    subtitle: "Each project's .band/environment.json, checked against the hosts.",
+    group: "Infrastructure",
+  },
+  {
+    id: "labels",
+    title: "Labels",
+    subtitle: "Tag projects to filter and group them in the sidebar.",
+    group: "Workspace",
+  },
+  {
+    id: "usage",
+    title: "Usage report",
+    subtitle:
+      "Configure how the Usage dialog collects and retains per-session token and cost rows.",
+    group: "Workspace",
+  },
+];
 
 interface Props {
   /** Whether the dialog is visible. */
@@ -113,6 +236,21 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const restartTerminalDaemonMutation = useRestartTerminalDaemon();
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const capabilities = useCapabilities();
+  const [active, setActive] = useState<SettingsSectionId>("general");
+  const [navQuery, setNavQuery] = useState("");
+  const availableSections = SETTINGS_SECTIONS.filter(
+    (section) => !section.desktopOnly || isDesktop,
+  );
+  const visibleGroups = availableSections
+    .filter((section) => section.title.toLowerCase().includes(navQuery.trim().toLowerCase()))
+    .reduce<Array<{ name: string; sections: SettingsSectionMeta[] }>>((groups, section) => {
+      const group = groups.find((g) => g.name === section.group);
+      if (group) group.sections.push(section);
+      else groups.push({ name: section.group, sections: [section] });
+      return groups;
+    }, []);
+  const activeMeta =
+    availableSections.find((section) => section.id === active) ?? availableSections[0];
 
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
   const [codingAgents, setCodingAgents] = useState<CodingAgentDefinition[]>(
@@ -483,692 +621,833 @@ export function SettingsPage({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        // Mobile: a bottom drawer that slides up and stops short of the top so
-        // the header + close button clear the iOS notch (the `bottom-sheet`
-        // variant caps height with env(safe-area-inset-top)). Desktop (sm+):
-        // the centered, capped-width card — unchanged.
-        variant="bottom-sheet"
-        className="flex flex-col gap-0 overflow-hidden p-0 lg:h-[calc(80vh/var(--app-zoom,1))] lg:max-w-2xl"
-      >
-        <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
-          <DialogTitle>Settings</DialogTitle>
-        </DialogHeader>
-        {/* Body — every section stacked in a single scrolling column. */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="flex flex-col gap-6 px-6 pb-6">
-            {/* ── Appearance ─────────────────────────────────── */}
-            <SettingsSection title="Appearance">
-              <SettingsRow
-                variant="responsive"
-                label="Theme"
-                description="Choose between system default, light, and dark mode."
+      <DialogContent variant="fullscreen" showCloseButton={false} className="gap-0 p-0">
+        <DialogTitle className="sr-only">Settings</DialogTitle>
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <nav
+            aria-label="Settings sections"
+            data-testid="settings-page__nav"
+            className="flex shrink-0 flex-col gap-2 border-border border-b bg-muted/20 p-3 max-lg:flex-row max-lg:items-center max-lg:overflow-x-auto lg:w-60 lg:overflow-y-auto lg:border-r lg:border-b-0"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 justify-start gap-2"
+              data-testid="settings-page__back"
+              onClick={() => onOpenChange(false)}
+            >
+              <ArrowLeft className="size-4" />
+              Back to app
+            </Button>
+            <Input
+              aria-label="Search settings"
+              placeholder="Search settings"
+              value={navQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNavQuery(e.target.value)}
+              className="h-8 text-sm max-lg:hidden"
+            />
+            {visibleGroups.map((group) => (
+              <div
+                key={group.name}
+                className="flex flex-col gap-0.5 max-lg:flex-row max-lg:items-center"
               >
-                <Select
-                  value={selectedTheme}
-                  onValueChange={(v: string) => setSelectedTheme(v as Theme)}
-                >
-                  <SelectTrigger className="h-8 w-full text-sm sm:w-32" aria-label="Theme">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="system">System</SelectItem>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
-                  </SelectContent>
-                </Select>
-              </SettingsRow>
-              {capabilities.translucentSidebar && (
-                <SettingsRow
-                  htmlFor="translucent-sidebar"
-                  label="Translucent sidebar"
-                  description="Show the desktop through the project list, blurred and tinted."
-                >
-                  <Switch
-                    id="translucent-sidebar"
-                    checked={translucentSidebar}
-                    onCheckedChange={setTranslucentSidebar}
-                  />
-                </SettingsRow>
-              )}
-            </SettingsSection>
-
-            {/* ── General ────────────────────────────────────── */}
-            <SettingsSection title="General">
-              <SettingsRow
-                variant="responsive"
-                htmlFor="worktrees-dir"
-                label="Worktrees folder"
-                description="Directory where new worktrees are created. Leave empty for the default location."
-              >
-                <div className="flex w-full gap-2 sm:w-[22rem]">
-                  <Input
-                    id="worktrees-dir"
-                    placeholder="~/.band/worktrees (default)"
-                    value={worktreesDir}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setWorktreesDir(e.target.value)
-                    }
-                    className="h-8 text-sm"
-                  />
-                  {capabilities.pickFolder && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={handleBrowse}
-                      aria-label="Browse for folder"
-                    >
-                      <FolderOpen />
-                    </Button>
-                  )}
+                <div className="px-2 pt-2 pb-1 text-[10px] max-lg:hidden font-medium tracking-widest text-muted-foreground uppercase">
+                  {group.name}
                 </div>
-              </SettingsRow>
-              <SettingsRow
-                htmlFor="enable-lsp"
-                label="Code intelligence (LSP)"
-                description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
-              >
-                <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
-              </SettingsRow>
-              <SettingsRow
-                htmlFor="enable-file-preview-tabs"
-                label="Preview tabs (single-click open)"
-                description="Single-click a file in the tree to open it in a temporary preview tab. Double-click or edit to keep it open."
-              >
-                <Switch
-                  id="enable-file-preview-tabs"
-                  checked={enableFilePreviewTabs}
-                  onCheckedChange={setEnableFilePreviewTabs}
-                />
-              </SettingsRow>
-            </SettingsSection>
-
-            {/* ── Hub (desktop app only) ─────────────────────── */}
-            {isDesktop ? (
-              <SettingsSection title="Hub">
-                <HubSettings />
-              </SettingsSection>
-            ) : null}
-
-            {/* ── Browser ────────────────────────────────────── */}
-            <SettingsSection title="Browser">
-              <SettingsRow
-                htmlFor="web-browser-cdp"
-                label="Stream desktop tabs to web (experimental)"
-                description="When enabled, the desktop opens a chromium debug port and lets web clients view + drive your Browser-pane tabs over CDP. Disable to save CPU/memory if you don't use the web UI for browsing."
-              >
-                <Switch
-                  id="web-browser-cdp"
-                  checked={webBrowserCdpEnabled}
-                  onCheckedChange={setWebBrowserCdpEnabled}
-                />
-              </SettingsRow>
-              <BrowserProfilesSettings />
-            </SettingsSection>
-
-            {/* ── Hosts ──────────────────────────────────────── */}
-            <SettingsSection title="Hosts">
-              <HostsSettings />
-            </SettingsSection>
-
-            {/* ── Credentials ────────────────────────────────── */}
-            <SettingsSection title="Credentials">
-              <CredentialsSettings />
-            </SettingsSection>
-
-            {/* ── Runners ────────────────────────────────────── */}
-            <SettingsSection title="Runners">
-              <RunnersSettings />
-            </SettingsSection>
-
-            {/* ── Environment ────────────────────────────────── */}
-            <SettingsSection
-              title="Environment"
-              description="Each project's .band/environment.json, checked against the hosts."
-            >
-              <EnvironmentSettings />
-            </SettingsSection>
-
-            {/* ── Labels ─────────────────────────────────────── */}
-            <SettingsSection
-              title="Labels"
-              description="Tag projects to filter and group them in the sidebar."
-            >
-              {labels.length === 0 ? (
-                <SettingsRow
-                  label="No labels yet"
-                  description="Add a label to start tagging projects."
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const id = `lbl_${Date.now()}`;
-                      setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
-                    }}
+                {group.sections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    data-testid={`settings__nav-${section.id}`}
+                    aria-current={active === section.id ? "page" : undefined}
+                    onClick={() => setActive(section.id)}
+                    className={cn(
+                      "rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent/60",
+                      active === section.id && "bg-accent font-medium text-accent-foreground",
+                    )}
                   >
-                    <Plus className="size-3" />
-                    Add label
-                  </Button>
-                </SettingsRow>
-              ) : (
-                <>
-                  {labels.map((lbl) => (
-                    <div
-                      key={lbl.id}
-                      data-slot="settings-row"
-                      className="flex items-center gap-2 px-4 py-2.5"
-                    >
-                      <ColorPicker
-                        value={lbl.color}
-                        onChange={(color) =>
-                          setLabels((prev) =>
-                            prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
-                          )
-                        }
-                        showHex={false}
-                        className="w-auto h-7 px-1.5 shrink-0"
-                      />
-                      <Input
-                        value={lbl.name}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setLabels((prev) =>
-                            prev.map((l) => (l.id === lbl.id ? { ...l, name: e.target.value } : l)),
-                          )
-                        }
-                        className="flex-1 h-8 text-sm"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label="Remove label"
-                        className="shrink-0 text-foreground hover:text-foreground"
-                        onClick={() => setLabels((prev) => prev.filter((l) => l.id !== lbl.id))}
+                    {section.title}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
+                <header className="space-y-1">
+                  <h1 className="text-xl font-semibold" data-testid="settings-page__title">
+                    {activeMeta.title}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">{activeMeta.subtitle}</p>
+                </header>
+                <SettingsPageContext.Provider value={true}>
+                  {/* ── Appearance ─────────────────────────────────── */}
+                  {active === "appearance" ? (
+                    <SettingsSection title="Appearance">
+                      <SettingsRow
+                        variant="responsive"
+                        label="Theme"
+                        description="Choose between system default, light, and dark mode."
                       >
-                        <X className="size-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                  <div data-slot="settings-row" className="flex items-center px-4 py-2.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const id = `lbl_${Date.now()}`;
-                        setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
-                      }}
-                    >
-                      <Plus className="size-3" />
-                      Add label
-                    </Button>
-                  </div>
-                </>
-              )}
-            </SettingsSection>
-
-            {/* ── Coding Agents ──────────────────────────────── */}
-            <SettingsSection
-              title="Coding Agents"
-              description="Enable the agents you have installed."
-            >
-              {codingAgents.length > 0 && (
-                <SettingsRow
-                  variant="responsive"
-                  label="Default agent"
-                  description="Used for new workspaces. You can switch agents per workspace from the workspace chat header."
-                >
-                  <Select
-                    value={defaultAgentId || codingAgents[0].id}
-                    onValueChange={(v: string) => setDefaultAgentId(v)}
-                  >
-                    <SelectTrigger
-                      className="h-8 w-full text-sm sm:w-48"
-                      aria-label="Default coding agent"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {codingAgents.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          <AgentIcon type={a.type} className="size-3.5" />
-                          {a.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </SettingsRow>
-              )}
-              <SettingsRow
-                variant="responsive"
-                label="Open agents on this device as"
-                description="New agents you start from this device open as a chat or as the agent's CLI in a terminal. Saved in this browser only. Running sessions keep their mode."
-              >
-                <Select
-                  value={deviceAgentMode ?? ""}
-                  onValueChange={(v: string) => setDeviceAgentMode(v as AgentMode)}
-                >
-                  <SelectTrigger
-                    className="h-8 w-full text-sm sm:w-48"
-                    aria-label="Agent mode on this device"
-                    data-testid="settings-page__device-agent-mode"
-                  >
-                    <SelectValue placeholder="Not set" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gui" data-testid="settings-page__agent-mode-option--gui">
-                      Chat
-                    </SelectItem>
-                    <SelectItem value="tui" data-testid="settings-page__agent-mode-option--tui">
-                      Terminal
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </SettingsRow>
-              <SettingsRow
-                variant="responsive"
-                label="Open programmatically created agents in"
-                description="Used by the CLI, cronjobs and MCP, and by a device with no mode set."
-              >
-                <Select
-                  value={defaultAgentMode}
-                  onValueChange={(v: string) => setDefaultAgentMode(v as AgentMode)}
-                >
-                  <SelectTrigger
-                    className="h-8 w-full text-sm sm:w-48"
-                    aria-label="Default agent mode"
-                    data-testid="settings-page__default-agent-mode"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      value="gui"
-                      data-testid="settings-page__default-agent-mode-option--gui"
-                    >
-                      Chat
-                    </SelectItem>
-                    <SelectItem
-                      value="tui"
-                      data-testid="settings-page__default-agent-mode-option--tui"
-                    >
-                      Terminal
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </SettingsRow>
-              <Accordion type="multiple" className="w-full">
-                {KNOWN_AGENTS.map((known) => {
-                  const agent = codingAgents.find((a) => a.type === known.type);
-                  const enabled = !!agent;
-                  const modelState = agent ? agentModels[agent.id] : undefined;
-                  const models = modelState?.models ?? [];
-                  const isRefreshing = modelState?.isRefreshing ?? false;
-                  const updatedAt = modelState?.updatedAt;
-                  const refreshError = modelState?.error;
-                  return (
-                    <AccordionItem
-                      key={known.id}
-                      value={known.id}
-                      data-slot="settings-row"
-                      className={cn("border-b-0 transition-opacity", !enabled && "opacity-60")}
-                    >
-                      <AccordionHeader className="flex items-center gap-3 px-4 py-3">
-                        <span
-                          className={cn(
-                            "size-2 shrink-0 rounded-full",
-                            enabled ? "bg-green-500" : "bg-muted-foreground/30",
-                          )}
-                        />
-                        <AgentIcon type={known.type} className="size-4 shrink-0" />
-                        <AccordionTriggerInline
-                          aria-label={`Toggle advanced settings for ${known.label}`}
-                          className="flex-1 rounded-md text-left text-sm font-medium"
+                        <Select
+                          value={selectedTheme}
+                          onValueChange={(v: string) => setSelectedTheme(v as Theme)}
                         >
-                          {known.label}
-                        </AccordionTriggerInline>
+                          <SelectTrigger className="h-8 w-full text-sm sm:w-32" aria-label="Theme">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="system">System</SelectItem>
+                            <SelectItem value="light">Light</SelectItem>
+                            <SelectItem value="dark">Dark</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+                      {capabilities.translucentSidebar && (
+                        <SettingsRow
+                          htmlFor="translucent-sidebar"
+                          label="Translucent sidebar"
+                          description="Show the desktop through the project list, blurred and tinted."
+                        >
+                          <Switch
+                            id="translucent-sidebar"
+                            checked={translucentSidebar}
+                            onCheckedChange={setTranslucentSidebar}
+                          />
+                        </SettingsRow>
+                      )}
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── General ────────────────────────────────────── */}
+                  {active === "general" ? (
+                    <SettingsSection title="General">
+                      <SettingsRow
+                        variant="responsive"
+                        htmlFor="worktrees-dir"
+                        label="Worktrees folder"
+                        description="Directory where new worktrees are created. Leave empty for the default location."
+                      >
+                        <div className="flex w-full gap-2 sm:w-[22rem]">
+                          <Input
+                            id="worktrees-dir"
+                            placeholder="~/.band/worktrees (default)"
+                            value={worktreesDir}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setWorktreesDir(e.target.value)
+                            }
+                            className="h-8 text-sm"
+                          />
+                          {capabilities.pickFolder && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon-sm"
+                              onClick={handleBrowse}
+                              aria-label="Browse for folder"
+                            >
+                              <FolderOpen />
+                            </Button>
+                          )}
+                        </div>
+                      </SettingsRow>
+                      <SettingsRow
+                        htmlFor="enable-lsp"
+                        label="Code intelligence (LSP)"
+                        description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
+                      >
                         <Switch
-                          aria-label={`Enable ${known.label}`}
-                          checked={enabled}
-                          onCheckedChange={(checked: boolean) => {
-                            if (checked) {
-                              setCodingAgents((prev) => [
+                          id="enable-lsp"
+                          checked={enableLSP}
+                          onCheckedChange={setEnableLSP}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        htmlFor="enable-file-preview-tabs"
+                        label="Preview tabs (single-click open)"
+                        description="Single-click a file in the tree to open it in a temporary preview tab. Double-click or edit to keep it open."
+                      >
+                        <Switch
+                          id="enable-file-preview-tabs"
+                          checked={enableFilePreviewTabs}
+                          onCheckedChange={setEnableFilePreviewTabs}
+                        />
+                      </SettingsRow>
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Hub (desktop app only) ─────────────────────── */}
+                  {isDesktop && active === "hub" ? (
+                    <SettingsSection title="Hub">
+                      <HubSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Browser ────────────────────────────────────── */}
+                  {active === "browser" ? (
+                    <SettingsSection title="Browser">
+                      <SettingsRow
+                        htmlFor="web-browser-cdp"
+                        label="Stream desktop tabs to web (experimental)"
+                        description="When enabled, the desktop opens a chromium debug port and lets web clients view + drive your Browser-pane tabs over CDP. Disable to save CPU/memory if you don't use the web UI for browsing."
+                      >
+                        <Switch
+                          id="web-browser-cdp"
+                          checked={webBrowserCdpEnabled}
+                          onCheckedChange={setWebBrowserCdpEnabled}
+                        />
+                      </SettingsRow>
+                      <BrowserProfilesSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Hosts ──────────────────────────────────────── */}
+                  {active === "hosts" ? (
+                    <SettingsSection title="Hosts">
+                      <HostsSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Credentials ────────────────────────────────── */}
+                  {active === "credentials" ? (
+                    <SettingsSection title="Credentials">
+                      <CredentialsSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── MCP ────────────────────────────────────────── */}
+                  {active === "mcp" ? (
+                    <SettingsSection title="MCP">
+                      <McpSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Runners ────────────────────────────────────── */}
+                  {active === "runners" ? (
+                    <SettingsSection title="Runners">
+                      <RunnersSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Environment ────────────────────────────────── */}
+                  {active === "environment" ? (
+                    <SettingsSection
+                      title="Environment"
+                      description="Each project's .band/environment.json, checked against the hosts."
+                    >
+                      <EnvironmentSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Labels ─────────────────────────────────────── */}
+                  {active === "labels" ? (
+                    <SettingsSection
+                      title="Labels"
+                      description="Tag projects to filter and group them in the sidebar."
+                    >
+                      {labels.length === 0 ? (
+                        <SettingsRow
+                          label="No labels yet"
+                          description="Add a label to start tagging projects."
+                        >
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const id = `lbl_${Date.now()}`;
+                              setLabels((prev) => [
                                 ...prev,
-                                { id: known.id, type: known.type, label: known.label },
+                                { id, name: "New label", color: "#3b82f6" },
                               ]);
-                              if (!defaultAgentId) setDefaultAgentId(known.id);
-                            } else {
-                              setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
-                              if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
-                                const remaining = codingAgents.filter((a) => a.type !== known.type);
-                                setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
-                              }
+                            }}
+                          >
+                            <Plus className="size-3" />
+                            Add label
+                          </Button>
+                        </SettingsRow>
+                      ) : (
+                        <>
+                          {labels.map((lbl) => (
+                            <div
+                              key={lbl.id}
+                              data-slot="settings-row"
+                              className="flex items-center gap-2 px-4 py-2.5"
+                            >
+                              <ColorPicker
+                                value={lbl.color}
+                                onChange={(color) =>
+                                  setLabels((prev) =>
+                                    prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
+                                  )
+                                }
+                                showHex={false}
+                                className="w-auto h-7 px-1.5 shrink-0"
+                              />
+                              <Input
+                                value={lbl.name}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  setLabels((prev) =>
+                                    prev.map((l) =>
+                                      l.id === lbl.id ? { ...l, name: e.target.value } : l,
+                                    ),
+                                  )
+                                }
+                                className="flex-1 h-8 text-sm"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label="Remove label"
+                                className="shrink-0 text-foreground hover:text-foreground"
+                                onClick={() =>
+                                  setLabels((prev) => prev.filter((l) => l.id !== lbl.id))
+                                }
+                              >
+                                <X className="size-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                          <div data-slot="settings-row" className="flex items-center px-4 py-2.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const id = `lbl_${Date.now()}`;
+                                setLabels((prev) => [
+                                  ...prev,
+                                  { id, name: "New label", color: "#3b82f6" },
+                                ]);
+                              }}
+                            >
+                              <Plus className="size-3" />
+                              Add label
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Coding Agents ──────────────────────────────── */}
+                  {active === "agents" ? (
+                    <SettingsSection
+                      title="Coding Agents"
+                      description="Enable the agents you have installed."
+                    >
+                      {codingAgents.length > 0 && (
+                        <SettingsRow
+                          variant="responsive"
+                          label="Default agent"
+                          description="Used for new workspaces. You can switch agents per workspace from the workspace chat header."
+                        >
+                          <Select
+                            value={defaultAgentId || codingAgents[0].id}
+                            onValueChange={(v: string) => setDefaultAgentId(v)}
+                          >
+                            <SelectTrigger
+                              className="h-8 w-full text-sm sm:w-48"
+                              aria-label="Default coding agent"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {codingAgents.map((a) => (
+                                <SelectItem key={a.id} value={a.id}>
+                                  <AgentIcon type={a.type} className="size-3.5" />
+                                  {a.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </SettingsRow>
+                      )}
+                      <SettingsRow
+                        variant="responsive"
+                        label="Open agents on this device as"
+                        description="New agents you start from this device open as a chat or as the agent's CLI in a terminal. Saved in this browser only. Running sessions keep their mode."
+                      >
+                        <Select
+                          value={deviceAgentMode ?? ""}
+                          onValueChange={(v: string) => setDeviceAgentMode(v as AgentMode)}
+                        >
+                          <SelectTrigger
+                            className="h-8 w-full text-sm sm:w-48"
+                            aria-label="Agent mode on this device"
+                            data-testid="settings-page__device-agent-mode"
+                          >
+                            <SelectValue placeholder="Not set" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem
+                              value="gui"
+                              data-testid="settings-page__agent-mode-option--gui"
+                            >
+                              Chat
+                            </SelectItem>
+                            <SelectItem
+                              value="tui"
+                              data-testid="settings-page__agent-mode-option--tui"
+                            >
+                              Terminal
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+                      <SettingsRow
+                        variant="responsive"
+                        label="Open programmatically created agents in"
+                        description="Used by the CLI, cronjobs and MCP, and by a device with no mode set."
+                      >
+                        <Select
+                          value={defaultAgentMode}
+                          onValueChange={(v: string) => setDefaultAgentMode(v as AgentMode)}
+                        >
+                          <SelectTrigger
+                            className="h-8 w-full text-sm sm:w-48"
+                            aria-label="Default agent mode"
+                            data-testid="settings-page__default-agent-mode"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem
+                              value="gui"
+                              data-testid="settings-page__default-agent-mode-option--gui"
+                            >
+                              Chat
+                            </SelectItem>
+                            <SelectItem
+                              value="tui"
+                              data-testid="settings-page__default-agent-mode-option--tui"
+                            >
+                              Terminal
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+                      <Accordion type="multiple" className="w-full">
+                        {KNOWN_AGENTS.map((known) => {
+                          const agent = codingAgents.find((a) => a.type === known.type);
+                          const enabled = !!agent;
+                          const modelState = agent ? agentModels[agent.id] : undefined;
+                          const models = modelState?.models ?? [];
+                          const isRefreshing = modelState?.isRefreshing ?? false;
+                          const updatedAt = modelState?.updatedAt;
+                          const refreshError = modelState?.error;
+                          return (
+                            <AccordionItem
+                              key={known.id}
+                              value={known.id}
+                              data-slot="settings-row"
+                              className={cn(
+                                "border-b-0 transition-opacity",
+                                !enabled && "opacity-60",
+                              )}
+                            >
+                              <AccordionHeader className="flex items-center gap-3 px-4 py-3">
+                                <span
+                                  className={cn(
+                                    "size-2 shrink-0 rounded-full",
+                                    enabled ? "bg-green-500" : "bg-muted-foreground/30",
+                                  )}
+                                />
+                                <AgentIcon type={known.type} className="size-4 shrink-0" />
+                                <AccordionTriggerInline
+                                  aria-label={`Toggle advanced settings for ${known.label}`}
+                                  className="flex-1 rounded-md text-left text-sm font-medium"
+                                >
+                                  {known.label}
+                                </AccordionTriggerInline>
+                                <Switch
+                                  aria-label={`Enable ${known.label}`}
+                                  checked={enabled}
+                                  onCheckedChange={(checked: boolean) => {
+                                    if (checked) {
+                                      setCodingAgents((prev) => [
+                                        ...prev,
+                                        { id: known.id, type: known.type, label: known.label },
+                                      ]);
+                                      if (!defaultAgentId) setDefaultAgentId(known.id);
+                                    } else {
+                                      setCodingAgents((prev) =>
+                                        prev.filter((a) => a.type !== known.type),
+                                      );
+                                      if (
+                                        defaultAgentId === known.id ||
+                                        defaultAgentId === agent?.id
+                                      ) {
+                                        const remaining = codingAgents.filter(
+                                          (a) => a.type !== known.type,
+                                        );
+                                        setDefaultAgentId(
+                                          remaining.length > 0 ? remaining[0].id : "",
+                                        );
+                                      }
+                                    }
+                                  }}
+                                />
+                                <AccordionTriggerInline
+                                  aria-label={`Toggle advanced settings for ${known.label}`}
+                                  className="-mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+                                >
+                                  <ChevronDown className="size-4 shrink-0 transition-transform duration-200" />
+                                </AccordionTriggerInline>
+                              </AccordionHeader>
+                              <AccordionContent className="space-y-2.5 px-4 pb-3 pl-11">
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Command</Label>
+                                  <Input
+                                    placeholder={known.defaultCommand}
+                                    disabled={!enabled}
+                                    value={agent?.command ?? ""}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                      setCodingAgents((prev) =>
+                                        prev.map((a) =>
+                                          a.type === known.type
+                                            ? { ...a, command: e.target.value || undefined }
+                                            : a,
+                                        ),
+                                      )
+                                    }
+                                    className="h-8 text-xs"
+                                  />
+                                </div>
+                                {agent && (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Label className="text-xs text-muted-foreground">
+                                        Models {models.length > 0 && `(${models.length})`}
+                                      </Label>
+                                      {(availability.data?.hosts.length ?? 0) > 1 && (
+                                        <select
+                                          aria-label={`Host to refresh ${known.label} on`}
+                                          data-testid={`settings-page__refresh-host-${agent.id}`}
+                                          value={refreshHostId}
+                                          onChange={(e) => setRefreshHostId(e.target.value)}
+                                          className="ml-auto h-6 rounded-md border border-input bg-transparent px-1 text-xs"
+                                        >
+                                          {availability.data?.hosts.map((h) => (
+                                            <option key={h.id} value={h.id}>
+                                              {h.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      )}
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 gap-1 px-2 text-xs"
+                                        disabled={!enabled || isRefreshing}
+                                        onClick={() => handleRefreshModels(agent.id)}
+                                        aria-label={`Refresh models for ${known.label}`}
+                                        data-testid={`settings-page__refresh-models-${agent.id}`}
+                                      >
+                                        <RefreshCcw
+                                          className={cn("size-3", isRefreshing && "animate-spin")}
+                                        />
+                                        {isRefreshing ? "Refreshing…" : "Refresh"}
+                                      </Button>
+                                    </div>
+                                    {(() => {
+                                      const row = availability.data?.agents.find(
+                                        (a) => a.agentId === agent.id,
+                                      );
+                                      if (!row || row.hosts.length < 2) return null;
+                                      return (
+                                        <ul
+                                          className="text-[11px] text-muted-foreground"
+                                          data-testid={`settings-page__agent-hosts-${agent.id}`}
+                                        >
+                                          {row.hosts.map((h) => (
+                                            <li
+                                              key={h.hostId}
+                                              data-host-id={h.hostId}
+                                              data-available={h.available}
+                                            >
+                                              {h.hostName}:{" "}
+                                              {h.available
+                                                ? "available"
+                                                : `not available (${h.reason})`}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      );
+                                    })()}
+                                    {models.length > 0 ? (
+                                      <ul
+                                        className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs"
+                                        data-testid={`settings-page__model-list-${agent.id}`}
+                                      >
+                                        {models.map((m) => (
+                                          // Two-line layout, mirroring the chat-pane
+                                          // model dropdown (`ModelLine` in ChatView):
+                                          // top row is name + optional context-window
+                                          // pill, second row is the description.
+                                          // Keeps Settings and the chat picker
+                                          // visually consistent.
+                                          <li
+                                            key={m.id}
+                                            className="flex flex-col items-start gap-0.5 py-1"
+                                          >
+                                            <span className="flex w-full items-baseline justify-between gap-2">
+                                              <span className="font-medium">{m.name}</span>
+                                              {m.contextWindow !== undefined && (
+                                                <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                                  {formatCtxWindow(m.contextWindow)} ctx
+                                                </span>
+                                              )}
+                                            </span>
+                                            {m.description && (
+                                              <span className="text-[11px] text-muted-foreground">
+                                                {m.description}
+                                              </span>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <p className="text-[11px] text-muted-foreground">
+                                        No models cached yet — click Refresh.
+                                      </p>
+                                    )}
+                                    {refreshError && (
+                                      <p className="text-[11px] text-destructive">
+                                        Refresh failed: {refreshError}
+                                      </p>
+                                    )}
+                                    {updatedAt !== undefined && updatedAt > 0 && (
+                                      <p className="text-[10px] text-muted-foreground">
+                                        Last refreshed {formatLastRefreshed(updatedAt)}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                                {agent && models.length > 0 && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">
+                                      Default model
+                                    </Label>
+                                    <Select
+                                      // Radix Select reserves the empty string for the
+                                      // "no selection / show placeholder" state, so we
+                                      // round-trip through a sentinel for "use the agent's
+                                      // built-in default model".
+                                      value={agent?.model ?? MODEL_DEFAULT_SENTINEL}
+                                      disabled={!enabled}
+                                      onValueChange={(v: string) =>
+                                        setCodingAgents((prev) =>
+                                          prev.map((a) =>
+                                            a.type === known.type
+                                              ? {
+                                                  ...a,
+                                                  model:
+                                                    v === MODEL_DEFAULT_SENTINEL ? undefined : v,
+                                                }
+                                              : a,
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Default" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={MODEL_DEFAULT_SENTINEL}>
+                                          Default
+                                        </SelectItem>
+                                        {models.map((m) => (
+                                          <SelectItem key={m.id} value={m.id}>
+                                            <span className="flex w-full items-baseline justify-between gap-2">
+                                              <span>{m.name}</span>
+                                              {m.contextWindow !== undefined && (
+                                                <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                                  {formatCtxWindow(m.contextWindow)} ctx
+                                                </span>
+                                              )}
+                                            </span>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                              </AccordionContent>
+                            </AccordionItem>
+                          );
+                        })}
+                      </Accordion>
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Notifications ──────────────────────────────── */}
+                  {active === "notifications" ? (
+                    <SettingsSection title="Notifications">
+                      <SettingsRow
+                        htmlFor="sound-needs-attention"
+                        label="Play sound on needs attention"
+                        description="Play a sound when an agent transitions from working to needs attention."
+                      >
+                        <Switch
+                          id="sound-needs-attention"
+                          checked={soundOnNeedsAttention}
+                          onCheckedChange={(checked: boolean) => {
+                            setSoundOnNeedsAttention(checked);
+                            if (checked) {
+                              playSound(selectedSound);
                             }
                           }}
                         />
-                        <AccordionTriggerInline
-                          aria-label={`Toggle advanced settings for ${known.label}`}
-                          className="-mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+                      </SettingsRow>
+                      {soundOnNeedsAttention && (
+                        <SettingsRow
+                          variant="responsive"
+                          label="Sound"
+                          description="Choose which sound plays. Selecting one previews it."
                         >
-                          <ChevronDown className="size-4 shrink-0 transition-transform duration-200" />
-                        </AccordionTriggerInline>
-                      </AccordionHeader>
-                      <AccordionContent className="space-y-2.5 px-4 pb-3 pl-11">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Command</Label>
-                          <Input
-                            placeholder={known.defaultCommand}
-                            disabled={!enabled}
-                            value={agent?.command ?? ""}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setCodingAgents((prev) =>
-                                prev.map((a) =>
-                                  a.type === known.type
-                                    ? { ...a, command: e.target.value || undefined }
-                                    : a,
-                                ),
-                              )
-                            }
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        {agent && (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <Label className="text-xs text-muted-foreground">
-                                Models {models.length > 0 && `(${models.length})`}
-                              </Label>
-                              {(availability.data?.hosts.length ?? 0) > 1 && (
-                                <select
-                                  aria-label={`Host to refresh ${known.label} on`}
-                                  data-testid={`settings-page__refresh-host-${agent.id}`}
-                                  value={refreshHostId}
-                                  onChange={(e) => setRefreshHostId(e.target.value)}
-                                  className="ml-auto h-6 rounded-md border border-input bg-transparent px-1 text-xs"
-                                >
-                                  {availability.data?.hosts.map((h) => (
-                                    <option key={h.id} value={h.id}>
-                                      {h.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 gap-1 px-2 text-xs"
-                                disabled={!enabled || isRefreshing}
-                                onClick={() => handleRefreshModels(agent.id)}
-                                aria-label={`Refresh models for ${known.label}`}
-                                data-testid={`settings-page__refresh-models-${agent.id}`}
-                              >
-                                <RefreshCcw
-                                  className={cn("size-3", isRefreshing && "animate-spin")}
-                                />
-                                {isRefreshing ? "Refreshing…" : "Refresh"}
-                              </Button>
-                            </div>
-                            {(() => {
-                              const row = availability.data?.agents.find(
-                                (a) => a.agentId === agent.id,
-                              );
-                              if (!row || row.hosts.length < 2) return null;
-                              return (
-                                <ul
-                                  className="text-[11px] text-muted-foreground"
-                                  data-testid={`settings-page__agent-hosts-${agent.id}`}
-                                >
-                                  {row.hosts.map((h) => (
-                                    <li
-                                      key={h.hostId}
-                                      data-host-id={h.hostId}
-                                      data-available={h.available}
-                                    >
-                                      {h.hostName}:{" "}
-                                      {h.available ? "available" : `not available (${h.reason})`}
-                                    </li>
-                                  ))}
-                                </ul>
-                              );
-                            })()}
-                            {models.length > 0 ? (
-                              <ul
-                                className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs"
-                                data-testid={`settings-page__model-list-${agent.id}`}
-                              >
-                                {models.map((m) => (
-                                  // Two-line layout, mirroring the chat-pane
-                                  // model dropdown (`ModelLine` in ChatView):
-                                  // top row is name + optional context-window
-                                  // pill, second row is the description.
-                                  // Keeps Settings and the chat picker
-                                  // visually consistent.
-                                  <li key={m.id} className="flex flex-col items-start gap-0.5 py-1">
-                                    <span className="flex w-full items-baseline justify-between gap-2">
-                                      <span className="font-medium">{m.name}</span>
-                                      {m.contextWindow !== undefined && (
-                                        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
-                                          {formatCtxWindow(m.contextWindow)} ctx
-                                        </span>
-                                      )}
-                                    </span>
-                                    {m.description && (
-                                      <span className="text-[11px] text-muted-foreground">
-                                        {m.description}
-                                      </span>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="text-[11px] text-muted-foreground">
-                                No models cached yet — click Refresh.
-                              </p>
-                            )}
-                            {refreshError && (
-                              <p className="text-[11px] text-destructive">
-                                Refresh failed: {refreshError}
-                              </p>
-                            )}
-                            {updatedAt !== undefined && updatedAt > 0 && (
-                              <p className="text-[10px] text-muted-foreground">
-                                Last refreshed {formatLastRefreshed(updatedAt)}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {agent && models.length > 0 && (
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Default model</Label>
-                            <Select
-                              // Radix Select reserves the empty string for the
-                              // "no selection / show placeholder" state, so we
-                              // round-trip through a sentinel for "use the agent's
-                              // built-in default model".
-                              value={agent?.model ?? MODEL_DEFAULT_SENTINEL}
-                              disabled={!enabled}
-                              onValueChange={(v: string) =>
-                                setCodingAgents((prev) =>
-                                  prev.map((a) =>
-                                    a.type === known.type
-                                      ? {
-                                          ...a,
-                                          model: v === MODEL_DEFAULT_SENTINEL ? undefined : v,
-                                        }
-                                      : a,
-                                  ),
-                                )
-                              }
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Default" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={MODEL_DEFAULT_SENTINEL}>Default</SelectItem>
-                                {models.map((m) => (
-                                  <SelectItem key={m.id} value={m.id}>
-                                    <span className="flex w-full items-baseline justify-between gap-2">
-                                      <span>{m.name}</span>
-                                      {m.contextWindow !== undefined && (
-                                        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
-                                          {formatCtxWindow(m.contextWindow)} ctx
-                                        </span>
-                                      )}
-                                    </span>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-                      </AccordionContent>
-                    </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            </SettingsSection>
+                          <Select
+                            value={selectedSound}
+                            onValueChange={(v: string) => {
+                              setSelectedSound(v as SoundId);
+                              playSound(v as SoundId);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-full text-xs sm:min-w-[10rem]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {SOUNDS.map((s) => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {s.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </SettingsRow>
+                      )}
+                    </SettingsSection>
+                  ) : null}
 
-            {/* ── Notifications ──────────────────────────────── */}
-            <SettingsSection title="Notifications">
-              <SettingsRow
-                htmlFor="sound-needs-attention"
-                label="Play sound on needs attention"
-                description="Play a sound when an agent transitions from working to needs attention."
-              >
-                <Switch
-                  id="sound-needs-attention"
-                  checked={soundOnNeedsAttention}
-                  onCheckedChange={(checked: boolean) => {
-                    setSoundOnNeedsAttention(checked);
-                    if (checked) {
-                      playSound(selectedSound);
-                    }
-                  }}
-                />
-              </SettingsRow>
-              {soundOnNeedsAttention && (
-                <SettingsRow
-                  variant="responsive"
-                  label="Sound"
-                  description="Choose which sound plays. Selecting one previews it."
-                >
-                  <Select
-                    value={selectedSound}
-                    onValueChange={(v: string) => {
-                      setSelectedSound(v as SoundId);
-                      playSound(v as SoundId);
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-full text-xs sm:min-w-[10rem]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SOUNDS.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </SettingsRow>
-              )}
-            </SettingsSection>
+                  {/* ── Web Server ─────────────────────────────────── */}
+                  {active === "web-server" ? (
+                    <SettingsSection title="Web Server">
+                      <SettingsRow
+                        variant="responsive"
+                        htmlFor="web-server-port"
+                        label="Port"
+                        description="Port the web server listens on for mobile access. Leave empty for the default (3456). Requires restart."
+                      >
+                        <Input
+                          id="web-server-port"
+                          type="number"
+                          placeholder="3456 (default)"
+                          value={webServerPort}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setWebServerPort(e.target.value)
+                          }
+                          min={1}
+                          max={65535}
+                          className="h-8 w-full text-sm sm:w-32"
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        htmlFor="auto-start-tunnel"
+                        label="Auto-start tunnel"
+                        description="Automatically start the web server and tunnel when the app launches."
+                      >
+                        <Switch
+                          id="auto-start-tunnel"
+                          checked={autoStartTunnel}
+                          onCheckedChange={setAutoStartTunnel}
+                        />
+                      </SettingsRow>
+                    </SettingsSection>
+                  ) : null}
 
-            {/* ── Web Server ─────────────────────────────────── */}
-            <SettingsSection title="Web Server">
-              <SettingsRow
-                variant="responsive"
-                htmlFor="web-server-port"
-                label="Port"
-                description="Port the web server listens on for mobile access. Leave empty for the default (3456). Requires restart."
-              >
-                <Input
-                  id="web-server-port"
-                  type="number"
-                  placeholder="3456 (default)"
-                  value={webServerPort}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setWebServerPort(e.target.value)
-                  }
-                  min={1}
-                  max={65535}
-                  className="h-8 w-full text-sm sm:w-32"
-                />
-              </SettingsRow>
-              <SettingsRow
-                htmlFor="auto-start-tunnel"
-                label="Auto-start tunnel"
-                description="Automatically start the web server and tunnel when the app launches."
-              >
-                <Switch
-                  id="auto-start-tunnel"
-                  checked={autoStartTunnel}
-                  onCheckedChange={setAutoStartTunnel}
-                />
-              </SettingsRow>
-            </SettingsSection>
+                  {/* ── Usage report ───────────────────────────────── */}
+                  {active === "usage" ? (
+                    <SettingsSection
+                      title="Usage report"
+                      description="Configure how the Usage dialog collects and retains per-session token and cost rows."
+                    >
+                      <SettingsRow
+                        htmlFor="usage-polling-enabled"
+                        label="Poll for usage data"
+                        description="Periodically scan your coding agents' session files to populate the Usage dialog. Disable to skip the background scan if you don't use the Usage dialog or want to claw back CPU."
+                      >
+                        <Switch
+                          id="usage-polling-enabled"
+                          checked={usagePollingEnabled}
+                          onCheckedChange={setUsagePollingEnabled}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        variant="responsive"
+                        htmlFor="usage-retention-days"
+                        label="Retention period (days)"
+                        description="How long to keep usage history. Older rows are pruned daily. Leave empty for the default (365 days). Max 3650."
+                      >
+                        <Input
+                          id="usage-retention-days"
+                          type="number"
+                          placeholder="365 (default)"
+                          value={usageRetentionDays}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setUsageRetentionDays(e.target.value)
+                          }
+                          min={1}
+                          max={3650}
+                          className="h-8 w-full text-sm sm:w-32"
+                        />
+                      </SettingsRow>
+                    </SettingsSection>
+                  ) : null}
 
-            {/* ── Usage report ───────────────────────────────── */}
-            <SettingsSection
-              title="Usage report"
-              description="Configure how the Usage dialog collects and retains per-session token and cost rows."
+                  {/* ── Terminal ───────────────────────────────────── */}
+                  {active === "terminal" ? (
+                    <SettingsSection title="Terminal">
+                      <SettingsRow
+                        htmlFor="use-webgl-terminal-renderer"
+                        label="GPU-accelerated rendering"
+                        description="Render terminal panels with WebGL. Enables continuous box-drawing, powerline, and block-element glyphs, and iTerm-style row spacing. Falls back to the DOM renderer automatically if WebGL is unavailable. Reopen the terminal for changes to take effect."
+                      >
+                        <Switch
+                          id="use-webgl-terminal-renderer"
+                          checked={useWebGLTerminalRenderer}
+                          onCheckedChange={setUseWebGLTerminalRenderer}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Terminal service"
+                        description="Recover from a frozen or misbehaving terminal daemon by restarting it. Every terminal ends and can be reopened."
+                      >
+                        <Button variant="destructive" onClick={() => setRestartDialogOpen(true)}>
+                          Restart terminal service
+                        </Button>
+                      </SettingsRow>
+                    </SettingsSection>
+                  ) : null}
+                </SettingsPageContext.Provider>
+              </div>
+            </div>
+            {/* The footer sits on the bottom screen edge, so it clears the home indicator. */}
+            <DialogFooter
+              data-testid="settings-page__footer"
+              className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end"
             >
-              <SettingsRow
-                htmlFor="usage-polling-enabled"
-                label="Poll for usage data"
-                description="Periodically scan your coding agents' session files to populate the Usage dialog. Disable to skip the background scan if you don't use the Usage dialog or want to claw back CPU."
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveAndClose}
+                disabled={!isDirty}
+                aria-label="Save"
               >
-                <Switch
-                  id="usage-polling-enabled"
-                  checked={usagePollingEnabled}
-                  onCheckedChange={setUsagePollingEnabled}
-                />
-              </SettingsRow>
-              <SettingsRow
-                variant="responsive"
-                htmlFor="usage-retention-days"
-                label="Retention period (days)"
-                description="How long to keep usage history. Older rows are pruned daily. Leave empty for the default (365 days). Max 3650."
-              >
-                <Input
-                  id="usage-retention-days"
-                  type="number"
-                  placeholder="365 (default)"
-                  value={usageRetentionDays}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setUsageRetentionDays(e.target.value)
-                  }
-                  min={1}
-                  max={3650}
-                  className="h-8 w-full text-sm sm:w-32"
-                />
-              </SettingsRow>
-            </SettingsSection>
-
-            {/* ── Terminal ───────────────────────────────────── */}
-            <SettingsSection title="Terminal">
-              <SettingsRow
-                htmlFor="use-webgl-terminal-renderer"
-                label="GPU-accelerated rendering"
-                description="Render terminal panels with WebGL. Enables continuous box-drawing, powerline, and block-element glyphs, and iTerm-style row spacing. Falls back to the DOM renderer automatically if WebGL is unavailable. Reopen the terminal for changes to take effect."
-              >
-                <Switch
-                  id="use-webgl-terminal-renderer"
-                  checked={useWebGLTerminalRenderer}
-                  onCheckedChange={setUseWebGLTerminalRenderer}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Terminal service"
-                description="Recover from a frozen or misbehaving terminal daemon by restarting it. Every terminal ends and can be reopened."
-              >
-                <Button variant="destructive" onClick={() => setRestartDialogOpen(true)}>
-                  Restart terminal service
-                </Button>
-              </SettingsRow>
-            </SettingsSection>
-          </div>
+                Save
+              </Button>
+            </DialogFooter>
+          </main>
         </div>
         <RestartTerminalDaemonDialog
           open={restartDialogOpen}
@@ -1180,22 +1459,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             });
           }}
         />
-        {/* The footer sits on the bottom screen edge in the mobile drawer, so it
-            clears the home indicator. The wide-layout card floats off the edge. */}
-        <DialogFooter
-          data-testid="settings-page__footer"
-          className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:pb-3 sm:justify-end"
-        >
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleSaveAndClose}
-            disabled={!isDirty}
-            aria-label="Save"
-          >
-            Save
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

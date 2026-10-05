@@ -81,7 +81,7 @@ test("restarting the terminal service from Settings ends the open terminal", asy
     /BEFORE_RESTART/,
   );
 
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("terminal");
   await settingsPage.expectRowVisible(settingsPage.restartTerminalServiceButton());
   await settingsPage.restartTerminalService();
 

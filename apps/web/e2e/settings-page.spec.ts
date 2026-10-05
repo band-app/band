@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -11,7 +11,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { SettingsPage } from "./pages/SettingsPage";
+import { type SettingsNavId, SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-settings-test-token";
 
@@ -57,66 +57,72 @@ function readSettings(): Record<string, unknown> {
 // Tests
 // ---------------------------------------------------------------------------
 
-test("settings dialog renders every section in a single scrolling list", async ({ page }) => {
+test("settings opens full screen with one page per sidebar entry", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog();
 
-  // Every section is now rendered at once — there is no master/detail
-  // navigation. We expect thirteen SettingsSection cards to be present and
-  // every section's first row to be visible (after scrolling, if needed).
-  // The thirteen sections are: Appearance, General, Browser, Hosts, Credentials, Runners,
-  // Environment, Labels, Coding Agents, Notifications, Web Server, Usage report, Terminal.
-  await expect(settingsPage.sectionCards()).toHaveCount(13);
+  // The settings cover the whole window, not a centred card.
+  await expect(settingsPage.dialog).toHaveAttribute("data-variant", "fullscreen");
+  const viewport = page.viewportSize();
+  const box = await settingsPage.dialogBox();
+  expect(Math.round(box.width)).toBe(viewport?.width);
+  expect(Math.round(box.height)).toBe(viewport?.height);
 
-  // Appearance — Theme dropdown rendered by SettingsRow.
-  await expect(settingsPage.themeSelect()).toBeVisible();
-
-  // Subsequent sections live in the same scrolling column. Use
-  // `expectRowVisible` (scroll-then-assert) because the dialog viewport
-  // is fixed-height. Each row is anchored on its control's accessible
-  // name; the empty-Labels-state row is anchored on its "Add label"
-  // button (the only stable system-controlled name there).
-  for (const row of [
-    settingsPage.worktreesFolderInput(),
-    settingsPage.lspSwitch(),
-    settingsPage.webBrowserCdpSwitch(),
-    settingsPage.hostRow("local"),
-    settingsPage.credentialsAddButton(),
-    settingsPage.addLabelButton().first(),
-    settingsPage.soundOnNeedsAttentionSwitch(),
-    settingsPage.webServerPortInput(),
-    settingsPage.autoStartTunnelSwitch(),
-    settingsPage.webGLTerminalRendererSwitch(),
-  ]) {
-    await settingsPage.expectRowVisible(row);
+  // Each sidebar entry shows its own page, anchored on its first row's control. The empty Labels
+  // state is anchored on its "Add label" button (the only stable system-controlled name there).
+  const pages: Array<[SettingsNavId, () => Locator]> = [
+    ["appearance", () => settingsPage.themeSelect()],
+    ["general", () => settingsPage.worktreesFolderInput()],
+    ["general", () => settingsPage.lspSwitch()],
+    ["browser", () => settingsPage.webBrowserCdpSwitch()],
+    ["hosts", () => settingsPage.hostRow("local")],
+    ["credentials", () => settingsPage.credentialsAddButton()],
+    ["labels", () => settingsPage.addLabelButton().first()],
+    ["notifications", () => settingsPage.soundOnNeedsAttentionSwitch()],
+    ["web-server", () => settingsPage.webServerPortInput()],
+    ["web-server", () => settingsPage.autoStartTunnelSwitch()],
+    ["terminal", () => settingsPage.webGLTerminalRendererSwitch()],
+  ];
+  for (const [section, row] of pages) {
+    await settingsPage.openSection(section);
+    await settingsPage.expectRowVisible(row());
   }
 
-  // Coding Agents — the agent labels appear in two places (the per-agent
-  // row and, when enabled, the default-agent dropdown's selected value),
-  // so target the agent's enable switch which is uniquely keyed.
-  //
-  // `SettingsPage.tsx` renders one row per entry in its `KNOWN_AGENTS`
-  // constant regardless of what is seeded in `codingAgents`, so OpenCode
-  // is visible here even though only `claude-code` and `codex` are in the
-  // beforeAll seed above.
+  // A page shows only its own section: with Terminal open, the Appearance theme row is not mounted.
+  await expect(settingsPage.themeSelect()).toHaveCount(0);
+
+  // Coding Agents: `SettingsPage.tsx` renders one row per entry in its `KNOWN_AGENTS` constant
+  // regardless of what is seeded in `codingAgents`, so OpenCode is visible even though only
+  // `claude-code` and `codex` are in the beforeAll seed.
+  await settingsPage.openSection("agents");
   for (const agent of ["Claude Code", "Codex", "OpenCode"]) {
     await settingsPage.expectRowVisible(settingsPage.agentEnableSwitch(agent));
   }
-
-  // The "Default coding agent" dropdown only renders when at least one
-  // agent is enabled. We seed Claude Code as an enabled agent in the
-  // `beforeAll` above (and set it as the default), so the dropdown renders
-  // deterministically regardless of which CLIs are on the test runner's
-  // PATH — `ensureDefaultCodingAgents()` in `server/services/setup.ts` returns early
-  // when `codingAgents` is non-empty, skipping the `whichBinary()` probe.
+  // The "Default coding agent" dropdown only renders when at least one agent is enabled. The
+  // `beforeAll` seeds Claude Code as enabled and as the default, so it renders deterministically.
   await settingsPage.expectRowVisible(settingsPage.defaultAgentSelect());
+});
+
+test("the sidebar search narrows the page list and Back to app closes settings", async ({
+  page,
+}) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  await settingsPage.searchSections("cred");
+  await expect(settingsPage.navEntries()).toHaveCount(1);
+  await expect(settingsPage.navEntry("credentials")).toBeVisible();
+
+  await settingsPage.backToApp();
+  await expect(settingsPage.dialog).toHaveCount(0);
 });
 
 test("the browser build does not offer the translucent sidebar toggle", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("appearance");
 
   // Positive anchor: the Appearance section rendered its Theme row. The
   // translucent sidebar only works over the macOS desktop window's vibrancy
@@ -128,7 +134,7 @@ test("the browser build does not offer the translucent sidebar toggle", async ({
 test("the General section no longer offers a cached-workspaces count", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("general");
 
   // Positive anchor: the General section rendered (LSP is one of its rows).
   await settingsPage.expectRowVisible(settingsPage.lspSwitch());
@@ -138,7 +144,7 @@ test("the General section no longer offers a cached-workspaces count", async ({ 
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("general");
 
   // Sanity check the starting state, then toggle (the POM asserts the
   // visual state change after the click).
@@ -169,7 +175,7 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("agents");
 
   // The Coding Agents section is part of the single scrolling list. Scroll
   // to Claude Code's enable switch (the per-agent row label and the
@@ -240,7 +246,7 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("agents");
 
   // Open the Codex accordion so the model list + Refresh button mount.
   await settingsPage.expandAgentAccordion("Codex");
@@ -285,7 +291,7 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
 test("changing theme via the dropdown persists the new theme", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("appearance");
 
   // Open the Theme dropdown and pick Light.
   await settingsPage.selectTheme("Light");
