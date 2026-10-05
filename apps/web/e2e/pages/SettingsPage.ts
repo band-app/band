@@ -493,6 +493,46 @@ export class SettingsPage {
     });
   }
 
+  /** Opens the add form and fills a stdio server: a process on a host, with one vault-backed env variable. */
+  async startMcpStdioServer(opts: {
+    name: string;
+    hostId: string;
+    command: string;
+    args: string[];
+    cwd: string;
+    envName: string;
+    envVaultItem: string;
+  }): Promise<void> {
+    await test.step(`Fill in the stdio MCP server ${opts.name}`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(opts.name);
+      await this.dialog
+        .getByRole("combobox", { name: "MCP transport" })
+        .selectOption({ label: "Process on a host (stdio)" });
+      await this.dialog
+        .getByRole("combobox", { name: "MCP host" })
+        .selectOption({ value: opts.hostId });
+      await this.dialog.getByRole("textbox", { name: "MCP command" }).fill(opts.command);
+      await this.dialog.getByRole("textbox", { name: "MCP arguments" }).fill(opts.args.join("\n"));
+      await this.dialog.getByRole("textbox", { name: "MCP working directory" }).fill(opts.cwd);
+      await this.dialog.getByTestId("settings__mcp-env-add").click();
+      await this.dialog
+        .getByRole("textbox", { name: "Environment variable 1 name" })
+        .fill(opts.envName);
+      await this.dialog
+        .getByRole("combobox", { name: "Environment variable 1 source" })
+        .selectOption({ label: "Vault item" });
+      await this.dialog
+        .getByRole("combobox", { name: "Environment variable 1 vault item" })
+        .selectOption({ label: opts.envVaultItem });
+    });
+  }
+
+  /** The status line of a server row: `data-state` is ok, other or disabled. */
+  mcpServerStatus(name: string): Locator {
+    return this.mcpServerRow(name).getByTestId("settings__mcp-status");
+  }
+
   /** Clicks Test connection and waits for the hub's answer. */
   async testMcpConnection(): Promise<void> {
     await test.step("Test the MCP connection", async () => {

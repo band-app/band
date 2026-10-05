@@ -18,11 +18,26 @@ const POLL_MS = 1000;
 
 type ScopeMode = "all" | "projects" | "hosts";
 
+/** One environment variable of a stdio server: a literal, or the id of a vault item. */
+interface EnvRow {
+  name: string;
+  source: "value" | "vault";
+  value: string;
+  vaultItemId: string;
+}
+
 interface FormState {
   /** The saved server being edited, or null for a new one. */
   editing: string | null;
   name: string;
+  transport: "http" | "stdio";
   url: string;
+  /** A stdio server's host, command, arguments (one per line), working directory and environment. */
+  hostId: string;
+  command: string;
+  args: string;
+  cwd: string;
+  env: EnvRow[];
   vaultItemId: string;
   headerName: string;
   headerPrefix: string;
@@ -38,7 +53,13 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   editing: null,
   name: "",
+  transport: "http",
   url: "",
+  hostId: "",
+  command: "",
+  args: "",
+  cwd: "",
+  env: [],
   vaultItemId: "",
   headerName: "Authorization",
   headerPrefix: "Bearer ",
@@ -55,7 +76,17 @@ function formFor(server: McpServer): FormState {
   return {
     editing: server.name,
     name: server.name,
+    transport: server.transport,
     url: server.url,
+    hostId: server.hostId ?? "",
+    command: server.command ?? "",
+    args: server.args.join("\n"),
+    cwd: server.cwd ?? "",
+    env: server.env.map((entry) =>
+      "vaultItemId" in entry
+        ? { name: entry.name, source: "vault", value: "", vaultItemId: entry.vaultItemId }
+        : { name: entry.name, source: "value", value: entry.value, vaultItemId: "" },
+    ),
     vaultItemId: server.vaultItemId ?? "",
     headerName: server.headerName,
     headerPrefix: server.headerPrefix,
@@ -75,6 +106,39 @@ function scopeSummary(server: McpServer): string {
   return "All workspaces";
 }
 
+/** What the hub is sent for a stdio server's process. Rows with no name are dropped. */
+function stdioFields(form: FormState) {
+  return {
+    hostId: form.hostId,
+    command: form.command.trim(),
+    args: form.args.split("\n").filter((line) => line !== ""),
+    cwd: form.cwd.trim() === "" ? null : form.cwd.trim(),
+    env: form.env
+      .filter((row) => row.name.trim() !== "")
+      .map((row) =>
+        row.source === "vault"
+          ? { name: row.name.trim(), vaultItemId: row.vaultItemId }
+          : { name: row.name.trim(), value: row.value },
+      ),
+  };
+}
+
+function formReady(form: FormState): boolean {
+  if (!form.editing && form.name.trim() === "") return false;
+  if (form.transport === "stdio") return form.hostId !== "" && form.command.trim() !== "";
+  return form.url.trim() !== "";
+}
+
+function serverState(
+  server: McpServer,
+  result: TestResult | "checking" | undefined,
+  hostStatus: string | undefined,
+): "disabled" | "ok" | "other" {
+  if (!server.enabled) return "disabled";
+  if (server.transport === "stdio") return hostStatus === "online" ? "ok" : "other";
+  return typeof result === "object" && result.ok ? "ok" : "other";
+}
+
 function toggle(list: string[], value: string, on: boolean): string[] {
   return on ? [...new Set([...list, value])] : list.filter((v) => v !== value);
 }
@@ -87,7 +151,7 @@ function statusText(result: TestResult | "checking" | undefined): string {
 }
 
 /**
- * Rows for the Settings dialog's MCP section (plan step 4.5): the HTTP MCP servers the hub
+ * Rows for the Settings dialog's MCP section (plan step 4.5): the HTTP and stdio MCP servers the hub
  * proxies, with the credential from the vault, the tool allowlist (picked from the server's live
  * `tools/list`), read-only mode, scope, status and the audit log. Changes apply at once and are
  * not part of the dialog's Save. A credential is only ever named by its vault id here.
@@ -107,10 +171,13 @@ export function McpSettings() {
       ((await trpc.projects.list.query()).projects as Array<{ name: string }>).map((p) => p.name),
     enabled: form?.scopeMode === "projects",
   });
+  // Scope choices, the stdio host picker and the status of a stdio server's host.
   const hosts = useQuery({
-    queryKey: ["hosts.list"],
+    queryKey: ["mcp.hosts"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
-    enabled: form?.scopeMode === "hosts",
+    enabled: servers.isSuccess,
+    // A worker may join or drop while this section is open.
+    refetchInterval: 5000,
   });
 
   const [tools, setTools] = useState<ToolInfo[] | null>(null);
@@ -163,13 +230,17 @@ export function McpSettings() {
   useEffect(() => {
     if (!servers.data || checkedOnce.current) return;
     checkedOnce.current = true;
-    for (const server of servers.data.servers) if (server.enabled) void check(server);
+    // A stdio server is not started for a status check; its status is whether its host is online.
+    for (const server of servers.data.servers) {
+      if (server.enabled && server.transport === "http") void check(server);
+    }
   }, [servers.data]);
 
   const open = (next: FormState) => {
     stopPolling();
     // The Credentials section may have added a key since the last load.
     void vault.refetch();
+    void hosts.refetch();
     setForm(next);
     setTools(null);
     setTestMessage(null);
@@ -183,12 +254,16 @@ export function McpSettings() {
     setError(null);
     setTestMessage(null);
     try {
-      const result = await trpc.mcp.test.mutate({
-        url: form.url.trim(),
-        vaultItemId: form.vaultItemId || null,
-        headerName: form.headerName,
-        headerPrefix: form.headerPrefix,
-      });
+      const result = await trpc.mcp.test.mutate(
+        form.transport === "stdio"
+          ? { transport: "stdio", ...stdioFields(form) }
+          : {
+              url: form.url.trim(),
+              vaultItemId: form.vaultItemId || null,
+              headerName: form.headerName,
+              headerPrefix: form.headerPrefix,
+            },
+      );
       if (result.ok) {
         setTools(result.tools);
         setTestOk(true);
@@ -209,11 +284,17 @@ export function McpSettings() {
     if (!form) return;
     setBusy(true);
     setError(null);
+    const connection =
+      form.transport === "stdio"
+        ? stdioFields(form)
+        : {
+            url: form.url.trim(),
+            vaultItemId: form.vaultItemId || null,
+            headerName: form.headerName,
+            headerPrefix: form.headerPrefix,
+          };
     const settings = {
-      url: form.url.trim(),
-      vaultItemId: form.vaultItemId || null,
-      headerName: form.headerName,
-      headerPrefix: form.headerPrefix,
+      ...connection,
       allowTools: form.allowAll ? null : form.allowed,
       readOnly: form.readOnly,
       enabled: form.enabled,
@@ -222,12 +303,18 @@ export function McpSettings() {
     };
     try {
       if (form.editing) await trpc.mcp.update.mutate({ name: form.editing, ...settings });
-      else await trpc.mcp.add.mutate({ name: form.name.trim(), ...settings });
+      else {
+        await trpc.mcp.add.mutate({
+          name: form.name.trim(),
+          transport: form.transport,
+          ...settings,
+        });
+      }
       const savedName = form.editing ?? form.name.trim();
       stopPolling();
       setForm(null);
       await refresh();
-      if (form.enabled) void check({ name: savedName });
+      if (form.enabled && form.transport === "http") void check({ name: savedName });
     } catch (err) {
       fail(err);
     } finally {
@@ -317,7 +404,10 @@ export function McpSettings() {
     );
   }
 
+  const hostStatus = (server: McpServer) =>
+    server.hostId ? (hosts.data ?? []).find((h) => h.id === server.hostId)?.status : undefined;
   const credentials = (vault.data ?? []).filter((i: VaultItem) => i.kind !== "env");
+  const envItems = vault.data ?? [];
   const toolNames = new Set([...(tools ?? []).map((t) => t.name), ...(form?.allowed ?? [])]);
 
   return (
@@ -325,7 +415,7 @@ export function McpSettings() {
       <SettingsRow
         variant="stacked"
         label="MCP servers"
-        description="HTTP MCP servers the hub proxies to coding agents. The hub adds the credential, so an agent never holds it."
+        description="MCP servers the hub proxies to coding agents, over HTTP or as a process on a host. The hub adds the credential, so an agent never holds it."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {(servers.data?.servers ?? []).map((server) => (
@@ -338,7 +428,11 @@ export function McpSettings() {
                 <div className="truncate" data-testid="settings__mcp-server-name">
                   {server.name}
                 </div>
-                <div className="truncate text-xs text-muted-foreground">{server.url}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {server.transport === "stdio"
+                    ? `${server.command ?? ""} ${server.args.join(" ")} on ${server.hostId ?? "no host"}`
+                    : server.url}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   <span data-testid="settings__mcp-server-scope">{scopeSummary(server)}</span>
                   {" · "}
@@ -349,16 +443,13 @@ export function McpSettings() {
                 <div
                   className="text-xs text-muted-foreground"
                   data-testid="settings__mcp-status"
-                  data-state={
-                    !server.enabled
-                      ? "disabled"
-                      : typeof status[server.name] === "object" &&
-                          (status[server.name] as TestResult).ok
-                        ? "ok"
-                        : "other"
-                  }
+                  data-state={serverState(server, status[server.name], hostStatus(server))}
                 >
-                  {server.enabled ? statusText(status[server.name]) : "Disabled"}
+                  {server.enabled
+                    ? server.transport === "stdio"
+                      ? `Host ${hostStatus(server) ?? "unknown"}`
+                      : statusText(status[server.name])
+                    : "Disabled"}
                 </div>
               </div>
               <div className="flex shrink-0 gap-1">
@@ -410,7 +501,6 @@ export function McpSettings() {
         <SettingsRow
           variant="stacked"
           label={form.editing ? `Edit ${form.editing}` : "Add a server"}
-          description="Only HTTP servers are supported so far."
         >
           <div className="space-y-2" data-testid="settings__mcp-form">
             <Input
@@ -421,59 +511,216 @@ export function McpSettings() {
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
               className="h-8 text-sm"
             />
-            <Input
-              aria-label="MCP server URL"
-              placeholder="https://mcp.example.com/mcp"
-              value={form.url}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ url: e.target.value })}
-              className="h-8 text-sm"
-            />
             <select
-              aria-label="MCP credential"
-              value={form.vaultItemId}
-              onChange={(e) => patch({ vaultItemId: e.target.value })}
+              aria-label="MCP transport"
+              value={form.transport}
+              disabled={form.editing !== null}
+              onChange={(e) => patch({ transport: e.target.value as "http" | "stdio" })}
               className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
-              <option value="">No credential</option>
-              {credentials.map((item: VaultItem) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} ({item.kind === "oauth" ? "OAuth" : "API key"})
-                </option>
-              ))}
+              <option value="http">HTTP server</option>
+              <option value="stdio">Process on a host (stdio)</option>
             </select>
-            <div className="flex gap-2">
-              <Input
-                aria-label="MCP header name"
-                value={form.headerName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  patch({ headerName: e.target.value })
-                }
-                className="h-8 text-sm"
-              />
-              <Input
-                aria-label="MCP header prefix"
-                value={form.headerPrefix}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  patch({ headerPrefix: e.target.value })
-                }
-                className="h-8 text-sm"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="settings__mcp-connect-oauth"
-              disabled={busy || form.url.trim() === ""}
-              onClick={() => void connectOAuth()}
-            >
-              Connect with OAuth
-            </Button>
-            {notice ? (
-              <p className="text-xs text-muted-foreground" data-testid="settings__mcp-notice">
-                {notice}
-              </p>
-            ) : null}
+            {form.transport === "stdio" ? (
+              <div className="space-y-2" data-testid="settings__mcp-stdio">
+                <select
+                  aria-label="MCP host"
+                  value={form.hostId}
+                  onChange={(e) => patch({ hostId: e.target.value })}
+                  className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  <option value="">Choose a host</option>
+                  {(hosts.data ?? []).map((host) => (
+                    <option key={host.id} value={host.id}>
+                      {host.name} ({host.id}, {host.status})
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  aria-label="MCP command"
+                  placeholder="Executable, for example npx"
+                  value={form.command}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    patch({ command: e.target.value })
+                  }
+                  className="h-8 text-sm"
+                />
+                <textarea
+                  aria-label="MCP arguments"
+                  placeholder="Arguments, one per line"
+                  value={form.args}
+                  onChange={(e) => patch({ args: e.target.value })}
+                  rows={3}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-sm"
+                />
+                <Input
+                  aria-label="MCP working directory"
+                  placeholder="Working directory (optional, inside the worker's roots)"
+                  value={form.cwd}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    patch({ cwd: e.target.value })
+                  }
+                  className="h-8 text-sm"
+                />
+                <div className="space-y-1" data-testid="settings__mcp-env">
+                  {form.env.map((row, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: rows have no id and are only edited in place
+                    <div key={index} className="flex gap-2">
+                      <Input
+                        aria-label={`Environment variable ${index + 1} name`}
+                        placeholder="NAME"
+                        value={row.name}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          patch({
+                            env: form.env.map((r, i) =>
+                              i === index ? { ...r, name: e.target.value } : r,
+                            ),
+                          })
+                        }
+                        className="h-8 text-sm"
+                      />
+                      <select
+                        aria-label={`Environment variable ${index + 1} source`}
+                        value={row.source}
+                        onChange={(e) =>
+                          patch({
+                            env: form.env.map((r, i) =>
+                              i === index
+                                ? { ...r, source: e.target.value as EnvRow["source"] }
+                                : r,
+                            ),
+                          })
+                        }
+                        className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                      >
+                        <option value="value">Value</option>
+                        <option value="vault">Vault item</option>
+                      </select>
+                      {row.source === "vault" ? (
+                        <select
+                          aria-label={`Environment variable ${index + 1} vault item`}
+                          value={row.vaultItemId}
+                          onChange={(e) =>
+                            patch({
+                              env: form.env.map((r, i) =>
+                                i === index ? { ...r, vaultItemId: e.target.value } : r,
+                              ),
+                            })
+                          }
+                          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                        >
+                          <option value="">Choose an item</option>
+                          {envItems
+                            .filter((item: VaultItem) => item.kind !== "oauth")
+                            .map((item: VaultItem) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                        </select>
+                      ) : (
+                        <Input
+                          aria-label={`Environment variable ${index + 1} value`}
+                          placeholder="value"
+                          value={row.value}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            patch({
+                              env: form.env.map((r, i) =>
+                                i === index ? { ...r, value: e.target.value } : r,
+                              ),
+                            })
+                          }
+                          className="h-8 text-sm"
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Remove environment variable ${index + 1}`}
+                        onClick={() => patch({ env: form.env.filter((_, i) => i !== index) })}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="settings__mcp-env-add"
+                    onClick={() =>
+                      patch({
+                        env: [
+                          ...form.env,
+                          { name: "", source: "value", value: "", vaultItemId: "" },
+                        ],
+                      })
+                    }
+                  >
+                    Add environment variable
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <Input
+                  aria-label="MCP server URL"
+                  placeholder="https://mcp.example.com/mcp"
+                  value={form.url}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    patch({ url: e.target.value })
+                  }
+                  className="h-8 text-sm"
+                />
+                <select
+                  aria-label="MCP credential"
+                  value={form.vaultItemId}
+                  onChange={(e) => patch({ vaultItemId: e.target.value })}
+                  className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  <option value="">No credential</option>
+                  {credentials.map((item: VaultItem) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({item.kind === "oauth" ? "OAuth" : "API key"})
+                    </option>
+                  ))}
+                </select>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="MCP header name"
+                    value={form.headerName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      patch({ headerName: e.target.value })
+                    }
+                    className="h-8 text-sm"
+                  />
+                  <Input
+                    aria-label="MCP header prefix"
+                    value={form.headerPrefix}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      patch({ headerPrefix: e.target.value })
+                    }
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="settings__mcp-connect-oauth"
+                  disabled={busy || form.url.trim() === ""}
+                  onClick={() => void connectOAuth()}
+                >
+                  Connect with OAuth
+                </Button>
+                {notice ? (
+                  <p className="text-xs text-muted-foreground" data-testid="settings__mcp-notice">
+                    {notice}
+                  </p>
+                ) : null}
+              </>
+            )}
 
             <div className="flex items-center gap-2">
               <Button
@@ -481,7 +728,7 @@ export function McpSettings() {
                 variant="outline"
                 size="sm"
                 data-testid="settings__mcp-test"
-                disabled={busy || form.url.trim() === ""}
+                disabled={busy || !formReady({ ...form, name: form.name || "x" })}
                 onClick={() => void testConnection()}
               >
                 Test connection
@@ -621,9 +868,7 @@ export function McpSettings() {
                 type="button"
                 size="sm"
                 data-testid="settings__mcp-save"
-                disabled={
-                  busy || form.url.trim() === "" || (!form.editing && form.name.trim() === "")
-                }
+                disabled={busy || !formReady(form)}
                 onClick={() => void save()}
               >
                 Save

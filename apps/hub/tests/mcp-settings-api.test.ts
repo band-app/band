@@ -98,6 +98,18 @@ describe("mcp.test", () => {
     expect(result.ok && result.tools.length).toBeGreaterThan(1);
   });
 
+  it("reports a stdio server on an unknown host with the hub's own message, no process output", async () => {
+    const result = await m<TestResult>("mcp.test", {
+      transport: "stdio",
+      hostId: "h-nowhere",
+      command: "node",
+      env: [{ name: "SECRET", value: API_KEY }],
+    });
+    expect(result).toMatchObject({ ok: false, reason: "unreachable" });
+    expect(JSON.stringify(result)).toContain("h-nowhere");
+    expect(JSON.stringify(result)).not.toContain(API_KEY);
+  });
+
   it("refuses a non-loopback http URL", async () => {
     const res = await trpcMutate(server.url, "mcp.test", { url: "http://example.com/mcp" }, ADMIN);
     expect(res.status).toBe(400);

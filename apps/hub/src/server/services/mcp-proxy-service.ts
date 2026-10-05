@@ -18,7 +18,10 @@ import {
   type McpProxyTokenRow,
   type McpServerRow,
 } from "../infra/db/queries/mcp-proxy";
+import type { McpStdioEnvEntry } from "../infra/db/schema";
 import { subscribe } from "../infra/events/status-event-bus";
+import { hostRegistry } from "../infra/host/registry";
+import { mcpStdioService } from "./mcp-stdio-service";
 import { vaultService } from "./vault-service";
 
 const log = createLogger("mcp-proxy-service");
@@ -35,6 +38,9 @@ const AUDIT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const TOOL_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const MAX_ENV_ENTRIES = 50;
+const MAX_ARGS = 100;
 const HEADER_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
 /** Headers the proxy sets itself, so a credential can't be pointed at them. */
 const RESERVED_HEADERS = new Set([
@@ -53,7 +59,13 @@ export interface McpServerView {
   id: string;
   name: string;
   url: string;
-  transport: "http";
+  transport: "http" | "stdio";
+  /** For `stdio`: the worker that runs `command`, and what it runs. `url` is empty. */
+  hostId: string | null;
+  command: string | null;
+  args: string[];
+  env: McpStdioEnvEntry[];
+  cwd: string | null;
   vaultItemId: string | null;
   headerName: string;
   headerPrefix: string;
@@ -71,7 +83,15 @@ export interface McpServerView {
 
 export interface McpServerInput {
   name: string;
-  url: string;
+  /** Required for an HTTP server, and not allowed for a stdio one. */
+  url?: string;
+  transport?: "http" | "stdio";
+  /** A stdio server's host, command line and environment. `env` names carry a literal or a vault item. */
+  hostId?: string;
+  command?: string;
+  args?: string[];
+  env?: McpStdioEnvEntry[];
+  cwd?: string | null;
   vaultItemId?: string | null;
   headerName?: string;
   headerPrefix?: string;
@@ -141,6 +161,30 @@ function checkToolList(label: string, list: string[]): string[] {
   return [...new Set(names)];
 }
 
+function checkCommand(command: string | undefined): string {
+  const trimmed = command?.trim() ?? "";
+  if (!trimmed || trimmed.length > 1000 || trimmed.includes("\0")) {
+    throw new McpProxyInputError(
+      "A stdio server needs a command (an executable, not a shell line).",
+    );
+  }
+  return trimmed;
+}
+
+function checkArgs(args: string[]): string[] {
+  if (args.length > MAX_ARGS || args.some((a) => a.length > 4096 || a.includes("\0"))) {
+    throw new McpProxyInputError("args has too many entries, or one is too long.");
+  }
+  return args;
+}
+
+function checkCwd(cwd: string | null | undefined): string | null {
+  if (cwd === undefined || cwd === null || cwd === "") return null;
+  if (cwd.length > 4096 || cwd.includes("\0"))
+    throw new McpProxyInputError("The cwd is not valid.");
+  return cwd;
+}
+
 function checkScope(label: string, list: string[] | null | undefined): string[] | null {
   if (list === null || list === undefined) return null;
   if (list.length > 200) throw new McpProxyInputError(`${label} has more than 200 entries.`);
@@ -175,6 +219,7 @@ export class McpProxyService {
       }
     });
     this.sweep();
+    mcpStdioService.start();
     this.timer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
     this.timer.unref();
   }
@@ -182,6 +227,7 @@ export class McpProxyService {
   stop(): void {
     this.stopListening?.();
     this.stopListening = undefined;
+    mcpStdioService.stop();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
@@ -234,6 +280,11 @@ export class McpProxyService {
       name: "test",
       url: checkUrl(input.url),
       transport: "http",
+      hostId: null,
+      command: null,
+      args: [],
+      env: [],
+      cwd: null,
       vaultItemId: this.checkVaultItem(input.vaultItemId),
       headerName: this.checkHeaderName(input.headerName ?? "Authorization"),
       headerPrefix: this.checkHeaderPrefix(input.headerPrefix ?? "Bearer "),
@@ -259,14 +310,10 @@ export class McpProxyService {
       throw new McpProxyInputError(`An MCP server named "${name}" already exists.`);
     }
     const now = Date.now();
-    const row: McpServerRow = {
+    const transport = input.transport ?? "http";
+    const base = {
       id: `m-${randomUUID().slice(0, 12)}`,
       name,
-      url: checkUrl(input.url),
-      transport: "http",
-      vaultItemId: this.checkVaultItem(input.vaultItemId),
-      headerName: this.checkHeaderName(input.headerName ?? "Authorization"),
-      headerPrefix: this.checkHeaderPrefix(input.headerPrefix ?? "Bearer "),
       allowTools: input.allowTools ? checkToolList("allowTools", input.allowTools) : null,
       readOnly: input.readOnly ?? false,
       readOnlyTools: checkToolList("readOnlyTools", input.readOnlyTools ?? []),
@@ -276,6 +323,47 @@ export class McpProxyService {
       createdAt: now,
       updatedAt: now,
     };
+    let row: McpServerRow;
+    if (transport === "stdio") {
+      if (input.url || input.vaultItemId || input.headerName || input.headerPrefix) {
+        throw new McpProxyInputError(
+          "A stdio server takes a host, a command and env, not a URL or a header credential.",
+        );
+      }
+      row = {
+        ...base,
+        url: "",
+        transport,
+        hostId: this.checkHost(input.hostId),
+        command: checkCommand(input.command),
+        args: checkArgs(input.args ?? []),
+        env: this.checkEnv(input.env ?? []),
+        cwd: checkCwd(input.cwd),
+        vaultItemId: null,
+        headerName: "Authorization",
+        headerPrefix: "Bearer ",
+      };
+    } else {
+      if (!input.url) throw new McpProxyInputError("An HTTP server needs a URL.");
+      if (input.hostId || input.command || input.args || input.env || input.cwd) {
+        throw new McpProxyInputError(
+          "Only a stdio server takes a host, command, args, env or cwd.",
+        );
+      }
+      row = {
+        ...base,
+        url: checkUrl(input.url),
+        transport,
+        hostId: null,
+        command: null,
+        args: [],
+        env: [],
+        cwd: null,
+        vaultItemId: this.checkVaultItem(input.vaultItemId),
+        headerName: this.checkHeaderName(input.headerName ?? "Authorization"),
+        headerPrefix: this.checkHeaderPrefix(input.headerPrefix ?? "Bearer "),
+      };
+    }
     this.queries.insertServer(row);
     log.info({ name, id: row.id }, "mcp server added");
     return view(row);
@@ -285,7 +373,22 @@ export class McpProxyService {
     const row = this.queries.findServer(name);
     if (!row) throw new McpServerNotFoundError(name);
     const next: Partial<Omit<McpServerRow, "id" | "name">> = { updatedAt: Date.now() };
+    const stdio = row.transport === "stdio";
+    const httpOnly = [patch.url, patch.vaultItemId, patch.headerName, patch.headerPrefix];
+    const stdioOnly = [patch.hostId, patch.command, patch.args, patch.env, patch.cwd];
+    if ((stdio ? httpOnly : stdioOnly).some((v) => v !== undefined)) {
+      throw new McpProxyInputError(
+        stdio
+          ? "A stdio server has no URL or header credential."
+          : "Only a stdio server has a host, command, args, env or cwd.",
+      );
+    }
     if (patch.url !== undefined) next.url = checkUrl(patch.url);
+    if (patch.hostId !== undefined) next.hostId = this.checkHost(patch.hostId);
+    if (patch.command !== undefined) next.command = checkCommand(patch.command);
+    if (patch.args !== undefined) next.args = checkArgs(patch.args);
+    if (patch.env !== undefined) next.env = this.checkEnv(patch.env);
+    if (patch.cwd !== undefined) next.cwd = checkCwd(patch.cwd);
     if (patch.vaultItemId !== undefined) next.vaultItemId = this.checkVaultItem(patch.vaultItemId);
     if (patch.headerName !== undefined) next.headerName = this.checkHeaderName(patch.headerName);
     if (patch.headerPrefix !== undefined) {
@@ -307,12 +410,17 @@ export class McpProxyService {
     this.queries.updateServer(name, next);
     this.toolCache.delete(row.id);
     // New destination or credential: tokens issued for the old one must not carry over.
-    if (
-      (next.url !== undefined && next.url !== row.url) ||
-      (next.vaultItemId !== undefined && next.vaultItemId !== row.vaultItemId)
-    ) {
+    const moved = (["url", "vaultItemId", "hostId", "command", "cwd"] as const).some(
+      (key) => next[key] !== undefined && next[key] !== row[key],
+    );
+    const reconfigured = (["args", "env"] as const).some(
+      (key) => next[key] !== undefined && JSON.stringify(next[key]) !== JSON.stringify(row[key]),
+    );
+    if (moved || reconfigured) {
       this.queries.dropServerFromTokens(name, Date.now());
     }
+    // A running process holds the old command line and secrets, so it ends with the change.
+    if (moved || reconfigured || next.enabled === false) mcpStdioService.closeServer(name);
     log.info({ name }, "mcp server updated");
     return view({ ...row, ...next });
   }
@@ -322,7 +430,47 @@ export class McpProxyService {
     if (!row || !this.queries.removeServer(name)) throw new McpServerNotFoundError(name);
     this.toolCache.delete(row.id);
     this.queries.dropServerFromTokens(name, Date.now());
+    mcpStdioService.closeServer(name);
     log.info({ name }, "mcp server removed");
+  }
+
+  private checkHost(hostId: string | undefined): string {
+    if (!hostId?.trim()) throw new McpProxyInputError("A stdio server needs a host id.");
+    try {
+      hostRegistry.hostById(hostId);
+    } catch {
+      throw new McpProxyInputError(`No host with the id "${hostId}".`);
+    }
+    return hostId;
+  }
+
+  /** Each name is a valid variable name, used once, with a literal or a vault item that holds a secret value. */
+  private checkEnv(entries: McpStdioEnvEntry[]): McpStdioEnvEntry[] {
+    if (entries.length > MAX_ENV_ENTRIES) {
+      throw new McpProxyInputError(`env has more than ${MAX_ENV_ENTRIES} entries.`);
+    }
+    const seen = new Set<string>();
+    return entries.map((entry) => {
+      if (!ENV_NAME.test(entry.name)) {
+        throw new McpProxyInputError(`"${entry.name}" is not a valid environment variable name.`);
+      }
+      if (seen.has(entry.name)) {
+        throw new McpProxyInputError(`env names ${entry.name} twice.`);
+      }
+      seen.add(entry.name);
+      if ("vaultItemId" in entry) {
+        const kind = vaultService.kindOf(entry.vaultItemId);
+        if (!kind) throw new McpProxyInputError("No credential with that id in the vault.");
+        if (kind === "oauth") {
+          throw new McpProxyInputError("An OAuth connection can't be passed as an env value.");
+        }
+        return { name: entry.name, vaultItemId: entry.vaultItemId };
+      }
+      if (entry.value.length > 4096 || entry.value.includes("\0")) {
+        throw new McpProxyInputError(`The value of ${entry.name} is too long or has a NUL byte.`);
+      }
+      return { name: entry.name, value: entry.value };
+    });
   }
 
   private checkVaultItem(id: string | null | undefined): string | null {
@@ -416,6 +564,7 @@ export class McpProxyService {
   revokeSession(sessionId: string): number {
     const revoked = this.queries.revokeSession(sessionId, Date.now());
     if (revoked > 0) log.info({ sessionId, revoked }, "mcp session tokens revoked");
+    mcpStdioService.closeProxySession(sessionId);
     return revoked;
   }
 

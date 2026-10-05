@@ -11,6 +11,7 @@ import {
   StreamableHTTPError,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type McpServerView, mcpProxyService } from "./mcp-proxy-service";
+import { mcpStdioService, StdioOpenError, type StdioTarget } from "./mcp-stdio-service";
 
 const TEST_TIMEOUT_MS = 15_000;
 const MAX_PAGES = 20;
@@ -96,5 +97,96 @@ export async function testMcpConnection(server: McpServerView): Promise<McpTestR
       return { ok: false, reason: "auth", message: "The server refused the credential." };
     }
     return { ok: false, reason: "unreachable", message: describeFailure(err) };
+  }
+}
+
+const STDIO_SESSION = "settings-test";
+
+function toolsOf(result: unknown): { tools: McpToolInfo[]; next?: string } {
+  const body = (result ?? {}) as {
+    tools?: Array<{
+      name?: unknown;
+      description?: unknown;
+      annotations?: { readOnlyHint?: unknown };
+    }>;
+    nextCursor?: unknown;
+  };
+  const tools: McpToolInfo[] = [];
+  for (const tool of body.tools ?? []) {
+    if (typeof tool.name !== "string") continue;
+    tools.push({
+      name: tool.name,
+      description: typeof tool.description === "string" ? tool.description.slice(0, 500) : "",
+      readOnly: tool.annotations?.readOnlyHint === true,
+    });
+  }
+  return { tools, next: typeof body.nextCursor === "string" ? body.nextCursor : undefined };
+}
+
+/**
+ * The same check for a stdio server: starts its process on the host, runs `initialize` and
+ * `tools/list` over the link, and ends the process. Nothing the process writes comes back except
+ * the tool list, so a secret in its env or output cannot reach the form.
+ */
+export async function testStdioConnection(target: StdioTarget): Promise<McpTestResult> {
+  const signal = AbortSignal.timeout(TEST_TIMEOUT_MS);
+  let session: Awaited<ReturnType<typeof mcpStdioService.open>> | undefined;
+  try {
+    session = await mcpStdioService.open(target, STDIO_SESSION);
+    const [init] = await session.exchange(
+      [
+        {
+          jsonrpc: "2.0",
+          id: "band-settings-init",
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "band-settings", version: "1.0.0" },
+          },
+        },
+      ],
+      signal,
+    );
+    if (!init || init.error) {
+      return { ok: false, reason: "error", message: "The server refused to initialize." };
+    }
+    session.write([{ jsonrpc: "2.0", method: "notifications/initialized" }]);
+    const tools: McpToolInfo[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const [answer] = await session.exchange(
+        [
+          {
+            jsonrpc: "2.0",
+            id: `band-settings-list-${page}`,
+            method: "tools/list",
+            params: cursor ? { cursor } : {},
+          },
+        ],
+        signal,
+      );
+      if (!answer || answer.error) {
+        return { ok: false, reason: "error", message: "The server did not list its tools." };
+      }
+      const parsed = toolsOf(answer.result);
+      tools.push(...parsed.tools);
+      cursor = parsed.next;
+      if (!cursor) break;
+    }
+    return { ok: true, tools };
+  } catch (err) {
+    if (err instanceof StdioOpenError) {
+      return { ok: false, reason: "unreachable", message: err.message };
+    }
+    return {
+      ok: false,
+      reason: "unreachable",
+      message: signal.aborted
+        ? "The server did not answer in time."
+        : "The server process ended or could not be reached.",
+    };
+  } finally {
+    session?.close("settings test finished");
   }
 }
