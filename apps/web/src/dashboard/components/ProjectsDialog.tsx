@@ -20,6 +20,12 @@ type Project = ProjectList["projects"][number];
 const PROJECTS_KEY = ["projects.list"] as const;
 const DEFAULT_MODEL = "opus";
 const MODELS = ["opus", "sonnet", "haiku"];
+const AUTONOMY: Array<{ value: "observe" | "steer" | "autonomous"; label: string }> = [
+  { value: "observe", label: "Observe: read only" },
+  { value: "steer", label: "Steer: message and stop workers (default)" },
+  { value: "autonomous", label: "Autonomous: dispatch within the limits" },
+];
+const ISOLATION = ["worktree", "container", "vm"] as const;
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const splitLabels = (text: string) =>
@@ -41,16 +47,20 @@ function ModelSelect({
   onChange,
   disabled,
   testId = "projects__model-select",
+  label = "Coordinator model",
+  defaultModel = DEFAULT_MODEL,
 }: {
   value: string;
   onChange: (model: string) => void;
   disabled?: boolean;
   testId?: string;
+  label?: string;
+  defaultModel?: string;
 }) {
   const options = MODELS.includes(value) ? MODELS : [value, ...MODELS];
   return (
     <select
-      aria-label="Coordinator model"
+      aria-label={label}
       data-testid={testId}
       value={value}
       disabled={disabled}
@@ -59,7 +69,7 @@ function ModelSelect({
     >
       {options.map((m) => (
         <option key={m} value={m}>
-          {m === DEFAULT_MODEL ? "opus (default)" : m}
+          {m === defaultModel ? `${m} (default)` : m}
         </option>
       ))}
     </select>
@@ -355,16 +365,244 @@ function EditProjectDialog({
   );
 }
 
+function CoordinatorSection({
+  project,
+  canEdit,
+  run,
+  onOpenWorktree,
+}: {
+  project: Project;
+  canEdit: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+  onOpenWorktree: (worktreeId: string) => void;
+}) {
+  const coordinator = project.coordinator;
+  return (
+    <section
+      className="space-y-1"
+      data-testid="projects__coordinator"
+      data-state={coordinator ? "started" : "not-started"}
+    >
+      <h3 className="text-sm font-medium">Coordinator</h3>
+      {coordinator ? (
+        <div className="flex items-center gap-2 text-sm">
+          <span data-testid="projects__coordinator-worktree">{coordinator.worktreeId}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="projects__coordinator-open"
+            onClick={() => onOpenWorktree(coordinator.worktreeId)}
+          >
+            Open coordinator chat
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="projects__coordinator-none">
+          {project.repos.length === 0
+            ? "Add a repo to start the coordinator."
+            : "The coordinator has not started."}
+        </p>
+      )}
+      {project.coordinatorError ? (
+        <p
+          role="alert"
+          data-testid="projects__coordinator-error"
+          className="text-xs text-destructive"
+        >
+          {project.coordinatorError}
+        </p>
+      ) : null}
+      {canEdit && !coordinator && project.repos.length > 0 ? (
+        <Button
+          size="sm"
+          data-testid="projects__coordinator-start"
+          onClick={() => run(() => trpc.projects.startCoordinator.mutate({ project: project.id }))}
+        >
+          Start coordinator
+        </Button>
+      ) : null}
+    </section>
+  );
+}
+
+function PolicySection({
+  project,
+  canEdit,
+  run,
+}: {
+  project: Project;
+  canEdit: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const p = project.effectivePolicy;
+  const [maxConcurrent, setMaxConcurrent] = useState(p.maxConcurrent?.toString() ?? "");
+  const [budget, setBudget] = useState(p.budgetUsd?.toString() ?? "");
+  const [floor, setFloor] = useState<(typeof ISOLATION)[number]>(p.isolationFloor);
+  const [autoMerge, setAutoMerge] = useState(project.policy.autoMerge === true);
+  const [worker, setWorker] = useState(p.models.worker);
+  const [reviewer, setReviewer] = useState(p.models.reviewer);
+  const [labels, setLabels] = useState(p.labels.join(" "));
+
+  const save = () =>
+    run(() =>
+      trpc.projects.update.mutate({
+        project: project.id,
+        policy: {
+          ...project.policy,
+          maxConcurrent: maxConcurrent.trim() ? Number(maxConcurrent) : undefined,
+          budgetUsd: budget.trim() ? Number(budget) : undefined,
+          isolationFloor: floor,
+          autoMerge,
+          labels: splitLabels(labels),
+          models: { worker, reviewer },
+        },
+      }),
+    );
+
+  return (
+    <section className="space-y-2" data-testid="projects__policy" data-autonomy={p.autonomy}>
+      <h3 className="text-sm font-medium">Policy</h3>
+      <div className="flex items-center gap-2">
+        <Label htmlFor="projects-autonomy">Autonomy</Label>
+        <select
+          id="projects-autonomy"
+          data-testid="projects__autonomy"
+          value={p.autonomy}
+          disabled={!canEdit}
+          onChange={(e) =>
+            run(() =>
+              trpc.projects.update.mutate({
+                project: project.id,
+                policy: {
+                  ...project.policy,
+                  autonomy: e.target.value as "observe" | "steer" | "autonomous",
+                },
+              }),
+            )
+          }
+          className="h-8 rounded-md border bg-background px-2 text-sm"
+        >
+          {AUTONOMY.map((a) => (
+            <option key={a.value} value={a.value}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label htmlFor="projects-max-concurrent">Max concurrent workers</Label>
+          <Input
+            id="projects-max-concurrent"
+            data-testid="projects__max-concurrent"
+            type="number"
+            min={1}
+            disabled={!canEdit}
+            placeholder="no limit"
+            value={maxConcurrent}
+            onChange={(e) => setMaxConcurrent(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="projects-budget">Budget (USD)</Label>
+          <Input
+            id="projects-budget"
+            data-testid="projects__budget"
+            type="number"
+            min={0}
+            disabled={!canEdit}
+            placeholder="no limit"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="projects-isolation-floor">Minimum isolation</Label>
+          <select
+            id="projects-isolation-floor"
+            data-testid="projects__isolation-floor"
+            value={floor}
+            disabled={!canEdit}
+            onChange={(e) => setFloor(e.target.value as (typeof ISOLATION)[number])}
+            className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+          >
+            {ISOLATION.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="projects-worker-labels">Worker host labels</Label>
+          <Input
+            id="projects-worker-labels"
+            data-testid="projects__worker-labels"
+            disabled={!canEdit}
+            placeholder="pool=eu"
+            value={labels}
+            onChange={(e) => setLabels(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm">Model lanes</span>
+        <ModelSelect
+          value={p.models.coordinator}
+          disabled={!canEdit}
+          label="Coordinator lane"
+          onChange={(model) =>
+            run(() => trpc.projects.update.mutate({ project: project.id, coordinatorModel: model }))
+          }
+        />
+        <ModelSelect
+          value={worker}
+          disabled={!canEdit}
+          label="Worker lane"
+          defaultModel="sonnet"
+          testId="projects__lane-worker"
+          onChange={setWorker}
+        />
+        <ModelSelect
+          value={reviewer}
+          disabled={!canEdit}
+          label="Reviewer lane"
+          defaultModel="sonnet"
+          testId="projects__lane-reviewer"
+          onChange={setReviewer}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          data-testid="projects__auto-merge"
+          checked={autoMerge}
+          disabled={!canEdit || p.autonomy !== "autonomous"}
+          onChange={(e) => setAutoMerge(e.target.checked)}
+        />
+        Merge without asking (autonomous only)
+      </label>
+      {canEdit ? (
+        <Button size="sm" data-testid="projects__policy-save" onClick={save}>
+          Save policy
+        </Button>
+      ) : null}
+    </section>
+  );
+}
+
 function ProjectDetail({
   project,
   canEdit,
   onBack,
   onOpenContext,
+  onOpenWorktree,
 }: {
   project: Project;
   canEdit: boolean;
   onBack: () => void;
   onOpenContext: (name: string) => void;
+  onOpenWorktree: (worktreeId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { repos } = useRepos();
@@ -447,16 +685,19 @@ function ProjectDetail({
         ) : null}
       </div>
 
-      <section className="space-y-1">
-        <h3 className="text-sm font-medium">Coordinator model</h3>
-        <ModelSelect
-          value={project.coordinatorModel}
-          disabled={!canEdit}
-          onChange={(model) =>
-            run(() => trpc.projects.update.mutate({ project: project.id, coordinatorModel: model }))
-          }
-        />
-      </section>
+      <CoordinatorSection
+        project={project}
+        canEdit={canEdit}
+        run={run}
+        onOpenWorktree={onOpenWorktree}
+      />
+
+      <PolicySection
+        key={`${project.id}:${JSON.stringify(project.policy)}:${project.coordinatorModel}`}
+        project={project}
+        canEdit={canEdit}
+        run={run}
+      />
 
       <section className="space-y-1">
         <h3 className="text-sm font-medium">Context repo</h3>
@@ -592,11 +833,14 @@ export function ProjectsDialog({
   open,
   onOpenChange,
   onOpenContext,
+  onOpenWorktree,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Opens Settings > Context on this context. */
   onOpenContext: (name: string) => void;
+  /** Shows a worktree, for the coordinator's chat. */
+  onOpenWorktree: (worktreeId: string) => void;
 }) {
   const list = useQuery<ProjectList>({
     queryKey: PROJECTS_KEY,
@@ -631,6 +875,10 @@ export function ProjectsDialog({
             onOpenContext={(name) => {
               onOpenChange(false);
               onOpenContext(name);
+            }}
+            onOpenWorktree={(worktreeId) => {
+              onOpenChange(false);
+              onOpenWorktree(worktreeId);
             }}
           />
         ) : (

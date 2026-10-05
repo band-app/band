@@ -11,11 +11,16 @@
 import { randomBytes } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId as toWorktreeIdOf } from "@band-app/shared/worktree-id";
-import { z } from "zod";
 import { ProjectConflictError, ProjectInputError, ProjectNotFoundError } from "../errors";
 import type { ContextRow } from "../infra/db/queries/contexts";
 import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
+import {
+  type ProjectPolicy,
+  projectPolicy,
+  type ResolvedPolicy,
+  resolvePolicy,
+} from "./_utils/project-policy";
 import { CONTEXT_NAME, contextService, validateLabels } from "./context-service";
 import { loadState } from "./state";
 
@@ -25,15 +30,7 @@ export const DEFAULT_COORDINATOR_MODEL = "opus";
 const MAX_REPOS = 100;
 const ROLE = /^[a-z0-9][a-z0-9_.-]{0,39}$/i;
 
-/** Placement defaults the coordinator applies to the worktrees it creates (enforced from step 6.2). */
-export const projectPolicy = z
-  .object({
-    maxConcurrent: z.number().int().min(1).max(100).optional(),
-    isolation: z.enum(["worktree", "container", "vm"]).optional(),
-    budgetUsd: z.number().positive().max(1_000_000).optional(),
-  })
-  .strict();
-export type ProjectPolicy = z.infer<typeof projectPolicy>;
+export { type ProjectPolicy, projectPolicy };
 
 export interface ProjectRepoInput {
   repo: string;
@@ -48,7 +45,14 @@ export interface ProjectView {
   coordinatorAgent: string | null;
   coordinatorModel: string;
   labels: string[];
+  /** What the user set. */
   policy: ProjectPolicy;
+  /** The policy with its defaults filled in, which is what the coordinator runs under. */
+  effectivePolicy: ResolvedPolicy;
+  /** The coordinator session (plan step 6.2), or null until it has started. */
+  coordinator: { worktreeId: string; chatId: string | null; hostId: string | null } | null;
+  /** The host the coordinator is pinned to. Null means the hub's default. */
+  coordinatorHostId: string | null;
   createdAt: number;
   repos: Array<{ repo: string; role: string | null }>;
   worktrees: Array<{
@@ -79,6 +83,7 @@ export interface CreateProjectInput {
   remoteVaultItemId?: string;
   coordinatorAgent?: string | null;
   coordinatorModel?: string;
+  coordinatorHostId?: string | null;
   labels?: string[];
   policy?: ProjectPolicy;
 }
@@ -87,6 +92,7 @@ export interface UpdateProjectInput {
   description?: string;
   coordinatorAgent?: string | null;
   coordinatorModel?: string;
+  coordinatorHostId?: string | null;
   labels?: string[];
   policy?: ProjectPolicy;
 }
@@ -222,6 +228,9 @@ export class ProjectService {
       coordinatorModel,
       labels,
       policy,
+      coordinatorWorktreeId: null,
+      coordinatorChatId: null,
+      coordinatorHostId: input.coordinatorHostId?.trim() || null,
       createdAt: Date.now(),
     };
     try {
@@ -254,21 +263,34 @@ export class ProjectService {
     }
     if (patch.coordinatorModel !== undefined)
       set.coordinatorModel = cleanModel(patch.coordinatorModel);
+    if (patch.coordinatorHostId !== undefined) {
+      set.coordinatorHostId = patch.coordinatorHostId?.trim() || null;
+    }
     if (patch.labels) set.labels = labelsOf(patch.labels);
-    if (patch.policy) set.policy = cleanPolicy(patch.policy);
+    if (patch.policy) {
+      set.policy = cleanPolicy(patch.policy);
+      // The coordinator lane and the coordinator model are one setting.
+      const lane = (set.policy as ProjectPolicy).models?.coordinator;
+      if (lane && patch.coordinatorModel === undefined) set.coordinatorModel = cleanModel(lane);
+    }
     if (Object.keys(set).length > 0) this.queries.update(row.id, set);
     return this.get(row.id);
   }
 
   /** Removes the project. A project with worktrees is refused. The context repo stays unless `removeContext` is set. */
-  async remove(ref: string, opts: { removeContext?: boolean } = {}): Promise<void> {
+  async remove(
+    ref: string,
+    opts: { removeContext?: boolean; beforeRemove?: (row: ProjectRow) => Promise<void> } = {},
+  ): Promise<void> {
     const row = this.require(ref);
-    const attached = this.queries.worktreesOf(row.id);
+    const attached = this.workersOf(row);
     if (attached.length > 0) {
       throw new ProjectConflictError(
         `Project "${row.name}" still has ${attached.length} worktree${attached.length === 1 ? "" : "s"} (${this.describe(attached)}). Detach or remove them first.`,
       );
     }
+    // The coordinator's chat and worktree go first, while the project still names them.
+    await opts.beforeRemove?.(row);
     this.queries.remove(row.id);
     if (opts.removeContext && contextService.find(row.contextName)) {
       await contextService.remove(row.contextName);
@@ -294,7 +316,7 @@ export class ProjectService {
     if (!this.queries.reposOf(row.id).some((r) => r.repoName === repo)) {
       throw new ProjectInputError(`Repo "${repo}" is not in project "${row.name}"`);
     }
-    const using = this.queries.worktreesOf(row.id).filter((w) => w.repoName === repo);
+    const using = this.workersOf(row).filter((w) => w.repoName === repo);
     if (using.length > 0) {
       throw new ProjectConflictError(
         `Cannot remove repo "${repo}" from project "${row.name}": ${using.length} active worktree${using.length === 1 ? "" : "s"} (${this.describe(using)}) belong${using.length === 1 ? "s" : ""} to the project. Remove or detach them first.`,
@@ -337,6 +359,40 @@ export class ProjectService {
     const projectId = knownProjectId ?? this.worktreeQueries.findProjectId(worktreeId);
     const project = projectId ? this.queries.find(projectId) : undefined;
     return project ? contextService.find(project.contextName) : undefined;
+  }
+
+  /** The project's worktrees, without the coordinator's own. */
+  workersOf(row: ProjectRow) {
+    return this.queries
+      .worktreesOf(row.id)
+      .filter((w) => toWorktreeIdOf(w.repoName, w.name) !== row.coordinatorWorktreeId);
+  }
+
+  branchStatus(worktreeId: string) {
+    return this.queries.branchStatus(worktreeId);
+  }
+
+  /** Every worktree of the project, the coordinator's included. */
+  allWorktreesOf(projectId: string) {
+    return this.queries.worktreesOf(projectId);
+  }
+
+  /** The project row for an id or name. Throws `ProjectNotFoundError`. */
+  row(ref: string): ProjectRow {
+    return this.require(ref);
+  }
+
+  findByCoordinatorChat(chatId: string): ProjectRow | undefined {
+    return this.queries.findByCoordinatorChat(chatId);
+  }
+
+  isCoordinatorWorktree(worktreeId: string): boolean {
+    return this.queries.findByCoordinatorWorktree(worktreeId) !== undefined;
+  }
+
+  /** Records the coordinator's worktree and chat, or clears them with nulls. */
+  setCoordinator(id: string, worktreeId: string | null, chatId: string | null): void {
+    this.queries.update(id, { coordinatorWorktreeId: worktreeId, coordinatorChatId: chatId });
   }
 
   /** A repo was removed from Band: drop it from every project. */
@@ -383,6 +439,8 @@ export class ProjectService {
 
   private toView(row: ProjectRow, repoRows = this.queries.reposOf(row.id)): ProjectView {
     const ctx = contextService.find(row.contextName);
+    const parsed = projectPolicy.safeParse(row.policy);
+    const policy: ProjectPolicy = parsed.success ? parsed.data : {};
     return {
       id: row.id,
       name: row.name,
@@ -391,10 +449,19 @@ export class ProjectService {
       coordinatorAgent: row.coordinatorAgent,
       coordinatorModel: row.coordinatorModel,
       labels: row.labels,
-      policy: row.policy as ProjectPolicy,
+      policy,
+      effectivePolicy: resolvePolicy(policy, row.coordinatorModel),
+      coordinator: row.coordinatorWorktreeId
+        ? {
+            worktreeId: row.coordinatorWorktreeId,
+            chatId: row.coordinatorChatId,
+            hostId: row.coordinatorHostId,
+          }
+        : null,
+      coordinatorHostId: row.coordinatorHostId,
       createdAt: row.createdAt,
       repos: repoRows.map((r) => ({ repo: r.repoName, role: r.role })),
-      worktrees: this.queries.worktreesOf(row.id).map((w) => ({
+      worktrees: this.workersOf(row).map((w) => ({
         worktreeId: toWorktreeIdOf(w.repoName, w.name),
         repo: w.repoName,
         name: w.name,

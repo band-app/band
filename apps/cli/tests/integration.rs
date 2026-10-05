@@ -2201,7 +2201,13 @@ fn mcp_add_list_remove() {
 
 #[test]
 fn projects_create_list_add_repo() {
-    let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
+    // A project with a repo starts its coordinator, so run it on the scripted stub agent.
+    let stub_agent = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/hub/tests/fixtures/acp-stub-agent.mjs");
+    let env = TestEnv::with_server_env(&[
+        ("BAND_SERVE_UI", "false"),
+        ("BAND_TEST_ACP_AGENT", stub_agent.to_str().unwrap()),
+    ]);
     for name in ["api", "client"] {
         let dir = env.tmp.path().join(name);
         fs::create_dir_all(&dir).unwrap();

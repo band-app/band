@@ -574,6 +574,10 @@ export function DashboardShell({
           setSettingsContext(name);
           setShowSettingsDialog(true);
         }}
+        onOpenWorktree={(worktreeId) => {
+          const href = capabilities.getWorktreeHref?.(worktreeId);
+          if (href && capabilities.navigate) capabilities.navigate(href);
+        }}
       />
       <SettingsPage
         open={showSettingsDialog}

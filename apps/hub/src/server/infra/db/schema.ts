@@ -844,6 +844,11 @@ export const projects = sqliteTable(
     coordinatorModel: text("coordinator_model").notNull().default("opus"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
     policy: text("policy", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    // The coordinator session of step 6.2: its worktree (in one of the project's
+    // repos), its chat, and the host it is pinned to (null means the local host).
+    coordinatorWorktreeId: text("coordinator_worktree_id"),
+    coordinatorChatId: text("coordinator_chat_id"),
+    coordinatorHostId: text("coordinator_host_id"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [uniqueIndex("projects_name_idx").on(t.name)],

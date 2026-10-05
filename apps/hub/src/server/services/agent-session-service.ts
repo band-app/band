@@ -57,11 +57,15 @@ import {
 import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
+import { COORDINATOR_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { contextSyncService } from "./context-sync-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
+// FRAGILE: ESM cycle leg, `project-coordinator-service` imports this file back.
+// Safe because it is only used inside function bodies.
+import { projectCoordinatorService } from "./project-coordinator-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -778,11 +782,14 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   try {
     const worktree = worktreeService.resolve(rt.worktreeId);
     if (!worktree) return [];
-    const servers = mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id);
-    if (servers.length === 0) return [];
+    // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
+    const names = projectCoordinatorService.projectOfChat(rt.chatId)
+      ? [COORDINATOR_SERVER]
+      : mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name);
+    if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
-        { chatId: rt.chatId, agent: proc.agentName, servers: servers.map((s) => s.name) },
+        { chatId: rt.chatId, agent: proc.agentName, servers: names },
         "agent does not support HTTP MCP servers, so none are passed",
       );
       return [];
@@ -791,7 +798,7 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     mcpProxyService.revokeSession(rt.chatId);
     const { token } = mcpProxyService.issueSessionToken(
       rt.chatId,
-      servers.map((s) => s.name),
+      names,
       // The process can outlive the default hour. Exit and chat removal revoke it.
       MAX_TOKEN_TTL_MS,
     );
@@ -800,15 +807,26 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     if (rt.relayEnv?.BAND_TOKEN) {
       headers.push({ name: "X-Band-Relay-Token", value: rt.relayEnv.BAND_TOKEN });
     }
-    return servers.map((s) => ({
+    return names.map((name) => ({
       type: "http" as const,
-      name: s.name,
-      url: `${base}/mcp-proxy/${encodeURIComponent(s.name)}`,
+      name,
+      url: `${base}/mcp-proxy/${encodeURIComponent(name)}`,
       headers,
     }));
   } catch (err) {
     log.warn({ chatId: rt.chatId, err }, "could not prepare MCP servers for the session");
     return [];
+  }
+}
+
+/** The charter a project's coordinator chat starts with, or undefined for any other chat. */
+function sessionCharter(rt: Runtime): string | undefined {
+  try {
+    const project = projectCoordinatorService.projectOfChat(rt.chatId);
+    return project ? projectCoordinatorService.charter(project) : undefined;
+  } catch (err) {
+    log.warn({ chatId: rt.chatId, err }, "could not prepare the coordinator charter");
+    return undefined;
   }
 }
 
@@ -827,6 +845,7 @@ async function attachNew(
       cwd,
       await agentExtraDirs(rt.worktreeId),
       sessionMcpServers(rt, proc),
+      sessionCharter(rt),
     );
   } catch (err) {
     rt.routing = "log";
@@ -867,8 +886,8 @@ async function attachExisting(
   try {
     const attached =
       how === "load"
-        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc))
-        : await proc.resumeSession(sessionId, cwd, sessionMcpServers(rt, proc));
+        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionCharter(rt))
+        : await proc.resumeSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionCharter(rt));
     rt.routing = "log";
     setLive(rt, def, attached);
     logAttached(rt, proc, how, attached);
