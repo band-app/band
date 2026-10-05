@@ -236,6 +236,30 @@ export class VaultService {
     return (JSON.parse(decrypt(this.getKey(), id, row.encrypted)) as OAuthSecret).accessToken;
   }
 
+  /** The kind of an item, or undefined when it doesn't exist. Metadata only. */
+  kindOf(id: string): VaultKind | undefined {
+    return this.queries.find(id)?.kind;
+  }
+
+  /**
+   * The plaintext credential of any item, for the MCP proxy. An OAuth item
+   * yields its access token, refreshed first when `forceRefresh` is set (the
+   * upstream just answered 401) or when it is about to expire.
+   */
+  async getCredential(
+    id: string,
+    forceRefresh = false,
+  ): Promise<{ kind: VaultKind; value: string }> {
+    const row = this.queries.find(id);
+    if (!row) throw new VaultNotFoundError();
+    if (row.kind === "oauth") {
+      if (forceRefresh && row.metadata.canRefresh) await this.refresh(id);
+      return { kind: row.kind, value: await this.getAccessToken(id) };
+    }
+    this.queries.update(id, { lastUsedAt: Date.now() });
+    return { kind: row.kind, value: decrypt(this.getKey(), id, row.encrypted) };
+  }
+
   // ---- key rotation --------------------------------------------------------------
 
   /** Re-encrypts every item under a new key file key. Only for a key file, not `BAND_VAULT_KEY`. */

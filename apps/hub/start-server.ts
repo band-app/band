@@ -28,6 +28,7 @@ import { handleChatHistory } from "./src/api/chat-history.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
+import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
@@ -63,6 +64,7 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
 import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
+import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
@@ -738,6 +740,7 @@ async function main() {
   runnerService.start();
   runnerReaperService.start();
   vaultService.start();
+  mcpProxyService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -841,6 +844,13 @@ async function main() {
     // single-use state from `vault.startOAuth` is the credential.
     if (req.method === "GET" && req.url?.split("?")[0] === OAUTH_CALLBACK_PATH) {
       await handleOAuthCallback(req, res);
+      return;
+    }
+
+    // The MCP proxy. Before the device-token check: a per-session `mcp_` token
+    // is its credential, and it only reaches the servers that token names.
+    if (req.url?.startsWith(MCP_PROXY_PREFIX)) {
+      await handleMcpProxy(req, res);
       return;
     }
 
@@ -1582,6 +1592,7 @@ async function main() {
     runnerService.stop();
     runnerReaperService.stop();
     vaultService.stop();
+    mcpProxyService.stop();
     placementService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});

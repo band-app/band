@@ -56,6 +56,7 @@ import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { hostRequestsRouter } from "./host-requests/router";
 import { hostsRouter } from "./hosts/router";
+import { mcpServersRouter } from "./mcp-servers/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
@@ -106,6 +107,7 @@ export const appRouter = t.router({
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,
+  mcp: mcpServersRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,
   tunnel: tunnelRouter,

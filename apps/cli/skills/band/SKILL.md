@@ -239,6 +239,16 @@ band tokens revoke <id>
 
 `list` shows each token's id, kind, label, state and last use, never its secret. `create-device` prints a new device token once, for a UI or script. Add `--admin` only for a token that must manage tokens too; without it the token gets 403 on `band tokens`. These commands need an admin token, which the shared token in `settings.json` is. `revoke` stops a token from authenticating. The shared token in `settings.json` cannot be revoked. These commands change who can reach the hub, so run them only when the user asks.
 
+### Proxy an MCP server through the hub
+
+```sh
+band mcp list
+band mcp add <name> <url> [--vault-item <id>] [--header <name>] [--prefix <text>] [--allow-tools a,b] [--read-only] [--read-only-tools a,b] [--disabled]
+band mcp remove <name>
+```
+
+The hub proxies HTTP MCP servers at `/mcp-proxy/<name>` and adds the credential from the vault, so an agent never holds it. Each agent session gets its own short-lived token for the servers it may use. `--allow-tools` limits the tools an agent sees and can call. `--read-only` keeps only tools the server marks `readOnlyHint` plus those named in `--read-only-tools`. An API key goes in `--header` (default `Authorization`) after `--prefix` (default `Bearer `). An OAuth connection from Settings > Credentials always goes as a Bearer token. These commands need an admin token. Run them only when the user asks.
+
 ### Store credentials in the hub's vault
 
 ```sh

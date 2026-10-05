@@ -21,6 +21,8 @@ export interface OAuthStub {
   liveAccessTokens: () => string[];
   /** Refuses the next token request with `invalid_grant`. */
   failNextToken: () => void;
+  /** Makes every access token issued so far invalid, as if it had expired at the server. Refresh tokens still work. */
+  expireAccessTokens: () => void;
   close: () => Promise<void>;
 }
 
@@ -190,6 +192,7 @@ export async function startOAuthStub(opts: OAuthStubOptions = {}): Promise<OAuth
     failNextToken: () => {
       failNext = true;
     },
+    expireAccessTokens: () => accessTokens.clear(),
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

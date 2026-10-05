@@ -2085,6 +2085,70 @@ fn vault_put_list_delete() {
     assert!(!empty.status.success());
 }
 
+// --- MCP proxy tests ---
+
+#[test]
+fn mcp_add_list_remove() {
+    let env = TestEnv::new();
+
+    let added = env.band(&[
+        "mcp",
+        "add",
+        "notes",
+        "http://127.0.0.1:9/mcp",
+        "--allow-tools",
+        "echo, add",
+        "--read-only",
+        "--output",
+        "json",
+    ]);
+    assert!(added.status.success(), "stderr: {}", stderr(&added));
+    let server = &json_of(&added)["server"];
+    assert_eq!(server["name"], "notes");
+    assert_eq!(server["allowTools"], serde_json::json!(["echo", "add"]));
+    assert_eq!(server["readOnly"], true);
+
+    let listed = json_of(&env.band(&["mcp", "list", "--output", "json"]));
+    let row = listed["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "notes")
+        .expect("server listed");
+    assert_eq!(row["url"], "http://127.0.0.1:9/mcp");
+    let text = stdout(&env.band(&["mcp", "list"]));
+    assert!(text.starts_with("NAME"), "text: {text}");
+    assert!(text.contains("notes"), "text: {text}");
+    assert!(text.contains("read-only"), "text: {text}");
+
+    // A duplicate, a bad URL and an unknown credential are refused.
+    assert!(!env
+        .band(&["mcp", "add", "notes", "http://127.0.0.1:9/mcp"])
+        .status
+        .success());
+    assert!(!env
+        .band(&["mcp", "add", "plain", "http://example.com/mcp"])
+        .status
+        .success());
+    assert!(!env
+        .band(&[
+            "mcp",
+            "add",
+            "nocred",
+            "http://127.0.0.1:9/mcp",
+            "--vault-item",
+            "nope"
+        ])
+        .status
+        .success());
+
+    let removed = env.band(&["mcp", "remove", "notes"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    let listed = json_of(&env.band(&["mcp", "list", "--output", "json"]));
+    assert!(listed["servers"].as_array().unwrap().is_empty());
+    assert!(!env.band(&["mcp", "remove", "notes"]).status.success());
+}
+
 // --- Subscriptions tests ---
 
 /// A workspace with one chat, and the environment an agent in that chat has.

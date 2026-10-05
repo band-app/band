@@ -97,7 +97,14 @@ export class WorkerRelayService {
       if (typeof value === "string") headers[name] = value;
     }
     if (request.scope.chatId) headers[CHAT_ID_HEADER] = request.scope.chatId;
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (/^\/mcp-proxy\/[^/]+\/?$/.test(request.path.split("?")[0])) {
+      // The MCP proxy answers to the agent's own `mcp_` token, so that goes up
+      // as it came and the hub's token stays out of the call.
+      const proxyToken = request.headers.authorization;
+      if (typeof proxyToken === "string") headers.authorization = proxyToken;
+    } else if (token) {
+      headers.authorization = `Bearer ${token}`;
+    }
 
     const abort = new AbortController();
     let upstream: Response;
