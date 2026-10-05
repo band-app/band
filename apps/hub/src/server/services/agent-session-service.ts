@@ -60,6 +60,7 @@ import { rowsToEvents } from "./_utils/chat-log-replay";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 import { workspaceService } from "./workspace-service";
 
 const log = createLogger("agent-sessions");
@@ -134,6 +135,8 @@ interface Runtime {
   /** Claude Code: flags on the command line of the CLI behind the session,
    *  which a wrapper script may have added. */
   claudeCli: ClaudeCliArgs | null;
+  /** `BAND_SERVER_URL` and `BAND_TOKEN` of the host's relay, for an agent on a worker. */
+  relayEnv: Record<string, string> | null;
 }
 
 /** What an agent offers before a chat has a session: gathered from probes
@@ -269,6 +272,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       work: new PendingWork(),
       idleTimer: null,
       claudeCli: null,
+      relayEnv: null,
     };
     runtimes.set(chat.id, rt);
   }
@@ -650,6 +654,7 @@ async function ensureProcess(
     const exited = handlers.onExit;
     handlers.onExit = (code, stderr) => {
       void grant?.revoke();
+      mcpProxyService.revokeSession(rt.chatId);
       exited?.(code, stderr);
     };
     let proc: AcpAgentProcess;
@@ -659,6 +664,7 @@ async function ensureProcess(
       await grant?.revoke();
       throw err;
     }
+    rt.relayEnv = grant?.env ?? null;
     remember(def, { agentName: proc.agentName, canList: proc.canList });
     return proc;
   })();
@@ -756,6 +762,55 @@ async function applyPreferences(
   }
 }
 
+/** The hub's own address, for an agent on this machine. */
+function localHubUrl(): string {
+  return process.env.BAND_SERVER_URL ?? `http://127.0.0.1:${process.env.BAND_PORT ?? "3456"}`;
+}
+
+/**
+ * The MCP servers a session may use, as ACP `mcpServers` entries that point
+ * at the hub's proxy with a fresh per-session token (plan step 4.3). An agent
+ * on a worker reaches the proxy through the worker's relay, which needs the
+ * relay token as well. A failure here never stops the chat.
+ */
+function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
+  try {
+    const workspace = workspaceService.resolve(rt.workspaceId);
+    if (!workspace) return [];
+    const servers = mcpProxyService.serversForSession(workspace.project.name, workspace.host.id);
+    if (servers.length === 0) return [];
+    if (!proc.supportsHttpMcp) {
+      log.info(
+        { chatId: rt.chatId, agent: proc.agentName, servers: servers.map((s) => s.name) },
+        "agent does not support HTTP MCP servers, so none are passed",
+      );
+      return [];
+    }
+    // A resume or reload gets a new token, and the old one stops working.
+    mcpProxyService.revokeSession(rt.chatId);
+    const { token } = mcpProxyService.issueSessionToken(
+      rt.chatId,
+      servers.map((s) => s.name),
+      // The process can outlive the default hour. Exit and chat removal revoke it.
+      MAX_TOKEN_TTL_MS,
+    );
+    const base = (rt.relayEnv?.BAND_SERVER_URL ?? localHubUrl()).replace(/\/+$/, "");
+    const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
+    if (rt.relayEnv?.BAND_TOKEN) {
+      headers.push({ name: "X-Band-Relay-Token", value: rt.relayEnv.BAND_TOKEN });
+    }
+    return servers.map((s) => ({
+      type: "http" as const,
+      name: s.name,
+      url: `${base}/mcp-proxy/${encodeURIComponent(s.name)}`,
+      headers,
+    }));
+  } catch (err) {
+    log.warn({ chatId: rt.chatId, err }, "could not prepare MCP servers for the session");
+    return [];
+  }
+}
+
 async function attachNew(
   rt: Runtime,
   proc: AcpAgentProcess,
@@ -767,7 +822,11 @@ async function attachNew(
   rt.buffered = [];
   let attached: AttachedSession;
   try {
-    attached = await proc.newSession(cwd, await agentExtraDirs(rt.workspaceId));
+    attached = await proc.newSession(
+      cwd,
+      await agentExtraDirs(rt.workspaceId),
+      sessionMcpServers(rt, proc),
+    );
   } catch (err) {
     rt.routing = "log";
     throw err;
@@ -807,8 +866,8 @@ async function attachExisting(
   try {
     const attached =
       how === "load"
-        ? await proc.loadSession(sessionId, cwd)
-        : await proc.resumeSession(sessionId, cwd);
+        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc))
+        : await proc.resumeSession(sessionId, cwd, sessionMcpServers(rt, proc));
     rt.routing = "log";
     setLive(rt, def, attached);
     logAttached(rt, proc, how, attached);
