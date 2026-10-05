@@ -334,7 +334,10 @@ describe("the tools are scoped to the project (S2)", () => {
     );
     const names = (workerSession.params.mcpServers as Array<{ name: string }>).map((s) => s.name);
     expect(names).toEqual(["notes"]);
-    expect(workerSession.params._meta).toBeUndefined();
+    // A worker may carry the context preamble in `_meta`, but never a coordinator charter.
+    expect(JSON.stringify(workerSession.params._meta ?? {})).not.toContain(
+      "coordinator of the Band project",
+    );
 
     const workerBearer = bearerOf(workerSession);
     const denied = await fetch(`${server.url}/mcp-proxy/band-coordinator`, {
