@@ -1652,7 +1652,7 @@ describe("tRPC — pinned worktrees", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
 
-    // Create the repo repo + a second worktree on `feature` so we have
+    // Create the repo + a second worktree on `feature` so we have
     // two branches to pin/unpin/test reorder against.
     repoPath = join(tmpHome, "pin-repo");
     mkdirSync(repoPath, { recursive: true });
