@@ -1,5 +1,11 @@
 import { cn } from "@band-app/ui";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
+
+/**
+ * True inside a settings page that already shows the section name as its page title, so the
+ * section does not repeat it.
+ */
+export const SettingsPageContext = createContext(false);
 
 interface SettingsSectionProps {
   /** Header text displayed above the card (e.g. "General"). */
@@ -25,15 +31,22 @@ export function SettingsSection({
   children,
   className,
 }: SettingsSectionProps) {
+  const hasPageTitle = useContext(SettingsPageContext);
   return (
     <section className={cn("space-y-2", className)}>
-      {(title || action) && (
+      {((title && !hasPageTitle) || action) && (
         <div className="flex items-center justify-between gap-2 px-1">
-          {title ? <h3 className="text-sm font-medium text-foreground/90">{title}</h3> : <span />}
+          {title && !hasPageTitle ? (
+            <h3 className="text-sm font-medium text-foreground/90">{title}</h3>
+          ) : (
+            <span />
+          )}
           {action ? <div className="shrink-0">{action}</div> : null}
         </div>
       )}
-      {description ? <p className="px-1 text-xs text-muted-foreground">{description}</p> : null}
+      {description && !hasPageTitle ? (
+        <p className="px-1 text-xs text-muted-foreground">{description}</p>
+      ) : null}
       <div
         data-slot="settings-section-card"
         data-testid="settings__section-card"

@@ -30,6 +30,7 @@ export class HubPickerPage {
         (window as unknown as { __bandOpenSettings?: () => void }).__bandOpenSettings?.();
       });
       await expect(this.dialog).toBeVisible();
+      await this.dialog.getByTestId("settings__nav-hub").click();
       await expect(this.mode).toBeVisible();
     });
   }

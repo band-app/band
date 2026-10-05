@@ -89,7 +89,7 @@ test.afterAll(async () => {
 test("a worker turns its host row online and offline", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
   await settingsPage.addWorker("e2e-box", "");
 
   const env = parseWorkerCommand(await settingsPage.readWorkerCommand());
@@ -156,7 +156,7 @@ test("the Hosts screen shows what the worker offers and removes it once offline"
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
   await expect(settingsPage.hostAgents(hostId)).toContainText("claude-code");
   await expect(settingsPage.hostRoots(hostId)).toContainText(root);
 

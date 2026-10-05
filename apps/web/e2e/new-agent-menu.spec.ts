@@ -135,7 +135,7 @@ test.describe("New agent menu", () => {
   test("the Settings page saves this device's agent mode", async ({ page }) => {
     const settings = new SettingsPage(page, server.url, TOKEN);
     await settings.goto();
-    await settings.openDialog();
+    await settings.openDialog("agents");
     await settings.selectDeviceAgentMode("tui");
     await expect.poll(() => settings.readDeviceAgentMode()).toBe("tui");
     await settings.selectDeviceAgentMode("gui");
@@ -146,7 +146,7 @@ test.describe("New agent menu", () => {
   test("the Settings page saves the default agent mode", async ({ page }) => {
     const settings = new SettingsPage(page, server.url, TOKEN);
     await settings.goto();
-    await settings.openDialog();
+    await settings.openDialog("agents");
     await settings.selectDefaultAgentMode("gui");
     await settings.save();
     await expect

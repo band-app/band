@@ -86,7 +86,7 @@ test("adds a stdio server on a worker host, tests it, limits its tools and serve
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
 
   await settingsPage.addWorker("stdio-box", "");
   const env = parseWorkerCommand(await settingsPage.readWorkerCommand());
@@ -106,8 +106,10 @@ test("adds a stdio server on a worker host, tests it, limits its tools and serve
     timeout: 20_000,
   });
 
+  await settingsPage.openSection("credentials");
   await settingsPage.addCredential("STDIO_SECRET", "stdio-e2e-SECRET-0123", "Environment variable");
   await settingsPage.expectRowVisible(settingsPage.credentialRow("STDIO_SECRET"));
+  await settingsPage.openSection("mcp");
 
   await settingsPage.startMcpStdioServer({
     name: "e2e-stdio",

@@ -34,6 +34,24 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { AGENT_MODE_KEY } from "@/dashboard";
 
+/** Ids of the pages in the settings sidebar (`SETTINGS_SECTIONS` in `SettingsPage.tsx`). */
+export type SettingsNavId =
+  | "appearance"
+  | "general"
+  | "hub"
+  | "browser"
+  | "hosts"
+  | "credentials"
+  | "mcp"
+  | "runners"
+  | "environment"
+  | "labels"
+  | "agents"
+  | "usage"
+  | "notifications"
+  | "web-server"
+  | "terminal";
+
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
   readonly dialog: Locator;
@@ -78,7 +96,7 @@ export class SettingsPage {
    * hydration-swallowed first click (see `goto`) can drop the event, so
    * re-click until the dialog is actually visible.
    */
-  async openDialog(): Promise<void> {
+  async openDialog(section?: SettingsNavId): Promise<void> {
     await test.step("Open Settings dialog from the bottom action bar", async () => {
       await expect(this.settingsButton).toBeVisible();
       await expect
@@ -91,6 +109,48 @@ export class SettingsPage {
           { timeout: 10_000 },
         )
         .toBe(true);
+      if (section) await this.openSection(section);
+    });
+  }
+
+  /** Selects a page in the settings sidebar. Each page shows one section. */
+  async openSection(section: SettingsNavId): Promise<void> {
+    await test.step(`Open the ${section} settings page`, async () => {
+      await this.dialog.getByTestId(`settings__nav-${section}`).click();
+      await expect(this.dialog.getByTestId(`settings__nav-${section}`)).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    });
+  }
+
+  /** Types into the sidebar's search box. */
+  async searchSections(query: string): Promise<void> {
+    await test.step(`Search the settings pages for "${query}"`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Search settings" }).fill(query);
+    });
+  }
+
+  /** One sidebar entry per page that matches the search. */
+  navEntries(): Locator {
+    return this.dialog.getByTestId("settings-page__nav").locator("[data-testid^='settings__nav-']");
+  }
+
+  navEntry(section: SettingsNavId): Locator {
+    return this.dialog.getByTestId(`settings__nav-${section}`);
+  }
+
+  /** Bounding box of the sidebar. */
+  async navBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await this.dialog.getByTestId("settings-page__nav").boundingBox();
+    if (!box) throw new Error("The settings sidebar has no bounding box (not visible)");
+    return box;
+  }
+
+  /** Clicks "Back to app", which closes the settings. */
+  async backToApp(): Promise<void> {
+    await test.step("Go back to the app", async () => {
+      await this.dialog.getByTestId("settings-page__back").click();
     });
   }
 

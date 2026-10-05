@@ -110,7 +110,7 @@ async function newTabProfile(workspaceId: string): Promise<string | null> {
 test("project defaults start collapsed and list each project once by name", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("browser");
 
   await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
   await settingsPage.expectRowVisible(settingsPage.projectDefaultsTrigger());
@@ -132,7 +132,7 @@ test("picking a project's browser profile makes new tabs in every workspace use 
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("browser");
 
   await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
   await expect(settingsPage.browserProfileRows()).toHaveCount(1);
@@ -154,7 +154,7 @@ test("deleting a profile removes it and puts its project back on Default", async
   });
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("browser");
   await settingsPage.expandProjectDefaults();
   await settingsPage.expectRowVisible(settingsPage.projectBrowserProfileSelect(PROJECT));
   await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toContainText(PROFILE_NAME);

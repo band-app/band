@@ -95,10 +95,11 @@ test("adds a server with a vault key, limits it to two tools, scopes it to a pro
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("credentials");
   await settingsPage.addCredential("UPSTREAM_KEY", API_KEY);
   await settingsPage.expectRowVisible(settingsPage.credentialRow("UPSTREAM_KEY"));
 
+  await settingsPage.openSection("mcp");
   await settingsPage.startMcpServer("notes", upstream.url, "UPSTREAM_KEY");
   await settingsPage.testMcpConnection();
   await expect(settingsPage.mcpTestResult()).toHaveAttribute("data-ok", "true");

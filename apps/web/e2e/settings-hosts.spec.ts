@@ -55,7 +55,7 @@ async function tokens(): Promise<TokenView[]> {
 test("lists the local host", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
 
   const local = settingsPage.hostRow("local");
   await settingsPage.expectRowVisible(local);
@@ -65,7 +65,7 @@ test("lists the local host", async ({ page }) => {
 test("creates a worker bootstrap token and lists its offline host", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
 
   await settingsPage.addWorker("build-box", "os=linux, gpu");
 
@@ -111,7 +111,7 @@ test("revokes a device token, which then gets 401", async ({ page }) => {
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
 
   const row = settingsPage.tokenRow("e2e phone");
   await settingsPage.expectRowVisible(row);
@@ -137,7 +137,7 @@ test("a non-admin device token sees the hosts but is told tokens need an admin t
 
   const settingsPage = new SettingsPage(page, server.url, plainToken);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("hosts");
 
   await settingsPage.expectRowVisible(settingsPage.hostRow("local"));
   await settingsPage.expectRowVisible(settingsPage.tokensDenied());

@@ -125,7 +125,7 @@ test("the Default agent select stays inside the window and scrolls to its last a
   await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
   await workspacePage.zoomInBy(3);
 
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("agents");
   await expectInsideViewport(settingsPage.dialog, viewport);
   await settingsPage.openDefaultAgentSelect();
   await expectInsideViewport(settingsPage.openSelectList, viewport);

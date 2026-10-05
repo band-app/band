@@ -46,7 +46,7 @@ test.afterAll(async () => {
 test("adds an API key whose value is never shown again, then deletes it", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("credentials");
 
   await settingsPage.addCredential("E2E_API_KEY", SECRET);
   const row = settingsPage.credentialRow("E2E_API_KEY");
@@ -65,12 +65,13 @@ test("connects an OAuth server through the consent window, then deletes and revo
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("mcp");
 
   const consent = await settingsPage.connectMcpOAuth("e2e-mcp", oauth.resourceUrl);
   // The stub consents at once and redirects the window back to the hub's callback.
   await settingsPage.expectOAuthCallbackConnected(consent);
 
+  await settingsPage.openSection("credentials");
   const row = settingsPage.credentialRow("e2e-mcp");
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-kind", "oauth");
@@ -86,9 +87,10 @@ test("connects an OAuth server through the consent window, then deletes and revo
 test("shows the hub's refusal when a server cannot be reached", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog();
+  await settingsPage.openDialog("mcp");
 
   await settingsPage.connectMcpOAuth("nowhere", "http://127.0.0.1:1/mcp");
   await expect(settingsPage.mcpError()).toBeVisible();
+  await settingsPage.openSection("credentials");
   await expect(settingsPage.credentialRow("nowhere")).toHaveCount(0);
 });

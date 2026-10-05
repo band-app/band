@@ -101,24 +101,18 @@ test.describe("Mobile bottom drawers", () => {
   const VIEWPORT = { width: 800, height: 900 };
   test.use({ viewport: VIEWPORT });
 
-  test("Settings opens as a bottom drawer with a top safe-area gap", async ({ page }) => {
+  test("Settings covers the whole window on mobile", async ({ page }) => {
     const settingsPage = new SettingsPage(page, server.url, TOKEN);
 
     await settingsPage.goto();
     await settingsPage.openDialog();
 
-    // The bottom-sheet variant is applied on mobile.
-    await expect(settingsPage.dialog).toHaveAttribute("data-variant", "bottom-sheet");
-
+    await expect(settingsPage.dialog).toHaveAttribute("data-variant", "fullscreen");
     const box = await settingsPage.dialogBox();
-    // Anchored to the bottom edge of the viewport.
-    expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);
-    // Spans the full width (bottom sheet, no side margins on mobile).
-    expect(box.width).toBeGreaterThanOrEqual(VIEWPORT.width - 4);
-    // Does NOT reach the top — a real gap is left for the notch. Settings is
-    // taller than the cap, so height is clamped and the top sits at ~1.5rem.
-    expect(box.y).toBeGreaterThanOrEqual(8);
-    expect(box.height).toBeLessThan(VIEWPORT.height);
+    expect(Math.round(box.x)).toBe(0);
+    expect(Math.round(box.y)).toBe(0);
+    expect(Math.round(box.width)).toBe(VIEWPORT.width);
+    expect(Math.round(box.height)).toBe(VIEWPORT.height);
   });
 
   test("the workspace picker opens as a command-palette bottom drawer", async ({ page }) => {
@@ -185,21 +179,22 @@ test.describe("Mobile bottom drawers", () => {
   });
 });
 
-test.describe("Desktop dialogs stay centred", () => {
+test.describe("Desktop settings", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("Settings renders as a centred card, not a bottom drawer", async ({ page }) => {
+  test("Settings covers the whole window and lists its pages in a sidebar", async ({ page }) => {
     const settingsPage = new SettingsPage(page, server.url, TOKEN);
 
     await settingsPage.goto();
     await settingsPage.openDialog();
 
     const box = await settingsPage.dialogBox();
-    // Not full-width — a centred card with side margins.
-    expect(box.width).toBeLessThan(1000);
-    // Horizontally centred within the viewport (±4px tolerance).
-    expect(Math.abs(box.x + box.width / 2 - 640)).toBeLessThanOrEqual(4);
-    // Not anchored to the bottom edge — there's a gap below it too.
-    expect(box.y + box.height).toBeLessThan(800 - 8);
+    expect(Math.round(box.width)).toBe(1280);
+    expect(Math.round(box.height)).toBe(800);
+    // The sidebar sits to the left of the page, not above it.
+    const nav = await settingsPage.navBox();
+    expect(nav.x).toBe(0);
+    expect(nav.width).toBeLessThan(400);
+    expect(Math.round(nav.height)).toBe(800);
   });
 });
