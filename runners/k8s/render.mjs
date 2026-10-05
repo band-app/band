@@ -89,6 +89,8 @@ export function resolveConfig(env) {
     requestId: env.BAND_REQUEST_ID || "",
     repo,
     repoName,
+    // The hub clones through the worker, which can ask it for the repository's git credential.
+    cloneByHub: Boolean(env.BAND_CLONE_BY_HUB),
   };
 }
 
@@ -132,7 +134,7 @@ export function podSpec(c) {
     { name: "HOME", value: "/work/home" },
     { name: "BAND_WORKER_ROOTS", value: "/work" },
     { name: "BAND_WORKER_STATE_DIR", value: "/work/.band-worker" },
-    { name: "BAND_CLONE_URL", value: c.repo },
+    { name: "BAND_CLONE_URL", value: c.cloneByHub ? "" : c.repo },
     { name: "BAND_CLONE_NAME", value: c.repoName },
   ];
   // A hub behind a private CA: Node reads the extra roots from the mounted ConfigMap.

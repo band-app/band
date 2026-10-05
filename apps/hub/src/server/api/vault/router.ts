@@ -43,10 +43,13 @@ export const vaultRouter = t.router({
     .input(
       z.object({
         name,
-        kind: z.enum(["api_key", "env"]).default("api_key"),
+        kind: z.enum(["api_key", "env", "git"]).default("api_key"),
         scope,
         value: z.string().min(1).max(MAX_SECRET_LENGTH),
         description: z.string().max(200).optional(),
+        host: z.string().max(260).optional(),
+        pathPattern: z.string().max(200).optional(),
+        username: z.string().max(100).optional(),
       }),
     )
     .mutation(({ input }) => guard(() => ({ item: vaultService.put(input) }))),

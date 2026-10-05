@@ -684,7 +684,7 @@ export const vaultItems = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["api_key", "oauth", "env"] }).notNull(),
+    kind: text("kind", { enum: ["api_key", "oauth", "env", "git"] }).notNull(),
     // `global` or `project:<name>`.
     scope: text("scope").notNull().default("global"),
     encrypted: text("encrypted").notNull(),

@@ -119,3 +119,24 @@ export interface SessionFile {
   /** File content, base64. */
   data: string;
 }
+
+/**
+ * Worker to hub: `GitCredentialParams` in, `GitCredentialReply` out. A git
+ * credential helper on the worker asks for the credential of one remote. The
+ * hub answers only for a remote of a repository placed on that worker, and
+ * the secret goes back to the helper process only. It is never stored on the
+ * worker and never logged on either side.
+ */
+export const METHOD_GIT_CREDENTIAL = "git.credential";
+
+export interface GitCredentialParams {
+  /** `https` or `http`, as git names it. */
+  protocol: string;
+  host: string;
+  /** The repository path git sends with `credential.useHttpPath`, such as `owner/repo.git`. */
+  path: string;
+}
+
+export type GitCredentialReply =
+  | { found: false }
+  | { found: true; username: string; password: string };

@@ -23,6 +23,7 @@ import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
+import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
@@ -54,6 +55,12 @@ const AGENT_TYPES = ["claude-code", "codex", "opencode", "gemini-cli", "cursor-c
 export interface WorkerOptions {
   /** Link client settings to override, such as a faster redial for a test. */
   link?: Pick<LinkClientOptions, "reconnect" | "heartbeatMisses" | "handshakeTimeoutMs">;
+  /**
+   * The `credential.helper` value (git's `!` form) that runs this worker's helper. With it the
+   * worker puts git credential settings in its own environment, which the git commands, agents
+   * and terminals it starts inherit. A worker started in a test process has none.
+   */
+  gitCredentialHelper?: string;
 }
 
 export class Worker {
@@ -143,6 +150,15 @@ export class Worker {
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
     if (config.ephemeral) registerLifecycleMethods(registrar, ctx);
+    if (options.gitCredentialHelper) {
+      const broker = new GitCredentialBroker(ctx);
+      const socketPath = await broker.start();
+      worker.disposers.push(() => broker.close());
+      Object.assign(
+        process.env,
+        gitCredentialEnv(process.env, options.gitCredentialHelper, socketPath),
+      );
+    }
     worker.wire(ctx);
 
     try {

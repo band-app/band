@@ -15,6 +15,7 @@ const KIND_LABEL: Record<VaultItem["kind"], string> = {
   api_key: "API key",
   env: "Environment variable",
   oauth: "OAuth",
+  git: "Git credential",
 };
 
 function formatTime(at: number | null): string {
@@ -44,7 +45,9 @@ export function CredentialsSettings() {
   });
 
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"api_key" | "env">("api_key");
+  const [kind, setKind] = useState<"api_key" | "env" | "git">("api_key");
+  const [gitHost, setGitHost] = useState("github.com");
+  const [gitPath, setGitPath] = useState("");
   const [value, setValue] = useState("");
   const [oauthName, setOauthName] = useState("");
   const [serverUrl, setServerUrl] = useState("");
@@ -68,7 +71,13 @@ export function CredentialsSettings() {
     setError(null);
     setNotice(null);
     try {
-      await trpc.vault.put.mutate({ name: name.trim(), kind, value, scope: "global" });
+      await trpc.vault.put.mutate({
+        name: name.trim(),
+        kind,
+        value,
+        scope: "global",
+        ...(kind === "git" && { host: gitHost.trim(), pathPattern: gitPath.trim() }),
+      });
       setName("");
       setValue("");
       await refresh();
@@ -217,12 +226,31 @@ export function CredentialsSettings() {
           <select
             aria-label="Credential kind"
             value={kind}
-            onChange={(e) => setKind(e.target.value as "api_key" | "env")}
+            onChange={(e) => setKind(e.target.value as "api_key" | "env" | "git")}
             className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="api_key">API key</option>
             <option value="env">Environment variable</option>
+            <option value="git">Git credential (access token)</option>
           </select>
+          {kind === "git" && (
+            <>
+              <Input
+                aria-label="Git host"
+                placeholder="Host, such as github.com"
+                value={gitHost}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGitHost(e.target.value)}
+                className="h-8 text-sm"
+              />
+              <Input
+                aria-label="Git path pattern"
+                placeholder="Repositories, such as owner/* or owner/repo"
+                value={gitPath}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGitPath(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </>
+          )}
           <Input
             aria-label="Credential value"
             type="password"
@@ -236,7 +264,12 @@ export function CredentialsSettings() {
             type="button"
             size="sm"
             data-testid="settings__credential-add"
-            disabled={busy || name.trim() === "" || value === ""}
+            disabled={
+              busy ||
+              name.trim() === "" ||
+              value === "" ||
+              (kind === "git" && gitPath.trim() === "")
+            }
             onClick={() => void add()}
           >
             Add credential

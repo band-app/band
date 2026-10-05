@@ -51,6 +51,35 @@ const MAX_FLOWS = 50;
 const DEFAULT_REFRESH_POLL_MS = 30_000;
 const DEFAULT_REFRESH_SKEW_MS = 120_000;
 export const MAX_SECRET_LENGTH = 16 * 1024;
+const GIT_HOST = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:\d{1,5})?$/;
+const GIT_PATH_PATTERN = /^[A-Za-z0-9._~/*-]{1,200}$/;
+const GIT_USERNAME = /^[^\s:]{1,100}$/;
+export const DEFAULT_GIT_USERNAME = "x-access-token";
+
+/** Where a `git` item applies: a host and a pattern over the repository path (`owner/*`). */
+export interface GitCredentialMatch {
+  host: string;
+  /** Repository path without a leading slash or a `.git` suffix, such as `owner/repo`. */
+  path: string;
+  /** The project the repository belongs to. An item scoped to another project does not apply. */
+  project: string | null;
+  /** Looks without recording a use. */
+  peek?: boolean;
+}
+
+/** `*` matches within one path segment, `**` across segments. The whole path must match. */
+export function pathPatternMatches(pattern: string, path: string): boolean {
+  const source = pattern
+    .replace(/\*{2,}/g, "**")
+    .split(/(\*\*|\*)/)
+    .map((part) => {
+      if (part === "**") return ".*";
+      if (part === "*") return "[^/]*";
+      return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    })
+    .join("");
+  return new RegExp(`^${source}$`, "i").test(path);
+}
 
 /** An item as the API shows it: never the secret. */
 export interface VaultItemView {
@@ -141,13 +170,23 @@ export class VaultService {
   /** Stores an API key or environment value, replacing the one with the same name and scope. */
   put(input: {
     name: string;
-    kind: "api_key" | "env";
+    kind: "api_key" | "env" | "git";
     scope: string;
     value: string;
     description?: string;
+    /** For a `git` item: the remote's host, a pattern over its repository path and the username. */
+    host?: string;
+    pathPattern?: string;
+    username?: string;
   }): VaultItemView {
     const name = input.name.trim();
+    // A git secret goes out on git's line-based credential protocol, so a trailing newline from
+    // `echo $TOKEN | band vault put` is dropped and any other control character is refused.
+    if (input.kind === "git") input = { ...input, value: input.value.replace(/\r?\n$/, "") };
     if (!NAME.test(name)) throw new VaultInputError("The name has characters the vault refuses.");
+    if (input.kind === "git" && /[\0\r\n]/.test(input.value)) {
+      throw new VaultInputError("A git credential's value must be a single line.");
+    }
     if (input.kind === "env" && !ENV_NAME.test(name)) {
       throw new VaultInputError("An env item's name must be a valid environment variable name.");
     }
@@ -155,7 +194,29 @@ export class VaultService {
       throw new VaultInputError("The value must be 1 to 16384 characters.");
     }
     const scope = validateScope(input.scope);
-    const metadata = input.description ? { description: input.description.slice(0, 200) } : {};
+    const metadata: Record<string, unknown> = input.description
+      ? { description: input.description.slice(0, 200) }
+      : {};
+    if (input.kind === "git") {
+      const host = (input.host ?? "").trim().toLowerCase();
+      const pathPattern = (input.pathPattern ?? "").trim().replace(/^\/+/, "");
+      const username = (input.username ?? DEFAULT_GIT_USERNAME).trim();
+      if (!GIT_HOST.test(host)) {
+        throw new VaultInputError("A git credential needs a host such as github.com.");
+      }
+      if (!GIT_PATH_PATTERN.test(pathPattern)) {
+        throw new VaultInputError(
+          'A git credential needs a path pattern such as "owner/*" ("**" matches every repository).',
+        );
+      }
+      if ((pathPattern.match(/\*+/g) ?? []).length > 6) {
+        throw new VaultInputError("The path pattern has too many wildcards.");
+      }
+      if (!GIT_USERNAME.test(username)) {
+        throw new VaultInputError("The username has characters the vault refuses.");
+      }
+      Object.assign(metadata, { host, pathPattern, username });
+    }
     const now = Date.now();
     const existing = this.queries.findByName(scope, name);
     if (existing) {
@@ -234,6 +295,39 @@ export class VaultService {
     }
     this.queries.update(id, { lastUsedAt: Date.now() });
     return (JSON.parse(decrypt(this.getKey(), id, row.encrypted)) as OAuthSecret).accessToken;
+  }
+
+  /**
+   * The `git` item that applies to a remote, or undefined. An item matches when its host is the
+   * remote's, its path pattern matches the repository path and its scope is `global` or the
+   * remote's project. A project-scoped item beats a global one, then the pattern with the most
+   * literal characters wins. For hub services, never an API.
+   */
+  findGitCredential(match: GitCredentialMatch): { username: string; password: string } | undefined {
+    const host = match.host.toLowerCase();
+    const candidates = this.queries
+      .list()
+      .filter((row) => row.kind === "git")
+      .filter((row) => row.metadata.host === host)
+      .filter(
+        (row) =>
+          row.scope === "global" ||
+          (match.project !== null && row.scope === `project:${match.project}`),
+      )
+      .filter(
+        (row) =>
+          typeof row.metadata.pathPattern === "string" &&
+          pathPatternMatches(row.metadata.pathPattern, match.path),
+      );
+    const specificity = (row: VaultRow) =>
+      (row.scope === "global" ? 0 : 1_000_000) +
+      String(row.metadata.pathPattern).replace(/\*/g, "").length;
+    const best = candidates.sort((a, b) => specificity(b) - specificity(a))[0];
+    if (!best) return undefined;
+    if (!match.peek) this.queries.update(best.id, { lastUsedAt: Date.now() });
+    const username =
+      typeof best.metadata.username === "string" ? best.metadata.username : DEFAULT_GIT_USERNAME;
+    return { username, password: decrypt(this.getKey(), best.id, best.encrypted) };
   }
 
   /** The kind of an item, or undefined when it doesn't exist. Metadata only. */
