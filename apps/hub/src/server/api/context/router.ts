@@ -8,6 +8,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ContextInputError, ContextNotFoundError } from "../../errors";
+import {
+  ContextConflictError,
+  contextBrowserService,
+} from "../../services/context-browser-service";
 import { contextService } from "../../services/context-service";
 import { adminProcedure, t } from "../trpc";
 
@@ -22,6 +26,9 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
   } catch (err) {
     if (err instanceof ContextNotFoundError) {
       throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+    }
+    if (err instanceof ContextConflictError) {
+      throw new TRPCError({ code: "CONFLICT", message: err.message });
     }
     if (err instanceof ContextInputError) {
       throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
@@ -98,4 +105,84 @@ export const contextRouter = t.router({
   sync: adminProcedure
     .input(z.object({ name }))
     .mutation(({ input }) => guard(() => contextService.sync(input.name))),
+
+  // ---- the context browser (plan step 5.5) ----
+
+  /** Every file of the context at its current head, with conflict copies marked. */
+  tree: adminProcedure
+    .input(z.object({ name }))
+    .query(({ input }) => guard(() => contextBrowserService.tree(input.name))),
+
+  file: adminProcedure
+    .input(z.object({ name, path: z.string().min(1).max(500) }))
+    .query(({ input }) => guard(() => contextBrowserService.file(input.name, input.path))),
+
+  /** Commits that touched the context, or one file when `path` is set. */
+  log: adminProcedure
+    .input(
+      z.object({
+        name,
+        path: z.string().min(1).max(500).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      guard(async () => ({
+        commits: await contextBrowserService.log(input.name, input.path, input.limit),
+      })),
+    ),
+
+  diff: adminProcedure
+    .input(
+      z.object({ name, sha: z.string().length(40), path: z.string().min(1).max(500).optional() }),
+    )
+    .query(({ input }) =>
+      guard(() => contextBrowserService.diff(input.name, input.sha, input.path)),
+    ),
+
+  /** The newest files under learnings/ and handoffs/. */
+  recent: adminProcedure
+    .input(z.object({ name, limit: z.number().int().min(1).max(100).optional() }))
+    .query(({ input }) =>
+      guard(async () => ({ entries: await contextBrowserService.recent(input.name, input.limit) })),
+    ),
+
+  /** Saves a file as one commit. `base` is the commit the editor loaded the file at. */
+  write: adminProcedure
+    .input(
+      z.object({
+        name,
+        path: z.string().min(1).max(500),
+        content: z.string(),
+        message: z.string().min(1).max(200),
+        base: z.string().length(40).optional(),
+      }),
+    )
+    .mutation(({ input }) =>
+      guard(() =>
+        contextBrowserService.write(
+          input.name,
+          input.path,
+          input.content,
+          input.message,
+          input.base,
+        ),
+      ),
+    ),
+
+  /** Keeps one version of a conflicted file and deletes the conflict copy. */
+  resolveConflict: adminProcedure
+    .input(
+      z.object({
+        name,
+        path: z.string().min(1).max(500),
+        keep: z.enum(["original", "conflict"]),
+        message: z.string().min(1).max(200).optional(),
+      }),
+    )
+    .mutation(({ input }) =>
+      guard(() =>
+        contextBrowserService.resolveConflict(input.name, input.path, input.keep, input.message),
+      ),
+    ),
 });

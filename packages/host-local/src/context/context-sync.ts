@@ -30,7 +30,7 @@ import type {
   ContextSpec,
   SecretFingerprint,
 } from "@band-app/host-api";
-import { scanText } from "./redaction";
+import { scanText } from "@band-app/host-api";
 
 /** Where a context is fetched from, and the environment that authenticates the call. */
 export interface ContextRemote {

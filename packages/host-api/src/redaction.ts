@@ -6,7 +6,8 @@
  * A finding names the rule and the line, never the matched text.
  */
 
-import { type ContextFinding, type SecretFingerprint, sha256Hex } from "@band-app/host-api";
+import type { ContextFinding, SecretFingerprint } from "./host";
+import { sha256Hex } from "./secret-fingerprint";
 
 interface Rule {
   id: string;
@@ -24,8 +25,28 @@ const RULES: Rule[] = [
   { id: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
   { id: "slack-token", pattern: /\bxox[abeprs]-[A-Za-z0-9-]{10,}/ },
   { id: "api-key", pattern: /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{32,}/ },
+  { id: "bearer-token", pattern: /\bBearer\s+[A-Za-z0-9._~+/-]{24,}=*/ },
   { id: "band-token", pattern: /\b(?:bdt|bwb|bws|brt|mcp)_[A-Za-z0-9_-]{16,}/ },
 ];
+
+/** What the hub's context editor shows for a rule. */
+export const RULE_LABELS: Record<string, string> = {
+  "aws-access-key": "AWS access key id",
+  "github-token": "GitHub token",
+  "private-key": "private key",
+  jwt: "JWT",
+  "slack-token": "Slack token",
+  "api-key": "Anthropic or OpenAI key",
+  "bearer-token": "bearer token",
+  "band-token": "Band token",
+  "high-entropy-assignment": "credential assignment",
+  "credential-assignment": "credential assignment",
+  "vault-secret": "vault secret",
+};
+
+/** Any value of 12 or more characters after a secret-sounding name, whatever its entropy. */
+const LOOSE_ASSIGNMENT =
+  /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b["']?\s*[:=]\s*["']?[A-Za-z0-9/+_.-]{12,}/i;
 
 const ASSIGNMENT =
   /(?:secret|token|passw(?:or)?d|passwd|api[_-]?key|apikey|credential|private[_-]?key|auth)\w*["']?\s*[:=]\s*["']?([A-Za-z0-9+/=_.-]{20,})/i;
@@ -61,6 +82,7 @@ export function scanText(
   path: string,
   text: string,
   secrets: SecretFingerprint[] = [],
+  options: { looseAssignments?: boolean } = {},
 ): ContextFinding[] {
   const findings: ContextFinding[] = [];
   const lines = text.split("\n");
@@ -81,6 +103,7 @@ export function scanText(
     ) {
       add("high-entropy-assignment");
     }
+    if (options.looseAssignments && LOOSE_ASSIGNMENT.test(line)) add("credential-assignment");
     if (secrets.length > 0 && vaultHit(line, secrets)) add("vault-secret");
   });
   return findings;

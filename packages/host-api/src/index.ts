@@ -7,4 +7,5 @@ export {
 export * from "./git-run";
 export * from "./host";
 export * from "./pty";
+export * from "./redaction";
 export * from "./secret-fingerprint";
