@@ -103,6 +103,11 @@ export class ContextBrowserPage {
     return this.root.getByTestId("context-browser__conflict-banner");
   }
 
+  /** The open file's text, whether the editor-free view shows it raw or rendered. */
+  fileText(): Locator {
+    return this.root.getByTestId("context-browser__raw").or(this.rendered());
+  }
+
   conflictCount(): Locator {
     return this.root.getByTestId("context-browser__conflict-count");
   }

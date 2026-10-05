@@ -1,19 +1,29 @@
-import { type ImgHTMLAttributes, useState } from "react";
+import { type ImgHTMLAttributes, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 import { streamdownComponents, streamdownPlugins } from "../../../components/streamdown-components";
 import { hubAssetUrl } from "../../../lib/hub-config";
 
-const MEDIA_LINK = /band:\/\/media\/[0-9a-f]{64}/g;
+const MEDIA_IMAGE = /(!\[[^\]\n]*\]\()band:\/\/media\/([0-9a-f]{64})(?=[)\s])/g;
 
-/** The URL a `band://media/<id>` link loads from. Other strings come back unchanged. */
-export function mediaSrc(src: string): string {
-  return src.replace(MEDIA_LINK, (link) =>
-    hubAssetUrl(`/media/${link.slice("band://media/".length)}`),
+/**
+ * Points the image links `![alt](band://media/<id>)` at the hub. Only image syntax is
+ * rewritten: on a cross-origin hub the URL carries the device token, so a link or code
+ * span that names a media id must stay as written and never show it.
+ */
+export function mediaSrc(source: string): string {
+  return source.replace(
+    MEDIA_IMAGE,
+    (_all, head: string, id: string) => `${head}${hubAssetUrl(`/media/${id}`)}`,
   );
 }
 
 /** An image link, or a video when the blob is not an image (a `![demo](band://media/<id>)` mp4 or webm). */
-function ContextMedia({
+function ContextMedia(props: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
+  // Keyed on the source so a reused instance starts as an image again.
+  return <ContextMediaItem key={String(props.src)} {...props} />;
+}
+
+function ContextMediaItem({
   src,
   alt,
   node: _node,
@@ -45,14 +55,17 @@ function ContextMedia({
 }
 
 /** Renders a context file's markdown with its `band://media` images and videos loaded from the hub. */
+const COMPONENTS = { ...streamdownComponents, img: ContextMedia };
+
 export function ContextMarkdown({ source }: { source: string }) {
+  const text = useMemo(() => mediaSrc(source), [source]);
   return (
     <Streamdown
       className="break-words text-sm leading-relaxed [overflow-wrap:anywhere]"
       plugins={streamdownPlugins}
-      components={{ ...streamdownComponents, img: ContextMedia }}
+      components={COMPONENTS}
     >
-      {mediaSrc(source)}
+      {text}
     </Streamdown>
   );
 }

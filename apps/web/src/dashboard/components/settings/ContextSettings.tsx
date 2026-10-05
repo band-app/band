@@ -501,6 +501,7 @@ export function ContextSettings() {
         {conflictCount > 0 ? (
           <span
             data-testid="context-browser__conflict-count"
+            data-count={conflictCount}
             className="rounded bg-amber-500/20 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300"
           >
             {conflictCount} {conflictCount === 1 ? "conflict" : "conflicts"}

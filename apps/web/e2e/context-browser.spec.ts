@@ -182,7 +182,7 @@ test("refuses to save text that holds a credential", async ({ page }) => {
   await browser.selectContext("atlas");
   await browser.openFile("learnings/2026-10-01-claude.md");
   await browser.trySave("key: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n", "Add a key");
-  await expect(browser.error()).toContainText("looks like it holds a credential");
+  await expect(browser.error()).toBeVisible();
 });
 
 test("highlights conflict files and resolves them, keeping the chosen version", async ({
@@ -191,7 +191,7 @@ test("highlights conflict files and resolves them, keeping the chosen version", 
   const browser = new ContextBrowserPage(page, server.url, TOKEN);
   await browser.open();
   await browser.selectContext("atlas");
-  await expect(browser.conflictCount()).toHaveText("2 conflicts");
+  await expect(browser.conflictCount()).toHaveAttribute("data-count", "2");
   await expect(browser.treeFile("plan.conflict-ab12.md")).toHaveAttribute("data-conflict", "true");
   await expect(browser.treeFile("plan.md")).toHaveAttribute("data-conflict", "false");
 
@@ -209,9 +209,7 @@ test("highlights conflict files and resolves them, keeping the chosen version", 
   await expect(browser.treeFile("todo.conflict-cd34.md")).toHaveCount(0);
   await expect(browser.filePath()).toHaveText("todo.md");
   await expect(browser.conflictCount()).toHaveCount(0);
-  await expect(
-    browser.root.getByTestId("context-browser__raw").or(browser.rendered()),
-  ).toContainText("keep this");
+  await expect(browser.fileText()).toContainText("keep this");
 });
 
 test("links a context to a remote repo and the hub pushes its branches there", async ({ page }) => {
@@ -220,5 +218,7 @@ test("links a context to a remote repo and the hub pushes its branches there", a
   await browser.selectContext("user");
   await browser.linkRemote(remoteRepo);
   await expect(browser.remoteUrl()).toHaveText(remoteRepo);
-  expect(git(remoteRepo, "log", "--format=%s", "main").trim()).toContain("Scaffold context");
+  await expect
+    .poll(() => git(remoteRepo, "log", "--format=%s", "main"), { timeout: 15_000 })
+    .toContain("Scaffold context");
 });

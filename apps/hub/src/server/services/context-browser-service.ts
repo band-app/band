@@ -63,13 +63,24 @@ export function conflictOriginal(path: string): string | null {
   return m ? `${m[1]}${m[3]}` : null;
 }
 
+/** True when `text` holds a control character. A message may keep its line breaks and tabs. */
+function hasControl(text: string, allowWhitespace = false): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (allowWhitespace && (c === 9 || c === 10 || c === 13)) continue;
+    if (c < 32 || c === 127) return true;
+  }
+  return false;
+}
+
 function checkPath(path: string): string {
   const bad =
     !path ||
     path.length > 500 ||
     path.startsWith("/") ||
     path.endsWith("/") ||
-    path.includes("\0") ||
+    path.startsWith(":") ||
+    hasControl(path) ||
     path.includes("\\") ||
     path.split("/").some((seg) => seg === "" || seg === "." || seg === ".." || seg === ".git");
   if (bad) throw new ContextInputError(`"${path}" is not a valid path inside a context`);
@@ -79,6 +90,12 @@ function checkPath(path: string): string {
 function checkMessage(message: string): string {
   const trimmed = message.trim();
   if (!trimmed) throw new ContextInputError("A commit message is required");
+  if (hasControl(trimmed, true)) {
+    throw new ContextInputError("The commit message holds control characters");
+  }
+  if (scanForSecrets(trimmed).length > 0) {
+    throw new ContextInputError("Not saved: the commit message looks like it holds a credential.");
+  }
   if (trimmed.length > MAX_MESSAGE) {
     throw new ContextInputError(`The commit message is longer than ${MAX_MESSAGE} characters`);
   }
@@ -148,6 +165,7 @@ export class ContextBrowserService {
     if (path) checkPath(path);
     if (!(await this.head(repo))) return [];
     const args = [
+      "--literal-pathspecs",
       "log",
       "--no-color",
       `-n${Math.min(Math.max(limit, 1), LOG_LIMIT)}`,
@@ -178,6 +196,7 @@ export class ContextBrowserService {
     const scope = path ? ["--", path] : [];
     const patch = await git(
       [
+        "--literal-pathspecs",
         "show",
         "--root",
         "--format=",
@@ -191,7 +210,17 @@ export class ContextBrowserService {
       { cwd: repo },
     );
     const names = await git(
-      ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", sha],
+      [
+        "diff-tree",
+        "--root",
+        "-m",
+        "--first-parent",
+        "--no-commit-id",
+        "--name-status",
+        "-r",
+        "-M",
+        sha,
+      ],
       { cwd: repo },
     );
     const files = names
@@ -201,8 +230,13 @@ export class ContextBrowserService {
         const parts = line.split("\t");
         return { status: parts[0] ?? "M", path: parts[parts.length - 1] ?? "" };
       });
-    const truncated = Buffer.byteLength(patch) > MAX_DIFF_BYTES;
-    return { diff: truncated ? patch.slice(0, MAX_DIFF_BYTES) : patch, truncated, files };
+    const patchBytes = Buffer.from(patch);
+    const truncated = patchBytes.length > MAX_DIFF_BYTES;
+    return {
+      diff: truncated ? patchBytes.subarray(0, MAX_DIFF_BYTES).toString("utf8") : patch,
+      truncated,
+      files,
+    };
   }
 
   /** The newest learnings and handoffs files, one row per file, newest commit first. */
@@ -293,6 +327,16 @@ export class ContextBrowserService {
         cwd: repo,
       });
       if (blob.code !== 0) throw new ContextInputError(`"${conflictPath}" does not exist`);
+      if (keep === "original") {
+        const orig = await runGit(["rev-parse", "--verify", "-q", `${head}:${original}`], {
+          cwd: repo,
+        });
+        if (orig.code !== 0) {
+          throw new ContextInputError(
+            `"${original}" does not exist, so "${conflictPath}" is not a conflict copy of anything`,
+          );
+        }
+      }
       const changes: Change[] = [{ path: conflictPath }];
       if (keep === "conflict") changes.push({ path: original, blob: blob.stdout.trim() });
       return this.commitLocked(repo, name, head, changes, msg);
@@ -370,7 +414,13 @@ export class ContextBrowserService {
         await git(["commit-tree", tree, ...(head ? ["-p", head] : []), "-m", message], opts)
       ).trim();
       const ref = (await git(["symbolic-ref", "-q", "HEAD"], { cwd: repo })).trim();
-      await git(["update-ref", "-m", "context browser", ref, commit, head ?? ""], { cwd: repo });
+      // A push can land between reading the head and moving the ref; the swap then fails.
+      const moved = await runGit(["update-ref", "-m", "context browser", ref, commit, head ?? ""], {
+        cwd: repo,
+      });
+      if (moved.code !== 0) {
+        throw new ContextConflictError("The context changed while saving. Reload and try again.");
+      }
       contextService.syncSoon(name);
       return { commit, changed: true };
     } finally {

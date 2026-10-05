@@ -101,7 +101,7 @@ describe("context browser API", () => {
   });
 
   it("rejects paths that leave the context and a missing file", async () => {
-    for (const path of ["../x", "/etc/passwd", "a/../b", ".git/config"]) {
+    for (const path of ["../x", "/etc/passwd", "a/../b", ".git/config", ":(top)notes.md", "a\nb"]) {
       const r = await call("q", "context.file", { name: "atlas", path });
       expect(r.status, path).toBe(400);
     }
@@ -255,9 +255,50 @@ describe("context browser API", () => {
     ).toBe(400);
   });
 
-  it("answers 403 to a token that is not an admin", async () => {
+  it("refuses a credential in a commit message", async () => {
+    const r = await call("m", "context.write", {
+      name: "atlas",
+      path: "notes.md",
+      content: "fine\n",
+      message: "key ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+    });
+    expect(r.status).toBe(400);
+    expect(r.text).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+
+  it("refuses to keep the original of a copy whose original does not exist", async () => {
+    pushFiles("atlas", { "lonely.conflict-zz9.md": "only copy\n" }, "Add a lone copy");
+    const r = await call("m", "context.resolveConflict", {
+      name: "atlas",
+      path: "lonely.conflict-zz9.md",
+      keep: "original",
+    });
+    expect(r.status).toBe(400);
+    const tree = await q("context.tree", { name: "atlas" });
+    expect(tree.entries.map((e: { path: string }) => e.path)).toContain("lonely.conflict-zz9.md");
+  });
+
+  it("answers 401 without a token and 403 to a token that is not an admin", async () => {
+    expect((await trpcQuery(server.url, "context.tree", { name: "atlas" })).status).toBe(401);
+    expect((await trpcQuery(server.url, "context.tree", { name: "atlas" }, "wrong")).status).toBe(
+      401,
+    );
     const made = await m<{ token: string }>("tokens.createDevice", { label: "viewer" });
     const res = await trpcQuery(server.url, "context.tree", { name: "atlas" }, made.token);
     expect(res.status).toBe(403);
+    const write = await trpcMutate(
+      server.url,
+      "context.write",
+      { name: "atlas", path: "x.md", content: "x\n", message: "x" },
+      made.token,
+    );
+    expect(write.status).toBe(403);
+    const resolve = await trpcMutate(
+      server.url,
+      "context.resolveConflict",
+      { name: "atlas", path: "plan.conflict-x7k2.md", keep: "original" },
+      made.token,
+    );
+    expect(resolve.status).toBe(403);
   });
 });
