@@ -19,12 +19,20 @@
  * Any failure keeps the worker alive and records the error (`lastError`).
  * Ignored files (`.gitignore`) and running processes do not survive.
  *
+ * When the runner that started the worker has `snapshot` and `restore` hooks
+ * (plan step 3.10), the hub also snapshots the machine once the above is
+ * stored, lets the worker exit and runs the runner's `destroy`. The stored
+ * state stays the fallback: a snapshot that cannot be taken, or restored, costs
+ * nothing but the speed and the ignored files.
+ *
  * Wake. A message, a terminal or a file call for a workspace that sleeps calls
  * `ensureAwake`. It records a wake request that repeats the placement of the
  * request that made the host. The runner starts a worker with the same id,
  * and when it says hello `restoreHost` checks the snapshot out into a new
  * worktree, puts the uncommitted changes back and restores the agent session
  * files. The chat then reattaches with `session/resume` or `session/load`.
+ * A wake that the runner served with `restore` brings the checkout back with
+ * the machine's disk, so only the agent session files are written again.
  */
 
 import { rmSync } from "node:fs";
@@ -53,6 +61,7 @@ import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { placementService } from "./placement-service";
+import { runnerService } from "./runner-service";
 import { loadState, saveState } from "./state";
 
 const log = createLogger("ephemeral-lifecycle");
@@ -269,9 +278,10 @@ export class EphemeralLifecycleService {
       }
       this.errors.delete(hostId);
       this.blocked.delete(hostId);
+      const snapshotted = await this.snapshotMachine(hostId, tracked);
       log.info(`stored ${tracked.length} workspace(s) of ${hostId}; the worker may exit`);
       exiting = true;
-      this.releaseWhenGone(session, hostId, release);
+      this.releaseWhenGone(session, hostId, release, snapshotted);
       return { exit: true };
     } catch (err) {
       const message = errorText(err);
@@ -286,22 +296,56 @@ export class EphemeralLifecycleService {
     }
   }
 
-  /** Holds callers until the worker's link closes. A worker that stays keeps its workspaces, so the sleep rows go. */
-  private releaseWhenGone(session: ServerSession, hostId: string, release: () => void): void {
+  /**
+   * Snapshots the machine when its runner can. A failure is not one for the sleep: the git and
+   * session state is stored already, and the wake falls back to it.
+   */
+  private async snapshotMachine(hostId: string, tracked: Tracked[]): Promise<boolean> {
+    if (!runnerService.supportsSnapshot(hostId)) return false;
+    try {
+      return await runnerService.snapshotHost(
+        hostId,
+        tracked.map((w) => w.workspaceId),
+      );
+    } catch (err) {
+      log.warn(
+        `could not snapshot the machine of ${hostId}; a wake restores from git: ${errorText(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Holds callers until the worker's link closes. A worker that stays keeps its workspaces, so the
+   * sleep rows go. With a snapshot taken, the runner's `destroy` runs once the worker is gone, before
+   * callers are let through, so it cannot race the restore a waiting caller starts.
+   */
+  private releaseWhenGone(
+    session: ServerSession,
+    hostId: string,
+    release: () => void,
+    snapshotted: boolean,
+  ): void {
     const done = () => {
       clearTimeout(timer);
       this.draining.delete(hostId);
       release();
     };
+    const gone = () => {
+      clearTimeout(timer);
+      const destroyed = snapshotted ? runnerService.destroyAfterSleep(hostId) : Promise.resolve();
+      void destroyed.catch(() => undefined).finally(done);
+    };
     const timer = setTimeout(() => {
       if (!session.attached) return;
       log.warn(`${hostId} did not exit after it was told to; keeping it`);
       for (const row of this.sleeps.listByHost(hostId)) this.forget(row);
-      session.off("detached", done);
+      session.off("detached", gone);
+      if (snapshotted) void runnerService.dropHostSnapshots(hostId);
       done();
     }, EXIT_GRACE_MS);
     timer.unref?.();
-    session.once("detached", done);
+    session.once("detached", gone);
   }
 
   private async busyReason(hostId: string, tracked: Tracked[]): Promise<string | null> {
@@ -531,9 +575,13 @@ export class EphemeralLifecycleService {
     const session = this.sessions.get(hostId);
     if (!session) throw new Error(`Host ${hostId} is not connected`);
     const rpc = new RemoteRpc(hostId, () => session);
+    // A restore hook put the machine's disk back, so the checkouts may be there already.
+    const fromSnapshot = runnerService.restoredSnapshot(hostId) !== undefined;
     for (const row of rows) {
-      await this.restore(host, rpc, row, hostProjectPath);
+      await this.restore(host, rpc, row, hostProjectPath, fromSnapshot);
     }
+    // The snapshots are used up, or stale when a fresh worker came up after a failed restore.
+    void runnerService.dropHostSnapshots(hostId);
   }
 
   private async restore(
@@ -541,9 +589,14 @@ export class EphemeralLifecycleService {
     rpc: RemoteRpc,
     row: WorkspaceSleepRow,
     hostProjectPath?: string,
+    fromSnapshot = false,
   ): Promise<void> {
     const [root] = (await host.info()).roots;
     if (!root) throw new Error(`host ${host.id} serves no directory`);
+    if (fromSnapshot && (await this.checkoutSurvived(host, row))) {
+      await this.finishFromDisk(host, rpc, row, root);
+      return;
+    }
     if (hostProjectPath) {
       const resolved = await host.fs.realpath(hostProjectPath);
       hostRegistry.setProjectPathOn(row.project, host.id, resolved);
@@ -602,6 +655,37 @@ export class EphemeralLifecycleService {
       await git(["push", "origin", "--delete", row.ref]).catch(() => undefined);
     }
     log.info(`restored ${row.workspaceId} on ${host.id}`);
+  }
+
+  /** Whether the checkout the sleep stored is on this machine at the commit it had. */
+  private async checkoutSurvived(host: Host, row: WorkspaceSleepRow): Promise<boolean> {
+    try {
+      const head = (
+        await host.exec("git", ["rev-parse", "HEAD"], { cwd: row.worktreePath })
+      ).stdout.trim();
+      return head === row.baseSha;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The machine came back from a snapshot with the checkout on it. Only the sleep's own records are left to clear. */
+  private async finishFromDisk(
+    host: Host,
+    rpc: RemoteRpc,
+    row: WorkspaceSleepRow,
+    root: string,
+  ): Promise<void> {
+    const wipDir = posix.join(root, WIP_DIR);
+    await host.fs.mkdir(wipDir, { recursive: true });
+    await this.restoreSessions(host, rpc, row, wipDir);
+    this.forget(row);
+    if (row.store === "origin") {
+      await host
+        .exec("git", ["push", "origin", "--delete", row.ref], { cwd: row.worktreePath })
+        .catch(() => undefined);
+    }
+    log.info(`restored ${row.workspaceId} on ${host.id} from a machine snapshot`);
   }
 
   private async restoreSessions(

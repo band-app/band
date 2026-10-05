@@ -39,6 +39,10 @@ What survives: git state (commits, uncommitted changes and untracked files that 
 
 A failed wake (no runner matches, the runner fails, the worker does not connect within `BAND_PLACEMENT_TIMEOUT_MS` plus five minutes) fails the call that asked for it. The workspace stays asleep and the next call tries again.
 
+## Machine snapshots
+
+When the runner that started the worker has `snapshot` and `restore` hooks, the hub also snapshots the machine's disk on every sleep, after it has stored the git state and the agent sessions, and a wake restores from the snapshot instead of building the workspace again. Ignored files such as `node_modules` and build output come back, and the wake needs no checkout. If the snapshot or the restore fails, the wake falls back to the stored git state described above, so no work is lost. See [Snapshots](runner-hooks.md#snapshots) for the hook contract, retention and cost.
+
 ## Claims
 
 A worker that says `ephemeral` in its hello is claimed by the workspaces created on it. Placement never offers it to another workspace, so a request without a matching online host always starts a new worker.

@@ -65,7 +65,11 @@ export async function spawnAgentProcess(launch: AcpLaunch, cwd: string): Promise
  * tracked, so anything it left behind in its group is not reached.
  */
 export async function stopAllAgentProcesses(): Promise<void> {
-  await Promise.all([...liveChildren].map(stopAgentProcess));
+  // An agent a turn was still launching when shutdown began joins the set
+  // after the first pass, so go on until nothing is tracked.
+  while (liveChildren.size > 0) {
+    await Promise.all([...liveChildren].map(stopAgentProcess));
+  }
 }
 
 async function stopAgentProcess(child: ChildProcess): Promise<void> {
@@ -97,8 +101,13 @@ async function stopAgentProcess(child: ChildProcess): Promise<void> {
   const deadline = Date.now() + STOP_TIMEOUT_MS;
   while (running() && Date.now() < deadline) await delay(20);
   if (running()) signalGroup(child, pid, "SIGKILL");
-  // Bounded, so shutdown can't hang on a process that never exits.
+  // Bounded, so shutdown can't hang on a process that never exits. The group
+  // must be gone too, not only the agent: a member still alive can write to
+  // the files the caller is about to remove.
+  const killedAt = Date.now();
   await Promise.race([exited, delay(1_000)]);
+  while (running() && Date.now() - killedAt < 1_000) await delay(20);
+  liveChildren.delete(child);
 }
 
 function delay(ms: number): Promise<void> {

@@ -13,6 +13,10 @@
 //   BAND_VM_WORKER_IMAGE   worker image for docker mode (required there).
 //   BAND_VM_MAX_HOURS      the worker is stopped, and the VM powers off, after this long (default 12).
 //   BAND_IDLE_EXIT         idle time before the ephemeral worker exits, like 90s.
+//
+// With BAND_SNAPSHOT_ID set the machine boots from a snapshot of an earlier one (plan step 3.10). The
+// worker, the clone and the user are on its disk already, so the script only removes the dead session token
+// the snapshot holds and starts the worker with the new bootstrap token.
 
 import { cloneUrl, repoName } from "./lib.mjs";
 
@@ -91,12 +95,20 @@ export function renderCloudInit(env = process.env) {
 
   const packages = mode === "docker" ? ["git", "docker.io", "ca-certificates"] : ["git", "curl", "ca-certificates", "gnupg"];
 
+  const stateDir = mode === "docker" ? "/var/lib/band-work/.band-worker" : "/home/band/work/.band-worker";
+  const restore = Boolean(env.BAND_SNAPSHOT_ID);
+
   // Every step runs under `set -e`. Any failure powers the VM off at once: a VM with no worker only costs money,
   // and the hub destroys it after its timeout anyway.
   const bootstrap = [
     "#!/bin/sh",
     "set -eu",
-    ...(mode === "docker"
+    ...(restore
+      ? [
+          // The hub revoked the session token the snapshot holds, so the worker has to trade the bootstrap token.
+          `rm -f '${stateDir}/session-token'`,
+        ]
+      : mode === "docker"
       ? [
           "mkdir -p /var/lib/band-work/home",
           ...(repo

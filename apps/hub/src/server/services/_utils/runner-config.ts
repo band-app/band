@@ -12,6 +12,20 @@ import { RUNNER_ISOLATIONS } from "./isolation";
 
 export const DEFAULT_RUNNER_TIMEOUT_SEC = 120;
 export const MAX_RUNNER_TIMEOUT_SEC = 3600;
+export const DEFAULT_SNAPSHOT_KEEP = 3;
+export const DEFAULT_SNAPSHOT_TTL_SEC = 7 * 24 * 3600;
+export const DEFAULT_SNAPSHOT_TIMEOUT_SEC = 600;
+/** The worker waits 15 minutes for the hub's answer to `lifecycle.idle`, and the snapshot is taken inside it. */
+export const MAX_SNAPSHOT_TIMEOUT_SEC = 780;
+
+/** The hook scripts a runner can have. The bundled name is `<runner dir>/<name>.sh`. */
+export type HookScript =
+  | "spawn"
+  | "destroy"
+  | "status"
+  | "snapshot"
+  | "restore"
+  | "snapshot-delete";
 /** Seconds after `maxLifetimeSec` before the reaper destroys a machine that could not be put to sleep. */
 export const DEFAULT_LIFETIME_GRACE_SEC = 600;
 const MAX_LIFETIME_SEC = 60 * 60 * 24 * 90;
@@ -25,56 +39,88 @@ const envName = z
   .string()
   .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "not a valid environment variable name");
 
-export const runnerSchema = z.object({
-  id: z.string().regex(ID, "ids are letters, digits, '.', '_' and '-', up to 64 characters"),
-  kind: z.literal("hook").default("hook"),
-  /** A script path (absolute, or relative to BAND_HOME), or `bundled:<name>` for the hooks in `runners/`. */
-  spawn: z.string().trim().min(1).max(1000),
-  destroy: z.string().trim().min(1).max(1000).optional(),
-  /**
-   * Optional. Prints the handle of every live machine of this runner, one per line, so the reaper
-   * can destroy machines the hub has no record of.
-   */
-  status: z.string().trim().min(1).max(1000).optional(),
-  /** What this runner offers. A request is leasable when every label it asks for is here. */
-  labels: z.record(z.string(), z.string()).default({}),
-  /**
-   * Facts about the machines this runner starts (`{ os: "linux", node: "24" }`), checked against a
-   * request's `requires`. Without it the runner takes requests whatever they require.
-   */
-  provides: z.record(z.string(), z.string()).optional(),
-  /**
-   * The isolation the machines it starts have. A request asking for `container` or `vm`
-   * (`placement.environment.isolation`) goes only to a runner offering at least that.
-   * `process` is the same as `worktree`. Passed to the hook as `BAND_ISOLATION`.
-   */
-  isolation: z.enum(RUNNER_ISOLATIONS).default("process"),
-  maxConcurrent: z.number().int().min(1).max(100).default(1),
-  /** Seconds from the start of an attempt to the worker's hello. */
-  timeoutSec: z
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_RUNNER_TIMEOUT_SEC)
-    .default(DEFAULT_RUNNER_TIMEOUT_SEC),
-  /**
-   * How long a machine may live, counted from its spawn. Past it the reaper has the worker store
-   * its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits.
-   */
-  maxLifetimeSec: z.number().int().min(1).max(MAX_LIFETIME_SEC).optional(),
-  /**
-   * Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that
-   * deadline it destroys the machine whether or not they were, and logs it as an error.
-   */
-  lifetimeGraceSec: z
-    .number()
-    .int()
-    .min(0)
-    .max(MAX_LIFETIME_SEC)
-    .default(DEFAULT_LIFETIME_GRACE_SEC),
-  /** Extra environment for the hook (`BAND_SSH_TARGET`, `BAND_WORKER_BIN`). Not secret: the settings file shows it. */
-  env: z.record(envName, z.string()).default({}),
-});
+const hookPath = z.string().trim().min(1).max(1000);
+
+export const runnerSchema = z
+  .object({
+    id: z.string().regex(ID, "ids are letters, digits, '.', '_' and '-', up to 64 characters"),
+    kind: z.literal("hook").default("hook"),
+    /** A script path (absolute, or relative to BAND_HOME), or `bundled:<name>` for the hooks in `runners/`. */
+    spawn: hookPath,
+    destroy: hookPath.optional(),
+    /**
+     * Optional. Prints the handle of every live machine of this runner, one per line, so the reaper
+     * can destroy machines the hub has no record of.
+     */
+    status: hookPath.optional(),
+    /** What this runner offers. A request is leasable when every label it asks for is here. */
+    labels: z.record(z.string(), z.string()).default({}),
+    /**
+     * Facts about the machines this runner starts (`{ os: "linux", node: "24" }`), checked against a
+     * request's `requires`. Without it the runner takes requests whatever they require.
+     */
+    provides: z.record(z.string(), z.string()).optional(),
+    /**
+     * The isolation the machines it starts have. A request asking for `container` or `vm`
+     * (`placement.environment.isolation`) goes only to a runner offering at least that.
+     * `process` is the same as `worktree`. Passed to the hook as `BAND_ISOLATION`.
+     */
+    isolation: z.enum(RUNNER_ISOLATIONS).default("process"),
+    maxConcurrent: z.number().int().min(1).max(100).default(1),
+    /** Seconds from the start of an attempt to the worker's hello. */
+    timeoutSec: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_RUNNER_TIMEOUT_SEC)
+      .default(DEFAULT_RUNNER_TIMEOUT_SEC),
+    /**
+     * How long a machine may live, counted from its spawn. Past it the reaper has the worker store
+     * its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits.
+     */
+    maxLifetimeSec: z.number().int().min(1).max(MAX_LIFETIME_SEC).optional(),
+    /**
+     * Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that
+     * deadline it destroys the machine whether or not they were, and logs it as an error.
+     */
+    lifetimeGraceSec: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_LIFETIME_SEC)
+      .default(DEFAULT_LIFETIME_GRACE_SEC),
+    /** Extra environment for the hook (`BAND_SSH_TARGET`, `BAND_WORKER_BIN`). Not secret: the settings file shows it. */
+    env: z.record(envName, z.string()).default({}),
+    /**
+     * Hibernate hooks (plan step 3.10). With `snapshot` and `restore`, putting an ephemeral worker's
+     * workspaces to sleep also snapshots the machine's disk, and waking restores from it. `snapshot`
+     * gets `BAND_MACHINE_HANDLE` and prints `BAND_SNAPSHOT_ID=<id>`, `restore` gets `BAND_SNAPSHOT_ID` and
+     * the spawn environment, `snapshotDelete` gets `BAND_SNAPSHOT_ID` and removes it.
+     */
+    snapshot: hookPath.optional(),
+    restore: hookPath.optional(),
+    snapshotDelete: hookPath.optional(),
+    /** Snapshots of this runner to keep, newest first. Older ones go through `snapshotDelete`. */
+    snapshotKeep: z.number().int().min(1).max(1000).default(DEFAULT_SNAPSHOT_KEEP),
+    /** Seconds a snapshot lives before `snapshotDelete` removes it. */
+    snapshotTtlSec: z
+      .number()
+      .int()
+      .min(60)
+      .max(90 * 24 * 3600)
+      .default(DEFAULT_SNAPSHOT_TTL_SEC),
+    /** Seconds the `snapshot` hook may run. The worker waits at most 15 minutes for the sleep to finish. */
+    snapshotTimeoutSec: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_SNAPSHOT_TIMEOUT_SEC)
+      .default(DEFAULT_SNAPSHOT_TIMEOUT_SEC),
+  })
+  .refine((r) => (r.snapshot === undefined) === (r.restore === undefined), {
+    message: "snapshot and restore go together: set both or neither",
+    path: ["snapshot"],
+  });
 
 export type RunnerConfig = z.infer<typeof runnerSchema>;
 
@@ -129,7 +175,7 @@ export function bundledRunnersDir(): string {
 }
 
 /** The absolute path of a hook script, or an error message when it cannot be one. */
-export function resolveHookPath(spec: string, script: "spawn" | "destroy" | "status"): string {
+export function resolveHookPath(spec: string, script: HookScript): string {
   if (spec.startsWith(BUNDLED_PREFIX)) {
     const name = spec.slice(BUNDLED_PREFIX.length);
     if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error(`invalid bundled hook "${spec}"`);

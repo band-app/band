@@ -259,6 +259,29 @@ export const workspaceSleep = sqliteTable(
   (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
 );
 
+// Machine snapshots a runner's `snapshot` hook took when an ephemeral worker went to sleep.
+// `restored_at` is set once a `restore` hook brought the machine back from it.
+export const runnerSnapshots = sqliteTable(
+  "runner_snapshots",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id").notNull(),
+    hostId: text("host_id").notNull(),
+    // The `runner_machines` row of the machine that was snapshotted.
+    machineId: text("machine_id"),
+    workspaceIds: text("workspace_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    snapshotId: text("snapshot_id").notNull(),
+    sizeBytes: integer("size_bytes"),
+    restoredAt: integer("restored_at"),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [
+    index("runner_snapshots_host_idx").on(t.hostId),
+    index("runner_snapshots_runner_idx").on(t.runnerId, t.createdAt),
+  ],
+);
+
 // A machine a runner hook started (plan step 3.7). The reaper compares these
 // rows with the hosts and with the runner's `status` hook, and destroys the
 // ones that are lost, orphaned or past the runner's maximum lifetime.
