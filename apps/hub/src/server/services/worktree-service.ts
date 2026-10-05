@@ -56,6 +56,7 @@ import { panelFocusService } from "./panel-focus-service";
 // FRAGILE: ESM cycle leg — `./placement-service` imports `worktreeService` from
 // this file. Keep every `placementService` reference inside a function body.
 import { placementService } from "./placement-service";
+import { projectService } from "./project-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
@@ -157,6 +158,9 @@ export const worktreeCreateInput = z.object({
   // online host that fits, or waits as `provisioning` while a runner starts one
   // (plan step 3.3). `placement: {}` means any host. Excludes `hostId`.
   placement: placementInput.optional(),
+  // The project (id or name) the worktree belongs to (plan step 6.1). The repo must be one
+  // of the project's. The agents in the worktree use that project's context.
+  projectId: z.string().min(1).optional(),
 });
 export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
 
@@ -520,6 +524,12 @@ export class WorktreeService {
       return { ok: true, path: existing.path };
     }
 
+    // Check the project before anything is created, so a bad request leaves no trace.
+    const projectId = input.projectId
+      ? projectService.resolveForWorktree(input.projectId, input.repo)
+      : undefined;
+    if (projectId) input = { ...input, projectId };
+
     const worktreeId = toWorktreeId(input.repo, input.branch);
     if (input.placement) {
       if (input.hostId) {
@@ -583,6 +593,7 @@ export class WorktreeService {
       path: worktreePath,
       pinned: false,
       ...(remote ? { hostId } : {}),
+      ...(projectId ? { projectId } : {}),
     };
     // Re-read state: `git worktree add` took a while, and a sync or another
     // create may have saved since `state` was loaded.
@@ -875,6 +886,9 @@ export class WorktreeService {
     }
     const host = hostRegistry.hostFor(worktreeId);
 
+    // The row is gone once saved, so read the project now for the chat capture below.
+    const projectId = repo.worktrees.find((wt) => wt.name === input.name)?.projectId;
+
     // ── Fast path: update state and emit immediately ──
     repo.worktrees = repo.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
@@ -893,7 +907,7 @@ export class WorktreeService {
     // tears down the saved layout as part of the same call (see
     // `ChatService.removeAllForWorktree`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    chatService.removeAllForWorktree(worktreeId, input.repo);
+    chatService.removeAllForWorktree(worktreeId, input.repo, projectId);
     agentSessionRegistry.removeAllForWorktree(worktreeId);
 
     // Clean up all browser tabs + layout. Same contract as chats —

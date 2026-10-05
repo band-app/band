@@ -82,6 +82,8 @@ export interface WorktreeState {
   pinned: boolean;
   /** Host the worktree lives on. Absent means `local`. */
   hostId?: string;
+  /** Project the worktree belongs to (plan step 6.1). Absent means none. */
+  projectId?: string;
 }
 
 /**
@@ -169,6 +171,7 @@ export class RepoQueries {
         head: row.head ?? undefined,
         pinned: row.pinned,
         hostId: row.hostId,
+        projectId: row.projectId ?? undefined,
       });
       wtByRepo.set(row.repoName, list);
     }
@@ -207,6 +210,20 @@ export class RepoQueries {
         .from(repoHostsTable)
         .where(ne(repoHostsTable.hostId, "local"))
         .all();
+      // The saved column is the source of truth for a worktree that already has a row, so a
+      // snapshot loaded before an attach or detach cannot undo it. The snapshot's value
+      // applies only to a worktree with no row yet (the create path).
+      const savedProjects = new Map<string, string | null>();
+      for (const row of tx
+        .select({
+          repo: worktreesTable.repoName,
+          name: worktreesTable.name,
+          projectId: worktreesTable.projectId,
+        })
+        .from(worktreesTable)
+        .all()) {
+        savedProjects.set(`${row.repo}\0${row.name}`, row.projectId);
+      }
       tx.delete(worktreesTable).run();
       tx.delete(reposTable).run();
 
@@ -234,6 +251,9 @@ export class RepoQueries {
               head: wt.head ?? null,
               pinned: wt.pinned,
               hostId: wt.hostId ?? "local",
+              projectId: savedProjects.has(`${repo.name}\0${wt.name}`)
+                ? (savedProjects.get(`${repo.name}\0${wt.name}`) ?? null)
+                : (wt.projectId ?? null),
             })
             .run();
         }

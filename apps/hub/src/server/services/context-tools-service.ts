@@ -17,6 +17,7 @@ import { redactSecrets } from "./_utils/context-redaction";
 import { chatService } from "./chat-service";
 import { contextService } from "./context-service";
 import { commitAppends, type SearchHit, searchContext } from "./context-store";
+import { projectService } from "./project-service";
 import { loadState } from "./state";
 
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,62}$/;
@@ -60,6 +61,18 @@ function utc(now: Date) {
   return { date: iso.slice(0, 10), time: iso.slice(11, 16), iso };
 }
 
+/** The worktree's project context: its project's, else the one bound to its repo. */
+function projectContextFor(
+  worktreeId: string,
+  repo: string | undefined,
+  knownProjectId?: string,
+): ContextRow | undefined {
+  return (
+    projectService.contextForWorktree(worktreeId, knownProjectId) ??
+    (repo ? contextService.forRepo(repo) : undefined)
+  );
+}
+
 function repoOf(worktreeId: string): string | undefined {
   for (const repo of loadState().repos) {
     for (const wt of repo.worktrees) {
@@ -73,6 +86,7 @@ function repoOf(worktreeId: string): string | undefined {
 export function sessionFromChat(
   chat: { id: string; worktreeId: string; agent: string },
   knownRepo?: string,
+  knownProjectId?: string,
 ): ToolSession {
   // A worktree being removed has already left the state, so its caller passes the repo.
   const repo = knownRepo ?? repoOf(chat.worktreeId);
@@ -80,7 +94,7 @@ export function sessionFromChat(
     worktreeId: chat.worktreeId,
     chatId: chat.id,
     agent: slug(chat.agent, "agent"),
-    project: repo ? contextService.forRepo(repo) : undefined,
+    project: projectContextFor(chat.worktreeId, repo, knownProjectId),
   };
 }
 
@@ -103,14 +117,14 @@ export function resolveSession(caller: ToolCaller): ToolSession {
     worktreeId,
     chatId: chat?.id,
     agent: slug(chat?.agent ?? "agent", "agent"),
-    project: contextService.forRepo(repo),
+    project: projectContextFor(worktreeId, repo),
   };
 }
 
 function requireProject(session: ToolSession): ContextRow {
   if (!session.project) {
     throw new ContextInputError(
-      "No project context is set for this repo. An admin binds one with `context.update` (repos).",
+      "No project context is set for this worktree. Put it in a project, or an admin binds one to the repo with `context.update` (repos).",
     );
   }
   return session.project;

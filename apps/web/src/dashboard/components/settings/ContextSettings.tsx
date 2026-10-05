@@ -438,14 +438,14 @@ function RemoteRow({
  * resolved by keeping one version. The feed lists the newest learnings and handoffs, and a context
  * can be linked to a remote repo. Changes apply at once and are not part of the dialog's Save.
  */
-export function ContextSettings() {
+export function ContextSettings({ initialContext }: { initialContext?: string } = {}) {
   const queryClient = useQueryClient();
   const contexts = useQuery<ContextList>({
     queryKey: CONTEXTS_KEY,
     queryFn: () => trpc.context.list.query(),
   });
   const list = contexts.data?.contexts ?? [];
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<string | null>(initialContext ?? null);
   const [path, setPath] = useState<string | null>(null);
   const active = list.find((c) => c.name === chosen) ?? list[0] ?? null;
   const name = active?.name ?? "";

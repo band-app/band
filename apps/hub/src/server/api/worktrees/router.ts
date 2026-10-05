@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { ProjectInputError, ProjectNotFoundError } from "../../errors";
 import {
   PlainRepoError,
   worktreeCreateInput,
@@ -27,7 +28,13 @@ import { publicProcedure, t } from "../trpc";
  * there.
  */
 export const worktreesRouter = t.router({
-  create: publicProcedure.input(worktreeCreateInput).mutation(async ({ input }) => {
+  create: publicProcedure.input(worktreeCreateInput).mutation(async ({ input, ctx }) => {
+    if (input.projectId && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Putting a worktree in a project needs an admin token.",
+      });
+    }
     try {
       return await worktreeService.create(input);
     } catch (err) {
@@ -104,7 +111,10 @@ export type WorktreesRouter = typeof worktreesRouter;
  * follow-up that updates the tests together.
  */
 function throwAsTrpcError(err: unknown): never {
-  if (err instanceof PlainRepoError) {
+  if (err instanceof ProjectNotFoundError) {
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
+  }
+  if (err instanceof PlainRepoError || err instanceof ProjectInputError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
   // `RepoNotFoundError` and `WorktreeNotFoundError` (and every other

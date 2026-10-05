@@ -43,6 +43,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("vault.") ||
       path.startsWith("mcp.") ||
       path.startsWith("context.") ||
+      path.startsWith("projects.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")

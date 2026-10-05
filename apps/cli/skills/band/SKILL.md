@@ -76,7 +76,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "path": "..."}]}`
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--project <name-or-id>]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -259,6 +259,22 @@ band context link-remote <name> <url> [--vault-item <id>]   (or --unlink)
 ```
 
 The hub keeps the user context (`user`) and named contexts as bare git repos and serves them at `<hub>/git/context/<name>.git`. `--remote` mirrors an existing repo both ways without forcing, and a branch that moved on both sides is left alone and shown under SYNC. `--labels` limits which workers may pull a context to hosts carrying every label. Media for contexts lives in the hub's media store as `band://media/<id>` links. These commands need an admin token. Run them only when the user asks.
+
+### Group repos into projects
+
+```sh
+band projects list
+band projects get <project>
+band projects create <name> [--description <text>] [--repo <name[:role]>...] [--context <existing>] [--remote-url <url>] [--remote-vault-item <id>] [--model <model>] [--agent <id>] [--labels k=v,k=v]
+band projects update <project> [--description <text>] [--model <model>] [--agent <id>] [--labels k=v,k=v]
+band projects remove <project> [--remove-context]
+band projects add-repo <project> <repo> [--role <role>]
+band projects remove-repo <project> <repo>
+band projects attach-worktree <project> <worktree-id>
+band projects detach-worktree <worktree-id>
+```
+
+A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project. Changes need an admin token. Run them only when the user asks.
 
 ### Store credentials in the hub's vault
 
