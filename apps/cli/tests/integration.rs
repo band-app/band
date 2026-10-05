@@ -31,11 +31,11 @@ impl TestEnv {
         // hands back `/var/folders/...` while git (and `fs::canonicalize`)
         // resolve that symlink to `/private/var/folders/...`. Every Band path
         // derives from HOME, and since #606 both `syncWorktrees` and
-        // `project-service.list` reconcile on-disk worktrees against tracked
+        // `repo-service.list` reconcile on-disk worktrees against tracked
         // rows by *path string equality*. If `worktreesDir` stayed
         // non-canonical, worktrees created under it (stored as
         // `/var/folders/...`) would never match git's `/private/var/folders/...`
-        // report and would be dropped from `workspaces list` — the exact
+        // report and would be dropped from `worktrees list` — the exact
         // macOS-only failure that passes on Linux CI (`ubuntu-latest`, no
         // `/private` symlink) but fails on the `macos-latest` release runner.
         // Canonicalizing here keeps band_dir, worktreesDir, and repo_path all
@@ -43,7 +43,7 @@ impl TestEnv {
         let home_dir = fs::canonicalize(tmp.path()).expect("canonicalize home_dir");
         // band_dir is HOME/.band — used as BAND_HOME for the CLI
         let band_dir = home_dir.join(".band");
-        let repo_path = home_dir.join("my-project");
+        let repo_path = home_dir.join("my-repo");
         let token = "test-token-12345";
 
         // Create .band dirs
@@ -58,7 +58,7 @@ impl TestEnv {
         // string equality — a `/var/folders` vs `/private/var/folders`
         // mismatch would reconcile the seeded row away on the first boot,
         // leaving `statuses.resolve` unable to map the CLI's cwd back to a
-        // workspaceId. See #427.
+        // worktreeId. See #427.
         fs::create_dir_all(&repo_path).unwrap();
         git(&repo_path, &["init", "-b", "main"]);
         git(&repo_path, &["commit", "--allow-empty", "-m", "init"]);
@@ -75,7 +75,7 @@ impl TestEnv {
             "worktreesDir": band_dir.join("worktrees").to_string_lossy(),
         });
 
-        // Seed SQLite database with migrations, project data, and settings
+        // Seed SQLite database with migrations, repo data, and settings
         seed_db(&band_dir, &repo_path, &settings);
 
         // Start the web server
@@ -190,7 +190,7 @@ impl Drop for TestEnv {
     }
 }
 
-/// Seed the `SQLite` database with Drizzle migrations, a test project, and settings.
+/// Seed the `SQLite` database with Drizzle migrations, a test repo, and settings.
 ///
 /// Runs a Node.js script that uses `node:sqlite` to apply migrations and
 /// insert seed data.
@@ -199,7 +199,7 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     let output = Command::new("node")
         .arg(&seed_script)
         .arg(band_dir)
-        .arg("my-project")
+        .arg("my-repo")
         .arg(repo_path)
         .arg("main")
         .arg(settings.to_string())
@@ -214,16 +214,16 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     );
 }
 
-/// List every `panel_states` row for a workspace. Each entry is
-/// `{ id, workspace_id, panel_type }`. Used by tests that assert
-/// teardown cleanup is complete (i.e. removing the workspace strips
+/// List every `panel_states` row for a worktree. Each entry is
+/// `{ id, worktree_id, panel_type }`. Used by tests that assert
+/// teardown cleanup is complete (i.e. removing the worktree strips
 /// all chat/terminal/browser/layout rows associated with it).
-fn list_panel_states(band_dir: &Path, workspace_id: &str) -> Vec<serde_json::Value> {
+fn list_panel_states(band_dir: &Path, worktree_id: &str) -> Vec<serde_json::Value> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/list-panel-states.mjs");
     let output = Command::new("node")
         .arg(&script)
         .arg(band_dir)
-        .arg(workspace_id)
+        .arg(worktree_id)
         .output()
         .expect("list-panel-states.mjs failed to execute");
 
@@ -240,14 +240,14 @@ fn list_panel_states(band_dir: &Path, workspace_id: &str) -> Vec<serde_json::Val
 }
 
 /// Read a saved dockview layout panel-state row (chat, terminal, or
-/// browser) for a workspace from the `panel_states` table. Returns
+/// browser) for a worktree from the `panel_states` table. Returns
 /// `Value::Null` if no layout has been persisted.
-fn read_layout(band_dir: &Path, workspace_id: &str, panel_type: &str) -> serde_json::Value {
+fn read_layout(band_dir: &Path, worktree_id: &str, panel_type: &str) -> serde_json::Value {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-layout.mjs");
     let output = Command::new("node")
         .arg(&script)
         .arg(band_dir)
-        .arg(workspace_id)
+        .arg(worktree_id)
         .arg(panel_type)
         .output()
         .expect("read-layout.mjs failed to execute");
@@ -265,12 +265,12 @@ fn read_layout(band_dir: &Path, workspace_id: &str, panel_type: &str) -> serde_j
 /// Seed a chat layout (dockview tree) directly into the `panel_states`
 /// table. Used by tests that exercise default-chat-panel resolution
 /// without going through the dashboard UI to drive the layout.
-fn seed_chat_layout(band_dir: &Path, workspace_id: &str, layout: &serde_json::Value) {
+fn seed_chat_layout(band_dir: &Path, worktree_id: &str, layout: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-chat-layout.mjs");
     let output = Command::new("node")
         .arg(&seed_script)
         .arg(band_dir)
-        .arg(workspace_id)
+        .arg(worktree_id)
         .arg(layout.to_string())
         .output()
         .expect("seed-chat-layout.mjs failed to execute");
@@ -282,7 +282,7 @@ fn seed_chat_layout(band_dir: &Path, workspace_id: &str, layout: &serde_json::Va
     );
 }
 
-/// Seed only settings into the database (no project data).
+/// Seed only settings into the database (no repo data).
 /// Used by tests that don't need a full `TestEnv` but need a valid settings row.
 fn seed_settings_only(band_dir: &Path, settings: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-settings.mjs");
@@ -307,16 +307,16 @@ fn query_state(band_dir: &Path) -> serde_json::Value {
         r#"
         const {{ DatabaseSync }} = await import("node:sqlite");
         const db = new DatabaseSync("{db}");
-        const projects = db.prepare(
-            "SELECT name, path, default_branch as defaultBranch FROM projects ORDER BY sort_order"
+        const repos = db.prepare(
+            "SELECT name, path, default_branch as defaultBranch FROM repos ORDER BY sort_order"
         ).all();
         const worktrees = db.prepare(
-            "SELECT project_name as projectName, branch, path, head FROM worktrees"
+            "SELECT repo_name as repoName, branch, path, head FROM worktrees"
         ).all();
-        for (const p of projects) {{
-            p.worktrees = worktrees.filter(w => w.projectName === p.name);
+        for (const p of repos) {{
+            p.worktrees = worktrees.filter(w => w.repoName === p.name);
         }}
-        console.log(JSON.stringify({{ projects }}));
+        console.log(JSON.stringify({{ repos }}));
         db.close();
         "#,
         db = db_path.to_string_lossy().replace('\\', "/"),
@@ -362,65 +362,65 @@ fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
-// --- Projects tests ---
+// --- Repos tests ---
 
 #[test]
-fn projects_list_shows_registered_project() {
+fn repos_list_shows_registered_repo() {
     let env = TestEnv::new();
-    let output = env.band(&["projects", "list"]);
+    let output = env.band(&["repos", "list"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.contains("my-project"), "expected project name: {out}");
+    assert!(out.contains("my-repo"), "expected repo name: {out}");
 }
 
 #[test]
-fn projects_add_registers_new_project() {
+fn repos_add_registers_new_repo() {
     let env = TestEnv::new();
 
     // Create a new git repo to add
-    let new_repo = env.tmp.path().join("new-project");
+    let new_repo = env.tmp.path().join("new-repo");
     fs::create_dir_all(&new_repo).unwrap();
     git(&new_repo, &["init", "-b", "main"]);
     git(&new_repo, &["commit", "--allow-empty", "-m", "init"]);
 
-    let output = env.band(&["projects", "add", new_repo.to_str().unwrap()]);
+    let output = env.band(&["repos", "add", new_repo.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("new-project"),
-        "expected project name in output: {out}"
+        out.contains("new-repo"),
+        "expected repo name in output: {out}"
     );
 
-    // Verify it appears in projects list
-    let list_output = env.band(&["projects", "list"]);
+    // Verify it appears in repos list
+    let list_output = env.band(&["repos", "list"]);
     assert!(list_output.status.success());
     let list_out = stdout(&list_output);
     assert!(
-        list_out.contains("new-project"),
-        "expected new-project in list: {list_out}"
+        list_out.contains("new-repo"),
+        "expected new-repo in list: {list_out}"
     );
 }
 
 #[test]
-fn projects_remove_unregisters_project() {
+fn repos_remove_unregisters_repo() {
     let env = TestEnv::new();
 
-    // First add a new project
+    // First add a new repo
     let new_repo = env.tmp.path().join("to-remove");
     fs::create_dir_all(&new_repo).unwrap();
     git(&new_repo, &["init", "-b", "main"]);
     git(&new_repo, &["commit", "--allow-empty", "-m", "init"]);
 
-    let add_output = env.band(&["projects", "add", new_repo.to_str().unwrap()]);
+    let add_output = env.band(&["repos", "add", new_repo.to_str().unwrap()]);
     assert!(add_output.status.success());
 
     // Now remove it
-    let output = env.band(&["projects", "remove", "to-remove"]);
+    let output = env.band(&["repos", "remove", "to-remove"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    // Verify it's gone from projects list
-    let list_output = env.band(&["projects", "list"]);
+    // Verify it's gone from repos list
+    let list_output = env.band(&["repos", "list"]);
     assert!(list_output.status.success());
     let list_out = stdout(&list_output);
     assert!(
@@ -429,12 +429,12 @@ fn projects_remove_unregisters_project() {
     );
 }
 
-// --- Workspaces tests ---
+// --- Worktrees tests ---
 
 #[test]
-fn workspaces_create_makes_worktree_and_registers_state() {
+fn worktrees_create_makes_worktree_and_registers_state() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "create", "my-project", "feat/test"]);
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/test"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -449,7 +449,7 @@ fn workspaces_create_makes_worktree_and_registers_state() {
 
     // State was updated (default "main" worktree + newly created one)
     let state = env.state_json();
-    let worktrees = state["projects"][0]["worktrees"].as_array().unwrap();
+    let worktrees = state["repos"][0]["worktrees"].as_array().unwrap();
     assert_eq!(worktrees.len(), 2);
     assert!(
         worktrees.iter().any(|w| w["branch"] == "feat/test"),
@@ -458,13 +458,13 @@ fn workspaces_create_makes_worktree_and_registers_state() {
 }
 
 #[test]
-fn workspaces_create_is_idempotent() {
+fn worktrees_create_is_idempotent() {
     let env = TestEnv::new();
 
-    let out1 = env.band(&["workspaces", "create", "my-project", "feat/idem"]);
+    let out1 = env.band(&["worktrees", "create", "my-repo", "feat/idem"]);
     assert!(out1.status.success(), "stderr: {}", stderr(&out1));
 
-    let out2 = env.band(&["workspaces", "create", "my-project", "feat/idem"]);
+    let out2 = env.band(&["worktrees", "create", "my-repo", "feat/idem"]);
     assert!(out2.status.success(), "stderr: {}", stderr(&out2));
 
     // Both return the same path
@@ -472,7 +472,7 @@ fn workspaces_create_is_idempotent() {
 }
 
 #[test]
-fn workspaces_create_with_base_branch() {
+fn worktrees_create_with_base_branch() {
     let env = TestEnv::new();
 
     // Create a commit on main so there's something to branch from
@@ -482,9 +482,9 @@ fn workspaces_create_with_base_branch() {
     git(&env.repo_path, &["commit", "-m", "add marker"]);
 
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/from-main",
         "--base",
         "main",
@@ -499,9 +499,9 @@ fn workspaces_create_with_base_branch() {
 }
 
 #[test]
-fn workspaces_create_unknown_project_fails() {
+fn worktrees_create_unknown_repo_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "create", "nonexistent", "feat/x"]);
+    let output = env.band(&["worktrees", "create", "nonexistent", "feat/x"]);
 
     assert!(!output.status.success());
     assert!(
@@ -512,10 +512,10 @@ fn workspaces_create_unknown_project_fails() {
 }
 
 #[test]
-fn workspaces_list_shows_created_worktrees() {
+fn worktrees_list_shows_created_worktrees() {
     let env = TestEnv::new();
     for branch in ["feat/a", "feat/b"] {
-        let output = env.band(&["workspaces", "create", "my-project", branch]);
+        let output = env.band(&["worktrees", "create", "my-repo", branch]);
         assert!(
             output.status.success(),
             "create {branch} failed: {}",
@@ -523,7 +523,7 @@ fn workspaces_list_shows_created_worktrees() {
         );
     }
 
-    let output = env.band(&["workspaces", "list"]);
+    let output = env.band(&["worktrees", "list"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("feat/a"), "should list feat/a: {out}");
@@ -531,24 +531,24 @@ fn workspaces_list_shows_created_worktrees() {
 }
 
 #[test]
-fn workspaces_list_filters_by_project() {
+fn worktrees_list_filters_by_repo() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/filtered"]);
+    env.band(&["worktrees", "create", "my-repo", "feat/filtered"]);
 
-    let output = env.band(&["workspaces", "list", "my-project"]);
+    let output = env.band(&["worktrees", "list", "my-repo"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("feat/filtered"));
 
-    let output = env.band(&["workspaces", "list", "nonexistent"]);
+    let output = env.band(&["worktrees", "list", "nonexistent"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("not found"));
 }
 
 #[test]
-fn workspaces_remove_cleans_up_worktree_and_state() {
+fn worktrees_remove_cleans_up_worktree_and_state() {
     let env = TestEnv::new();
 
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/rm"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/rm"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -556,17 +556,17 @@ fn workspaces_remove_cleans_up_worktree_and_state() {
     );
     let path = stdout(&create_out);
 
-    let output = env.band(&["workspaces", "remove", "my-project", "feat/rm"]);
+    let output = env.band(&["worktrees", "remove", "my-repo", "feat/rm"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Worktree removed from state (only the seeded "main" worktree remains)
     let state = env.state_json();
-    let worktrees = state["projects"][0]["worktrees"].as_array().unwrap();
+    let worktrees = state["repos"][0]["worktrees"].as_array().unwrap();
     assert_eq!(worktrees.len(), 1);
     assert_eq!(worktrees[0]["branch"], "main");
 
     // The server removes the worktree directory in the background after it
-    // responds (`WorkspaceService.removeNow`); poll until it is gone.
+    // responds (`WorktreeService.removeNow`); poll until it is gone.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while Path::new(&path).exists() {
         assert!(
@@ -578,9 +578,9 @@ fn workspaces_remove_cleans_up_worktree_and_state() {
 }
 
 #[test]
-fn workspaces_remove_unknown_branch_fails() {
+fn worktrees_remove_unknown_branch_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "remove", "my-project", "nonexistent"]);
+    let output = env.band(&["worktrees", "remove", "my-repo", "nonexistent"]);
 
     assert!(!output.status.success());
     assert!(
@@ -591,9 +591,9 @@ fn workspaces_remove_unknown_branch_fails() {
 }
 
 #[test]
-fn workspaces_remove_unknown_project_fails() {
+fn worktrees_remove_unknown_repo_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "remove", "nonexistent", "main"]);
+    let output = env.band(&["worktrees", "remove", "nonexistent", "main"]);
 
     assert!(!output.status.success());
     assert!(
@@ -617,7 +617,7 @@ fn setup_script_runs_on_create() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add config"]);
 
-    let output = env.band(&["workspaces", "create", "my-project", "feat/setup"]);
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/setup"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
@@ -651,10 +651,10 @@ fn teardown_script_runs_on_remove() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add config"]);
 
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/teardown"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/teardown"]);
     assert!(create_out.status.success());
 
-    let output = env.band(&["workspaces", "remove", "my-project", "feat/teardown"]);
+    let output = env.band(&["worktrees", "remove", "my-repo", "feat/teardown"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Teardown runs asynchronously on the server; poll until the marker file appears.
@@ -669,12 +669,12 @@ fn teardown_script_runs_on_remove() {
 }
 
 #[test]
-fn workspaces_create_with_prompt_submits_task() {
+fn worktrees_create_with_prompt_submits_task() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/run",
         "--prompt",
         "hello world",
@@ -686,7 +686,7 @@ fn workspaces_create_with_prompt_submits_task() {
     assert!(Path::new(&path).exists(), "worktree dir should exist");
 
     let state = env.state_json();
-    let worktrees = &state["projects"][0]["worktrees"];
+    let worktrees = &state["repos"][0]["worktrees"];
     assert!(
         worktrees
             .as_array()
@@ -698,7 +698,7 @@ fn workspaces_create_with_prompt_submits_task() {
 }
 
 #[test]
-fn workspaces_create_with_prompt_and_base() {
+fn worktrees_create_with_prompt_and_base() {
     let env = TestEnv::new();
 
     let marker = env.repo_path.join("marker.txt");
@@ -707,9 +707,9 @@ fn workspaces_create_with_prompt_and_base() {
     git(&env.repo_path, &["commit", "-m", "add marker"]);
 
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/run-base",
         "--prompt",
         "do stuff",
@@ -725,7 +725,7 @@ fn workspaces_create_with_prompt_and_base() {
     );
 }
 
-// --- Issue #551: `workspaces create --via` dispatch precedence ---
+// --- Issue #551: `worktrees create --via` dispatch precedence ---
 //
 // The CLI resolves `via` from this chain, highest first:
 //   1. `--via` flag.
@@ -741,7 +741,7 @@ fn workspaces_create_with_prompt_and_base() {
 // lower-precedence layer is absent or contradicts the asserted value.
 
 #[test]
-fn workspaces_create_with_prompt_defaults_to_terminal_from_cli() {
+fn worktrees_create_with_prompt_defaults_to_terminal_from_cli() {
     let env = TestEnv::new();
 
     // No flag, no env, no repo config, no user settings override —
@@ -749,9 +749,9 @@ fn workspaces_create_with_prompt_defaults_to_terminal_from_cli() {
     let output = env.band(&[
         "--output",
         "json",
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/via-default",
         "--prompt",
         "default via",
@@ -771,15 +771,15 @@ fn workspaces_create_with_prompt_defaults_to_terminal_from_cli() {
 }
 
 #[test]
-fn workspaces_create_via_chat_flag_overrides_default() {
+fn worktrees_create_via_chat_flag_overrides_default() {
     let env = TestEnv::new();
 
     let output = env.band(&[
         "--output",
         "json",
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/via-flag",
         "--prompt",
         "flag override",
@@ -798,7 +798,7 @@ fn workspaces_create_via_chat_flag_overrides_default() {
 }
 
 #[test]
-fn workspaces_create_band_dispatch_env_overrides_default() {
+fn worktrees_create_band_dispatch_env_overrides_default() {
     let env = TestEnv::new();
 
     // BAND_DISPATCH sits between --via and config files in the precedence
@@ -807,9 +807,9 @@ fn workspaces_create_band_dispatch_env_overrides_default() {
         &[
             "--output",
             "json",
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             "feat/via-env",
             "--prompt",
             "env override",
@@ -824,7 +824,7 @@ fn workspaces_create_band_dispatch_env_overrides_default() {
 }
 
 #[test]
-fn workspaces_create_via_flag_beats_band_dispatch_env() {
+fn worktrees_create_via_flag_beats_band_dispatch_env() {
     let env = TestEnv::new();
 
     // --via flag is highest precedence; an opposing env var must lose.
@@ -832,9 +832,9 @@ fn workspaces_create_via_flag_beats_band_dispatch_env() {
         &[
             "--output",
             "json",
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             "feat/via-flag-env",
             "--prompt",
             "flag wins",
@@ -851,7 +851,7 @@ fn workspaces_create_via_flag_beats_band_dispatch_env() {
 }
 
 #[test]
-fn workspaces_create_user_settings_default_via_overrides_built_in() {
+fn worktrees_create_user_settings_default_via_overrides_built_in() {
     let env = TestEnv::new();
 
     // Bypass the test harness's seeded settings.json by rewriting it
@@ -870,9 +870,9 @@ fn workspaces_create_user_settings_default_via_overrides_built_in() {
     let output = env.band(&[
         "--output",
         "json",
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/via-user",
         "--prompt",
         "user override",
@@ -888,7 +888,7 @@ fn workspaces_create_user_settings_default_via_overrides_built_in() {
 }
 
 #[test]
-fn workspaces_create_repo_config_default_via_overrides_user_settings() {
+fn worktrees_create_repo_config_default_via_overrides_user_settings() {
     let env = TestEnv::new();
 
     // Set user-level fallback to "chat".
@@ -915,9 +915,9 @@ fn workspaces_create_repo_config_default_via_overrides_user_settings() {
         .args([
             "--output",
             "json",
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             "feat/via-repo",
             "--prompt",
             "repo override",
@@ -941,7 +941,7 @@ fn workspaces_create_repo_config_default_via_overrides_user_settings() {
 }
 
 #[test]
-fn workspaces_create_band_dispatch_env_beats_repo_config_default_via() {
+fn worktrees_create_band_dispatch_env_beats_repo_config_default_via() {
     let env = TestEnv::new();
 
     // Per-repo `.band/config.json::workspace.defaultVia: "chat"` — the
@@ -961,9 +961,9 @@ fn workspaces_create_band_dispatch_env_beats_repo_config_default_via() {
         .args([
             "--output",
             "json",
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             "feat/via-env-vs-repo",
             "--prompt",
             "env beats repo",
@@ -984,7 +984,7 @@ fn workspaces_create_band_dispatch_env_beats_repo_config_default_via() {
 }
 
 #[test]
-fn workspaces_create_invalid_band_dispatch_fails_fast() {
+fn worktrees_create_invalid_band_dispatch_fails_fast() {
     let env = TestEnv::new();
 
     // A typo in BAND_DISPATCH should fail at the CLI layer rather than
@@ -993,9 +993,9 @@ fn workspaces_create_invalid_band_dispatch_fails_fast() {
     // knows which knob to fix.
     let output = env.band_with_env(
         &[
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             "feat/via-bad-env",
             "--prompt",
             "bad",
@@ -1014,10 +1014,10 @@ fn workspaces_create_invalid_band_dispatch_fails_fast() {
 }
 
 #[test]
-fn workspaces_create_unknown_project_with_prompt_fails() {
+fn worktrees_create_unknown_repo_with_prompt_fails() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
         "nonexistent",
         "feat/x",
@@ -1043,7 +1043,7 @@ fn setup_failure_is_non_fatal() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add failing setup"]);
 
-    let output = env.band(&["workspaces", "create", "my-project", "feat/fail-setup"]);
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/fail-setup"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
@@ -1120,21 +1120,21 @@ fn band_notify(env: &TestEnv, payload: &serde_json::Value) -> std::process::Outp
     band_notify_with_env(env, &[], payload, &[])
 }
 
-/// Helper: query workspace status from the SQLite database.
-fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
+/// Helper: query worktree status from the SQLite database.
+fn query_agent_status(band_dir: &Path, worktree_id: &str) -> Option<String> {
     let db_path = band_dir.join("band.db");
     let script = format!(
         r#"
         const {{ DatabaseSync }} = await import("node:sqlite");
         const db = new DatabaseSync("{db}");
         const row = db.prepare(
-            "SELECT agent_status FROM workspace_statuses WHERE workspace_id = ?"
+            "SELECT agent_status FROM worktree_statuses WHERE worktree_id = ?"
         ).get("{ws}");
         console.log(JSON.stringify({{ status: row ? row.agent_status : null }}));
         db.close();
         "#,
         db = db_path.to_string_lossy().replace('\\', "/"),
-        ws = workspace_id,
+        ws = worktree_id,
     );
     let output = Command::new("node")
         .args(["--input-type=module", "-e", &script])
@@ -1152,7 +1152,7 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
 }
 
 /// The CLI is intentionally a dumb forwarder: it pipes the raw hook payload to
-/// the server, which resolves the workspace and dispatches to the coding-agent
+/// the server, which resolves the worktree and dispatches to the coding-agent
 /// adapter to derive the status. This test verifies ONLY forwarding integrity
 /// (cwd resolution + forward + that the server actually maps something) — it is
 /// a wiring smoke-test, NOT a behaviour contract. The event-specific contract
@@ -1173,7 +1173,7 @@ fn notify_forwards_payload_to_server() {
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
-        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
         Some("needs_attention"),
         "Stop hook should be forwarded and mapped to needs_attention by the server"
     );
@@ -1190,7 +1190,7 @@ fn notify_forwards_payload_to_server() {
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
-        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
         Some("working"),
         "PreToolUse+Read should be forwarded and mapped to working by the server"
     );
@@ -1204,7 +1204,7 @@ fn query_source_terminal(band_dir: &Path, source_id: &str) -> Option<String> {
         const {{ DatabaseSync }} = await import("node:sqlite");
         const db = new DatabaseSync("{db}");
         const row = db.prepare(
-            "SELECT terminal_id FROM workspace_status_sources WHERE source_id = ?"
+            "SELECT terminal_id FROM worktree_status_sources WHERE source_id = ?"
         ).get("{source}");
         console.log(JSON.stringify({{ terminal: row ? row.terminal_id : null }}));
         db.close();
@@ -1249,7 +1249,7 @@ fn notify_forwards_agent_and_terminal_id() {
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
-        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
         Some("needs_attention"),
     );
     assert_eq!(
@@ -1273,7 +1273,7 @@ fn notify_forwards_chat_dispatch() {
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
-        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
         Some("needs_attention"),
     );
 
@@ -1290,9 +1290,9 @@ fn notify_forwards_chat_dispatch() {
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
-        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
         Some("needs_attention"),
-        "a chat agent's hook should not change the workspace status"
+        "a chat agent's hook should not change the worktree status"
     );
 }
 
@@ -1341,12 +1341,12 @@ fn tunnel_status_json_output() {
 // --- JSON output tests ---
 
 #[test]
-fn workspaces_create_json_output() {
+fn worktrees_create_json_output() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/json",
         "--output",
         "json",
@@ -1362,45 +1362,45 @@ fn workspaces_create_json_output() {
 }
 
 #[test]
-fn workspaces_list_json_output() {
+fn worktrees_list_json_output() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/j1"]);
+    env.band(&["worktrees", "create", "my-repo", "feat/j1"]);
 
-    let output = env.band(&["workspaces", "list", "--output", "json"]);
+    let output = env.band(&["worktrees", "list", "--output", "json"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    let workspaces = json["workspaces"].as_array().expect("workspaces array");
+    let worktrees = json["worktrees"].as_array().expect("worktrees array");
     assert!(
-        workspaces.iter().any(|w| w["branch"] == "feat/j1"),
+        worktrees.iter().any(|w| w["branch"] == "feat/j1"),
         "should contain feat/j1: {json}"
     );
 }
 
 #[test]
-fn projects_list_json_output() {
+fn repos_list_json_output() {
     let env = TestEnv::new();
-    let output = env.band(&["projects", "list", "--output", "json"]);
+    let output = env.band(&["repos", "list", "--output", "json"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    let projects = json["projects"].as_array().expect("projects array");
+    let repos = json["repos"].as_array().expect("repos array");
     assert!(
-        projects.iter().any(|p| p["name"] == "my-project"),
-        "should contain my-project: {json}"
+        repos.iter().any(|p| p["name"] == "my-repo"),
+        "should contain my-repo: {json}"
     );
 }
 
 #[test]
-fn workspaces_remove_json_output() {
+fn worktrees_remove_json_output() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/rmjson"]);
+    env.band(&["worktrees", "create", "my-repo", "feat/rmjson"]);
 
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "remove",
-        "my-project",
+        "my-repo",
         "feat/rmjson",
         "--output",
         "json",
@@ -1415,7 +1415,7 @@ fn workspaces_remove_json_output() {
 fn error_json_output() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
         "nonexistent",
         "feat/x",
@@ -1432,9 +1432,9 @@ fn error_json_output() {
 // --- Input validation tests ---
 
 #[test]
-fn workspaces_create_rejects_path_traversal() {
+fn worktrees_create_rejects_path_traversal() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "create", "my-project", "feat/../etc"]);
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/../etc"]);
 
     assert!(!output.status.success());
     assert!(
@@ -1445,9 +1445,9 @@ fn workspaces_create_rejects_path_traversal() {
 }
 
 #[test]
-fn workspaces_create_rejects_control_chars() {
+fn worktrees_create_rejects_control_chars() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "create", "my-project", "feat/\x01test"]);
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/\x01test"]);
 
     assert!(!output.status.success());
     assert!(
@@ -1458,9 +1458,9 @@ fn workspaces_create_rejects_control_chars() {
 }
 
 #[test]
-fn workspaces_create_rejects_empty_branch() {
+fn worktrees_create_rejects_empty_branch() {
     let env = TestEnv::new();
-    let output = env.band(&["workspaces", "create", "my-project", ""]);
+    let output = env.band(&["worktrees", "create", "my-repo", ""]);
 
     assert!(!output.status.success());
     assert!(
@@ -1476,20 +1476,20 @@ fn workspaces_create_rejects_empty_branch() {
 fn chat_returns_task_id() {
     let env = TestEnv::new();
 
-    // Create a workspace first
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/task-test"]);
+    // Create a worktree first
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/task-test"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
 
-    let workspace_id = "my-project-feat-task-test";
+    let worktree_id = "my-repo-feat-task-test";
     let output = env.band(&[
         "chats",
         "send",
-        "--workspace",
-        workspace_id,
+        "--worktree",
+        worktree_id,
         "--message",
         "write hello world",
     ]);
@@ -1506,13 +1506,13 @@ fn chat_returns_task_id() {
 fn chat_json_output_includes_chat_id() {
     let env = TestEnv::new();
 
-    env.band(&["workspaces", "create", "my-project", "feat/task-json"]);
+    env.band(&["worktrees", "create", "my-repo", "feat/task-json"]);
 
     let output = env.band(&[
         "chats",
         "send",
-        "--workspace",
-        "my-project-feat-task-json",
+        "--worktree",
+        "my-repo-feat-task-json",
         "--message",
         "hello",
         "--output",
@@ -1527,8 +1527,8 @@ fn chat_json_output_includes_chat_id() {
         "json: {json}"
     );
     assert_eq!(
-        json["workspaceId"].as_str().unwrap(),
-        "my-project-feat-task-json",
+        json["worktreeId"].as_str().unwrap(),
+        "my-repo-feat-task-json",
         "json: {json}"
     );
     // No --chat-id was passed, so the server resolved the default panel.
@@ -1559,13 +1559,13 @@ fn chat_send_while_agent_runs_queues_the_message() {
         ("BAND_TEST_ACP_SCENARIO", scenario.to_str().unwrap()),
     ]);
 
-    env.band(&["workspaces", "create", "my-project", "feat/queue"]);
+    env.band(&["worktrees", "create", "my-repo", "feat/queue"]);
     let send = |message: &str, json: bool| {
         let mut args = vec![
             "chats",
             "send",
-            "--workspace",
-            "my-project-feat-queue",
+            "--worktree",
+            "my-repo-feat-queue",
             "--message",
             message,
         ];
@@ -1589,7 +1589,7 @@ fn chat_send_while_agent_runs_queues_the_message() {
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&second)));
     assert_eq!(json["queued"], true, "json: {json}");
     assert_eq!(json["id"], serde_json::Value::Null, "json: {json}");
-    assert_eq!(json["workspaceId"], "my-project-feat-queue", "json: {json}");
+    assert_eq!(json["worktreeId"], "my-repo-feat-queue", "json: {json}");
     assert!(
         json["chatId"].as_str().unwrap_or("").starts_with("chat_"),
         "json: {json}"
@@ -1781,36 +1781,36 @@ fn docker_stub_env(dockerfile: &str) -> (TestEnv, tempfile::TempDir) {
 fn env_build_builds_an_image_and_the_second_build_is_a_cache_hit() {
     let (env, _stub) = docker_stub_env("FROM busybox\n");
 
-    let out = env.band(&["env", "build", "my-project"]);
+    let out = env.band(&["env", "build", "my-repo"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("$ docker build"), "stdout: {text}");
     let last = text.lines().last().unwrap_or_default();
     assert!(
-        last.starts_with("ready band-env/my-project:"),
+        last.starts_with("ready band-env/my-repo:"),
         "last line: {last}"
     );
 
-    let again = env.band(&["env", "build", "my-project"]);
+    let again = env.band(&["env", "build", "my-repo"]);
     assert!(again.status.success(), "stderr: {}", stderr(&again));
     assert!(
-        stdout(&again).starts_with("Cache hit: ready band-env/my-project:"),
+        stdout(&again).starts_with("Cache hit: ready band-env/my-repo:"),
         "stdout: {}",
         stdout(&again)
     );
 
-    let json = json_of(&env.band(&["env", "build", "my-project", "--output", "json"]));
+    let json = json_of(&env.band(&["env", "build", "my-repo", "--output", "json"]));
     assert_eq!(json["cacheHit"], true, "json: {json}");
     assert_eq!(json["build"]["status"], "ready", "json: {json}");
 
-    let status = env.band(&["env", "status", "my-project"]);
+    let status = env.band(&["env", "status", "my-repo"]);
     assert!(status.status.success(), "stderr: {}", stderr(&status));
     assert!(
-        stdout(&status).contains("Current image: ready band-env/my-project:"),
+        stdout(&status).contains("Current image: ready band-env/my-repo:"),
         "stdout: {}",
         stdout(&status)
     );
-    let status_json = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]));
+    let status_json = json_of(&env.band(&["env", "status", "my-repo", "--output", "json"]));
     assert_eq!(status_json["builds"].as_array().unwrap().len(), 1);
     assert_eq!(status_json["current"]["status"], "ready");
 }
@@ -1818,9 +1818,9 @@ fn env_build_builds_an_image_and_the_second_build_is_a_cache_hit() {
 #[test]
 fn env_build_exits_non_zero_with_the_log_and_keeps_the_current_image() {
     let (env, _stub) = docker_stub_env("FROM busybox\n");
-    let ok = env.band(&["env", "build", "my-project"]);
+    let ok = env.band(&["env", "build", "my-repo"]);
     assert!(ok.status.success(), "stderr: {}", stderr(&ok));
-    let good = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]))["current"]
+    let good = json_of(&env.band(&["env", "status", "my-repo", "--output", "json"]))["current"]
         ["image"]
         .clone();
 
@@ -1831,7 +1831,7 @@ fn env_build_exits_non_zero_with_the_log_and_keeps_the_current_image() {
     .unwrap();
     git(&env.repo_path, &["commit", "-am", "break the toolchain"]);
 
-    let failed = env.band(&["env", "build", "my-project"]);
+    let failed = env.band(&["env", "build", "my-repo"]);
     assert_eq!(failed.status.code(), Some(1));
     let text = stdout(&failed);
     assert!(text.contains("FAIL_BUILD"), "stdout: {text}");
@@ -1843,15 +1843,15 @@ fn env_build_exits_non_zero_with_the_log_and_keeps_the_current_image() {
         "stdout: {text}"
     );
 
-    let status = json_of(&env.band(&["env", "status", "my-project", "--output", "json"]));
+    let status = json_of(&env.band(&["env", "status", "my-repo", "--output", "json"]));
     assert_eq!(status["current"]["image"], good, "status: {status}");
     assert_eq!(status["latest"]["status"], "failed", "status: {status}");
 }
 
 #[test]
-fn env_build_says_why_a_project_cannot_build() {
+fn env_build_says_why_a_repo_cannot_build() {
     let env = TestEnv::new();
-    let out = env.band(&["env", "build", "my-project"]);
+    let out = env.band(&["env", "build", "my-repo"]);
     assert_eq!(out.status.code(), Some(1));
     // No Docker on this server, or no environment file: either way the reason is on stderr.
     assert!(!stderr(&out).is_empty());
@@ -2280,16 +2280,16 @@ fn context_create_list_link_remove() {
 
 // --- Subscriptions tests ---
 
-/// A workspace with one chat, and the environment an agent in that chat has.
+/// A worktree with one chat, and the environment an agent in that chat has.
 fn subscriptions_chat(env: &TestEnv) -> (String, String) {
-    let created = env.band(&["workspaces", "create", "my-project", "feat/listen"]);
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/listen"]);
     assert!(created.status.success(), "stderr: {}", stderr(&created));
-    let workspace_id = "my-project-feat-listen".to_string();
-    let chat = env.band(&["chats", "create", &workspace_id, "--output", "json"]);
+    let worktree_id = "my-repo-feat-listen".to_string();
+    let chat = env.band(&["chats", "create", &worktree_id, "--output", "json"]);
     assert!(chat.status.success(), "stderr: {}", stderr(&chat));
     let json: serde_json::Value = serde_json::from_str(&stdout(&chat)).unwrap();
     let chat_id = json["chat"]["id"].as_str().expect("chat id").to_string();
-    (workspace_id, chat_id)
+    (worktree_id, chat_id)
 }
 
 /// A `gh` stand-in that answers `pr view ... -q .headRefName` with a branch.
@@ -2312,11 +2312,11 @@ fn json_of(output: &std::process::Output) -> serde_json::Value {
 #[test]
 fn subscriptions_create_list_remove_use_the_agents_chat() {
     let env = TestEnv::new();
-    let (workspace_id, chat_id) = subscriptions_chat(&env);
+    let (worktree_id, chat_id) = subscriptions_chat(&env);
     let gh = gh_stub(env.tmp.path(), "feat/login");
     let agent_env = [
         ("BAND_CHAT_ID", chat_id.as_str()),
-        ("BAND_WORKSPACE_ID", workspace_id.as_str()),
+        ("BAND_WORKTREE_ID", worktree_id.as_str()),
         ("BAND_GH_BIN", gh.to_str().unwrap()),
     ];
 
@@ -2346,7 +2346,7 @@ fn subscriptions_create_list_remove_use_the_agents_chat() {
     assert!(keys.contains(&"github:ci:o/r@feat/login"), "keys: {keys:?}");
     for sub in subs {
         assert_eq!(sub["chatId"], chat_id.as_str());
-        assert_eq!(sub["workspaceId"], workspace_id.as_str());
+        assert_eq!(sub["worktreeId"], worktree_id.as_str());
     }
 
     // `list` with no flags lists the agent's own chat.
@@ -2370,25 +2370,25 @@ fn subscriptions_create_list_remove_use_the_agents_chat() {
     assert!(text.contains("CI on o/r@feat/login"), "text: {text}");
     assert!(text.contains("0/10"), "text: {text}");
 
-    // `--workspace` lists the workspace even though `BAND_CHAT_ID` is set.
-    let by_workspace = env.band_with_env(
+    // `--worktree` lists the worktree even though `BAND_CHAT_ID` is set.
+    let by_worktree = env.band_with_env(
         &[
             "subscriptions",
             "list",
-            "--workspace",
-            &workspace_id,
+            "--worktree",
+            &worktree_id,
             "--output",
             "json",
         ],
         &agent_env,
     );
     assert!(
-        by_workspace.status.success(),
+        by_worktree.status.success(),
         "stderr: {}",
-        stderr(&by_workspace)
+        stderr(&by_worktree)
     );
     assert_eq!(
-        json_of(&by_workspace)["subscriptions"]
+        json_of(&by_worktree)["subscriptions"]
             .as_array()
             .unwrap()
             .len(),
@@ -2419,7 +2419,7 @@ fn subscriptions_create_list_remove_use_the_agents_chat() {
 #[test]
 fn subscriptions_create_timer_branch_and_webhook() {
     let env = TestEnv::new();
-    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let (_worktree_id, chat_id) = subscriptions_chat(&env);
     let agent_env = [("BAND_CHAT_ID", chat_id.as_str())];
 
     let timer = json_of(&env.band_with_env(
@@ -2483,7 +2483,7 @@ fn subscriptions_create_timer_branch_and_webhook() {
 #[test]
 fn subscriptions_create_rejects_bad_input() {
     let env = TestEnv::new();
-    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let (_worktree_id, chat_id) = subscriptions_chat(&env);
     let agent_env = [("BAND_CHAT_ID", chat_id.as_str())];
 
     // Outside a chat there is nothing to subscribe.
@@ -2531,7 +2531,7 @@ fn subscriptions_create_rejects_bad_input() {
 #[test]
 fn subscriptions_create_ci_creates_nothing_when_the_branch_lookup_fails() {
     let env = TestEnv::new();
-    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let (_worktree_id, chat_id) = subscriptions_chat(&env);
     let missing = env.tmp.path().join("no-such-gh");
     let agent_env = [
         ("BAND_CHAT_ID", chat_id.as_str()),
@@ -2590,7 +2590,7 @@ fn cronjobs_create_and_list() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Daily check",
         "--prompt",
@@ -2607,7 +2607,7 @@ fn cronjobs_create_and_list() {
     let job_id = json["job"]["id"].as_str().unwrap();
     assert!(job_id.starts_with("cj_"), "expected cj_ prefix: {job_id}");
     assert_eq!(json["job"]["name"], "Daily check");
-    assert_eq!(json["job"]["scope"], "project");
+    assert_eq!(json["job"]["scope"], "repo");
 
     // Verify it shows in list
     let list_output = env.band(&["cronjobs", "list", "--output", "json"]);
@@ -2624,7 +2624,7 @@ fn cronjobs_create_text_output() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Test job",
         "--prompt",
@@ -2647,7 +2647,7 @@ fn cronjobs_create_invalid_cron_fails() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Bad cron",
         "--prompt",
@@ -2666,7 +2666,7 @@ fn cronjobs_update_modifies_job() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Original",
         "--prompt",
@@ -2682,14 +2682,7 @@ fn cronjobs_update_modifies_job() {
 
     // Update the name
     let output = env.band(&[
-        "cronjobs",
-        "update",
-        "my-project",
-        job_id,
-        "--name",
-        "Updated",
-        "--output",
-        "json",
+        "cronjobs", "update", "my-repo", job_id, "--name", "Updated", "--output", "json",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -2704,7 +2697,7 @@ fn cronjobs_update_enable_disable() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Toggle test",
         "--prompt",
@@ -2722,7 +2715,7 @@ fn cronjobs_update_enable_disable() {
     let output = env.band(&[
         "cronjobs",
         "update",
-        "my-project",
+        "my-repo",
         job_id,
         "--disable",
         "--output",
@@ -2734,13 +2727,7 @@ fn cronjobs_update_enable_disable() {
 
     // Enable
     let output = env.band(&[
-        "cronjobs",
-        "update",
-        "my-project",
-        job_id,
-        "--enable",
-        "--output",
-        "json",
+        "cronjobs", "update", "my-repo", job_id, "--enable", "--output", "json",
     ]);
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
@@ -2754,7 +2741,7 @@ fn cronjobs_delete_removes_job() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Delete me",
         "--prompt",
@@ -2768,7 +2755,7 @@ fn cronjobs_delete_removes_job() {
     let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_output)).unwrap();
     let job_id = create_json["job"]["id"].as_str().unwrap();
 
-    let output = env.band(&["cronjobs", "delete", "my-project", job_id]);
+    let output = env.band(&["cronjobs", "delete", "my-repo", job_id]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Verify it's gone
@@ -2784,18 +2771,18 @@ fn cronjobs_delete_removes_job() {
 #[test]
 fn cronjobs_delete_nonexistent_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["cronjobs", "delete", "my-project", "cj_nonexistent"]);
+    let output = env.band(&["cronjobs", "delete", "my-repo", "cj_nonexistent"]);
     assert!(!output.status.success());
 }
 
 #[test]
-fn cronjobs_list_filter_by_project() {
+fn cronjobs_list_filter_by_repo() {
     let env = TestEnv::new();
 
     env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "Proj job",
         "--prompt",
@@ -2804,24 +2791,17 @@ fn cronjobs_list_filter_by_project() {
         "0 * * * *",
     ]);
 
-    let output = env.band(&[
-        "cronjobs",
-        "list",
-        "--project",
-        "my-project",
-        "--output",
-        "json",
-    ]);
+    let output = env.band(&["cronjobs", "list", "--repo", "my-repo", "--output", "json"]);
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
     let jobs = json["jobs"].as_array().expect("jobs array");
     assert_eq!(jobs.len(), 1);
 
-    // Filter by nonexistent project — should be empty
+    // Filter by nonexistent repo — should be empty
     let output = env.band(&[
         "cronjobs",
         "list",
-        "--project",
+        "--repo",
         "nonexistent",
         "--output",
         "json",
@@ -2839,7 +2819,7 @@ fn cronjobs_list_text_output_shows_table() {
     env.band(&[
         "cronjobs",
         "create",
-        "my-project",
+        "my-repo",
         "--name",
         "My Job",
         "--prompt",
@@ -2860,7 +2840,7 @@ fn cronjobs_list_text_output_shows_table() {
 // --- Layout persistence parity tests ---
 //
 // Every CLI-driven creation of a chat / terminal / browser must persist
-// the new pane to the workspace's saved dockview layout, not just the
+// the new pane to the worktree's saved dockview layout, not just the
 // in-memory registry. Otherwise the dashboard renders nothing for that
 // pane until the user manually re-creates it via the UI. These tests
 // pin the contract at the CLI boundary so future refactors of the
@@ -2868,7 +2848,7 @@ fn cronjobs_list_text_output_shows_table() {
 // can't silently regress it.
 
 /// Regression: `band terminals create` must add the new terminal to the
-/// workspace's saved `terminal_layout`. Before the fix, only
+/// worktree's saved `terminal_layout`. Before the fix, only
 /// `terminals.create` (the tRPC mutation) added it; any other path that
 /// called `spawnTerminal` directly (e.g. the WebSocket handler in
 /// `terminal-ws.ts`) skipped the layout. Moving `addTerminalToLayout`
@@ -2876,15 +2856,15 @@ fn cronjobs_list_text_output_shows_table() {
 #[test]
 fn terminals_create_adds_terminal_to_layout() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/term-layout"]);
-    let workspace_id = "my-project-feat-term-layout";
+    env.band(&["worktrees", "create", "my-repo", "feat/term-layout"]);
+    let worktree_id = "my-repo-feat-term-layout";
 
-    let out = env.band(&["terminals", "create", workspace_id, "--output", "json"]);
+    let out = env.band(&["terminals", "create", worktree_id, "--output", "json"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
     let terminal_id = json["terminalId"].as_str().expect("terminalId in response");
 
-    let layout = read_layout(&env.band_dir, workspace_id, "terminal_layout");
+    let layout = read_layout(&env.band_dir, worktree_id, "terminal_layout");
     assert!(
         !layout.is_null(),
         "expected a terminal_layout row to be persisted, got null"
@@ -2907,13 +2887,13 @@ fn terminals_create_adds_terminal_to_layout() {
 #[test]
 fn browsers_create_adds_browser_to_layout() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/browser-layout"]);
-    let workspace_id = "my-project-feat-browser-layout";
+    env.band(&["worktrees", "create", "my-repo", "feat/browser-layout"]);
+    let worktree_id = "my-repo-feat-browser-layout";
 
     let out = env.band(&[
         "browsers",
         "create",
-        workspace_id,
+        worktree_id,
         "--url",
         "https://example.com",
         "--output",
@@ -2925,7 +2905,7 @@ fn browsers_create_adds_browser_to_layout() {
         .as_str()
         .expect("browser.id in response");
 
-    let layout = read_layout(&env.band_dir, workspace_id, "browser_layout");
+    let layout = read_layout(&env.band_dir, worktree_id, "browser_layout");
     assert!(
         !layout.is_null(),
         "expected a browser_layout row to be persisted, got null"
@@ -2950,84 +2930,84 @@ fn browsers_create_adds_browser_to_layout() {
     );
 }
 
-/// Regression: `band workspaces create --prompt ...` followed by
-/// `band workspaces remove` must wipe every `panel_states` row tied
-/// to that workspace. The lazy-create path in `workspaces.create`
+/// Regression: `band worktrees create --prompt ...` followed by
+/// `band worktrees remove` must wipe every `panel_states` row tied
+/// to that worktree. The lazy-create path in `worktrees.create`
 /// goes through a different code path than `chats.create` (it calls
 /// `getOrCreateDefaultChat` server-side rather than the explicit CLI
 /// mutation), so it's worth a dedicated test to make sure both paths
 /// teardown cleanly.
 #[test]
-fn workspaces_create_with_prompt_then_remove_clears_panel_states() {
+fn worktrees_create_with_prompt_then_remove_clears_panel_states() {
     let env = TestEnv::new();
     let create = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/prompt-teardown",
         "--prompt",
         "say hi",
     ]);
     assert!(create.status.success(), "stderr: {}", stderr(&create));
-    let workspace_id = "my-project-feat-prompt-teardown";
+    let worktree_id = "my-repo-feat-prompt-teardown";
 
-    let before = list_panel_states(&env.band_dir, workspace_id);
+    let before = list_panel_states(&env.band_dir, worktree_id);
     assert!(
         !before.is_empty(),
         "pre-condition: lazy-created chat + layout should be present: {before:?}"
     );
 
-    let out = env.band(&["workspaces", "remove", "my-project", "feat/prompt-teardown"]);
+    let out = env.band(&["worktrees", "remove", "my-repo", "feat/prompt-teardown"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
 
-    let after = list_panel_states(&env.band_dir, workspace_id);
+    let after = list_panel_states(&env.band_dir, worktree_id);
     assert!(
         after.is_empty(),
-        "expected panel_states empty after `workspaces remove`, got {after:?}"
+        "expected panel_states empty after `worktrees remove`, got {after:?}"
     );
 }
 
-/// Regression: `band workspaces remove` must wipe every `panel_states`
-/// row associated with the workspace — chat records, browser records,
+/// Regression: `band worktrees remove` must wipe every `panel_states`
+/// row associated with the worktree — chat records, browser records,
 /// and the three layout rows (`chat_layout_<id>`, `terminal_layout_<id>`,
 /// `browser_layout_<id>`). A leak means stale state survives across
-/// recreations of a workspace with the same name.
+/// recreations of a worktree with the same name.
 #[test]
-fn workspaces_remove_clears_all_panel_states() {
+fn worktrees_remove_clears_all_panel_states() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/teardown"]);
-    let workspace_id = "my-project-feat-teardown";
+    env.band(&["worktrees", "create", "my-repo", "feat/teardown"]);
+    let worktree_id = "my-repo-feat-teardown";
 
-    // Seed the workspace with one of each pane type so all relevant
+    // Seed the worktree with one of each pane type so all relevant
     // panel_states rows exist.
-    env.band(&["chats", "create", workspace_id, "--name", "Side"]);
+    env.band(&["chats", "create", worktree_id, "--name", "Side"]);
     env.band(&[
         "browsers",
         "create",
-        workspace_id,
+        worktree_id,
         "--url",
         "https://example.com",
     ]);
-    env.band(&["terminals", "create", workspace_id]);
+    env.band(&["terminals", "create", worktree_id]);
 
-    // Pre-condition: panel_states has multiple rows for this workspace
+    // Pre-condition: panel_states has multiple rows for this worktree
     // (1 chat record, 1 browser record, 3 layout rows — chat/terminal/browser).
-    let before = list_panel_states(&env.band_dir, workspace_id);
+    let before = list_panel_states(&env.band_dir, worktree_id);
     assert!(
         before.len() >= 5,
         "pre-condition: expected at least 5 panel_states rows (chat, browser, 3 layouts), got: {before:?}"
     );
 
-    // Tear down the workspace.
-    let out = env.band(&["workspaces", "remove", "my-project", "feat/teardown"]);
+    // Tear down the worktree.
+    let out = env.band(&["worktrees", "remove", "my-repo", "feat/teardown"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
 
-    // Every row keyed to this workspace should be gone — no chat records,
+    // Every row keyed to this worktree should be gone — no chat records,
     // no browser records, no chat_layout / terminal_layout / browser_layout.
-    let after = list_panel_states(&env.band_dir, workspace_id);
+    let after = list_panel_states(&env.band_dir, worktree_id);
     assert!(
         after.is_empty(),
-        "expected panel_states to be empty after `workspaces remove`, got {after:?}"
+        "expected panel_states to be empty after `worktrees remove`, got {after:?}"
     );
 }
 
@@ -3040,21 +3020,16 @@ fn workspaces_remove_clears_all_panel_states() {
 #[test]
 fn chats_remove_strips_chat_from_layout() {
     let env = TestEnv::new();
-    env.band(&[
-        "workspaces",
-        "create",
-        "my-project",
-        "feat/chat-remove-layout",
-    ]);
-    let workspace_id = "my-project-feat-chat-remove-layout";
+    env.band(&["worktrees", "create", "my-repo", "feat/chat-remove-layout"]);
+    let worktree_id = "my-repo-feat-chat-remove-layout";
 
-    // `workspaces create` lazily creates a default chat. Add a second so
+    // `worktrees create` lazily creates a default chat. Add a second so
     // we can assert the *target* chat is removed without affecting the
     // other.
     let second = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Second",
         "--output",
@@ -3068,7 +3043,7 @@ fn chats_remove_strips_chat_from_layout() {
         .to_string();
 
     // Snapshot pre-state: layout contains both chats.
-    let before = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let before = read_layout(&env.band_dir, worktree_id, "chat_layout");
     let before_panels = before.get("panels").and_then(|p| p.as_object()).unwrap();
     assert!(
         before_panels.contains_key(&second_id),
@@ -3082,7 +3057,7 @@ fn chats_remove_strips_chat_from_layout() {
 
     // Layout no longer references the removed chat, but the other panel
     // is preserved.
-    let after = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let after = read_layout(&env.band_dir, worktree_id, "chat_layout");
     let after_panels = after
         .get("panels")
         .and_then(|p| p.as_object())
@@ -3098,7 +3073,7 @@ fn chats_remove_strips_chat_from_layout() {
     );
 
     // And `chats list` agrees — the removed chat is gone from the registry too.
-    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let chats = list_json["chats"].as_array().unwrap();
     assert_eq!(
@@ -3115,18 +3090,18 @@ fn chats_remove_strips_chat_from_layout() {
 
 // --- Chat command / default-panel resolution tests ---
 
-/// Regression: `band workspaces create --prompt ...` lazily creates a default
+/// Regression: `band worktrees create --prompt ...` lazily creates a default
 /// chat pane and submits the prompt to it, but the chat record has to land
 /// in the saved `chat_layout` so the dashboard renders the tab when the user
-/// opens the workspace. Before the fix, only the chats registry was updated,
+/// opens the worktree. Before the fix, only the chats registry was updated,
 /// not the layout — so the chat existed but was invisible in the dashboard.
 #[test]
-fn workspaces_create_prompt_adds_chat_to_layout() {
+fn worktrees_create_prompt_adds_chat_to_layout() {
     let env = TestEnv::new();
     let out = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/prompt-layout",
         "--prompt",
         "say hi",
@@ -3135,24 +3110,24 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
 
-    let workspace_id = "my-project-feat-prompt-layout";
+    let worktree_id = "my-repo-feat-prompt-layout";
 
     // The chat exists in the registry.
-    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     assert!(list.status.success(), "stderr: {}", stderr(&list));
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let chats = list_json["chats"].as_array().expect("chats array");
     assert_eq!(
         chats.len(),
         1,
-        "expected exactly one chat after `workspaces create --prompt`: {list_json}"
+        "expected exactly one chat after `worktrees create --prompt`: {list_json}"
     );
     let chat_id = chats[0]["id"].as_str().unwrap();
 
     // ...AND it shows up in the persisted dockview chat layout. Asserting on
     // the layout shape directly (rather than via the dashboard) is the only
     // way to catch the invisible-chat bug at the CLI layer.
-    let layout = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let layout = read_layout(&env.band_dir, worktree_id, "chat_layout");
     assert!(
         !layout.is_null(),
         "expected a chat_layout row to be persisted, got null"
@@ -3174,7 +3149,7 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
     // `createDefaultPanel`, minted a brand-new chat ID with
     // `newChatId()`, and the server-created lazy-default chat (the one
     // running the user's --prompt task) was orphaned out of the layout
-    // — so opening the workspace showed an *empty* tab with a freshly-
+    // — so opening the worktree showed an *empty* tab with a freshly-
     // generated chat ID instead of the prompt the user just submitted.
     //
     // Pin the dockview-native shape: `grid.root.type === "branch"` with
@@ -3214,9 +3189,9 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
 #[test]
 fn chats_list_renders_labels_column() {
     let env = TestEnv::new();
-    let create = env.band(&["workspaces", "create", "my-project", "feat/labels-col"]);
+    let create = env.band(&["worktrees", "create", "my-repo", "feat/labels-col"]);
     assert!(create.status.success(), "stderr: {}", stderr(&create));
-    let workspace_id = "my-project-feat-labels-col";
+    let worktree_id = "my-repo-feat-labels-col";
 
     // ----- chats create --label seeds labels at creation time -----
     // Deliberately use insertion order that's reverse-alphabetical so a
@@ -3225,7 +3200,7 @@ fn chats_list_renders_labels_column() {
     let labeled = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Tagged",
         "--label",
@@ -3248,7 +3223,7 @@ fn chats_list_renders_labels_column() {
     let _unlabeled = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Bare",
         "--output",
@@ -3256,7 +3231,7 @@ fn chats_list_renders_labels_column() {
     ]);
 
     // ----- Text output (default): header + sorted rendering -----
-    let list_text = env.band(&["chats", "list", workspace_id]);
+    let list_text = env.band(&["chats", "list", worktree_id]);
     assert!(list_text.status.success(), "stderr: {}", stderr(&list_text));
     let text = stdout(&list_text);
     assert!(
@@ -3269,7 +3244,7 @@ fn chats_list_renders_labels_column() {
     );
 
     // ----- JSON output: labels round-trip as a real record -----
-    let list_json = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list_json = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     assert!(list_json.status.success(), "stderr: {}", stderr(&list_json));
     let parsed: serde_json::Value = serde_json::from_str(&stdout(&list_json)).unwrap();
     let chats = parsed["chats"].as_array().expect("chats array");
@@ -3379,7 +3354,7 @@ fn chats_list_renders_labels_column() {
         stderr(&reserved),
     );
     // The chat's labels should be unchanged after the rejected mutation.
-    let after_reject = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let after_reject = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     let after_reject_json: serde_json::Value =
         serde_json::from_str(&stdout(&after_reject)).unwrap();
     let still = after_reject_json["chats"]
@@ -3437,17 +3412,17 @@ fn chats_list_renders_labels_column() {
 }
 
 #[test]
-fn chat_creates_default_panel_when_workspace_has_no_chats() {
+fn chat_creates_default_panel_when_worktree_has_no_chats() {
     let env = TestEnv::new();
-    let create = env.band(&["workspaces", "create", "my-project", "feat/chat-empty"]);
+    let create = env.band(&["worktrees", "create", "my-repo", "feat/chat-empty"]);
     assert!(create.status.success(), "stderr: {}", stderr(&create));
 
     // No chats yet — `band chats send` should lazily create one and target it.
     let output = env.band(&[
         "chats",
         "send",
-        "--workspace",
-        "my-project-feat-chat-empty",
+        "--worktree",
+        "my-repo-feat-chat-empty",
         "--message",
         "first message",
         "--output",
@@ -3463,11 +3438,11 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
         "expected a chat id to be resolved: {json}"
     );
 
-    // The chat now exists in the workspace's chat list.
+    // The chat now exists in the worktree's chat list.
     let list = env.band(&[
         "chats",
         "list",
-        "my-project-feat-chat-empty",
+        "my-repo-feat-chat-empty",
         "--output",
         "json",
     ]);
@@ -3476,28 +3451,28 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let chats = list_json["chats"].as_array().expect("chats array");
     assert!(
         chats.iter().any(|c| c["id"] == resolved_chat),
-        "expected resolved chat in workspace list: {list_json}"
+        "expected resolved chat in worktree list: {list_json}"
     );
 }
 
 #[test]
 fn chat_targets_most_recently_added_chat_by_default() {
-    // Every chat created (lazy-default in `workspaces create`, explicit
+    // Every chat created (lazy-default in `worktrees create`, explicit
     // `chats create`, or via `tasks.submit` lazy-create) now also lands
     // in the saved chat_layout, with the new pane marked as the active
     // view of its group. So `chats send` without an explicit chat_id
     // resolves through `defaultPanelIdFromLayout` -> active panel ->
     // most recently added chat.
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-default"]);
-    let workspace_id = "my-project-feat-chat-default";
+    env.band(&["worktrees", "create", "my-repo", "feat/chat-default"]);
+    let worktree_id = "my-repo-feat-chat-default";
 
-    // `workspaces create` lazily creates the first chat panel and
+    // `worktrees create` lazily creates the first chat panel and
     // inserts it into the layout (active). Add a second pane on top.
     let second = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Second",
         "--output",
@@ -3511,7 +3486,7 @@ fn chat_targets_most_recently_added_chat_by_default() {
         .to_string();
 
     // Sanity-check that there really are two chats.
-    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let chats = list_json["chats"].as_array().expect("chats array");
     assert!(chats.len() >= 2, "expected at least 2 chats: {list_json}");
@@ -3521,8 +3496,8 @@ fn chat_targets_most_recently_added_chat_by_default() {
     let output = env.band(&[
         "chats",
         "send",
-        "--workspace",
-        workspace_id,
+        "--worktree",
+        worktree_id,
         "--message",
         "hello",
         "--output",
@@ -3540,15 +3515,15 @@ fn chat_targets_most_recently_added_chat_by_default() {
 #[test]
 fn chat_targets_active_panel_from_layout() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-layout"]);
-    let workspace_id = "my-project-feat-chat-layout";
+    env.band(&["worktrees", "create", "my-repo", "feat/chat-layout"]);
+    let worktree_id = "my-repo-feat-chat-layout";
 
     // Add a second pane on top of the auto-created default. We'll mark
     // this one as active in the layout below.
     let second = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Active",
         "--output",
@@ -3560,7 +3535,7 @@ fn chat_targets_active_panel_from_layout() {
 
     // Snapshot the registry-order first chat so the assertion below is
     // sharp: we want to verify the resolution differs from "first chat".
-    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list = env.band(&["chats", "list", worktree_id, "--output", "json"]);
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let first_id = list_json["chats"][0]["id"].as_str().unwrap().to_string();
     assert_ne!(first_id, second_id, "list should have at least 2 chats");
@@ -3591,19 +3566,19 @@ fn chat_targets_active_panel_from_layout() {
                 "contentComponent": "chatTab",
                 "tabComponent": "chatTab",
                 "title": "First",
-                "params": {"workspaceId": workspace_id, "chatId": first_id.clone()},
+                "params": {"worktreeId": worktree_id, "chatId": first_id.clone()},
             },
             second_id.clone(): {
                 "id": second_id,
                 "contentComponent": "chatTab",
                 "tabComponent": "chatTab",
                 "title": "Active",
-                "params": {"workspaceId": workspace_id, "chatId": second_id.clone()},
+                "params": {"worktreeId": worktree_id, "chatId": second_id.clone()},
             },
         },
         "activeGroup": group_id,
     });
-    seed_chat_layout(&env.band_dir, workspace_id, &layout);
+    seed_chat_layout(&env.band_dir, worktree_id, &layout);
 
     // `band chats send` without an explicit chat_id should target the
     // active panel from the saved layout — not the first chat in
@@ -3611,8 +3586,8 @@ fn chat_targets_active_panel_from_layout() {
     let output = env.band(&[
         "chats",
         "send",
-        "--workspace",
-        workspace_id,
+        "--worktree",
+        worktree_id,
         "--message",
         "to active panel",
         "--output",
@@ -3630,14 +3605,14 @@ fn chat_targets_active_panel_from_layout() {
 #[test]
 fn chat_explicit_chat_id_overrides_default() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-explicit"]);
-    let workspace_id = "my-project-feat-chat-explicit";
+    env.band(&["worktrees", "create", "my-repo", "feat/chat-explicit"]);
+    let worktree_id = "my-repo-feat-chat-explicit";
 
-    env.band(&["chats", "create", workspace_id, "--name", "First"]);
+    env.band(&["chats", "create", worktree_id, "--name", "First"]);
     let second = env.band(&[
         "chats",
         "create",
-        workspace_id,
+        worktree_id,
         "--name",
         "Second",
         "--output",
@@ -3650,8 +3625,8 @@ fn chat_explicit_chat_id_overrides_default() {
         "chats",
         "send",
         &second_id,
-        "--workspace",
-        workspace_id,
+        "--worktree",
+        worktree_id,
         "--message",
         "directly",
         "--output",
@@ -3667,10 +3642,10 @@ fn chat_explicit_chat_id_overrides_default() {
 }
 
 #[test]
-fn chat_auto_detects_workspace_from_cwd() {
+fn chat_auto_detects_worktree_from_cwd() {
     let env = TestEnv::new();
 
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/chat-cwd"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/chat-cwd"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -3678,7 +3653,7 @@ fn chat_auto_detects_workspace_from_cwd() {
     );
     let worktree_path = stdout(&create_out);
 
-    // Run `band chats send` with NO workspace from inside the worktree.
+    // Run `band chats send` with NO worktree from inside the worktree.
     let output = env.band_in(
         Path::new(&worktree_path),
         &[
@@ -3694,17 +3669,17 @@ fn chat_auto_detects_workspace_from_cwd() {
 
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(
-        json["workspaceId"].as_str().unwrap(),
-        "my-project-feat-chat-cwd",
-        "expected workspace to be auto-detected from cwd: {json}"
+        json["worktreeId"].as_str().unwrap(),
+        "my-repo-feat-chat-cwd",
+        "expected worktree to be auto-detected from cwd: {json}"
     );
 }
 
 #[test]
-fn chat_outside_workspace_fails_with_helpful_error() {
+fn chat_outside_worktree_fails_with_helpful_error() {
     let env = TestEnv::new();
 
-    // A git repo that is NOT a registered workspace.
+    // A git repo that is NOT a registered worktree.
     let unrelated = env.tmp.path().join("chat-unrelated");
     fs::create_dir_all(&unrelated).unwrap();
     git(&unrelated, &["init", "-b", "main"]);
@@ -3714,11 +3689,11 @@ fn chat_outside_workspace_fails_with_helpful_error() {
 
     assert!(
         !output.status.success(),
-        "expected failure when not in a registered workspace"
+        "expected failure when not in a registered worktree"
     );
     let err = stderr(&output);
     assert!(
-        err.contains("No workspace found"),
+        err.contains("No worktree found"),
         "expected helpful error: {err}"
     );
 }
@@ -3738,12 +3713,12 @@ fn schema_lists_all_commands() {
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"projects list"), "missing: {names:?}");
-    assert!(names.contains(&"projects add"), "missing: {names:?}");
-    assert!(names.contains(&"projects remove"), "missing: {names:?}");
-    assert!(names.contains(&"workspaces list"), "missing: {names:?}");
-    assert!(names.contains(&"workspaces create"), "missing: {names:?}");
-    assert!(names.contains(&"workspaces remove"), "missing: {names:?}");
+    assert!(names.contains(&"repos list"), "missing: {names:?}");
+    assert!(names.contains(&"repos add"), "missing: {names:?}");
+    assert!(names.contains(&"repos remove"), "missing: {names:?}");
+    assert!(names.contains(&"worktrees list"), "missing: {names:?}");
+    assert!(names.contains(&"worktrees create"), "missing: {names:?}");
+    assert!(names.contains(&"worktrees remove"), "missing: {names:?}");
     assert!(names.contains(&"settings"), "missing: {names:?}");
     // The `tasks` subcommand was fully removed — agent task submission
     // happens via the top-level `chat` command, and lifecycle management
@@ -3796,17 +3771,14 @@ fn schema_lists_all_commands() {
 #[test]
 fn schema_shows_single_command() {
     let env = TestEnv::new();
-    let output = env.band(&["schema", "workspaces create"]);
+    let output = env.band(&["schema", "worktrees create"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    assert_eq!(json["name"], "workspaces create");
+    assert_eq!(json["name"], "worktrees create");
     let params = json["parameters"].as_array().expect("parameters array");
-    assert!(
-        params.iter().any(|p| p["name"] == "project"),
-        "json: {json}"
-    );
+    assert!(params.iter().any(|p| p["name"] == "repo"), "json: {json}");
     assert!(params.iter().any(|p| p["name"] == "branch"), "json: {json}");
 }
 
@@ -4442,40 +4414,40 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
 
 // --- Open command tests ---
 
-/// Call the test helper that posts to `editor.setActiveWorkspace` on the
+/// Call the test helper that posts to `editor.setActiveWorktree` on the
 /// running server. Mirrors the dashboard's behaviour when the user focuses
-/// a workspace, without requiring a real renderer to drive the focus event.
-fn set_active_workspace(band_dir: &Path, workspace_id: Option<&str>) {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/set-active-workspace.mjs");
-    let value = workspace_id.unwrap_or("null");
+/// a worktree, without requiring a real renderer to drive the focus event.
+fn set_active_worktree(band_dir: &Path, worktree_id: Option<&str>) {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/set-active-worktree.mjs");
+    let value = worktree_id.unwrap_or("null");
     let output = Command::new("node")
         .arg(&script)
         .arg(band_dir)
         .arg(value)
         .output()
-        .expect("set-active-workspace.mjs failed to execute");
+        .expect("set-active-worktree.mjs failed to execute");
     assert!(
         output.status.success(),
-        "set-active-workspace.mjs failed: {}",
+        "set-active-worktree.mjs failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
 #[test]
-fn open_with_explicit_workspace_opens_file() {
+fn open_with_explicit_worktree_opens_file() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/open"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/open"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
     // Seed a file inside the new worktree so the server's existence check
     // passes. The CLI sends an absolute path; the server normalizes it
-    // back to a workspace-relative path before emitting the open event.
-    let file_path = Path::new(&workspace_path).join("hello.txt");
+    // back to a worktree-relative path before emitting the open event.
+    let file_path = Path::new(&worktree_path).join("hello.txt");
     fs::write(&file_path, "hello world\n").unwrap();
 
     let output = env.band(&[
@@ -4483,8 +4455,8 @@ fn open_with_explicit_workspace_opens_file() {
         "json",
         "open",
         file_path.to_str().unwrap(),
-        "--workspace",
-        "my-project-feat-open",
+        "--worktree",
+        "my-repo-feat-open",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -4492,60 +4464,60 @@ fn open_with_explicit_workspace_opens_file() {
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
     assert_eq!(json["ok"].as_bool(), Some(true));
     assert_eq!(
-        json["workspaceId"].as_str(),
-        Some("my-project-feat-open"),
+        json["worktreeId"].as_str(),
+        Some("my-repo-feat-open"),
         "json: {json}",
     );
-    // Server normalises the path against the workspace root, so the wire
-    // value is workspace-relative ("hello.txt"), not the absolute path the
+    // Server normalises the path against the worktree root, so the wire
+    // value is worktree-relative ("hello.txt"), not the absolute path the
     // CLI sent.
     assert_eq!(json["filePath"].as_str(), Some("hello.txt"), "json: {json}");
-    // In-workspace files report external=false so the renderer routes
-    // through the workspace-relative `_splat` route, not the external-tab
+    // In-worktree files report external=false so the renderer routes
+    // through the worktree-relative `_splat` route, not the external-tab
     // path.
     assert_eq!(
         json["external"].as_bool(),
         Some(false),
-        "in-workspace file should not be external: {json}",
+        "in-worktree file should not be external: {json}",
     );
 }
 
 #[test]
 fn open_resolves_relative_path_against_cwd() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/relpath"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/relpath"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
-    let workspace_path = fs::canonicalize(&workspace_path).expect("canonicalize worktree");
+    let worktree_path = stdout(&create_out);
+    let worktree_path = fs::canonicalize(&worktree_path).expect("canonicalize worktree");
 
     // Drop a file into a subdir so the relative-path resolution has
     // something to bite on.
-    let sub = workspace_path.join("src");
+    let sub = worktree_path.join("src");
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("main.rs"), "fn main() {}\n").unwrap();
 
-    // Run band from inside the workspace; pass a relative path with a
+    // Run band from inside the worktree; pass a relative path with a
     // line/column suffix to exercise both code paths in `split_file_location`.
     let output = env.band_in(
-        &workspace_path,
+        &worktree_path,
         &[
             "--output",
             "json",
             "open",
             "src/main.rs:7:3",
-            "--workspace",
-            "my-project-feat-relpath",
+            "--worktree",
+            "my-repo-feat-relpath",
         ],
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    // Server re-emits the workspace-relative path with the line/column
+    // Server re-emits the worktree-relative path with the line/column
     // suffix preserved verbatim (it's a UX hint, not a filesystem
     // identifier).
     assert_eq!(
@@ -4556,27 +4528,27 @@ fn open_resolves_relative_path_against_cwd() {
 }
 
 #[test]
-fn open_falls_back_to_active_workspace() {
+fn open_falls_back_to_active_worktree() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/active"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/active"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
-    fs::write(Path::new(&workspace_path).join("README.md"), "# Hi\n").unwrap();
+    let worktree_path = stdout(&create_out);
+    fs::write(Path::new(&worktree_path).join("README.md"), "# Hi\n").unwrap();
 
-    // Simulate the dashboard focusing this workspace.
-    set_active_workspace(&env.band_dir, Some("my-project-feat-active"));
+    // Simulate the dashboard focusing this worktree.
+    set_active_worktree(&env.band_dir, Some("my-repo-feat-active"));
 
-    // No `--workspace` flag — server should pull the workspaceId from the
-    // active-workspace atom.
+    // No `--worktree` flag — server should pull the worktreeId from the
+    // active-worktree atom.
     let output = env.band(&[
         "--output",
         "json",
         "open",
-        Path::new(&workspace_path)
+        Path::new(&worktree_path)
             .join("README.md")
             .to_str()
             .unwrap(),
@@ -4586,25 +4558,25 @@ fn open_falls_back_to_active_workspace() {
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
     assert_eq!(
-        json["workspaceId"].as_str(),
-        Some("my-project-feat-active"),
+        json["worktreeId"].as_str(),
+        Some("my-repo-feat-active"),
         "json: {json}",
     );
 }
 
 #[test]
-fn open_without_active_workspace_errors_clearly() {
+fn open_without_active_worktree_errors_clearly() {
     let env = TestEnv::new();
-    // Explicitly clear any leftover active-workspace state from previous
+    // Explicitly clear any leftover active-worktree state from previous
     // server interactions (the in-memory atom starts null on boot, but
     // belt-and-braces).
-    set_active_workspace(&env.band_dir, None);
+    set_active_worktree(&env.band_dir, None);
 
     // Use a fully-qualified non-existent path so the test asserts the
-    // "no active workspace" branch regardless of cwd. With a relative
+    // "no active worktree" branch regardless of cwd. With a relative
     // path like `some-file.txt`, `cmd_open` would resolve it against the
     // test runner's cwd and — if that file happens to exist — the
-    // server's workspace-resolution guard would trip *before* the
+    // server's worktree-resolution guard would trip *before* the
     // existence check, masking the branch we want to cover.
     let output = env.band(&["open", "/nonexistent/path/some-file.txt"]);
     assert!(
@@ -4614,28 +4586,28 @@ fn open_without_active_workspace_errors_clearly() {
     );
     let err = stderr(&output);
     assert!(
-        err.contains("No active workspace"),
-        "expected 'No active workspace' in stderr, got: {err}",
+        err.contains("No active worktree"),
+        "expected 'No active worktree' in stderr, got: {err}",
     );
 }
 
 #[test]
 fn open_missing_file_errors_clearly() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/missing"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/missing"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
-    let bogus = Path::new(&workspace_path).join("does-not-exist.txt");
+    let bogus = Path::new(&worktree_path).join("does-not-exist.txt");
     let output = env.band(&[
         "open",
         bogus.to_str().unwrap(),
-        "--workspace",
-        "my-project-feat-missing",
+        "--worktree",
+        "my-repo-feat-missing",
     ]);
     assert!(
         !output.status.success(),
@@ -4650,16 +4622,16 @@ fn open_missing_file_errors_clearly() {
 }
 
 #[test]
-fn open_external_path_outside_workspace_opens_as_external_tab() {
+fn open_external_path_outside_worktree_opens_as_external_tab() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/outside"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/outside"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
 
-    // A real file on disk that lives outside the workspace root (the
+    // A real file on disk that lives outside the worktree root (the
     // `band open` flow needs to open this as an external editor tab —
     // same surface as desktop Cmd+O / "Open File…").
     let stray = env.tmp.path().join("stray.txt");
@@ -4670,8 +4642,8 @@ fn open_external_path_outside_workspace_opens_as_external_tab() {
         "json",
         "open",
         stray.to_str().unwrap(),
-        "--workspace",
-        "my-project-feat-outside",
+        "--worktree",
+        "my-repo-feat-outside",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -4680,7 +4652,7 @@ fn open_external_path_outside_workspace_opens_as_external_tab() {
     assert_eq!(
         json["external"].as_bool(),
         Some(true),
-        "expected external=true for out-of-workspace file: {json}",
+        "expected external=true for out-of-worktree file: {json}",
     );
     // For external files the wire path stays absolute (the renderer
     // needs the full path to call `readExternalFile`).
@@ -4694,7 +4666,7 @@ fn open_external_path_outside_workspace_opens_as_external_tab() {
 #[test]
 fn open_external_path_with_line_suffix_preserved() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/external-line"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/external-line"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -4713,8 +4685,8 @@ fn open_external_path_with_line_suffix_preserved() {
         "json",
         "open",
         &arg,
-        "--workspace",
-        "my-project-feat-external-line",
+        "--worktree",
+        "my-repo-feat-external-line",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -4739,21 +4711,21 @@ fn open_inverted_range_is_rejected_as_suffix() {
     // `(line=10, lineEnd=5)` and forwarded to the editor as a malformed
     // selection — silent corruption rather than a visible error.
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/inverted"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/inverted"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
     // Seed a real file so the only failure mode is the parser-driven one
     // — if the test ever started passing because the suffix-bearing path
     // happened to not exist, we wouldn't notice the guard regressing.
-    fs::write(Path::new(&workspace_path).join("real.txt"), "hi\n").unwrap();
+    fs::write(Path::new(&worktree_path).join("real.txt"), "hi\n").unwrap();
 
-    let bogus = format!("{}/real.txt:10-5", &workspace_path);
-    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-inverted"]);
+    let bogus = format!("{}/real.txt:10-5", &worktree_path);
+    let output = env.band(&["open", &bogus, "--worktree", "my-repo-feat-inverted"]);
     assert!(
         !output.status.success(),
         "expected failure for inverted range, got stdout: {}",
@@ -4767,11 +4739,11 @@ fn open_inverted_range_is_rejected_as_suffix() {
 }
 
 #[test]
-fn open_with_nonexistent_workspace_errors_clearly() {
-    // The server resolves `--workspace <id>` via `resolveWorkspace` and
-    // throws `NOT_FOUND: Workspace '<id>' not found` when no row exists.
+fn open_with_nonexistent_worktree_errors_clearly() {
+    // The server resolves `--worktree <id>` via `resolveWorktree` and
+    // throws `NOT_FOUND: Worktree '<id>' not found` when no row exists.
     // Without an integration test, a regression that silently created
-    // a placeholder workspace (or swallowed the error and emitted an
+    // a placeholder worktree (or swallowed the error and emitted an
     // open-file event pointing at a non-existent worktree) would slip
     // through.
     let env = TestEnv::new();
@@ -4781,8 +4753,8 @@ fn open_with_nonexistent_workspace_errors_clearly() {
     let output = env.band(&[
         "open",
         file.to_str().unwrap(),
-        "--workspace",
-        "definitely-not-a-real-workspace",
+        "--worktree",
+        "definitely-not-a-real-worktree",
     ]);
     assert!(
         !output.status.success(),
@@ -4791,8 +4763,8 @@ fn open_with_nonexistent_workspace_errors_clearly() {
     );
     let err = stderr(&output);
     assert!(
-        err.contains("not found") || err.contains("Workspace"),
-        "expected 'workspace not found' error, got: {err}",
+        err.contains("not found") || err.contains("Worktree"),
+        "expected 'worktree not found' error, got: {err}",
     );
 }
 
@@ -4807,22 +4779,22 @@ fn open_zero_column_falls_through_to_filename() {
     // the user gets a clear "File not found" against the literal
     // string they typed rather than a half-parsed surprise.
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/zerocol"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/zerocol"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
     // Seed a real `file.rs` so a regression that strips off `:0:5`
     // would *succeed* instead of failing. Without this, the test
     // could pass for the wrong reason (regressed parser strips
     // suffix → opens real file.rs → success when we expect failure).
-    fs::write(Path::new(&workspace_path).join("file.rs"), "// real\n").unwrap();
+    fs::write(Path::new(&worktree_path).join("file.rs"), "// real\n").unwrap();
 
-    let bogus = format!("{}/file.rs:0:5", &workspace_path);
-    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-zerocol"]);
+    let bogus = format!("{}/file.rs:0:5", &worktree_path);
+    let output = env.band(&["open", &bogus, "--worktree", "my-repo-feat-zerocol"]);
     assert!(
         !output.status.success(),
         "expected failure (file.rs:0:5 has no file on disk), got stdout: {}",
@@ -4845,27 +4817,27 @@ fn open_directory_is_rejected() {
     // `statSync().isFile()` guard on the server, `band open <dir>`
     // would treat the directory as an external file and the renderer
     // would try to open it as a text buffer. This also covers the
-    // workspace-root edge case (`band open <workspace-root>` →
+    // worktree-root edge case (`band open <worktree-root>` →
     // directory → rejected here before the renderer's empty-splat
     // logic fires).
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/dir"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/dir"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
-    // Create a real subdirectory inside the workspace.
-    let dir_inside = Path::new(&workspace_path).join("src");
+    // Create a real subdirectory inside the worktree.
+    let dir_inside = Path::new(&worktree_path).join("src");
     fs::create_dir_all(&dir_inside).unwrap();
 
     let output = env.band(&[
         "open",
         dir_inside.to_str().unwrap(),
-        "--workspace",
-        "my-project-feat-dir",
+        "--worktree",
+        "my-repo-feat-dir",
     ]);
     assert!(
         !output.status.success(),
@@ -4887,35 +4859,35 @@ fn open_valid_line_range_is_parsed_and_round_tripped() {
     // payload (or in the server's `formatFileLocation` call) would go
     // undetected — the rejection test only covers the guard.
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/range"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/range"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_path = stdout(&create_out);
+    let worktree_path = stdout(&create_out);
 
     fs::write(
-        Path::new(&workspace_path).join("ranged.txt"),
+        Path::new(&worktree_path).join("ranged.txt"),
         "one\ntwo\nthree\nfour\nfive\n",
     )
     .unwrap();
 
-    let arg = format!("{}/ranged.txt:2-4", &workspace_path);
+    let arg = format!("{}/ranged.txt:2-4", &worktree_path);
     let output = env.band(&[
         "--output",
         "json",
         "open",
         &arg,
-        "--workspace",
-        "my-project-feat-range",
+        "--worktree",
+        "my-repo-feat-range",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
     assert_eq!(json["external"].as_bool(), Some(false));
-    // Server normalises to a workspace-relative path with the range
+    // Server normalises to a worktree-relative path with the range
     // suffix preserved verbatim. If `line` and `lineEnd` got swapped
     // anywhere in the pipeline, the round-tripped suffix would be
     // `:4-2` (which the inverted-range test verifies is rejected).
@@ -4996,23 +4968,23 @@ fn wait_for_terminal_output(env: &TestEnv, terminal_id: &str, needle: &str) {
 #[test]
 fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
     let env = TestEnv::new();
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-gui"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/agents-gui"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_id = "my-project-feat-agents-gui";
+    let worktree_id = "my-repo-feat-agents-gui";
 
     // Text output: `<mode>\t<chat id>`.
-    let output = band_clean(&env, &["agents", "launch", workspace_id, "--mode", "gui"]);
+    let output = band_clean(&env, &["agents", "launch", worktree_id, "--mode", "gui"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let text = stdout(&output);
     let (mode, chat_id) = text.split_once('\t').expect("mode and pane, tab-separated");
     assert_eq!(mode, "gui", "got {text:?}");
     let chat_id = chat_id.to_string();
 
-    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let listed = band_json(&env, &["agents", "list", worktree_id]);
     let sessions = listed["agentSessions"]
         .as_array()
         .expect("agentSessions array");
@@ -5023,7 +4995,7 @@ fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
     let session_id = sessions[0]["id"].as_str().unwrap().to_string();
 
     // Text output of `agents list`: the header, then a row whose PANE is the chat.
-    let table = band_clean(&env, &["agents", "list", workspace_id]);
+    let table = band_clean(&env, &["agents", "list", worktree_id]);
     assert!(table.status.success(), "stderr: {}", stderr(&table));
     let table = stdout(&table);
     let mut lines = table.lines();
@@ -5043,7 +5015,7 @@ fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
         assert!(row.contains(cell), "row {row:?} lacks {cell}");
     }
 
-    let chats = band_json(&env, &["chats", "list", workspace_id]);
+    let chats = band_json(&env, &["chats", "list", worktree_id]);
     let has_chat = chats["chats"]
         .as_array()
         .expect("chats array")
@@ -5056,13 +5028,13 @@ fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
 fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
     let env = TestEnv::new();
     use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-tui"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/agents-tui"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
-    let workspace_id = "my-project-feat-agents-tui";
+    let worktree_id = "my-repo-feat-agents-tui";
 
     // `terminal` is the `--via` name for `tui`.
     let launched = band_json(
@@ -5070,7 +5042,7 @@ fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
         &[
             "agents",
             "launch",
-            workspace_id,
+            worktree_id,
             "--mode",
             "terminal",
             "--agent",
@@ -5086,7 +5058,7 @@ fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
         .to_string();
     wait_for_terminal_output(&env, &terminal_id, "STUB_AGENT_STARTED hello-from-cli");
 
-    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let listed = band_json(&env, &["agents", "list", worktree_id]);
     let sessions = listed["agentSessions"]
         .as_array()
         .expect("agentSessions array");
@@ -5103,7 +5075,7 @@ fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
 fn agents_launch_prints_a_note_when_an_agent_falls_back_to_a_chat() {
     let env = TestEnv::new();
     use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-note"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/agents-note"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -5115,7 +5087,7 @@ fn agents_launch_prints_a_note_when_an_agent_falls_back_to_a_chat() {
         &[
             "agents",
             "launch",
-            "my-project-feat-agents-note",
+            "my-repo-feat-agents-note",
             "--mode",
             "tui",
             "--agent",
@@ -5138,17 +5110,14 @@ fn agents_launch_without_mode_uses_the_server_default() {
     update_settings(&env, |settings| {
         settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
     });
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-default"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/agents-default"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
         stderr(&create_out)
     );
 
-    let launched = band_json(
-        &env,
-        &["agents", "launch", "my-project-feat-agents-default"],
-    );
+    let launched = band_json(&env, &["agents", "launch", "my-repo-feat-agents-default"]);
     assert_eq!(launched["mode"], "tui", "got {launched}");
     let terminal_id = launched["terminalId"].as_str().expect("terminalId");
     let killed = env.band(&["terminals", "kill", terminal_id]);
@@ -5161,7 +5130,7 @@ fn agents_launch_follows_band_dispatch_over_the_server_default() {
     update_settings(&env, |settings| {
         settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
     });
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-env"]);
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/agents-env"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -5175,7 +5144,7 @@ fn agents_launch_follows_band_dispatch_over_the_server_default() {
             "json",
             "agents",
             "launch",
-            "my-project-feat-agents-env",
+            "my-repo-feat-agents-env",
         ],
         &[("BAND_DISPATCH", "chat")],
     );
@@ -5192,7 +5161,7 @@ fn agents_launch_rejects_an_unknown_mode() {
     // server, so this needs no server.
     let tmp = tempfile::tempdir().expect("create tempdir");
     let output = Command::new(env!("CARGO_BIN_EXE_band"))
-        .args(["agents", "launch", "my-project-main", "--mode", "web"])
+        .args(["agents", "launch", "my-repo-main", "--mode", "web"])
         .env("BAND_HOME", tmp.path())
         .output()
         .expect("failed to execute band");
@@ -5205,13 +5174,13 @@ fn agents_launch_rejects_an_unknown_mode() {
 }
 
 #[test]
-fn workspaces_create_isolation_needs_a_runner_that_offers_it() {
+fn worktrees_create_isolation_needs_a_runner_that_offers_it() {
     let env = TestEnv::new();
     for level in ["container", "vm"] {
         let out = env.band(&[
-            "workspaces",
+            "worktrees",
             "create",
-            "my-project",
+            "my-repo",
             &format!("feat/iso-{level}"),
             "--isolation",
             level,
@@ -5225,9 +5194,9 @@ fn workspaces_create_isolation_needs_a_runner_that_offers_it() {
     }
     // Only the three levels parse.
     let bad = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/iso-x",
         "--isolation",
         "kvm",
@@ -5241,7 +5210,7 @@ fn workspaces_create_isolation_needs_a_runner_that_offers_it() {
 }
 
 #[test]
-fn workspaces_create_isolation_container_waits_for_a_runner() {
+fn worktrees_create_isolation_container_waits_for_a_runner() {
     let env = TestEnv::new();
     let settings: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
@@ -5258,9 +5227,9 @@ fn workspaces_create_isolation_container_waits_for_a_runner() {
         }]}))
         .expect("settings.update");
     let out = env.band(&[
-        "workspaces",
+        "worktrees",
         "create",
-        "my-project",
+        "my-repo",
         "feat/iso-ok",
         "--isolation",
         "container",
