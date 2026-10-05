@@ -582,7 +582,7 @@ export class ChatService {
    * skip the DB delete and leak the rows (and the agents would never be
    * killed).
    */
-  removeAllForWorktree(worktreeId: string, repo?: string): void {
+  removeAllForWorktree(worktreeId: string, repo?: string, projectId?: string): void {
     this.ensureInitialized();
 
     const ids = this.worktreeChats.get(worktreeId);
@@ -598,7 +598,7 @@ export class ChatService {
       // indexes.
       for (const chatId of [...ids]) {
         const chat = this.chatSessions.get(chatId);
-        if (chat) contextCaptureService.captureChat(chat, repo);
+        if (chat) contextCaptureService.captureChat(chat, repo, projectId);
         agentSessionService.stop(chatId);
         agentSessionService.deleteLog(chatId);
         this.removeFromIndex(chatId);

@@ -132,7 +132,12 @@ describe("repo and worktree rename migration", () => {
     const names = all("SELECT name FROM sqlite_master WHERE type = 'table'").map(
       (r) => (r as { name: string }).name,
     );
-    expect(names).not.toContain("projects");
+    // `projects` is back as the cross-repo table of step 6.1, so the old one-repo shape is what must be gone.
+    expect(
+      all("SELECT name FROM pragma_table_info('projects')").map(
+        (r) => (r as { name: string }).name,
+      ),
+    ).not.toContain("path");
     expect(names).not.toContain("project_hosts");
     expect(names).not.toContain("workspace_statuses");
     sqlite.exec("DELETE FROM repos WHERE name = 'proj'");

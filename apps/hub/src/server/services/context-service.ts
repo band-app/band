@@ -1,6 +1,6 @@
 /**
  * Context repos the hub holds (plan step 5.1): one user context and any number
- * of named ones (mission contexts, step 6.1). Each is a bare git repo at
+ * of named ones (project contexts, step 6.1). Each is a bare git repo at
  * `<BAND_HOME>/context/<name>.git`, served over git smart HTTP by
  * `api/context/git-http.ts`.
  *
@@ -151,7 +151,7 @@ const SCAFFOLD: Record<ContextRow["kind"], Array<[string, string]>> = {
     ["preferences.md", "# Preferences\n\nHow you like agents to work. Agents read this first.\n"],
     ["skills/.gitkeep", ""],
   ],
-  mission: [
+  project: [
     ["notes.md", "# Notes\n\nWritten by the coordinator. Keep it short.\n"],
     ["docs/.gitkeep", ""],
     ["media/.gitkeep", ""],
@@ -214,7 +214,7 @@ export function validateRemoteUrl(raw: string): string {
   throw new ContextInputError("The remote must be an https, ssh or scp-style URL");
 }
 
-function validateLabels(labels: string[]): string[] {
+export function validateLabels(labels: string[]): string[] {
   if (labels.length > MAX_LABELS) {
     throw new ContextInputError(`At most ${MAX_LABELS} labels`);
   }
@@ -268,7 +268,7 @@ export class ContextService {
 
   /** The named context that serves as the project context of a repo's agents, if any. */
   forRepo(repoName: string): ContextRow | undefined {
-    return this.queries.list().find((c) => c.kind === "mission" && c.repos.includes(repoName));
+    return this.queries.list().find((c) => c.kind === "project" && c.repos.includes(repoName));
   }
 
   /** The user context, if one exists. */
@@ -293,11 +293,11 @@ export class ContextService {
         "A context name is lowercase letters, digits, hyphens and underscores",
       );
     }
-    const kind = input.kind ?? (name === USER_CONTEXT_NAME ? "user" : "mission");
+    const kind = input.kind ?? (name === USER_CONTEXT_NAME ? "user" : "project");
     if (kind === "user" && name !== USER_CONTEXT_NAME) {
       throw new ContextInputError(`The user context is named "${USER_CONTEXT_NAME}"`);
     }
-    if (kind === "mission" && name === USER_CONTEXT_NAME) {
+    if (kind === "project" && name === USER_CONTEXT_NAME) {
       throw new ContextInputError(`"${USER_CONTEXT_NAME}" is reserved for the user context`);
     }
     if (this.queries.find(name)) throw new ContextInputError(`Context "${name}" already exists`);

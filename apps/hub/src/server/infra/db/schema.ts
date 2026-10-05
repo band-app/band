@@ -1,5 +1,6 @@
 import type { PullRequestSummary } from "@band-app/host-local/git/git-client";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -144,6 +145,11 @@ export const worktrees = sqliteTable("worktrees", {
   head: text("head"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   hostId: hostId(),
+  // The project this worktree belongs to (plan step 6.1), or null. A project
+  // removed while worktrees still point at it is refused, so the SET NULL is a backstop.
+  projectId: text("project_id").references((): AnySQLiteColumn => projects.id, {
+    onDelete: "set null",
+  }),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was
@@ -791,7 +797,7 @@ export const contexts = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["user", "mission"] }).notNull(),
+    kind: text("kind", { enum: ["user", "project"] }).notNull(),
     remoteUrl: text("remote_url"),
     remoteVaultItemId: text("remote_vault_item_id"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
@@ -807,4 +813,38 @@ export const contexts = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [uniqueIndex("contexts_name_idx").on(t.name)],
+);
+
+// A project is the cross-repo body of work (plan step 6.1). `context_name` is its
+// context repo (`contexts.name`, kind `project`). `labels` are `k=v` host labels and
+// `policy` holds placement defaults for the coordinator of step 6.2.
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    contextName: text("context_name").notNull(),
+    coordinatorAgent: text("coordinator_agent"),
+    coordinatorModel: text("coordinator_model").notNull().default("opus"),
+    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    policy: text("policy", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("projects_name_idx").on(t.name)],
+);
+
+// The repos a project may touch. `repo_name` has no foreign key on purpose: the
+// whole-tree save of `repos` deletes and reinserts every repo row, which would
+// cascade-delete these rows. `ProjectService` checks the repo exists instead.
+export const projectRepos = sqliteTable(
+  "project_repos",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    repoName: text("repo_name").notNull(),
+    role: text("role"),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.repoName] })],
 );

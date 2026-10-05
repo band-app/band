@@ -306,7 +306,10 @@ function checkCall(
     }
   }
   if (procedure === "worktrees.create") {
-    const { repo, branch, hostId } = (input ?? {}) as Record<string, unknown>;
+    const { repo, branch, hostId, projectId } = (input ?? {}) as Record<string, unknown>;
+    if (projectId !== undefined) {
+      return deny(403, `${procedure}: An agent on a worker cannot put a worktree in a project`);
+    }
     if (typeof repo !== "string" || typeof branch !== "string") {
       return deny(400, `${procedure} needs a repo and a branch`);
     }

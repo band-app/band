@@ -213,6 +213,7 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
           path: wt.path,
           head: wt.head,
           pinned: existing?.pinned ?? false,
+          ...(existing?.projectId ? { projectId: existing.projectId } : {}),
         };
       });
   } catch {

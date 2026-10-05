@@ -12,7 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag } from "lucide-react";
+import { Check, ChevronsDownUp, FolderKanban, FolderPlus, Plus, Settings, Tag } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { useCapabilities } from "../context";
@@ -38,6 +38,7 @@ import {
 import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
 import { AddRepoDialog } from "./AddRepoDialog";
+import { ProjectsDialog } from "./ProjectsDialog";
 import { RepoList } from "./RepoList";
 import { SettingsPage } from "./SettingsPage";
 
@@ -91,6 +92,8 @@ export function DashboardShell({
   const labels = settings.labels ?? [];
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
+  const [settingsContext, setSettingsContext] = useState<string | undefined>(undefined);
   const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
   const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
@@ -112,7 +115,10 @@ export function DashboardShell({
   useBranchStatusWatcher();
   useSetupStatusWatcher();
 
-  const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
+  const handleSettingsClick = useCallback(() => {
+    setSettingsContext(undefined);
+    setShowSettingsDialog(true);
+  }, []);
 
   // Collapse-all toolbar action: write every repo name into the
   // collapsed-repos set and every label id (plus the unlabeled sentinel)
@@ -530,16 +536,28 @@ export function DashboardShell({
         className="shrink-0 flex h-9 items-center justify-between gap-1 border-t border-border px-2"
         data-testid="repo-list__action-bar"
       >
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-muted-foreground"
-          data-testid="repo-list__settings-button"
-          onClick={handleSettingsClick}
-        >
-          <Settings className="size-4" />
-          Settings
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            data-testid="repo-list__settings-button"
+            onClick={handleSettingsClick}
+          >
+            <Settings className="size-4" />
+            Settings
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            data-testid="repo-list__projects-button"
+            onClick={() => setShowProjects(true)}
+          >
+            <FolderKanban className="size-4" />
+            Projects
+          </Button>
+        </div>
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
 
@@ -549,7 +567,20 @@ export function DashboardShell({
         defaultLabel={labelFilter}
       />
 
-      <SettingsPage open={showSettingsDialog} onOpenChange={setShowSettingsDialog} />
+      <ProjectsDialog
+        open={showProjects}
+        onOpenChange={setShowProjects}
+        onOpenContext={(name) => {
+          setSettingsContext(name);
+          setShowSettingsDialog(true);
+        }}
+      />
+      <SettingsPage
+        open={showSettingsDialog}
+        onOpenChange={setShowSettingsDialog}
+        initialSection={settingsContext ? "context" : undefined}
+        initialContext={settingsContext}
+      />
     </div>
   );
 }

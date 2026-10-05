@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
+import { projectService } from "../../services/project-service";
 import { repoService } from "../../services/repo-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -67,6 +68,8 @@ export const reposRouter = t.router({
     cronjobService.removeForKey(input.name);
     // Same for the repo's default browser profile mapping.
     browserProfileService.forgetRepo(input.name);
+    // And its place in any project.
+    projectService.forgetRepo(input.name);
 
     return { ok: true };
   }),

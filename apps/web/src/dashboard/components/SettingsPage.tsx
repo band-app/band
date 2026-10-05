@@ -205,6 +205,10 @@ interface Props {
   open: boolean;
   /** Called when the dialog wants to open or close (Esc, backdrop click, Done button). */
   onOpenChange: (open: boolean) => void;
+  /** Section to show each time the dialog opens, instead of the one last used. */
+  initialSection?: SettingsSectionId;
+  /** With `initialSection` "context", the context to select. */
+  initialContext?: string;
 }
 
 /** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
@@ -238,13 +242,16 @@ function formatLastRefreshed(epochMs: number): string {
   }
 }
 
-export function SettingsPage({ open, onOpenChange }: Props) {
+export function SettingsPage({ open, onOpenChange, initialSection, initialContext }: Props) {
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
   const restartTerminalDaemonMutation = useRestartTerminalDaemon();
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const capabilities = useCapabilities();
-  const [active, setActive] = useState<SettingsSectionId>("general");
+  const [active, setActive] = useState<SettingsSectionId>(initialSection ?? "general");
+  useEffect(() => {
+    if (open && initialSection) setActive(initialSection);
+  }, [open, initialSection]);
   const [navQuery, setNavQuery] = useState("");
   const availableSections = SETTINGS_SECTIONS.filter(
     (section) => !section.desktopOnly || isDesktop,
@@ -835,7 +842,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   {/* ── Context ────────────────────────────────────── */}
                   {active === "context" ? (
                     <SettingsSection title="Context">
-                      <ContextSettings />
+                      <ContextSettings initialContext={initialContext} />
                     </SettingsSection>
                   ) : null}
 
