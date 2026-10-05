@@ -5,7 +5,7 @@
  * `apps/hub/tests/runners.test.ts` covers the real `local` and `ssh` hooks.
  */
 
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -27,6 +27,7 @@ const PROJECT = "runner-project";
 
 let server: ServerHandle;
 let tmpHome: string;
+let destroyMarker: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -36,6 +37,14 @@ test.beforeAll(async () => {
     '#!/bin/sh\necho "no capacity in the moon pool"\necho "token $BAND_BOOTSTRAP_TOKEN"\nexit 2\n',
   );
   chmodSync(hook, 0o755);
+  // A runner whose machine never connects: spawn prints a handle and exits, destroy leaves a note.
+  const ghostSpawn = join(tmpHome, "ghost-spawn.sh");
+  writeFileSync(ghostSpawn, '#!/bin/sh\necho "BAND_MACHINE_HANDLE=ghost-$BAND_WORKER_ID"\n');
+  chmodSync(ghostSpawn, 0o755);
+  destroyMarker = join(tmpHome, "ghost-destroyed.log");
+  const ghostDestroy = join(tmpHome, "ghost-destroy.sh");
+  writeFileSync(ghostDestroy, `#!/bin/sh\necho "$BAND_MACHINE_HANDLE" >> "${destroyMarker}"\n`);
+  chmodSync(ghostDestroy, 0o755);
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     runners: [
@@ -47,6 +56,17 @@ test.beforeAll(async () => {
         isolation: "process",
         maxConcurrent: 2,
         timeoutSec: 10,
+        env: {},
+      },
+      {
+        id: "ghost-runner",
+        kind: "hook",
+        spawn: ghostSpawn,
+        destroy: ghostDestroy,
+        labels: { zone: "ghost" },
+        isolation: "process",
+        maxConcurrent: 1,
+        timeoutSec: 600,
         env: {},
       },
     ],
@@ -95,4 +115,30 @@ test("lists the runner and shows the log of a run that failed", async ({ page })
   // The bootstrap token the hook echoed is not shown.
   await expect(log).toContainText("token [redacted]");
   await expect(log).not.toContainText("bwb_");
+});
+
+test("lists a machine the runner started, and an admin destroys it", async ({ page }) => {
+  await trpcMutate(server.url, TOKEN, "workspaces.create", {
+    project: PROJECT,
+    branch: "needs-ghost",
+    placement: { labels: { zone: "ghost" } },
+  });
+
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  const machine = settingsPage.runnerMachines("ghost-runner");
+  await expect(machine).toHaveCount(1, { timeout: 30_000 });
+  await expect(machine).toHaveAttribute("data-state", "spawning");
+  await expect(settingsPage.machineAge(machine)).toBeVisible();
+  await expect(machine).toContainText("ghost-h-");
+
+  await settingsPage.destroyMachine(machine);
+  await expect(machine).toHaveAttribute("data-state", "destroyed", { timeout: 15_000 });
+  await expect(settingsPage.machineNote(machine)).toHaveText("destroyed by an admin");
+  expect(existsSync(destroyMarker)).toBe(true);
+  expect(readFileSync(destroyMarker, "utf8")).toMatch(/^ghost-h-[0-9a-f]{12}$/m);
+  // A destroyed machine has nothing left to destroy.
+  await expect(settingsPage.machineDestroyButton(machine)).toHaveCount(0);
 });

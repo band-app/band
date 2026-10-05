@@ -12,6 +12,7 @@ import {
   type LinkClientOptions,
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_POLICY,
+  METHOD_LIFECYCLE_SLEEP,
   type Ready,
   RPC_METHOD_NOT_FOUND,
   RpcError,
@@ -216,6 +217,12 @@ export class Worker {
           log.info({ idleExitMs }, "the hub set the idle time");
         }
         return null;
+      });
+      // The hub wants the worker stored and gone before its idle time (maximum lifetime of the machine).
+      client.session.handle(METHOD_LIFECYCLE_SLEEP, () => {
+        const started = !this.asking && !this.stopping;
+        if (started) void this.askToExit(ctx);
+        return { started };
       });
       const lostHubMs = Math.max(idleExitMs, LOST_HUB_EXIT_MS);
       const tick = setInterval(

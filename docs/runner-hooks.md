@@ -31,12 +31,15 @@ Runners live in `~/.band/settings.json` under `runners`. `settings.update` valid
 | `id` | Unique. Letters, digits, `.`, `_` and `-`. |
 | `kind` | `hook`. |
 | `spawn` | The script that starts a worker. An absolute path, a path relative to `BAND_HOME`, or `bundled:<name>` for `runners/<name>/spawn.sh`. |
-| `destroy` | Optional. The script that undoes `spawn`. `bundled:<name>` means `runners/<name>/destroy.sh`. |
+| `destroy` | Optional. The script that undoes `spawn`. `bundled:<name>` means `runners/<name>/destroy.sh`. Without it the reaper cannot destroy the runner's machines. |
+| `status` | Optional. The script that lists the runner's live machines, so the reaper can find ones the hub forgot. `bundled:<name>` means `runners/<name>/status.sh`. |
 | `labels` | What the runner offers. It takes a request when every label the request asks for is in this map. A request with no labels fits any runner. |
 | `provides` | Optional facts about the machines it starts, like `{ "node": "24", "os": "linux" }`. When set, a request's `requires` must hold for them. When unset, `requires` is not checked. |
 | `isolation` | The isolation of the machines it starts: `process` (same as `worktree`), `container` or `vm`. A request that asks for `container` or `vm` goes only to a runner that offers at least that (see [Isolation levels](#isolation-levels)). Passed to the hook as `BAND_ISOLATION`. Default `process`. |
 | `maxConcurrent` | How many requests the runner has in flight at once. Default 1. |
 | `timeoutSec` | Seconds from the start of an attempt to the worker's hello. Default 120. |
+| `maxLifetimeSec` | Optional. How long a machine may live, counted from its spawn. Past it the reaper has the worker store its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits. |
+| `lifetimeGraceSec` | Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that hard deadline it destroys the machine anyway. Default 600. |
 | `env` | Extra environment for the hook, such as `BAND_SSH_TARGET`. The settings file is readable by any device token, so put no secrets here. |
 
 `bundled:` hooks are found in the nearest `runners/` directory above the hub's bundle, or in `BAND_RUNNERS_DIR`.
@@ -72,6 +75,7 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
 | `BAND_PROJECT` | The project name. |
 | `BAND_RUNNER_ID`, `BAND_REQUEST_ID` | The runner and the host request. |
+| `BAND_MACHINE_HANDLE` | Only for `destroy`. The handle `spawn` printed, when it printed one. |
 | `BAND_RUNNER_DIR` | A directory for the runner under `BAND_HOME`. Mode 0700, created by the hub. The hook runs with it as its working directory. |
 | `BAND_NODE` | The Node binary the hub runs on. |
 
@@ -80,9 +84,12 @@ A hook must:
 - Start `band-worker` for `BAND_WORKER_ID` with the token, and return. The worker keeps running after the hook exits, so detach it and redirect its output. The hub treats a hook as finished when it exits, even if a child holds its pipes.
 - Exit 0 once the worker is started. Any other exit code fails the attempt. The hub does not wait for the worker inside `spawn`.
 - Read the token from the environment, not from a command line. `band-worker` reads `BAND_HUB_URL`, `BAND_WORKER_ID` and `BAND_BOOTSTRAP_TOKEN` itself.
+- Optionally print `BAND_MACHINE_HANDLE=<id>` on its own line: a name for the machine that `destroy` and `status` can find again, such as a container id, a pid or a VM id. No spaces. The hub stores it in `runner_machines` and passes it to `destroy` as `BAND_MACHINE_HANDLE`.
 - Optionally print `BAND_HOST_PROJECT_PATH=<path>` on its own line: where the repository is on the worker. The hub passes it as `hostProjectPath` when it fulfils the request. The path must be inside one of the worker's roots.
 
-`destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo.
+`destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`, plus `BAND_MACHINE_HANDLE`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo. For a machine the hub has no record of (an orphan), the hub sets `BAND_MACHINE_HANDLE` and `BAND_RUNNER_ID` and leaves `BAND_WORKER_ID` and the request variables unset, so a `destroy` must be able to work from the handle alone. It must check that the handle is one of its own machines before it kills anything.
+
+`status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, with or without a `BAND_MACHINE_HANDLE=` prefix; the VM hooks print `BAND_MACHINE_HANDLE=<id> worker=... state=...`), and exits 0. It must list only this runner's machines.
 
 ## What the hub does
 
@@ -94,6 +101,23 @@ A hook must:
 
 When the worker later exits because it was idle, the hub stores its workspaces and starts a new worker with the same id on the next message, terminal or file access. That wake is another request, and `spawn` runs again with the same `BAND_WORKER_ID`, so the hook must start that id on a clean machine. See [Ephemeral workers](ephemeral-workers.md).
 
+## The reaper
+
+`RunnerReaperService` (`apps/hub/src/server/services/runner-reaper-service.ts`) makes sure no machine a runner started leaks. The hub records each machine in the `runner_machines` table (`spawning`, `running`, `stopping`, `destroyed` or `lost`, with the handle, the worker id, the request and the times). Every `BAND_REAPER_INTERVAL_MS` (default 30 s) it destroys, through the runner's `destroy` hook:
+
+- **A machine that never said hello.** A machine still `spawning` that no attempt in flight owns (for example after a hub restart) is destroyed once `timeoutSec` plus `BAND_REAPER_HELLO_GRACE_MS` (default 60 s) have passed since the spawn. The host row it made is removed.
+- **A lost machine.** A running machine whose host row is gone is destroyed at once. One whose worker has been `offline` or `lost` for `BAND_REAPER_OFFLINE_MS` (default 2 minutes) is destroyed too, which also cleans up after an ephemeral worker that went to sleep and exited. The time counts from the hub's boot at the earliest, so a hub restart does not destroy workers that are about to redial.
+- **An orphan.** For a runner with `status` and `destroy`, a handle that `status` lists and no live `runner_machines` row has is destroyed. The sweep skips a runner while one of its spawns is in flight.
+- **A machine past `maxLifetimeSec`.** The machine becomes `stopping`. The reaper sends `lifecycle.sleep` to the worker, which then goes through the same hand-off as an idle one (docs/ephemeral-workers.md): the hub refuses while an agent turn, queued message or terminal runs, and otherwise stores each workspace's snapshot and agent sessions before the worker exits. The reaper asks again every sweep and shows the reason in the machine's note. It runs `destroy` only after the worker has exited with every workspace stored. A machine with no workspaces is destroyed at once.
+
+A machine whose workspaces are not stored is never destroyed early. It waits until the hard deadline (`maxLifetimeSec` plus `lifetimeGraceSec` after the spawn, or the offline threshold plus `lifetimeGraceSec`). If that passes, the machine is destroyed anyway and the hub logs an error naming the workspaces that were lost. A worker that is not ephemeral cannot hand its workspaces over, so a machine like that waits for the deadline.
+
+When `destroy` fails, the reaper runs it again on the next sweeps. After the third failure the machine is `lost` and stays listed. If a later `status` still lists its handle, the orphan sweep tries again.
+
+A worker id that wakes up gets a new machine row, and the row of its earlier machine ends as `destroyed` (replaced), because the hook wipes the old machine when it starts the new one.
+
+Settings > Runners lists the machines with their state and age. An admin can destroy one there (`runners.destroyMachine`). The hub refuses while the machine holds workspaces that are not stored, and the UI then offers "Destroy anyway". Only admin tokens can list machines or destroy them, and the MCP endpoint and the worker relay leave `runners.*` out.
+
 ## Logs
 
 The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.log`, one line per output line, tagged `spawn stdout`, `spawn stderr`, `destroy stdout` and so on. Before a line is stored the hub replaces the attempt's bootstrap token and anything shaped like a Band token (`bwb_`, `bws_`, `bdt_`, `brt_`) with `[redacted]`. Read a log with `band runners log <request id>` or from Settings > Runners.
@@ -102,13 +126,13 @@ The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.l
 
 ### `local`
 
-Starts an ephemeral `band-worker` on the hub's machine. Everything lives under `$BAND_RUNNER_DIR/<worker id>/`: its own `HOME` and `BAND_HOME` (`home/.band`), its state dir, and a work dir that is its only root. If `BAND_REPO_URLS` is set, `spawn` clones the first URL into the work dir and prints `BAND_HOST_PROJECT_PATH`. It writes the worker's pid to `pid`. `destroy` kills that pid and removes the directory. A `spawn` for a worker id that already has a directory (a worker waking up) deletes the old directory first, because a woken worker is a new machine, and it refuses when that worker's pid is still alive.
+Starts an ephemeral `band-worker` on the hub's machine. Everything lives under `$BAND_RUNNER_DIR/<worker id>/`: its own `HOME` and `BAND_HOME` (`home/.band`), its state dir, and a work dir that is its only root. If `BAND_REPO_URLS` is set, `spawn` clones the first URL into the work dir and prints `BAND_HOST_PROJECT_PATH`. It writes the worker's pid to `pid` and prints it as `BAND_MACHINE_HANDLE`. `destroy` kills that pid, waits for it to exit, and removes the directory. `status` lists the pids of the worker directories whose process is alive. With only a handle, `destroy` acts only when one of the runner's directories holds that pid. A `spawn` for a worker id that already has a directory (a worker waking up) deletes the old directory first, because a woken worker is a new machine, and it refuses when that worker's pid is still alive.
 
 Settings (`env`): `BAND_WORKER_BIN` is the worker, either a `.mjs`/`.js` file run with `BAND_NODE` or an executable (default `band-worker` on `PATH`). `BAND_IDLE_EXIT` sets how long an idle worker waits before it exits, like `90s` (default 10 minutes).
 
 ### `ssh`
 
-Runs the same steps on another machine: `ssh $BAND_SSH_TARGET 'sh -s'` with a script on stdin. The script, which carries the bootstrap token, is sent over stdin, so the token is in no command line on either machine. The worker's files go to `$BAND_SSH_DIR/<worker id>/` on the target. `destroy` kills the pid and removes that directory.
+Runs the same steps on another machine: `ssh $BAND_SSH_TARGET 'sh -s'` with a script on stdin. The script, which carries the bootstrap token, is sent over stdin, so the token is in no command line on either machine. The worker's files go to `$BAND_SSH_DIR/<worker id>/` on the target. `destroy` kills the pid and removes that directory. The handle is the remote pid, and `status` lists the live ones on the target.
 
 Settings (`env`):
 
@@ -150,7 +174,7 @@ Settings (`env`):
 | `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
 | `DOCKER_HOST` | A remote docker daemon, such as `ssh://user@build-host`. |
 
-A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
+A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already. `spawn` prints the container id as `BAND_MACHINE_HANDLE`. `status` lists the ids of the containers with the label `band.runner=<runner id>`, and `destroy` called with only a handle removes that container when it carries the runner's label.
 
 A worker takes plain `http` only for a loopback hub, and a container on the `bridge` network cannot reach the hub's loopback. So the hub URL must be `https`, or on Linux the runner uses `"BAND_DOCKER_NETWORK": "host"` with the default `http://127.0.0.1:<port>`.
 

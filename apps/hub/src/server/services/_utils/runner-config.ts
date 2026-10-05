@@ -12,6 +12,9 @@ import { RUNNER_ISOLATIONS } from "./isolation";
 
 export const DEFAULT_RUNNER_TIMEOUT_SEC = 120;
 export const MAX_RUNNER_TIMEOUT_SEC = 3600;
+/** Seconds after `maxLifetimeSec` before the reaper destroys a machine that could not be put to sleep. */
+export const DEFAULT_LIFETIME_GRACE_SEC = 600;
+const MAX_LIFETIME_SEC = 60 * 60 * 24 * 90;
 
 /** Prefix that names a hook shipped in the repo's `runners/` directory, like `bundled:local`. */
 export const BUNDLED_PREFIX = "bundled:";
@@ -28,6 +31,11 @@ export const runnerSchema = z.object({
   /** A script path (absolute, or relative to BAND_HOME), or `bundled:<name>` for the hooks in `runners/`. */
   spawn: z.string().trim().min(1).max(1000),
   destroy: z.string().trim().min(1).max(1000).optional(),
+  /**
+   * Optional. Prints the handle of every live machine of this runner, one per line, so the reaper
+   * can destroy machines the hub has no record of.
+   */
+  status: z.string().trim().min(1).max(1000).optional(),
   /** What this runner offers. A request is leasable when every label it asks for is here. */
   labels: z.record(z.string(), z.string()).default({}),
   /**
@@ -49,6 +57,21 @@ export const runnerSchema = z.object({
     .min(1)
     .max(MAX_RUNNER_TIMEOUT_SEC)
     .default(DEFAULT_RUNNER_TIMEOUT_SEC),
+  /**
+   * How long a machine may live, counted from its spawn. Past it the reaper has the worker store
+   * its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits.
+   */
+  maxLifetimeSec: z.number().int().min(1).max(MAX_LIFETIME_SEC).optional(),
+  /**
+   * Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that
+   * deadline it destroys the machine whether or not they were, and logs it as an error.
+   */
+  lifetimeGraceSec: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_LIFETIME_SEC)
+    .default(DEFAULT_LIFETIME_GRACE_SEC),
   /** Extra environment for the hook (`BAND_SSH_TARGET`, `BAND_WORKER_BIN`). Not secret: the settings file shows it. */
   env: z.record(envName, z.string()).default({}),
 });
@@ -106,7 +129,7 @@ export function bundledRunnersDir(): string {
 }
 
 /** The absolute path of a hook script, or an error message when it cannot be one. */
-export function resolveHookPath(spec: string, script: "spawn" | "destroy"): string {
+export function resolveHookPath(spec: string, script: "spawn" | "destroy" | "status"): string {
   if (spec.startsWith(BUNDLED_PREFIX)) {
     const name = spec.slice(BUNDLED_PREFIX.length);
     if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error(`invalid bundled hook "${spec}"`);

@@ -65,6 +65,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
+import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
@@ -733,6 +734,7 @@ async function main() {
   placementService.start();
   environmentBuildService.start();
   runnerService.start();
+  runnerReaperService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -1568,6 +1570,7 @@ async function main() {
       console.error("Failed to stop language servers:", err);
     });
     runnerService.stop();
+    runnerReaperService.stop();
     placementService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});

@@ -38,6 +38,7 @@ import {
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_IMPORT_SESSIONS,
   METHOD_LIFECYCLE_POLICY,
+  METHOD_LIFECYCLE_SLEEP,
   type ServerSession,
   type SessionFile,
 } from "@band-app/link";
@@ -108,6 +109,8 @@ export class EphemeralLifecycleService {
   private readonly draining = new Map<string, Promise<void>>();
   private readonly waking = new Map<string, Promise<void>>();
   private readonly errors = new Map<string, string>();
+  /** Per host: why the last hand-off was refused (an agent is working), until one goes through. */
+  private readonly blocked = new Map<string, string>();
 
   // ---- link ---------------------------------------------------------------
 
@@ -151,6 +154,67 @@ export class EphemeralLifecycleService {
     return this.errors.get(hostId);
   }
 
+  /** Why the last hand-off of a host was refused or failed, or undefined when none was. */
+  sleepBlocker(hostId: string): string | undefined {
+    return this.errors.get(hostId) ?? this.blocked.get(hostId);
+  }
+
+  /** Whether a worker of this host is connected on the link. */
+  isConnected(hostId: string): boolean {
+    return this.sessions.get(hostId)?.attached === true;
+  }
+
+  /** Whether the host's workspaces are all stored (`workspace_sleep` rows), so its machine can go. */
+  isStored(hostId: string): boolean {
+    // A workspace being created on the host is not tracked yet, and nothing of it is stored.
+    if (this.requests.listAwaitingHost().some((r) => r.hostId === hostId)) return false;
+    const stored = new Set(this.sleeps.listByHost(hostId).map((r) => r.workspaceId));
+    return this.workspacesOn(hostId).every((w) => stored.has(w.workspaceId));
+  }
+
+  /** How many workspaces the hub tracks on a host. */
+  workspaceCount(hostId: string): number {
+    return this.workspacesOn(hostId).length;
+  }
+
+  /** Workspace counts for every host, from one read of the state. */
+  workspaceCountsByHost(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const project of loadState().projects) {
+      for (const wt of project.worktrees) {
+        if (wt.hostId) counts.set(wt.hostId, (counts.get(wt.hostId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }
+
+  /** Whether the host's worker is ephemeral, so it can hand its workspaces over. */
+  isEphemeral(hostId: string): boolean {
+    const session = this.sessions.get(hostId);
+    return session?.attached === true && session.hello.mode === "ephemeral";
+  }
+
+  /**
+   * Asks the connected ephemeral worker to hand its workspaces over now, like an idle one. The
+   * worker answers at once and then sends `lifecycle.idle`, so the outcome shows as the worker
+   * exiting (or `sleepBlocker` saying why it did not). Returns false when no worker took it.
+   */
+  async requestSleep(hostId: string): Promise<boolean> {
+    const session = this.sessions.get(hostId);
+    if (!session?.attached || session.hello.mode !== "ephemeral") return false;
+    try {
+      const reply = await session.request<{ started?: boolean }>(
+        METHOD_LIFECYCLE_SLEEP,
+        {},
+        { timeoutMs: 15_000 },
+      );
+      return reply?.started !== false;
+    } catch (err) {
+      log.warn(`could not ask ${hostId} to sleep: ${errorText(err)}`);
+      return false;
+    }
+  }
+
   // ---- sleep --------------------------------------------------------------
 
   private workspacesOn(hostId: string): Tracked[] {
@@ -189,7 +253,10 @@ export class EphemeralLifecycleService {
     try {
       const tracked = this.workspacesOn(hostId);
       const busy = await this.busyReason(hostId, tracked);
-      if (busy) return { exit: false, reason: busy };
+      if (busy) {
+        this.blocked.set(hostId, busy);
+        return { exit: false, reason: busy };
+      }
       const rpc = new RemoteRpc(hostId, () => session);
       const host = hostRegistry.hostById(hostId);
       const stored: WorkspaceSleepRow[] = [];
@@ -201,6 +268,7 @@ export class EphemeralLifecycleService {
         throw err;
       }
       this.errors.delete(hostId);
+      this.blocked.delete(hostId);
       log.info(`stored ${tracked.length} workspace(s) of ${hostId}; the worker may exit`);
       exiting = true;
       this.releaseWhenGone(session, hostId, release);

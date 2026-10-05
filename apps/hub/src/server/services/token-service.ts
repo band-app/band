@@ -371,6 +371,12 @@ export class TokenService {
     return this.queries.findHost(id)?.status ?? null;
   }
 
+  /** A host's status and when the hub last saw its worker, or null when there is no such host. */
+  hostSeen(id: string): { status: string; lastSeenAt: number | null } | null {
+    const host = this.queries.findHost(id);
+    return host ? { status: host.status, lastSeenAt: host.lastSeenAt } : null;
+  }
+
   /** The oldest `limit` hosts, the local one first. */
   listHosts(limit: number = DEFAULT_LIST_LIMIT): HostView[] {
     return this.queries.listHosts(limit).map((h) => ({

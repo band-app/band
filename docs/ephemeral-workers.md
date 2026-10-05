@@ -22,6 +22,8 @@ A workspace placed on a worker that a runner started behaves like one on a machi
    - The files of each chat's agent session are copied to `<BAND_HOME>/sleep/<workspace id>/sessions.json`.
 4. The worker exits with code 0.
 
+The reaper starts the same hand-off before the idle time when a machine reaches its runner's `maxLifetimeSec`: the hub sends the worker `lifecycle.sleep`, the worker answers at once and sends `lifecycle.idle`, and steps 2 to 4 follow. The reaper destroys the machine after the worker has exited with its workspaces stored (see [Runner hooks](runner-hooks.md#the-reaper)).
+
 If anything in step 3 fails, nothing is kept half done. The worker stays up, `hosts.list` reports the reason as `sleepError`, and the worker asks again after another idle time. A workspace with uncommitted work, no writable origin and no usable `<BAND_HOME>/sleep` never loses that work this way.
 
 ## Waking up

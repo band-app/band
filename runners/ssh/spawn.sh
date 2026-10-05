@@ -55,6 +55,8 @@ export BAND_WORKER_EPHEMERAL=1
 export BAND_HOME="\$base/home/.band"
 $idle
 nohup $cmd >"\$base/worker.log" 2>&1 </dev/null &
-echo \$! >"\$base/pid"
-echo "started worker \$BAND_WORKER_ID as pid \$(cat "\$base/pid") on \$(hostname)"
+pid=\$!
+echo "\$pid" >"\$base/pid"
+echo "BAND_MACHINE_HANDLE=\$pid"
+echo "started worker \$BAND_WORKER_ID as pid \$pid on \$(hostname)"
 REMOTE

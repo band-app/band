@@ -125,4 +125,5 @@ if [ -n "$BAND_CLONE_URL" ]; then env -u BAND_BOOTSTRAP_TOKEN GIT_ALLOW_PROTOCOL
 exec band-worker'
 
 id="$(docker run "$@" --entrypoint /bin/sh "$image" -c "$start")"
+echo "BAND_MACHINE_HANDLE=$id"
 echo "started container $name (${id%"${id#????????????}"}) from $image"
