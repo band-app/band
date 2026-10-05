@@ -604,6 +604,11 @@ describe("the band CLI through the relay (S2)", () => {
         clearTimeout(timer);
         resolve({ code, out });
       });
+      // Most commands never read stdin and exit at once, so the pipe can close before this write
+      // lands. That is not a failure of the command, and an unhandled EPIPE would fail the run.
+      child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code !== "EPIPE") throw err;
+      });
       child.stdin.end(options.stdin ?? "");
     });
   const run = (...args: string[]) => runWith({}, ...args);
