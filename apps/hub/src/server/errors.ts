@@ -156,3 +156,23 @@ export class VaultInputError extends Error {
     this.name = "VaultInputError";
   }
 }
+
+/**
+ * Thrown by `McpProxyService` for input the caller can fix: a bad server name
+ * or URL, an unknown vault item, a token for a server that doesn't exist.
+ * `api/mcp-servers/router.ts` maps it to 400 `BAD_REQUEST`.
+ */
+export class McpProxyInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "McpProxyInputError";
+  }
+}
+
+/** Thrown by `McpProxyService` for an unknown server name. Mapped to 404 `NOT_FOUND`. */
+export class McpServerNotFoundError extends Error {
+  constructor(name: string) {
+    super(`MCP server "${name}" not found`);
+    this.name = "McpServerNotFoundError";
+  }
+}

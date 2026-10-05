@@ -675,3 +675,69 @@ export const vaultItems = sqliteTable(
   },
   (t) => [uniqueIndex("vault_items_scope_name_idx").on(t.scope, t.name)],
 );
+
+// HTTP MCP servers the hub proxies at `/mcp-proxy/<name>` (plan step 4.2). The
+// credential is a vault item (`vault_item_id`), never stored here. `allow_tools`
+// null means every tool; `read_only` keeps only tools in `read_only_tools` or
+// annotated `readOnlyHint`. Only `streamable HTTP` upstreams are proxied.
+export const mcpServers = sqliteTable(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    transport: text("transport", { enum: ["http"] })
+      .notNull()
+      .default("http"),
+    vaultItemId: text("vault_item_id"),
+    // Where an `api_key` credential goes: `<header_name>: <header_prefix><secret>`.
+    // An OAuth credential always goes as `Authorization: Bearer <access token>`.
+    headerName: text("header_name").notNull().default("Authorization"),
+    headerPrefix: text("header_prefix").notNull().default("Bearer "),
+    allowTools: text("allow_tools", { mode: "json" }).$type<string[] | null>(),
+    readOnly: integer("read_only", { mode: "boolean" }).notNull().default(false),
+    readOnlyTools: text("read_only_tools", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("mcp_servers_name_idx").on(t.name)],
+);
+
+// One short-lived token per agent session (`mcp_` prefix). Only the SHA-256 is
+// stored. `servers` lists the `mcp_servers.name`s the token may reach.
+export const mcpProxyTokens = sqliteTable(
+  "mcp_proxy_tokens",
+  {
+    id: text("id").primaryKey(),
+    hash: text("hash").notNull(),
+    sessionId: text("session_id").notNull(),
+    servers: text("servers", { mode: "json" }).$type<string[]>().notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+    revokedAt: integer("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("mcp_proxy_tokens_hash_idx").on(t.hash),
+    index("mcp_proxy_tokens_session_idx").on(t.sessionId),
+  ],
+);
+
+// One row per proxied `tools/call`. Holds no arguments and no results.
+export const mcpProxyAudit = sqliteTable(
+  "mcp_proxy_audit",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    at: integer("at").notNull(),
+    server: text("server").notNull(),
+    tool: text("tool").notNull(),
+    sessionId: text("session_id").notNull(),
+    ok: integer("ok", { mode: "boolean" }).notNull(),
+    error: text("error"),
+  },
+  (t) => [index("mcp_proxy_audit_at_idx").on(t.at)],
+);

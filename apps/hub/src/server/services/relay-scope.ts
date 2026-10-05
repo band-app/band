@@ -98,6 +98,8 @@ export function pinWorkspaceHost(request: RelayHttpRequest, workerId: string): R
  */
 const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "projects.list"]);
 
+const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
+
 /** The cronjob key is a workspace id for a workspace-scoped job and a project name for a project-scoped one. */
 const CRONJOB_KEY_PROCEDURES = new Set([
   "cronjobs.create",
@@ -436,6 +438,10 @@ export function checkRelayRequest(
   const { pathname } = url;
   if (pathname === "/api/health" && request.method === "GET") return { ok: true };
   if (pathname === "/mcp") return checkMcp(request, workerId, lookups);
+  // The MCP proxy checks its own per-session token, so the relay only has to
+  // let the call through. The workspace was checked above.
+  if (MCP_PROXY_ROUTE.test(pathname)) return { ok: true };
+  if (request.path.startsWith("/mcp-proxy/")) return deny(403, "Not an MCP proxy route");
   if (pathname.startsWith("/trpc/")) {
     try {
       return checkTrpc(request, url, workerId, lookups);

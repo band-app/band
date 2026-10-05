@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -78,11 +78,7 @@ export class Relay {
   private scopeOf(req: IncomingMessage): RelayScopeParams | undefined {
     const token = tokenOf(req);
     if (!token) return undefined;
-    const digest = sha256(token);
-    for (const [hash, scope] of this.scopes) {
-      if (timingSafeEqual(Buffer.from(hash, "hex"), digest)) return scope;
-    }
-    return undefined;
+    return this.scopes.get(sha256(token).toString("hex"));
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -108,6 +104,10 @@ export class Relay {
       for (const name of FORWARDED_HEADERS) {
         const value = req.headers[name];
         if (typeof value === "string") headers[name] = value;
+      }
+      // On the proxy route `Authorization` is the agent's MCP proxy token, not a relay credential.
+      if (isProxyRoute(path) && typeof req.headers.authorization === "string") {
+        headers.authorization = req.headers.authorization;
       }
       const request: RelayHttpRequest = {
         scope,
@@ -150,9 +150,24 @@ export class Relay {
   }
 }
 
+const PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
+const isProxyRoute = (path: string): boolean => PROXY_ROUTE.test(path.split("?")[0]);
+
+/** The header an agent's MCP client sets to name its relay token on the proxy route, where `Authorization` carries the proxy token. */
+const RELAY_TOKEN_HEADER = "x-band-relay-token";
+
 function tokenOf(req: IncomingMessage): string | undefined {
+  if (isProxyRoute(req.url ?? "")) {
+    const named = req.headers[RELAY_TOKEN_HEADER];
+    if (typeof named === "string") return named.trim();
+    return cookieToken(req);
+  }
   const auth = req.headers.authorization;
   if (typeof auth === "string" && /^bearer /i.test(auth)) return auth.slice(7).trim();
+  return cookieToken(req);
+}
+
+function cookieToken(req: IncomingMessage): string | undefined {
   const cookie = req.headers.cookie;
   if (typeof cookie === "string") {
     for (const part of cookie.split(";")) {

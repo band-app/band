@@ -87,6 +87,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: VaultCmd,
     },
+    /// Manage the MCP servers the hub proxies for agents (credentials stay in the vault)
+    Mcp {
+        #[command(subcommand)]
+        cmd: McpCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -666,6 +671,45 @@ enum VaultCmd {
 }
 
 #[derive(Subcommand)]
+enum McpCmd {
+    /// List the proxied MCP servers
+    List,
+    /// Add an HTTP MCP server. Agents reach it at `/mcp-proxy/<name>` on the hub.
+    Add {
+        /// Server name: lowercase letters, digits, hyphens and underscores
+        name: String,
+        /// The server's streamable HTTP endpoint (https, or http on loopback)
+        url: String,
+        /// Credential ID from `band vault list` (an API key or an OAuth connection)
+        #[arg(long)]
+        vault_item: Option<String>,
+        /// Header that carries an API key (default Authorization). An OAuth credential always uses Authorization.
+        #[arg(long)]
+        header: Option<String>,
+        /// Text before an API key in the header (default `Bearer `, pass an empty string for none)
+        #[arg(long)]
+        prefix: Option<String>,
+        /// Comma-separated tools agents may see and call. Default: every tool.
+        #[arg(long)]
+        allow_tools: Option<String>,
+        /// Keep only read-only tools (annotated readOnlyHint, or named in --read-only-tools)
+        #[arg(long)]
+        read_only: bool,
+        /// Comma-separated tools to treat as read-only
+        #[arg(long)]
+        read_only_tools: Option<String>,
+        /// Add the server switched off
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Remove a proxied MCP server
+    Remove {
+        /// Server name (from `band mcp list`)
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -965,6 +1009,31 @@ fn main() {
             } => cmd_vault_put(&name, &kind, &scope, description.as_deref(), value),
             VaultCmd::Delete { id } => cmd_vault_delete(&id),
             VaultCmd::RotateKey => cmd_vault_rotate_key(),
+        },
+        Commands::Mcp { cmd } => match cmd {
+            McpCmd::List => cmd_mcp_list(),
+            McpCmd::Add {
+                name,
+                url,
+                vault_item,
+                header,
+                prefix,
+                allow_tools,
+                read_only,
+                read_only_tools,
+                disabled,
+            } => cmd_mcp_add(
+                &name,
+                &url,
+                vault_item.as_deref(),
+                header.as_deref(),
+                prefix.as_deref(),
+                allow_tools.as_deref(),
+                read_only,
+                read_only_tools.as_deref(),
+                disabled,
+            ),
+            McpCmd::Remove { name } => cmd_mcp_remove(&name),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -3725,6 +3794,109 @@ fn cmd_vault_rotate_key() -> Result<CommandResult, String> {
     })
 }
 
+// --- MCP proxy commands ---
+
+fn split_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn cmd_mcp_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("mcp.list", &serde_json::json!({}))?;
+    let servers = data
+        .get("servers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 5]> = servers
+        .iter()
+        .map(|server| {
+            let text = |key: &str| server.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let tools = match server.get("allowTools").and_then(|v| v.as_array()) {
+                Some(list) => format!("{} allowed", list.len()),
+                None => "all".to_string(),
+            };
+            let mut mode =
+                if server.get("readOnly").and_then(serde_json::Value::as_bool) == Some(true) {
+                    "read-only".to_string()
+                } else {
+                    "read-write".to_string()
+                };
+            if server.get("enabled").and_then(serde_json::Value::as_bool) == Some(false) {
+                mode.push_str(", disabled");
+            }
+            [
+                text("name").to_string(),
+                text("url").to_string(),
+                if server.get("vaultItemId").is_some_and(|v| !v.is_null()) {
+                    "vault".to_string()
+                } else {
+                    "none".to_string()
+                },
+                tools,
+                mode,
+            ]
+        })
+        .collect();
+    Ok(CommandResult {
+        text: format_table(&["NAME", "URL", "CREDENTIAL", "TOOLS", "MODE"], &rows),
+        json: serde_json::json!({"servers": servers}),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_mcp_add(
+    name: &str,
+    url: &str,
+    vault_item: Option<&str>,
+    header: Option<&str>,
+    prefix: Option<&str>,
+    allow_tools: Option<&str>,
+    read_only: bool,
+    read_only_tools: Option<&str>,
+    disabled: bool,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"name": name, "url": url, "readOnly": read_only});
+    if let Some(v) = vault_item {
+        body["vaultItemId"] = serde_json::json!(v);
+    }
+    if let Some(v) = header {
+        body["headerName"] = serde_json::json!(v);
+    }
+    if let Some(v) = prefix {
+        body["headerPrefix"] = serde_json::json!(v);
+    }
+    if let Some(v) = allow_tools {
+        body["allowTools"] = serde_json::json!(split_list(v));
+    }
+    if let Some(v) = read_only_tools {
+        body["readOnlyTools"] = serde_json::json!(split_list(v));
+    }
+    if disabled {
+        body["enabled"] = serde_json::json!(false);
+    }
+    let data = client.trpc_mutate("mcp.add", &body)?;
+    Ok(CommandResult {
+        text: format!("Added MCP server {name}, proxied at /mcp-proxy/{name}\n"),
+        json: serde_json::json!({"server": data.get("server")}),
+    })
+}
+
+fn cmd_mcp_remove(name: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("mcp.remove", &serde_json::json!({"name": name}))?;
+    Ok(CommandResult {
+        text: format!("Removed MCP server {name}\n"),
+        json: serde_json::json!({"removed": true, "name": name}),
+    })
+}
+
 /// Resolve an explicit workspace ID, or auto-detect it from the current
 /// working directory by matching `git rev-parse --show-toplevel` against
 /// registered workspace paths.
@@ -4411,6 +4583,36 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Re-encrypt every stored credential under a new key",
             "parameters": [],
             "notes": "Needs an admin token. Only for a key file in BAND_HOME; a key from BAND_VAULT_KEY is changed in the environment."
+        }),
+        serde_json::json!({
+            "name": "mcp list",
+            "description": "List the HTTP MCP servers the hub proxies for agents",
+            "parameters": [],
+            "notes": "Needs an admin token. Text output: `NAME  URL  CREDENTIAL  TOOLS  MODE`.\nJSON output: `{\"servers\": [{\"id\": \"m-...\", \"name\": \"...\", \"url\": \"...\", \"vaultItemId\": null, \"allowTools\": null, \"readOnly\": false, \"readOnlyTools\": [], \"enabled\": true}]}`."
+        }),
+        serde_json::json!({
+            "name": "mcp add",
+            "description": "Add an HTTP MCP server the hub proxies at /mcp-proxy/<name>, injecting a vault credential",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Server name: lowercase letters, digits, hyphens and underscores"},
+                {"name": "url", "type": "string", "required": true, "positional": true, "description": "The server's streamable HTTP endpoint (https, or http on loopback)"},
+                {"name": "vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` (API key or OAuth connection)"},
+                {"name": "header", "type": "string", "required": false, "description": "Header that carries an API key (default Authorization)"},
+                {"name": "prefix", "type": "string", "required": false, "description": "Text before an API key in the header (default `Bearer `)"},
+                {"name": "allow-tools", "type": "string", "required": false, "description": "Comma-separated tools agents may see and call (default: all)"},
+                {"name": "read-only", "type": "boolean", "required": false, "description": "Keep only read-only tools"},
+                {"name": "read-only-tools", "type": "string", "required": false, "description": "Comma-separated tools to treat as read-only"},
+                {"name": "disabled", "type": "boolean", "required": false, "description": "Add the server switched off"},
+            ],
+            "notes": "Needs an admin token. Agents get a per-session token for the server and never see the credential."
+        }),
+        serde_json::json!({
+            "name": "mcp remove",
+            "description": "Remove a proxied MCP server",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Server name (from `band mcp list`)"},
+            ],
+            "notes": "Needs an admin token."
         }),
         serde_json::json!({
             "name": "runners list",

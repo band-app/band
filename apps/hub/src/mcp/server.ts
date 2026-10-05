@@ -39,6 +39,7 @@ function discoverProcedures(): ProcedureInfo[] {
     if (
       path.startsWith("tokens.") ||
       path.startsWith("vault.") ||
+      path.startsWith("mcp.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")
