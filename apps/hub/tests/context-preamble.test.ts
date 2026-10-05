@@ -125,7 +125,11 @@ beforeAll(async () => {
     },
   });
   await m("context.create", { name: "user" });
-  await m("context.create", { name: "acme", kind: "mission", repos: ["testrepo"] });
+  // A context that lists the repo, and a project with its own context. The worktree's project wins.
+  await m("context.create", { name: "other", kind: "project", repos: ["testrepo"] });
+  await write("other", "notes.md", "# Notes\nOTHER PROJECT NOTES\n");
+  await m("projects.create", { name: "acme", repos: [{ repo: "testrepo" }] });
+  await m("projects.attachWorktree", { project: "acme", worktreeId: "testrepo-main" });
   await write("user", "preferences.md", "# Preferences\nAlways use pnpm.\n");
   await write("acme", "notes.md", "# Notes\nThe release train leaves on Fridays.\n");
   await write(
@@ -147,6 +151,8 @@ describe("session preamble", () => {
     const text = appended(newSession(home, chatId));
     expect(text).toContain("Always use pnpm.");
     expect(text).toContain("The release train leaves on Fridays.");
+    // The worktree's project context applies, not the one that merely lists the repo.
+    expect(text).not.toContain("OTHER PROJECT NOTES");
     expect(text).toContain("acme/docs/deploy.md: How to deploy to staging");
     expect(text).toContain("acme/docs/api.md: The API guide");
     // The inlined files are not repeated in the index.
@@ -293,6 +299,7 @@ describe("auto memory on a worker", () => {
       branch: "mem",
       hostId: issued.hostId,
       hostRepoPath: repo,
+      projectId: "acme",
     });
 
     const chatId = await turn(server.url, "testrepo-mem", "claude-code");

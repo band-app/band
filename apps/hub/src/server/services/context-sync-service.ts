@@ -16,6 +16,7 @@
 import type { ContextPushResult, ContextSpec } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { contextService } from "./context-service";
+import { projectService } from "./project-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
 import { worktreeService } from "./worktree-service";
@@ -39,7 +40,11 @@ export class ContextSyncService {
       host.id === LOCAL_HOST_ID
         ? ((await host.info().catch(() => null))?.labels ?? [])
         : (tokenService.hostLabels(host.id) ?? []);
-    const rows = contextService.forSession(worktree.repo.name, labels);
+    const rows = contextService.forSession(
+      worktree.repo.name,
+      labels,
+      projectService.contextForWorktree(worktreeId),
+    );
     const specs: ContextSpec[] = rows.map((row) => ({
       name: row.name,
       kind: row.kind === "user" ? "user" : "project",

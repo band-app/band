@@ -276,10 +276,12 @@ export class ContextService {
 
   /**
    * The contexts a session of `repo` on a host with `hostLabels` gets (plan step 5.2): the user
-   * context and the repo's project context. A context whose labels the host lacks is left out.
+   * context and one project context. `projectContext` is the context of the worktree's project
+   * (step 6.1) and wins. Without one, the context that lists the repo applies. A context whose
+   * labels the host lacks is left out.
    */
-  forSession(repo: string, hostLabels: string[]): ContextRow[] {
-    return [this.queries.findUser(), this.forRepo(repo)]
+  forSession(repo: string, hostLabels: string[], projectContext?: ContextRow): ContextRow[] {
+    return [this.queries.findUser(), projectContext ?? this.forRepo(repo)]
       .filter((row): row is ContextRow => row !== undefined)
       .filter((row) => hostLabelsMatch(row.labels, hostLabels));
   }
