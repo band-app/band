@@ -203,6 +203,19 @@ export class TokenService {
     return row;
   }
 
+  /** The live worker session token this value is, as the host it belongs to, or null. */
+  resolveWorkerSession(candidate: string | undefined): { tokenId: string; hostId: string } | null {
+    const row = this.live(candidate, "worker_session");
+    if (!row || row.hostId == null) return null;
+    this.touch(row);
+    return { tokenId: row.id, hostId: row.hostId };
+  }
+
+  /** The labels (`k=v`) of a host, or null when there is no such host. */
+  hostLabels(id: string): string[] | null {
+    return this.queries.findHost(id)?.labels ?? null;
+  }
+
   /** Whether the value is a live device token. */
   acceptsDevice = (candidate: string | undefined): boolean =>
     this.resolveDevice(candidate) !== null;
