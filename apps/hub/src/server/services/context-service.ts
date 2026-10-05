@@ -45,6 +45,7 @@ export interface ContextView {
   labels: string[];
   repos: string[];
   workerAccess: ContextRow["workerAccess"];
+  preamble: boolean;
   syncError: string | null;
   lastSyncAt: number | null;
   createdAt: number;
@@ -69,6 +70,7 @@ function toView(row: ContextRow): ContextView {
     labels: row.labels,
     repos: row.repos,
     workerAccess: row.workerAccess,
+    preamble: row.preamble,
     syncError: row.syncError,
     lastSyncAt: row.lastSyncAt,
     createdAt: row.createdAt,
@@ -357,6 +359,7 @@ export class ContextService {
         labels,
         repos,
         workerAccess: input.workerAccess ?? "read-write",
+        preamble: true,
         syncError: null,
         lastSyncAt: null,
         createdAt: Date.now(),
@@ -395,13 +398,19 @@ export class ContextService {
 
   update(
     name: string,
-    patch: { labels?: string[]; repos?: string[]; workerAccess?: ContextRow["workerAccess"] },
+    patch: {
+      labels?: string[];
+      repos?: string[];
+      workerAccess?: ContextRow["workerAccess"];
+      preamble?: boolean;
+    },
   ): ContextView {
     const row = this.require(name);
     const set: Partial<ContextRow> = {};
     if (patch.labels) set.labels = validateLabels(patch.labels);
     if (patch.repos) set.repos = this.checkRepos(name, row.kind, patch.repos);
     if (patch.workerAccess) set.workerAccess = patch.workerAccess;
+    if (patch.preamble !== undefined) set.preamble = patch.preamble;
     if (Object.keys(set).length > 0) this.queries.update(name, set);
     return toView(this.require(name));
   }

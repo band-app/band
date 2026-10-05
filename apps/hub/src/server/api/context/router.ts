@@ -61,6 +61,7 @@ export const contextRouter = t.router({
         labels: labels.optional(),
         repos: repoNames.optional(),
         workerAccess: workerAccess.optional(),
+        preamble: z.boolean().optional(),
       }),
     )
     .mutation(({ input }) =>
@@ -69,6 +70,7 @@ export const contextRouter = t.router({
           labels: input.labels,
           repos: input.repos,
           workerAccess: input.workerAccess,
+          preamble: input.preamble,
         }),
       })),
     ),

@@ -31,7 +31,7 @@ function pullTimeoutMs(): number {
 
 export class ContextSyncService {
   /** The contexts a worktree's host may hold for its session, and the host that holds them. */
-  private async specsFor(worktreeId: string) {
+  async contextsFor(worktreeId: string) {
     const worktree = worktreeService.resolve(worktreeId);
     if (!worktree) return null;
     const host = worktree.host;
@@ -45,7 +45,7 @@ export class ContextSyncService {
       kind: row.kind === "user" ? "user" : "project",
     }));
     const readOnly = new Set(rows.filter((r) => r.workerAccess === "read-only").map((r) => r.name));
-    return { host, specs, readOnly };
+    return { host, specs, readOnly, rows };
   }
 
   /**
@@ -54,7 +54,7 @@ export class ContextSyncService {
    */
   async pullForWorktree(worktreeId: string): Promise<void> {
     try {
-      const target = await this.specsFor(worktreeId);
+      const target = await this.contextsFor(worktreeId);
       if (!target || target.specs.length === 0) return;
       const results = await target.host.context.pull({
         contexts: target.specs,
@@ -83,7 +83,7 @@ export class ContextSyncService {
     turn: number,
   ): Promise<ContextPushResult[]> {
     try {
-      const target = await this.specsFor(worktreeId);
+      const target = await this.contextsFor(worktreeId);
       if (!target || target.specs.length === 0) return [];
       const { readOnly } = target;
       const hostId = target.host.id;
