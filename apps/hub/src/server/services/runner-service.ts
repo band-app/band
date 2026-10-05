@@ -57,6 +57,7 @@ import {
   resolveHookPath,
 } from "./_utils/runner-config";
 import { environmentBuildService } from "./environment-build-service";
+import { gitCredentialService } from "./git-credential-service";
 import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
@@ -589,8 +590,23 @@ export class RunnerService {
       }
     }, LEASE_MS / 3);
     renew.unref?.();
+    let fulfilled = false;
     try {
-      const env = this.hookEnv(runner, row, issued.hostId, issued.token, await repoUrls(row));
+      const repos = await repoUrls(row);
+      const env = this.hookEnv(runner, row, issued.hostId, issued.token, repos);
+      // A repository the vault holds a git credential for is cloned by the hub through the worker
+      // once it says hello, because the hook has no credential. The hook skips its own clone.
+      const hubClone =
+        !snapshot && repos[0] && !repos[0].startsWith("/")
+          ? (await gitCredentialService.hasCredentialFor(repos[0], row.project))
+            ? repos[0]
+            : null
+          : null;
+      if (hubClone) {
+        env.BAND_CLONE_BY_HUB = "1";
+        gitCredentialService.expectRemote(issued.hostId, hubClone, row.project);
+        runLog.write("hub", "the hub will clone the repository with a vault git credential");
+      }
       let hostProjectPath: string | undefined;
       if (snapshot) {
         env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
@@ -625,6 +641,10 @@ export class RunnerService {
         await sleep(HELLO_POLL_MS);
       }
       this.machines.update(machineId, { state: "running", lastSeenAt: Date.now() });
+      if (hubClone && hostProjectPath) {
+        await this.cloneOnHost(issued.hostId, hubClone, hostProjectPath);
+        runLog.write("hub", `cloned the repository to ${hostProjectPath}`);
+      }
       // From here the machine's disk is the one the snapshot held, so the hub skips its git restore.
       if (snapshot) this.snapshots.markRestored(snapshot.id, Date.now());
       try {
@@ -633,10 +653,27 @@ export class RunnerService {
         if (err instanceof HostRequestError) throw new Aborted(err.message);
         throw err;
       }
+      fulfilled = true;
       return issued.hostId;
     } finally {
       clearInterval(renew);
+      // A failed attempt removes its host, so its clone grant goes with it.
+      if (!fulfilled) gitCredentialService.forget(issued.hostId);
     }
+  }
+
+  /**
+   * Clones `url` into `dest` on the worker, with git on the worker asking the hub for the
+   * credential. Does nothing when `dest` already exists.
+   */
+  private async cloneOnHost(hostId: string, url: string, dest: string): Promise<void> {
+    const host = hostRegistry.hostById(hostId);
+    const exists = await host.fs.stat(dest).then(
+      () => true,
+      () => false,
+    );
+    if (exists) return;
+    await host.git.exec(["clone", "--quiet", "--", url, dest], dirname(dest));
   }
 
   /** Records the machine of an attempt. An older machine of the same worker id is gone by now, so it is retired. */

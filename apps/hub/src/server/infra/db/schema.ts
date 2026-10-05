@@ -684,7 +684,7 @@ export const vaultItems = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["api_key", "oauth", "env"] }).notNull(),
+    kind: text("kind", { enum: ["api_key", "oauth", "env", "git"] }).notNull(),
     // `global` or `project:<name>`.
     scope: text("scope").notNull().default("global"),
     encrypted: text("encrypted").notNull(),
@@ -778,4 +778,30 @@ export const mcpProxyAudit = sqliteTable(
     error: text("error"),
   },
   (t) => [index("mcp_proxy_audit_at_idx").on(t.at)],
+);
+
+// Context git repos the hub holds (plan step 5.1). The bare repo lives at
+// `<BAND_HOME>/context/<name>.git`. `labels` are `k=v` host labels: a worker
+// may pull only when its host carries all of them (empty means any worker).
+// `worker_access` is what a worker may do over the git endpoint. A linked
+// remote is mirrored both ways, with its credential in the vault
+// (`remote_vault_item_id`), never stored here.
+export const contexts = sqliteTable(
+  "contexts",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["user", "mission"] }).notNull(),
+    remoteUrl: text("remote_url"),
+    remoteVaultItemId: text("remote_vault_item_id"),
+    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
+      .notNull()
+      .default("read-write"),
+    // Outcome of the last mirror run with the remote: null when it was clean.
+    syncError: text("sync_error"),
+    lastSyncAt: integer("last_sync_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("contexts_name_idx").on(t.name)],
 );

@@ -42,7 +42,7 @@ base="\$(pwd)"
 mkdir -p "\$base/home/.band" "\$base/state" "\$base/work"
 chmod 700 "\$base"
 if [ -n $(q "$repo") ]; then
-  git clone --quiet -- $(q "$repo") "\$base/work/$name"
+  if [ -z $(q "${BAND_CLONE_BY_HUB:-}") ]; then git clone --quiet -- $(q "$repo") "\$base/work/$name"; fi
   echo "BAND_HOST_PROJECT_PATH=\$base/work/$name"
 fi
 export BAND_HUB_URL=$(q "$BAND_HUB_URL")

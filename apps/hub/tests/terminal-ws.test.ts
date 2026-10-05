@@ -19,21 +19,40 @@
 // This is a black-box integration test against the production server
 // bundle (`dist/start-server.mjs`), with a real WebSocket client. No mocks.
 
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createTRPCClient, createWSClient, httpBatchLink, wsLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { AppRouter } from "../src/server/api/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
-import { stopTerminalDaemon } from "./helpers/terminal-daemon";
+import {
+  createTmpHome as createTmpHomeBase,
+  getRandomPort,
+  type ServerHandle as ServerHandleBase,
+  startServer as startServerBase,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "terminal-ws-test-token";
+
+type ServerHandle = ServerHandleBase & { port: number };
+
+function createTmpHome(): string {
+  return createTmpHomeBase("band-terminal-ws-test-");
+}
+
+async function startServer(
+  home: string,
+  extraEnv: Record<string, string> = {},
+): Promise<ServerHandle> {
+  const handle = await startServerBase({
+    tmpHome: home,
+    env: extraEnv,
+    port: await getRandomPort(),
+  });
+  return { ...handle, port: Number(new URL(handle.url).port) };
+}
 
 // A deliberately long, nonexistent worktree path. The terminal pool
 // throws `Workspace directory does not exist: ${cwd}` (36 + cwd bytes), so
@@ -51,121 +70,6 @@ function makeLongStalePath(home: string): string {
     "worktrees",
     "feat-journaling-promptkey-very-long-branch-name-for-padding",
   );
-}
-
-interface ServerHandle {
-  url: string;
-  port: number;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-terminal-ws-test-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(
-  home: string,
-  extraEnv: Record<string, string> = {},
-): Promise<ServerHandle> {
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...extraEnv,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-      // Own process group, so teardown signals the whole tree (git, LSP
-      // servers) like `tests/helpers/server.ts` does.
-      detached: true,
-    });
-
-    // `-pid` targets the group; ESRCH just means it is already gone.
-    const killGroup = (signal: NodeJS.Signals) => {
-      try {
-        if (typeof child.pid === "number") process.kill(-child.pid, signal);
-        else child.kill(signal);
-      } catch {
-        // group already torn down
-      }
-    };
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          port,
-          home,
-          close: async () => {
-            await new Promise<void>((r) => {
-              // Already gone: `exit` won't fire again, so waiting would hang.
-              if (child.exitCode !== null || child.signalCode !== null) {
-                r();
-                return;
-              }
-              const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
-              child.on("exit", () => {
-                clearTimeout(fallback);
-                r();
-              });
-              killGroup("SIGTERM");
-            });
-            await stopTerminalDaemon(home);
-          },
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        killGroup("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
 }
 
 describe("terminal WebSocket — close-reason byte cap", () => {
@@ -213,7 +117,7 @@ describe("terminal WebSocket — close-reason byte cap", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("clamps close reason to ≤123 bytes and ships the full message in a JSON frame", async () => {
@@ -317,7 +221,7 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("responds with a {type:'pong'} frame to a client {type:'ping'}", async () => {
@@ -400,7 +304,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   // OSC 11 (background) query + OSC 10 (foreground) rgb: report, plus a
@@ -694,7 +598,7 @@ describe("terminal WebSocket — authentication", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("returns 401 for an HTTP request without the band_token cookie", async () => {
@@ -771,7 +675,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   /** Connect to a terminal, optionally resize, run a command, wait until
@@ -1113,7 +1017,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
   afterAll(async () => {
     if (server) await server.close();
-    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+    if (tmpHome) removeTmpHome(tmpHome);
   });
 
   it("spawns the pane shell without NO_COLOR / FORCE_COLOR / CLICOLOR", async () => {

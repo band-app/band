@@ -2085,6 +2085,56 @@ fn vault_put_list_delete() {
     assert!(!empty.status.success());
 }
 
+#[test]
+fn vault_put_git_credential() {
+    let env = TestEnv::new();
+    let secret = "gitpat_cli_VALUE_0123456789";
+
+    // A git item needs its host and path pattern, and they apply only to git items.
+    let missing = env.band(&["vault", "put", "gh", "--kind", "git", "--value", secret]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("--host"),
+        "stderr: {}",
+        stderr(&missing)
+    );
+    let stray = env.band(&[
+        "vault",
+        "put",
+        "k",
+        "--host",
+        "github.com",
+        "--value",
+        secret,
+    ]);
+    assert!(!stray.status.success());
+
+    let put = env.band(&[
+        "vault",
+        "put",
+        "gh",
+        "--kind",
+        "git",
+        "--host",
+        "github.com",
+        "--path",
+        "owner/*",
+        "--username",
+        "band-bot",
+        "--value",
+        secret,
+        "--output",
+        "json",
+    ]);
+    assert!(put.status.success(), "stderr: {}", stderr(&put));
+    assert!(!stdout(&put).contains(secret));
+    let item = &json_of(&put)["item"];
+    assert_eq!(item["kind"], "git");
+    assert_eq!(item["metadata"]["host"], "github.com");
+    assert_eq!(item["metadata"]["pathPattern"], "owner/*");
+    assert_eq!(item["metadata"]["username"], "band-bot");
+}
+
 // --- MCP proxy tests ---
 
 #[test]
@@ -2147,6 +2197,85 @@ fn mcp_add_list_remove() {
     let listed = json_of(&env.band(&["mcp", "list", "--output", "json"]));
     assert!(listed["servers"].as_array().unwrap().is_empty());
     assert!(!env.band(&["mcp", "remove", "notes"]).status.success());
+}
+
+#[test]
+fn context_create_list_link_remove() {
+    let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
+
+    let created = env.band(&[
+        "context",
+        "create",
+        "alpha",
+        "--labels",
+        "org=epic, region=eu",
+        "--read-only",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let context = &json_of(&created)["context"];
+    assert_eq!(context["name"], "alpha");
+    assert_eq!(context["kind"], "mission");
+    assert_eq!(
+        context["labels"],
+        serde_json::json!(["org=epic", "region=eu"])
+    );
+    assert_eq!(context["workerAccess"], "read-only");
+
+    let user = env.band(&["context", "create", "user"]);
+    assert!(user.status.success(), "stderr: {}", stderr(&user));
+
+    let listed = json_of(&env.band(&["context", "list", "--output", "json"]));
+    let names: Vec<&str> = listed["contexts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["alpha", "user"]);
+    let text = stdout(&env.band(&["context", "list"]));
+    assert!(text.starts_with("NAME"), "text: {text}");
+    assert!(text.contains("org=epic,region=eu"), "text: {text}");
+
+    // A duplicate, a bad name and a second user context are refused.
+    assert!(!env.band(&["context", "create", "alpha"]).status.success());
+    assert!(!env
+        .band(&["context", "create", "Bad Name"])
+        .status
+        .success());
+    assert!(!env
+        .band(&[
+            "context",
+            "create",
+            "again",
+            "--remote",
+            "http://example.com/r.git"
+        ])
+        .status
+        .success());
+
+    // link-remote needs a URL or --unlink, not both and not neither.
+    assert!(!env
+        .band(&["context", "link-remote", "alpha"])
+        .status
+        .success());
+    assert!(!env
+        .band(&[
+            "context",
+            "link-remote",
+            "alpha",
+            "https://example.com/r.git",
+            "--unlink"
+        ])
+        .status
+        .success());
+    let unlinked = env.band(&["context", "link-remote", "alpha", "--unlink"]);
+    assert!(unlinked.status.success(), "stderr: {}", stderr(&unlinked));
+
+    let removed = env.band(&["context", "remove", "alpha"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    assert!(!env.band(&["context", "remove", "alpha"]).status.success());
 }
 
 // --- Subscriptions tests ---

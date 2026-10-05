@@ -1,43 +1,32 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createTmpHomeBase,
+  type ServerHandle,
+  startServer as startServerBase,
+} from "./helpers/server";
+import { SERVER_RUNTIME } from "./helpers/server-runtime";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "test-token-for-services";
+
+function createTmpHome(): string {
+  return createTmpHomeBase("band-test-");
+}
+
+async function startServer(
+  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+): Promise<ServerHandle> {
+  return startServerBase({ tmpHome: opts.tmpHome ?? createTmpHome(), env: opts.env });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = mkdtempSync(join(tmpdir(), "band-test-"));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
 
 function createDefaultState(tmpHome: string) {
   const repoDir = join(tmpHome, "repo");
@@ -52,72 +41,6 @@ function createDefaultState(tmpHome: string) {
       },
     ],
   };
-}
-
-async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +99,7 @@ describe("services.health", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns webserver as healthy since the web server is running", async () => {
@@ -213,7 +136,7 @@ describe("tunnel.status", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns tunnel not running when no tunnel has been started", async () => {
@@ -247,7 +170,7 @@ describe("tunnel.stop", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("succeeds even when no tunnel is running", async () => {
@@ -277,7 +200,7 @@ describe("prereqs.check", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns prerequisite status with cloudflared boolean", async () => {
@@ -326,7 +249,7 @@ describe("prereqs.check — cloudflared not installed", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns cloudflared: false when not on PATH", async () => {
@@ -369,7 +292,7 @@ describe("tunnel.stop — resets tunnel status", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("tunnel status remains not-running after stop", async () => {
@@ -407,7 +330,7 @@ describe("tRPC status.stream subscription — SSE event format", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns SSE content-type and streams events", async () => {
@@ -444,7 +367,7 @@ describe("Tunnel and service endpoints require auth when token is set", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("returns 401 for services.health without auth", async () => {
@@ -532,7 +455,7 @@ describe("tRPC status.stream subscription via WebSocket", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("connects and receives subscription data over WebSocket", async () => {

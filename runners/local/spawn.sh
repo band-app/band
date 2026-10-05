@@ -24,7 +24,8 @@ chmod 700 "$base"
 if [ -n "${BAND_REPO_URLS:-}" ]; then
   repo="${BAND_REPO_URLS%%,*}"
   name="$(printf '%s' "${BAND_PROJECT:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
-  git clone --quiet -- "$repo" "$base/work/$name"
+  # With BAND_CLONE_BY_HUB the hub clones through the worker, which asks it for the credential.
+  if [ -z "${BAND_CLONE_BY_HUB:-}" ]; then git clone --quiet -- "$repo" "$base/work/$name"; fi
   echo "BAND_HOST_PROJECT_PATH=$base/work/$name"
 fi
 

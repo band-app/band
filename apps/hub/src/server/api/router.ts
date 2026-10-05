@@ -49,6 +49,7 @@ import { chatRouter } from "./chat/router";
 import { chatsRouter } from "./chats/router";
 import { cliRouter } from "./cli/router";
 import { clientStateRouter } from "./client-state/router";
+import { contextRouter } from "./context/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { environmentRouter } from "./environment/router";
@@ -107,6 +108,7 @@ export const appRouter = t.router({
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,
+  context: contextRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

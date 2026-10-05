@@ -176,3 +176,25 @@ export class McpServerNotFoundError extends Error {
     this.name = "McpServerNotFoundError";
   }
 }
+
+/**
+ * Thrown by `ContextService` for an unknown context name.
+ * `api/context/router.ts` maps it to 404 `NOT_FOUND`.
+ */
+export class ContextNotFoundError extends Error {
+  constructor(name: string) {
+    super(`No context named "${name}"`);
+    this.name = "ContextNotFoundError";
+  }
+}
+
+/**
+ * Thrown by `ContextService` for input the caller can fix: a bad name, a
+ * duplicate, an unusable remote. `api/context/router.ts` maps it to 400.
+ */
+export class ContextInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContextInputError";
+  }
+}
