@@ -58,6 +58,17 @@ export class RunnerMachineQueries {
       .all();
   }
 
+  /** The newest machine of a worker id that may still exist. */
+  latestLiveForWorker(workerId: string): RunnerMachineRow | undefined {
+    return getDb()
+      .select()
+      .from(runnerMachines)
+      .where(and(eq(runnerMachines.workerId, workerId), inArray(runnerMachines.state, LIVE_STATES)))
+      .orderBy(desc(runnerMachines.spawnedAt))
+      .limit(1)
+      .get();
+  }
+
   /** Marks the `lost` machines of a runner with this handle as destroyed. */
   settleHandle(runnerId: string, handle: string, note: string): void {
     getDb()

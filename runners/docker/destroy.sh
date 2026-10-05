@@ -29,7 +29,7 @@ fi
 
 if err="$(docker rm --force --volumes "$name" 2>&1)"; then
   echo "removed container $name"
-elif printf '%s' "$err" | grep -qi "no such container"; then
+elif printf '%s' "$err" | grep -qiE "no such container|already in progress"; then
   echo "container $name is already gone"
 else
   # An unreachable daemon is not "gone": report it so the run log shows the leak.

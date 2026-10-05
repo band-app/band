@@ -42,7 +42,7 @@ interface HookResult {
  */
 function hook(
   name: string,
-  which: "spawn" | "destroy" | "status",
+  which: "spawn" | "destroy" | "status" | "snapshot" | "restore" | "snapshot-delete",
   extra: Record<string, string>,
   runnerDir: string,
 ): Promise<HookResult> {
@@ -194,6 +194,145 @@ describe("hetzner hook", () => {
     const res = await hook("hetzner", "spawn", { HCLOUD_API_URL: stub.url }, dir);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain("HCLOUD_TOKEN is required");
+  });
+
+  describe("snapshot, restore and snapshot-delete (plan step 3.10)", () => {
+    const polling = () => ({ ...env(), BAND_RUNNER_POLL_MS: "20" });
+
+    it("snapshot makes a labelled image of the server, waits for it and prints its id and size", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      const server = stub.servers[0];
+      stub.actionPolls.running = 2;
+      const res = await hook(
+        "hetzner",
+        "snapshot",
+        { ...polling(), BAND_MACHINE_HANDLE: String(server.id) },
+        dir,
+      );
+      expect(res.status, res.stderr).toBe(0);
+      expect(stub.images).toHaveLength(1);
+      const image = stub.images[0];
+      expect(res.stdout).toContain(`BAND_SNAPSHOT_ID=${image.id}\n`);
+      expect(res.stdout).toContain("BAND_SNAPSHOT_SIZE=2500000000\n");
+      expect(image).toMatchObject({
+        created_from: server.id,
+        labels: {
+          "band.runner": "vm-runner",
+          "band.worker": "h-0123456789ab",
+          "band.snapshot": "1",
+        },
+      });
+      // It polled the action until it succeeded.
+      expect(stub.requests.filter((r) => r.line.startsWith("GET /actions/"))).toHaveLength(3);
+    });
+
+    it("snapshot finds the server by its worker label when it has no handle", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      const res = await hook("hetzner", "snapshot", polling(), dir);
+      expect(res.status, res.stderr).toBe(0);
+      expect(stub.images[0]?.created_from).toBe(stub.servers[0]?.id);
+    });
+
+    it("snapshot fails, naming the reason, and deletes the half-made image", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      stub.actionPolls.fail = true;
+      const res = await hook("hetzner", "snapshot", polling(), dir);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain("snapshot failed");
+      expect(res.stdout).not.toContain("BAND_SNAPSHOT_ID");
+      expect(stub.images).toHaveLength(0);
+    });
+
+    it("snapshot fails when the worker has no server", async () => {
+      const res = await hook("hetzner", "snapshot", polling(), dir);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain("no server for worker h-0123456789ab");
+    });
+
+    it("restore creates a server from the image, with cloud-init that skips the install and the clone", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      const handle = String(stub.servers[0]?.id);
+      expect((await hook("hetzner", "snapshot", polling(), dir)).status).toBe(0);
+      const imageId = stub.images[0]?.id as number;
+      // The machine was destroyed after its snapshot.
+      expect((await hook("hetzner", "destroy", env(), dir)).status).toBe(0);
+      expect(stub.servers).toHaveLength(0);
+
+      const res = await hook(
+        "hetzner",
+        "restore",
+        {
+          ...env(),
+          BAND_SNAPSHOT_ID: String(imageId),
+          BAND_BOOTSTRAP_TOKEN: "bwb_newtoken9876543210",
+        },
+        dir,
+      );
+      expect(res.status, res.stderr).toBe(0);
+      expect(stub.servers).toHaveLength(1);
+      const server = stub.servers[0] as (typeof stub.servers)[number];
+      expect(server.id).not.toBe(Number(handle));
+      expect(server.image).toBe(String(imageId));
+      expect(server.labels["band.worker"]).toBe("h-0123456789ab");
+      expect(res.stdout).toContain(`BAND_MACHINE_HANDLE=${server.id}\n`);
+      // The repository is on the snapshot's disk already.
+      expect(res.stdout).not.toContain("BAND_HOST_PROJECT_PATH");
+
+      const cfg = parseCloudConfig(server.user_data);
+      expect(file(cfg, "/etc/band-worker.env").content).toContain(
+        'BAND_BOOTSTRAP_TOKEN="bwb_newtoken9876543210"',
+      );
+      const script = file(cfg, "/usr/local/sbin/band-bootstrap.sh").content;
+      expect(script).toContain("rm -f '/home/band/work/.band-worker/session-token'");
+      expect(script).toContain("systemctl start band-worker.service");
+      for (const step of ["git clone", "useradd", "npm install", "apt-get"]) {
+        expect(script).not.toContain(step);
+      }
+      for (const text of [res.stdout, res.stderr]) expect(text).not.toContain("bwb_newtoken");
+    });
+
+    it("restore replaces a server the worker id still has, and refuses an id that is not an image", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      expect((await hook("hetzner", "snapshot", polling(), dir)).status).toBe(0);
+      const imageId = String(stub.images[0]?.id);
+      const res = await hook("hetzner", "restore", { ...env(), BAND_SNAPSHOT_ID: imageId }, dir);
+      expect(res.status, res.stderr).toBe(0);
+      expect(stub.servers).toHaveLength(1);
+
+      const bad = await hook(
+        "hetzner",
+        "restore",
+        { ...env(), BAND_SNAPSHOT_ID: "ubuntu-24.04" },
+        dir,
+      );
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toContain("must be a Hetzner image id");
+      const missing = await hook("hetzner", "restore", env(), dir);
+      expect(missing.status).toBe(1);
+      expect(missing.stderr).toContain("BAND_SNAPSHOT_ID is required");
+    });
+
+    it("snapshot-delete removes the image and succeeds when it is gone already", async () => {
+      expect((await hook("hetzner", "spawn", env(), dir)).status).toBe(0);
+      expect((await hook("hetzner", "snapshot", polling(), dir)).status).toBe(0);
+      const imageId = String(stub.images[0]?.id);
+      const first = await hook(
+        "hetzner",
+        "snapshot-delete",
+        { ...env(), BAND_SNAPSHOT_ID: imageId },
+        dir,
+      );
+      expect(first.status, first.stderr).toBe(0);
+      expect(stub.images).toHaveLength(0);
+      const again = await hook(
+        "hetzner",
+        "snapshot-delete",
+        { ...env(), BAND_SNAPSHOT_ID: imageId },
+        dir,
+      );
+      expect(again.status, again.stderr).toBe(0);
+      expect(again.stdout).toContain("already gone");
+    });
   });
 
   it("docker mode runs the image and the clone path is the container's", async () => {

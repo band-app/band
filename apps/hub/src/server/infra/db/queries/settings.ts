@@ -18,6 +18,12 @@ export interface RunnerSettings {
   maxLifetimeSec?: number;
   lifetimeGraceSec: number;
   env: Record<string, string>;
+  snapshot?: string;
+  restore?: string;
+  snapshotDelete?: string;
+  snapshotKeep: number;
+  snapshotTtlSec: number;
+  snapshotTimeoutSec: number;
 }
 
 /**
