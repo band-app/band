@@ -32,6 +32,8 @@ export interface Host {
   /** Runs a binary on the host with `PATH` extended to the usual tool directories. */
   exec(bin: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   readonly agentEnv: HostAgentEnv;
+  /** Working copies of the hub's context repos, under `<BAND_HOME>/context` on the host. */
+  readonly context: HostContext;
   /**
    * How a process on the host reaches the hub. A host that runs in the hub
    * process (`LocalHost`) has none, because its processes use the hub's own
@@ -545,4 +547,99 @@ export interface HostRelay {
    * limited to the host's own worktrees. Rejects when the host is offline.
    */
   issue(scope: RelayScope): Promise<RelayGrant>;
+}
+
+// ---------------------------------------------------------------------------
+// Context sync
+// ---------------------------------------------------------------------------
+
+/** One context repo to sync. A project context lives at `projects/<name>`, the user context at `user`. */
+export interface ContextSpec {
+  name: string;
+  kind: "user" | "project";
+}
+
+/**
+ * What the hub knows about its vault secrets, enough to spot one in a file and
+ * hard to recover for a long secret. A secret shorter than 12 characters is left out.
+ */
+export interface SecretFingerprint {
+  length: number;
+  /** The first 4 characters. */
+  prefix: string;
+  /** SHA-256 of the whole value, hex. */
+  sha256: string;
+}
+
+export interface ContextPullRequest {
+  contexts: ContextSpec[];
+  /** How long one context may take. On a timeout the copy on disk stays as it was. */
+  timeoutMs?: number;
+}
+
+export type ContextPullStatus =
+  /** Cloned or moved forward. */
+  | "updated"
+  /** Already at the hub's head. */
+  | "current"
+  /** The hub did not answer in time or failed. A copy from an earlier pull is still there. */
+  | "stale"
+  /** The hub did not answer and no copy exists. */
+  | "missing"
+  /** The hub refused this host (labels, token). */
+  | "denied";
+
+export interface ContextPullResult {
+  name: string;
+  status: ContextPullStatus;
+  /** Why a pull was stale, missing or denied. */
+  error?: string;
+}
+
+export interface ContextPushRequest {
+  contexts: ContextSpec[];
+  /** The commit message of each pushed change. */
+  message: string;
+  /** Names conflict copies (`file.conflict-<host>-<ts>`). */
+  hostLabel: string;
+  secrets: SecretFingerprint[];
+}
+
+export interface ContextConflict {
+  path: string;
+  /** Where this host's version was kept. */
+  keptAs: string;
+}
+
+export interface ContextFinding {
+  path: string;
+  /** The pattern that matched, such as `github-token`. Never the value. */
+  rule: string;
+  line: number;
+}
+
+export type ContextPushStatus =
+  /** Changes committed and pushed. */
+  | "pushed"
+  /** Nothing to push. */
+  | "clean"
+  /** The hub refused the push or did not answer. The commit stays local and goes with the next push. */
+  | "failed";
+
+export interface ContextPushResult {
+  name: string;
+  status: ContextPushStatus;
+  conflicts: ContextConflict[];
+  /** Files the redaction scan held back. They are in `quarantine`, not pushed. */
+  blocked: ContextFinding[];
+  /** Directory on the host holding the files the scan held back. */
+  quarantine?: string;
+  error?: string;
+}
+
+export interface HostContext {
+  /** Brings each context's working copy up to the hub's head. Never rejects for a hub failure. */
+  pull(request: ContextPullRequest): Promise<ContextPullResult[]>;
+  /** Commits what changed in each working copy, scans it, rebases on the hub's head and pushes. */
+  push(request: ContextPushRequest): Promise<ContextPushResult[]>;
 }

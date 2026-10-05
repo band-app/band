@@ -815,6 +815,21 @@ export const contexts = sqliteTable(
   (t) => [uniqueIndex("contexts_name_idx").on(t.name)],
 );
 
+// What the worker sync (plan step 5.2) reported to the hub: a conflict whose two versions were
+// kept, or files the redaction scan held back. `detail` never holds a matched secret.
+export const contextEvents = sqliteTable(
+  "context_events",
+  {
+    id: text("id").primaryKey(),
+    context: text("context").notNull(),
+    hostId: text("host_id").notNull(),
+    kind: text("kind", { enum: ["conflict", "blocked"] }).notNull(),
+    detail: text("detail", { mode: "json" }).$type<unknown>().notNull(),
+    at: integer("at").notNull(),
+  },
+  (t) => [index("context_events_at_idx").on(t.at)],
+);
+
 // A project is the cross-repo body of work (plan step 6.1). `context_name` is its
 // context repo (`contexts.name`, kind `project`). `labels` are `k=v` host labels and
 // `policy` holds placement defaults for the coordinator of step 6.2.

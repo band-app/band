@@ -34,6 +34,7 @@ const MAX_LABELS = 20;
 const DEFAULT_POLL_MS = 60_000;
 const PUSH_DEBOUNCE_MS = 2_000;
 const GIT_TIMEOUT_MS = 5 * 60_000;
+const EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 export interface ContextView {
   id: string;
@@ -269,6 +270,40 @@ export class ContextService {
   /** The named context that serves as the project context of a repo's agents, if any. */
   forRepo(repoName: string): ContextRow | undefined {
     return this.queries.list().find((c) => c.kind === "project" && c.repos.includes(repoName));
+  }
+
+  /**
+   * The contexts a session of `repo` on a host with `hostLabels` gets (plan step 5.2): the user
+   * context and the repo's project context. A context whose labels the host lacks is left out.
+   */
+  forSession(repo: string, hostLabels: string[]): ContextRow[] {
+    return [this.queries.findUser(), this.forRepo(repo)]
+      .filter((row): row is ContextRow => row !== undefined)
+      .filter((row) => hostLabelsMatch(row.labels, hostLabels));
+  }
+
+  /** Records what a host's sync reported. The detail never holds a matched secret. */
+  recordEvent(
+    context: string,
+    hostId: string,
+    kind: "conflict" | "blocked",
+    detail: unknown,
+  ): void {
+    const now = Date.now();
+    this.queries.insertEvent({
+      id: `cev-${randomBytes(6).toString("hex")}`,
+      context,
+      hostId,
+      kind,
+      detail,
+      at: now,
+    });
+    this.queries.pruneEvents(now - EVENT_RETENTION_MS);
+    log.info(`context ${context}: ${kind} on host ${hostId}`);
+  }
+
+  events(limit: number, context?: string) {
+    return this.queries.listEvents(limit, context);
   }
 
   /** The user context, if one exists. */

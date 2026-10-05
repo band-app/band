@@ -19,6 +19,8 @@ export interface WorkerConfig {
   /** Absolute directories the worker serves. Empty means the default root under the state dir. */
   roots: string[];
   stateDir: string;
+  /** The machine's `BAND_HOME`, where context working copies go. Defaults to `BAND_HOME` or `~/.band`. */
+  bandHome?: string;
   ephemeral: boolean;
   idleExitMs: number;
 }
@@ -150,6 +152,7 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
         env.BAND_WORKER_STATE_DIR ??
         join(env.BAND_HOME ?? join(homedir(), ".band"), "worker"),
     ),
+    bandHome: resolve(env.BAND_HOME ?? join(homedir(), ".band")),
     ephemeral,
     idleExitMs: idleText === undefined ? DEFAULT_IDLE_EXIT_MS : parseDuration(idleText),
   };
