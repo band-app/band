@@ -587,6 +587,14 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   return { cancelled: false };
 }
 
+/**
+ * Whether a turn was accepted for the chat and has not finished. True from the submit, while the
+ * agent process is still starting, so it covers the span before `agentSessionService.isActive`.
+ */
+export function hasRunningTask(chatId: string): boolean {
+  return tasks.get(chatId)?.status === "running";
+}
+
 export function getTask(chatId: string): TaskInfo | null {
   const task = tasks.get(chatId);
   return task ? toTaskInfo(task) : null;

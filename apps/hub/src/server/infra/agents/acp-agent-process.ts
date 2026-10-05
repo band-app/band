@@ -326,16 +326,25 @@ export class AcpAgentProcess {
     return this.init.agentCapabilities?.sessionCapabilities?.additionalDirectories != null;
   }
 
+  /** Whether the agent can connect to MCP servers over streamable HTTP. */
+  get supportsHttpMcp(): boolean {
+    return this.init.agentCapabilities?.mcpCapabilities?.http === true;
+  }
+
   get promptCapabilities(): acp.PromptCapabilities {
     return this.init.agentCapabilities?.promptCapabilities ?? {};
   }
 
-  async newSession(cwd: string, additionalDirectories?: string[]): Promise<AttachedSession> {
+  async newSession(
+    cwd: string,
+    additionalDirectories?: string[],
+    mcpServers: acp.McpServer[] = [],
+  ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
         this.connection.agent.request(acp.methods.agent.session.new, {
           cwd,
-          mcpServers: [],
+          mcpServers,
           ...(additionalDirectories?.length && this.supportsAdditionalDirectories
             ? { additionalDirectories }
             : {}),
@@ -347,13 +356,17 @@ export class AcpAgentProcess {
   }
 
   /** Replays the session's history as `session/update`s, then answers. */
-  async loadSession(sessionId: string, cwd: string): Promise<AttachedSession> {
+  async loadSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: acp.McpServer[] = [],
+  ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
         this.connection.agent.request(acp.methods.agent.session.load, {
           sessionId,
           cwd,
-          mcpServers: [],
+          mcpServers,
         }),
         this.label,
         LOAD_TIMEOUT_MS,
@@ -363,13 +376,17 @@ export class AcpAgentProcess {
   }
 
   /** Reopens the session without replaying it. */
-  async resumeSession(sessionId: string, cwd: string): Promise<AttachedSession> {
+  async resumeSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: acp.McpServer[] = [],
+  ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
         this.connection.agent.request(acp.methods.agent.session.resume, {
           sessionId,
           cwd,
-          mcpServers: [],
+          mcpServers,
         }),
         this.label,
       ),

@@ -22,13 +22,19 @@
  *                           pid, env }), so a test can assert what Band sent.
  *   BAND_TEST_ACP_CAPS      JSON overriding advertised capabilities:
  *                           { "loadSession": false, "list": false,
- *                             "resume": false, "image": false }.
+ *                             "resume": false, "image": false,
+ *                             "mcpHttp": false }. HTTP MCP is advertised
+ *                           unless "mcpHttp" is false.
  *   BAND_TEST_ACP_OPTIONS   JSON overriding the session config options:
  *                           { "models": [{ value, name }], "modes": [...],
  *                             "extra": [{ id, name, category?, options }] }.
  *                           `extra` adds select options after model and
  *                           mode, settable through set_config_option.
  *   BAND_TEST_ACP_FAIL_START  When set, `initialize` fails with this message.
+ *   BAND_TEST_ACP_START_DELAY_FILE  Path to a file. While it exists, `initialize`
+ *                           waits (polling every 50 ms) and answers once the
+ *                           file is removed, so a test can hold a chat's agent
+ *                           start open for exactly as long as it needs.
  *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
  *                           default `echo` and `review` commands, in the
  *                           order the agent advertises them.
@@ -101,6 +107,8 @@ const scenario = env.BAND_TEST_ACP_SCENARIO
   : { turns: [] };
 const caps = env.BAND_TEST_ACP_CAPS ? JSON.parse(env.BAND_TEST_ACP_CAPS) : {};
 const stateDir = env.BAND_TEST_ACP_STATE;
+/** `mcpServers` of each session's latest new, load or resume request. */
+const mcpBySession = new Map();
 /** Whether the client listed the AIR `asyncTasks` capability. */
 let clientAsyncTasks = false;
 if (stateDir) mkdirSync(stateDir, { recursive: true });
@@ -294,6 +302,33 @@ async function runSteps(cx, sessionId, steps, signal, record) {
         line = { name, status: 0, body: String(err) };
       }
       appendFileSync(env.BAND_TEST_ACP_HTTP_LOG, `${JSON.stringify(line)}\n`);
+    } else if (step.mcpCall) {
+      // Calls a tool through the `mcpServers` entry Band passed for the
+      // session, with exactly the URL and headers it gave. One line goes to
+      // the HTTP log: { name, status, body }.
+      const { name, server, tool, args = {} } = step.mcpCall;
+      const entry = (mcpBySession.get(sessionId) ?? []).find((e) => e.name === server);
+      let line;
+      if (!entry) {
+        line = { name, status: -1, body: "no such mcp server in the session" };
+      } else {
+        const headers = {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          ...Object.fromEntries((entry.headers ?? []).map((h) => [h.name, h.value])),
+        };
+        try {
+          const res = await fetch(entry.url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
+          });
+          line = { name, status: res.status, body: (await res.text()).slice(0, 20000) };
+        } catch (err) {
+          line = { name, status: 0, body: String(err) };
+        }
+      }
+      appendFileSync(env.BAND_TEST_ACP_HTTP_LOG, `${JSON.stringify(line)}\n`);
     } else if (step.tool) {
       await notify({ sessionUpdate: "tool_call", ...step.tool });
     } else if (step.toolUpdate) {
@@ -342,16 +377,20 @@ async function runSteps(cx, sessionId, steps, signal, record) {
 
 acp
   .agent({ name: "band-acp-stub" })
-  .onRequest("initialize", (ctx) => {
+  .onRequest("initialize", async (ctx) => {
     logRequest("initialize", ctx.params);
     const air = ctx.params.clientCapabilities?._meta?.jetbrains?.air;
     clientAsyncTasks = air?.version >= 1 && (air.capabilities ?? []).includes("asyncTasks");
+    while (env.BAND_TEST_ACP_START_DELAY_FILE && existsSync(env.BAND_TEST_ACP_START_DELAY_FILE)) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     if (env.BAND_TEST_ACP_FAIL_START) throw new acp.RequestError(-32000, env.BAND_TEST_ACP_FAIL_START);
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: caps.loadSession !== false,
         promptCapabilities: { image: caps.image !== false, embeddedContext: true },
+        mcpCapabilities: { http: caps.mcpHttp !== false, sse: false },
         sessionCapabilities: {
           ...(caps.list === false ? {} : { list: {} }),
           ...(caps.resume === false ? {} : { resume: {} }),
@@ -365,6 +404,7 @@ acp
   .onRequest("session/new", async (ctx) => {
     logRequest("session/new", ctx.params);
     const sessionId = newSessionId();
+    mcpBySession.set(sessionId, ctx.params.mcpServers ?? []);
     const s = { cwd: ctx.params.cwd, title: null, updatedAt: new Date().toISOString(), model: MODELS[0].value, mode: MODES[0].value, history: [] };
     sessions.set(sessionId, s);
     save(sessionId);
@@ -379,6 +419,7 @@ acp
   })
   .onRequest("session/load", async (ctx) => {
     logRequest("session/load", ctx.params);
+    mcpBySession.set(ctx.params.sessionId, ctx.params.mcpServers ?? []);
     const s = lookup(ctx.params.sessionId);
     if (!s) throw new acp.RequestError(-32002, `Resource not found: ${ctx.params.sessionId}`);
     startCli(ctx.params.sessionId);
@@ -389,6 +430,7 @@ acp
   })
   .onRequest("session/resume", (ctx) => {
     logRequest("session/resume", ctx.params);
+    mcpBySession.set(ctx.params.sessionId, ctx.params.mcpServers ?? []);
     const s = lookup(ctx.params.sessionId);
     if (!s) throw new acp.RequestError(-32002, `Resource not found: ${ctx.params.sessionId}`);
     startCli(ctx.params.sessionId);

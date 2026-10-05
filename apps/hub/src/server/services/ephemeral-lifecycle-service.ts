@@ -63,6 +63,7 @@ import { chatService } from "./chat-service";
 import { placementService } from "./placement-service";
 import { runnerService } from "./runner-service";
 import { loadState, saveState } from "./state";
+import { hasRunningTask } from "./task-service";
 
 const log = createLogger("ephemeral-lifecycle");
 
@@ -355,7 +356,12 @@ export class EphemeralLifecycleService {
     const host = hostRegistry.hostById(hostId);
     for (const ws of tracked) {
       for (const chat of chatService.list(ws.workspaceId)) {
-        if (agentSessionService.isActive(chat.id) || hasQueuedMessages(chat.id)) {
+        // A task is running from the submit on, before the agent process has started a turn.
+        if (
+          hasRunningTask(chat.id) ||
+          agentSessionService.isActive(chat.id) ||
+          hasQueuedMessages(chat.id)
+        ) {
           return `an agent is working in ${ws.workspaceId}`;
         }
       }
