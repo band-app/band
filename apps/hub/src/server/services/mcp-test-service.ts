@@ -6,7 +6,10 @@
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type McpServerView, mcpProxyService } from "./mcp-proxy-service";
 
 const TEST_TIMEOUT_MS = 15_000;
@@ -23,8 +26,21 @@ export type McpTestResult =
   | { ok: false; reason: "unreachable" | "auth" | "error"; message: string };
 
 function looksUnauthorized(err: unknown): boolean {
-  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
-  return /\b40[13]\b|unauthori[sz]ed|forbidden/i.test(text);
+  return err instanceof StreamableHTTPError && (err.code === 401 || err.code === 403);
+}
+
+/**
+ * A fixed message for a failed connection. The SDK's error text carries the upstream's response
+ * body, which may echo request headers (the credential), so it is never returned.
+ */
+function describeFailure(err: unknown): string {
+  if (err instanceof StreamableHTTPError && err.code) {
+    return `The server answered with HTTP ${err.code}.`;
+  }
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    return "The server did not answer in time.";
+  }
+  return "The server could not be reached.";
 }
 
 async function listOnce(
@@ -45,7 +61,7 @@ async function listOnce(
       for (const tool of answer.tools) {
         tools.push({
           name: tool.name,
-          description: tool.description ?? "",
+          description: (tool.description ?? "").slice(0, 500),
           readOnly: tool.annotations?.readOnlyHint === true,
         });
       }
@@ -79,7 +95,6 @@ export async function testMcpConnection(server: McpServerView): Promise<McpTestR
     if (looksUnauthorized(err)) {
       return { ok: false, reason: "auth", message: "The server refused the credential." };
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason: "unreachable", message: message.slice(0, 300) };
+    return { ok: false, reason: "unreachable", message: describeFailure(err) };
   }
 }

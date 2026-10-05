@@ -101,7 +101,7 @@ test("adds a server with a vault key, limits it to two tools, scopes it to a pro
 
   await settingsPage.startMcpServer("notes", upstream.url, "UPSTREAM_KEY");
   await settingsPage.testMcpConnection();
-  await expect(settingsPage.mcpTestResult()).toContainText("Connected");
+  await expect(settingsPage.mcpTestResult()).toHaveAttribute("data-ok", "true");
 
   await settingsPage.allowOnlyMcpTools(["echo", "add"]);
   await expect(settingsPage.mcpMissionsScope()).toBeDisabled();
@@ -112,7 +112,7 @@ test("adds a server with a vault key, limits it to two tools, scopes it to a pro
   await settingsPage.expectRowVisible(row);
   await expect(row).toContainText("Projects: alpha");
   await expect(row).toContainText("2 tools allowed");
-  await expect(row).toContainText("Reachable");
+  await expect(row.getByTestId("settings__mcp-status")).toHaveAttribute("data-state", "ok");
   // The upstream key is in the vault, not in the server row or the page.
   await expect(settingsPage.dialog).not.toContainText(API_KEY);
 
@@ -141,4 +141,6 @@ test("adds a server with a vault key, limits it to two tools, scopes it to a pro
 
   await settingsPage.openMcpAudit("notes");
   await expect(settingsPage.mcpAuditTools().first()).toHaveText("echo");
+  await expect(settingsPage.mcpAuditSessions().first()).toHaveText("e2e-chat");
+  await expect(settingsPage.mcpAuditEntries().first()).toHaveAttribute("data-ok", "true");
 });

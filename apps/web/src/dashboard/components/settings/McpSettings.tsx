@@ -1,5 +1,5 @@
 import { Button, Input } from "@band-app/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
@@ -94,27 +94,28 @@ function statusText(result: TestResult | "checking" | undefined): string {
  */
 export function McpSettings() {
   const queryClient = useQueryClient();
+  const [form, setForm] = useState<FormState | null>(null);
   const servers = useQuery<McpList>({ queryKey: MCP_KEY, queryFn: () => trpc.mcp.list.query() });
   const vault = useQuery({
     queryKey: VAULT_KEY,
     queryFn: async () => (await trpc.vault.list.query()).items,
-    enabled: servers.isSuccess,
+    enabled: servers.isSuccess && form !== null,
   });
   const projects = useQuery({
     queryKey: ["mcp.projects"],
     queryFn: async () =>
       ((await trpc.projects.list.query()).projects as Array<{ name: string }>).map((p) => p.name),
-    enabled: servers.isSuccess,
+    enabled: form?.scopeMode === "projects",
   });
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
-    enabled: servers.isSuccess,
+    enabled: form?.scopeMode === "hosts",
   });
 
-  const [form, setForm] = useState<FormState | null>(null);
   const [tools, setTools] = useState<ToolInfo[] | null>(null);
   const [testMessage, setTestMessage] = useState<string | null>(null);
+  const [testOk, setTestOk] = useState(false);
   const [status, setStatus] = useState<Record<string, TestResult | "checking">>({});
   const [auditFor, setAuditFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +130,11 @@ export function McpSettings() {
     [],
   );
 
+  const stopPolling = () => {
+    if (polling.current) clearInterval(polling.current);
+    polling.current = null;
+    setNotice(null);
+  };
   const refresh = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
   const fail = (err: unknown) => setError(err instanceof Error ? err.message : String(err));
   const patch = (changes: Partial<FormState>) =>
@@ -161,6 +167,7 @@ export function McpSettings() {
   }, [servers.data]);
 
   const open = (next: FormState) => {
+    stopPolling();
     // The Credentials section may have added a key since the last load.
     void vault.refetch();
     setForm(next);
@@ -184,9 +191,11 @@ export function McpSettings() {
       });
       if (result.ok) {
         setTools(result.tools);
+        setTestOk(true);
         setTestMessage(`Connected. ${result.tools.length} tools.`);
       } else {
         setTools(null);
+        setTestOk(false);
         setTestMessage(result.message);
       }
     } catch (err) {
@@ -215,6 +224,7 @@ export function McpSettings() {
       if (form.editing) await trpc.mcp.update.mutate({ name: form.editing, ...settings });
       else await trpc.mcp.add.mutate({ name: form.name.trim(), ...settings });
       const savedName = form.editing ?? form.name.trim();
+      stopPolling();
       setForm(null);
       await refresh();
       if (form.enabled) void check({ name: savedName });
@@ -256,10 +266,12 @@ export function McpSettings() {
       setNotice("Waiting for you to approve the connection in the new window.");
       if (polling.current) clearInterval(polling.current);
       const startedAt = Date.now();
-      polling.current = setInterval(() => {
+      const timer: ReturnType<typeof setInterval> = setInterval(() => {
         void (async () => {
           try {
             const state = await trpc.vault.oauthStatus.query({ flowId });
+            // The form was cancelled, saved or reopened while the request was in flight.
+            if (polling.current !== timer) return;
             if (
               (state.status === "pending" || state.status === "exchanging") &&
               Date.now() - startedAt < 10 * 60_000
@@ -282,6 +294,7 @@ export function McpSettings() {
           }
         })();
       }, POLL_MS);
+      polling.current = timer;
     } catch (err) {
       consent?.close();
       fail(err);
@@ -333,7 +346,18 @@ export function McpSettings() {
                   {server.readOnly ? " · Read-only" : ""}
                   {server.allowTools ? ` · ${server.allowTools.length} tools allowed` : ""}
                 </div>
-                <div className="text-xs text-muted-foreground" data-testid="settings__mcp-status">
+                <div
+                  className="text-xs text-muted-foreground"
+                  data-testid="settings__mcp-status"
+                  data-state={
+                    !server.enabled
+                      ? "disabled"
+                      : typeof status[server.name] === "object" &&
+                          (status[server.name] as TestResult).ok
+                        ? "ok"
+                        : "other"
+                  }
+                >
                   {server.enabled ? statusText(status[server.name]) : "Disabled"}
                 </div>
               </div>
@@ -386,7 +410,7 @@ export function McpSettings() {
         <SettingsRow
           variant="stacked"
           label={form.editing ? `Edit ${form.editing}` : "Add a server"}
-          description="Stdio servers on a worker come with plan step 4.4."
+          description="Only HTTP servers are supported so far."
         >
           <div className="space-y-2" data-testid="settings__mcp-form">
             <Input
@@ -466,6 +490,7 @@ export function McpSettings() {
                 <span
                   className="text-xs text-muted-foreground"
                   data-testid="settings__mcp-test-result"
+                  data-ok={testOk ? "true" : "false"}
                 >
                   {testMessage}
                 </span>
@@ -555,7 +580,7 @@ export function McpSettings() {
               ))}
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input type="radio" name="mcp-scope" disabled aria-label="Scope: Missions" />
-                Missions (available with Phase 6)
+                Missions (not available yet)
               </label>
               {form.scopeMode === "projects"
                 ? (projects.data ?? []).map((project) => (
@@ -603,7 +628,15 @@ export function McpSettings() {
               >
                 Save
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => setForm(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  stopPolling();
+                  setForm(null);
+                }}
+              >
                 Cancel
               </Button>
             </div>
@@ -624,13 +657,15 @@ export function McpSettings() {
 
 /** One server's audit log, newest first, `AUDIT_PAGE` rows at a time. */
 function McpAudit({ server }: { server: string }) {
-  const [pages, setPages] = useState(1);
-  const audit = useQuery({
-    queryKey: ["mcp.audit", server, pages],
-    queryFn: () => trpc.mcp.audit.query({ server, limit: AUDIT_PAGE * pages }),
+  const audit = useInfiniteQuery({
+    queryKey: ["mcp.audit", server],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      trpc.mcp.audit.query({ server, limit: AUDIT_PAGE, offset: pageParam }),
+    getNextPageParam: (last, all) => (last.hasMore ? all.length * AUDIT_PAGE : undefined),
     refetchInterval: 5000,
   });
-  const entries = audit.data?.entries ?? [];
+  const entries = audit.data?.pages.flatMap((page) => page.entries) ?? [];
   return (
     <SettingsRow
       variant="stacked"
@@ -653,18 +688,20 @@ function McpAudit({ server }: { server: string }) {
             </span>{" "}
             <span>{entry.ok ? "ok" : `failed: ${entry.error ?? "error"}`}</span>
             <div className="text-muted-foreground">
-              Session {entry.sessionId} · {new Date(entry.at).toLocaleString()}
+              Session <span data-testid="settings__mcp-audit-session">{entry.sessionId}</span> ·{" "}
+              {new Date(entry.at).toLocaleString()}
             </div>
           </li>
         ))}
       </ul>
-      {audit.data?.hasMore ? (
+      {audit.hasNextPage ? (
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="mt-2"
-          onClick={() => setPages(pages + 1)}
+          disabled={audit.isFetchingNextPage}
+          onClick={() => void audit.fetchNextPage()}
         >
           Load more
         </Button>

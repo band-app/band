@@ -79,6 +79,14 @@ describe("mcp.test", () => {
     expect(result).toMatchObject({ ok: false, reason: "unreachable" });
   });
 
+  it("never returns the upstream's response body in a failure message", async () => {
+    const result = await m<TestResult>("mcp.test", { url: upstream.url, vaultItemId: keyId });
+    expect(result.ok).toBe(true);
+    const bad = await m<TestResult>("mcp.test", { url: `${upstream.url}/nope` });
+    expect(JSON.stringify(bad)).not.toContain(API_KEY);
+    if (!bad.ok) expect(bad.message.length).toBeLessThan(80);
+  });
+
   it("ignores a saved server's allowlist so the editor shows every tool", async () => {
     await m("mcp.add", {
       name: "limited",
@@ -93,6 +101,17 @@ describe("mcp.test", () => {
   it("refuses a non-loopback http URL", async () => {
     const res = await trpcMutate(server.url, "mcp.test", { url: "http://example.com/mcp" }, ADMIN);
     expect(res.status).toBe(400);
+  });
+});
+
+describe("access", () => {
+  it("refuses mcp.test and mcp.audit without a token and for a non-admin device token", async () => {
+    const { token } = await m<{ token: string }>("tokens.createDevice", { label: "plain" });
+    const body = { url: upstream.url };
+    expect((await trpcMutate(server.url, "mcp.test", body, "")).status).toBe(401);
+    expect((await trpcMutate(server.url, "mcp.test", body, token)).status).toBe(403);
+    expect((await trpcQuery(server.url, "mcp.audit", {}, "")).status).toBe(401);
+    expect((await trpcQuery(server.url, "mcp.audit", {}, token)).status).toBe(403);
   });
 });
 

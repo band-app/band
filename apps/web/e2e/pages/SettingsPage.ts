@@ -545,6 +545,14 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__mcp-audit-tool");
   }
 
+  mcpAuditSessions(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-session");
+  }
+
+  mcpAuditEntries(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-entry");
+  }
+
   mcpDenied(): Locator {
     return this.dialog.getByTestId("settings__mcp-denied");
   }
