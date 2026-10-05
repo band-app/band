@@ -41,6 +41,7 @@ import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
+import { McpSettings } from "./settings/McpSettings";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsSection } from "./settings/SettingsSection";
@@ -615,6 +616,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Credentials ────────────────────────────────── */}
             <SettingsSection title="Credentials">
               <CredentialsSettings />
+            </SettingsSection>
+
+            {/* ── MCP ────────────────────────────────────────── */}
+            <SettingsSection title="MCP">
+              <McpSettings />
             </SettingsSection>
 
             {/* ── Runners ────────────────────────────────────── */}

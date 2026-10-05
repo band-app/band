@@ -9,6 +9,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { McpProxyInputError, McpServerNotFoundError } from "../../errors";
 import { mcpProxyService } from "../../services/mcp-proxy-service";
+import { testMcpConnection } from "../../services/mcp-test-service";
 import { adminProcedure, t } from "../trpc";
 
 const name = z.string().trim().min(1).max(63);
@@ -81,9 +82,44 @@ export const mcpServersRouter = t.router({
     .input(z.object({ sessionId: z.string().min(1).max(200) }))
     .mutation(({ input }) => ({ revoked: mcpProxyService.revokeSession(input.sessionId) })),
 
+  /**
+   * Connects to an upstream and lists its tools, unfiltered (Settings > MCP). Takes a saved
+   * server's `name`, or the `url` and credential fields of a form that is not saved yet.
+   */
+  test: adminProcedure
+    .input(
+      z.union([
+        z.object({ name }),
+        z.object({
+          url: settings.url,
+          vaultItemId: settings.vaultItemId,
+          headerName: settings.headerName,
+          headerPrefix: settings.headerPrefix,
+        }),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const server = guard(() => {
+        if ("name" in input) {
+          const saved = mcpProxyService.listServers().find((s) => s.name === input.name);
+          if (!saved) throw new McpServerNotFoundError(input.name);
+          return mcpProxyService.connectionView(saved);
+        }
+        return mcpProxyService.connectionView(input);
+      });
+      return testMcpConnection(server);
+    }),
+
   audit: adminProcedure
     .input(
-      z.object({ server: name.optional(), limit: z.number().int().min(1).max(500).default(100) }),
+      z.object({
+        server: name.optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+        offset: z.number().int().min(0).max(100_000).default(0),
+      }),
     )
-    .query(({ input }) => ({ entries: mcpProxyService.listAudit(input.limit, input.server) })),
+    .query(({ input }) => {
+      const rows = mcpProxyService.listAudit(input.limit + 1, input.server, input.offset);
+      return { entries: rows.slice(0, input.limit), hasMore: rows.length > input.limit };
+    }),
 });

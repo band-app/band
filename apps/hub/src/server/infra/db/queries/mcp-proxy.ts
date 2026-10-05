@@ -94,11 +94,12 @@ export class McpProxyQueries {
     getDb().insert(mcpProxyAudit).values(row).run();
   }
 
-  listAudit(limit: number, server?: string): McpAuditRow[] {
+  listAudit(limit: number, server?: string, offset = 0): McpAuditRow[] {
     const query = getDb().select().from(mcpProxyAudit);
     return (server ? query.where(eq(mcpProxyAudit.server, server)) : query)
       .orderBy(desc(mcpProxyAudit.id))
       .limit(limit)
+      .offset(offset)
       .all();
   }
 

@@ -219,6 +219,35 @@ export class McpProxyService {
       .map(view);
   }
 
+  /**
+   * A checked, unsaved server view for "Test connection": the URL, credential and header
+   * the form holds, with no tool filter. Throws `McpProxyInputError` for a bad field.
+   */
+  connectionView(input: {
+    url: string;
+    vaultItemId?: string | null;
+    headerName?: string;
+    headerPrefix?: string;
+  }): McpServerView {
+    return {
+      id: "m-test",
+      name: "test",
+      url: checkUrl(input.url),
+      transport: "http",
+      vaultItemId: this.checkVaultItem(input.vaultItemId),
+      headerName: this.checkHeaderName(input.headerName ?? "Authorization"),
+      headerPrefix: this.checkHeaderPrefix(input.headerPrefix ?? "Bearer "),
+      allowTools: null,
+      readOnly: false,
+      readOnlyTools: [],
+      enabled: true,
+      scopeProjects: null,
+      scopeHosts: null,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+  }
+
   addServer(input: McpServerInput): McpServerView {
     const name = input.name.trim();
     if (!SERVER_NAME.test(name)) {
@@ -444,8 +473,8 @@ export class McpProxyService {
     }
   }
 
-  listAudit(limit: number, server?: string): McpAuditRow[] {
-    return this.queries.listAudit(limit, server);
+  listAudit(limit: number, server?: string, offset = 0): McpAuditRow[] {
+    return this.queries.listAudit(limit, server, offset);
   }
 }
 

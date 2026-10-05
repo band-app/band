@@ -474,6 +474,81 @@ export class SettingsPage {
     });
   }
 
+  /** One row per MCP server. `data-testid` set in `McpSettings.tsx`. */
+  mcpServerRow(name: string): Locator {
+    return this.dialog.getByTestId("settings__mcp-server").filter({
+      has: this.page.getByTestId("settings__mcp-server-name").getByText(name, { exact: true }),
+    });
+  }
+
+  /** Opens the add form, fills it and clicks Test connection. */
+  async startMcpServer(name: string, url: string, credential: string): Promise<void> {
+    await test.step(`Fill in the MCP server ${name}`, async () => {
+      await this.dialog.getByTestId("settings__mcp-add").click();
+      await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(name);
+      await this.dialog.getByRole("textbox", { name: "MCP server URL" }).fill(url);
+      await this.dialog
+        .getByRole("combobox", { name: "MCP credential" })
+        .selectOption({ label: `${credential} (API key)` });
+    });
+  }
+
+  /** Clicks Test connection and waits for the hub's answer. */
+  async testMcpConnection(): Promise<void> {
+    await test.step("Test the MCP connection", async () => {
+      await this.dialog.getByTestId("settings__mcp-test").click();
+    });
+  }
+
+  mcpTestResult(): Locator {
+    return this.dialog.getByTestId("settings__mcp-test-result");
+  }
+
+  /** Limits the server to exactly these tools, after a successful test. */
+  async allowOnlyMcpTools(tools: string[]): Promise<void> {
+    await test.step(`Allow only ${tools.join(", ")}`, async () => {
+      await this.dialog.getByRole("checkbox", { name: "Allow every tool" }).uncheck();
+      const boxes = this.dialog.getByTestId("settings__mcp-tools").getByRole("checkbox");
+      const count = await boxes.count();
+      for (let i = 0; i < count; i++) await boxes.nth(i).uncheck();
+      for (const tool of tools) {
+        await this.dialog.getByRole("checkbox", { name: `Allow tool ${tool}` }).check();
+      }
+    });
+  }
+
+  /** Scopes the server to one project. */
+  async scopeMcpToProject(project: string): Promise<void> {
+    await test.step(`Scope the MCP server to ${project}`, async () => {
+      await this.dialog.getByRole("radio", { name: "Scope: Selected projects" }).check();
+      await this.dialog.getByRole("checkbox", { name: `Project ${project}` }).check();
+    });
+  }
+
+  mcpMissionsScope(): Locator {
+    return this.dialog.getByRole("radio", { name: "Scope: Missions" });
+  }
+
+  async saveMcpServer(): Promise<void> {
+    await test.step("Save the MCP server", async () => {
+      await this.dialog.getByTestId("settings__mcp-save").click();
+    });
+  }
+
+  async openMcpAudit(name: string): Promise<void> {
+    await test.step(`Open the audit log of ${name}`, async () => {
+      await this.dialog.getByRole("button", { name: `Audit log of ${name}` }).click();
+    });
+  }
+
+  mcpAuditTools(): Locator {
+    return this.dialog.getByTestId("settings__mcp-audit-tool");
+  }
+
+  mcpDenied(): Locator {
+    return this.dialog.getByTestId("settings__mcp-denied");
+  }
+
   /** One row per configured runner. `data-testid` set in `RunnersSettings.tsx`. */
   runnerRow(runnerId: string): Locator {
     return this.dialog.getByTestId("settings__runner").filter({
