@@ -1,11 +1,11 @@
 /**
- * Placement (plan step 3.3): choosing the host for a new workspace, and the
+ * Placement (plan step 3.3): choosing the host for a new worktree, and the
  * `host_requests` a runner leases when no host fits.
  *
- * `workspaces.create` with `placement` calls `place()`. An online host whose
- * labels and facts satisfy the criteria gets the workspace at once (the least
+ * `worktrees.create` with `placement` calls `place()`. An online host whose
+ * labels and facts satisfy the criteria gets the worktree at once (the least
  * loaded one, when several fit). Otherwise the hub records a `host_request` and
- * the workspace is `provisioning`. A runner (step 3.4) leases the request,
+ * the worktree is `provisioning`. A runner (step 3.4) leases the request,
  * starts a machine and fulfils the request with the host id. When that host
  * says hello, the hub replays the stored create call on it. A request that no
  * host satisfies within `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default)
@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { extractVersion, satisfies as inRange, rangeError } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
 import { hostRegistry } from "../infra/host/registry";
@@ -32,7 +32,7 @@ import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { settingsService } from "./settings-service";
 import { tokenService } from "./token-service";
 import { emit } from "./watcher-service";
-import { type WorkspaceCreateInput, workspaceService } from "./workspace-service";
+import { type WorktreeCreateInput, worktreeService } from "./worktree-service";
 
 const log = createLogger("placement");
 
@@ -68,10 +68,10 @@ export class HostRequestError extends Error {
 /** What a wake request (plan step 3.5) carries in `input.wake`: the sleeping host to bring back. */
 export interface WakeInput {
   hostId: string;
-  workspaceIds: string[];
+  worktreeIds: string[];
 }
 
-/** The sleeping host a request is for, or null for an ordinary request for a new workspace. */
+/** The sleeping host a request is for, or null for an ordinary request for a new worktree. */
 export function wakeOf(row: HostRequestRow): WakeInput | null {
   const wake = (row.input as { wake?: WakeInput }).wake;
   return wake && typeof wake.hostId === "string" ? wake : null;
@@ -162,7 +162,7 @@ export class PlacementService {
     const out: Candidate[] = [];
     for (const row of tokenService.listHosts(1000)) {
       if (row.status !== "online" || !row.usable) continue;
-      // An ephemeral worker is claimed by the workspace it was started for.
+      // An ephemeral worker is claimed by the worktree it was started for.
       if ((row.info as { mode?: unknown } | null)?.mode === "ephemeral") continue;
       const info =
         row.id === LOCAL_HOST_ID ? await hostRegistry.local.info().catch(() => null) : null;
@@ -192,8 +192,8 @@ export class PlacementService {
 
   /**
    * The least loaded online host that satisfies `placement`, or null. A
-   * `container` or `vm` workspace gets a worker of its own, so it never reuses
-   * a host, and a `worktree` workspace never lands on a host that was started
+   * `container` or `vm` worktree gets a worker of its own, so it never reuses
+   * a host, and a `worktree` worktree never lands on a host that was started
    * for one of those.
    */
   async place(placement: Placement): Promise<string | null> {
@@ -208,28 +208,28 @@ export class PlacementService {
   }
 
   /**
-   * Picks a host for a workspace, or records a request for one. Asking again
-   * for a workspace that already has an open request returns that request.
+   * Picks a host for a worktree, or records a request for one. Asking again
+   * for a worktree that already has an open request returns that request.
    */
-  async placeWorkspace(input: WorkspaceCreateInput, placement: Placement): Promise<PlaceResult> {
-    const workspaceId = toWorkspaceId(input.project, input.branch);
-    const open = this.queries.findOpenForWorkspace(workspaceId);
+  async placeWorktree(input: WorktreeCreateInput, placement: Placement): Promise<PlaceResult> {
+    const worktreeId = toWorktreeId(input.repo, input.branch);
+    const open = this.queries.findOpenForWorktree(worktreeId);
     if (open) return { kind: "request", requestId: open.id };
     const hostId = await this.place(placement);
     if (hostId) return { kind: "host", hostId };
-    // A concurrent create for the same workspace may have recorded a request
+    // A concurrent create for the same worktree may have recorded a request
     // while `place` awaited. Nothing below awaits, so this check and the insert
     // run together.
-    const raced = this.queries.findOpenForWorkspace(workspaceId);
+    const raced = this.queries.findOpenForWorktree(worktreeId);
     if (raced) return { kind: "request", requestId: raced.id };
-    this.assertRunnerOffers(requestedIsolation(placement.environment ?? null), workspaceId);
+    this.assertRunnerOffers(requestedIsolation(placement.environment ?? null), worktreeId);
     const now = this.now();
     const { placement: _placement, ...replay } = input;
     const id = `hr-${randomUUID().slice(0, 12)}`;
     this.queries.insert({
       id,
-      workspaceId,
-      project: input.project,
+      worktreeId,
+      repo: input.repo,
       branch: input.branch,
       labels: placement.labels ?? {},
       requires: placement.requires ?? {},
@@ -244,8 +244,8 @@ export class PlacementService {
       createdAt: now,
       updatedAt: now,
     });
-    log.info(`no host fits ${workspaceId}; recorded request ${id}`);
-    this.publish(id, workspaceId, "pending");
+    log.info(`no host fits ${worktreeId}; recorded request ${id}`);
+    this.publish(id, worktreeId, "pending");
     return { kind: "request", requestId: id };
   }
 
@@ -253,7 +253,7 @@ export class PlacementService {
    * Refuses a `container` or `vm` request that no configured runner could
    * take, so the caller gets the reason now and not after the placement timeout.
    */
-  private assertRunnerOffers(wanted: IsolationLevel, workspaceId: string): void {
+  private assertRunnerOffers(wanted: IsolationLevel, worktreeId: string): void {
     if (wanted === "worktree") return;
     const { runners } = parseRunners(settingsService.get().runners);
     if (runners.some((r) => offers(runnerLevel(r.isolation), wanted))) return;
@@ -261,8 +261,8 @@ export class PlacementService {
       wanted === "vm"
         ? "No runner offers isolation vm. Set isolation to vm on a runner in settings.json. The bundled hooks start no virtual machines yet."
         : "No runner offers isolation container. Add a runner with isolation container to settings.json, such as the bundled docker hook.";
-    log.warn(`${workspaceId} asked for isolation ${wanted}, but ${reason}`);
-    throw new Error(`Cannot place ${workspaceId}: ${reason}`);
+    log.warn(`${worktreeId} asked for isolation ${wanted}, but ${reason}`);
+    throw new Error(`Cannot place ${worktreeId}: ${reason}`);
   }
 
   /**
@@ -271,25 +271,25 @@ export class PlacementService {
    * and names the host in `input.wake`, so the runner starts a worker with the
    * same id. Asking again while a request is open returns that request.
    */
-  requestWake(wake: WakeInput, project: string, branch: string): HostRequestRow {
-    const first = wake.workspaceIds[0];
-    if (!first) throw new Error("A wake request names no workspace");
-    const open = this.queries.findOpenForWorkspace(first);
+  requestWake(wake: WakeInput, repo: string, branch: string): HostRequestRow {
+    const first = wake.worktreeIds[0];
+    if (!first) throw new Error("A wake request names no worktree");
+    const open = this.queries.findOpenForWorktree(first);
     if (open) return open;
     const earlier = this.queries.latestForHost(wake.hostId);
     const now = this.now();
     const row: HostRequestRow = {
       id: `hr-${randomUUID().slice(0, 12)}`,
-      workspaceId: first,
-      project,
+      worktreeId: first,
+      repo,
       branch,
       labels: earlier?.labels ?? {},
       requires: earlier?.requires ?? {},
       environment: earlier?.environment ?? null,
       input: {
         wake,
-        ...(typeof (earlier?.input as { hostProjectPath?: unknown })?.hostProjectPath === "string"
-          ? { hostProjectPath: (earlier?.input as { hostProjectPath: string }).hostProjectPath }
+        ...(typeof (earlier?.input as { hostRepoPath?: unknown })?.hostRepoPath === "string"
+          ? { hostRepoPath: (earlier?.input as { hostRepoPath: string }).hostRepoPath }
           : {}),
       },
       status: "pending",
@@ -340,7 +340,7 @@ export class PlacementService {
       }
       // A runner that lost the race to another one tries the next request.
       if (this.queries.lease(row.id, runnerId, now, now + ttl)) {
-        this.publish(row.id, row.workspaceId, "leased");
+        this.publish(row.id, row.worktreeId, "leased");
         return this.queries.get(row.id) ?? null;
       }
     }
@@ -356,24 +356,24 @@ export class PlacementService {
     return this.require(requestId);
   }
 
-  /** The runner started `hostId` for this request, with the repository at `hostProjectPath`. The workspace completes once that host is online. */
+  /** The runner started `hostId` for this request, with the repository at `hostRepoPath`. The worktree completes once that host is online. */
   fulfil(
     requestId: string,
     runnerId: string,
     hostId: string,
-    hostProjectPath?: string,
+    hostRepoPath?: string,
   ): HostRequestRow {
     if (!tokenService.listHosts(1000).some((h) => h.id === hostId)) {
       throw new HostRequestError("conflict", `No host "${hostId}"`);
     }
     // The runner knows where the repository is on the machine it started.
     const current = this.queries.get(requestId);
-    const input = hostProjectPath && current ? { ...current.input, hostProjectPath } : undefined;
+    const input = hostRepoPath && current ? { ...current.input, hostRepoPath } : undefined;
     if (!this.queries.fulfil(requestId, runnerId, hostId, this.now(), input)) {
       throw this.notHeld(requestId, runnerId);
     }
     const row = this.require(requestId);
-    this.publish(row.id, row.workspaceId, "fulfilled");
+    this.publish(row.id, row.worktreeId, "fulfilled");
     void this.finish(row);
     return row;
   }
@@ -382,20 +382,20 @@ export class PlacementService {
     const row = this.require(requestId);
     if (this.queries.fail(requestId, reason, this.now())) {
       log.warn(`request ${requestId} failed: ${reason}`);
-      this.publish(row.id, row.workspaceId, "failed");
+      this.publish(row.id, row.worktreeId, "failed");
     }
     return this.require(requestId);
   }
 
-  /** Stops waiting for a host (or dismisses a failure). A workspace already created stays. */
+  /** Stops waiting for a host (or dismisses a failure). A worktree already created stays. */
   cancel(requestId: string): HostRequestRow {
     const row = this.require(requestId);
     if (this.queries.cancel(requestId, this.now()))
-      this.publish(row.id, row.workspaceId, "cancelled");
+      this.publish(row.id, row.worktreeId, "cancelled");
     return this.require(requestId);
   }
 
-  /** The requests the UI lists: waiting workspaces. A wake request shows as its workspace waking instead. */
+  /** The requests the UI lists: waiting worktrees. A wake request shows as its worktree waking instead. */
   list(): HostRequestRow[] {
     return this.queries.listActive().filter((r) => wakeOf(r) === null);
   }
@@ -417,7 +417,7 @@ export class PlacementService {
     for (const id of this.queries.releaseExpired(now)) {
       const row = this.queries.get(id);
       log.info(`lease on ${id} expired`);
-      if (row) this.publish(id, row.workspaceId, "pending");
+      if (row) this.publish(id, row.worktreeId, "pending");
     }
   }
 
@@ -441,7 +441,7 @@ export class PlacementService {
     }
   }
 
-  /** Creates the workspace on the fulfilled request's host, once that host is online. */
+  /** Creates the worktree on the fulfilled request's host, once that host is online. */
   private async finish(row: HostRequestRow): Promise<void> {
     if (!row.hostId || this.completing.has(row.id)) return;
     const host = tokenService.listHosts(1000).find((h) => h.id === row.hostId);
@@ -452,26 +452,26 @@ export class PlacementService {
       if (wake) {
         await ephemeralLifecycleService.restoreHost(
           wake.hostId,
-          (row.input as { hostProjectPath?: string }).hostProjectPath,
+          (row.input as { hostRepoPath?: string }).hostRepoPath,
         );
         if (this.queries.complete(row.id, this.now())) {
           log.info(`host ${wake.hostId} is awake`);
-          this.publish(row.id, row.workspaceId, "fulfilled");
+          this.publish(row.id, row.worktreeId, "fulfilled");
         }
         return;
       }
-      await workspaceService.create({
-        ...(row.input as WorkspaceCreateInput),
+      await worktreeService.create({
+        ...(row.input as WorktreeCreateInput),
         hostId: row.hostId,
       });
       if (this.queries.complete(row.id, this.now())) {
-        log.info(`workspace ${row.workspaceId} is ready on ${row.hostId}`);
-        this.publish(row.id, row.workspaceId, "fulfilled");
+        log.info(`worktree ${row.worktreeId} is ready on ${row.hostId}`);
+        this.publish(row.id, row.worktreeId, "fulfilled");
       } else {
         // Cancelled while the checkout was being made: don't leave an orphan.
-        await workspaceService
-          .remove({ project: row.project, name: row.branch })
-          .catch((err) => log.warn(`could not remove cancelled ${row.workspaceId}: ${err}`));
+        await worktreeService
+          .remove({ repo: row.repo, name: row.branch })
+          .catch((err) => log.warn(`could not remove cancelled ${row.worktreeId}: ${err}`));
       }
     } catch (err) {
       this.fail(row.id, err instanceof Error ? err.message : String(err));
@@ -496,12 +496,12 @@ export class PlacementService {
     );
   }
 
-  private publish(requestId: string, workspaceId: string, status: HostRequestRow["status"]): void {
+  private publish(requestId: string, worktreeId: string, status: HostRequestRow["status"]): void {
     emit({
       kind: "host-request-changed",
       hostRequestId: requestId,
       hostRequestStatus: status,
-      workspaceId,
+      worktreeId,
     });
   }
 }

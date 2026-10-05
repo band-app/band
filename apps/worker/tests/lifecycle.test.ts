@@ -122,7 +122,7 @@ describe("ephemeral lifecycle", () => {
       asked = true;
       return { exit: true };
     });
-    // A status poller and the project list read the worker every 100 ms.
+    // A status poller and the repo list read the worker every 100 ms.
     let exited = false;
     void proc.exited.then(() => {
       exited = true;

@@ -11,7 +11,7 @@ const decoder = new TextDecoder();
 
 /**
  * A `.band/config.json` `setup` / `teardown` command prepared to run inside
- * a workspace terminal.
+ * a worktree terminal.
  *
  * The terminal types {@link command} into the user's interactive shell, so
  * the PTY's own exit code says nothing about the script (the shell stays

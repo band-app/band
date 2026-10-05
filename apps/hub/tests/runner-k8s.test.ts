@@ -52,7 +52,7 @@ const contract = (extra: Record<string, string> = {}): Record<string, string> =>
   BAND_BOOTSTRAP_TOKEN: TOKEN,
   BAND_RUNNER_ID: "k8s",
   BAND_REQUEST_ID: "req-1",
-  BAND_PROJECT: "my-project",
+  BAND_REPO: "my-repo",
   BAND_LABELS: "pool=k8s",
   BAND_ENVIRONMENT: "{}",
   ...extra,
@@ -77,13 +77,13 @@ describe("k8s runner hook: spawn", () => {
       contract({
         BAND_REPO_URLS: "https://github.com/acme/app.git",
         BAND_ENVIRONMENT: JSON.stringify({ resources: { cpu: 2, memory: "8Gi" } }),
-        BAND_PROJECT_IMAGE: "registry.example.com/app:abc",
+        BAND_REPO_IMAGE: "registry.example.com/app:abc",
         BAND_IDLE_EXIT: "90s",
       }),
     );
     expect(res.code, res.stderr).toBe(0);
     expect(res.stdout).toContain("BAND_MACHINE_HANDLE=band-workers/band-h-0123456789ab");
-    expect(res.stdout).toContain("BAND_HOST_PROJECT_PATH=/work/my-project");
+    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/work/my-repo");
 
     const [pod, secret] = created();
     expect(pod).toMatchObject({

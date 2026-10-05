@@ -6,7 +6,7 @@ import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 import { removeTmpHome } from "./helpers/tmp-home";
 
-// End-to-end test for `workspace.formatFile`: boots the real server, drives
+// End-to-end test for `worktree.formatFile`: boots the real server, drives
 // the procedure over HTTP, asserts success / soft-skip / hard-error paths.
 // The procedure is pure — content goes in, formatted content comes back —
 // so the test deliberately confirms the *on-disk* file is left alone.
@@ -47,7 +47,7 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-describe("workspace.formatFile (tRPC)", () => {
+describe("worktree.formatFile (tRPC)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -63,7 +63,7 @@ describe("workspace.formatFile (tRPC)", () => {
     git(repoPath, ["commit", "-m", "initial commit"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "repo",
           path: repoPath,
@@ -90,8 +90,8 @@ describe("workspace.formatFile (tRPC)", () => {
     const target = join(repoPath, "messy.js");
     writeFileSync(target, "// stale on-disk version\n");
 
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: "const   a={x:1,y:2}\n",
     });
@@ -114,8 +114,8 @@ describe("workspace.formatFile (tRPC)", () => {
 
   it("returns skipped=true for unsupported file extensions", async () => {
     const target = join(repoPath, "blob.bin");
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: "anything",
     });
@@ -128,8 +128,8 @@ describe("workspace.formatFile (tRPC)", () => {
 
   it("returns changed=false when input is already formatted", async () => {
     const target = join(repoPath, "clean.js");
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: "const a = 1;\n",
     });
@@ -145,9 +145,9 @@ describe("workspace.formatFile (tRPC)", () => {
     expect(body.result.data.formatted).toBe("const a = 1;\n");
   });
 
-  it("rejects requests for an unknown workspace with 404", async () => {
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "does-not-exist",
+  it("rejects requests for an unknown worktree with 404", async () => {
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "does-not-exist",
       filePath: join(repoPath, "messy.js"),
       content: "const a=1\n",
     });
@@ -156,8 +156,8 @@ describe("workspace.formatFile (tRPC)", () => {
 
   it("surfaces Prettier syntax errors as 400", async () => {
     const target = join(repoPath, "broken.ts");
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: "const x: =;\n",
     });
@@ -171,8 +171,8 @@ describe("workspace.formatFile (tRPC)", () => {
     writeFileSync(join(repoPath, ".prettierrc"), JSON.stringify({ singleQuote: true }));
     const target = join(repoPath, "quotes.js");
 
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: `const s = "hello";\n`,
     });
@@ -190,8 +190,8 @@ describe("workspace.formatFile (tRPC)", () => {
 
   it("formats files that don't exist on disk yet (untitled / unsaved buffers)", async () => {
     const target = join(repoPath, "brand-new-never-saved.ts");
-    const res = await trpcMutate(server.url, "workspace.formatFile", {
-      workspaceId: "repo-main",
+    const res = await trpcMutate(server.url, "worktree.formatFile", {
+      worktreeId: "repo-main",
       filePath: target,
       content: "const a:number=1\n",
     });

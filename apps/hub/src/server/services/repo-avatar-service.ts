@@ -3,27 +3,27 @@ import { join } from "node:path";
 import { gitRunner } from "@band-app/host-api";
 import { getRepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
-import { ProjectQueries, type ProjectState } from "../infra/db/queries/projects";
+import { RepoQueries, type RepoState } from "../infra/db/queries/repos";
 import { bandHome } from "../infra/db/queries/settings";
 import { GitHubClient } from "../infra/github/github-client";
 import { type GitHubRepoRef, githubRepoRef } from "../infra/github/github-repo-ref";
 import { hostRegistry } from "../infra/host/registry";
 
-const log = createLogger("project-avatars");
+const log = createLogger("repo-avatars");
 
 /** How long a fetched avatar (or a confirmed "no avatar") is reused before
  *  the next request refetches it. Owners rarely change their picture. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** After a failed fetch (offline, timeout, 5xx), wait this long before
- *  trying GitHub again, so a sidebar re-render or the 30 s project-list
+ *  trying GitHub again, so a sidebar re-render or the 30 s repo-list
  *  refetch does not retry on every request. */
 const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
-/** `git remote get-url origin` result reuse. `projects.list` runs every
+/** `git remote get-url origin` result reuse. `repos.list` runs every
  *  30 s per open dashboard; a remote change shows up within a minute. */
 const REMOTE_TTL_MS = 60 * 1000;
 
-/** What `projects.list` returns per project for the UI to render. */
-export interface ProjectAvatarInfo {
+/** What `repos.list` returns per repo for the UI to render. */
+export interface RepoAvatarInfo {
   /** Same-origin URL of the cached image. */
   src: string;
   /** `owner/repo`, for alt text. */
@@ -49,52 +49,50 @@ interface AvatarImage {
 }
 
 /**
- * Owner avatars for projects whose `origin` is on GitHub.
+ * Owner avatars for repos whose `origin` is on GitHub.
  *
  * The image is fetched once per owner and cached under
  * `~/.band/cache/github-avatars/`, so the browser only ever talks to Band.
  * A cached image is served even when it is stale and GitHub is unreachable.
  * A "no avatar" answer (404, non-raster type) is remembered for the TTL, and
- * `projects.list` then returns no avatar so the UI keeps its folder icon
+ * `repos.list` then returns no avatar so the UI keeps its folder icon
  * without making a request.
  */
-export class ProjectAvatarService {
+export class RepoAvatarService {
   private readonly remotes = new Map<string, { ref: GitHubRepoRef | null; at: number }>();
   private readonly entries = new Map<string, CacheEntry>();
   private readonly inflight = new Map<string, Promise<AvatarImage | null>>();
 
   constructor(
-    private readonly queries: ProjectQueries = new ProjectQueries(),
+    private readonly queries: RepoQueries = new RepoQueries(),
     private readonly github: GitHubClient = new GitHubClient(),
   ) {}
 
   /**
-   * Avatar descriptor for `projects.list`. Never touches the network: it
+   * Avatar descriptor for `repos.list`. Never touches the network: it
    * reads the `origin` remote (memoised) and the cache sidecar only.
    */
-  async describe(
-    project: Pick<ProjectState, "name" | "path" | "kind">,
-  ): Promise<ProjectAvatarInfo | null> {
-    if (project.kind !== "git") return null;
-    const ref = await this.repoRef(project.name, project.path);
+  async describe(repo: Pick<RepoState, "name" | "path" | "kind">): Promise<RepoAvatarInfo | null> {
+    if (repo.kind !== "git") return null;
+    const ref = await this.repoRef(repo.name, repo.path);
     if (!ref) return null;
     const entry = await this.entry(ref);
     if (entry.meta?.status === "missing" && !this.isStale(entry.meta)) return null;
     return {
-      src: `/api/project-avatar/${encodeURIComponent(project.name)}`,
+      src: `/api/repo-avatar/${encodeURIComponent(repo.name)}`,
       label: `${ref.owner}/${ref.repo}`,
     };
   }
 
   /**
-   * The avatar bytes for the project named `projectName`, fetching and
-   * caching them on a miss. `null` when the project is unknown, not on
+   * The avatar bytes for the repo named `repoName`, fetching and
+   * caching them on a miss. `null` when the repo is unknown, not on
    * GitHub, has no avatar, or GitHub is unreachable with nothing cached.
    */
-  async image(projectName: string): Promise<AvatarImage | null> {
-    const project = this.queries.findLocation(projectName);
-    if (!project || project.kind !== "git") return null;
-    const ref = await this.repoRef(projectName, project.path);
+  async image(repoName: string): Promise<AvatarImage | null> {
+    const repo = this.queries.findLocation(repoName);
+    if (!repo || repo.kind !== "git") return null;
+    const ref = await this.repoRef(repoName, repo.path);
     if (!ref) return null;
 
     const key = cacheKey(ref);
@@ -182,13 +180,13 @@ export class ProjectAvatarService {
     return Date.now() - meta.fetchedAt > CACHE_TTL_MS;
   }
 
-  private async repoRef(projectName: string, projectPath: string): Promise<GitHubRepoRef | null> {
-    const cached = this.remotes.get(projectPath);
+  private async repoRef(repoName: string, repoPath: string): Promise<GitHubRepoRef | null> {
+    const cached = this.remotes.get(repoPath);
     if (cached && Date.now() - cached.at < REMOTE_TTL_MS) return cached.ref;
     const ref = githubRepoRef(
-      await getRepoInfo(projectPath, gitRunner(hostRegistry.hostForProject(projectName))),
+      await getRepoInfo(repoPath, gitRunner(hostRegistry.hostForRepo(repoName))),
     );
-    this.remotes.set(projectPath, { ref, at: Date.now() });
+    this.remotes.set(repoPath, { ref, at: Date.now() });
     return ref;
   }
 }
@@ -203,4 +201,4 @@ function cacheKey(ref: Pick<GitHubRepoRef, "host" | "owner">): string {
   return `${ref.host.replace(/[^a-z0-9.-]/g, "_")}__${ref.owner.toLowerCase()}`;
 }
 
-export const projectAvatarService = new ProjectAvatarService();
+export const repoAvatarService = new RepoAvatarService();

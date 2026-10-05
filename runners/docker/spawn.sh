@@ -9,9 +9,9 @@
 # mounted and the docker socket is never passed in.
 #
 # Settings (the runner's "env"):
-#   BAND_DOCKER_IMAGE       the worker base image, run when the project has no ready environment image
+#   BAND_DOCKER_IMAGE       the worker base image, run when the repo has no ready environment image
 #                           (default: band-worker, built from docker/worker.Dockerfile).
-#   BAND_PROJECT_IMAGE      set by the hub: the project's current image from `band env build` (plan
+#   BAND_REPO_IMAGE      set by the hub: the repo's current image from `band env build` (plan
 #                           step 3.2). It wins over BAND_DOCKER_IMAGE when this docker daemon has it or
 #                           can pull it, else the base image runs. It needs git for the clone.
 #   BAND_DOCKER_NETWORK     docker network (default: bridge). A worker accepts plain http only for a
@@ -60,7 +60,7 @@ docker_size() {
 # A restore (restore.sh) runs the image the snapshot was taken from, and puts the snapshot's /work back
 # into the new container's volume before the worker starts. See snapshot.sh for what the snapshot is.
 restore="${BAND_DOCKER_RESTORE:-}"
-# Otherwise the project's own image holds its toolchain and installed dependencies, and the worker (layer 1
+# Otherwise the repo's own image holds its toolchain and installed dependencies, and the worker (layer 1
 # of docs/agent-environments.md). When this daemon cannot get it (a build on another host without a
 # registry), the worker base image runs instead.
 if [ -n "$restore" ]; then
@@ -70,11 +70,11 @@ if [ -n "$restore" ]; then
     echo "$BAND_SNAPSHOT_ID is not a snapshot of this runner (no band.snapshot.base label)" >&2
     exit 1
   fi
-elif [ -n "${BAND_PROJECT_IMAGE:-}" ]; then
-  if docker image inspect "$BAND_PROJECT_IMAGE" >/dev/null 2>&1 || docker pull --quiet "$BAND_PROJECT_IMAGE" >/dev/null 2>&1; then
-    image="$BAND_PROJECT_IMAGE"
+elif [ -n "${BAND_REPO_IMAGE:-}" ]; then
+  if docker image inspect "$BAND_REPO_IMAGE" >/dev/null 2>&1 || docker pull --quiet "$BAND_REPO_IMAGE" >/dev/null 2>&1; then
+    image="$BAND_REPO_IMAGE"
   else
-    echo "project image $BAND_PROJECT_IMAGE is not available on this docker host; using $image" >&2
+    echo "repo image $BAND_REPO_IMAGE is not available on this docker host; using $image" >&2
   fi
 fi
 
@@ -90,11 +90,11 @@ repo_name=""
 if [ -z "$restore" ] && [ -n "${BAND_REPO_URLS:-}" ]; then
   repo="${BAND_REPO_URLS%%,*}"
   case "$repo" in
-    /*) echo "the project has no origin URL a container can clone (got $repo)" >&2; exit 1 ;;
+    /*) echo "the repo has no origin URL a container can clone (got $repo)" >&2; exit 1 ;;
   esac
-  repo_name="$(printf '%s' "${BAND_PROJECT:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
+  repo_name="$(printf '%s' "${BAND_REPO:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
   case "$repo_name" in "" | . | ..) repo_name=repo ;; esac
-  echo "BAND_HOST_PROJECT_PATH=/work/$repo_name"
+  echo "BAND_HOST_REPO_PATH=/work/$repo_name"
 fi
 # With BAND_CLONE_BY_HUB the hub clones through the worker once it is up, because the worker can ask
 # the hub for the repository's git credential and this script cannot.

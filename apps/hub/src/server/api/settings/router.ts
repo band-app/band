@@ -5,7 +5,7 @@ import { publicProcedure, t } from "../trpc";
 /**
  * Settings sub-router — first migrated procedure under the new 3-tier
  * architecture (`docs/web-architecture.md`). Subsequent phases will move
- * other domains (projects, workspaces, chats, …) into sibling
+ * other domains (repos, worktrees, chats, …) into sibling
  * `api/<domain>/router.ts` files following this same shape.
  *
  * The router is intentionally thin: it validates input with Zod, delegates

@@ -1,13 +1,13 @@
 import type { Host } from "@band-app/host-api";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 // ---------------------------------------------------------------------------
 // Server-side file watcher
 // ---------------------------------------------------------------------------
 //
-// One recursive watch (`host.fs.watch`) per workspace, started on demand when a client
-// subscribes for that workspace's file changes and stopped when the last
-// subscriber disconnects. The watcher emits a coalesced `(workspaceId,
+// One recursive watch (`host.fs.watch`) per worktree, started on demand when a client
+// subscribes for that worktree's file changes and stopped when the last
+// subscriber disconnects. The watcher emits a coalesced `(worktreeId,
 // parentDir)` event so the client FileBrowser can invalidate its
 // in-memory directory cache.
 //
@@ -15,13 +15,13 @@ import { workspaceService } from "./workspace-service";
 // knows how to re-fetch via `listFiles`. The event just says which parent
 // directory to invalidate.
 //
-// Per-workspace lifecycle (not global) so we don't hold OS watch handles
+// Per-worktree lifecycle (not global) so we don't hold OS watch handles
 // open on every worktree the user has ever added — see issue #384.
 //
 // Edge-cases:
 //   * Heavy directories (`.git`, `node_modules`, build output) are
 //     filtered out so the watcher doesn't drown the client in noise.
-//   * Events are coalesced per (workspaceId, parentDir) with a short
+//   * Events are coalesced per (worktreeId, parentDir) with a short
 //     debounce — a rapid burst (e.g. `git checkout`) maps to one refresh.
 //   * A watch may fail to start or end if the worktree was deleted; we
 //     swallow the first and tell listeners about the second.
@@ -36,9 +36,9 @@ import { workspaceService } from "./workspace-service";
 // tree is silently filtered (intentional — Rust monorepos write to
 // apps/cli/target/, packages/*/target/, etc. on every cargo build). The
 // cost is that a repo that legitimately uses one of these names as a
-// source directory (e.g. a Go project with a nested "build/" source
+// source directory (e.g. a Go repo with a nested "build/" source
 // folder) will see no refresh events from it. If a real user hits that,
-// the right fix is a per-project configurable ignore list rather than
+// the right fix is a per-repo configurable ignore list rather than
 // unilaterally narrowing this set.
 const IGNORED_SEGMENTS = new Set<string>([
   ".git",
@@ -59,7 +59,7 @@ const IGNORED_SEGMENTS = new Set<string>([
 
 /**
  * Window (in milliseconds) over which we coalesce events for the same
- * (workspaceId, parentDir) pair. Short enough to feel snappy; long enough
+ * (worktreeId, parentDir) pair. Short enough to feel snappy; long enough
  * to collapse rapid bursts (saves, git operations) into one refresh.
  */
 const DEBOUNCE_MS = 250;
@@ -67,7 +67,7 @@ const DEBOUNCE_MS = 250;
 /**
  * Listener for file-change events.
  *
- * - `path` (string): workspace-relative parent directory whose contents
+ * - `path` (string): worktree-relative parent directory whose contents
  *   changed.
  * - `path === null`: sentinel meaning the underlying watcher hit an
  *   unrecoverable error (e.g. the worktree directory was deleted) and is
@@ -101,8 +101,8 @@ function parentDirOf(relativePath: string): string {
   return idx === -1 ? "" : normalised.slice(0, idx);
 }
 
-function scheduleEmit(workspaceId: string, dirPath: string): void {
-  const entry = watchers.get(workspaceId);
+function scheduleEmit(worktreeId: string, dirPath: string): void {
+  const entry = watchers.get(worktreeId);
   if (!entry) return;
   const existing = entry.pendingTimers.get(dirPath);
   if (existing) clearTimeout(existing);
@@ -110,24 +110,24 @@ function scheduleEmit(workspaceId: string, dirPath: string): void {
     entry.pendingTimers.delete(dirPath);
     // Re-resolve the entry — listeners may have been torn down during the
     // debounce window.
-    const current = watchers.get(workspaceId);
+    const current = watchers.get(worktreeId);
     if (!current) return;
     for (const listener of current.listeners) listener(dirPath);
   }, DEBOUNCE_MS);
   entry.pendingTimers.set(dirPath, timer);
 }
 
-function stopWatcher(workspaceId: string, entry: WatchEntry): void {
+function stopWatcher(worktreeId: string, entry: WatchEntry): void {
   entry.controller.abort();
   for (const timer of entry.pendingTimers.values()) clearTimeout(timer);
   entry.pendingTimers.clear();
   // A newer entry may have replaced this one.
-  if (watchers.get(workspaceId) === entry) watchers.delete(workspaceId);
+  if (watchers.get(worktreeId) === entry) watchers.delete(worktreeId);
 }
 
 /** Feeds the host's change stream into `scheduleEmit` until it ends or the entry stops. */
 async function pumpChanges(
-  workspaceId: string,
+  worktreeId: string,
   entry: WatchEntry,
   host: Host,
   root: string,
@@ -142,14 +142,14 @@ async function pumpChanges(
     })) {
       const relative = change.path;
       if (!relative || isIgnoredPath(relative)) continue;
-      scheduleEmit(workspaceId, parentDirOf(relative));
+      scheduleEmit(worktreeId, parentDirOf(relative));
     }
   } catch {
     // The worktree may have been deleted between resolve and the watch
     // start. Treat it as a silent no-op, as a failed start always was.
     // A subscriber that joined before the failure surfaced must still end.
     for (const listener of entry.listeners) listener(null);
-    stopWatcher(workspaceId, entry);
+    stopWatcher(worktreeId, entry);
     return;
   }
   if (entry.controller.signal.aborted) return;
@@ -158,32 +158,32 @@ async function pumpChanges(
   // their tRPC generators can finish cleanly instead of parking forever
   // waiting for an event from a dead watcher.
   for (const listener of entry.listeners) listener(null);
-  stopWatcher(workspaceId, entry);
+  stopWatcher(worktreeId, entry);
 }
 
 /**
- * Subscribe to external file-system changes inside a workspace. The
+ * Subscribe to external file-system changes inside a worktree. The
  * watcher is started lazily on the first subscription and torn down when
  * the last subscriber disconnects. Returns an unsubscribe function.
  *
- * If the workspace can't be resolved (e.g. it was just removed) the
+ * If the worktree can't be resolved (e.g. it was just removed) the
  * subscription is a silent no-op so callers don't need a separate
  * error-handling path.
  */
 export function subscribeToFileChanges(
-  workspaceId: string,
+  worktreeId: string,
   listener: FileChangeListener,
 ): Unsubscribe {
-  let entry = watchers.get(workspaceId);
+  let entry = watchers.get(worktreeId);
 
   if (!entry) {
-    const ws = workspaceService.resolve(workspaceId);
+    const ws = worktreeService.resolve(worktreeId);
     if (!ws) return () => {};
     const root = ws.worktree.path;
 
     entry = { controller: new AbortController(), listeners: new Set(), pendingTimers: new Map() };
-    watchers.set(workspaceId, entry);
-    void pumpChanges(workspaceId, entry, ws.host, root);
+    watchers.set(worktreeId, entry);
+    void pumpChanges(worktreeId, entry, ws.host, root);
   }
 
   entry.listeners.add(listener);
@@ -191,6 +191,6 @@ export function subscribeToFileChanges(
   const subscribed = entry;
   return () => {
     subscribed.listeners.delete(listener);
-    if (subscribed.listeners.size === 0) stopWatcher(workspaceId, subscribed);
+    if (subscribed.listeners.size === 0) stopWatcher(worktreeId, subscribed);
   };
 }

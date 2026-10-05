@@ -14,7 +14,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startAcpServer, stubRequests, TEST_TOKEN, trpc, WORKSPACE_ID } from "./helpers/acp-chat";
+import { startAcpServer, stubRequests, TEST_TOKEN, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
@@ -38,16 +38,16 @@ function writeArgvStub(home: string): string {
   return path;
 }
 
-/** A git-less project with one workspace, and settings with the given
+/** A git-less repo with one worktree, and settings with the given
  *  extras (`seedAcpHome` with its own agents). */
 function seedHome(prefix: string, settings: (home: string) => object): string {
   const home = createTmpHome(prefix);
   const repo = join(home, "repo");
   mkdirSync(repo, { recursive: true });
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: "testproject",
+        name: "testrepo",
         path: repo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repo }],
@@ -59,14 +59,14 @@ function seedHome(prefix: string, settings: (home: string) => object): string {
 }
 
 function launch(url: string, input: object): Promise<LaunchResult> {
-  return trpc<LaunchResult>(url, "agentSessions.launch", { workspaceId: WORKSPACE_ID, ...input });
+  return trpc<LaunchResult>(url, "agentSessions.launch", { worktreeId: WORKTREE_ID, ...input });
 }
 
 async function openSessions(url: string): Promise<AgentSessionRecord[]> {
   const data = await trpc<{ agentSessions: AgentSessionRecord[] }>(
     url,
     "agentSessions.list",
-    { workspaceId: WORKSPACE_ID },
+    { worktreeId: WORKTREE_ID },
     "query",
   );
   return data.agentSessions;
@@ -108,21 +108,21 @@ describe("agentSessions.launch", () => {
     const res = await fetch(`${server.url}/trpc/agentSessions.launch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID, mode: "gui" }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, mode: "gui" }),
     });
     expect(res.status).toBe(401);
   });
 
-  it("returns NOT_FOUND for an unknown workspace", async () => {
+  it("returns NOT_FOUND for an unknown worktree", async () => {
     await expect(
-      trpc(server.url, "agentSessions.launch", { workspaceId: "nope-main", mode: "gui" }),
+      trpc(server.url, "agentSessions.launch", { worktreeId: "nope-main", mode: "gui" }),
     ).rejects.toThrow(/\(404\)/);
   });
 
-  it("rejects a chat id that belongs to another workspace", async () => {
-    await trpc(server.url, "chats.create", { workspaceId: "other-main", id: "chat_other_ws" });
+  it("rejects a chat id that belongs to another worktree", async () => {
+    await trpc(server.url, "chats.create", { worktreeId: "other-main", id: "chat_other_ws" });
     await expect(launch(server.url, { mode: "gui", chatId: "chat_other_ws" })).rejects.toThrow(
-      /\(400\).*not in workspace/,
+      /\(400\).*not in worktree/,
     );
   });
 
@@ -136,7 +136,7 @@ describe("agentSessions.launch", () => {
     expect(result.chatId).toBe("chat_gui_launch");
     expect(result.terminalId).toBeUndefined();
     expect(result.agentSession).toMatchObject({
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       agentDefinitionId: "claude-code",
       mode: "gui",
       chatId: "chat_gui_launch",
@@ -183,7 +183,7 @@ describe("agentSessions.launch", () => {
     expect(result.terminalId).toBe(terminalId);
     expect(result.chatId).toBeUndefined();
     expect(result.agentSession).toMatchObject({
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       agentDefinitionId: "claude-code",
       mode: "tui",
       terminalId,

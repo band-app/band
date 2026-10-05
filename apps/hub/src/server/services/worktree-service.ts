@@ -15,85 +15,85 @@ import { scriptInvocation } from "@band-app/host-local/process/path";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
-// FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
+// FRAGILE: ESM cycle leg — `agent-launch-service` imports `worktreeService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
 import { agentLaunchService } from "./agent-launch-service";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
-// `workspaceService` directly from this file (the `services/workspace.ts`
+// `worktreeService` directly from this file (the `services/worktree.ts`
 // shim that used to broker this hop was deleted in the #535 cleanup).
 // The cycle is safe only because every cross-module call below
 // (`submitTask`, `abortTask`, `cronjobService.*`, …) is inside a
 // function body — ESM live binding fills the reference in at call time.
 // Capturing any of these at module load — `const t = submitTask;` at
-// the top of this file, or `const ws = workspaceService;` at the top of
+// the top of this file, or `const ws = worktreeService;` at the top of
 // `task-service.ts` — would silently get `undefined`.
 import { agentSessionService } from "./agent-session-service";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 import { clientStateService } from "./client-state-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
-// from `./task-service`, which imports `workspaceService` from this
+// from `./task-service`, which imports `worktreeService` from this
 // file (see the cycle note on the import block above). Same live-
 // binding constraint: keep every `cronjobService` reference inside a
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { resolveWorkspaceHostId } from "./local-host-policy";
+import { resolveWorktreeHostId } from "./local-host-policy";
 import { panelFocusService } from "./panel-focus-service";
-// FRAGILE: ESM cycle leg — `./placement-service` imports `workspaceService` from
+// FRAGILE: ESM cycle leg — `./placement-service` imports `worktreeService` from
 // this file. Keep every `placementService` reference inside a function body.
 import { placementService } from "./placement-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
-  deleteWorkspaceStatus,
+  deleteWorktreeStatus,
   loadState,
-  type ProjectState,
+  type RepoState,
   saveState,
   type WorktreeState,
   worktreesDir,
 } from "./state";
 // FRAGILE: ESM cycle leg — `./subscription-service` imports `task-service`,
-// which imports `workspaceService` from this file. Keep every
+// which imports `worktreeService` from this file. Keep every
 // `subscriptionService` reference inside a function body.
 import { subscriptionService } from "./subscription-service";
 import { syncService, type WorktreeRemoval } from "./sync-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
-// FRAGILE: ESM cycle leg #3 — `./workspace-script-service` imports
-// `workspaceService` from this file. Keep every `workspaceScriptService`
+// FRAGILE: ESM cycle leg #3 — `./worktree-script-service` imports
+// `worktreeService` from this file. Keep every `worktreeScriptService`
 // reference inside a function body; capturing it at module load would
 // silently get `undefined`.
-import { workspaceScriptService } from "./workspace-script-service";
+import { worktreeScriptService } from "./worktree-script-service";
 
-/** How long {@link WorkspaceService.remove} waits for a `teardown` command. */
+/** How long {@link WorktreeService.remove} waits for a `teardown` command. */
 const TEARDOWN_TIMEOUT_MS = 60_000;
-const log = createLogger("workspace-service");
+const log = createLogger("worktree-service");
 
 /**
- * Resolved workspace shape (project row + worktree row) returned by
- * `WorkspaceService.resolve`. Mirrors the legacy `lib/workspace.ts`
- * `resolveWorkspace` return type so existing callers can be migrated to
+ * Resolved worktree shape (repo row + worktree row) returned by
+ * `WorktreeService.resolve`. Mirrors the legacy `lib/worktree.ts`
+ * `resolveWorktree` return type so existing callers can be migrated to
  * the service without touching their use sites.
  */
-export interface ResolvedWorkspace {
-  project: ProjectState;
+export interface ResolvedWorktree {
+  repo: RepoState;
   worktree: WorktreeState;
-  /** The machine the workspace lives on. */
+  /** The machine the worktree lives on. */
   host: Host;
 }
 
@@ -102,34 +102,34 @@ export interface ResolvedWorkspace {
 // ---------------------------------------------------------------------------
 
 /**
- * Input schema for `WorkspaceService.create`.
+ * Input schema for `WorktreeService.create`.
  *
  * Lives in the service tier (not the API router) so the service and any
  * future non-tRPC entry points (CLI, scripts) share a single source of
  * truth for the accepted shape — same pattern as `settingsUpdateInput`.
  */
 /**
- * Where to dispatch a `--prompt` task on workspace create (issue #551).
+ * Where to dispatch a `--prompt` task on worktree create (issue #551).
  *
  *   - `"chat"` — current behavior: submit a task to the SDK-backed agent
- *     and stream events into the workspace's default chat pane.
+ *     and stream events into the worktree's default chat pane.
  *   - `"terminal"` — spawn the adapter's interactive CLI (`claude
  *     "<prompt>"`, `codex "<prompt>"`, …) in a fresh terminal pane.
  *
  * The schema is the single source of truth for the field; both the API
  * tier and any future non-tRPC entry points (the Rust CLI included)
- * forward through `WorkspaceService.create`.
+ * forward through `WorktreeService.create`.
  *
  * Superseded by `agentMode` (`gui` / `tui`, issue #682), which wins when
  * both are sent. With neither, the server's `agents.defaultMode` applies.
- * The CLI resolves `via` *client-side* (in `cmd_workspaces_create`) and
+ * The CLI resolves `via` *client-side* (in `cmd_worktrees_create`) and
  * forwards it on every call.
  */
-export const workspaceVia = z.enum(["chat", "terminal"]);
-export type WorkspaceVia = z.infer<typeof workspaceVia>;
+export const worktreeVia = z.enum(["chat", "terminal"]);
+export type WorktreeVia = z.infer<typeof worktreeVia>;
 
-export const workspaceCreateInput = z.object({
-  project: z.string(),
+export const worktreeCreateInput = z.object({
+  repo: z.string(),
   branch: z.string(),
   base: z.string().optional(),
   // Cap at 100 KiB. On the via=terminal path the prompt is embedded
@@ -147,126 +147,126 @@ export const workspaceCreateInput = z.object({
   // mode. `via` is the older name for the same choice and loses to
   // `agentMode`. With neither, `agents.defaultMode` applies.
   agentMode: z.enum(["gui", "tui"]).optional(),
-  via: workspaceVia.optional(),
-  // The host to create the workspace on (`hosts.list`). Defaults to the hub's own machine.
+  via: worktreeVia.optional(),
+  // The host to create the worktree on (`hosts.list`). Defaults to the hub's own machine.
   hostId: z.string().min(1).optional(),
-  // Where the project's repository is on that host. Needed the first time a
-  // project is used on a remote host, and remembered after that.
-  hostProjectPath: z.string().min(1).optional(),
-  // Pick the host by criteria instead of naming one. The workspace goes on an
+  // Where the repo's repository is on that host. Needed the first time a
+  // repo is used on a remote host, and remembered after that.
+  hostRepoPath: z.string().min(1).optional(),
+  // Pick the host by criteria instead of naming one. The worktree goes on an
   // online host that fits, or waits as `provisioning` while a runner starts one
   // (plan step 3.3). `placement: {}` means any host. Excludes `hostId`.
   placement: placementInput.optional(),
 });
-export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
+export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
 
-export const workspaceRemoveInput = z.object({
-  project: z.string(),
-  // Workspace identity (the immutable `name`), NOT the live git branch. The
+export const worktreeRemoveInput = z.object({
+  repo: z.string(),
+  // Worktree identity (the immutable `name`), NOT the live git branch. The
   // live branch to delete is resolved from the worktree row.
   name: z.string(),
 });
-export type WorkspaceRemoveInput = z.infer<typeof workspaceRemoveInput>;
+export type WorktreeRemoveInput = z.infer<typeof worktreeRemoveInput>;
 
 /**
- * Result of {@link WorkspaceService.continueChatInTerminal}. A discriminated
+ * Result of {@link WorktreeService.continueChatInTerminal}. A discriminated
  * union so the (thin) tRPC router maps the failure `code` straight onto a
  * `TRPCError` without owning the resolve / build / spawn business logic.
  */
 export type ContinueChatInTerminalResult =
-  | { ok: true; terminalId: string; workspaceId: string; sessionId: string }
+  | { ok: true; terminalId: string; worktreeId: string; sessionId: string }
   | { ok: false; code: "NOT_FOUND" | "PRECONDITION_FAILED" | "BAD_REQUEST"; message: string };
 
-export const workspaceSetPinnedInput = z.object({
-  project: z.string(),
-  // Workspace identity (immutable `name`), not the live git branch.
+export const worktreeSetPinnedInput = z.object({
+  repo: z.string(),
+  // Worktree identity (immutable `name`), not the live git branch.
   name: z.string(),
   pinned: z.boolean(),
 });
-export type WorkspaceSetPinnedInput = z.infer<typeof workspaceSetPinnedInput>;
+export type WorktreeSetPinnedInput = z.infer<typeof worktreeSetPinnedInput>;
 
-export const workspaceGitInput = z.object({
-  project: z.string(),
-  // Workspace identity (immutable `name`), not the live git branch.
+export const worktreeGitInput = z.object({
+  repo: z.string(),
+  // Worktree identity (immutable `name`), not the live git branch.
   name: z.string(),
 });
-export type WorkspaceGitInput = z.infer<typeof workspaceGitInput>;
+export type WorktreeGitInput = z.infer<typeof worktreeGitInput>;
 
-export const workspaceRunScriptInput = z.object({
+export const worktreeRunScriptInput = z.object({
   path: z.string(),
   scriptType: z.string(),
 });
-export type WorkspaceRunScriptInput = z.infer<typeof workspaceRunScriptInput>;
+export type WorktreeRunScriptInput = z.infer<typeof worktreeRunScriptInput>;
 
 // ---------------------------------------------------------------------------
 // Domain errors
 // ---------------------------------------------------------------------------
 
 /**
- * Project named in the workspace mutation does not exist in state.
+ * Repo named in the worktree mutation does not exist in state.
  *
  * Translated by the API tier (`throwAsTrpcError` in
- * `api/workspaces/router.ts`) into a plain `Error` rethrow that surfaces
+ * `api/worktrees/router.ts`) into a plain `Error` rethrow that surfaces
  * as HTTP 500 — that's the legacy wire contract for these procedures
  * and the existing trpc integration tests pin it. The router comment
  * explains the rationale and the migration plan; a future PR can
  * promote the mapping to `NOT_FOUND` (and update the pinned tests) in
  * lock-step.
  */
-export class ProjectNotFoundError extends Error {
+export class RepoNotFoundError extends Error {
   constructor(name: string) {
-    super(`Project "${name}" not found`);
-    this.name = "ProjectNotFoundError";
+    super(`Repo "${name}" not found`);
+    this.name = "RepoNotFoundError";
   }
 }
 
 /**
- * Re-export the canonical `WorkspaceNotFoundError` so existing imports
- * (`api/workspaces/router.ts`) keep working. The class is defined in
+ * Re-export the canonical `WorktreeNotFoundError` so existing imports
+ * (`api/worktrees/router.ts`) keep working. The class is defined in
  * `server/errors.ts` (imported at the top of this file for internal throws)
  * and shared with `session-service` and `task-service` — see `errors.ts`
  * for the consolidation rationale and the per-router HTTP mapping
- * (workspaces stays 500 to honor the pinned legacy contract).
+ * (worktrees stays 500 to honor the pinned legacy contract).
  */
-export { WorkspaceNotFoundError };
+export { WorktreeNotFoundError };
 
 /**
- * Workspace mutation invoked on a plain (non-git) project. Plain projects
- * have a single implicit workspace at the project path and don't support
+ * Worktree mutation invoked on a plain (non-git) repo. Plain repos
+ * have a single implicit worktree at the repo path and don't support
  * additional worktrees, branch operations, or pinning.
  */
-export class PlainProjectError extends Error {
+export class PlainRepoError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "PlainProjectError";
+    this.name = "PlainRepoError";
   }
 }
 
 /**
- * Business logic for the workspace domain (Phase 3 of the 3-tier refactor —
+ * Business logic for the worktree domain (Phase 3 of the 3-tier refactor —
  * issue #314).
  *
- * Service tier — depends on Infra (`WorkspaceQueries`, `infra/git/git-
- * client` for git exec, `infra/setup/workspace-files` for workspace
+ * Service tier — depends on Infra (`WorktreeQueries`, `infra/git/git-
+ * client` for git exec, `infra/setup/worktree-files` for worktree
  * bootstrap) plus a handful of sibling services
  * (`chatService`, `browserService`, `terminalService`,
- * `workspaceScriptService` for the setup / teardown commands,
- * `cronjobService.removeForKey`) for workspace-scoped cleanup on
+ * `worktreeScriptService` for the setup / teardown commands,
+ * `cronjobService.removeForKey`) for worktree-scoped cleanup on
  * delete. Knows nothing about tRPC or the API surface — all callers
  * (routers, future CLI / scripts) funnel through this class.
  *
  * Persistence quirks worth knowing about:
  *
- *   - **Projects table reads/writes.** `loadState` / `saveState` still
- *     co-manage the `projects` + `worktrees` tables via a whole-tree
- *     rewrite. The persistence model belongs to the projects domain
- *     (`ProjectQueries`, issue #313); once that domain owns workspace
+ *   - **Repos table reads/writes.** `loadState` / `saveState` still
+ *     co-manage the `repos` + `worktrees` tables via a whole-tree
+ *     rewrite. The persistence model belongs to the repos domain
+ *     (`RepoQueries`, issue #313); once that domain owns worktree
  *     row inserts/removes too, the create/remove paths here can swap
- *     to `WorkspaceQueries.insert` / `WorkspaceQueries.remove`
+ *     to `WorktreeQueries.insert` / `WorktreeQueries.remove`
  *     directly. Today the orchestration goes through `state.ts`'s
  *     `saveState` to keep one writer per table.
- *   - **Workspace-scoped side-effect cleanup.** `chatService`,
- *     `browserService`, `terminalService.killWorkspace`,
+ *   - **Worktree-scoped side-effect cleanup.** `chatService`,
+ *     `browserService`, `terminalService.killWorktree`,
  *     `cronjobService.removeForKey`, etc. each own their own domain;
  *     the orchestration is centralized here so the remove flow is
  *     atomic from the router's perspective.
@@ -331,49 +331,49 @@ export function expandHome(given: string, home: string | undefined, hostId: stri
   return path;
 }
 
-export class WorkspaceService {
+export class WorktreeService {
   private readonly pendingRemovals = new PendingRemovalQueries();
 
   constructor(
-    private readonly queries: WorkspaceQueries = new WorkspaceQueries(),
+    private readonly queries: WorktreeQueries = new WorktreeQueries(),
     private readonly usageEventQueries: UsageEventQueries = new UsageEventQueries(),
     private readonly usageScanStateQueries: UsageScanStateQueries = new UsageScanStateQueries(),
   ) {}
 
-  /** Removals waiting on their teardown, by workspace id, so a repeat call joins the first. */
+  /** Removals waiting on their teardown, by worktree id, so a repeat call joins the first. */
   private readonly removing = new Map<string, Promise<{ ok: true }>>();
 
   /**
-   * Resolve a workspace ID to its parent project + worktree row.
+   * Resolve a worktree ID to its parent repo + worktree row.
    *
-   * Mirrors the legacy `lib/workspace.ts::resolveWorkspace` so callers can
-   * be migrated incrementally. Returns `null` when the workspace ID
+   * Mirrors the legacy `lib/worktree.ts::resolveWorktree` so callers can
+   * be migrated incrementally. Returns `null` when the worktree ID
    * doesn't match any worktree (the caller decides whether that's a 404
    * or a fall-through).
    *
-   * NOTE: deliberately uses `loadState()` (full projects + worktrees walk)
-   * rather than the targeted `WorkspaceQueries.findIdentity()` SQL lookup
-   * that lives in the same PR. The return shape is `ResolvedWorkspace =
-   * { project: ProjectState, worktree: WorktreeState }` — callers (e.g.
-   * `gitPull`/`gitPush`) read `project.kind` to gate plain-project
-   * rejections, and the legacy shim in `lib/workspace.ts` exposes the
+   * NOTE: deliberately uses `loadState()` (full repos + worktrees walk)
+   * rather than the targeted `WorktreeQueries.findIdentity()` SQL lookup
+   * that lives in the same PR. The return shape is `ResolvedWorktree =
+   * { repo: RepoState, worktree: WorktreeState }` — callers (e.g.
+   * `gitPull`/`gitPush`) read `repo.kind` to gate plain-repo
+   * rejections, and the legacy shim in `lib/worktree.ts` exposes the
    * same shape to existing consumers. `findIdentity()` only returns
-   * `(project, branch, worktreePath)` — no `kind`, no full project row —
-   * so swapping it in here would require a second `ProjectQueries`-tier
+   * `(repo, branch, worktreePath)` — no `kind`, no full repo row —
+   * so swapping it in here would require a second `RepoQueries`-tier
    * lookup we don't have yet (Phase 2 ships that surface). Once the
-   * projects-domain queries land, this can drop to one `findIdentity()` +
-   * one targeted project read. Call frequency is low (user-initiated
+   * repos-domain queries land, this can drop to one `findIdentity()` +
+   * one targeted repo read. Call frequency is low (user-initiated
    * git pull/push only), so the O(n) JS walk is acceptable in the
    * interim.
    */
-  resolve(workspaceId: string): ResolvedWorkspace | null {
+  resolve(worktreeId: string): ResolvedWorktree | null {
     const state = loadState();
-    for (const project of state.projects) {
-      for (const worktree of project.worktrees) {
+    for (const repo of state.repos) {
+      for (const worktree of repo.worktrees) {
         // Identity is by the immutable `name`, so the resolve keeps working
         // after a git branch switch (which moves `worktree.branch`).
-        if (toWorkspaceId(project.name, worktree.name) === workspaceId) {
-          return { project, worktree, host: hostRegistry.hostFor(workspaceId) };
+        if (toWorktreeId(repo.name, worktree.name) === worktreeId) {
+          return { repo, worktree, host: hostRegistry.hostFor(worktreeId) };
         }
       }
     }
@@ -381,11 +381,11 @@ export class WorkspaceService {
   }
 
   /**
-   * The project's checkout on a remote host. `given` records it the first
+   * The repo's checkout on a remote host. `given` records it the first
    * time, since the hub can't know where a worker keeps the repository.
    */
   private async remoteCheckout(
-    projectName: string,
+    repoName: string,
     host: Host,
     given: string | undefined,
   ): Promise<string> {
@@ -399,39 +399,39 @@ export class WorkspaceService {
         }
         throw new Error(`Host "${host.id}" has no directory ${path}.${where}`);
       });
-      hostRegistry.setProjectPathOn(projectName, host.id, resolved);
+      hostRegistry.setRepoPathOn(repoName, host.id, resolved);
       return resolved;
     }
-    const known = hostRegistry.projectPathOn(projectName, host.id, "");
+    const known = hostRegistry.repoPathOn(repoName, host.id, "");
     if (!known) {
       throw new Error(
-        `Project "${projectName}" has no checkout on host "${host.id}". Pass hostProjectPath with the repository's path on that host.`,
+        `Repo "${repoName}" has no checkout on host "${host.id}". Pass hostRepoPath with the repository's path on that host.`,
       );
     }
     return known;
   }
 
-  /** Where a remote host keeps the worktrees of Band workspaces: under its first root. */
+  /** Where a remote host keeps the worktrees of Band worktrees: under its first root. */
   private async remoteWorktreesDir(host: Host): Promise<string> {
     const [root] = (await host.info()).roots;
-    if (!root) throw new Error(`Host "${host.id}" serves no directory to put workspaces in`);
+    if (!root) throw new Error(`Host "${host.id}" serves no directory to put worktrees in`);
     return posix.join(root, ".band-worktrees");
   }
 
   /**
-   * Create a workspace (git worktree) for `(project, branch)`.
+   * Create a worktree (git worktree) for `(repo, branch)`.
    *
    * Idempotent: returns the existing path when the branch is already a
-   * worktree on the project. Rejects plain (non-git) projects with
-   * `PlainProjectError` — they have a single implicit workspace at the
-   * project path and don't support additional worktrees.
+   * worktree on the repo. Rejects plain (non-git) repos with
+   * `PlainRepoError` — they have a single implicit worktree at the
+   * repo path and don't support additional worktrees.
    *
    * On success:
    *   1. Creates the worktree on disk via `git worktree add` (with an
    *      optional base branch).
    *   2. Persists the new worktree row through `saveState`.
-   *   3. Materialises the workspace's default chat pane.
-   *   4. Kicks off the workspace's `.band/setup` script in the background.
+   *   3. Materialises the worktree's default chat pane.
+   *   4. Kicks off the worktree's `.band/setup` script in the background.
    *      If a `prompt` was supplied, the task is submitted only after the
    *      setup script finishes (so the coding agent sees its dependencies
    *      installed). When there is no setup script, the task is dispatched
@@ -440,7 +440,7 @@ export class WorkspaceService {
    * Dispatch target (`input.agentMode`, else `input.via`, else
    * `agents.defaultMode`; issues #551 and #682). `agentLaunchService` starts
    * the agent:
-   *   - `gui` / `"chat"` — submit the prompt to the workspace's default chat
+   *   - `gui` / `"chat"` — submit the prompt to the worktree's default chat
    *     pane via `taskService.submitTask`.
    *   - `tui` / `"terminal"` — resolve the chosen agent's interactive CLI
    *     invocation (`cliInvocation(type, prompt)`) and spawn it in a fresh
@@ -464,19 +464,19 @@ export class WorkspaceService {
    * "the pane that already exists". The terminal-created / terminal-killed
    * event stream is the authoritative liveness signal.
    *
-   * On the **idempotent path** (the workspace's branch already exists as
+   * On the **idempotent path** (the worktree's branch already exists as
    * a worktree row), the method returns just `{ ok: true, path }` —
    * `via` and `terminalId` are omitted because no fresh dispatch
    * happened. The Rust CLI propagates that absence so a caller can
    * distinguish "newly created + dispatched" from "already existed,
    * no dispatch."
    */
-  async create(input: WorkspaceCreateInput): Promise<{
+  async create(input: WorktreeCreateInput): Promise<{
     ok: true;
     path: string;
-    via?: WorkspaceVia;
+    via?: WorktreeVia;
     terminalId?: string;
-    /** Set when no host fits yet: the workspace is created once the request is fulfilled. */
+    /** Set when no host fits yet: the worktree is created once the request is fulfilled. */
     provisioning?: { requestId: string };
   }> {
     const sanitizedBranch = slugifyBranchName(input.branch);
@@ -488,74 +488,74 @@ export class WorkspaceService {
     input = { ...input, branch: sanitizedBranch };
 
     const state = loadState();
-    const project = state.projects.find((p) => p.name === input.project);
-    if (!project) {
-      throw new ProjectNotFoundError(input.project);
+    const repo = state.repos.find((p) => p.name === input.repo);
+    if (!repo) {
+      throw new RepoNotFoundError(input.repo);
     }
 
-    // Plain projects have exactly one implicit workspace, created at
-    // project-add time. Creating additional workspaces is meaningless
+    // Plain repos have exactly one implicit worktree, created at
+    // repo-add time. Creating additional worktrees is meaningless
     // without git worktrees, so reject the call as a backstop — the UI
-    // should already be hiding the "New workspace" button.
-    if (project.kind === "plain") {
-      throw new PlainProjectError(
-        `Project "${input.project}" is a plain (non-git) folder and cannot have additional workspaces. Promote it to git (right-click the project → "Promote to git") to enable branches.`,
+    // should already be hiding the "New worktree" button.
+    if (repo.kind === "plain") {
+      throw new PlainRepoError(
+        `Repo "${input.repo}" is a plain (non-git) folder and cannot have additional worktrees. Promote it to git (right-click the repo → "Promote to git") to enable branches.`,
       );
     }
 
     // Idempotency + identity-collision guard, matching on both fields:
     //   - `wt.name === input.branch`: the requested branch collides with an
-    //     existing workspace's immutable identity — creating here would mint a
+    //     existing worktree's immutable identity — creating here would mint a
     //     second row with a duplicate `name` (both serialize to the same
-    //     workspace id). Return the existing path instead.
-    //   - `wt.branch === input.branch`: the plain idempotent case — a workspace
+    //     worktree id). Return the existing path instead.
+    //   - `wt.branch === input.branch`: the plain idempotent case — a worktree
     //     whose live branch already matches the request (always true for a
-    //     never-switched workspace, where `name === branch`).
+    //     never-switched worktree, where `name === branch`).
     // Either way we return the existing path, keeping create idempotent and
     // preserving the immutable-name invariant.
-    const existing = project.worktrees.find(
+    const existing = repo.worktrees.find(
       (wt) => wt.name === input.branch || wt.branch === input.branch,
     );
     if (existing) {
       return { ok: true, path: existing.path };
     }
 
-    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const worktreeId = toWorktreeId(input.repo, input.branch);
     if (input.placement) {
       if (input.hostId) {
         throw new Error("Pass either hostId or placement, not both.");
       }
-      const placed = await placementService.placeWorkspace(input, input.placement);
+      const placed = await placementService.placeWorktree(input, input.placement);
       if (placed.kind === "request") {
         return { ok: true, path: "", provisioning: { requestId: placed.requestId } };
       }
       const { placement: _placement, ...rest } = input;
       return this.create({ ...rest, hostId: placed.hostId });
     }
-    const hostId = resolveWorkspaceHostId(input.hostId);
-    // No row exists for a new workspace yet, so the host comes from the request.
+    const hostId = resolveWorktreeHostId(input.hostId);
+    // No row exists for a new worktree yet, so the host comes from the request.
     const host = hostRegistry.hostById(hostId);
     const remote = hostId !== hostRegistry.local.id;
-    // On a remote host the project's checkout and the worktree live under the
+    // On a remote host the repo's checkout and the worktree live under the
     // worker's roots, at paths the worker reports.
     const repoPath = remote
-      ? await this.remoteCheckout(project.name, host, input.hostProjectPath)
-      : project.path;
+      ? await this.remoteCheckout(repo.name, host, input.hostRepoPath)
+      : repo.path;
     const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
     const worktreePath = remote
-      ? posix.join(wtDir, input.project, input.branch)
-      : join(wtDir, input.project, input.branch);
-    // Pre-create the `<project>` subdir under the worktrees root so the
-    // first `workspaces.create` call on a freshly-installed Band has
+      ? posix.join(wtDir, input.repo, input.branch)
+      : join(wtDir, input.repo, input.branch);
+    // Pre-create the `<repo>` subdir under the worktrees root so the
+    // first `worktrees.create` call on a freshly-installed Band has
     // somewhere to land. For slash-containing branch names (e.g.
-    // `feature/my-feature` → `<wtDir>/<project>/feature/my-feature`)
+    // `feature/my-feature` → `<wtDir>/<repo>/feature/my-feature`)
     // we deliberately do NOT pre-create the in-between segments
     // (`feature/`): `git worktree add` itself creates every intermediate
     // directory under its target path, so an extra mkdir here would be
     // redundant. Verified against `git 2.x` — `git worktree add
     // /tmp/wt/feature/login -b feature/login` succeeds without the
     // parent existing.
-    await host.fs.mkdir(remote ? posix.join(wtDir, input.project) : join(wtDir, input.project), {
+    await host.fs.mkdir(remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo), {
       recursive: true,
     });
 
@@ -587,16 +587,16 @@ export class WorkspaceService {
     // Re-read state: `git worktree add` took a while, and a sync or another
     // create may have saved since `state` was loaded.
     const fresh = loadState();
-    const freshProject = fresh.projects.find((p) => p.name === input.project);
-    if (freshProject && !freshProject.worktrees.some((wt) => wt.path === worktreePath)) {
-      freshProject.worktrees.push(row);
+    const freshRepo = fresh.repos.find((p) => p.name === input.repo);
+    if (freshRepo && !freshRepo.worktrees.some((wt) => wt.path === worktreePath)) {
+      freshRepo.worktrees.push(row);
       saveState(fresh);
     }
-    syncService.commitWorktreeAdd(input.project, row);
+    syncService.commitWorktreeAdd(input.repo, row);
 
-    // Copy declared workspace files from the main checkout into the new
+    // Copy declared worktree files from the main checkout into the new
     // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
-    // `.worktreeinclude` at the project root — see `copyWorkspaceFiles`
+    // `.worktreeinclude` at the repo root — see `copyWorktreeFiles`
     // for the union/intersection semantics. Runs AFTER `git worktree add`
     // (so the destination directory exists) and BEFORE the setup command (so the
     // setup script can read `.env` / local credentials / etc. just like
@@ -606,14 +606,14 @@ export class WorkspaceService {
     try {
       const copied = await host.scripts.copyFiles(repoPath, worktreePath);
       if (copied.length > 0) {
-        log.info({ workspaceId, count: copied.length }, "copied workspace files into new worktree");
+        log.info({ worktreeId, count: copied.length }, "copied worktree files into new worktree");
       }
     } catch (err) {
-      // Catch-all backstop. `copyWorkspaceFiles` already logs per-file
+      // Catch-all backstop. `copyWorktreeFiles` already logs per-file
       // failures internally; this guard exists so an unexpected crash
       // (e.g. a truly malformed config) doesn't abort the create flow
       // before the chat pane / setup script have a chance to run.
-      log.warn({ err, workspaceId }, "copyWorkspaceFiles raised — continuing");
+      log.warn({ err, worktreeId }, "copyWorktreeFiles raised — continuing");
     }
 
     // How the prompt's agent is displayed (issue #682): the caller's
@@ -621,16 +621,16 @@ export class WorkspaceService {
     const agentMode =
       input.agentMode ?? agentModeFromVia(input.via) ?? settingsService.defaultAgentMode();
 
-    // Materialize the default chat pane so the workspace surfaces a
+    // Materialize the default chat pane so the worktree surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt. A `gui`
     // prompt runs in it.
-    const defaultChat = chatService.getOrCreateDefault(workspaceId);
+    const defaultChat = chatService.getOrCreateDefault(worktreeId);
 
     // The setup command runs in its own terminal tab, in parallel with the
     // agent: the prompt goes out now rather than after setup, so a slow or
     // failing setup never holds back or drops it, and the user can watch
     // (and answer) the setup in its tab.
-    workspaceScriptService.startSetup(workspaceId, worktreePath, repoPath);
+    worktreeScriptService.startSetup(worktreeId, worktreePath, repoPath);
 
     if (!input.prompt) {
       return { ok: true, path: worktreePath };
@@ -641,7 +641,7 @@ export class WorkspaceService {
     // without a TUI invocation falls back to a chat, which the response
     // reports as `via: "chat"`.
     const launched = agentLaunchService.launch({
-      workspaceId,
+      worktreeId,
       agentDefinitionId: input.codingAgentId,
       prompt: input.prompt,
       mode: agentMode,
@@ -686,9 +686,9 @@ export class WorkspaceService {
       };
     }
 
-    const workspace = this.resolve(chat.workspaceId);
-    if (!workspace) {
-      return { ok: false, code: "NOT_FOUND", message: "Workspace not found" };
+    const worktree = this.resolve(chat.worktreeId);
+    if (!worktree) {
+      return { ok: false, code: "NOT_FOUND", message: "Worktree not found" };
     }
 
     const agentDef = settingsService.getAgentDefinition(chat.agent);
@@ -701,39 +701,39 @@ export class WorkspaceService {
 
     const command = formatShellCommand(invocation.command, invocation.args);
     const terminalId = randomUUID();
-    await terminalService.spawn(chat.workspaceId, terminalId, { command });
+    await terminalService.spawn(chat.worktreeId, terminalId, { command });
     // Broadcast so an already-open dashboard adds the pane to its terminal
     // dockview without a reload — same pattern as `terminal.create` and the
     // `via=terminal` create path.
-    emit({ kind: "terminal-created", workspaceId: chat.workspaceId, terminalId });
+    emit({ kind: "terminal-created", worktreeId: chat.worktreeId, terminalId });
 
     log.info(
-      { chatId, workspaceId: chat.workspaceId, terminalId },
+      { chatId, worktreeId: chat.worktreeId, terminalId },
       "continue chat session in terminal",
     );
-    return { ok: true, terminalId, workspaceId: chat.workspaceId, sessionId: chat.activeSessionId };
+    return { ok: true, terminalId, worktreeId: chat.worktreeId, sessionId: chat.activeSessionId };
   }
 
   /**
-   * Remove a workspace (git worktree) and its workspace-scoped state.
+   * Remove a worktree (git worktree) and its worktree-scoped state.
    *
    * Two-phase to keep the UI snappy:
    *
    *   1. **Fast path (synchronous):** waits for any worktree sync already
    *      running (it could save the row back), then drops the row from state,
-   *      deletes the workspace's prompt file / DB statuses / chats /
+   *      deletes the worktree's prompt file / DB statuses / chats /
    *      browsers / terminals / LSPs / cronjobs / tasks, and emits a
    *      `remove` event so subscribers (the dashboard) can drop the card.
    *   2. **Background:** `git worktree remove --force` + `git branch -D`.
    *      Failures are logged but never bubble back — by then the
-   *      workspace is already gone from the user's perspective and we
+   *      worktree is already gone from the user's perspective and we
    *      don't want a stale `.git` to wedge the UI.
    *
    * When `.band/config.json` declares a `teardown` command, it runs first,
-   * in a terminal tab of the still-listed workspace, and this call waits
+   * in a terminal tab of the still-listed worktree, and this call waits
    * for it (up to {@link TEARDOWN_TIMEOUT_MS}) before either phase. The
-   * dashboard shows the workspace as tearing down meanwhile. A failing
-   * teardown is logged and does not stop the removal. The workspace's
+   * dashboard shows the worktree as tearing down meanwhile. A failing
+   * teardown is logged and does not stop the removal. The worktree's
    * chats, agents and cronjobs are still live while it runs; they stop in
    * the fast path afterwards.
    *
@@ -741,87 +741,86 @@ export class WorkspaceService {
    * `git worktree list --porcelain` inline so detached-HEAD worktrees
    * (labelled `detached-<short-sha>` everywhere else in the app) round-
    * trip correctly through the remove flow — see the
-   * `workspace-remove-detached.test.ts` regression test.
+   * `worktree-remove-detached.test.ts` regression test.
    */
-  async remove(input: WorkspaceRemoveInput): Promise<{ ok: true }> {
+  async remove(input: WorktreeRemoveInput): Promise<{ ok: true }> {
     const state = loadState();
-    const project = state.projects.find((p) => p.name === input.project);
-    if (!project) {
-      throw new ProjectNotFoundError(input.project);
+    const repo = state.repos.find((p) => p.name === input.repo);
+    if (!repo) {
+      throw new RepoNotFoundError(input.repo);
     }
 
-    // Plain projects can't have their (single, implicit) workspace
-    // removed — the workspace is the project. The user must remove the
-    // project entirely instead.
-    if (project.kind === "plain") {
-      throw new PlainProjectError(
-        `Project "${input.project}" is a plain (non-git) project. Remove the project instead of the workspace.`,
+    // Plain repos can't have their (single, implicit) worktree
+    // removed — the worktree is the repo. The user must remove the
+    // repo entirely instead.
+    if (repo.kind === "plain") {
+      throw new PlainRepoError(
+        `Repo "${input.repo}" is a plain (non-git) repo. Remove the repo instead of the worktree.`,
       );
     }
 
-    // Resolve the workspace by its immutable `name`. The live git branch
+    // Resolve the worktree by its immutable `name`. The live git branch
     // (what we actually delete) comes from the row, since it may have been
     // switched away from `name` since creation.
-    const wtRow = project.worktrees.find((wt) => wt.name === input.name);
+    const wtRow = repo.worktrees.find((wt) => wt.name === input.name);
     if (!wtRow) {
-      throw new WorkspaceNotFoundError(input.name);
+      throw new WorktreeNotFoundError(input.name);
     }
     const currentBranch = wtRow.branch;
 
     // Resolve the worktree path via `listWorktrees` rather than re-parsing
     // porcelain inline — it applies the detached-HEAD → `detached-<sha>`
-    // fallback that the rest of the app sees in `project.worktrees`, so
+    // fallback that the rest of the app sees in `repo.worktrees`, so
     // the live branch matches.
     // A worktree on a remote host is listed from that host's checkout.
     const wtHostId = wtRow.hostId ?? hostRegistry.local.id;
-    const checkoutPath =
-      hostRegistry.projectPathOn(project.name, wtHostId, project.path) ?? project.path;
-    const workspaceId = toWorkspaceId(input.project, input.name);
+    const checkoutPath = hostRegistry.repoPathOn(repo.name, wtHostId, repo.path) ?? repo.path;
+    const worktreeId = toWorktreeId(input.repo, input.name);
     let worktrees: Awaited<ReturnType<Host["worktree"]["list"]>>;
     try {
       worktrees = await (wtHostId === hostRegistry.local.id
-        ? hostRegistry.hostForProject(project.name)
+        ? hostRegistry.hostForRepo(repo.name)
         : hostRegistry.hostById(wtHostId)
       ).worktree.list(checkoutPath);
     } catch (err) {
-      // A worker that is offline can't be asked. Take the workspace off the
+      // A worker that is offline can't be asked. Take the worktree off the
       // hub now and delete the checkout when the worker reconnects.
       if (wtHostId !== hostRegistry.local.id && err instanceof HostOfflineError) {
         log.info(
-          { workspaceId, hostId: wtHostId },
+          { worktreeId, hostId: wtHostId },
           "host offline; removal will finish on reconnect",
         );
-        return this.removeNow(input, workspaceId, wtRow.path, currentBranch, currentBranch, true);
+        return this.removeNow(input, worktreeId, wtRow.path, currentBranch, currentBranch, true);
       }
       throw err;
     }
     const match = worktrees.find((wt) => wt.branch === currentBranch);
     if (!match) {
-      throw new WorkspaceNotFoundError(input.name);
+      throw new WorktreeNotFoundError(input.name);
     }
     const worktreePath = match.path;
 
-    const teardownScript = { worktreePath, projectPath: checkoutPath };
-    if (!(await workspaceScriptService.getCommand(workspaceId, "teardown", teardownScript))) {
-      return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
+    const teardownScript = { worktreePath, repoPath: checkoutPath };
+    if (!(await worktreeScriptService.getCommand(worktreeId, "teardown", teardownScript))) {
+      return this.removeNow(input, worktreeId, worktreePath, currentBranch, match.branch);
     }
 
-    const inFlight = this.removing.get(workspaceId);
+    const inFlight = this.removing.get(worktreeId);
     if (inFlight) return inFlight;
     const removal = (async () => {
-      const outcome = await workspaceScriptService.run(
-        workspaceId,
+      const outcome = await worktreeScriptService.run(
+        worktreeId,
         "teardown",
         teardownScript,
         TEARDOWN_TIMEOUT_MS,
       );
       // `closed` from a duplicate run is not a failure; the first run reports.
       if (outcome.kind !== "closed" && (outcome.kind !== "exited" || outcome.code !== 0)) {
-        log.warn({ workspaceId, outcome }, "teardown did not succeed; removing anyway");
+        log.warn({ worktreeId, outcome }, "teardown did not succeed; removing anyway");
       }
-      return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
-    })().finally(() => this.removing.delete(workspaceId));
-    this.removing.set(workspaceId, removal);
+      return this.removeNow(input, worktreeId, worktreePath, currentBranch, match.branch);
+    })().finally(() => this.removing.delete(worktreeId));
+    this.removing.set(worktreeId, removal);
     return removal;
   }
 
@@ -830,8 +829,8 @@ export class WorkspaceService {
    * state because a teardown can take a while.
    */
   private async removeNow(
-    input: WorkspaceRemoveInput,
-    workspaceId: string,
+    input: WorktreeRemoveInput,
+    worktreeId: string,
     worktreePath: string,
     currentBranch: string,
     matchedBranch: string,
@@ -843,7 +842,7 @@ export class WorkspaceService {
     try {
       const result = this.removeFromState(
         input,
-        workspaceId,
+        worktreeId,
         worktreePath,
         currentBranch,
         matchedBranch,
@@ -858,8 +857,8 @@ export class WorkspaceService {
   }
 
   private removeFromState(
-    input: WorkspaceRemoveInput,
-    workspaceId: string,
+    input: WorktreeRemoveInput,
+    worktreeId: string,
     worktreePath: string,
     currentBranch: string,
     matchedBranch: string,
@@ -867,107 +866,103 @@ export class WorkspaceService {
     deferCleanup: boolean,
   ): { ok: true } {
     const state = loadState();
-    const project = state.projects.find((p) => p.name === input.project);
-    if (!project) {
-      throw new ProjectNotFoundError(input.project);
+    const repo = state.repos.find((p) => p.name === input.repo);
+    if (!repo) {
+      throw new RepoNotFoundError(input.repo);
     }
-    if (!project.worktrees.some((wt) => wt.name === input.name)) {
-      throw new WorkspaceNotFoundError(input.name);
+    if (!repo.worktrees.some((wt) => wt.name === input.name)) {
+      throw new WorktreeNotFoundError(input.name);
     }
-    const host = hostRegistry.hostFor(workspaceId);
+    const host = hostRegistry.hostFor(worktreeId);
 
     // ── Fast path: update state and emit immediately ──
-    project.worktrees = project.worktrees.filter((wt) => wt.name !== input.name);
+    repo.worktrees = repo.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
     removal.commit();
 
     try {
-      unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
+      unlinkSync(join(bandHome(), "worktree-prompts", `${worktreeId}.json`));
     } catch {
       // Prompt file may not exist
     }
-    deleteWorkspaceStatus(workspaceId);
-    this.queries.deleteBranchStatus(workspaceId);
+    deleteWorktreeStatus(worktreeId);
+    this.queries.deleteBranchStatus(worktreeId);
 
     // Clean up all chat panes and their agent processes. The service
     // tears down the saved layout as part of the same call (see
-    // `ChatService.removeAllForWorkspace`) so a separate `deleteChatLayout`
+    // `ChatService.removeAllForWorktree`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    chatService.removeAllForWorkspace(workspaceId);
-    agentSessionRegistry.removeAllForWorkspace(workspaceId);
+    chatService.removeAllForWorktree(worktreeId);
+    agentSessionRegistry.removeAllForWorktree(worktreeId);
 
     // Clean up all browser tabs + layout. Same contract as chats —
-    // `BrowserService.removeAllForWorkspace` drops the layout row itself.
-    browserService.removeAllForWorkspace(workspaceId);
+    // `BrowserService.removeAllForWorktree` drops the layout row itself.
+    browserService.removeAllForWorktree(worktreeId);
 
     // Kill any running terminal PTY sessions + layout. Fire-and-forget: the
     // kill may hop to the terminal daemon, and a failure there must not fail
-    // the workspace removal (the boot reconcile retries it).
-    void terminalService.killWorkspace(workspaceId).catch((err) => {
-      log.warn({ workspaceId, err }, "failed to kill the workspace's terminals");
+    // the worktree removal (the boot reconcile retries it).
+    void terminalService.killWorktree(worktreeId).catch((err) => {
+      log.warn({ worktreeId, err }, "failed to kill the worktree's terminals");
     });
-    terminalService.deleteLayout(workspaceId);
+    terminalService.deleteLayout(worktreeId);
 
-    // Drop the last-focused-panel record so it doesn't outlive the workspace.
-    panelFocusService.remove(workspaceId);
+    // Drop the last-focused-panel record so it doesn't outlive the worktree.
+    panelFocusService.remove(worktreeId);
 
-    // Drop the workspace's shared UI state (center tabs, drafts, splits).
-    clientStateService.removeAllForWorkspace(workspaceId);
+    // Drop the worktree's shared UI state (center tabs, drafts, splits).
+    clientStateService.removeAllForWorktree(worktreeId);
 
-    // Drop the workspace's subscriptions.
-    subscriptionService.removeForWorkspace(workspaceId);
+    // Drop the worktree's subscriptions.
+    subscriptionService.removeForWorktree(worktreeId);
 
     // Kill any running language server processes
-    void host.lsp.killWorkspace(workspaceId).catch((err) => {
-      log.warn({ workspaceId, err }, "failed to kill the workspace's language servers");
+    void host.lsp.killWorktree(worktreeId).catch((err) => {
+      log.warn({ worktreeId, err }, "failed to kill the worktree's language servers");
     });
 
-    // Clean up workspace-scoped cronjobs
-    cronjobService.removeForKey(workspaceId);
+    // Clean up worktree-scoped cronjobs
+    cronjobService.removeForKey(worktreeId);
 
-    // Delete persisted task history for the workspace (issue #416).
-    // Tasks aren't covered by a FK cascade because workspaces aren't a
+    // Delete persisted task history for the worktree (issue #416).
+    // Tasks aren't covered by a FK cascade because worktrees aren't a
     // first-class DB row, so the cleanup is explicit here next to the
-    // other workspace-scoped removals. Task cleanup is best-effort — a
+    // other worktree-scoped removals. Task cleanup is best-effort — a
     // DB lock or WAL timeout must not abort the whole removal or
     // suppress the `emit` below, otherwise the dashboard would keep
-    // showing the just-deleted workspace.
+    // showing the just-deleted worktree.
     try {
-      const deletedTasks = new TaskQueries().deleteWorkspaceTasks(workspaceId);
+      const deletedTasks = new TaskQueries().deleteWorktreeTasks(worktreeId);
       if (deletedTasks > 0) {
-        log.info({ workspaceId, count: deletedTasks }, "deleted workspace tasks on removal");
+        log.info({ worktreeId, count: deletedTasks }, "deleted worktree tasks on removal");
       }
     } catch (err) {
-      log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
+      log.error({ worktreeId, err }, "failed to delete worktree tasks on removal");
     }
 
     // Delete persisted usage-event history + scan watermarks alongside
     // tasks (issue #425). Same best-effort policy as the tasks cleanup
-    // above. Dropping the watermark lets a future workspace at the same
+    // above. Dropping the watermark lets a future worktree at the same
     // id start scanning from scratch.
     try {
-      const deletedEvents = this.usageEventQueries.deleteWorkspaceEvents(workspaceId);
+      const deletedEvents = this.usageEventQueries.deleteWorktreeEvents(worktreeId);
       if (deletedEvents > 0) {
-        log.info(
-          { workspaceId, count: deletedEvents },
-          "deleted workspace usage events on removal",
-        );
+        log.info({ worktreeId, count: deletedEvents }, "deleted worktree usage events on removal");
       }
     } catch (err) {
-      log.error({ workspaceId, err }, "failed to delete workspace usage events on removal");
+      log.error({ worktreeId, err }, "failed to delete worktree usage events on removal");
     }
     try {
-      this.usageScanStateQueries.deleteWorkspace(workspaceId);
+      this.usageScanStateQueries.deleteWorktree(worktreeId);
     } catch (err) {
-      log.error({ workspaceId, err }, "failed to delete workspace usage scan state on removal");
+      log.error({ worktreeId, err }, "failed to delete worktree usage scan state on removal");
     }
 
-    // Notify subscribers (dashboard status stream) that this workspace is gone
-    emit({ kind: "remove", workspaceId });
+    // Notify subscribers (dashboard status stream) that this worktree is gone
+    emit({ kind: "remove", worktreeId });
 
     // ── Background cleanup: slow git/fs operations ──
-    const projPath =
-      hostRegistry.projectPathOn(project.name, host.id, project.path) ?? project.path;
+    const projPath = hostRegistry.repoPathOn(repo.name, host.id, repo.path) ?? repo.path;
     // Synthetic "detached-<short-sha>" labels generated by `listWorktrees`
     // for detached-HEAD worktrees do not correspond to a real git ref.
     // Trying to `git branch -D detached-abc1234` would error ("branch not
@@ -986,12 +981,12 @@ export class WorkspaceService {
       return { ok: true };
     }
     setImmediate(() => {
-      this.cleanupWorktree(host, projPath, worktreePath, branchToDelete, workspaceId)
+      this.cleanupWorktree(host, projPath, worktreePath, branchToDelete, worktreeId)
         .catch((err) => {
           if (err instanceof HostOfflineError) {
-            // The host dropped after the workspace left the hub. The worker finishes the job on reconnect.
+            // The host dropped after the worktree left the hub. The worker finishes the job on reconnect.
             log.info(
-              { workspaceId, hostId: host.id },
+              { worktreeId, hostId: host.id },
               "host went offline; cleanup will finish on reconnect",
             );
             this.pendingRemovals.add({
@@ -1002,7 +997,7 @@ export class WorkspaceService {
             });
             return;
           }
-          log.error({ err, workspaceId }, "background workspace cleanup failed");
+          log.error({ err, worktreeId }, "background worktree cleanup failed");
         })
         .finally(removal.end);
     });
@@ -1011,7 +1006,7 @@ export class WorkspaceService {
   }
 
   /**
-   * Deletes a removed workspace's checkout on its host: the git worktree, then
+   * Deletes a removed worktree's checkout on its host: the git worktree, then
    * its branch. Rejects with `HostOfflineError` when the host can't be reached,
    * so the caller can try again later.
    */
@@ -1020,7 +1015,7 @@ export class WorkspaceService {
     projPath: string,
     worktreePath: string,
     branchToDelete: string | null,
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<void> {
     // Unlock the worktree first. External tooling (e.g. `supacode`)
     // locks Band's worktrees — visible as a `locked "{...}"` line in
@@ -1030,7 +1025,7 @@ export class WorkspaceService {
     // --force` ("cannot remove a locked working tree") AND is skipped by
     // `git worktree prune`, so without this unlock the admin record in
     // `.git/worktrees/<id>/` survives and `syncWorktrees` re-adds the
-    // workspace on the next tick (issue: locked worktrees resurrect
+    // worktree on the next tick (issue: locked worktrees resurrect
     // forever). Best-effort: swallow "not locked" and any other error.
     try {
       // Unlocks first (best-effort), then removes.
@@ -1047,7 +1042,7 @@ export class WorkspaceService {
         // log so a stale worktree path is traceable, then still try
         // `git worktree prune` to at least clean the index — matches
         // the existing best-effort pattern used for prune/branch -D.
-        log.warn({ err: rmErr, workspaceId, worktreePath }, "manual worktree rm failed");
+        log.warn({ err: rmErr, worktreeId, worktreePath }, "manual worktree rm failed");
       }
       // Re-run the unlock: `git worktree prune` skips LOCKED entries, so
       // a still-locked admin record (whose working dir we just `rm`'d)
@@ -1062,7 +1057,7 @@ export class WorkspaceService {
         await host.git.exec(["worktree", "prune"], projPath);
       } catch (pruneErr) {
         if (pruneErr instanceof HostOfflineError) throw pruneErr;
-        log.warn({ err: pruneErr, workspaceId }, "git worktree prune failed");
+        log.warn({ err: pruneErr, worktreeId }, "git worktree prune failed");
       }
     }
 
@@ -1076,7 +1071,7 @@ export class WorkspaceService {
   }
 
   /**
-   * Deletes the checkouts of workspaces that were removed while `hostId` was
+   * Deletes the checkouts of worktrees that were removed while `hostId` was
    * offline. Called when its worker connects. A removal that fails stays
    * recorded for the next connect.
    */
@@ -1095,27 +1090,27 @@ export class WorkspaceService {
   }
 
   /**
-   * Toggle a workspace's pinned flag.
+   * Toggle a worktree's pinned flag.
    *
-   * Pinning surfaces the workspace in the dashboard's "Pinned" section.
-   * Rejects plain projects (they're already flat in the projects list and
+   * Pinning surfaces the worktree in the dashboard's "Pinned" section.
+   * Rejects plain repos (they're already flat in the repos list and
    * a stray `pinned=true` strands the UI with an empty `worktrees` array;
    * the menu item is also hidden client-side as a first line of defence).
    */
-  setPinned(input: WorkspaceSetPinnedInput): { ok: true } {
+  setPinned(input: WorktreeSetPinnedInput): { ok: true } {
     const state = loadState();
-    const project = state.projects.find((p) => p.name === input.project);
-    if (!project) {
-      throw new ProjectNotFoundError(input.project);
+    const repo = state.repos.find((p) => p.name === input.repo);
+    if (!repo) {
+      throw new RepoNotFoundError(input.repo);
     }
-    if (project.kind === "plain") {
-      throw new PlainProjectError(
-        `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
+    if (repo.kind === "plain") {
+      throw new PlainRepoError(
+        `Repo "${input.repo}" is a plain (non-git) repo. Pinning is not available.`,
       );
     }
-    const worktree = project.worktrees.find((w) => w.name === input.name);
+    const worktree = repo.worktrees.find((w) => w.name === input.name);
     if (!worktree) {
-      throw new WorkspaceNotFoundError(input.name);
+      throw new WorktreeNotFoundError(input.name);
     }
     worktree.pinned = input.pinned;
     saveState(state);
@@ -1123,7 +1118,7 @@ export class WorkspaceService {
   }
 
   /**
-   * `git pull --rebase` inside the workspace's worktree.
+   * `git pull --rebase` inside the worktree's worktree.
    *
    * Swallows the specific "Cannot rebase onto multiple branches" exit
    * status that git produces when the fetch step has already fast-
@@ -1131,22 +1126,22 @@ export class WorkspaceService {
    * case and a thrown error would surface as a red toast. Local changes in
    * the way, or no upstream, come back as an `ok: false` refusal.
    */
-  async gitPull(input: WorkspaceGitInput): Promise<GitOpResult> {
-    const workspaceId = toWorkspaceId(input.project, input.name);
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(input.name);
+  async gitPull(input: WorktreeGitInput): Promise<GitOpResult> {
+    const worktreeId = toWorktreeId(input.repo, input.name);
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(input.name);
     }
-    if (workspace.project.kind === "plain") {
-      throw new PlainProjectError(
-        `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
+    if (worktree.repo.kind === "plain") {
+      throw new PlainRepoError(
+        `Repo "${input.repo}" is a plain (non-git) repo. Git pull is not available.`,
       );
     }
-    return pullRebase(gitRunner(workspace.host), workspace.worktree.path);
+    return pullRebase(gitRunner(worktree.host), worktree.worktree.path);
   }
 
   /**
-   * `git push` inside the workspace's worktree. Falls back to
+   * `git push` inside the worktree's worktree. Falls back to
    * `git push --set-upstream origin <branch>` on first push when no
    * upstream is configured.
    *
@@ -1156,19 +1151,19 @@ export class WorkspaceService {
    * a second failing push. A non-fast-forward rejection comes back as an
    * `ok: false` refusal.
    */
-  async gitPush(input: WorkspaceGitInput): Promise<GitOpResult> {
-    const workspaceId = toWorkspaceId(input.project, input.name);
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(input.name);
+  async gitPush(input: WorktreeGitInput): Promise<GitOpResult> {
+    const worktreeId = toWorktreeId(input.repo, input.name);
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(input.name);
     }
-    if (workspace.project.kind === "plain") {
-      throw new PlainProjectError(
-        `Project "${input.project}" is a plain (non-git) project. Git push is not available.`,
+    if (worktree.repo.kind === "plain") {
+      throw new PlainRepoError(
+        `Repo "${input.repo}" is a plain (non-git) repo. Git push is not available.`,
       );
     }
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
     try {
       await execGit(["push"], cwd);
     } catch (err) {
@@ -1183,56 +1178,56 @@ export class WorkspaceService {
         if (refusal) return refusal;
         throw err;
       }
-      // Set upstream for the LIVE git branch, not the workspace identity —
+      // Set upstream for the LIVE git branch, not the worktree identity —
       // after a branch switch they differ, and we push the current checkout.
-      await execGit(["push", "--set-upstream", "origin", workspace.worktree.branch], cwd);
+      await execGit(["push", "--set-upstream", "origin", worktree.worktree.branch], cwd);
     }
-    await recordPushedHead(workspace.host, workspaceId, cwd);
+    await recordPushedHead(worktree.host, worktreeId, cwd);
     return { ok: true };
   }
 
   /**
-   * `git pull --rebase` keyed by workspaceId rather than `(project, branch)`.
+   * `git pull --rebase` keyed by worktreeId rather than `(repo, branch)`.
    *
-   * Used by `api/workspace/router.ts::gitPull` (the per-workspace,
+   * Used by `api/worktree/router.ts::gitPull` (the per-worktree,
    * singular-namespace variant). Runs the same `pullRebase` helper as the
-   * project-keyed `gitPull` above, so the collision guard and the refusal
+   * repo-keyed `gitPull` above, so the collision guard and the refusal
    * mapping stay in one place. (We don't `this.gitPull` from here because that variant
    * additionally enforces the `kind === "plain"` rejection via
-   * `PlainProjectError`; the workspaceId surface doesn't carry that
+   * `PlainRepoError`; the worktreeId surface doesn't carry that
    * concern.)
    */
-  async gitPullByWorkspaceId(workspaceId: string): Promise<GitOpResult> {
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+  async gitPullByWorktreeId(worktreeId: string): Promise<GitOpResult> {
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    return pullRebase(gitRunner(workspace.host), workspace.worktree.path);
+    return pullRebase(gitRunner(worktree.host), worktree.worktree.path);
   }
 
   /**
-   * `git push` keyed by workspaceId rather than `(project, branch)`.
+   * `git push` keyed by worktreeId rather than `(repo, branch)`.
    *
-   * Used by `api/workspace/router.ts::gitPush` (the per-workspace,
+   * Used by `api/worktree/router.ts::gitPush` (the per-worktree,
    * singular-namespace variant). Resolves the live HEAD branch rather than
    * the recorded one for the upstream fallback — the worktree may have
-   * been renamed via `git branch -m` and the project record not yet
+   * been renamed via `git branch -m` and the repo record not yet
    * refreshed, in which case pushing the stale name fails too.
    */
-  async gitPushByWorkspaceId(workspaceId: string): Promise<GitOpResult> {
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+  async gitPushByWorktreeId(worktreeId: string): Promise<GitOpResult> {
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
     try {
       await execGit(["push"], cwd);
     } catch (err) {
       // Narrow the catch to the specific "no upstream configured" exit
       // — every other failure (auth, rejected push, network) must bubble
       // up unmasked so the user sees the real cause instead of a
-      // misleading second-push error. Same shape as the project-keyed
+      // misleading second-push error. Same shape as the repo-keyed
       // `gitPush` above.
       const msg = err instanceof Error ? err.message : String(err);
       if (!/has no upstream branch/i.test(msg)) {
@@ -1242,39 +1237,39 @@ export class WorkspaceService {
       }
       // First push needs to set upstream. Resolve the live HEAD branch
       // rather than trusting a stale state.json entry — the worktree
-      // may have been renamed via `git branch -m` and the project
+      // may have been renamed via `git branch -m` and the repo
       // record not yet refreshed.
       let headBranch: string;
       try {
         headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
       } catch {
-        headBranch = workspace.worktree.branch;
+        headBranch = worktree.worktree.branch;
       }
       // Don't wrap the upstream-set failure in `new Error(msg)` — that
       // would drop the original stack. Let `execGit`'s rejection bubble
       // unchanged, carrying its captured stderr.
       await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
     }
-    await recordPushedHead(workspace.host, workspaceId, cwd);
+    await recordPushedHead(worktree.host, worktreeId, cwd);
     return { ok: true };
   }
 
   /**
-   * Commit all pending changes in `workspaceId` with `message` (and optional
+   * Commit all pending changes in `worktreeId` with `message` (and optional
    * `body`). Stages everything (tracked + untracked) so the commit reflects
    * the diff the user just reviewed in the Changes view. A clean working
    * tree comes back as a `nothing-to-commit` refusal.
    */
   async gitCommit(
-    workspaceId: string,
+    worktreeId: string,
     input: { message: string; body?: string },
   ): Promise<GitOpResult> {
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    const cwd = workspace.worktree.path;
-    const execGit = gitRunner(workspace.host);
+    const cwd = worktree.worktree.path;
+    const execGit = gitRunner(worktree.host);
 
     await execGit(["add", "-A"], cwd);
     // `git commit` reports "nothing to commit" on stdout, which `execGit`'s
@@ -1297,8 +1292,8 @@ export class WorkspaceService {
   }
 
   /**
-   * Ask the workspace's coding agent to summarise pending changes into a
-   * commit message. The agent runs in the workspace's worktree with
+   * Ask the worktree's coding agent to summarise pending changes into a
+   * commit message. The agent runs in the worktree's worktree with
    * `Bash`/`Read` tools and explores the diff itself rather than receiving
    * a (potentially truncated) serialised diff in the prompt.
    *
@@ -1309,13 +1304,13 @@ export class WorkspaceService {
    * commit".
    */
   async generateCommitMessage(
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<{ message: string; body: string; agentLabel: string }> {
-    const workspace = this.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = this.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    const cwd = workspace.worktree.path;
+    const cwd = worktree.worktree.path;
 
     // Cheap pre-flight: refuse early if there are no pending changes so
     // we don't spin up an agent process just to have it report "nothing
@@ -1327,14 +1322,14 @@ export class WorkspaceService {
     // permission denied, …) is a real, user-actionable error: surface
     // it instead of silently spawning an agent that will run the same
     // status command and fail the same way.
-    const execGit = gitRunner(workspace.host);
+    const execGit = gitRunner(worktree.host);
     const status = await execGit(["status", "--porcelain"], cwd);
     if (!status.trim()) {
       throw new Error("No changes to summarise");
     }
 
     const settings = settingsService.get();
-    // Use the workspace's default chat-pane agent so the commit-message
+    // Use the worktree's default chat-pane agent so the commit-message
     // agent matches the agent the user is actually looking at. Without
     // this, switching the pane to (e.g.) codex would silently keep
     // generating commit messages with the user's global default
@@ -1342,16 +1337,16 @@ export class WorkspaceService {
     // the user has explicitly switched panes; when it's null, we fall
     // back to the global default via SettingsService.resolveAgent —
     // which is intentional, not a silent oversight, so a freshly seeded
-    // workspace still picks up the user's preferred agent.
-    const defaultChat = chatService.getOrCreateDefault(workspaceId);
+    // worktree still picks up the user's preferred agent.
+    const defaultChat = chatService.getOrCreateDefault(worktreeId);
     const agentDef = SettingsService.resolveAgent(settings, defaultChat.agent ?? undefined);
 
     const prompt = [
-      "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",
+      "You are running inside a git worktree. Write a commit message for the changes that are pending in this worktree right now.",
       "",
       "Steps:",
       "  1. Run `git status` and `git diff HEAD` (and `git diff --stat` if the diff is large) to understand what changed.",
-      "  2. If helpful, read a few of the changed files or recent commits (`git log -5 --oneline`) to match the project's commit style.",
+      "  2. If helpful, read a few of the changed files or recent commits (`git log -5 --oneline`) to match the repo's commit style.",
       "  3. Write a single commit message.",
       "",
       "Format:",
@@ -1364,7 +1359,7 @@ export class WorkspaceService {
 
     let lastTurnText: string;
     try {
-      lastTurnText = await agentSessionService.oneShot(agentDef, cwd, prompt, workspace.host);
+      lastTurnText = await agentSessionService.oneShot(agentDef, cwd, prompt, worktree.host);
     } catch (e) {
       throw new Error(
         `Coding agent "${agentDef.label}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -1394,7 +1389,7 @@ export class WorkspaceService {
   /**
    * Execute a `.band/<scriptType>` shell script in the given directory.
    *
-   * Used by the dashboard's "Run script" actions on a workspace
+   * Used by the dashboard's "Run script" actions on a worktree
    * (e.g. `on-create`, `on-open`). Returns once the script exits 0;
    * rejects on a non-zero exit. On POSIX the script is run via
    * `bash <scriptPath>` — execFile with a fixed argv, not a shell-spawned
@@ -1407,14 +1402,14 @@ export class WorkspaceService {
    *
    * Missing-script case throws a generic `Error` (not a domain class) so
    * tRPC surfaces it as `INTERNAL_SERVER_ERROR` (500). The wire-level
-   * contract is pinned by `workspaces.runScript returns error for missing
+   * contract is pinned by `worktrees.runScript returns error for missing
    * script` in `apps/hub/tests/trpc.test.ts`; a 4xx mapping would be
    * semantically nicer but would break the existing test and any client
    * pattern-matching on status.
    */
-  async runScript(input: WorkspaceRunScriptInput): Promise<{ ok: true }> {
+  async runScript(input: WorktreeRunScriptInput): Promise<{ ok: true }> {
     // Harden `scriptType` before it becomes a path segment / command token.
-    // Real callers only ever send `"setup"` / `"teardown"` (see WorkspaceCard),
+    // Real callers only ever send `"setup"` / `"teardown"` (see WorktreeCard),
     // but the tRPC input is an unconstrained `z.string()`. Restrict to a safe
     // filename charset — no path separators, no `..` segment, no cmd.exe
     // metacharacters — so the Windows `cmd /c <scriptPath>` path can't be
@@ -1448,9 +1443,9 @@ export class WorkspaceService {
 }
 
 /**
- * Shared singleton consumed by the API tier (workspaces router) and any
- * future non-tRPC entry points (CLI, scripts). `WorkspaceService` is
+ * Shared singleton consumed by the API tier (worktrees router) and any
+ * future non-tRPC entry points (CLI, scripts). `WorktreeService` is
  * stateless aside from its `queries` dependency, so one instance is safe
  * across callers.
  */
-export const workspaceService = new WorkspaceService();
+export const worktreeService = new WorktreeService();

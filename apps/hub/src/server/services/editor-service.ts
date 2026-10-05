@@ -1,28 +1,28 @@
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { FsStat, HostFs } from "@band-app/host-api";
 import { formatFileLocation } from "@band-app/shared/file-location";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
 import { emit } from "./watcher-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 /**
  * Editor domain service.
  *
  * Absorbs the small helpers that used to live in `lib/`:
- *   - `lib/active-workspace.ts`   → the in-memory "currently focused
- *     workspace" hint that the CLI's `band open` falls back to.
+ *   - `lib/active-worktree.ts`   → the in-memory "currently focused
+ *     worktree" hint that the CLI's `band open` falls back to.
  *   - `lib/formatter.ts`          → Prettier dispatcher (kept as a
  *     module-level helper in `services/formatter.ts`).
- *   - `lib/file-watcher.ts`       → per-workspace fs.watch lifecycle
+ *   - `lib/file-watcher.ts`       → per-worktree fs.watch lifecycle
  *     (kept as a module-level helper in `services/file-watcher.ts`).
  *
  * Plus a couple of behaviours that used to be inlined in the legacy
  * `editorRouter` (`apps/web/src/trpc/router.ts`):
- *   - LSP shutdown hooks (`host.lsp.killWorkspace`, `host.lsp.killAll`) so
- *     the workspace cleanup path and the server-shutdown handler reach
+ *   - LSP shutdown hooks (`host.lsp.killWorktree`, `host.lsp.killAll`) so
+ *     the worktree cleanup path and the server-shutdown handler reach
  *     LSP state via the service tier rather than poking infra directly.
  *   - `openFile` resolution + SSE emit (used by the CLI's `band open`).
  *
@@ -32,18 +32,18 @@ import { workspaceService } from "./workspace-service";
  * be a no-op.
  */
 export class EditorService {
-  private activeWorkspaceId: string | null = null;
+  private activeWorktreeId: string | null = null;
 
   // -------------------------------------------------------------------------
-  // Active-workspace tracking (process-local; resets on server restart)
+  // Active-worktree tracking (process-local; resets on server restart)
   // -------------------------------------------------------------------------
 
-  setActiveWorkspace(workspaceId: string | null): void {
-    this.activeWorkspaceId = workspaceId && workspaceId.length > 0 ? workspaceId : null;
+  setActiveWorktree(worktreeId: string | null): void {
+    this.activeWorktreeId = worktreeId && worktreeId.length > 0 ? worktreeId : null;
   }
 
-  getActiveWorkspace(): string | null {
-    return this.activeWorkspaceId;
+  getActiveWorktree(): string | null {
+    return this.activeWorktreeId;
   }
 
   // -------------------------------------------------------------------------
@@ -52,41 +52,38 @@ export class EditorService {
 
   /**
    * Format `content` using Prettier as if it were the file at `filePath`
-   * inside `workspaceId`. Throws `FormatterError` for bad input (file
+   * inside `worktreeId`. Throws `FormatterError` for bad input (file
    * outside the worktree, Prettier syntax error, etc.); throws a
-   * `WorkspaceNotFoundError` when the workspace can't be resolved
+   * `WorktreeNotFoundError` when the worktree can't be resolved
    * (the caller maps both to tRPC errors — `formatFile` is one of the
-   * historical NOT_FOUND carve-outs in `api/workspace/router.ts`).
+   * historical NOT_FOUND carve-outs in `api/worktree/router.ts`).
    */
   async formatFile(
-    workspaceId: string,
+    worktreeId: string,
     filePath: string,
     content: string,
   ): Promise<Awaited<ReturnType<typeof formatFile>>> {
-    const workspace = workspaceService.resolve(workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(workspaceId);
+    const worktree = worktreeService.resolve(worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(worktreeId);
     }
-    return formatFile(workspace.worktree.path, filePath, content, { fs: workspace.host.fs });
+    return formatFile(worktree.worktree.path, filePath, content, { fs: worktree.host.fs });
   }
 
   // -------------------------------------------------------------------------
-  // File-change subscriptions (per-workspace fs.watch)
+  // File-change subscriptions (per-worktree fs.watch)
   // -------------------------------------------------------------------------
 
-  subscribeToFileChanges(
-    workspaceId: string,
-    listener: (path: string | null) => void,
-  ): Unsubscribe {
-    return subscribeToFileChanges(workspaceId, listener);
+  subscribeToFileChanges(worktreeId: string, listener: (path: string | null) => void): Unsubscribe {
+    return subscribeToFileChanges(worktreeId, listener);
   }
 
   // -------------------------------------------------------------------------
   // LSP lifecycle pass-throughs
   // -------------------------------------------------------------------------
 
-  killWorkspaceLspServers(workspaceId: string): Promise<void> {
-    return hostRegistry.hostFor(workspaceId).lsp.killWorkspace(workspaceId);
+  killWorktreeLspServers(worktreeId: string): Promise<void> {
+    return hostRegistry.hostFor(worktreeId).lsp.killWorktree(worktreeId);
   }
 
   /** Stops every language server on every host, local and remote. One host failing does not stop the rest. */
@@ -99,7 +96,7 @@ export class EditorService {
   // -------------------------------------------------------------------------
 
   async openFile(input: {
-    workspaceId?: string;
+    worktreeId?: string;
     filePath: string;
     line?: number;
     lineEnd?: number;
@@ -107,26 +104,26 @@ export class EditorService {
     focus?: boolean;
   }): Promise<{
     ok: true;
-    workspaceId: string;
+    worktreeId: string;
     filePath: string;
     external: boolean;
   }> {
-    const targetWorkspaceId = input.workspaceId ?? this.activeWorkspaceId;
-    if (!targetWorkspaceId) {
+    const targetWorktreeId = input.worktreeId ?? this.activeWorktreeId;
+    if (!targetWorktreeId) {
       throw new EditorOpenError(
         "PRECONDITION_FAILED",
-        "No active workspace. Open a workspace in the Band dashboard or pass --workspace.",
+        "No active worktree. Open a worktree in the Band dashboard or pass --worktree.",
       );
     }
 
-    const workspace = workspaceService.resolve(targetWorkspaceId);
-    if (!workspace) {
-      throw new EditorOpenError("NOT_FOUND", `Workspace '${targetWorkspaceId}' not found`);
+    const worktree = worktreeService.resolve(targetWorktreeId);
+    if (!worktree) {
+      throw new EditorOpenError("NOT_FOUND", `Worktree '${targetWorktreeId}' not found`);
     }
 
     const resolved = await this.resolveTarget(
-      workspace.host.fs,
-      workspace.worktree.path,
+      worktree.host.fs,
+      worktree.worktree.path,
       input.filePath,
     );
 
@@ -142,10 +139,10 @@ export class EditorService {
     }
 
     // Two open modes share this procedure:
-    //   - In-workspace: emit a workspace-relative path so the renderer
-    //     opens it in the workspace's Files panel.
+    //   - In-worktree: emit a worktree-relative path so the renderer
+    //     opens it in the worktree's Files panel.
     //   - External: file exists on disk but lives outside the active
-    //     workspace's root. Pass the absolute path through verbatim so
+    //     worktree's root. Pass the absolute path through verbatim so
     //     the FileViewer mounts it as an *external* tab.
     const payloadPath = resolved.inside ? resolved.relativePath! : resolved.canonicalTarget;
 
@@ -156,7 +153,7 @@ export class EditorService {
 
     emit({
       kind: "open-file",
-      workspaceId: targetWorkspaceId,
+      worktreeId: targetWorktreeId,
       filePath: formatted,
       external: !resolved.inside,
       focus: input.focus ?? true,
@@ -164,17 +161,17 @@ export class EditorService {
 
     return {
       ok: true,
-      workspaceId: targetWorkspaceId,
+      worktreeId: targetWorktreeId,
       filePath: formatted,
       external: !resolved.inside,
     };
   }
 
   /**
-   * Resolve a path (absolute or workspace-relative) against a workspace and
+   * Resolve a path (absolute or worktree-relative) against a worktree and
    * report where it lands. Used by the dashboard's Quick Open to decide, for
    * an absolute-path query, whether to open the file as a normal
-   * workspace-relative tab (when it lives *inside* the worktree) or as an
+   * worktree-relative tab (when it lives *inside* the worktree) or as an
    * external tab (outside) — and, either way, whether it exists at all.
    *
    * Shares the exact canonicalize + segment-aware containment logic that
@@ -183,28 +180,28 @@ export class EditorService {
    * neither emits an SSE event nor throws for a missing file — the caller
    * only offers to open when `exists && isFile`.
    */
-  async resolvePath(input: { workspaceId: string; filePath: string }): Promise<{
+  async resolvePath(input: { worktreeId: string; filePath: string }): Promise<{
     exists: boolean;
     isFile: boolean;
-    /** True when the path lies outside the workspace worktree. */
+    /** True when the path lies outside the worktree worktree. */
     external: boolean;
-    /** POSIX workspace-relative path, set only when inside the worktree. */
-    workspaceRelativePath: string | null;
+    /** POSIX worktree-relative path, set only when inside the worktree. */
+    worktreeRelativePath: string | null;
   }> {
-    const workspace = workspaceService.resolve(input.workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(input.workspaceId);
+    const worktree = worktreeService.resolve(input.worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(input.worktreeId);
     }
     const resolved = await this.resolveTarget(
-      workspace.host.fs,
-      workspace.worktree.path,
+      worktree.host.fs,
+      worktree.worktree.path,
       input.filePath,
     );
     return {
       exists: resolved.exists,
       isFile: resolved.isFile,
       external: !resolved.inside,
-      workspaceRelativePath: resolved.inside ? resolved.relativePath : null,
+      worktreeRelativePath: resolved.inside ? resolved.relativePath : null,
     };
   }
 
@@ -223,13 +220,13 @@ export class EditorService {
     exists: boolean;
     isFile: boolean;
     inside: boolean;
-    /** POSIX workspace-relative path when `inside`, else null. */
+    /** POSIX worktree-relative path when `inside`, else null. */
     relativePath: string | null;
   }> {
     // Absolute paths are taken as-is; relative paths resolve against root.
     const absoluteTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
 
-    // Canonicalize the workspace root so symlinked path prefixes
+    // Canonicalize the worktree root so symlinked path prefixes
     // (macOS's `/var/folders` → `/private/var/folders` in particular)
     // compare equal. The CLI canonicalizes the user's argument before
     // sending, so a stored worktree path under `/var/...` would
@@ -245,7 +242,7 @@ export class EditorService {
     // Canonicalize the user's path the same way. `realpath` fails on
     // missing files, so walk up to the deepest ancestor that does exist,
     // canonicalize that, then re-append the trailing segments. That
-    // keeps the in-workspace check accurate for paths the user wants to
+    // keeps the in-worktree check accurate for paths the user wants to
     // *create* as well.
     const canonicalTarget = await canonicalizeMaybeMissing(fs, absoluteTarget);
 

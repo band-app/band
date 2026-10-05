@@ -1,14 +1,14 @@
 // Regression test for the PR-review blocker on the detached-HEAD label
 // fix. `listWorktrees` now returns `detached-<short-sha>` for a
 // detached worktree, and the dashboard sends that back to the
-// `workspaces.remove` mutation when the user clicks "Delete
-// workspace". The mutation used to re-parse `git worktree list
+// `worktrees.remove` mutation when the user clicks "Delete
+// worktree". The mutation used to re-parse `git worktree list
 // --porcelain` inline with no SHA fallback, so the lookup at
 // `currentBranch === input.branch` never matched and the call ended
-// in `throw new Error('Workspace "detached-abc1234" not found')` —
+// in `throw new Error('Worktree "detached-abc1234" not found')` —
 // breaking the delete action on every detached-HEAD card.
 //
-// The fix routes `workspaces.remove` through `listWorktrees` so the
+// The fix routes `worktrees.remove` through `listWorktrees` so the
 // same SHA fallback applies on both ends. This test boots the real
 // server, creates a real detached-HEAD worktree, sends the synthetic
 // `detached-<sha>` label to the mutation, and asserts:
@@ -27,7 +27,7 @@ import { listWorktreeBranches, listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
-const DEFAULT_TOKEN = "workspace-remove-detached-token";
+const DEFAULT_TOKEN = "worktree-remove-detached-token";
 
 const gitEnv = {
   ...process.env,
@@ -46,9 +46,9 @@ function git(cwd: string, args: string[]): string {
 // see `helpers/db-read.ts`. Reading the DB keeps the assertion
 // independent of an unrelated endpoint's behaviour, and asserting BOTH
 // the `branch` and the `name` (identity) columns pins the actual removal
-// key: `workspaces.remove` filters rows by `name`.
+// key: `worktrees.remove` filters rows by `name`.
 
-describe("workspaces.remove on a detached-HEAD worktree", () => {
+describe("worktrees.remove on a detached-HEAD worktree", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let detachedBranch: string;
@@ -84,7 +84,7 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     detachedBranch = `detached-${olderSha.slice(0, 7)}`;
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repoPath,
@@ -106,7 +106,7 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("removes the detached worktree without throwing 'Workspace not found'", async () => {
+  it("removes the detached worktree without throwing 'Worktree not found'", async () => {
     // Sanity: both worktrees survived the server boot and the
     // background reconcile pass — the latter writes `detached-<sha>`
     // via the same `listWorktrees` path, so it should agree with the
@@ -116,25 +116,25 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: "proj", name: detachedBranch },
+      "worktrees.remove",
+      { repo: "proj", name: detachedBranch },
       DEFAULT_TOKEN,
     );
     const body = await res.text();
 
     // The pre-fix bug was a TRPCError with message ending in
-    // `Workspace "detached-<sha>" not found`. Pin status, error
+    // `Worktree "detached-<sha>" not found`. Pin status, error
     // absence, AND the positive success shape — a future regression
     // that returns 200 with a mangled body (e.g. `{ result: { data:
     // null } }`) would still pass the loose checks alone, so the
     // shape assertion catches that case explicitly. The tRPC
     // response envelope is `{ result: { data: <procedure return> } }`,
-    // and `workspaces.remove` returns `{ ok: true }`.
+    // and `worktrees.remove` returns `{ ok: true }`.
     expect(res.status, `unexpected status; body=${body}`).toBe(200);
     expect(body).not.toContain("not found");
     expect(JSON.parse(body)).toEqual({ result: { data: { ok: true } } });
 
-    // The persisted row for the detached workspace must be gone; `main`
+    // The persisted row for the detached worktree must be gone; `main`
     // must still be there. Assert on both the `branch` and the `name`
     // (identity) columns so the removal is pinned by its actual key.
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);

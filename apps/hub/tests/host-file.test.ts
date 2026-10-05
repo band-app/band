@@ -3,7 +3,7 @@
 //
 // We exercise the real server pipeline: spawn the production server in a
 // child process, then call the tRPC procedures over HTTP against an actual
-// file living outside any registered workspace root. The assertions are
+// file living outside any registered worktree root. The assertions are
 // behavioural (HTTP status, response shape, on-disk content after a save)
 // — no mocks; the only seam is the band_token cookie used by the rest of
 // the integration-test suite.
@@ -67,7 +67,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   // The "outside" dir lives next to (not inside) the user's home, to model
-  // a path that no workspace would ever contain — i.e. the real-world
+  // a path that no worktree would ever contain — i.e. the real-world
   // case the "Open File…" action is for.
   let outsideDir: string;
   let externalPath: string;
@@ -78,7 +78,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     externalPath = join(outsideDir, "scratch.md");
     writeFileSync(externalPath, "# external file\n\noriginal contents\n", "utf-8");
 
-    seedState(tmpHome, { projects: [] });
+    seedState(tmpHome, { repos: [] });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
@@ -89,7 +89,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("host.readFile returns the contents of a file outside any workspace", async () => {
+  it("host.readFile returns the contents of a file outside any worktree", async () => {
     const res = await trpcQuery(server.url, "host.readFile", { absolutePath: externalPath });
     expect(res.status).toBe(200);
     const data = await trpcData<{ content: string; size: number; language?: string }>(res);
@@ -234,7 +234,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
   });
 
   it("host.readFile / host.saveFile reject unauthenticated callers", async () => {
-    // The host procedures bypass the workspace containment guard, so
+    // The host procedures bypass the worktree containment guard, so
     // the transport-layer band_token cookie is the only thing standing
     // between an unauthenticated caller and arbitrary FS access. The
     // assertion pins the response to 401 (the status auth.test.ts also

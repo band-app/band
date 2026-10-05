@@ -1,9 +1,9 @@
 // Black-box integration test for the Commits panel's tRPC procedures:
-// `workspace.getCommitHistory`, `getCommitHistorySignature`,
+// `worktree.getCommitHistory`, `getCommitHistorySignature`,
 // `getCommitDetails` and `getCommitFileDiff`.
 //
 // Boots the real production server (`dist/start-server.mjs`) against a tmp
-// `$HOME` and drives it over real HTTP. The workspace is a real on-disk git
+// `$HOME` and drives it over real HTTP. The worktree is a real on-disk git
 // repo with a merged side branch, tags, a remote-tracking ref, a rename, and
 // an unmerged branch, so the history has lanes, ref decorations and pages
 // to check. No mocks.
@@ -21,9 +21,9 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const TOKEN = "workspace-commit-history-token";
-const WORKSPACE = "alpha-main";
-const EMPTY_WORKSPACE = "empty-main";
+const TOKEN = "worktree-commit-history-token";
+const WORKTREE = "alpha-main";
+const EMPTY_WORKTREE = "empty-main";
 const LONG_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
 
 const gitEnv = {
@@ -113,13 +113,13 @@ interface HistoryPage {
   signature: string;
 }
 
-describe("tRPC — workspace commit history", () => {
+describe("tRPC — worktree commit history", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repo: ReturnType<typeof seedRepo>;
 
   async function history(input: Record<string, unknown>): Promise<HistoryPage> {
-    const res = await trpcQuery(server.url, "workspace.getCommitHistory", input, TOKEN);
+    const res = await trpcQuery(server.url, "worktree.getCommitHistory", input, TOKEN);
     expect(res.status).toBe(200);
     return trpcData<HistoryPage>(res);
   }
@@ -127,8 +127,8 @@ describe("tRPC — workspace commit history", () => {
   async function signature(): Promise<string> {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitHistorySignature",
-      { workspaceId: WORKSPACE },
+      "worktree.getCommitHistorySignature",
+      { worktreeId: WORKTREE },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -136,14 +136,14 @@ describe("tRPC — workspace commit history", () => {
   }
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-commit-history-");
+    tmpHome = createTmpHome("band-worktree-commit-history-");
     repo = seedRepo(tmpHome);
     const emptyPath = join(tmpHome, "empty");
     mkdirSync(emptyPath);
     git(emptyPath, ["init", "-b", "main"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: repo.path,
@@ -169,25 +169,25 @@ describe("tRPC — workspace commit history", () => {
 
   it("returns 401 without a token", async () => {
     const res = await fetch(
-      `${server.url}/trpc/workspace.getCommitHistory?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: WORKSPACE }),
+      `${server.url}/trpc/worktree.getCommitHistory?input=${encodeURIComponent(
+        JSON.stringify({ worktreeId: WORKTREE }),
       )}`,
     );
     expect(res.status).toBe(401);
   });
 
-  it("returns 500 for an unknown workspace", async () => {
+  it("returns 500 for an unknown worktree", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitHistory",
-      { workspaceId: "nope-main" },
+      "worktree.getCommitHistory",
+      { worktreeId: "nope-main" },
       TOKEN,
     );
     expect(res.status).toBe(500);
   });
 
   it("returns HEAD's history in topological order with parents and ref badges", async () => {
-    const page = await history({ workspaceId: WORKSPACE });
+    const page = await history({ worktreeId: WORKTREE });
 
     expect(page.head).toBe(repo.tip);
     expect(page.hasMore).toBe(false);
@@ -217,10 +217,10 @@ describe("tRPC — workspace commit history", () => {
   });
 
   it("pages with skip and limit, and the pages join into the full history", async () => {
-    const full = await history({ workspaceId: WORKSPACE });
-    const first = await history({ workspaceId: WORKSPACE, limit: 2 });
-    const second = await history({ workspaceId: WORKSPACE, skip: 2, limit: 2 });
-    const third = await history({ workspaceId: WORKSPACE, skip: 4, limit: 2 });
+    const full = await history({ worktreeId: WORKTREE });
+    const first = await history({ worktreeId: WORKTREE, limit: 2 });
+    const second = await history({ worktreeId: WORKTREE, skip: 2, limit: 2 });
+    const third = await history({ worktreeId: WORKTREE, skip: 4, limit: 2 });
 
     expect(first.hasMore).toBe(true);
     expect(second.hasMore).toBe(true);
@@ -233,28 +233,28 @@ describe("tRPC — workspace commit history", () => {
   it("rejects an out-of-range limit", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitHistory",
-      { workspaceId: WORKSPACE, limit: 0 },
+      "worktree.getCommitHistory",
+      { worktreeId: WORKTREE, limit: 0 },
       TOKEN,
     );
     expect(res.status).toBe(400);
   });
 
   it("returns an empty history for a repo with no commits", async () => {
-    const page = await history({ workspaceId: EMPTY_WORKSPACE });
+    const page = await history({ worktreeId: EMPTY_WORKTREE });
     expect(page).toEqual({ commits: [], head: null, hasMore: false, signature: "" });
   });
 
   it("changes the signature when a ref moves, and the history carries it", async () => {
     const before = await signature();
     expect(before).toMatch(/^[0-9a-f]{40}$/);
-    expect((await history({ workspaceId: WORKSPACE })).signature).toBe(before);
+    expect((await history({ worktreeId: WORKTREE })).signature).toBe(before);
 
     git(repo.path, ["tag", "v0.3", repo.merge]);
     try {
       const after = await signature();
       expect(after).not.toBe(before);
-      const page = await history({ workspaceId: WORKSPACE });
+      const page = await history({ worktreeId: WORKTREE });
       expect(page.signature).toBe(after);
       expect(page.commits.find((c) => c.sha === repo.merge)?.refs).toEqual([
         { name: "v0.3", kind: "tag" },
@@ -267,8 +267,8 @@ describe("tRPC — workspace commit history", () => {
   it("lists a commit's changed files, reporting a rename once with its old path", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitDetails",
-      { workspaceId: WORKSPACE, sha: repo.rename },
+      "worktree.getCommitDetails",
+      { worktreeId: WORKTREE, sha: repo.rename },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -293,8 +293,8 @@ describe("tRPC — workspace commit history", () => {
   it("lists a merge's files against its first parent", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitDetails",
-      { workspaceId: WORKSPACE, sha: repo.merge },
+      "worktree.getCommitDetails",
+      { worktreeId: WORKTREE, sha: repo.merge },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -305,8 +305,8 @@ describe("tRPC — workspace commit history", () => {
   it("diffs a renamed file against its old path", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: repo.rename, filePath: "new-name.txt" },
+      "worktree.getCommitFileDiff",
+      { worktreeId: WORKTREE, sha: repo.rename, filePath: "new-name.txt" },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -320,8 +320,8 @@ describe("tRPC — workspace commit history", () => {
   it("diffs a root commit's file as an addition", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: repo.initial, filePath: "README.md" },
+      "worktree.getCommitFileDiff",
+      { worktreeId: WORKTREE, sha: repo.initial, filePath: "README.md" },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -333,8 +333,8 @@ describe("tRPC — workspace commit history", () => {
   it("diffs a file with a non-ASCII name", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: repo.rename, filePath: "café.txt" },
+      "worktree.getCommitFileDiff",
+      { worktreeId: WORKTREE, sha: repo.rename, filePath: "café.txt" },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -346,8 +346,8 @@ describe("tRPC — workspace commit history", () => {
     const diffWith = async (contextLines?: number) => {
       const res = await trpcQuery(
         server.url,
-        "workspace.getCommitFileDiff",
-        { workspaceId: WORKSPACE, sha: repo.rename, filePath: "long.txt", contextLines },
+        "worktree.getCommitFileDiff",
+        { worktreeId: WORKTREE, sha: repo.rename, filePath: "long.txt", contextLines },
         TOKEN,
       );
       expect(res.status).toBe(200);
@@ -364,8 +364,8 @@ describe("tRPC — workspace commit history", () => {
   it("rejects a sha that is not a hex object id", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: "--output=/tmp/x", filePath: "README.md" },
+      "worktree.getCommitFileDiff",
+      { worktreeId: WORKTREE, sha: "--output=/tmp/x", filePath: "README.md" },
       TOKEN,
     );
     expect(res.status).toBe(400);
@@ -374,8 +374,8 @@ describe("tRPC — workspace commit history", () => {
   it("rejects a file path outside the worktree", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: repo.initial, filePath: "../escape.txt" },
+      "worktree.getCommitFileDiff",
+      { worktreeId: WORKTREE, sha: repo.initial, filePath: "../escape.txt" },
       TOKEN,
     );
     expect(res.status).toBe(500);

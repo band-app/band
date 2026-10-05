@@ -7,7 +7,7 @@
  * `/trpc` WebSocket. Covers versioned writes (a stale base version is
  * refused, never applied), per-device-type scopes, deletes as tombstones,
  * the `client-state-changed` event on the status stream, and cleanup when a
- * workspace is deleted.
+ * worktree is deleted.
  */
 
 import { execFileSync } from "node:child_process";
@@ -54,7 +54,7 @@ function git(cwd: string, args: string[]): string {
 interface Entry {
   key: string;
   scope: "all" | "desktop" | "mobile";
-  workspaceId: string | null;
+  worktreeId: string | null;
   value: unknown;
   version: number;
   updatedAt: number;
@@ -79,21 +79,21 @@ async function setEntry(
 
 async function listEntries(
   serverUrl: string,
-  workspaceId: string | null,
+  worktreeId: string | null,
   deviceType: "desktop" | "mobile",
 ): Promise<Entry[]> {
-  const res = await trpcQuery(serverUrl, "clientState.list", { workspaceId, deviceType });
+  const res = await trpcQuery(serverUrl, "clientState.list", { worktreeId, deviceType });
   expect(res.status).toBe(200);
   const { entries } = await trpcData<{ entries: Entry[] }>(res);
   return entries.sort((a, b) => `${a.key}|${a.scope}`.localeCompare(`${b.key}|${b.scope}`));
 }
 
-function countRows(tmpHome: string, workspaceId: string): number {
+function countRows(tmpHome: string, worktreeId: string): number {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"), { readOnly: true });
   try {
     const row = sqlite
-      .prepare("SELECT COUNT(*) AS n FROM client_state WHERE workspace_id = ?")
-      .get(workspaceId) as { n: number };
+      .prepare("SELECT COUNT(*) AS n FROM client_state WHERE worktree_id = ?")
+      .get(worktreeId) as { n: number };
     return row.n;
   } finally {
     sqlite.close();
@@ -153,7 +153,7 @@ describe("clientState", () => {
     const featurePath = join(tmpHome, "proj-feature-wt");
     git(repoPath, ["worktree", "add", "-b", "feature", featurePath]);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repoPath,
@@ -179,7 +179,7 @@ describe("clientState", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        key: "band-recent-workspaces",
+        key: "band-recent-worktrees",
         scope: "all",
         value: [],
         baseVersion: 0,
@@ -220,7 +220,7 @@ describe("clientState", () => {
     expect(wrongScope.status).toBe(400);
   });
 
-  it("rejects a write for a workspace that doesn't exist", async () => {
+  it("rejects a write for a worktree that doesn't exist", async () => {
     const res = await trpcMutate(server.url, "clientState.set", {
       key: "band-draft:proj-missing",
       scope: "all",
@@ -245,7 +245,7 @@ describe("clientState", () => {
       entry: {
         key,
         scope: "all",
-        workspaceId: WS_MAIN,
+        worktreeId: WS_MAIN,
         value: { tabs: [{ id: "file:a.ts", kind: "file" }], active: "file:a.ts" },
         version: 1,
         updatedAt: expect.any(Number),
@@ -275,7 +275,7 @@ describe("clientState", () => {
       entry: {
         key,
         scope: "all",
-        workspaceId: WS_MAIN,
+        worktreeId: WS_MAIN,
         value: { tabs: [{ id: "file:b.ts", kind: "file" }], active: "file:b.ts" },
         version: 2,
         updatedAt: second.entry.updatedAt,
@@ -310,32 +310,32 @@ describe("clientState", () => {
     });
 
     const desktop = await listEntries(server.url, WS_FEATURE, "desktop");
-    expect(desktop.map((e) => [e.key, e.scope, e.workspaceId, e.value])).toEqual([
+    expect(desktop.map((e) => [e.key, e.scope, e.worktreeId, e.value])).toEqual([
       [`band-draft:${WS_FEATURE}`, "all", WS_FEATURE, "half-written message"],
       [key, "desktop", WS_FEATURE, { grid: "desktop" }],
     ]);
     const mobile = await listEntries(server.url, WS_FEATURE, "mobile");
-    expect(mobile.map((e) => [e.key, e.scope, e.workspaceId, e.value])).toEqual([
+    expect(mobile.map((e) => [e.key, e.scope, e.worktreeId, e.value])).toEqual([
       [`band-draft:${WS_FEATURE}`, "all", WS_FEATURE, "half-written message"],
       [key, "mobile", WS_FEATURE, { grid: "mobile" }],
     ]);
   });
 
-  it("lists global keys apart from workspace keys", async () => {
+  it("lists global keys apart from worktree keys", async () => {
     await setEntry(server.url, {
-      key: "band-recent-workspaces",
+      key: "band-recent-worktrees",
       scope: "all",
       value: [WS_FEATURE, WS_MAIN],
       baseVersion: 0,
     });
     const global = await listEntries(server.url, null, "desktop");
-    expect(global.map((e) => [e.key, e.scope, e.workspaceId, e.value])).toEqual([
-      ["band-recent-workspaces", "all", null, [WS_FEATURE, WS_MAIN]],
+    expect(global.map((e) => [e.key, e.scope, e.worktreeId, e.value])).toEqual([
+      ["band-recent-worktrees", "all", null, [WS_FEATURE, WS_MAIN]],
     ]);
   });
 
   it("deletes a key as a tombstone whose version keeps counting", async () => {
-    const key = "band.projects-list.label-filter";
+    const key = "band.repos-list.label-filter";
     const created = await setEntry(server.url, {
       key,
       scope: "all",
@@ -355,7 +355,7 @@ describe("clientState", () => {
       entry: {
         key,
         scope: "all",
-        workspaceId: null,
+        worktreeId: null,
         value: null,
         version: created.entry.version + 1,
         updatedAt: expect.any(Number),
@@ -376,7 +376,7 @@ describe("clientState", () => {
   });
 
   it("refuses a delete based on a stale version", async () => {
-    const key = "band.projects-list.collapsed-labels";
+    const key = "band.repos-list.collapsed-labels";
     const first = await setEntry(server.url, { key, scope: "all", value: ["a"], baseVersion: 0 });
     const second = await setEntry(server.url, {
       key,
@@ -447,11 +447,11 @@ describe("clientState", () => {
     }
   });
 
-  it("removes a workspace's keys when the workspace is deleted, and refuses new ones", async () => {
+  it("removes a worktree's keys when the worktree is deleted, and refuses new ones", async () => {
     const featureDraft = `band-draft:${WS_FEATURE}`;
     const featureSplit = `band:term-split:${WS_FEATURE}:leaf-1`;
     const mainBranch = `band:diff-compare-branch:${WS_MAIN}`;
-    const globalKey = "band.projects-list.label-last-workspace";
+    const globalKey = "band.repos-list.label-last-worktree";
     const draft = (await listEntries(server.url, WS_FEATURE, "desktop")).find(
       (e) => e.key === featureDraft,
     );
@@ -481,8 +481,8 @@ describe("clientState", () => {
     });
     expect(countRows(tmpHome, WS_FEATURE)).toBeGreaterThanOrEqual(2);
 
-    const res = await trpcMutate(server.url, "workspaces.remove", {
-      project: "proj",
+    const res = await trpcMutate(server.url, "worktrees.remove", {
+      repo: "proj",
       name: "feature",
     });
     expect(res.status).toBe(200);
@@ -500,7 +500,7 @@ describe("clientState", () => {
     expect(late.status).toBe(404);
     expect(countRows(tmpHome, WS_FEATURE)).toBe(0);
 
-    // Other workspaces and global keys are untouched.
+    // Other worktrees and global keys are untouched.
     expect(
       (await listEntries(server.url, WS_MAIN, "desktop")).find((e) => e.key === mainBranch),
     ).toEqual(kept.entry);

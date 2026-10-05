@@ -120,7 +120,7 @@ export async function installHooks(): Promise<void> {
     });
 
     // Add fresh band hook. `--agent` tells the server which agent's rules
-    // read the payload, whatever agent the workspace is configured for.
+    // read the payload, whatever agent the worktree is configured for.
     filtered.push({
       hooks: [{ type: "command", command: `${bandPath} notify --agent claude-code` }],
     });

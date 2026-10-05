@@ -143,7 +143,7 @@ export interface TerminalSnapshot {
  * One live PTY session tracked by the pool.
  *
  * The pool owns the `IPty` handle, the buffered scrollback, and the
- * `workspaceId` reverse-lookup so the service tier never has to touch
+ * `worktreeId` reverse-lookup so the service tier never has to touch
  * `node-pty` directly. `scrollback` holds the last `MAX_SCROLLBACK_SIZE`
  * (~100 KB) characters of output (see {@link OutputTail}). It serves the
  * plain-text read paths (`terminal.output` / `band terminals output`);
@@ -163,7 +163,7 @@ export interface TerminalSession {
    */
   headless: HeadlessTerminal;
   serializeAddon: SerializeAddon;
-  workspaceId: string;
+  worktreeId: string;
   /** Number of output chunks emitted so far; the last chunk's `seq`. */
   seq: number;
   /**
@@ -207,7 +207,7 @@ export interface TerminalPoolOptions {
  *
  * Infra tier — manages an external resource (forked shell processes). The
  * class is deliberately small and dependency-free aside from `node-pty` and
- * the `shellPath` helper; all business logic (workspace resolution, layout
+ * the `shellPath` helper; all business logic (worktree resolution, layout
  * persistence, event emission) lives in `TerminalService`.
  *
  * One instance per PTY host: the terminal daemon owns one, and
@@ -218,8 +218,8 @@ export class TerminalPool {
   private readonly historyStore: TerminalHistoryManager | null;
   /**
    * terminalIds whose next `onExit` should prune (not checkpoint) their
-   * history: set by an explicit `kill` / `killWorkspace`, i.e. the tab or
-   * workspace is actually being closed or deleted. `killAll` (daemon
+   * history: set by an explicit `kill` / `killWorktree`, i.e. the tab or
+   * worktree is actually being closed or deleted. `killAll` (daemon
    * shutdown/restart) deliberately never adds to this set, so those sessions
    * stay cold-restorable.
    */
@@ -235,8 +235,8 @@ export class TerminalPool {
   /** terminalId -> session */
   private readonly terminals = new Map<string, TerminalSession>();
 
-  /** workspaceId -> Set<terminalId> (reverse index for workspace-level cleanup) */
-  private readonly workspaceTerminals = new Map<string, Set<string>>();
+  /** worktreeId -> Set<terminalId> (reverse index for worktree-level cleanup) */
+  private readonly worktreeTerminals = new Map<string, Set<string>>();
 
   /** terminalId -> Set<listener> for live output streaming */
   private readonly outputListeners = new Map<string, Set<TerminalOutputListener>>();
@@ -273,14 +273,14 @@ export class TerminalPool {
    * Idempotent per terminalId: if a session already exists it is returned
    * as-is, and concurrent spawn calls for the same id share a single in-flight
    * promise — so the WebSocket and tRPC create paths never create competing
-   * PTYs. `workspaceRoot` is the absolute worktree path; resolving the
-   * workspaceId to a path is the service tier's job so the pool stays oblivious
-   * to the workspace registry.
+   * PTYs. `worktreeRoot` is the absolute worktree path; resolving the
+   * worktreeId to a path is the service tier's job so the pool stays oblivious
+   * to the worktree registry.
    */
   async spawn(
-    workspaceId: string,
+    worktreeId: string,
     terminalId: string,
-    workspaceRoot: string,
+    worktreeRoot: string,
     options?: SpawnOptions,
     extras?: SpawnExtras,
   ): Promise<TerminalSession> {
@@ -290,7 +290,7 @@ export class TerminalPool {
     if (inflight) return inflight;
     // Store the promise synchronously (before any await) so a concurrent call
     // that arrives while this one is awaiting sees it and reuses it.
-    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options, extras);
+    const promise = this.spawnNew(worktreeId, terminalId, worktreeRoot, options, extras);
     this.spawning.set(terminalId, promise);
     try {
       return await promise;
@@ -300,9 +300,9 @@ export class TerminalPool {
   }
 
   private async spawnNew(
-    workspaceId: string,
+    worktreeId: string,
     terminalId: string,
-    workspaceRoot: string,
+    worktreeRoot: string,
     options?: SpawnOptions,
     extras?: SpawnExtras,
   ): Promise<TerminalSession> {
@@ -316,14 +316,14 @@ export class TerminalPool {
     // restoring what's on disk is the cold-restore path; nothing here
     // distinguishes "first ever spawn" from "reopened" beyond that.
     //
-    // Guarded by the saved `workspaceId`: the tRPC `terminal.create` input is
+    // Guarded by the saved `worktreeId`: the tRPC `terminal.create` input is
     // UUID-constrained, but the `/terminal` WebSocket's spawn-on-miss path
     // takes `terminalId` straight from a query string with no such
     // constraint, so a caller could otherwise collide a fresh terminalId in
-    // one workspace with a stale checkpoint left by another.
+    // one worktree with a stale checkpoint left by another.
     const historyMeta = this.historyStore?.readMeta(terminalId) ?? null;
     const checkpoint =
-      historyMeta?.workspaceId === workspaceId
+      historyMeta?.worktreeId === worktreeId
         ? (this.historyStore?.readCheckpoint(terminalId) ?? null)
         : null;
 
@@ -361,7 +361,7 @@ export class TerminalPool {
     // terminal supports DEC 2026 synchronized output, which xterm.js does,
     // and unlocks the scroll regions. Claude ignores it inside tmux.
     env.CLAUDE_CODE_FORCE_SYNC_OUTPUT = "1";
-    // Remove PORT so workspace dev servers don't inherit the Band server's port
+    // Remove PORT so worktree dev servers don't inherit the Band server's port
     delete env.PORT;
 
     // Merge extra env from spawn options
@@ -384,29 +384,29 @@ export class TerminalPool {
     // Lets a coding agent's hook (`band notify`) say which terminal it runs
     // in, so closing the terminal drops that agent's status source.
     env.BAND_TERMINAL_ID = terminalId;
-    // Lets an agent running here say which workspace it is in. A terminal
+    // Lets an agent running here say which worktree it is in. A terminal
     // belongs to no chat, so there is no BAND_CHAT_ID.
-    env.BAND_WORKSPACE_ID = workspaceId;
+    env.BAND_WORKTREE_ID = worktreeId;
 
-    // Resolve cwd: options.cwd is relative to workspace root; a saved
+    // Resolve cwd: options.cwd is relative to worktree root; a saved
     // checkpoint's cwd (used only when the caller didn't ask for one — the
     // normal reopen path) is already absolute.
-    let cwd = workspaceRoot;
+    let cwd = worktreeRoot;
     if (options?.cwd) {
       cwd =
-        resolveSafeCwd(join(workspaceRoot, options.cwd), workspaceRoot, "cwd", options.cwd) ?? cwd;
+        resolveSafeCwd(join(worktreeRoot, options.cwd), worktreeRoot, "cwd", options.cwd) ?? cwd;
     } else if (checkpoint?.cwd) {
       cwd =
         resolveSafeCwd(
           checkpoint.cwd,
-          workspaceRoot,
+          worktreeRoot,
           "saved terminal history cwd",
           checkpoint.cwd,
         ) ?? cwd;
     }
 
     if (!existsSync(cwd)) {
-      throw new Error(`Workspace directory does not exist: ${cwd}`);
+      throw new Error(`Worktree directory does not exist: ${cwd}`);
     }
     if (!existsSync(shell)) {
       throw new Error(`Shell not found: ${shell}`);
@@ -509,7 +509,7 @@ export class TerminalPool {
       scrollback: new OutputTail(MAX_SCROLLBACK_SIZE),
       headless,
       serializeAddon,
-      workspaceId,
+      worktreeId,
       seq: 0,
       holds: 0,
       cleanupOnExit: extras?.cleanupOnExit ?? false,
@@ -544,10 +544,10 @@ export class TerminalPool {
     }
 
     // Register in reverse index
-    let ids = this.workspaceTerminals.get(workspaceId);
+    let ids = this.worktreeTerminals.get(worktreeId);
     if (!ids) {
       ids = new Set();
-      this.workspaceTerminals.set(workspaceId, ids);
+      this.worktreeTerminals.set(worktreeId, ids);
     }
     ids.add(terminalId);
 
@@ -572,7 +572,7 @@ export class TerminalPool {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
-      log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
+      log.debug("Terminal exited: %s (worktree %s)", terminalId, worktreeId);
       // Distinguish a natural exit from an explicit `kill()`: the `kill()` path
       // calls `pty.kill()` and then synchronously deletes the session from
       // `terminals` — both run before node-pty's async `onExit` fires here, so
@@ -582,11 +582,11 @@ export class TerminalPool {
       const explicitlyKilled = !this.terminals.has(terminalId);
       this.terminals.delete(terminalId);
       this.outputListeners.delete(terminalId);
-      const set = this.workspaceTerminals.get(workspaceId);
+      const set = this.worktreeTerminals.get(worktreeId);
       if (set) {
         set.delete(terminalId);
         if (set.size === 0) {
-          this.workspaceTerminals.delete(workspaceId);
+          this.worktreeTerminals.delete(worktreeId);
         }
       }
       // Remove the staged auto-run command file, if any.
@@ -597,8 +597,8 @@ export class TerminalPool {
           // Already gone / never written — nothing to clean up.
         }
       }
-      // History: an explicit `kill` / `killWorkspace` means the tab or
-      // workspace is actually gone, so drop its saved history too. Any other
+      // History: an explicit `kill` / `killWorktree` means the tab or
+      // worktree is actually gone, so drop its saved history too. Any other
       // exit (a natural shell exit, or `killAll` during a daemon
       // restart/shutdown) writes one last checkpoint instead, so a later
       // reopen of this terminalId can still cold-restore it. Must run before
@@ -629,7 +629,7 @@ export class TerminalPool {
       // Guarded so a throwing listener can't wedge the exit handler.
       const event: TerminalExitEvent = {
         terminalId,
-        workspaceId,
+        worktreeId,
         exitCode,
         killed: explicitlyKilled,
         cleanupOnExit: session.cleanupOnExit,
@@ -656,7 +656,7 @@ export class TerminalPool {
    *
    * Takes the already boundary-checked `cwd` the new shell is actually
    * spawning in, not the checkpoint's raw saved cwd: if that saved cwd fell
-   * outside the workspace root and `cwd` fell back to `workspaceRoot`, the
+   * outside the worktree root and `cwd` fell back to `worktreeRoot`, the
    * resume lookup must follow, not probe a directory the spawn itself
    * decided not to trust.
    */
@@ -716,7 +716,7 @@ export class TerminalPool {
         rows,
       }),
       this.historyStore.writeMeta(terminalId, {
-        workspaceId: session.workspaceId,
+        worktreeId: session.worktreeId,
         cwd,
         cols,
         rows,
@@ -730,7 +730,7 @@ export class TerminalPool {
   }
 
   /**
-   * Auto-run the workspace's initial command inside a freshly spawned PTY,
+   * Auto-run the worktree's initial command inside a freshly spawned PTY,
    * robustly.
    *
    * Writing a long command line straight into a cold PTY is racy on three
@@ -919,14 +919,14 @@ export class TerminalPool {
   }
 
   /**
-   * List metadata for every PTY session bound to the given workspace.
+   * List metadata for every PTY session bound to the given worktree.
    *
    * The returned `title` is the foreground process name reported by the
    * PTY; reading `pty.process` can throw if the process has already exited
    * between the reverse-index lookup and the read, so the read is wrapped.
    */
-  list(workspaceId: string): TerminalListEntry[] {
-    const ids = this.workspaceTerminals.get(workspaceId);
+  list(worktreeId: string): TerminalListEntry[] {
+    const ids = this.worktreeTerminals.get(worktreeId);
     if (!ids) return [];
     const result: TerminalListEntry[] = [];
     for (const terminalId of ids) {
@@ -941,7 +941,7 @@ export class TerminalPool {
     return this.terminals.size;
   }
 
-  /** Every live session across all workspaces. */
+  /** Every live session across all worktrees. */
   listAll(): TerminalListEntry[] {
     const result: TerminalListEntry[] = [];
     for (const terminalId of this.terminals.keys()) {
@@ -963,7 +963,7 @@ export class TerminalPool {
     }
     return {
       terminalId,
-      workspaceId: session.workspaceId,
+      worktreeId: session.worktreeId,
       pid: session.pty.pid,
       scrollbackLength: session.scrollback.length,
       title,
@@ -1188,11 +1188,11 @@ export class TerminalPool {
       // there rather than duplicated in every kill path.
       session.pty.kill();
       this.terminals.delete(terminalId);
-      const set = this.workspaceTerminals.get(session.workspaceId);
+      const set = this.worktreeTerminals.get(session.worktreeId);
       if (set) {
         set.delete(terminalId);
         if (set.size === 0) {
-          this.workspaceTerminals.delete(session.workspaceId);
+          this.worktreeTerminals.delete(session.worktreeId);
         }
       }
     } else {
@@ -1204,26 +1204,26 @@ export class TerminalPool {
   }
 
   /**
-   * Kill all terminals for a workspace.
+   * Kill all terminals for a worktree.
    */
-  killWorkspace(workspaceId: string): void {
-    const ids = this.workspaceTerminals.get(workspaceId);
+  killWorktree(worktreeId: string): void {
+    const ids = this.worktreeTerminals.get(worktreeId);
     if (ids) {
       for (const terminalId of ids) {
         const session = this.terminals.get(terminalId);
         if (session) {
-          // The workspace is actually being deleted: prune saved history too.
+          // The worktree is actually being deleted: prune saved history too.
           this.pruneHistoryOnExit.add(terminalId);
           session.pty.kill();
           this.terminals.delete(terminalId);
         }
       }
-      this.workspaceTerminals.delete(workspaceId);
+      this.worktreeTerminals.delete(worktreeId);
     }
-    // Also sweep for history left by terminals of this workspace that had
+    // Also sweep for history left by terminals of this worktree that had
     // already exited (and so are no longer in the reverse index above) —
-    // the on-disk `workspaceId` is the only record of them left.
-    this.historyStore?.removeSessionsForWorkspace(workspaceId);
+    // the on-disk `worktreeId` is the only record of them left.
+    this.historyStore?.removeSessionsForWorktree(worktreeId);
   }
 
   /**
@@ -1234,7 +1234,7 @@ export class TerminalPool {
       session.pty.kill();
     }
     this.terminals.clear();
-    this.workspaceTerminals.clear();
+    this.worktreeTerminals.clear();
     // Output subscribers go with their sessions. Exit listeners stay: the
     // kills above still report their exits through them.
     this.outputListeners.clear();
@@ -1252,22 +1252,22 @@ export class TerminalPool {
 }
 
 /**
- * A candidate cwd, valid only if it stays within `workspaceRoot` and exists.
+ * A candidate cwd, valid only if it stays within `worktreeRoot` and exists.
  * `label`/`original` are for the warning log only, so a caller can attribute
  * one shared check to either the request's `options.cwd` or a saved
  * checkpoint's cwd. Appends `sep` to the containment check (with an equality
- * carve-out for `candidate === workspaceRoot`) so a sibling like
+ * carve-out for `candidate === worktreeRoot`) so a sibling like
  * `<root>-evil` can't pass the prefix check — same shape as
- * `serveWorkspaceFile` in start-server.ts.
+ * `serveWorktreeFile` in start-server.ts.
  */
 function resolveSafeCwd(
   candidate: string,
-  workspaceRoot: string,
+  worktreeRoot: string,
   label: string,
   original: string,
 ): string | null {
-  if (candidate !== workspaceRoot && !candidate.startsWith(workspaceRoot + sep)) {
-    log.warn("Ignoring %s %s — resolves outside workspace root %s", label, original, workspaceRoot);
+  if (candidate !== worktreeRoot && !candidate.startsWith(worktreeRoot + sep)) {
+    log.warn("Ignoring %s %s — resolves outside worktree root %s", label, original, worktreeRoot);
     return null;
   }
   if (!existsSync(candidate)) {

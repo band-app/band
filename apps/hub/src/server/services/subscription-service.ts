@@ -45,7 +45,7 @@ export type Subscription = SubscriptionRecord;
 
 export const subscriptionCreateInput = z.object({
   chatId: z.string().min(1),
-  workspaceId: z.string().min(1),
+  worktreeId: z.string().min(1),
   source: z.string().min(1),
   kinds: z.array(z.string().min(1)).default([]),
   /** Defaults to the key of the source (`hook:<id>`, `timer:<id>`). */
@@ -127,8 +127,8 @@ export type GithubCiCreateInput = z.input<typeof githubCiCreateInput>;
 export type WebhookDeliveryResult = "accepted" | "unauthorized" | "not-found";
 
 export class SubscriptionChatNotFoundError extends Error {
-  constructor(chatId: string, workspaceId: string) {
-    super(`Chat ${chatId} not found in workspace ${workspaceId}`);
+  constructor(chatId: string, worktreeId: string) {
+    super(`Chat ${chatId} not found in worktree ${worktreeId}`);
     this.name = "SubscriptionChatNotFoundError";
   }
 }
@@ -351,15 +351,15 @@ export class SubscriptionService {
     source: { source: string; filterKey: string; config: SubscriptionConfig },
   ): Subscription {
     const chat = chatService.get(parsed.chatId);
-    if (!chat || chat.workspaceId !== parsed.workspaceId) {
-      throw new SubscriptionChatNotFoundError(parsed.chatId, parsed.workspaceId);
+    if (!chat || chat.worktreeId !== parsed.worktreeId) {
+      throw new SubscriptionChatNotFoundError(parsed.chatId, parsed.worktreeId);
     }
     const now = Date.now();
     const latest = now + MAX_SUBSCRIPTION_DAYS * DAY_MS;
     const record: Subscription = {
       id,
       chatId: parsed.chatId,
-      workspaceId: parsed.workspaceId,
+      worktreeId: parsed.worktreeId,
       source: source.source,
       kinds: parsed.kinds,
       filterKey: source.filterKey,
@@ -379,7 +379,7 @@ export class SubscriptionService {
       kind: "subscription-created",
       subscriptionId: id,
       chatId: record.chatId,
-      workspaceId: record.workspaceId,
+      worktreeId: record.worktreeId,
     });
     return record;
   }
@@ -432,13 +432,13 @@ export class SubscriptionService {
     }
   }
 
-  list(filter?: { chatId?: string; workspaceId?: string }): Subscription[] {
+  list(filter?: { chatId?: string; worktreeId?: string }): Subscription[] {
     return this.queries
       .list()
       .filter(
         (s) =>
           (!filter?.chatId || s.chatId === filter.chatId) &&
-          (!filter?.workspaceId || s.workspaceId === filter.workspaceId),
+          (!filter?.worktreeId || s.worktreeId === filter.worktreeId),
       );
   }
 
@@ -453,9 +453,9 @@ export class SubscriptionService {
     return true;
   }
 
-  /** Drops every subscription of a deleted workspace. */
-  removeForWorkspace(workspaceId: string): void {
-    this.removeAll(this.queries.idsFor({ workspaceId }), "workspace-removed");
+  /** Drops every subscription of a deleted worktree. */
+  removeForWorktree(worktreeId: string): void {
+    this.removeAll(this.queries.idsFor({ worktreeId }), "worktree-removed");
   }
 
   /**
@@ -526,7 +526,7 @@ export class SubscriptionService {
     }
     try {
       submitOrQueueTask({
-        workspaceId: sub.workspaceId,
+        worktreeId: sub.worktreeId,
         chatId: sub.chatId,
         prompt: buildSubscriptionMessage(sub.filterKey, pending.events),
       });
@@ -544,7 +544,7 @@ export class SubscriptionService {
       kind: "subscription-delivered",
       subscriptionId: id,
       chatId: sub.chatId,
-      workspaceId: sub.workspaceId,
+      worktreeId: sub.worktreeId,
       eventCount: pending.events.length,
     });
     if (wakeups >= sub.maxWakeups) {
@@ -553,7 +553,7 @@ export class SubscriptionService {
   }
 
   /**
-   * A failed delivery (for example the workspace can't be resolved) keeps
+   * A failed delivery (for example the worktree can't be resolved) keeps
    * its events and tries again after a coalesce window, up to
    * MAX_DELIVERY_ATTEMPTS. After that the events' rows are deleted, so the
    * source can send them again, instead of staying marked as seen forever.
@@ -606,7 +606,7 @@ export class SubscriptionService {
           kind: "subscription-removed",
           subscriptionId: id,
           chatId: sub.chatId,
-          workspaceId: sub.workspaceId,
+          worktreeId: sub.worktreeId,
           reason,
         });
       }

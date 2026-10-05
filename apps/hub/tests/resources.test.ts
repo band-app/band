@@ -3,8 +3,8 @@
  *
  * Boots the real production server bundle against a fresh tmp HOME,
  * seeds a real git repo + worktree, and calls the three tRPC
- * procedures (`services.resourcesServer`, `services.resourcesProjects`,
- * `services.resourcesProjectSize`) over HTTP. No mocking — the test
+ * procedures (`services.resourcesServer`, `services.resourcesRepos`,
+ * `services.resourcesRepoSize`) over HTTP. No mocking — the test
  * exercises the same code path the dashboard hits in production.
  *
  * This package uses vitest.
@@ -23,7 +23,7 @@ import {
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const TOKEN = "test-token-resources";
-const PROJECT = "resources-fixture";
+const REPO = "resources-fixture";
 const BRANCH = "main";
 const SEED_FILE_BYTES = 1024 * 1024; // 1 MiB
 
@@ -52,7 +52,7 @@ async function trpcData<T>(res: Response): Promise<T> {
   return body.result.data;
 }
 
-describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (issue #506)", () => {
+describe("services.resourcesServer + resourcesRepos + resourcesRepoSize (issue #506)", () => {
   // Definite-assignment in `beforeAll`. The `typeof` guard in
   // `afterAll` covers the only path that could leave it
   // unassigned: `startServer` throwing before resolving. Without
@@ -60,41 +60,41 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
   // undefined (reading 'close')` would mask the real boot failure.
   let server!: ServerHandle;
   let tmpHome: string;
-  let projectPath: string;
+  let repoPath: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
 
     // Real git repo with a known-size seed file. The server walks
     // this directory at request time — no fixtures-on-disk shortcut.
-    projectPath = join(tmpHome, PROJECT);
-    mkdirSync(projectPath, { recursive: true });
+    repoPath = join(tmpHome, REPO);
+    mkdirSync(repoPath, { recursive: true });
     execFileSync("git", ["init", "-q", "--initial-branch", BRANCH], {
-      cwd: projectPath,
+      cwd: repoPath,
       stdio: "ignore",
     });
     execFileSync("git", ["config", "user.email", "test@example.com"], {
-      cwd: projectPath,
+      cwd: repoPath,
       stdio: "ignore",
     });
     execFileSync("git", ["config", "user.name", "Test"], {
-      cwd: projectPath,
+      cwd: repoPath,
       stdio: "ignore",
     });
-    writeFileSync(join(projectPath, "seed.bin"), Buffer.alloc(SEED_FILE_BYTES));
-    execFileSync("git", ["add", "."], { cwd: projectPath, stdio: "ignore" });
+    writeFileSync(join(repoPath, "seed.bin"), Buffer.alloc(SEED_FILE_BYTES));
+    execFileSync("git", ["add", "."], { cwd: repoPath, stdio: "ignore" });
     execFileSync("git", ["commit", "-q", "-m", "seed"], {
-      cwd: projectPath,
+      cwd: repoPath,
       stdio: "ignore",
     });
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
-          path: projectPath,
+          name: REPO,
+          path: repoPath,
           defaultBranch: BRANCH,
-          worktrees: [{ branch: BRANCH, path: projectPath }],
+          worktrees: [{ branch: BRANCH, path: repoPath }],
         },
       ],
     });
@@ -137,20 +137,20 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
     expect(data.cpu.systemMicros).toBeGreaterThanOrEqual(0);
   });
 
-  it("resourcesProjects returns the seeded project + worktree paths without doing disk walks", async () => {
-    const res = await trpcQuery(server.url, "services.resourcesProjects", TOKEN);
+  it("resourcesRepos returns the seeded repo + worktree paths without doing disk walks", async () => {
+    const res = await trpcQuery(server.url, "services.resourcesRepos", TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{
-      projects: Array<{
-        project: string;
+      repos: Array<{
+        repo: string;
         path: string;
         worktrees: Array<{ branch: string; path: string }>;
         error?: string;
       }>;
     }>(res);
 
-    expect(data.projects.length).toBeGreaterThanOrEqual(1);
-    const proj = data.projects.find((p) => p.project === PROJECT);
+    expect(data.repos.length).toBeGreaterThanOrEqual(1);
+    const proj = data.repos.find((p) => p.repo === REPO);
     expect(proj).toBeDefined();
     expect(proj?.error).toBeUndefined();
     expect(proj?.worktrees.length).toBe(1);
@@ -158,16 +158,16 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
     expect(wt?.branch).toBe(BRANCH);
     // `git worktree list --porcelain` returns the canonical (realpath)
     // path; macOS tmp dirs are symlinks (`/var/...` → `/private/var/...`).
-    expect(wt?.path).toBe(realpathSync(projectPath));
+    expect(wt?.path).toBe(realpathSync(repoPath));
   });
 
-  it("resourcesProjectSize returns the seeded project's worktree sizes >= seed file size", async () => {
-    const res = await trpcQuery(server.url, "services.resourcesProjectSize", TOKEN, {
-      project: PROJECT,
+  it("resourcesRepoSize returns the seeded repo's worktree sizes >= seed file size", async () => {
+    const res = await trpcQuery(server.url, "services.resourcesRepoSize", TOKEN, {
+      repo: REPO,
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
-      project: string;
+      repo: string;
       sizeBytes: number;
       worktrees: Array<{
         branch: string;
@@ -178,26 +178,26 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
       error?: string;
     }>(res);
 
-    expect(data.project).toBe(PROJECT);
+    expect(data.repo).toBe(REPO);
     expect(data.error).toBeUndefined();
     expect(data.worktrees.length).toBe(1);
     const wt = data.worktrees[0];
     expect(wt.branch).toBe(BRANCH);
     expect(wt.error).toBeUndefined();
-    expect(wt.path).toBe(realpathSync(projectPath));
+    expect(wt.path).toBe(realpathSync(repoPath));
     // Walk must include the 1 MiB seed file plus git plumbing (.git
     // objects, index, etc.) — strictly greater is the safest lower
     // bound that's still a real assertion.
     expect(wt.sizeBytes).toBeGreaterThanOrEqual(SEED_FILE_BYTES);
 
-    // Project total must equal the sum of its worktree sizes.
+    // Repo total must equal the sum of its worktree sizes.
     const expectedTotal = data.worktrees.reduce((sum, w) => sum + w.sizeBytes, 0);
     expect(data.sizeBytes).toBe(expectedTotal);
   });
 
-  it("resourcesProjectSize returns NOT_FOUND for an unknown project", async () => {
-    const res = await trpcQuery(server.url, "services.resourcesProjectSize", TOKEN, {
-      project: "this-project-does-not-exist",
+  it("resourcesRepoSize returns NOT_FOUND for an unknown repo", async () => {
+    const res = await trpcQuery(server.url, "services.resourcesRepoSize", TOKEN, {
+      repo: "this-repo-does-not-exist",
     });
     expect(res.status).toBe(404);
   });
@@ -211,12 +211,12 @@ describe("services.resourcesServer + resourcesProjects + resourcesProjectSize (i
     const serverRes = await fetch(`${server.url}/trpc/services.resourcesServer`);
     expect(serverRes.status).toBe(401);
 
-    const projectsRes = await fetch(`${server.url}/trpc/services.resourcesProjects`);
-    expect(projectsRes.status).toBe(401);
+    const reposRes = await fetch(`${server.url}/trpc/services.resourcesRepos`);
+    expect(reposRes.status).toBe(401);
 
     const sizeRes = await fetch(
-      `${server.url}/trpc/services.resourcesProjectSize?input=${encodeURIComponent(
-        JSON.stringify({ project: PROJECT }),
+      `${server.url}/trpc/services.resourcesRepoSize?input=${encodeURIComponent(
+        JSON.stringify({ repo: REPO }),
       )}`,
     );
     expect(sizeRes.status).toBe(401);

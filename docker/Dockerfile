@@ -49,7 +49,7 @@ RUN pnpm build:web
 # keeping the runtime on the same base guarantees ABI/glibc compatibility.
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
-# git: workspaces / worktrees. ca-certificates: outbound HTTPS (gh, model
+# git: worktrees. ca-certificates: outbound HTTPS (gh, model
 # APIs). Deliberately no zsh — defaultShell() must fall back to /bin/bash.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \

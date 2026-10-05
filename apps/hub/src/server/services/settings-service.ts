@@ -96,7 +96,7 @@ export const settingsUpdateInput = z
     // the dashboard's "Disable usage polling" toggle.
     usagePollingEnabled: z.boolean().optional(),
     // CLI-scoped preferences (issue #551). Today only `defaultVia`
-    // is recognized — the user-level fallback for `band workspaces
+    // is recognized — the user-level fallback for `band worktrees
     // create --prompt` dispatch when no `--via` flag, `BAND_DISPATCH`
     // env var, or repo `.band/config.json` value is set. Nested object
     // is `.passthrough()` so future per-CLI keys can be added without
@@ -264,7 +264,7 @@ export class SettingsService {
   }
 
   /**
-   * Where Band creates new workspace worktrees. Defaults to
+   * Where Band creates new git worktrees. Defaults to
    * `$BAND_HOME/worktrees` when the user hasn't overridden it.
    *
    * Both `undefined` ("key was never written") and `null` ("user explicitly

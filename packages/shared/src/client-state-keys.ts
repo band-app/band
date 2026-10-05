@@ -2,7 +2,7 @@
  * Which localStorage keys are kept on the Band server (see
  * `lib/client-state.ts`) and how each maps to a server entry. The server uses
  * the same table to refuse keys that aren't listed and to take a key's
- * workspace from the key itself.
+ * worktree from the key itself.
  *
  * A key's scope is `all` (one value shared by every device) or `device` (one
  * value per device type: desktop or mobile). A key can map to several server
@@ -24,7 +24,7 @@ export interface KeyPart {
 }
 
 export interface KeyRule {
-  /** The workspace the key belongs to (null for a global key), or undefined when the key isn't this rule's. */
+  /** The worktree the key belongs to (null for a global key), or undefined when the key isn't this rule's. */
   match: (key: string) => string | null | undefined;
   parts: KeyPart[];
 }
@@ -111,8 +111,8 @@ function exact(key: string, parts: KeyPart[]): KeyRule {
   return { match: (k) => (k === key ? null : undefined), parts };
 }
 
-/** `<prefix><workspaceId>` */
-function perWorkspace(prefix: string, parts: KeyPart[]): KeyRule {
+/** `<prefix><worktreeId>` */
+function perWorktree(prefix: string, parts: KeyPart[]): KeyRule {
   return {
     match: (k) =>
       k.startsWith(prefix) && k.length > prefix.length ? k.slice(prefix.length) : undefined,
@@ -120,8 +120,8 @@ function perWorkspace(prefix: string, parts: KeyPart[]): KeyRule {
   };
 }
 
-/** `<prefix><workspaceId>:<leafId>`. Workspace ids never contain a colon. */
-function perWorkspaceLeaf(prefix: string, parts: KeyPart[]): KeyRule {
+/** `<prefix><worktreeId>:<leafId>`. Worktree ids never contain a colon. */
+function perWorktreeLeaf(prefix: string, parts: KeyPart[]): KeyRule {
   return {
     match: (k) => {
       if (!k.startsWith(prefix)) return undefined;
@@ -138,19 +138,19 @@ export const CENTER_TABS_PREFIX = "band:center-tabs:";
 
 const RULES: KeyRule[] = [
   // Shared across devices.
-  exact("band-recent-workspaces", [jsonPart("all")]),
-  exact("band.projects-list.collapsed-projects", [jsonPart("all")]),
-  exact("band.projects-list.collapsed-labels", [jsonPart("all")]),
-  exact("band.projects-list.collapsed-pinned", [jsonPart("all")]),
-  exact("band.projects-list.label-filter", [rawPart("all")]),
-  exact("band.projects-list.label-last-workspace", [jsonPart("all")]),
-  perWorkspace(CENTER_TABS_PREFIX, [jsonPart("all")]),
-  perWorkspaceLeaf("band:term-split:", [jsonPart("all")]),
-  perWorkspace("band:diff-compare-branch:", [rawPart("all")]),
-  perWorkspace("band-draft:", [rawPart("all")]),
+  exact("band-recent-worktrees", [jsonPart("all")]),
+  exact("band.repos-list.collapsed-repos", [jsonPart("all")]),
+  exact("band.repos-list.collapsed-labels", [jsonPart("all")]),
+  exact("band.repos-list.collapsed-pinned", [jsonPart("all")]),
+  exact("band.repos-list.label-filter", [rawPart("all")]),
+  exact("band.repos-list.label-last-worktree", [jsonPart("all")]),
+  perWorktree(CENTER_TABS_PREFIX, [jsonPart("all")]),
+  perWorktreeLeaf("band:term-split:", [jsonPart("all")]),
+  perWorktree("band:diff-compare-branch:", [rawPart("all")]),
+  perWorktree("band-draft:", [rawPart("all")]),
   // A file's unsaved text, or an untitled buffer's (`<prefix><ws>:<path>`).
-  perWorkspaceLeaf("band-unsaved:", [rawPart("all")]),
-  perWorkspace("band-tab-state:", [
+  perWorktreeLeaf("band-unsaved:", [rawPart("all")]),
+  perWorktree("band-tab-state:", [
     perFileFieldsPart("all", ["viewMode", "language"]),
     perFileFieldsPart("device", ["scrollTop", "selection"]),
   ]),
@@ -167,20 +167,20 @@ const RULES: KeyRule[] = [
   exact("band:diff-view-mode", [rawPart("device")]),
   exact("band:markdown-preview-width", [rawPart("device")]),
   exact("band:zoom-level", [rawPart("device")]),
-  // The workspace a restart opens (`lib/last-workspace.ts`).
-  exact("band:last-workspace", [rawPart("device")]),
-  perWorkspace("band:dockview-layout-v9:", [jsonPart("device")]),
+  // The worktree a restart opens (`lib/last-worktree.ts`).
+  exact("band:last-worktree", [rawPart("device")]),
+  perWorktree("band:dockview-layout-v9:", [jsonPart("device")]),
 ];
 
 export interface MatchedKey {
-  workspaceId: string | null;
+  worktreeId: string | null;
   parts: KeyPart[];
 }
 
 export function matchKey(key: string): MatchedKey | null {
   for (const rule of RULES) {
-    const workspaceId = rule.match(key);
-    if (workspaceId !== undefined) return { workspaceId, parts: rule.parts };
+    const worktreeId = rule.match(key);
+    if (worktreeId !== undefined) return { worktreeId, parts: rule.parts };
   }
   return null;
 }

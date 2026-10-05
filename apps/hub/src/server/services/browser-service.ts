@@ -9,11 +9,11 @@
  * Created in issue #316 (Phase 5 of the 3-tier refactor) by lifting the
  * business half of `lib/browser-manager.ts` + `lib/browser-layout-manager.ts`
  * out of `lib/` and into this class. `lib/browser-layout-manager.ts` has
- * been deleted entirely now that its only caller (`workspace-service`)
- * goes through `browserService.removeAllForWorkspace` — which is self-
+ * been deleted entirely now that its only caller (`worktree-service`)
+ * goes through `browserService.removeAllForWorktree` — which is self-
  * contained per the contract below. `lib/browser-manager.ts` remains as
  * a back-compat shim because it still has live importers (`start-server`,
- * `workspace-service`); subsequent phases will rewrite those call sites
+ * `worktree-service`); subsequent phases will rewrite those call sites
  * to import from this module directly.
  */
 
@@ -66,7 +66,7 @@ export interface UpdateBrowserOptions {
  *
  * The service owns:
  *   - The in-memory primary index (`browserId → BrowserTab`)
- *   - The reverse index (`workspaceId → Set<browserId>`)
+ *   - The reverse index (`worktreeId → Set<browserId>`)
  *   - Lazy hydration from `panel_states` on first read
  *   - Layout integration via `DockviewLayoutManager("browser_layout")`
  *
@@ -88,8 +88,8 @@ export interface UpdateBrowserOptions {
 export class BrowserService {
   // Primary index: browserId → BrowserTab
   private readonly browserTabs = new Map<string, BrowserTab>();
-  // Reverse index: workspaceId → Set<browserId>
-  private readonly workspaceBrowsers = new Map<string, Set<string>>();
+  // Reverse index: worktreeId → Set<browserId>
+  private readonly worktreeBrowsers = new Map<string, Set<string>>();
 
   /**
    * Lazy initialization flag. In dev mode (vite dev) the service may be
@@ -114,10 +114,10 @@ export class BrowserService {
 
   private addToIndex(tab: BrowserTab): void {
     this.browserTabs.set(tab.id, tab);
-    let ids = this.workspaceBrowsers.get(tab.workspaceId);
+    let ids = this.worktreeBrowsers.get(tab.worktreeId);
     if (!ids) {
       ids = new Set();
-      this.workspaceBrowsers.set(tab.workspaceId, ids);
+      this.worktreeBrowsers.set(tab.worktreeId, ids);
     }
     ids.add(tab.id);
   }
@@ -126,11 +126,11 @@ export class BrowserService {
     const tab = this.browserTabs.get(browserId);
     if (!tab) return;
     this.browserTabs.delete(browserId);
-    const ids = this.workspaceBrowsers.get(tab.workspaceId);
+    const ids = this.worktreeBrowsers.get(tab.worktreeId);
     if (ids) {
       ids.delete(browserId);
       if (ids.size === 0) {
-        this.workspaceBrowsers.delete(tab.workspaceId);
+        this.worktreeBrowsers.delete(tab.worktreeId);
       }
     }
   }
@@ -140,7 +140,7 @@ export class BrowserService {
   // -------------------------------------------------------------------------
 
   /**
-   * Create a new browser tab for a workspace.
+   * Create a new browser tab for a worktree.
    * Persists to panel_states and adds to in-memory registry.
    *
    * Intentionally bypasses `ensureInitialized()` — mirrors `ChatService.create`.
@@ -149,12 +149,12 @@ export class BrowserService {
    * public read (`get`/`list`) lazily initializes, so a write-only sequence
    * still observes the reset before the first read.
    */
-  create(workspaceId: string, options?: CreateBrowserOptions): BrowserTab {
+  create(worktreeId: string, options?: CreateBrowserOptions): BrowserTab {
     const now = Date.now();
 
     const tab: BrowserTab = {
       id: options?.id ?? `browser_${crypto.randomUUID()}`,
-      workspaceId,
+      worktreeId,
       name: options?.name ?? "Browser",
       url: options?.url ?? "",
       status: "idle",
@@ -167,17 +167,17 @@ export class BrowserService {
 
     // Mirror what `chatService.create` does: register the new tab in the
     // saved dockview layout so it survives a server restart and renders
-    // the moment the workspace is opened. `addPanel` is idempotent, so any
+    // the moment the worktree is opened. `addPanel` is idempotent, so any
     // mutation/handler that also calls `addToLayout` after `create` (the
     // `browsers.create` tRPC mutation does, transitively) is unaffected —
     // the second call refreshes metadata and bails.
-    this.addToLayout(workspaceId, tab.id, {
+    this.addToLayout(worktreeId, tab.id, {
       title: tab.name,
       initialUrl: tab.url || undefined,
     });
 
     log.info(
-      { browserId: tab.id, workspaceId, url: tab.url, profileId: tab.profileId },
+      { browserId: tab.id, worktreeId, url: tab.url, profileId: tab.profileId },
       "browser tab created",
     );
     return tab;
@@ -189,10 +189,10 @@ export class BrowserService {
     return this.browserTabs.get(browserId);
   }
 
-  /** List all browser tabs for a workspace. */
-  list(workspaceId: string): BrowserTab[] {
+  /** List all browser tabs for a worktree. */
+  list(worktreeId: string): BrowserTab[] {
     this.ensureInitialized();
-    const ids = this.workspaceBrowsers.get(workspaceId);
+    const ids = this.worktreeBrowsers.get(worktreeId);
     if (!ids) return [];
     const tabs: BrowserTab[] = [];
     for (const id of ids) {
@@ -289,7 +289,7 @@ export class BrowserService {
    * domains symmetric so callers (the tRPC router today, future direct
    * `browserService.remove` callers tomorrow) get the same one-call cleanup.
    *
-   * Returns the removed `BrowserTab` snapshot (carrying the workspaceId) so
+   * Returns the removed `BrowserTab` snapshot (carrying the worktreeId) so
    * the API tier can emit a lifecycle event without a separate `get()` pre-
    * read — which would otherwise be a TOCTOU race against a concurrent
    * `remove`. Returns `false` when no row matched.
@@ -302,61 +302,61 @@ export class BrowserService {
     this.queries.remove(browserId);
 
     // Drop the panel from the saved dockview layout. Done before the
-    // in-memory removal so the workspaceId is still available without a
+    // in-memory removal so the worktreeId is still available without a
     // second lookup. `removePanel` is a no-op if the panel was never
     // registered (e.g. a browser created before `create()` started auto-
     // adding to the layout), so this is safe across legacy rows.
-    this.removeFromLayout(tab.workspaceId, browserId);
+    this.removeFromLayout(tab.worktreeId, browserId);
 
     this.removeFromIndex(browserId);
 
-    log.info({ browserId, workspaceId: tab.workspaceId }, "browser tab removed");
+    log.info({ browserId, worktreeId: tab.worktreeId }, "browser tab removed");
     return tab;
   }
 
   /**
-   * Remove all browser tabs for a workspace.
-   * Called when a workspace is deleted.
+   * Remove all browser tabs for a worktree.
+   * Called when a worktree is deleted.
    *
    * Drops the saved dockview layout in the same call — mirrors `remove()`,
    * which calls `removeFromLayout` so layout cleanup is part of the
    * service-level contract instead of something every caller has to
    * remember to do as a second step. Keeps `BrowserService` and
    * `ChatService` symmetric. `deleteLayout` is a no-op when no layout row
-   * exists, so this is safe across workspaces that never opened a browser.
+   * exists, so this is safe across worktrees that never opened a browser.
    *
-   * `ensureInitialized()` runs first so a workspace deletion that arrives
+   * `ensureInitialized()` runs first so a worktree deletion that arrives
    * before any public read has hydrated the registry still cleans up the
    * persisted `panel_states` rows — otherwise the `if (ids)` guard would
    * skip the DB delete and leak the rows.
    */
-  removeAllForWorkspace(workspaceId: string): void {
+  removeAllForWorktree(worktreeId: string): void {
     this.ensureInitialized();
 
-    const ids = this.workspaceBrowsers.get(workspaceId);
+    const ids = this.worktreeBrowsers.get(worktreeId);
 
     if (ids) {
       // Snapshot the id set before mutating — `removeFromIndex` rewrites
-      // `workspaceBrowsers` underneath the iterator. `removeFromIndex`
+      // `worktreeBrowsers` underneath the iterator. `removeFromIndex`
       // (instead of an inline `browserTabs.delete`) keeps the reverse-
       // index invariant self-enforcing: it empties + deletes the
-      // `workspaceBrowsers` set when the last browserId is dropped, so
-      // no separate post-loop `workspaceBrowsers.delete(workspaceId)`
+      // `worktreeBrowsers` set when the last browserId is dropped, so
+      // no separate post-loop `worktreeBrowsers.delete(worktreeId)`
       // is needed and a future refactor of the loop can't desync the
-      // two indexes. Mirrors `ChatService.removeAllForWorkspace`.
+      // two indexes. Mirrors `ChatService.removeAllForWorktree`.
       for (const browserId of [...ids]) {
         this.removeFromIndex(browserId);
       }
 
-      this.queries.removeAllForWorkspace(workspaceId);
+      this.queries.removeAllForWorktree(worktreeId);
     }
 
     // Always drop the saved layout, even when no in-memory tabs exist —
     // a row in `browser_layout` can survive a server restart where the
-    // workspace's browsers were never hydrated yet.
-    this.deleteLayout(workspaceId);
+    // worktree's browsers were never hydrated yet.
+    this.deleteLayout(worktreeId);
 
-    log.info({ workspaceId }, "all browser tabs removed for workspace");
+    log.info({ worktreeId }, "all browser tabs removed for worktree");
   }
 
   /**
@@ -390,24 +390,24 @@ export class BrowserService {
   // Layout integration (absorbed from the now-deleted `lib/browser-layout-manager.ts`)
   // -------------------------------------------------------------------------
 
-  /** Delete the saved browser layout for a workspace. */
-  deleteLayout(workspaceId: string): void {
-    this.layoutManager.delete(workspaceId);
+  /** Delete the saved browser layout for a worktree. */
+  deleteLayout(worktreeId: string): void {
+    this.layoutManager.delete(worktreeId);
   }
 
   /** Add a browser panel to the saved dockview layout. */
   addToLayout(
-    workspaceId: string,
+    worktreeId: string,
     browserId: string,
     opts?: { title?: string; initialUrl?: string },
   ): void {
-    this.layoutManager.addPanel(workspaceId, {
+    this.layoutManager.addPanel(worktreeId, {
       id: browserId,
       contentComponent: "browserTab",
       tabComponent: "browserTab",
       title: opts?.title ?? "New Tab",
       params: {
-        workspaceId,
+        worktreeId,
         browserId,
         ...(opts?.initialUrl ? { initialUrl: opts.initialUrl } : {}),
       },
@@ -415,14 +415,14 @@ export class BrowserService {
   }
 
   /** Remove a browser panel from the saved dockview layout. */
-  removeFromLayout(workspaceId: string, browserId: string): void {
-    this.layoutManager.removePanel(workspaceId, browserId);
+  removeFromLayout(worktreeId: string, browserId: string): void {
+    this.layoutManager.removePanel(worktreeId, browserId);
   }
 }
 
 /**
  * Shared singleton consumed by the API tier (browsers router), other
- * services (e.g. workspace lifecycle deleting all tabs), and start-server
+ * services (e.g. worktree lifecycle deleting all tabs), and start-server
  * boot. The browser service holds in-memory state (the tab registry), so
  * callers MUST go through this instance — instantiating a second
  * `BrowserService` elsewhere would create a phantom registry that

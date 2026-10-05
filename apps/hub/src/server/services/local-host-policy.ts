@@ -1,7 +1,7 @@
 /**
- * Whether workspaces may run on the hub's own machine. `BAND_LOCAL_HOST=off`
+ * Whether worktrees may run on the hub's own machine. `BAND_LOCAL_HOST=off`
  * (read on every call) turns it off, for a hub on a server where every
- * workspace belongs on a worker. A new workspace with no host then goes to
+ * worktree belongs on a worker. A new worktree with no host then goes to
  * `BAND_DEFAULT_HOST`, or to the only online worker.
  */
 
@@ -13,7 +13,7 @@ export const LOCAL_HOST_ID = "local";
 export class LocalHostDisabledError extends Error {
   constructor() {
     super(
-      "Workspaces on the hub's own machine are turned off (BAND_LOCAL_HOST=off). Choose a worker host.",
+      "Worktrees on the hub's own machine are turned off (BAND_LOCAL_HOST=off). Choose a worker host.",
     );
     this.name = "LocalHostDisabledError";
   }
@@ -22,14 +22,14 @@ export class LocalHostDisabledError extends Error {
 export class NoDefaultHostError extends Error {
   constructor(reason: string) {
     super(
-      `${reason} Workspaces on the hub's own machine are turned off (BAND_LOCAL_HOST=off), so pass a hostId or set BAND_DEFAULT_HOST.`,
+      `${reason} Worktrees on the hub's own machine are turned off (BAND_LOCAL_HOST=off), so pass a hostId or set BAND_DEFAULT_HOST.`,
     );
     this.name = "NoDefaultHostError";
   }
 }
 
-/** The host a workspace goes on when the caller named none. */
-export function resolveWorkspaceHostId(requested: string | undefined): string {
+/** The host a worktree goes on when the caller named none. */
+export function resolveWorktreeHostId(requested: string | undefined): string {
   if (!isLocalHostEnabled()) {
     if (requested === LOCAL_HOST_ID) throw new LocalHostDisabledError();
     if (requested) return requested;

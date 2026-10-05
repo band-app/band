@@ -402,7 +402,7 @@ export class AcpAgentProcess {
   async listSessions(cwd: string, limit = 200): Promise<acp.SessionInfo[]> {
     // The Claude adapter lists sessions from every git worktree of the repo
     // (the Agent SDK's `includeWorktrees` defaults on), and every Band
-    // workspace is a worktree, so keep only the ones started in `cwd`.
+    // worktree is a worktree, so keep only the ones started in `cwd`.
     const dir = canonicalPath(cwd);
     // Sessions share a few worktree paths; resolve each one once.
     const resolved = new Map<string, string>();

@@ -231,7 +231,7 @@ function validateLabels(
  *
  * The service owns:
  *   - The in-memory primary index (`chatId → ChatSession`)
- *   - The reverse index (`workspaceId → Set<chatId>`)
+ *   - The reverse index (`worktreeId → Set<chatId>`)
  *   - Lazy hydration from `panel_states` on first read
  *   - Layout integration via `DockviewLayoutManager("chat_layout")`
  *   - Emitting `chat-created` / `chat-removed` events on `watcher`
@@ -250,8 +250,8 @@ function validateLabels(
 export class ChatService {
   // Primary index: chatId → ChatSession
   private readonly chatSessions = new Map<string, ChatSession>();
-  // Reverse index: workspaceId → Set<chatId>
-  private readonly workspaceChats = new Map<string, Set<string>>();
+  // Reverse index: worktreeId → Set<chatId>
+  private readonly worktreeChats = new Map<string, Set<string>>();
 
   /**
    * Lazy initialization flag. In dev mode (vite dev) the service may be
@@ -276,10 +276,10 @@ export class ChatService {
 
   private addToIndex(session: ChatSession): void {
     this.chatSessions.set(session.id, session);
-    let ids = this.workspaceChats.get(session.workspaceId);
+    let ids = this.worktreeChats.get(session.worktreeId);
     if (!ids) {
       ids = new Set();
-      this.workspaceChats.set(session.workspaceId, ids);
+      this.worktreeChats.set(session.worktreeId, ids);
     }
     ids.add(session.id);
   }
@@ -288,11 +288,11 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return;
     this.chatSessions.delete(chatId);
-    const ids = this.workspaceChats.get(session.workspaceId);
+    const ids = this.worktreeChats.get(session.worktreeId);
     if (ids) {
       ids.delete(chatId);
       if (ids.size === 0) {
-        this.workspaceChats.delete(session.workspaceId);
+        this.worktreeChats.delete(session.worktreeId);
       }
     }
   }
@@ -306,7 +306,7 @@ export class ChatService {
   // -------------------------------------------------------------------------
 
   /**
-   * Create a new chat pane for a workspace.
+   * Create a new chat pane for a worktree.
    * Persists to panel_states and adds to in-memory registry.
    *
    * Intentionally bypasses `ensureInitialized()` — `create` is a pure
@@ -316,7 +316,7 @@ export class ChatService {
    * sequence (CLI `band chats create` followed straight by `submitTask`)
    * still observes the reset before the first read.
    */
-  create(workspaceId: string, options?: CreateChatOptions): ChatSession {
+  create(worktreeId: string, options?: CreateChatOptions): ChatSession {
     const defaultAgent = settingsService.getAgentDefinition();
     const now = Date.now();
 
@@ -328,7 +328,7 @@ export class ChatService {
 
     const session: ChatSession = {
       id: options?.id ?? this.generateChatId(),
-      workspaceId,
+      worktreeId,
       name: options?.name ?? "Chat",
       agent: options?.agent ?? defaultAgent.id,
       model: options?.model,
@@ -346,19 +346,19 @@ export class ChatService {
 
     // Mirror what `terminals.create` and `browsers.create` do: register the
     // new pane in the saved dockview layout so it shows up next time the
-    // workspace is opened. Without this, chats created via the CLI (e.g.
-    // `band workspaces create --prompt`, `band chats create`, or the lazy
+    // worktree is opened. Without this, chats created via the CLI (e.g.
+    // `band worktrees create --prompt`, `band chats create`, or the lazy
     // `getOrCreateDefaultChat` path) exist as records but are invisible
     // in the dashboard until the user manually opens a tab. `addPanel`
     // is idempotent, so the dashboard's own "+ chat" button — which may
     // also touch the layout client-side — is unaffected.
-    this.addToLayout(workspaceId, session.id, { title: session.name });
+    this.addToLayout(worktreeId, session.id, { title: session.name });
 
     // Notify any open dashboard so it can sync its dockview without a
     // page reload. Same pattern as `terminal-created` / `browser-created`.
-    emit({ kind: "chat-created", workspaceId, chatId: session.id });
+    emit({ kind: "chat-created", worktreeId, chatId: session.id });
 
-    log.info({ chatId: session.id, workspaceId, agent: session.agent }, "chat pane created");
+    log.info({ chatId: session.id, worktreeId, agent: session.agent }, "chat pane created");
     return session;
   }
 
@@ -368,10 +368,10 @@ export class ChatService {
     return this.chatSessions.get(chatId);
   }
 
-  /** List all chat sessions for a workspace. */
-  list(workspaceId: string): ChatSession[] {
+  /** List all chat sessions for a worktree. */
+  list(worktreeId: string): ChatSession[] {
     this.ensureInitialized();
-    const ids = this.workspaceChats.get(workspaceId);
+    const ids = this.worktreeChats.get(worktreeId);
     if (!ids) return [];
     const sessions: ChatSession[] = [];
     for (const id of ids) {
@@ -548,48 +548,48 @@ export class ChatService {
     // `terminal.kill` and `browsers.remove` do via their respective
     // `remove*FromLayout` helpers — keeps the layout in sync with
     // the registry so an open dashboard doesn't show a ghost tab.
-    this.removeFromLayout(session.workspaceId, chatId);
+    this.removeFromLayout(session.worktreeId, chatId);
 
     // Remove from in-memory maps
     this.removeFromIndex(chatId);
 
     // Notify any open dashboard. Same pattern as `browser-removed` /
     // `terminal-killed`.
-    emit({ kind: "chat-removed", workspaceId: session.workspaceId, chatId });
+    emit({ kind: "chat-removed", worktreeId: session.worktreeId, chatId });
 
-    log.info({ chatId, workspaceId: session.workspaceId }, "chat pane removed");
+    log.info({ chatId, worktreeId: session.worktreeId }, "chat pane removed");
     return true;
   }
 
   /**
-   * Remove all chat panes for a workspace.
-   * Called when a workspace is deleted.
+   * Remove all chat panes for a worktree.
+   * Called when a worktree is deleted.
    *
    * Drops the saved dockview layout in the same call — mirrors `remove()`,
    * which calls `removeFromLayout` so layout cleanup is part of the
    * service-level contract instead of something every caller has to
    * remember to do as a second step. Keeps `ChatService` and
    * `BrowserService` symmetric. `deleteLayout` is a no-op when no layout
-   * row exists, so this is safe across workspaces that never opened a chat.
+   * row exists, so this is safe across worktrees that never opened a chat.
    *
-   * `ensureInitialized()` runs first so a workspace deletion that arrives
+   * `ensureInitialized()` runs first so a worktree deletion that arrives
    * before any public read has hydrated the registry still cleans up the
    * persisted `panel_states` rows — otherwise the `if (ids)` guard would
    * skip the DB delete and leak the rows (and the agents would never be
    * killed).
    */
-  removeAllForWorkspace(workspaceId: string): void {
+  removeAllForWorktree(worktreeId: string): void {
     this.ensureInitialized();
 
-    const ids = this.workspaceChats.get(workspaceId);
+    const ids = this.worktreeChats.get(worktreeId);
 
     if (ids) {
       // Snapshot the id set before mutating — `removeFromIndex` rewrites
-      // `workspaceChats` underneath the iterator. `removeFromIndex`
+      // `worktreeChats` underneath the iterator. `removeFromIndex`
       // (instead of an inline `chatSessions.delete`) keeps the reverse-
       // index invariant self-enforcing: it empties + deletes the
-      // `workspaceChats` set when the last chatId is dropped, so no
-      // separate post-loop `workspaceChats.delete(workspaceId)` is
+      // `worktreeChats` set when the last chatId is dropped, so no
+      // separate post-loop `worktreeChats.delete(worktreeId)` is
       // needed and a future refactor of the loop can't desync the two
       // indexes.
       for (const chatId of [...ids]) {
@@ -599,15 +599,15 @@ export class ChatService {
       }
 
       // Bulk delete chat panel states from DB
-      this.queries.removeAllForWorkspace(workspaceId);
+      this.queries.removeAllForWorktree(worktreeId);
     }
 
     // Always drop the saved layout, even when no in-memory chats exist —
     // a row in `chat_layout` can survive a server restart where the
-    // workspace's chats were never hydrated yet.
-    this.deleteLayout(workspaceId);
+    // worktree's chats were never hydrated yet.
+    this.deleteLayout(worktreeId);
 
-    log.info({ workspaceId }, "all chat panes removed for workspace");
+    log.info({ worktreeId }, "all chat panes removed for worktree");
   }
 
   /**
@@ -648,20 +648,20 @@ export class ChatService {
   // -------------------------------------------------------------------------
 
   /**
-   * Find the first chat in `workspaceId` whose labels match every key/value
+   * Find the first chat in `worktreeId` whose labels match every key/value
    * pair in `match` (AND semantics; extra labels on the chat are ignored).
    * Returns `null` when no chat matches.
    *
-   * In-memory filter over `list(workspaceId)` — fast for the workspace
+   * In-memory filter over `list(worktreeId)` — fast for the worktree
    * sizes we deal with (typically <50 chats) and avoids a per-key SQL query.
    * Used by the cronjob scheduler to claim its own chat via the canonical
    * `band:cronId` label.
    */
-  findByLabels(workspaceId: string, match: Record<string, string>): ChatSession | null {
+  findByLabels(worktreeId: string, match: Record<string, string>): ChatSession | null {
     this.ensureInitialized();
     const keys = Object.keys(match);
     if (keys.length === 0) return null;
-    const chats = this.list(workspaceId);
+    const chats = this.list(worktreeId);
     for (const chat of chats) {
       let allMatch = true;
       for (const k of keys) {
@@ -676,7 +676,7 @@ export class ChatService {
   }
 
   /**
-   * Get or create a default chat pane for a workspace.
+   * Get or create a default chat pane for a worktree.
    *
    * Resolution order:
    *   1. The active panel from the saved chat layout (e.g. the tab the user
@@ -684,17 +684,17 @@ export class ChatService {
    *      `band chat ...` target the same chat the user is looking at.
    *   2. The first chat panel in the saved layout, even if not active.
    *   3. The first chat in the in-memory registry (insertion order).
-   *   4. A freshly-created "Chat" panel if the workspace has none yet.
+   *   4. A freshly-created "Chat" panel if the worktree has none yet.
    *
    * Used by the CLI (`band chat`), cronjobs, and tRPC routes that accept an
    * optional chatId — all of them want a single deterministic answer to
-   * "which chat does this workspace mean by default".
+   * "which chat does this worktree mean by default".
    */
-  getOrCreateDefault(workspaceId: string): ChatSession {
-    const chats = this.list(workspaceId);
+  getOrCreateDefault(worktreeId: string): ChatSession {
+    const chats = this.list(worktreeId);
 
     if (chats.length > 0) {
-      const layout = this.getLayout(workspaceId);
+      const layout = this.getLayout(worktreeId);
       const layoutDefault = defaultPanelIdFromLayout(layout);
       if (layoutDefault) {
         const match = chats.find((c) => c.id === layoutDefault);
@@ -703,7 +703,7 @@ export class ChatService {
       return chats[0];
     }
 
-    return this.create(workspaceId, { name: "Chat" });
+    return this.create(worktreeId, { name: "Chat" });
   }
 
   // -------------------------------------------------------------------------
@@ -711,39 +711,39 @@ export class ChatService {
   // -------------------------------------------------------------------------
 
   /**
-   * Get the saved chat layout tree for a workspace, or null when absent.
+   * Get the saved chat layout tree for a worktree, or null when absent.
    *
    * Server-internal only — used by `getOrCreateDefault` to resolve the
    * layout's active panel. Clients persist center layout in localStorage;
    * the former `chatLayout.get` tRPC procedure was retired in issue #643
    * Phase 4.
    */
-  getLayout(workspaceId: string): unknown | null {
-    return this.layoutManager.get(workspaceId);
+  getLayout(worktreeId: string): unknown | null {
+    return this.layoutManager.get(worktreeId);
   }
 
-  /** Delete the saved chat layout for a workspace. */
-  deleteLayout(workspaceId: string): void {
-    this.layoutManager.delete(workspaceId);
+  /** Delete the saved chat layout for a worktree. */
+  deleteLayout(worktreeId: string): void {
+    this.layoutManager.delete(worktreeId);
   }
 
   /** Add a chat panel to the saved dockview layout. */
-  addToLayout(workspaceId: string, chatId: string, opts?: { title?: string }): void {
-    this.layoutManager.addPanel(workspaceId, {
+  addToLayout(worktreeId: string, chatId: string, opts?: { title?: string }): void {
+    this.layoutManager.addPanel(worktreeId, {
       id: chatId,
       contentComponent: "chatTab",
       tabComponent: "chatTab",
       title: opts?.title ?? "Chat",
       params: {
-        workspaceId,
+        worktreeId,
         chatId,
       },
     });
   }
 
   /** Remove a chat panel from the saved dockview layout. */
-  removeFromLayout(workspaceId: string, chatId: string): void {
-    this.layoutManager.removePanel(workspaceId, chatId);
+  removeFromLayout(worktreeId: string, chatId: string): void {
+    this.layoutManager.removePanel(worktreeId, chatId);
   }
 
   // -------------------------------------------------------------------------

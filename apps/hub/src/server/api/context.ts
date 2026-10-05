@@ -1,5 +1,5 @@
 export const CHAT_ID_HEADER = "x-band-chat-id";
-export const WORKSPACE_ID_HEADER = "x-band-workspace-id";
+export const WORKTREE_ID_HEADER = "x-band-worktree-id";
 
 type HeaderBag = Headers | Record<string, string | string[] | undefined>;
 
@@ -14,9 +14,9 @@ function readHeader(headers: HeaderBag | undefined, name: string): string | unde
 }
 
 /**
- * The caller's context. A call from an agent names the chat and workspace
- * it runs in (headers `x-band-chat-id` and `x-band-workspace-id`, from the
- * agent's `BAND_CHAT_ID` and `BAND_WORKSPACE_ID`), so procedures like
+ * The caller's context. A call from an agent names the chat and worktree
+ * it runs in (headers `x-band-chat-id` and `x-band-worktree-id`, from the
+ * agent's `BAND_CHAT_ID` and `BAND_WORKTREE_ID`), so procedures like
  * `subscriptions.create` can default to them. Calls from the UI carry neither.
  *
  * `admin` says whether the token that authenticated the call is an admin
@@ -25,7 +25,7 @@ function readHeader(headers: HeaderBag | undefined, name: string): string | unde
 export function createContext(opts?: { req?: { headers: HeaderBag }; admin?: boolean }) {
   return {
     chatId: readHeader(opts?.req?.headers, CHAT_ID_HEADER),
-    workspaceId: readHeader(opts?.req?.headers, WORKSPACE_ID_HEADER),
+    worktreeId: readHeader(opts?.req?.headers, WORKTREE_ID_HEADER),
     admin: opts?.admin === true,
   };
 }

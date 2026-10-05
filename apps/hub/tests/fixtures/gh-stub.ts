@@ -57,7 +57,7 @@ export interface GhStub {
   /**
    * Answer the branch-status poller's batched CI query
    * (`buildBatchedCIQuery`, one `ws_<n>: repository(...)` alias per
-   * workspace). One registration answers the whole query: each alias of
+   * worktree). One registration answers the whole query: each alias of
    * `repo` gets `answer(branch)`, a `repository` object, and `null` when that
    * returns undefined; aliases of any other repository get `null`. Called
    * per request.

@@ -48,7 +48,7 @@ export const DESKTOP_CDP_PORT = 9223;
 
 export interface EnsureViewEvent {
   bandTabId: string;
-  workspaceId: string;
+  worktreeId: string;
   url: string;
   /** Browser profile whose session the view runs in. `null` is Default. */
   profileId: string | null;
@@ -164,7 +164,7 @@ export async function ensureCdpTargetId(bandTabId: string): Promise<string> {
     try {
       listener({
         bandTabId,
-        workspaceId: tab.workspaceId,
+        worktreeId: tab.worktreeId,
         url: tab.url,
         profileId: tab.profileId,
       });

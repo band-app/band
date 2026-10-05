@@ -99,23 +99,23 @@ function repoComponent(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
-  return cleaned === "" ? "project" : cleaned;
+  return cleaned === "" ? "repo" : cleaned;
 }
 
-/** `band-env/<project>:<key16>`, under `registry` when one is set. */
-export function imageTag(project: string, key: string, registry?: string): string {
+/** `band-env/<repo>:<key16>`, under `registry` when one is set. */
+export function imageTag(repo: string, key: string, registry?: string): string {
   const prefix = registry ? `${registry.replace(/\/+$/, "")}/` : "";
-  return `${prefix}band-env/${repoComponent(project)}:${key.slice(0, 16)}`;
+  return `${prefix}band-env/${repoComponent(repo)}:${key.slice(0, 16)}`;
 }
 
 /** The intermediate image that holds the toolchain before the worker layer. */
-export function toolchainTag(project: string, key: string): string {
-  return `band-env-toolchain/${repoComponent(project)}:${key.slice(0, 16)}`;
+export function toolchainTag(repo: string, key: string): string {
+  return `band-env-toolchain/${repoComponent(repo)}:${key.slice(0, 16)}`;
 }
 
 /** The image with the worker layer and no `install` yet. */
-export function layeredTag(project: string, key: string): string {
-  return `band-env-layered/${repoComponent(project)}:${key.slice(0, 16)}`;
+export function layeredTag(repo: string, key: string): string {
+  return `band-env-layered/${repoComponent(repo)}:${key.slice(0, 16)}`;
 }
 
 /** `docker build` for an environment whose `build.dockerfile` is set. `checkout` is the default-branch snapshot. */

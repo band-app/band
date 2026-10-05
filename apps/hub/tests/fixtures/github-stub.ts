@@ -1,4 +1,4 @@
-// Express stub for github.com, the host Band fetches project owner avatars
+// Express stub for github.com, the host Band fetches repo owner avatars
 // from (`GET /<owner>.png?size=64`). The server reads its base URL from
 // `BAND_GITHUB_URL` at request time. Shared by backend tests and e2e specs.
 

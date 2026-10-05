@@ -1,5 +1,5 @@
 import { type Host, HostOfflineError, HostTimeoutError, type RelayGrant } from "@band-app/host-api";
-import { loadProjectConfig } from "@band-app/host-local/setup/project-config";
+import { loadRepoConfig } from "@band-app/host-local/setup/repo-config";
 import { TerminalDaemonUnavailableError } from "@band-app/host-local/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
 import type {
@@ -11,7 +11,7 @@ import type {
 } from "@band-app/host-local/terminals/terminal-backend";
 import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
 import { createLogger } from "@band-app/logger";
-import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
+import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
 import {
@@ -21,7 +21,7 @@ import {
 } from "./_utils/terminal-layout-manager";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { emit } from "./watcher-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 // Re-export the terminal types so the API tier (`terminals/router.ts`,
 // `terminals/ws.ts`) can reference them without reaching into infra.
@@ -38,12 +38,12 @@ export type TerminalStreamEvent =
 const log = createLogger("terminal-service");
 
 // ---------------------------------------------------------------------------
-// Zod schemas for the workspace `.band/config.json` `workspace.terminal` block
+// Zod schemas for the worktree `.band/config.json` `workspace.terminal` block
 //
-// The schema and `loadWorkspaceConfig` helper used to live in
+// The schema and `loadWorktreeConfig` helper used to live in
 // `lib/terminal-config.ts`. They were absorbed into the service tier as part
 // of the Phase 7 3-tier refactor (issue #318) — config parsing is a piece of
-// terminal business logic that callers (currently the workspace router's
+// terminal business logic that callers (currently the worktree router's
 // `getTerminalConfig` query) reach via `terminalService` rather than a
 // stand-alone helper.
 // ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ const TerminalLayoutNodeSchema: z.ZodType<TerminalLayoutNodeInput> = z.lazy(() =
   ]),
 );
 
-const WorkspaceTerminalConfigSchema = z.object({
+const WorktreeTerminalConfigSchema = z.object({
   layout: TerminalLayoutNodeSchema,
 });
 
@@ -97,9 +97,9 @@ function skipUnreachable(err: unknown): undefined {
  *
  * Services tier — coordinates each host's {@link TerminalBackend} (`host.pty`:
  * PTY lifecycle, in this process or in the terminal daemon), the dockview layout store (so
- * a freshly spawned terminal survives a reload), and the workspace status
- * event bus. The backend stays oblivious to the workspace registry; the
- * service is the one that resolves a workspaceId to a worktree path and
+ * a freshly spawned terminal survives a reload), and the worktree status
+ * event bus. The backend stays oblivious to the worktree registry; the
+ * service is the one that resolves a worktreeId to a worktree path and
  * decides which side effects fire on spawn / kill.
  *
  * Callers:
@@ -107,8 +107,8 @@ function skipUnreachable(err: unknown): undefined {
  *     CRUD-shaped procedures.
  *   - The terminal WebSocket handler (`server/api/terminals/ws.ts`) for
  *     spawning + attaching a live PTY.
- *   - The workspace router, for `getTerminalConfig`, and the workspace
- *     deletion cleanup (`killWorkspace` + `deleteLayout`).
+ *   - The worktree router, for `getTerminalConfig`, and the worktree
+ *     deletion cleanup (`killWorktree` + `deleteLayout`).
  *   - `start-server.ts`, which picks the local host's backend at boot and calls
  *     {@link close} on shutdown.
  */
@@ -167,9 +167,9 @@ export class TerminalService {
     return backend;
   }
 
-  /** The host a workspace's terminals live on. */
-  private hostOfWorkspace(workspaceId: string): Host {
-    return hostRegistry.hostFor(workspaceId);
+  /** The host a worktree's terminals live on. */
+  private hostOfWorktree(worktreeId: string): Host {
+    return hostRegistry.hostFor(worktreeId);
   }
 
   /**
@@ -219,9 +219,9 @@ export class TerminalService {
   // -------------------------------------------------------------------------
 
   /**
-   * Spawn a new PTY for the given workspace + terminalId.
+   * Spawn a new PTY for the given worktree + terminalId.
    *
-   * Resolves `workspaceId` to a worktree path before delegating to the
+   * Resolves `worktreeId` to a worktree path before delegating to the
    * backend, and registers the new terminal in the saved dockview layout so
    * it survives a server restart (mirrors `chatService.create` /
    * `browserService.create`). Does NOT emit a `terminal-created` event —
@@ -229,7 +229,7 @@ export class TerminalService {
    * stays silent; the tRPC `create` mutation emits explicitly).
    */
   async spawn(
-    workspaceId: string,
+    worktreeId: string,
     terminalId: string,
     options?: SpawnOptions,
     // `cleanupOnExit` (issue #581): when set, a *natural* PTY exit (e.g. a
@@ -242,24 +242,24 @@ export class TerminalService {
     // `handleExit`), so it holds even when the shell outlives this server.
     opts?: { cleanupOnExit?: boolean },
   ): Promise<TerminalListEntry> {
-    // Opening a terminal in a sleeping workspace brings its worker back first.
-    await ephemeralLifecycleService.ensureAwake(workspaceId);
-    const workspace = workspaceService.resolve(workspaceId);
-    if (!workspace) {
-      throw new Error(`Workspace not found: ${workspaceId}`);
+    // Opening a terminal in a sleeping worktree brings its worker back first.
+    await ephemeralLifecycleService.ensureAwake(worktreeId);
+    const worktree = worktreeService.resolve(worktreeId);
+    if (!worktree) {
+      throw new Error(`Worktree not found: ${worktreeId}`);
     }
-    const host = this.hostOfWorkspace(workspaceId);
+    const host = this.hostOfWorktree(worktreeId);
     const known = this.terminalHosts.get(terminalId);
     if (known && known.id !== host.id) {
       throw new Error(`Terminal ${terminalId} already runs on another host`);
     }
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.
-    const grant = await host.relay?.issue({ workspaceId });
+    const grant = await host.relay?.issue({ worktreeId });
     const request = {
-      workspaceId,
+      worktreeId,
       terminalId,
-      workspaceRoot: workspace.worktree.path,
+      worktreeRoot: worktree.worktree.path,
       options: grant ? { ...options, env: { ...options?.env, ...grant.env } } : options,
       cleanupOnExit: opts?.cleanupOnExit,
     };
@@ -297,24 +297,24 @@ export class TerminalService {
       else this.relayGrants.set(terminalId, grant);
     }
 
-    // The workspace can be removed while the spawn is in flight (e.g.
-    // `band workspaces create --prompt` spawns fire-and-forget and a quick
-    // `workspaces remove` follows). Its `killWorkspace` ran before this shell
+    // The worktree can be removed while the spawn is in flight (e.g.
+    // `band worktrees create --prompt` spawns fire-and-forget and a quick
+    // `worktrees remove` follows). Its `killWorktree` ran before this shell
     // existed, so end the shell here and don't resurrect the layout row that
     // the removal already deleted. Shells now outlive the server, so a stray
     // one would otherwise run until the next boot's reconcile.
-    if (!workspaceService.resolve(workspaceId)) {
+    if (!worktreeService.resolve(worktreeId)) {
       await this.ptyOf(host).kill(terminalId);
-      throw new Error(`Workspace removed while its terminal was starting: ${workspaceId}`);
+      throw new Error(`Worktree removed while its terminal was starting: ${worktreeId}`);
     }
 
     // Mirror what `createChat` and `createBrowser` do: register the new
     // terminal in the saved dockview layout so it survives a server
-    // restart and renders the moment the workspace is opened. Without
+    // restart and renders the moment the worktree is opened. Without
     // this, terminals spawned via the WebSocket handler would be
     // invisible in the dashboard. `addPanel` is idempotent, so the tRPC
     // `create` path doesn't need a separate call.
-    addTerminalToLayout(workspaceId, terminalId, {
+    addTerminalToLayout(worktreeId, terminalId, {
       command: options?.command,
       cwd: options?.cwd,
       env: options?.env,
@@ -340,7 +340,7 @@ export class TerminalService {
     this.terminalHosts.delete(terminalId);
     this.releaseRelay(terminalId);
     if (killed) {
-      this.emitRemoved(killed.workspaceId, terminalId);
+      this.emitRemoved(killed.worktreeId, terminalId);
     }
   }
 
@@ -351,9 +351,9 @@ export class TerminalService {
    * {@link handleExit}. Idempotent: `removeTerminalFromLayout` is a no-op when
    * the panel is already gone, and a duplicate `terminal-killed` is harmless.
    */
-  private emitRemoved(workspaceId: string, terminalId: string): void {
-    removeTerminalFromLayout(workspaceId, terminalId);
-    emit({ kind: "terminal-killed", workspaceId, terminalId });
+  private emitRemoved(worktreeId: string, terminalId: string): void {
+    removeTerminalFromLayout(worktreeId, terminalId);
+    emit({ kind: "terminal-killed", worktreeId, terminalId });
   }
 
   /** Revokes the relay token a terminal's shell was started with. */
@@ -372,7 +372,7 @@ export class TerminalService {
     this.terminalHosts.delete(event.terminalId);
     this.releaseRelay(event.terminalId);
     if (event.cleanupOnExit && !event.killed) {
-      this.emitRemoved(event.workspaceId, event.terminalId);
+      this.emitRemoved(event.worktreeId, event.terminalId);
     }
     for (const listener of this.exitListeners.get(event.terminalId) ?? []) {
       try {
@@ -384,14 +384,14 @@ export class TerminalService {
   }
 
   /**
-   * Kill every PTY associated with a workspace. Used by the workspace
+   * Kill every PTY associated with a worktree. Used by the worktree
    * deletion path — the caller is responsible for tearing down the layout
    * tree via {@link deleteLayout} as well.
    */
-  async killWorkspace(workspaceId: string): Promise<void> {
-    const backend = this.ptyOf(this.hostOfWorkspace(workspaceId));
-    const entries = await backend.list(workspaceId);
-    await backend.killWorkspace(workspaceId);
+  async killWorktree(worktreeId: string): Promise<void> {
+    const backend = this.ptyOf(this.hostOfWorktree(worktreeId));
+    const entries = await backend.list(worktreeId);
+    await backend.killWorktree(worktreeId);
     for (const entry of entries) {
       this.terminalHosts.delete(entry.terminalId);
       this.releaseRelay(entry.terminalId);
@@ -399,23 +399,23 @@ export class TerminalService {
   }
 
   /**
-   * Kill sessions whose workspace no longer exists — it was deleted while
-   * no server was running, so the `killWorkspace` in the delete path never
-   * reached them. Runs once at boot. Only workspaces missing from the shared
+   * Kill sessions whose worktree no longer exists — it was deleted while
+   * no server was running, so the `killWorktree` in the delete path never
+   * reached them. Runs once at boot. Only worktrees missing from the shared
    * `~/.band` state count, so a second server on the same home (dev beside
    * desktop) never kills the other's terminals.
    */
   async reconcile(): Promise<void> {
     const entries = await this.listAll();
-    // One kill per deleted workspace, not per terminal: each is a daemon round trip.
+    // One kill per deleted worktree, not per terminal: each is a daemon round trip.
     const deleted = new Set(
       entries
-        .map((entry) => entry.workspaceId)
-        .filter((workspaceId) => !workspaceService.resolve(workspaceId)),
+        .map((entry) => entry.worktreeId)
+        .filter((worktreeId) => !worktreeService.resolve(worktreeId)),
     );
-    for (const workspaceId of deleted) {
-      log.info({ workspaceId }, "killing terminals of a deleted workspace");
-      await this.killWorkspace(workspaceId);
+    for (const worktreeId of deleted) {
+      log.info({ worktreeId }, "killing terminals of a deleted worktree");
+      await this.killWorktree(worktreeId);
     }
   }
 
@@ -442,14 +442,14 @@ export class TerminalService {
   // Per-terminal accessors
   // -------------------------------------------------------------------------
 
-  async list(workspaceId: string): Promise<TerminalListEntry[]> {
-    const host = this.hostOfWorkspace(workspaceId);
-    const entries = await this.ptyOf(host).list(workspaceId);
+  async list(worktreeId: string): Promise<TerminalListEntry[]> {
+    const host = this.hostOfWorktree(worktreeId);
+    const entries = await this.ptyOf(host).list(worktreeId);
     for (const entry of entries) this.terminalHosts.set(entry.terminalId, host);
     return entries;
   }
 
-  /** pid, foreground process name (`title`) and workspace, or `null` if not live. */
+  /** pid, foreground process name (`title`) and worktree, or `null` if not live. */
   async info(terminalId: string): Promise<TerminalListEntry | null> {
     return (await this.locate(terminalId))?.entry ?? null;
   }
@@ -568,8 +568,8 @@ export class TerminalService {
   // -------------------------------------------------------------------------
   // Layout persistence (dockview tree)
   //
-  // Only the workspace-deletion cleanup remains: `deleteLayout` drops the
-  // saved `terminal_layout` row so a deleted workspace doesn't leak it. The
+  // Only the worktree-deletion cleanup remains: `deleteLayout` drops the
+  // saved `terminal_layout` row so a deleted worktree doesn't leak it. The
   // former get/save pass-throughs (which backed the `terminalLayout.*` tRPC
   // procedures) were retired in issue #643 Phase 4 once clients moved
   // center-layout persistence into localStorage. The spawn/kill paths still
@@ -578,45 +578,45 @@ export class TerminalService {
   // working server-side.
   // -------------------------------------------------------------------------
 
-  deleteLayout(workspaceId: string): void {
-    deleteTerminalLayout(workspaceId);
+  deleteLayout(worktreeId: string): void {
+    deleteTerminalLayout(worktreeId);
   }
 
   // -------------------------------------------------------------------------
-  // Workspace `.band/config.json` `workspace.terminal` block
+  // Worktree `.band/config.json` `workspace.terminal` block
   // -------------------------------------------------------------------------
 
   /**
    * Load and validate the `workspace.terminal` block from
-   * `.band/config.json`. Returns `null` when the workspace can't be
+   * `.band/config.json`. Returns `null` when the worktree can't be
    * resolved, the config file is absent, the block is missing, or the
    * payload fails validation.
    *
-   * Absorbed from the old `lib/terminal-config.ts:loadWorkspaceTerminalConfig`
+   * Absorbed from the old `lib/terminal-config.ts:loadWorktreeTerminalConfig`
    * — same parsing semantics, but the lookup now goes through the service
-   * tier so callers (currently the workspace router's `getTerminalConfig`
+   * tier so callers (currently the worktree router's `getTerminalConfig`
    * query) reach it via `terminalService` instead of a stand-alone helper.
    */
-  async getWorkspaceConfig(workspaceId: string): Promise<WorkspaceTerminalConfig | null> {
-    const workspace = workspaceService.resolve(workspaceId);
-    if (!workspace) return null;
-    return this.loadWorkspaceConfigFromPaths(
-      workspace.host,
-      workspace.worktree.path,
-      workspace.project.path,
+  async getWorktreeConfig(worktreeId: string): Promise<WorktreeTerminalConfig | null> {
+    const worktree = worktreeService.resolve(worktreeId);
+    if (!worktree) return null;
+    return this.loadWorktreeConfigFromPaths(
+      worktree.host,
+      worktree.worktree.path,
+      worktree.repo.path,
     );
   }
 
   /**
    * Internal: the path-driven parse so tests / future non-tRPC entry
-   * points can plug raw paths in without going through `resolveWorkspace`.
+   * points can plug raw paths in without going through `resolveWorktree`.
    */
-  private async loadWorkspaceConfigFromPaths(
+  private async loadWorktreeConfigFromPaths(
     host: Host,
     worktreePath: string,
-    projectPath: string,
-  ): Promise<WorkspaceTerminalConfig | null> {
-    const raw = await loadProjectConfig(host, worktreePath, projectPath);
+    repoPath: string,
+  ): Promise<WorktreeTerminalConfig | null> {
+    const raw = await loadRepoConfig(host, worktreePath, repoPath);
     if (!raw) return null;
 
     const terminalBlock =
@@ -626,7 +626,7 @@ export class TerminalService {
 
     if (!terminalBlock) return null;
 
-    const result = WorkspaceTerminalConfigSchema.safeParse(terminalBlock);
+    const result = WorktreeTerminalConfigSchema.safeParse(terminalBlock);
     if (!result.success) {
       log.warn(
         "Invalid workspace.terminal config: %s",
@@ -655,7 +655,7 @@ function addKeyed<T>(map: Map<string, Set<T>>, key: string, listener: T): () => 
 
 /**
  * Process-wide singleton consumed by the API tier (terminals router +
- * terminal WS handler), the workspace cleanup paths, and `start-server.ts`.
+ * terminal WS handler), the worktree cleanup paths, and `start-server.ts`.
  * Sharing one instance keeps the backend, the dockview layout writes, and the
  * event bus emissions in lock-step across every entry point.
  */

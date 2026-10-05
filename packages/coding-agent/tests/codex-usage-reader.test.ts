@@ -1,6 +1,6 @@
 /**
  * Tests for the Codex usage reader (`src/usage/codex.ts`), which the Reports
- * scanner uses to list a workspace's sessions and read their token usage from
+ * scanner uses to list a worktree's sessions and read their token usage from
  * the rollout JSONL files under `$CODEX_HOME/sessions/`.
  *
  * Real temp directories only: each test writes rollout files in the
@@ -26,7 +26,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { codexUsageReader } from "../src/usage/codex.ts";
 
 let root: string;
-let workspace: string;
+let worktree: string;
 let dayDir: string;
 let originalCodexHome: string | undefined;
 
@@ -82,8 +82,8 @@ async function settledFdCount(baseline: number): Promise<number> {
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "band-codex-usage-")));
-  workspace = join(root, "workspaces", "my-repo");
-  mkdirSync(workspace, { recursive: true });
+  worktree = join(root, "worktrees", "my-repo");
+  mkdirSync(worktree, { recursive: true });
   dayDir = join(root, "codex", "sessions", "2026", "04", "19");
   mkdirSync(dayDir, { recursive: true });
   originalCodexHome = process.env.CODEX_HOME;
@@ -98,10 +98,10 @@ afterEach(() => {
 
 describe("codexUsageReader.listSessions", () => {
   it("returns only sessions whose session_meta cwd matches the directory", async () => {
-    writeRollout(sessionId(1), [metaRecord(sessionId(1), workspace)]);
+    writeRollout(sessionId(1), [metaRecord(sessionId(1), worktree)]);
     writeRollout(sessionId(2), [metaRecord(sessionId(2), join(root, "elsewhere"))]);
 
-    const sessions = await codexUsageReader.listSessions(workspace);
+    const sessions = await codexUsageReader.listSessions(worktree);
 
     assert.deepEqual(
       sessions.map((s) => s.sessionId),
@@ -113,12 +113,12 @@ describe("codexUsageReader.listSessions", () => {
     const other = join(root, "elsewhere");
     const file = writeRollout(sessionId(1), [metaRecord(sessionId(1), other)]);
     utimesSync(file, 1_000, 1_000);
-    assert.deepEqual(await codexUsageReader.listSessions(workspace), []);
+    assert.deepEqual(await codexUsageReader.listSessions(worktree), []);
 
-    writeRollout(sessionId(1), [metaRecord(sessionId(1), workspace)]);
+    writeRollout(sessionId(1), [metaRecord(sessionId(1), worktree)]);
     utimesSync(file, 2_000, 2_000);
 
-    assert.deepEqual(await codexUsageReader.listSessions(workspace), [
+    assert.deepEqual(await codexUsageReader.listSessions(worktree), [
       { sessionId: sessionId(1), lastModified: 2_000_000 },
     ]);
   });
@@ -127,12 +127,12 @@ describe("codexUsageReader.listSessions", () => {
     const file = join(dayDir, `rollout-2026-04-19T11-23-00-${sessionId(1)}.jsonl`);
     writeFileSync(file, '{"type":"session_meta","payload":{"id":');
     utimesSync(file, 1_000, 1_000);
-    assert.deepEqual(await codexUsageReader.listSessions(workspace), []);
+    assert.deepEqual(await codexUsageReader.listSessions(worktree), []);
 
-    writeRollout(sessionId(1), [metaRecord(sessionId(1), workspace)]);
+    writeRollout(sessionId(1), [metaRecord(sessionId(1), worktree)]);
     utimesSync(file, 2_000, 2_000);
 
-    assert.deepEqual(await codexUsageReader.listSessions(workspace), [
+    assert.deepEqual(await codexUsageReader.listSessions(worktree), [
       { sessionId: sessionId(1), lastModified: 2_000_000 },
     ]);
   });
@@ -141,7 +141,7 @@ describe("codexUsageReader.listSessions", () => {
 describe("codexUsageReader.getSessionUsage", () => {
   it("sums per-turn last_token_usage, not the cumulative totals", async () => {
     writeRollout(sessionId(1), [
-      metaRecord(sessionId(1), workspace),
+      metaRecord(sessionId(1), worktree),
       turnContext("gpt-5"),
       tokenCount("2026-04-19T11:23:02.000Z", {
         input_tokens: 100,
@@ -155,7 +155,7 @@ describe("codexUsageReader.getSessionUsage", () => {
       }),
     ]);
 
-    const snap = await codexUsageReader.getSessionUsage(sessionId(1), workspace);
+    const snap = await codexUsageReader.getSessionUsage(sessionId(1), worktree);
 
     assert.ok(snap);
     assert.equal(snap.modelFallback, "gpt-5");
@@ -170,12 +170,12 @@ describe("codexUsageReader.getSessionUsage", () => {
 
   it("returns an empty turn list for a subagent rollout", async () => {
     writeRollout(sessionId(1), [
-      metaRecord(sessionId(1), workspace, { parent_thread_id: sessionId(99) }),
+      metaRecord(sessionId(1), worktree, { parent_thread_id: sessionId(99) }),
       turnContext("gpt-5"),
       tokenCount("2026-04-19T11:23:02.000Z", { input_tokens: 100, output_tokens: 10 }),
     ]);
 
-    const snap = await codexUsageReader.getSessionUsage(sessionId(1), workspace);
+    const snap = await codexUsageReader.getSessionUsage(sessionId(1), worktree);
 
     assert.ok(snap);
     assert.deepEqual(snap.turns, []);
@@ -185,14 +185,14 @@ describe("codexUsageReader.getSessionUsage", () => {
     writeRollout(
       sessionId(1),
       [
-        metaRecord(sessionId(1), workspace),
+        metaRecord(sessionId(1), worktree),
         turnContext("gpt-5"),
         tokenCount("2026-04-19T11:23:02.000Z", { input_tokens: 5 }),
       ],
       "rollout-renamed.jsonl",
     );
 
-    const snap = await codexUsageReader.getSessionUsage(sessionId(1), workspace);
+    const snap = await codexUsageReader.getSessionUsage(sessionId(1), worktree);
 
     assert.deepEqual(
       snap?.turns.map((t) => t.inputTokens),
@@ -201,7 +201,7 @@ describe("codexUsageReader.getSessionUsage", () => {
   });
 
   it("returns null for an unknown session", async () => {
-    assert.equal(await codexUsageReader.getSessionUsage(sessionId(1), workspace), null);
+    assert.equal(await codexUsageReader.getSessionUsage(sessionId(1), worktree), null);
   });
 });
 
@@ -213,18 +213,18 @@ describe("codexUsageReader file descriptors", () => {
       tokenCount("2026-04-19T11:23:02.000Z", { input_tokens: i }),
     );
     for (let n = 1; n <= 30; n++) {
-      writeRollout(sessionId(n), [metaRecord(sessionId(n), workspace), ...filler]);
+      writeRollout(sessionId(n), [metaRecord(sessionId(n), worktree), ...filler]);
     }
     // Subagent rollout: getSessionUsage breaks out after session_meta.
     writeRollout(sessionId(100), [
-      metaRecord(sessionId(100), workspace, { parent_thread_id: sessionId(1) }),
+      metaRecord(sessionId(100), worktree, { parent_thread_id: sessionId(1) }),
       ...filler,
     ]);
     // Rollouts with no id in the name force findRolloutFile's session_meta scan.
     for (let n = 200; n < 210; n++) {
       writeRollout(
         sessionId(n),
-        [metaRecord(sessionId(n), workspace), ...filler],
+        [metaRecord(sessionId(n), worktree), ...filler],
         `rollout-${n}.jsonl`,
       );
     }
@@ -235,9 +235,9 @@ describe("codexUsageReader file descriptors", () => {
       const t = 1_000 + scan;
       for (const f of readdirSync(dayDir)) utimesSync(join(dayDir, f), t, t);
       // Before listSessions, so findRolloutFile's scan runs on a cold cache.
-      await codexUsageReader.getSessionUsage(sessionId(209), workspace);
-      await codexUsageReader.listSessions(workspace);
-      await codexUsageReader.getSessionUsage(sessionId(100), workspace);
+      await codexUsageReader.getSessionUsage(sessionId(209), worktree);
+      await codexUsageReader.listSessions(worktree);
+      await codexUsageReader.getSessionUsage(sessionId(100), worktree);
     }
 
     const settled = await settledFdCount(baseline);

@@ -13,21 +13,21 @@ export interface BranchGitStatus {
 
 interface StreamEvent {
   kind?: string;
-  workspaceId?: string;
+  worktreeId?: string;
   git?: BranchGitStatus;
 }
 
 export class StatusStream {
-  /** Every `branch-status` event's git status, newest last, by workspace. */
+  /** Every `branch-status` event's git status, newest last, by worktree. */
   readonly branchStatuses = new Map<string, BranchGitStatus[]>();
 
   private constructor(private readonly ws: WebSocket) {
     ws.on("message", (raw: Buffer) => {
       const data = (JSON.parse(raw.toString()) as { result?: { data?: StreamEvent } }).result?.data;
-      if (data?.kind !== "branch-status" || !data.workspaceId || !data.git) return;
-      const list = this.branchStatuses.get(data.workspaceId) ?? [];
+      if (data?.kind !== "branch-status" || !data.worktreeId || !data.git) return;
+      const list = this.branchStatuses.get(data.worktreeId) ?? [];
       list.push(data.git);
-      this.branchStatuses.set(data.workspaceId, list);
+      this.branchStatuses.set(data.worktreeId, list);
     });
   }
 
@@ -58,9 +58,9 @@ export class StatusStream {
     return stream;
   }
 
-  /** The newest git status polled for `workspaceId`, if any. */
-  latest(workspaceId: string): BranchGitStatus | undefined {
-    return this.branchStatuses.get(workspaceId)?.at(-1);
+  /** The newest git status polled for `worktreeId`, if any. */
+  latest(worktreeId: string): BranchGitStatus | undefined {
+    return this.branchStatuses.get(worktreeId)?.at(-1);
   }
 
   close(): void {

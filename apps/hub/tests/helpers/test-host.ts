@@ -1,7 +1,7 @@
 // The `BAND_TEST_HOST` switch (plan step 2.6). With `local` (the default) the
-// suites run workspaces on the hub's own machine. With `remote-loopback`
+// suites run worktrees on the hub's own machine. With `remote-loopback`
 // `startServer` also starts a real `band-worker` against the test server and
-// moves the workspaces the test seeded onto that host, so the same assertions
+// moves the worktrees the test seeded onto that host, so the same assertions
 // run through `RemoteHost`, the link and the worker.
 //
 // The worker is on the same machine, so it sees the same temp dirs the test
@@ -56,7 +56,7 @@ function guardFiles(home: string): { paths: string; violations: string } {
 /**
  * Environment for the hub process in remote-loopback mode: preloads the guard
  * and tells it where the worker-owned paths and the violation log are.
- * `guardFiles` start empty, so the hub may read anything until workspaces move.
+ * `guardFiles` start empty, so the hub may read anything until worktrees move.
  */
 export function workerGuardEnv(home: string, baseNodeOptions?: string): Record<string, string> {
   const files = guardFiles(home);
@@ -86,7 +86,7 @@ export function assertNoWorkerPathAccess(home: string): void {
     report.push(`${key}\n${v.stack ?? ""}`);
   }
   throw new Error(
-    `The hub read or ran something under a path the worker owns. A hub service must reach a remote workspace through its Host.\n${report.join("\n")}`,
+    `The hub read or ran something under a path the worker owns. A hub service must reach a remote worktree through its Host.\n${report.join("\n")}`,
   );
 }
 
@@ -226,29 +226,29 @@ export async function startLoopbackWorker(target: WorkerTarget): Promise<Loopbac
 }
 
 /**
- * Move every workspace in the hub's database onto `hostId`: its worktree rows, and
- * the projects' checkout paths on that host (the same paths, because the
+ * Move every worktree in the hub's database onto `hostId`: its worktree rows, and
+ * the repos' checkout paths on that host (the same paths, because the
  * worker shares this machine's disk). Then lists the worktree paths for the
- * guard, so the hub can no longer read them. A workspace at the project root
- * stays readable, because that path is also the hub's own copy of the project.
+ * guard, so the hub can no longer read them. A worktree at the repo root
+ * stays readable, because that path is also the hub's own copy of the repo.
  */
-export function moveSeededWorkspacesToHost(home: string, hostId: string): void {
+export function moveSeededWorktreesToHost(home: string, hostId: string): void {
   const workerPaths: string[] = [];
   const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
   try {
     sqlite.exec("PRAGMA busy_timeout = 5000");
     sqlite
       .prepare(
-        "INSERT OR IGNORE INTO project_hosts (project_name, host_id, path) SELECT name, ?, path FROM projects",
+        "INSERT OR IGNORE INTO repo_hosts (repo_name, host_id, path) SELECT name, ?, path FROM repos",
       )
       .run(hostId);
     // Rows of an earlier worker count too: a test that restarts the hub gets a new worker.
     sqlite.prepare("UPDATE worktrees SET host_id = ? WHERE host_id <> ?").run(hostId, hostId);
-    // A project's own path is the hub's copy of it, which the hub keeps on a
-    // real worker too. Only checkouts that are not a project root are off limits.
+    // A repo's own path is the hub's copy of it, which the hub keeps on a
+    // real worker too. Only checkouts that are not a repo root are off limits.
     const rows = sqlite
       .prepare(
-        "SELECT path FROM worktrees WHERE host_id = ? AND path NOT IN (SELECT path FROM projects)",
+        "SELECT path FROM worktrees WHERE host_id = ? AND path NOT IN (SELECT path FROM repos)",
       )
       .all(hostId) as Array<{
       path: string;
@@ -290,24 +290,24 @@ function rowsOffHost(home: string, hostId: string): number {
 }
 
 /**
- * Moves the seeded workspaces onto `hostId` and keeps them there. The hub's
+ * Moves the seeded worktrees onto `hostId` and keeps them there. The hub's
  * boot sync can still hold the rows it loaded before the move and save them
- * back as `local`, which would put a workspace on the hub's own host while
+ * back as `local`, which would put a worktree on the hub's own host while
  * the guard lists its path as the worker's. So this re-applies the move until
  * the rows have stayed on the host across two checks.
  */
-export async function settleWorkspacesOnHost(home: string, hostId: string): Promise<void> {
+export async function settleWorktreesOnHost(home: string, hostId: string): Promise<void> {
   let stable = 0;
   const deadline = Date.now() + 10_000;
   while (stable < 2) {
-    moveSeededWorkspacesToHost(home, hostId);
+    moveSeededWorktreesToHost(home, hostId);
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (rowsOffHost(home, hostId) === 0) {
       stable++;
     } else {
       stable = 0;
       if (Date.now() > deadline) {
-        throw new Error("the seeded workspaces would not stay on the loopback worker's host");
+        throw new Error("the seeded worktrees would not stay on the loopback worker's host");
       }
     }
   }

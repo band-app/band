@@ -93,7 +93,7 @@ describe("auth middleware (with token)", () => {
   });
 
   it("valid token on any path sets cookie and passes through", async () => {
-    const res = await fetch(`${server.url}/chat?project=foo&token=${TEST_TOKEN}&page=1`);
+    const res = await fetch(`${server.url}/chat?repo=foo&token=${TEST_TOKEN}&page=1`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
 

@@ -14,18 +14,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
-import { saveWorkspaceUploads } from "../server/services/_utils/upload-utils";
+import { saveWorktreeUploads } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
   type TaskAttachment,
   taskService,
-  WorkspaceNotFoundError,
+  WorktreeNotFoundError,
 } from "../server/services/task-service";
 
 const log = createLogger("chat-submit");
 
 interface SubmitBody {
-  workspaceId: string;
+  worktreeId: string;
   text: string;
   sessionId?: string;
   mode?: string;
@@ -61,9 +61,9 @@ export async function handleChatSubmit(
     return;
   }
 
-  const { workspaceId, text, sessionId, mode, model, codingAgentId, files } = body;
-  if (!workspaceId || !text?.trim()) {
-    sendJson(res, 400, { error: "workspaceId and text are required" });
+  const { worktreeId, text, sessionId, mode, model, codingAgentId, files } = body;
+  if (!worktreeId || !text?.trim()) {
+    sendJson(res, 400, { error: "worktreeId and text are required" });
     return;
   }
   if (sessionId !== undefined && !SESSION_ID_PATTERN.test(sessionId)) {
@@ -72,13 +72,13 @@ export async function handleChatSubmit(
   }
 
   if (!chatService.get(chatId)) {
-    chatService.create(workspaceId, { id: chatId, name: "Chat", agent: codingAgentId });
+    chatService.create(worktreeId, { id: chatId, name: "Chat", agent: codingAgentId });
   }
 
   let attachments: TaskAttachment[] = [];
   if (files && files.length > 0) {
-    const saved = await saveWorkspaceUploads(workspaceId, files);
-    // `saveWorkspaceUploads` skips entries that aren't
+    const saved = await saveWorktreeUploads(worktreeId, files);
+    // `saveWorktreeUploads` skips entries that aren't
     // `data:<mime>;base64,...` URLs; say so rather than drop them silently.
     if (saved.length !== files.length) {
       log.warn(
@@ -96,7 +96,7 @@ export async function handleChatSubmit(
 
   try {
     const result = taskService.submitOrQueueTask({
-      workspaceId,
+      worktreeId,
       chatId,
       prompt: text,
       sessionId,
@@ -106,12 +106,12 @@ export async function handleChatSubmit(
       codingAgentId,
     });
     log.info(
-      { chatId, workspaceId },
+      { chatId, worktreeId },
       result.queued ? "chat-submit: chat busy, message queued" : "chat-submit: task started",
     );
     sendJson(res, 200, { ok: true, queued: result.queued });
   } catch (err) {
-    if (err instanceof WorkspaceNotFoundError) {
+    if (err instanceof WorktreeNotFoundError) {
       sendJson(res, 404, { error: err.message });
       return;
     }

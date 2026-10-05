@@ -10,7 +10,7 @@ import { cn } from "../utils";
  * Shares Radix Dialog's semantics with the `Dialog` primitive (focus trap,
  * Escape to close, click-outside to close, portal + backdrop overlay) but
  * slides in from a screen edge rather than fading into the centre. Used for
- * the mobile project-list fly-out (`side="left"`). The `side="bottom"` variant
+ * the mobile repo-list fly-out (`side="left"`). The `side="bottom"` variant
  * is provided for parity; the app's modal dialogs that morph into bottom
  * drawers on mobile use `DialogContent variant="bottom-sheet"` instead so the
  * desktop centred layout is preserved.

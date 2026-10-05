@@ -5,7 +5,7 @@
 //
 // History: the helpers were inlined in `trpc.test.ts`,
 // `task-cleanup.test.ts`, `trpc-batch-url.test.ts`, and (initially)
-// `workspace-remove-detached.test.ts` — four copies that had already
+// `worktree-remove-detached.test.ts` — four copies that had already
 // drifted (the SIGKILL fallback below lived only in
 // `task-cleanup.test.ts`). This module is the canonical version; new
 // tests should import from here. The pre-existing tests are not
@@ -32,7 +32,7 @@ import { stopTerminalDaemon } from "./terminal-daemon";
 import {
   assertNoWorkerPathAccess,
   isRemoteLoopback,
-  settleWorkspacesOnHost,
+  settleWorktreesOnHost,
   startLoopbackWorker,
   workerGuardEnv,
 } from "./test-host";
@@ -158,7 +158,7 @@ export interface StartServerOptions {
   args?: string[];
   /**
    * With `BAND_TEST_HOST=remote-loopback`, a real `band-worker` joins the server
-   * and the seeded workspaces move onto it (see `test-host.ts`). Pass `false` for
+   * and the seeded worktrees move onto it (see `test-host.ts`). Pass `false` for
    * a test that is about the hub's own machine. No effect in `local` mode.
    */
   remoteHost?: boolean;
@@ -212,7 +212,7 @@ export const LISTENING_BANNER = /Web server listening on http:\/\/[^\s:]+:(\d+)/
  * subprocess that `ModelRefreshService.refreshAll()` boots at startup)
  * are re-parented to init when the direct child exits, keep holding
  * pipes, and pile up across the suite. On macOS CI runners that
- * accumulation actually killed the runner during `workspace-git-ops.test.ts`'
+ * accumulation actually killed the runner during `worktree-git-ops.test.ts`'
  * 4-server startup burst, which is why this helper now mirrors the
  * process-group teardown already used by `apps/web/e2e/helpers/server.ts`.
  */
@@ -231,7 +231,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     await handle.close();
     throw err;
   }
-  await settleWorkspacesOnHost(handle.home, worker.hostId);
+  await settleWorktreesOnHost(handle.home, worker.hostId);
   return {
     ...handle,
     close: async (closeOpts) => {

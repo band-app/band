@@ -41,14 +41,14 @@ const TOKEN = TEST_TOKEN;
 const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
 const IDLE_MS = 2500;
 
-interface Workspace {
+interface Worktree {
   name: string;
   path: string;
   hostId?: string;
   lifecycle?: "sleeping" | "waking";
 }
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Workspace[] }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Worktree[] }>;
 }
 interface HostsList {
   hosts: Array<{ id: string; status: string; sleepError: string | null }>;
@@ -76,7 +76,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A bare origin and the hub's checkout of it, with one commit on main. */
-function makeProject(base: string, name: string): { origin: string; checkout: string } {
+function makeRepo(base: string, name: string): { origin: string; checkout: string } {
   const origin = join(base, `${name}-origin.git`);
   mkdirSync(origin, { recursive: true });
   git(origin, "init", "-q", "--bare", "-b", "main");
@@ -108,16 +108,20 @@ const m = <T>(procedure: string, input: unknown) =>
     return trpcData<T>(res);
   });
 
-const workspace = async (project: string, name: string) =>
-  (await q<ProjectsList>("projects.list")).projects
-    .find((p) => p.name === project)
+const findWorktree = async (repo: string, name: string) =>
+  (await q<ReposList>("repos.list")).repos
+    .find((p) => p.name === repo)
     ?.worktrees.find((w) => w.name === name);
 const host = async (id: string) =>
   (await q<HostsList>("hosts.list")).hosts.find((h) => h.id === id);
-const sleeping = (project: string, name: string) =>
+const sleeping = (repo: string, name: string) =>
   waitFor(
-    async () => ((await workspace(project, name))?.lifecycle === "sleeping" ? true : undefined),
-    { label: `${project}-${name} sleeps`, timeoutMs: 90_000, intervalMs: 250 },
+    async () => ((await findWorktree(repo, name))?.lifecycle === "sleeping" ? true : undefined),
+    {
+      label: `${repo}-${name} sleeps`,
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    },
   ).catch((err) => {
     // Say what the workers said, so a failure explains itself.
     const base = join(hubHome, ".band", "runners", "eph");
@@ -143,18 +147,18 @@ const isAlive = (pid: number) => {
 };
 const pidOf = (hostId: string) => Number(readFileSync(join(runnerDir(hostId), "pid"), "utf8"));
 
-async function createWorkspace(project: string, branch: string): Promise<Workspace> {
-  await m("workspaces.create", { project, branch, placement: { labels: { pool: "eph" } } });
+async function createWorktree(repo: string, branch: string): Promise<Worktree> {
+  await m("worktrees.create", { repo, branch, placement: { labels: { pool: "eph" } } });
   return waitFor(
     async () => {
-      const wt = await workspace(project, branch);
+      const wt = await findWorktree(repo, branch);
       return wt?.hostId ? wt : undefined;
     },
-    { label: `${project}-${branch} on a worker`, timeoutMs: 90_000, intervalMs: 250 },
+    { label: `${repo}-${branch} on a worker`, timeoutMs: 90_000, intervalMs: 250 },
   );
 }
 
-async function turn(workspaceId: string, chatId: string, text: string, after = 0) {
+async function turn(worktreeId: string, chatId: string, text: string, after = 0) {
   const stream = await openStream(server.url, chatId, {
     lastEventId: after,
     until: (e) => turnEnded(e) && (e.eventId > after || e.eventId < 0),
@@ -163,7 +167,7 @@ async function turn(workspaceId: string, chatId: string, text: string, after = 0
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-    body: JSON.stringify({ workspaceId, text }),
+    body: JSON.stringify({ worktreeId, text }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   return stream.events;
@@ -184,8 +188,8 @@ beforeAll(async () => {
   hubHome = createTmpHome("band-ephemeral-hub-");
   scratch.push(hubHome);
   const base = tmp("band-ephemeral-repos-");
-  a = makeProject(base, "proja");
-  b = makeProject(base, "projb");
+  a = makeRepo(base, "proja");
+  b = makeRepo(base, "projb");
   // projb's origin refuses every push after the setup, as a remote the worker cannot write to.
   const hook = join(b.origin, "hooks", "pre-receive");
   writeFileSync(hook, "#!/bin/sh\necho 'read-only remote' >&2\nexit 1\n");
@@ -206,7 +210,7 @@ beforeAll(async () => {
     defaultCodingAgent: "claude-code",
   });
   seedState(hubHome, {
-    projects: [a, b].map((p, i) => ({
+    repos: [a, b].map((p, i) => ({
       name: i === 0 ? "proja" : "projb",
       path: p.checkout,
       defaultBranch: "main",
@@ -267,8 +271,8 @@ describe("sleep and wake", () => {
   let sessionFile = "";
   let seen = 0;
 
-  it("stores a workspace with an uncommitted edit and lets the idle worker exit (S1)", async () => {
-    const wt = await createWorkspace("proja", "eph-a");
+  it("stores a worktree with an uncommitted edit and lets the idle worker exit (S1)", async () => {
+    const wt = await createWorktree("proja", "eph-a");
     hostId = wt.hostId as string;
     worktree = wt.path;
     expect((await host(hostId))?.status).toBe("online");
@@ -285,9 +289,9 @@ describe("sleep and wake", () => {
     expect(sessions).toHaveLength(1);
     sessionFile = sessions[0] as string;
 
-    // The worker belongs to this workspace: placement does not give it to another one.
+    // The worker belongs to this worktree: placement does not give it to another one.
     // (It may go idle while the second worker starts, which is the sleep checked next.)
-    const other = await createWorkspace("proja", "eph-other");
+    const other = await createWorktree("proja", "eph-other");
     expect(other.hostId).not.toBe(hostId);
 
     const pid = pidOf(hostId);
@@ -295,7 +299,7 @@ describe("sleep and wake", () => {
 
     expect(await host(hostId)).toMatchObject({ status: "offline", sleepError: null });
     await waitFor(async () => !isAlive(pid), { label: "worker process exits", timeoutMs: 20_000 });
-    expect(workerLog(hostId)).toContain("the hub stored the workspaces, exiting");
+    expect(workerLog(hostId)).toContain("the hub stored the worktrees, exiting");
     // Origin holds the working tree, on top of the branch head.
     const ref = "refs/heads/band/wip/proja-eph-a";
     expect(git(a.origin, "show", `${ref}:hello.txt`)).toContain("edited on the worker");
@@ -313,7 +317,7 @@ describe("sleep and wake", () => {
     expect(events.some((e) => e.type === "turn-ended")).toBe(true);
     seen = maxId(events);
 
-    const wt = await workspace("proja", "eph-a");
+    const wt = await findWorktree("proja", "eph-a");
     expect(wt?.lifecycle).toBeUndefined();
     expect(wt?.hostId).toBe(hostId);
     expect((await host(hostId))?.status).toBe("online");
@@ -339,7 +343,7 @@ describe("sleep and wake", () => {
 
   it("keeps the worker while a terminal runs, and sleeps after it is closed (S3)", async () => {
     const terminalId = "11111111-1111-4111-8111-111111111111";
-    await m("terminal.create", { workspaceId: "proja-eph-a", id: terminalId });
+    await m("terminal.create", { worktreeId: "proja-eph-a", id: terminalId });
     // Longer than two idle times: the worker asks, and the hub says no.
     await waitFor(
       async () => (workerLog(hostId).includes("a terminal is running") ? true : undefined),
@@ -350,7 +354,7 @@ describe("sleep and wake", () => {
       },
     );
     expect((await host(hostId))?.status).toBe("online");
-    expect((await workspace("proja", "eph-a"))?.lifecycle).toBeUndefined();
+    expect((await findWorktree("proja", "eph-a"))?.lifecycle).toBeUndefined();
 
     await m("terminal.kill", { terminalId });
     await sleeping("proja", "eph-a");
@@ -362,7 +366,7 @@ describe("sleep and wake", () => {
     // Wakes on the message, then the 9 s turn outlasts two idle times.
     await waitFor(
       async () => {
-        const wt = await workspace("proja", "eph-a");
+        const wt = await findWorktree("proja", "eph-a");
         return wt && wt.lifecycle === undefined && (await host(hostId))?.status === "online"
           ? true
           : undefined;
@@ -373,23 +377,23 @@ describe("sleep and wake", () => {
     expect(Date.now() - started).toBeGreaterThan(8000);
     expect(events.some((e) => e.type === "turn-ended")).toBe(true);
     // While the turn ran, nothing had put it to sleep (the turn only ended now).
-    expect(workerLog(hostId)).not.toContain("the hub stored the workspaces, exiting");
+    expect(workerLog(hostId)).not.toContain("the hub stored the worktrees, exiting");
     await sleeping("proja", "eph-a");
   }, 240_000);
 
   it("wakes on a file read too", async () => {
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: "proja-eph-a",
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: "proja-eph-a",
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited on the worker\n");
-    expect((await workspace("proja", "eph-a"))?.lifecycle).toBeUndefined();
+    expect((await findWorktree("proja", "eph-a"))?.lifecycle).toBeUndefined();
   }, 180_000);
 });
 
 describe("persist failure", () => {
   it("keeps the worker alive and says why when nothing can store the work (S4)", async () => {
-    const wt = await createWorkspace("projb", "eph-b");
+    const wt = await createWorktree("projb", "eph-b");
     const hostId = wt.hostId as string;
     appendFileSync(join(wt.path, "hello.txt"), "do not lose me\n");
 
@@ -407,7 +411,7 @@ describe("persist failure", () => {
     );
     expect(failed.sleepError).toContain("no writable remote");
     expect(failed.status).toBe("online");
-    expect((await workspace("projb", "eph-b"))?.lifecycle).toBeUndefined();
+    expect((await findWorktree("projb", "eph-b"))?.lifecycle).toBeUndefined();
     expect(readFileSync(join(wt.path, "hello.txt"), "utf8")).toContain("do not lose me");
     expect(workerLog(hostId)).not.toContain("exiting");
     expect(git(b.origin, "branch", "--list", "band/wip/*").trim()).toBe("");
@@ -419,8 +423,8 @@ describe("persist failure", () => {
     expect(existsSync(join(sleepPath, "projb-eph-b", "snapshot.bundle"))).toBe(true);
 
     // The bundle brings the edit back on a new worker.
-    const file = await q<{ content: string }>("workspace.getFile", {
-      workspaceId: "projb-eph-b",
+    const file = await q<{ content: string }>("worktree.getFile", {
+      worktreeId: "projb-eph-b",
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\ndo not lose me\n");

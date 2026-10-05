@@ -3,15 +3,15 @@
  *
  * Sleep. An ephemeral worker that has been idle for its idle time sends
  * `lifecycle.idle`. The hub refuses while a turn, a request waiting on the
- * user, queued messages or a terminal exist for any workspace on that worker.
- * Otherwise it stores each workspace, through ordinary calls on the worker's
+ * user, queued messages or a terminal exist for any worktree on that worker.
+ * Otherwise it stores each worktree, through ordinary calls on the worker's
  * link, and answers `exit: true` only when all of it is stored:
  *
  *   - The working tree goes into a snapshot commit that sits on top of the
  *     branch head (a temporary index, so the branch and its index stay as
- *     they are). It is pushed to `refs/heads/band/wip/<workspace>` on the
+ *     they are). It is pushed to `refs/heads/band/wip/<worktree>` on the
  *     origin remote. When origin is not writable, a git bundle of what the
- *     remotes lack goes into the hub's `<BAND_HOME>/sleep/<workspace>/`. A
+ *     remotes lack goes into the hub's `<BAND_HOME>/sleep/<worktree>/`. A
  *     snapshot every remote already has needs neither.
  *   - The files of each chat's agent session are read from the worker and
  *     kept in the same directory, so the chat can resume on another machine.
@@ -25,7 +25,7 @@
  * state stays the fallback: a snapshot that cannot be taken, or restored, costs
  * nothing but the speed and the ignored files.
  *
- * Wake. A message, a terminal or a file call for a workspace that sleeps calls
+ * Wake. A message, a terminal or a file call for a worktree that sleeps calls
  * `ensureAwake`. It records a wake request that repeats the placement of the
  * request that made the host. The runner starts a worker with the same id,
  * and when it says hello `restoreHost` checks the snapshot out into a new
@@ -51,11 +51,11 @@ import {
   type SessionFile,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { HostRequestQueries } from "../infra/db/queries/host-requests";
 import { bandHome } from "../infra/db/queries/settings";
-import { WorkspaceSleepQueries, type WorkspaceSleepRow } from "../infra/db/queries/workspace-sleep";
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { WorktreeSleepQueries, type WorktreeSleepRow } from "../infra/db/queries/worktree-sleep";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { agentSessionService } from "./agent-session-service";
@@ -89,13 +89,13 @@ export class SleepError extends Error {
   }
 }
 
-export type WorkspaceLifecycle = "sleeping" | "waking";
+export type WorktreeLifecycle = "sleeping" | "waking";
 
 interface Tracked {
-  project: string;
+  repo: string;
   name: string;
   path: string;
-  workspaceId: string;
+  worktreeId: string;
 }
 
 /** The hub's idle time for ephemeral workers, from `BAND_EPHEMERAL_IDLE_TIMEOUT_MS`, or undefined to keep the worker's own. */
@@ -104,15 +104,15 @@ function idleTimeoutMs(): number | undefined {
   return Number.isFinite(raw) && raw > 0 ? raw : undefined;
 }
 
-function sleepDir(workspaceId: string): string {
-  return join(bandHome(), "sleep", workspaceId);
+function sleepDir(worktreeId: string): string {
+  return join(bandHome(), "sleep", worktreeId);
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export class EphemeralLifecycleService {
-  private readonly sleeps = new WorkspaceSleepQueries();
-  private readonly workspaces = new WorkspaceQueries();
+  private readonly sleeps = new WorktreeSleepQueries();
+  private readonly worktrees = new WorktreeQueries();
   private readonly requests = new HostRequestQueries();
   private readonly sessions = new Map<string, ServerSession>();
   /** Per host: settles when a worker the hub told to exit has gone, or when the handshake gave up. */
@@ -143,19 +143,19 @@ export class EphemeralLifecycleService {
 
   // ---- views --------------------------------------------------------------
 
-  /** Whether a workspace sleeps or is waking, or null when it is up. */
-  stateOf(workspaceId: string): WorkspaceLifecycle | null {
-    const row = this.sleeps.get(workspaceId);
+  /** Whether a worktree sleeps or is waking, or null when it is up. */
+  stateOf(worktreeId: string): WorktreeLifecycle | null {
+    const row = this.sleeps.get(worktreeId);
     if (!row) return null;
     return row.wakingSince != null ? "waking" : "sleeping";
   }
 
-  /** Every sleeping or waking workspace, by id. */
-  states(): Map<string, WorkspaceLifecycle> {
+  /** Every sleeping or waking worktree, by id. */
+  states(): Map<string, WorktreeLifecycle> {
     return new Map(
       this.sleeps
         .listAll()
-        .map((r) => [r.workspaceId, r.wakingSince != null ? "waking" : "sleeping"]),
+        .map((r) => [r.worktreeId, r.wakingSince != null ? "waking" : "sleeping"]),
     );
   }
 
@@ -174,38 +174,38 @@ export class EphemeralLifecycleService {
     return this.sessions.get(hostId)?.attached === true;
   }
 
-  /** Whether the host's workspaces are all stored (`workspace_sleep` rows), so its machine can go. */
+  /** Whether the host's worktrees are all stored (`worktree_sleep` rows), so its machine can go. */
   isStored(hostId: string): boolean {
-    // A workspace being created on the host is not tracked yet, and nothing of it is stored.
+    // A worktree being created on the host is not tracked yet, and nothing of it is stored.
     if (this.requests.listAwaitingHost().some((r) => r.hostId === hostId)) return false;
-    const stored = new Set(this.sleeps.listByHost(hostId).map((r) => r.workspaceId));
-    return this.workspacesOn(hostId).every((w) => stored.has(w.workspaceId));
+    const stored = new Set(this.sleeps.listByHost(hostId).map((r) => r.worktreeId));
+    return this.worktreesOn(hostId).every((w) => stored.has(w.worktreeId));
   }
 
-  /** How many workspaces the hub tracks on a host. */
-  workspaceCount(hostId: string): number {
-    return this.workspacesOn(hostId).length;
+  /** How many worktrees the hub tracks on a host. */
+  worktreeCount(hostId: string): number {
+    return this.worktreesOn(hostId).length;
   }
 
-  /** Workspace counts for every host, from one read of the state. */
-  workspaceCountsByHost(): Map<string, number> {
+  /** Worktree counts for every host, from one read of the state. */
+  worktreeCountsByHost(): Map<string, number> {
     const counts = new Map<string, number>();
-    for (const project of loadState().projects) {
-      for (const wt of project.worktrees) {
+    for (const repo of loadState().repos) {
+      for (const wt of repo.worktrees) {
         if (wt.hostId) counts.set(wt.hostId, (counts.get(wt.hostId) ?? 0) + 1);
       }
     }
     return counts;
   }
 
-  /** Whether the host's worker is ephemeral, so it can hand its workspaces over. */
+  /** Whether the host's worker is ephemeral, so it can hand its worktrees over. */
   isEphemeral(hostId: string): boolean {
     const session = this.sessions.get(hostId);
     return session?.attached === true && session.hello.mode === "ephemeral";
   }
 
   /**
-   * Asks the connected ephemeral worker to hand its workspaces over now, like an idle one. The
+   * Asks the connected ephemeral worker to hand its worktrees over now, like an idle one. The
    * worker answers at once and then sends `lifecycle.idle`, so the outcome shows as the worker
    * exiting (or `sleepBlocker` saying why it did not). Returns false when no worker took it.
    */
@@ -227,16 +227,16 @@ export class EphemeralLifecycleService {
 
   // ---- sleep --------------------------------------------------------------
 
-  private workspacesOn(hostId: string): Tracked[] {
+  private worktreesOn(hostId: string): Tracked[] {
     const out: Tracked[] = [];
-    for (const project of loadState().projects) {
-      for (const wt of project.worktrees) {
+    for (const repo of loadState().repos) {
+      for (const wt of repo.worktrees) {
         if (wt.hostId === hostId) {
           out.push({
-            project: project.name,
+            repo: repo.name,
             name: wt.name,
             path: wt.path,
-            workspaceId: toWorkspaceId(project.name, wt.name),
+            worktreeId: toWorktreeId(repo.name, wt.name),
           });
         }
       }
@@ -261,7 +261,7 @@ export class EphemeralLifecycleService {
     );
     let exiting = false;
     try {
-      const tracked = this.workspacesOn(hostId);
+      const tracked = this.worktreesOn(hostId);
       const busy = await this.busyReason(hostId, tracked);
       if (busy) {
         this.blocked.set(hostId, busy);
@@ -269,18 +269,18 @@ export class EphemeralLifecycleService {
       }
       const rpc = new RemoteRpc(hostId, () => session);
       const host = hostRegistry.hostById(hostId);
-      const stored: WorkspaceSleepRow[] = [];
+      const stored: WorktreeSleepRow[] = [];
       try {
         for (const ws of tracked) stored.push(await this.persist(host, rpc, ws, hostId));
       } catch (err) {
-        // A host stores all of its workspaces or none, so the next wake has nothing half done.
+        // A host stores all of its worktrees or none, so the next wake has nothing half done.
         for (const row of stored) this.forget(row);
         throw err;
       }
       this.errors.delete(hostId);
       this.blocked.delete(hostId);
       const snapshotted = await this.snapshotMachine(hostId, tracked);
-      log.info(`stored ${tracked.length} workspace(s) of ${hostId}; the worker may exit`);
+      log.info(`stored ${tracked.length} worktree(s) of ${hostId}; the worker may exit`);
       exiting = true;
       this.releaseWhenGone(session, hostId, release, snapshotted);
       return { exit: true };
@@ -306,7 +306,7 @@ export class EphemeralLifecycleService {
     try {
       return await runnerService.snapshotHost(
         hostId,
-        tracked.map((w) => w.workspaceId),
+        tracked.map((w) => w.worktreeId),
       );
     } catch (err) {
       log.warn(
@@ -317,7 +317,7 @@ export class EphemeralLifecycleService {
   }
 
   /**
-   * Holds callers until the worker's link closes. A worker that stays keeps its workspaces, so the
+   * Holds callers until the worker's link closes. A worker that stays keeps its worktrees, so the
    * sleep rows go. With a snapshot taken, the runner's `destroy` runs once the worker is gone, before
    * callers are let through, so it cannot race the restore a waiting caller starts.
    */
@@ -351,22 +351,22 @@ export class EphemeralLifecycleService {
 
   private async busyReason(hostId: string, tracked: Tracked[]): Promise<string | null> {
     if (tracked.length === 0 && this.requests.listAwaitingHost().some((r) => r.hostId === hostId)) {
-      return "a workspace is still being created on this host";
+      return "a worktree is still being created on this host";
     }
     const host = hostRegistry.hostById(hostId);
     for (const ws of tracked) {
-      for (const chat of chatService.list(ws.workspaceId)) {
+      for (const chat of chatService.list(ws.worktreeId)) {
         // A task is running from the submit on, before the agent process has started a turn.
         if (
           hasRunningTask(chat.id) ||
           agentSessionService.isActive(chat.id) ||
           hasQueuedMessages(chat.id)
         ) {
-          return `an agent is working in ${ws.workspaceId}`;
+          return `an agent is working in ${ws.worktreeId}`;
         }
       }
-      if ((await host.pty.list(ws.workspaceId)).length > 0) {
-        return `a terminal is running in ${ws.workspaceId}`;
+      if ((await host.pty.list(ws.worktreeId)).length > 0) {
+        return `a terminal is running in ${ws.worktreeId}`;
       }
     }
     return null;
@@ -377,7 +377,7 @@ export class EphemeralLifecycleService {
     rpc: RemoteRpc,
     ws: Tracked,
     hostId: string,
-  ): Promise<WorkspaceSleepRow> {
+  ): Promise<WorktreeSleepRow> {
     const cwd = ws.path;
     const git = async (args: string[], env?: Record<string, string>) =>
       (await host.exec("git", args, { cwd, env })).stdout.trim();
@@ -389,7 +389,7 @@ export class EphemeralLifecycleService {
     // The snapshot is built in a temporary index, so the branch and the real index are untouched.
     const baseSha = await git(["rev-parse", "HEAD"]);
     const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-    const indexFile = posix.join(wipDir, `${ws.workspaceId}.index`);
+    const indexFile = posix.join(wipDir, `${ws.worktreeId}.index`);
     const env = { ...BOT, GIT_INDEX_FILE: indexFile };
     await host.fs.rm(indexFile, { force: true });
     let snapshotSha: string;
@@ -401,21 +401,21 @@ export class EphemeralLifecycleService {
         tree === (await git(["rev-parse", "HEAD^{tree}"]))
           ? baseSha
           : await git(
-              ["commit-tree", tree, "-p", baseSha, "-m", `band: snapshot of ${ws.workspaceId}`],
+              ["commit-tree", tree, "-p", baseSha, "-m", `band: snapshot of ${ws.worktreeId}`],
               env,
             );
     } finally {
       await host.fs.rm(indexFile, { force: true }).catch(() => undefined);
     }
 
-    const ref = `refs/heads/band/wip/${ws.workspaceId}`;
-    const store = await this.upload(host, git, wipDir, ws.workspaceId, ref, snapshotSha);
-    const sessionIds = await this.saveSessions(rpc, ws.workspaceId);
+    const ref = `refs/heads/band/wip/${ws.worktreeId}`;
+    const store = await this.upload(host, git, wipDir, ws.worktreeId, ref, snapshotSha);
+    const sessionIds = await this.saveSessions(rpc, ws.worktreeId);
 
-    const row: WorkspaceSleepRow = {
-      workspaceId: ws.workspaceId,
+    const row: WorktreeSleepRow = {
+      worktreeId: ws.worktreeId,
       hostId,
-      project: ws.project,
+      repo: ws.repo,
       name: ws.name,
       branch: branch === "HEAD" ? "" : branch,
       worktreePath: ws.path,
@@ -436,10 +436,10 @@ export class EphemeralLifecycleService {
     host: Host,
     git: (args: string[], env?: Record<string, string>) => Promise<string>,
     wipDir: string,
-    workspaceId: string,
+    worktreeId: string,
     ref: string,
     sha: string,
-  ): Promise<WorkspaceSleepRow["store"]> {
+  ): Promise<WorktreeSleepRow["store"]> {
     let pushError = "origin has no URL";
     const origin = await git(["remote", "get-url", "origin"]).catch(() => "");
     if (origin) {
@@ -451,20 +451,20 @@ export class EphemeralLifecycleService {
         return "origin";
       } catch (err) {
         pushError = errorText(err);
-        log.warn(`${workspaceId}: origin is not writable (${pushError}); trying the hub`);
+        log.warn(`${worktreeId}: origin is not writable (${pushError}); trying the hub`);
       }
     }
-    const local = `refs/band/wip/${workspaceId}`;
+    const local = `refs/band/wip/${worktreeId}`;
     await git(["update-ref", local, sha]);
-    const bundle = posix.join(wipDir, `${workspaceId}.bundle`);
+    const bundle = posix.join(wipDir, `${worktreeId}.bundle`);
     try {
       await git(["bundle", "create", bundle, local, "--not", "--remotes"]);
     } catch (err) {
       if (/empty bundle/i.test(errorText(err))) return "remote";
-      throw new SleepError(`could not bundle the snapshot of ${workspaceId}: ${errorText(err)}`);
+      throw new SleepError(`could not bundle the snapshot of ${worktreeId}: ${errorText(err)}`);
     }
     try {
-      const dir = sleepDir(workspaceId);
+      const dir = sleepDir(worktreeId);
       try {
         await mkdir(dir, { recursive: true, mode: 0o700 });
         await writeFile(join(dir, "snapshot.bundle"), await host.fs.readFile(bundle), {
@@ -472,7 +472,7 @@ export class EphemeralLifecycleService {
         });
       } catch (err) {
         throw new SleepError(
-          `no writable remote (${pushError}) and the hub cannot keep the snapshot of ${workspaceId}: ${errorText(err)}`,
+          `no writable remote (${pushError}) and the hub cannot keep the snapshot of ${worktreeId}: ${errorText(err)}`,
         );
       }
       return "hub";
@@ -481,10 +481,10 @@ export class EphemeralLifecycleService {
     }
   }
 
-  /** Reads the session files of the workspace's chats and keeps them on the hub. Returns the session ids. */
-  private async saveSessions(rpc: RemoteRpc, workspaceId: string): Promise<string[]> {
+  /** Reads the session files of the worktree's chats and keeps them on the hub. Returns the session ids. */
+  private async saveSessions(rpc: RemoteRpc, worktreeId: string): Promise<string[]> {
     const ids = chatService
-      .list(workspaceId)
+      .list(worktreeId)
       .map((c) => c.activeSessionId)
       .filter((id): id is string => typeof id === "string" && id !== "");
     if (ids.length === 0) return [];
@@ -493,44 +493,44 @@ export class EphemeralLifecycleService {
     });
     if (files.length === 0) return [];
     try {
-      const dir = sleepDir(workspaceId);
+      const dir = sleepDir(worktreeId);
       await mkdir(dir, { recursive: true, mode: 0o700 });
       await writeFile(join(dir, "sessions.json"), JSON.stringify({ files }), { mode: 0o600 });
     } catch (err) {
       // The chat's log is on the hub, so a chat without its agent files starts a new session with a notice.
-      log.warn(`could not keep the agent sessions of ${workspaceId}: ${errorText(err)}`);
+      log.warn(`could not keep the agent sessions of ${worktreeId}: ${errorText(err)}`);
       return [];
     }
     return ids;
   }
 
-  private forget(row: WorkspaceSleepRow): void {
-    this.sleeps.delete(row.workspaceId);
-    rmSync(sleepDir(row.workspaceId), { recursive: true, force: true });
+  private forget(row: WorktreeSleepRow): void {
+    this.sleeps.delete(row.worktreeId);
+    rmSync(sleepDir(row.worktreeId), { recursive: true, force: true });
   }
 
   // ---- wake ---------------------------------------------------------------
 
   /**
-   * Returns once the workspace has a running worker: at once when it is up,
-   * after the restore when it sleeps. Call it before using the workspace's
+   * Returns once the worktree has a running worker: at once when it is up,
+   * after the restore when it sleeps. Call it before using the worktree's
    * host. Background work (pollers, syncs) does not call it, so it does not
-   * wake a sleeping workspace.
+   * wake a sleeping worktree.
    */
-  async ensureAwake(workspaceId: string): Promise<void> {
+  async ensureAwake(worktreeId: string): Promise<void> {
     for (let i = 0; i < 3; i++) {
-      const hostId = this.workspaces.findHostId(workspaceId);
+      const hostId = this.worktrees.findHostId(worktreeId);
       if (!hostId || hostId === LOCAL_HOST_ID) return;
       const draining = this.draining.get(hostId);
       if (draining) {
         await draining;
         continue;
       }
-      if (!this.sleeps.get(workspaceId)) return;
+      if (!this.sleeps.get(worktreeId)) return;
       await this.wake(hostId);
       return;
     }
-    throw new Error(`workspace ${workspaceId} is being stored, retry in a moment`);
+    throw new Error(`worktree ${worktreeId} is being stored, retry in a moment`);
   }
 
   wake(hostId: string): Promise<void> {
@@ -549,8 +549,8 @@ export class EphemeralLifecycleService {
     this.sleeps.setWaking(hostId, Date.now());
     try {
       const request = placementService.requestWake(
-        { hostId, workspaceIds: rows.map((r) => r.workspaceId) },
-        first.project,
+        { hostId, worktreeIds: rows.map((r) => r.worktreeId) },
+        first.repo,
         first.name,
       );
       const deadline = Date.now() + placementService.timeoutMs() + WAKE_GRACE_MS;
@@ -571,10 +571,10 @@ export class EphemeralLifecycleService {
   }
 
   /**
-   * Restores the sleeping workspaces of `hostId` onto its new worker. Called
+   * Restores the sleeping worktrees of `hostId` onto its new worker. Called
    * by placement once the worker said hello.
    */
-  async restoreHost(hostId: string, hostProjectPath?: string): Promise<void> {
+  async restoreHost(hostId: string, hostRepoPath?: string): Promise<void> {
     const rows = this.sleeps.listByHost(hostId);
     if (rows.length === 0) return;
     const host = hostRegistry.hostById(hostId);
@@ -584,7 +584,7 @@ export class EphemeralLifecycleService {
     // A restore hook put the machine's disk back, so the checkouts may be there already.
     const fromSnapshot = runnerService.restoredSnapshot(hostId) !== undefined;
     for (const row of rows) {
-      await this.restore(host, rpc, row, hostProjectPath, fromSnapshot);
+      await this.restore(host, rpc, row, hostRepoPath, fromSnapshot);
     }
     // The snapshots are used up, or stale when a fresh worker came up after a failed restore.
     void runnerService.dropHostSnapshots(hostId);
@@ -593,8 +593,8 @@ export class EphemeralLifecycleService {
   private async restore(
     host: Host,
     rpc: RemoteRpc,
-    row: WorkspaceSleepRow,
-    hostProjectPath?: string,
+    row: WorktreeSleepRow,
+    hostRepoPath?: string,
     fromSnapshot = false,
   ): Promise<void> {
     const [root] = (await host.info()).roots;
@@ -603,27 +603,27 @@ export class EphemeralLifecycleService {
       await this.finishFromDisk(host, rpc, row, root);
       return;
     }
-    if (hostProjectPath) {
-      const resolved = await host.fs.realpath(hostProjectPath);
-      hostRegistry.setProjectPathOn(row.project, host.id, resolved);
+    if (hostRepoPath) {
+      const resolved = await host.fs.realpath(hostRepoPath);
+      hostRegistry.setRepoPathOn(row.repo, host.id, resolved);
     }
-    const repoPath = hostRegistry.projectPathOn(row.project, host.id, "");
+    const repoPath = hostRegistry.repoPathOn(row.repo, host.id, "");
     if (!repoPath) {
-      throw new Error(`Project "${row.project}" has no checkout on host "${host.id}"`);
+      throw new Error(`Repo "${row.repo}" has no checkout on host "${host.id}"`);
     }
     const wipDir = posix.join(root, WIP_DIR);
     await host.fs.mkdir(wipDir, { recursive: true });
     const git = async (args: string[], at = repoPath) =>
       (await host.exec("git", args, { cwd: at })).stdout.trim();
 
-    const local = `refs/band/wip/${row.workspaceId}`;
+    const local = `refs/band/wip/${row.worktreeId}`;
     if (row.store === "origin") {
       await git(["fetch", "--force", "origin", `${row.ref}:${local}`]);
     } else if (row.store === "hub") {
-      const bundle = posix.join(wipDir, `${row.workspaceId}.bundle`);
+      const bundle = posix.join(wipDir, `${row.worktreeId}.bundle`);
       await host.fs.writeFile(
         bundle,
-        await readFile(join(sleepDir(row.workspaceId), "snapshot.bundle")),
+        await readFile(join(sleepDir(row.worktreeId), "snapshot.bundle")),
       );
       try {
         await git(["fetch", "--force", bundle, `${local}:${local}`]);
@@ -635,7 +635,7 @@ export class EphemeralLifecycleService {
     }
     await git(["cat-file", "-e", `${row.snapshotSha}^{commit}`]);
 
-    const worktreePath = posix.join(root, ".band-worktrees", row.project, row.name);
+    const worktreePath = posix.join(root, ".band-worktrees", row.repo, row.name);
     await host.fs.mkdir(posix.dirname(worktreePath), { recursive: true });
     await host.fs.rm(worktreePath, { recursive: true, force: true });
     await git(["worktree", "prune"]);
@@ -651,7 +651,7 @@ export class EphemeralLifecycleService {
       await git(["reset", "-q"], worktreePath);
     }
     await host.scripts.copyFiles(repoPath, worktreePath).catch((err) => {
-      log.warn(`${row.workspaceId}: could not copy workspace files: ${errorText(err)}`);
+      log.warn(`${row.worktreeId}: could not copy worktree files: ${errorText(err)}`);
     });
     await this.restoreSessions(host, rpc, row, wipDir);
     if (worktreePath !== row.worktreePath) this.moveWorktree(row, worktreePath);
@@ -660,11 +660,11 @@ export class EphemeralLifecycleService {
     if (row.store === "origin") {
       await git(["push", "origin", "--delete", row.ref]).catch(() => undefined);
     }
-    log.info(`restored ${row.workspaceId} on ${host.id}`);
+    log.info(`restored ${row.worktreeId} on ${host.id}`);
   }
 
   /** Whether the checkout the sleep stored is on this machine at the commit it had. */
-  private async checkoutSurvived(host: Host, row: WorkspaceSleepRow): Promise<boolean> {
+  private async checkoutSurvived(host: Host, row: WorktreeSleepRow): Promise<boolean> {
     try {
       const head = (
         await host.exec("git", ["rev-parse", "HEAD"], { cwd: row.worktreePath })
@@ -679,7 +679,7 @@ export class EphemeralLifecycleService {
   private async finishFromDisk(
     host: Host,
     rpc: RemoteRpc,
-    row: WorkspaceSleepRow,
+    row: WorktreeSleepRow,
     root: string,
   ): Promise<void> {
     const wipDir = posix.join(root, WIP_DIR);
@@ -691,28 +691,28 @@ export class EphemeralLifecycleService {
         .exec("git", ["push", "origin", "--delete", row.ref], { cwd: row.worktreePath })
         .catch(() => undefined);
     }
-    log.info(`restored ${row.workspaceId} on ${host.id} from a machine snapshot`);
+    log.info(`restored ${row.worktreeId} on ${host.id} from a machine snapshot`);
   }
 
   private async restoreSessions(
     host: Host,
     rpc: RemoteRpc,
-    row: WorkspaceSleepRow,
+    row: WorktreeSleepRow,
     wipDir: string,
   ): Promise<void> {
     if (row.sessionIds.length === 0) return;
     let files: SessionFile[];
     try {
       files = (
-        JSON.parse(await readFile(join(sleepDir(row.workspaceId), "sessions.json"), "utf8")) as {
+        JSON.parse(await readFile(join(sleepDir(row.worktreeId), "sessions.json"), "utf8")) as {
           files: SessionFile[];
         }
       ).files;
     } catch (err) {
-      log.warn(`${row.workspaceId}: no saved agent sessions: ${errorText(err)}`);
+      log.warn(`${row.worktreeId}: no saved agent sessions: ${errorText(err)}`);
       return;
     }
-    const stage = posix.join(wipDir, "sessions", row.workspaceId);
+    const stage = posix.join(wipDir, "sessions", row.worktreeId);
     await host.fs.rm(stage, { recursive: true, force: true });
     for (const file of files) {
       const target = posix.join(stage, file.root, file.rel);
@@ -723,10 +723,10 @@ export class EphemeralLifecycleService {
   }
 
   /** The checkout moved to another path on the new worker. */
-  private moveWorktree(row: WorkspaceSleepRow, path: string): void {
+  private moveWorktree(row: WorktreeSleepRow, path: string): void {
     const state = loadState();
-    const project = state.projects.find((p) => p.name === row.project);
-    const wt = project?.worktrees.find((w) => w.name === row.name);
+    const repo = state.repos.find((p) => p.name === row.repo);
+    const wt = repo?.worktrees.find((w) => w.name === row.name);
     if (!wt) return;
     wt.path = path;
     saveState(state);

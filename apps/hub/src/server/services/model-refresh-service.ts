@@ -109,9 +109,9 @@ export class ModelRefreshService {
    * Whether each configured agent can start on each host that is up (the local
    * host, and workers that are online). The Settings page shows it per host.
    */
-  async availability(workspaceId?: string): Promise<{
+  async availability(worktreeId?: string): Promise<{
     hosts: { id: string; name: string }[];
-    /** The host a refresh runs on by default: the one the workspace is on, else Local. */
+    /** The host a refresh runs on by default: the one the worktree is on, else Local. */
     defaultHostId: string;
     agents: AgentAvailabilityEntry[];
   }> {
@@ -136,12 +136,12 @@ export class ModelRefreshService {
       agents.push({ agentId: def.id, agentType: def.type, hosts: perHost });
     }
     let defaultHostId = hosts.find((h) => h.up)?.host.id ?? hostRegistry.local.id;
-    if (workspaceId) {
+    if (worktreeId) {
       try {
-        const id = hostRegistry.hostFor(workspaceId).id;
+        const id = hostRegistry.hostFor(worktreeId).id;
         if (hosts.some((h) => h.host.id === id && h.up)) defaultHostId = id;
       } catch {
-        // An unknown workspace or host falls back to Local.
+        // An unknown worktree or host falls back to Local.
       }
     }
     return {

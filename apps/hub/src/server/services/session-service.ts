@@ -1,8 +1,8 @@
 import { createLogger } from "@band-app/logger";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("session-service");
 
@@ -15,7 +15,7 @@ const log = createLogger("session-service");
  * The API tier (`server/api/sessions/router.ts`) delegates here.
  */
 
-export { WorkspaceNotFoundError };
+export { WorktreeNotFoundError };
 
 export interface SessionSummary {
   sessionId: string;
@@ -31,18 +31,18 @@ export interface ListSessionsResponse {
 }
 
 export class SessionService {
-  /** Lists past sessions for a workspace's chat pane (default chat when
+  /** Lists past sessions for a worktree's chat pane (default chat when
    *  `chatId` is undefined). */
-  async list(input: { workspaceId: string; chatId?: string }): Promise<ListSessionsResponse> {
-    const workspace = workspaceService.resolve(input.workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(input.workspaceId);
+  async list(input: { worktreeId: string; chatId?: string }): Promise<ListSessionsResponse> {
+    const worktree = worktreeService.resolve(input.worktreeId);
+    if (!worktree) {
+      throw new WorktreeNotFoundError(input.worktreeId);
     }
-    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
     if (!chatService.get(chatId)) {
-      chatService.create(input.workspaceId, { id: chatId, name: "Chat" });
+      chatService.create(input.worktreeId, { id: chatId, name: "Chat" });
     }
-    log.debug({ chatId, workspaceId: input.workspaceId }, "listing past sessions for chat");
+    log.debug({ chatId, worktreeId: input.worktreeId }, "listing past sessions for chat");
     return agentSessionService.listSessions(chatId);
   }
 }

@@ -1,4 +1,4 @@
-// Integration tests for `workspaces.create --via` (issue #551).
+// Integration tests for `worktrees.create --via` (issue #551).
 //
 // Covers the three dispatch paths exposed by the new `via` field:
 //
@@ -11,7 +11,7 @@
 //                           reports `via: "chat"` in the response, so a
 //                           CLI caller can tell the fallback happened.
 //
-// We also pin the cleanup side: `workspaces.remove` must kill the PTY
+// We also pin the cleanup side: `worktrees.remove` must kill the PTY
 // that `via=terminal` spawned (issue #551 acceptance criterion).
 //
 // Real production server (`dist/start-server.mjs`), real PTY (node-pty),
@@ -38,7 +38,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -49,7 +49,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
-import { listTasksForWorkspace } from "./helpers/tasks";
+import { listTasksForWorktree } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 const gitEnv = {
@@ -118,7 +118,7 @@ function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
   return writeVendorCliScript(
     tmpHome,
     name,
-    `printf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\nprintf 'ENV_BAND_WORKSPACE_ID:%s|\\n' "$BAND_WORKSPACE_ID"\n`,
+    `printf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\nprintf 'ENV_BAND_WORKTREE_ID:%s|\\n' "$BAND_WORKTREE_ID"\n`,
   );
 }
 
@@ -131,16 +131,16 @@ function promptTexts(home: string): (string | undefined)[] {
 
 interface TerminalListEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
 async function listTerminals(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   token: string,
 ): Promise<TerminalListEntry[]> {
-  const res = await trpcQuery(serverUrl, "terminal.list", { workspaceId }, token);
+  const res = await trpcQuery(serverUrl, "terminal.list", { worktreeId }, token);
   const body = await res.text();
   expect(res.status, `terminal.list failed: ${body}`).toBe(200);
   return (JSON.parse(body) as { result: { data: { terminals: TerminalListEntry[] } } }).result.data
@@ -174,7 +174,7 @@ interface CreateResponse {
 // in its own describe block to keep agent failures from cascading into
 // other tests. ---------------------------------------------------------------------------
 
-describe("workspaces.create via=terminal happy path", () => {
+describe("worktrees.create via=terminal happy path", () => {
   const TOKEN = "wc-via-terminal-happy-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -185,7 +185,7 @@ describe("workspaces.create via=terminal happy path", () => {
     const repoPath = createGitRepo(tmpHome, "viaproj");
     stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "viaproj",
           path: repoPath,
@@ -214,9 +214,9 @@ describe("workspaces.create via=terminal happy path", () => {
   it("spawns a terminal with the prompt as argv and returns terminalId", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "viaproj",
+        repo: "viaproj",
         branch: "feat/term",
         prompt: "implement feature X",
         via: "terminal",
@@ -232,11 +232,11 @@ describe("workspaces.create via=terminal happy path", () => {
     expect(data.terminalId!.length).toBeGreaterThan(0);
     expect(data.path.endsWith("/feat/term")).toBe(true);
 
-    const workspaceId = toWorkspaceId("viaproj", "feat/term");
+    const worktreeId = toWorktreeId("viaproj", "feat/term");
 
     const terminals = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.find((t) => t.terminalId === data.terminalId) ? list : undefined;
       },
       { label: "terminal registered" },
@@ -253,14 +253,14 @@ describe("workspaces.create via=terminal happy path", () => {
     );
     expect(output).toContain("implement feature X|");
 
-    // Cleanup: `workspaces.remove` must kill the spawned PTY. Without
-    // this, a stale vendor CLI process would leak past workspace
-    // teardown — the explicit `terminalService.killWorkspace` call in
-    // `WorkspaceService.remove` is what makes this safe.
+    // Cleanup: `worktrees.remove` must kill the spawned PTY. Without
+    // this, a stale vendor CLI process would leak past worktree
+    // teardown — the explicit `terminalService.killWorktree` call in
+    // `WorktreeService.remove` is what makes this safe.
     const removeRes = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: "viaproj", name: "feat/term" },
+      "worktrees.remove",
+      { repo: "viaproj", name: "feat/term" },
       TOKEN,
     );
     const removeBody = await removeRes.text();
@@ -268,10 +268,10 @@ describe("workspaces.create via=terminal happy path", () => {
 
     const afterRemove = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        const list = await listTerminals(server.url, worktreeId, TOKEN);
         return list.length === 0 ? list : undefined;
       },
-      { label: "terminal removed on workspace delete" },
+      { label: "terminal removed on worktree delete" },
     );
     expect(afterRemove).toEqual([]);
   });
@@ -279,11 +279,11 @@ describe("workspaces.create via=terminal happy path", () => {
 
 // ---------------------------------------------------------------------------
 // 401 negative auth — the new `via` field is part of the
-// `workspaces.create` mutation contract, so this file owns the baseline
+// `worktrees.create` mutation contract, so this file owns the baseline
 // auth check for that surface.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create via=terminal — auth", () => {
+describe("worktrees.create via=terminal — auth", () => {
   const TOKEN = "wc-via-auth-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -292,7 +292,7 @@ describe("workspaces.create via=terminal — auth", () => {
     tmpHome = createTmpHome("band-via-auth-");
     const repoPath = createGitRepo(tmpHome, "authproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "authproj",
           path: repoPath,
@@ -310,15 +310,15 @@ describe("workspaces.create via=terminal — auth", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("rejects workspaces.create without the band_token cookie (401)", async () => {
+  it("rejects worktrees.create without the band_token cookie (401)", async () => {
     // The shared `trpcMutate` always sends the cookie, so we call
     // `fetch` directly to omit it. Mirrors the 401 guard pattern in
     // `chat-lifecycle.test.ts` / `browsers.test.ts`.
-    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+    const res = await fetch(`${server.url}/trpc/worktrees.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        project: "authproj",
+        repo: "authproj",
         branch: "feat/unauth",
         prompt: "should be rejected",
         via: "terminal",
@@ -334,7 +334,7 @@ describe("workspaces.create via=terminal — auth", () => {
 // prompt and ends the turn cleanly.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create via=chat path", () => {
+describe("worktrees.create via=chat path", () => {
   const TOKEN = "wc-via-chat-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -343,7 +343,7 @@ describe("workspaces.create via=chat path", () => {
     tmpHome = createTmpHome("band-via-chat-");
     const repoPath = createGitRepo(tmpHome, "chatproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "chatproj",
           path: repoPath,
@@ -373,9 +373,9 @@ describe("workspaces.create via=chat path", () => {
   it("via=chat (explicit) does NOT spawn a terminal and dispatches a chat task", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "chatproj",
+        repo: "chatproj",
         branch: "feat/chatpath",
         prompt: "implement feature Y",
         via: "chat",
@@ -389,7 +389,7 @@ describe("workspaces.create via=chat path", () => {
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
 
-    const workspaceId = toWorkspaceId("chatproj", "feat/chatpath");
+    const worktreeId = toWorktreeId("chatproj", "feat/chatpath");
 
     // Positive anchor: prove the chat path actually dispatched.
     // `taskService.submitTask` persists a task row before the agent
@@ -397,7 +397,7 @@ describe("workspaces.create via=chat path", () => {
     // signal without a wall-clock sleep.
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);
+        const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
         return list.find((t) => t.prompt === "implement feature Y") ? list : undefined;
       },
       { label: "chat task submitted for via=chat" },
@@ -406,19 +406,19 @@ describe("workspaces.create via=chat path", () => {
     // ...and the prompt reached the agent over ACP.
     await expect.poll(() => promptTexts(tmpHome)).toContain("implement feature Y");
 
-    // No PTY should be associated with this workspace — chat-path
+    // No PTY should be associated with this worktree — chat-path
     // dispatch goes through `taskService.submitTask`, which never
     // touches the terminal pool.
-    const terminals = await listTerminals(server.url, workspaceId, TOKEN);
+    const terminals = await listTerminals(server.url, worktreeId, TOKEN);
     expect(terminals).toEqual([]);
   });
 
   it("omitting via defaults to chat (web-UI default) and dispatches a chat task", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "chatproj",
+        repo: "chatproj",
         branch: "feat/default",
         prompt: "implement feature Z",
         // intentionally no `via` field
@@ -435,10 +435,10 @@ describe("workspaces.create via=chat path", () => {
     // Same positive anchor as above — the schema makes `via` optional
     // and the server defaults to chat so the web UI continues working
     // without sending the field.
-    const workspaceId = toWorkspaceId("chatproj", "feat/default");
+    const worktreeId = toWorktreeId("chatproj", "feat/default");
     const tasks = await waitFor(
       async () => {
-        const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);
+        const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
         return list.find((t) => t.prompt === "implement feature Z") ? list : undefined;
       },
       { label: "chat task submitted for default via" },
@@ -457,7 +457,7 @@ describe("workspaces.create via=chat path", () => {
 // the `via=chat` describe above.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create via=terminal — adapter fallback", () => {
+describe("worktrees.create via=terminal — adapter fallback", () => {
   const TOKEN = "wc-via-fallback-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -466,7 +466,7 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
     tmpHome = createTmpHome("band-via-fallback-");
     const repoPath = createGitRepo(tmpHome, "fbproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "fbproj",
           path: repoPath,
@@ -491,9 +491,9 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
   it("falls back to chat when the agent's cliInvocation is unsupported", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "fbproj",
+        repo: "fbproj",
         branch: "feat/fallback",
         prompt: "implement feature W",
         via: "terminal",
@@ -519,10 +519,10 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
 
 // ---------------------------------------------------------------------------
 // Bug 1 — band-start run from the webchat must dispatch the new
-// workspace's task to the CHAT, not a terminal.
+// worktree's task to the CHAT, not a terminal.
 //
 // The mechanism: a chat-hosted coding agent is spawned with
-// `BAND_DISPATCH=chat` in its environment, so a NESTED `band workspaces
+// `BAND_DISPATCH=chat` in its environment, so a NESTED `band worktrees
 // create --prompt …` it fires (the band-start skill) resolves to
 // `via: chat` — matching where the agent itself runs — instead of the
 // Rust CLI's built-in `terminal` default. `BAND_SERVER_URL` is injected
@@ -553,7 +553,7 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     tmpHome = createTmpHome("band-dispatch-env-");
     const repoPath = createGitRepo(tmpHome, "dispproj");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "dispproj",
           path: repoPath,
@@ -583,9 +583,9 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
   it("spawns the chat agent with BAND_DISPATCH=chat and BAND_SERVER_URL pointing at this server", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "dispproj",
+        repo: "dispproj",
         branch: "feat/nested",
         prompt: "kick off nested work",
         via: "chat",
@@ -609,10 +609,10 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     // The agent that ran the chat turn was spawned with the chat dispatch
     // target, and the server advertised its own bound URL so a nested CLI
     // call reaches it regardless of which port it claimed.
-    // It also learns which chat and workspace it runs in.
+    // It also learns which chat and worktree it runs in.
     expect(prompt.env).toMatchObject({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
     expect(prompt.env.BAND_CHAT_ID).toBeTruthy();
-    expect(prompt.env.BAND_WORKSPACE_ID).toBe(toWorkspaceId("dispproj", "feat/nested"));
+    expect(prompt.env.BAND_WORKTREE_ID).toBe(toWorktreeId("dispproj", "feat/nested"));
   });
 });
 
@@ -633,7 +633,7 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
 // intact — proving it both EXECUTED and survived byte-for-byte.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
+describe("worktrees.create via=terminal — long UTF-8 prompt", () => {
   const TOKEN = "wc-via-longprompt-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -644,7 +644,7 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
     const repoPath = createGitRepo(tmpHome, "longproj");
     stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "longproj",
           path: repoPath,
@@ -677,9 +677,9 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
 
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "longproj",
+        repo: "longproj",
         branch: "feat/long",
         prompt: longPrompt,
         via: "terminal",
@@ -722,7 +722,7 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
       server.url,
       "terminal.create",
       {
-        workspaceId: toWorkspaceId("longproj", "main"),
+        worktreeId: toWorktreeId("longproj", "main"),
         id: "../../../../tmp/band-evil",
         command: "echo pwned",
       },
@@ -755,7 +755,7 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     const repoPath = createGitRepo(tmpHome, "termenvproj");
     stubBin = writeEnvEchoVendorCli(tmpHome, "stub-env-echo.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "termenvproj",
           path: repoPath,
@@ -781,9 +781,9 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
   it("spawns the PTY vendor CLI with BAND_DISPATCH=terminal", async () => {
     const createRes = await trpcMutate(
       server.url,
-      "workspaces.create",
+      "worktrees.create",
       {
-        project: "termenvproj",
+        repo: "termenvproj",
         branch: "feat/termenv",
         prompt: "run in terminal",
         via: "terminal",
@@ -807,7 +807,7 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
         // poll before the second line is captured.
         return out?.includes("ENV_BAND_DISPATCH:terminal|") &&
           out.includes("ENV_BAND_SERVER_URL:") &&
-          out.includes("ENV_BAND_WORKSPACE_ID:")
+          out.includes("ENV_BAND_WORKTREE_ID:")
           ? out
           : undefined;
       },
@@ -819,10 +819,10 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     // Symmetric with the chat-path assertion: the PTY child also reaches
     // THIS server, so a nested `band` CLI call resolves to the right port.
     expect(output).toContain(`ENV_BAND_SERVER_URL:${server.url}|`);
-    // The terminal learns its workspace, so an agent there can omit
-    // `workspaceId` when it creates a subscription.
+    // The terminal learns its worktree, so an agent there can omit
+    // `worktreeId` when it creates a subscription.
     expect(output).toContain(
-      `ENV_BAND_WORKSPACE_ID:${toWorkspaceId("termenvproj", "feat/termenv")}|`,
+      `ENV_BAND_WORKTREE_ID:${toWorktreeId("termenvproj", "feat/termenv")}|`,
     );
   });
 });
@@ -832,7 +832,7 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
 // older `via`, and with neither the server's `agents.defaultMode` applies.
 // ---------------------------------------------------------------------------
 
-describe("workspaces.create agentMode", () => {
+describe("worktrees.create agentMode", () => {
   const TOKEN = "wc-agent-mode-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -840,8 +840,8 @@ describe("workspaces.create agentMode", () => {
   async function create(branch: string, extra: object): Promise<CreateResponse> {
     const res = await trpcMutate(
       server.url,
-      "workspaces.create",
-      { project: "modeproj", branch, prompt: `prompt for ${branch}`, ...extra },
+      "worktrees.create",
+      { repo: "modeproj", branch, prompt: `prompt for ${branch}`, ...extra },
       TOKEN,
     );
     const body = await res.text();
@@ -859,7 +859,7 @@ describe("workspaces.create agentMode", () => {
     const repoPath = createGitRepo(tmpHome, "modeproj");
     const stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "modeproj",
           path: repoPath,
@@ -907,8 +907,8 @@ describe("workspaces.create agentMode", () => {
       path: expect.stringMatching(/\/feat\/mode-gui$/),
       via: "chat",
     });
-    const workspaceId = toWorkspaceId("modeproj", "feat/mode-gui");
-    expect(await listTerminals(server.url, workspaceId, TOKEN)).toEqual([]);
+    const worktreeId = toWorktreeId("modeproj", "feat/mode-gui");
+    expect(await listTerminals(server.url, worktreeId, TOKEN)).toEqual([]);
     await waitFor(() => promptTexts(tmpHome).includes("prompt for feat/mode-gui"), {
       label: "prompt reached the chat agent",
     });

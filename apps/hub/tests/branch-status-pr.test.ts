@@ -1,5 +1,5 @@
 /**
- * The pull request each workspace's branch-status event carries (`ci.pr`),
+ * The pull request each worktree's branch-status event carries (`ci.pr`),
  * which the sidebar's PR badge renders. The branch-status poller reads it
  * from the same batched `gh api graphql` query as the CI state.
  *
@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { branchRepository, prNode, prUrl, workflowSuite } from "./fixtures/branch-status-data";
@@ -24,7 +24,7 @@ import { createTmpHome, type ServerHandle, startServer } from "./helpers/server"
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "branch-status-pr-test-token";
-const PROJECT = "widgets";
+const REPO = "widgets";
 
 const gitEnv = {
   ...process.env,
@@ -52,7 +52,7 @@ interface CIEvent {
 
 /**
  * A `status.stream` subscriber, as the dashboard keeps open. Collects the
- * `ci` of every `branch-status` event, newest last, by workspace.
+ * `ci` of every `branch-status` event, newest last, by worktree.
  */
 async function openStatusStream(serverUrl: string) {
   const ws = new WebSocket(`${serverUrl.replace(/^http/, "ws")}/trpc`, {
@@ -62,11 +62,11 @@ async function openStatusStream(serverUrl: string) {
   ws.on("message", (raw: Buffer) => {
     const data = (
       JSON.parse(raw.toString()) as {
-        result?: { data?: { kind?: string; workspaceId?: string; ci?: CIEvent } };
+        result?: { data?: { kind?: string; worktreeId?: string; ci?: CIEvent } };
       }
     ).result?.data;
-    if (data?.kind !== "branch-status" || !data.workspaceId || !data.ci) return;
-    ci.set(data.workspaceId, [...(ci.get(data.workspaceId) ?? []), data.ci]);
+    if (data?.kind !== "branch-status" || !data.worktreeId || !data.ci) return;
+    ci.set(data.worktreeId, [...(ci.get(data.worktreeId) ?? []), data.ci]);
   });
   await new Promise<void>((resolve, reject) => {
     ws.once("error", reject);
@@ -83,17 +83,17 @@ async function openStatusStream(serverUrl: string) {
     });
   });
   return {
-    /** The first `ci` received for `workspaceId`. */
-    async firstCI(workspaceId: string): Promise<CIEvent> {
-      await waitFor(() => (ci.get(workspaceId)?.length ?? 0) > 0, { timeoutMs: 20_000 });
-      return ci.get(workspaceId)?.[0] as CIEvent;
+    /** The first `ci` received for `worktreeId`. */
+    async firstCI(worktreeId: string): Promise<CIEvent> {
+      await waitFor(() => (ci.get(worktreeId)?.length ?? 0) > 0, { timeoutMs: 20_000 });
+      return ci.get(worktreeId)?.[0] as CIEvent;
     },
-    /** The newest `ci` for `workspaceId`, once one has a `pr` field. */
-    async latestCI(workspaceId: string): Promise<CIEvent> {
-      await waitFor(() => ci.get(workspaceId)?.some((e) => e.pr !== undefined) ?? false, {
+    /** The newest `ci` for `worktreeId`, once one has a `pr` field. */
+    async latestCI(worktreeId: string): Promise<CIEvent> {
+      await waitFor(() => ci.get(worktreeId)?.some((e) => e.pr !== undefined) ?? false, {
         timeoutMs: 20_000,
       });
-      return ci.get(workspaceId)?.at(-1) as CIEvent;
+      return ci.get(worktreeId)?.at(-1) as CIEvent;
     },
     close: () => ws.close(),
   };
@@ -101,10 +101,10 @@ async function openStatusStream(serverUrl: string) {
 
 /**
  * A git repo with a github.com `origin` and one worktree per branch, seeded
- * as the project `PROJECT` with `main` as its default branch.
+ * as the repo `REPO` with `main` as its default branch.
  */
-function seedProject(tmpHome: string, branches: string[]): void {
-  const repo = join(tmpHome, PROJECT);
+function seedRepo(tmpHome: string, branches: string[]): void {
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", "main"]);
   writeFileSync(join(repo, "README.md"), "hello\n");
@@ -117,9 +117,9 @@ function seedProject(tmpHome: string, branches: string[]): void {
     return { name: branch, branch, path };
   });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ name: "main", branch: "main", path: repo }, ...worktrees],
@@ -202,11 +202,11 @@ describe("branch-status events carry the branch's pull request", () => {
   let stub: GhStub;
   let stream: Awaited<ReturnType<typeof openStatusStream>>;
 
-  const wsId = (branch: string) => toWorkspaceId(PROJECT, branch);
+  const wsId = (branch: string) => toWorktreeId(REPO, branch);
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-");
-    seedProject(tmpHome, Object.values(CASES));
+    seedRepo(tmpHome, Object.values(CASES));
     seedSettings(tmpHome, { tokenSecret: TOKEN });
 
     stub = await ghStub.start();
@@ -301,7 +301,7 @@ describe("branch-status events carry the branch's pull request", () => {
     });
   });
 
-  it("asks GitHub for every workspace in one query, in the first poll", async () => {
+  it("asks GitHub for every worktree in one query, in the first poll", async () => {
     await stream.latestCI(wsId(CASES.failing));
     const first = stub.requests.find((r) => r.fields.query?.includes("ws_0: repository("));
     for (const branch of [...Object.values(CASES), "main"]) {
@@ -342,7 +342,7 @@ describe("with the GitHub plugin disabled", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-disabled-");
-    seedProject(tmpHome, [CASES.failing]);
+    seedRepo(tmpHome, [CASES.failing]);
     seedSettings(tmpHome, { tokenSecret: TOKEN, plugins: { disabled: ["github"] } });
 
     stub = await ghStub.start();
@@ -360,7 +360,7 @@ describe("with the GitHub plugin disabled", () => {
   });
 
   it("the poller never runs gh, and the branch reports no PR and no CI state", async () => {
-    expect(await stream.latestCI(toWorkspaceId(PROJECT, CASES.failing))).toEqual({
+    expect(await stream.latestCI(toWorktreeId(REPO, CASES.failing))).toEqual({
       state: "none",
       url: null,
       pr: null,

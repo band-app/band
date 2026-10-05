@@ -26,7 +26,7 @@
  *     `guest-policy.ts`), so their exceptions are keyed by that
  *     partition's `storagePath`. Keying by partition also keeps the
  *     store correct if further named partitions are ever introduced
- *     (e.g. per-workspace storage isolation).
+ *     (e.g. per-worktree storage isolation).
  *   - **No global "ignore all" flag**. Per-host only by design.
  *
  * This module is intentionally pure: no Electron imports, no IPC.
@@ -131,7 +131,7 @@ export interface SessionLike {
  * requirement is that it's stable across calls for the same session.
  *
  * Keeps the cert-exception store partition-aware if a future
- * feature introduces named partitions (e.g. per-workspace storage
+ * feature introduces named partitions (e.g. per-worktree storage
  * isolation) without needing to plumb anything else through.
  */
 export function partitionForSession(session: SessionLike | undefined | null): string {

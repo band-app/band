@@ -10,7 +10,7 @@
 // in-process and assert which rows survive — i.e. the prune sees the
 // settings flow end-to-end without booting the server.
 //
-// Same shape as `workspace-queries.test.ts`: tmp BAND_HOME per test,
+// Same shape as `worktree-queries.test.ts`: tmp BAND_HOME per test,
 // `closeDb()` between tests to reset the module-level singleton.
 
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -32,14 +32,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function seedEvent(opts: {
   taskId: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   capturedAt: number;
 }): void {
   new UsageEventQueries().insert({
     taskId: opts.taskId,
-    workspaceId: opts.workspaceId,
-    project: opts.project,
+    worktreeId: opts.worktreeId,
+    repo: opts.repo,
     inputTokens: 1,
     outputTokens: 1,
     cacheReadTokens: 0,
@@ -84,14 +84,14 @@ describe("usage-events retention setting", () => {
     // Two rows: one inside the 365-day window, one just outside.
     seedEvent({
       taskId: "fresh",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 30 * DAY_MS,
     });
     seedEvent({
       taskId: "ancient",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 400 * DAY_MS,
     });
     expect(listEventIds()).toHaveLength(2);
@@ -113,16 +113,16 @@ describe("usage-events retention setting", () => {
     // 5 d old — survives.
     seedEvent({
       taskId: "young",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 5 * DAY_MS,
     });
     // 60 d old — would survive the 365-day default, must be pruned by
     // the 30-day override.
     seedEvent({
       taskId: "old",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 60 * DAY_MS,
     });
 
@@ -142,14 +142,14 @@ describe("usage-events retention setting", () => {
 
     seedEvent({
       taskId: "fresh",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 30 * DAY_MS,
     });
     seedEvent({
       taskId: "ancient",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 400 * DAY_MS,
     });
 
@@ -169,14 +169,14 @@ describe("usage-events retention setting", () => {
 
     seedEvent({
       taskId: "5d",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 5 * DAY_MS,
     });
     seedEvent({
       taskId: "20d",
-      workspaceId: "w",
-      project: "p",
+      worktreeId: "w",
+      repo: "p",
       capturedAt: now - 20 * DAY_MS,
     });
 

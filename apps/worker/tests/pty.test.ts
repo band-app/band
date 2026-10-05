@@ -23,9 +23,9 @@ async function spawnTerminal(
   options?: { command?: string },
 ): Promise<void> {
   await call(w.session, "pty.spawn", {
-    workspaceId: "ws",
+    worktreeId: "ws",
     terminalId,
-    workspaceRoot: w.root,
+    worktreeRoot: w.root,
     options,
   });
 }

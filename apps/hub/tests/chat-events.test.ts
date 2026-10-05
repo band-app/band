@@ -38,10 +38,10 @@ import {
   trpc,
   turnEnded,
   uploadsLocation,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
-import { listTasksForWorkspace } from "./helpers/tasks";
+import { listTasksForWorktree } from "./helpers/tasks";
 
 const authHeaders = { Cookie: `band_token=${TEST_TOKEN}` };
 
@@ -235,7 +235,7 @@ describe("a turn", () => {
     const submit = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "hello" }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, text: "hello" }),
     });
     expect(submit.status).toBe(200);
     expect(await submit.json()).toEqual({ ok: true, queued: false });
@@ -283,7 +283,7 @@ describe("a turn", () => {
       .filter((blocks) => ["first message", "second message"].includes(blocks[0].text ?? ""));
     expect(sent).toHaveLength(2);
     expect(sent[0][0]).toEqual({ type: "text", text: "first message" });
-    expect(sent[0].at(-1)?.text).toMatch(sharedDirHintPattern(WORKSPACE_ID));
+    expect(sent[0].at(-1)?.text).toMatch(sharedDirHintPattern(WORKTREE_ID));
     expect(sent[1]).toEqual([{ type: "text", text: "second message" }]);
   });
 
@@ -499,7 +499,7 @@ describe("queue", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
       "base64",
     );
-    const { dir: uploadDir, urlPattern } = uploadsLocation(server.home, WORKSPACE_ID);
+    const { dir: uploadDir, urlPattern } = uploadsLocation(server.home, WORKTREE_ID);
     const before = new Set(existsSync(uploadDir) ? readdirSync(uploadDir) : []);
 
     const { events: done } = await openStream(server.url, chatId, {
@@ -557,21 +557,21 @@ describe("queue", () => {
     });
     const submit = (prompt: string, extra: Record<string, string> = {}) =>
       trpc<Record<string, unknown>>(server.url, "tasks.submit", {
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         chatId,
         prompt,
         ...extra,
       });
 
     const first = await submit("slow first");
-    expect(first).toMatchObject({ queued: false, workspaceId: WORKSPACE_ID, chatId });
+    expect(first).toMatchObject({ queued: false, worktreeId: WORKTREE_ID, chatId });
     expect(first.id).toMatch(/^tsk_/);
     const second = await submit("second on large", { model: "stub-large" });
     expect(second).toEqual({
       queued: true,
       id: null,
       queuedMessageId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId,
       sessionId: null,
     });
@@ -592,7 +592,7 @@ describe("queue", () => {
     });
     const submit = (prompt: string, extra: Record<string, string>) =>
       trpc<{ queuedMessageId?: string }>(server.url, "tasks.submit", {
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         chatId,
         prompt,
         ...extra,
@@ -604,7 +604,7 @@ describe("queue", () => {
     // Swap them the way the chat pane's drag-reorder does: the wire shape,
     // which carries no model or mode.
     await trpc(server.url, "queue.set", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId,
       messages: [
         { id: inPlan.queuedMessageId, text: "in plan" },
@@ -633,7 +633,7 @@ describe("queue", () => {
     });
     const send = (message: string) =>
       trpc<Record<string, unknown>>(server.url, "chats.send", {
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         chatId,
         message,
       });
@@ -670,7 +670,7 @@ describe("queue", () => {
         }
         if (!aborted && working && queuedBehind) {
           aborted = true;
-          actions.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
+          actions.push(trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId }));
         }
         // The stopped turn leaves "left in queue" waiting; send one more.
         if (turnEnded(e) && ++ended === 1) {
@@ -728,7 +728,7 @@ describe("cancel", () => {
       onEvent: (e) => {
         // Abort once the agent is inside the turn.
         if (e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
-          answers.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
+          answers.push(trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId }));
         }
       },
     });
@@ -740,7 +740,7 @@ describe("cancel", () => {
     const ended = events.at(-1);
     expect(ended).toMatchObject({ type: "turn-ended", stopReason: "cancelled" });
     const taskId = ended?.type === "turn-ended" ? ended.taskId : "";
-    const tasks = await listTasksForWorkspace(server.url, WORKSPACE_ID, TEST_TOKEN);
+    const tasks = await listTasksForWorktree(server.url, WORKTREE_ID, TEST_TOKEN);
     expect(tasks.find((t) => t.id === taskId)?.status).toBe("failed");
   });
 
@@ -758,7 +758,7 @@ describe("cancel", () => {
     });
     await sendMessage(server.url, chatId, "wait for me early");
     // Straight after the submit returns: the agent process is not up yet.
-    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
     const events = await done;
     expect(events.at(-1)).toMatchObject({ type: "turn-ended", stopReason: "cancelled" });
   });
@@ -773,7 +773,7 @@ describe("session switching", () => {
 
     const otherSessionId = "session-picked-from-history";
     await trpc(server.url, "chats.setActiveSession", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       chatId,
       sessionId: otherSessionId,
     });
@@ -794,7 +794,7 @@ describe("session switching", () => {
   it("clearing activeSessionId (New session) yields an empty subscription", async () => {
     const chatId = newChatId("newsession");
     await runTurn(server.url, chatId, "first task");
-    await trpc(server.url, "chats.setActiveSession", { workspaceId: WORKSPACE_ID, chatId });
+    await trpc(server.url, "chats.setActiveSession", { worktreeId: WORKTREE_ID, chatId });
 
     const events = await collectEvents(server.url, chatId, {
       until: (e) => e.type === "history-meta",
@@ -810,12 +810,12 @@ describe("session switching", () => {
 });
 
 describe("error paths", () => {
-  it("submitting to a workspace that doesn't exist returns 404; the chat's stream still opens", async () => {
+  it("submitting to a worktree that doesn't exist returns 404; the chat's stream still opens", async () => {
     const chatId = newChatId("orphan-ws");
     const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({ workspaceId: "no-such-workspace-main", text: "hello" }),
+      body: JSON.stringify({ worktreeId: "no-such-worktree-main", text: "hello" }),
     });
     expect(res.status).toBe(404);
 
@@ -835,29 +835,29 @@ describe("error paths", () => {
     const res = await fetch(`${server.url}/api/chats/${newChatId("auth")}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "anything" }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, text: "anything" }),
     });
     expect(res.status).toBe(401);
   });
 
-  it("POST /api/chats/:chatId/messages with missing workspaceId returns 400", async () => {
+  it("POST /api/chats/:chatId/messages with missing worktreeId returns 400", async () => {
     const res = await fetch(`${server.url}/api/chats/${newChatId("bad")}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({ text: "no workspace id" }),
+      body: JSON.stringify({ text: "no worktree id" }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "workspaceId and text are required" });
+    expect(await res.json()).toEqual({ error: "worktreeId and text are required" });
   });
 
   it("POST /api/chats/:chatId/messages with blank text returns 400", async () => {
     const res = await fetch(`${server.url}/api/chats/${newChatId("bad")}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "   " }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, text: "   " }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "workspaceId and text are required" });
+    expect(await res.json()).toEqual({ error: "worktreeId and text are required" });
   });
 
   it("POST /api/chats/:chatId/messages with a non-JSON body returns 400", async () => {

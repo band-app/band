@@ -6,7 +6,7 @@
  * session partition; they are not returned over IPC, sent to the web
  * server, or logged, and the IPC result carries their counts only. History
  * entries are returned to the renderer, which stores them in the web
- * server's per-workspace history (where Band's own browsing is recorded).
+ * server's per-worktree history (where Band's own browsing is recorded).
  *
  * Every selected DB is read before anything is written, so a locked or
  * unreadable DB fails the whole import instead of leaving half of it done.

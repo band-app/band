@@ -30,7 +30,7 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
 }
 
 /**
- * Reads the hub makes on its own schedule (status pollers, the project list, a
+ * Reads the hub makes on its own schedule (status pollers, the repo list, a
  * file tree), so they must not keep an ephemeral worker awake. A call still
  * holds the worker while it runs, but finishing one does not restart the idle clock.
  */
@@ -86,7 +86,7 @@ export class Registrar {
 }
 
 /**
- * Where the hub keeps workspace files on this worker: beside the worktrees, in
+ * Where the hub keeps worktree files on this worker: beside the worktrees, in
  * the first root, so the path policy already allows them.
  */
 export function hostDirs(roots: string[]): HostDirs | undefined {

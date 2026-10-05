@@ -1,8 +1,8 @@
 /**
- * Workspace-switch performance: `sessions.list` with many past sessions.
+ * Worktree-switch performance: `sessions.list` with many past sessions.
  *
  * Opening a chat's history dropdown lists the agent's past sessions for the
- * workspace. Under ACP (issue #648) that is the agent's `session/list`, with
+ * worktree. Under ACP (issue #648) that is the agent's `session/list`, with
  * titles filled in from Band's log. The stub ACP agent here starts with
  * SESSION_COUNT saved sessions (seeded into its state directory, as if made
  * by earlier runs), and the list must come back complete and fast.
@@ -19,7 +19,7 @@ import {
   stubRequests,
   TEST_TOKEN,
   trpc,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
@@ -71,13 +71,13 @@ afterAll(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
-describe("workspace-switch perf — sessions.list", () => {
+describe("worktree-switch perf — sessions.list", () => {
   it(`sessions.list returns all ${SESSION_COUNT} sessions within 5s`, async () => {
     const start = Date.now();
     const data = await trpc<{
       sessions: Array<{ sessionId: string; summary: string; lastModified: number }>;
       supported: boolean;
-    }>(server.url, "sessions.list", { workspaceId: WORKSPACE_ID }, "query");
+    }>(server.url, "sessions.list", { worktreeId: WORKTREE_ID }, "query");
     const elapsedMs = Date.now() - start;
 
     expect(data.supported).toBe(true);
@@ -89,7 +89,7 @@ describe("workspace-switch perf — sessions.list", () => {
     });
     // Generous bound: this includes starting the agent process.
     expect(elapsedMs).toBeLessThan(5000);
-    // Exactly one `session/list`, scoped to the workspace, answered it (the
+    // Exactly one `session/list`, scoped to the worktree, answered it (the
     // boot-time model probe never lists), and no session was loaded to
     // read titles.
     expect(stubRequests(home, "session/list").map((r) => r.params.cwd)).toEqual([
@@ -101,13 +101,13 @@ describe("workspace-switch perf — sessions.list", () => {
   it("rejects sessions.list without the band_token cookie (401)", async () => {
     const res = await fetch(
       `${server.url}/trpc/sessions.list?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: WORKSPACE_ID }),
+        JSON.stringify({ worktreeId: WORKTREE_ID }),
       )}`,
     );
     expect(res.status).toBe(401);
     const ok = await fetch(
       `${server.url}/trpc/sessions.list?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: WORKSPACE_ID }),
+        JSON.stringify({ worktreeId: WORKTREE_ID }),
       )}`,
       { headers: { Cookie: `band_token=${TEST_TOKEN}` } },
     );

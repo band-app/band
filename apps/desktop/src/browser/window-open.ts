@@ -8,7 +8,7 @@
  * unconditionally returns `{ action: "deny" }` (so no detached
  * OS-level window ever appears) and uses this helper to decide whether
  * to ALSO emit a `browser-open-window` IPC event that the renderer
- * turns into a new Band browser tab in the same workspace.
+ * turns into a new Band browser tab in the same worktree.
  *
  * Extracted as a pure module so the routing rules can be exercised in
  * `node:test` without an Electron runtime — same pattern as

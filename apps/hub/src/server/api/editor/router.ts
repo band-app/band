@@ -9,19 +9,19 @@ import { publicProcedure, t } from "../trpc";
  * Zod, delegate to `EditorService`, map errors to tRPC codes, return.
  *
  * Backs the `band open <filePath>` CLI command and the web UI's
- * "I am the currently focused workspace" hint. See the docstring on
+ * "I am the currently focused worktree" hint. See the docstring on
  * `EditorService` for the security/threat model.
  */
 export const editorRouter = t.router({
-  // Intentionally no `getActiveWorkspace` query — the only consumer is
+  // Intentionally no `getActiveWorktree` query — the only consumer is
   // the CLI's `band open`, which reads the value implicitly through the
   // `openFile` fallback in the same round-trip. Adding a separate query
   // doubles the cost for no benefit.
 
-  setActiveWorkspace: publicProcedure
-    .input(z.object({ workspaceId: z.string().nullable() }))
+  setActiveWorktree: publicProcedure
+    .input(z.object({ worktreeId: z.string().nullable() }))
     .mutation(({ input }) => {
-      editorService.setActiveWorkspace(input.workspaceId);
+      editorService.setActiveWorktree(input.worktreeId);
       return { ok: true };
     }),
 
@@ -30,16 +30,16 @@ export const editorRouter = t.router({
       z
         .object({
           /**
-           * Workspace to open the file in. When omitted, falls back to the
-           * dashboard's currently active workspace.
+           * Worktree to open the file in. When omitted, falls back to the
+           * dashboard's currently active worktree.
            */
-          workspaceId: z.string().optional(),
+          worktreeId: z.string().optional(),
           /**
-           * Either an absolute filesystem path or a workspace-relative
-           * path. Paths inside the workspace root open as normal editor
+           * Either an absolute filesystem path or a worktree-relative
+           * path. Paths inside the worktree root open as normal editor
            * tabs (the renderer routes to the Files panel via the
            * `open-file` SSE event; see `dispatchOpenFileEvent`); paths
-           * outside any workspace root open as external tabs. May include
+           * outside any worktree root open as external tabs. May include
            * a trailing line / column suffix in the standard
            * `path:line[:column]` / `path:line-lineEnd` notation.
            */

@@ -2,8 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   CronjobNotFoundError,
-  CronjobProjectNotFoundError,
-  CronjobWorkspaceMissingError,
+  CronjobRepoNotFoundError,
+  CronjobWorktreeMissingError,
   cronjobByIdInput,
   cronjobCreateInput,
   cronjobService,
@@ -33,8 +33,8 @@ export const cronjobsRouter = t.router({
     .input(
       z
         .object({
-          project: z.string().optional(),
-          workspaceId: z.string().optional(),
+          repo: z.string().optional(),
+          worktreeId: z.string().optional(),
         })
         .optional(),
     )
@@ -100,17 +100,17 @@ export type CronjobsRouter = typeof cronjobsRouter;
  *
  * Each domain error class maps to a specific tRPC code that mirrors the
  * legacy router's behavior:
- *   - `CronjobNotFoundError` / `CronjobProjectNotFoundError` → 404 `NOT_FOUND`
- *   - `InvalidCronExpressionError` / `CronjobWorkspaceMissingError` → 400
+ *   - `CronjobNotFoundError` / `CronjobRepoNotFoundError` → 404 `NOT_FOUND`
+ *   - `InvalidCronExpressionError` / `CronjobWorktreeMissingError` → 400
  *   - `TaskConflictError` → 409 `CONFLICT` (raised inside `service.trigger`)
  * Anything else is rethrown unchanged so unexpected failures surface as a
  * 500 with the original stack rather than being silently swallowed.
  */
 function throwAsTRPCError(err: unknown): never {
-  if (err instanceof CronjobNotFoundError || err instanceof CronjobProjectNotFoundError) {
+  if (err instanceof CronjobNotFoundError || err instanceof CronjobRepoNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
-  if (err instanceof InvalidCronExpressionError || err instanceof CronjobWorkspaceMissingError) {
+  if (err instanceof InvalidCronExpressionError || err instanceof CronjobWorktreeMissingError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
   }
   if (err instanceof TaskConflictError) {

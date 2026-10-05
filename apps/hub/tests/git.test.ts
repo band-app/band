@@ -113,16 +113,16 @@ describe("listWorktrees", () => {
   });
 
   it("returns a SHA-based label for detached HEAD without rebase state", async () => {
-    // Regression for the "blank workspace label" bug. A detached worktree
+    // Regression for the "blank worktree label" bug. A detached worktree
     // that isn't mid-rebase used to flow through with `branch: ""`, which
     // (a) rendered as a blank label next to the branch icon + "M" dirty
-    // badge in `WorkspaceCard.tsx`, and (b) collided every detached
-    // worktree in the same project onto the same `toWorkspaceId(...)`
+    // badge in `WorktreeCard.tsx`, and (b) collided every detached
+    // worktree in the same repo onto the same `toWorktreeId(...)`
     // output, breaking selection / pinning / the `data-testid` hook.
     //
     // `listWorktrees` now falls back to `detached-<short-sha>`, which is
     // non-empty, unique per HEAD, and `[a-z0-9-]`-only so it survives
-    // every place `workspaceId` is used as a filesystem path component or
+    // every place `worktreeId` is used as a filesystem path component or
     // URL segment.
     const { repoPath, tmp } = createRepo();
 
@@ -145,18 +145,18 @@ describe("listWorktrees", () => {
     expect(detached!.branch).toBe(`detached-${detachedSha.slice(0, 7)}`);
     // Spell the invariants out so a future refactor that re-introduces
     // empty branches or unsafe characters fails loudly here rather than
-    // silently regressing the WorkspaceCard / toWorkspaceId chain.
+    // silently regressing the WorktreeCard / toWorktreeId chain.
     expect(detached!.branch).not.toBe("");
     expect(detached!.branch).toMatch(/^[a-z0-9-]+$/);
     expect(detached!.head).toBe(detachedSha);
   });
 
   it("gives two detached worktrees at different commits distinct branch labels", async () => {
-    // The user-reported failure was ~9 detached worktrees in one project
+    // The user-reported failure was ~9 detached worktrees in one repo
     // all sharing the empty-string branch. Asserting uniqueness here pins
     // down the property that fixed it: two detached worktrees at
     // different SHAs map to different `branch` values, so
-    // `toWorkspaceId(projectName, branch)` no longer collides.
+    // `toWorktreeId(repoName, branch)` no longer collides.
     const { repoPath, tmp } = createRepo();
 
     const firstSha = git(repoPath, ["rev-parse", "HEAD"]).trim();
@@ -185,7 +185,7 @@ describe("listWorktrees", () => {
 
 // `getRepoInfo` is best-effort metadata — issue #458. The two failure
 // branches below ("not a git checkout" and "no origin remote") are
-// expected steady states for some project directories, not error paths.
+// expected steady states for some repo directories, not error paths.
 // These tests pin down that the function returns `null` cleanly for both,
 // so the `hasOrigin` flag that `syncWorktrees` derives from it has a
 // stable contract. The success branches exercise the three remote-URL

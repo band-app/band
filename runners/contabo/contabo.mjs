@@ -176,7 +176,7 @@ async function spawn() {
   }
 
   printHandle(String(id));
-  if (cloneUrl()) console.log(`BAND_HOST_PROJECT_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`);
+  if (cloneUrl()) console.log(`BAND_HOST_REPO_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`);
   console.log(`${mode === "pool" ? "reinstalled pool" : "bought"} instance ${id} as ${name}`);
 }
 

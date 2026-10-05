@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Workspace terminal configuration (recursive split-tree layout)
+// Worktree terminal configuration (recursive split-tree layout)
 // ---------------------------------------------------------------------------
 
 export interface TerminalPaneConfig {
@@ -18,6 +18,6 @@ export type TerminalLayoutNode =
       children: [TerminalLayoutNode, TerminalLayoutNode];
     };
 
-export interface WorkspaceTerminalConfig {
+export interface WorktreeTerminalConfig {
   layout: TerminalLayoutNode;
 }

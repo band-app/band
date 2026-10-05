@@ -14,7 +14,7 @@ import {
 const DEFAULT_TOKEN = "search-files-test-token";
 
 // ---------------------------------------------------------------------------
-// Black-box integration tests for `workspace.searchFiles` — the procedure
+// Black-box integration tests for `worktree.searchFiles` — the procedure
 // powering the Cmd+P Quick Open file picker. The previous implementation
 // shelled out to `git ls-files --cached --others --exclude-standard`, which
 // silently dropped files inside nested git repositories / submodules
@@ -23,7 +23,7 @@ const DEFAULT_TOKEN = "search-files-test-token";
 // The replacement uses `rg --files` so the walker descends into nested
 // repos while still respecting `.gitignore` and excluding `node_modules`
 // / `.git` internals. These tests boot the real server (same bundle that
-// ships to users) against a temp workspace that contains a nested git
+// ships to users) against a temp worktree that contains a nested git
 // repo and pin both the new positive behaviour and the unchanged
 // exclusion semantics.
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-describe("tRPC — workspace.searchFiles", () => {
+describe("tRPC — worktree.searchFiles", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -48,7 +48,7 @@ describe("tRPC — workspace.searchFiles", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-search-files-test-");
 
-    // Outer workspace: a real git repo with a tracked file.
+    // Outer worktree: a real git repo with a tracked file.
     repoPath = join(tmpHome, "outer");
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, ["init", "-b", "main"]);
@@ -84,7 +84,7 @@ describe("tRPC — workspace.searchFiles", () => {
     git(repoPath, ["commit", "-m", "gitignore"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "outer",
           path: repoPath,
@@ -108,8 +108,8 @@ describe("tRPC — workspace.searchFiles", () => {
   it("surfaces files inside nested git repositories (issue #530)", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "outer-main", query: "" },
+      "worktree.searchFiles",
+      { worktreeId: "outer-main", query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -126,8 +126,8 @@ describe("tRPC — workspace.searchFiles", () => {
   it("excludes node_modules and .gitignored paths", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "outer-main", query: "" },
+      "worktree.searchFiles",
+      { worktreeId: "outer-main", query: "" },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -145,8 +145,8 @@ describe("tRPC — workspace.searchFiles", () => {
     // even when scattered subsequence matches exist elsewhere.
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "outer-main", query: "composite" },
+      "worktree.searchFiles",
+      { worktreeId: "outer-main", query: "composite" },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -156,19 +156,19 @@ describe("tRPC — workspace.searchFiles", () => {
   it("respects the limit parameter", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "outer-main", query: "", limit: 2 },
+      "worktree.searchFiles",
+      { worktreeId: "outer-main", query: "", limit: 2 },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
     expect(files.length).toBe(2);
   });
 
-  it("returns an error for an unknown workspace", async () => {
+  it("returns an error for an unknown worktree", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "nonexistent-main", query: "" },
+      "worktree.searchFiles",
+      { worktreeId: "nonexistent-main", query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -177,11 +177,11 @@ describe("tRPC — workspace.searchFiles", () => {
   it("rejects unauthenticated requests with 401", async () => {
     // Negative auth test (TEST-13): the band_token cookie gates every
     // tRPC endpoint at the transport layer; a request without it must
-    // be rejected before it ever reaches `workspace.searchFiles`. We
+    // be rejected before it ever reaches `worktree.searchFiles`. We
     // call `fetch` directly here rather than going through `trpcQuery`
     // because the helper unconditionally attaches the Cookie header.
-    const url = `${server.url}/trpc/workspace.searchFiles?input=${encodeURIComponent(
-      JSON.stringify({ workspaceId: "outer-main", query: "" }),
+    const url = `${server.url}/trpc/worktree.searchFiles?input=${encodeURIComponent(
+      JSON.stringify({ worktreeId: "outer-main", query: "" }),
     )}`;
     const res = await fetch(url);
     expect(res.status).toBe(401);
@@ -189,11 +189,11 @@ describe("tRPC — workspace.searchFiles", () => {
 });
 
 // ---------------------------------------------------------------------------
-// `searchFiles` against a non-git workspace. The previous `git ls-files`
+// `searchFiles` against a non-git worktree. The previous `git ls-files`
 // implementation would fail outright in this case; ripgrep's
 // `--no-require-git` makes the procedure work for plain directories too.
 // ---------------------------------------------------------------------------
-describe("tRPC — workspace.searchFiles in non-git directories", () => {
+describe("tRPC — worktree.searchFiles in non-git directories", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let plainDir: string;
@@ -206,7 +206,7 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
     writeFileSync(join(plainDir, "note.md"), "# plain note\n");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "plain",
           path: plainDir,
@@ -227,11 +227,11 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("lists files in a workspace that is not a git repository", async () => {
+  it("lists files in a worktree that is not a git repository", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.searchFiles",
-      { workspaceId: "plain-main", query: "" },
+      "worktree.searchFiles",
+      { worktreeId: "plain-main", query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -244,8 +244,8 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
     // The transport-layer middleware is the same for both suites, but
     // an auditor reading just the non-git block would otherwise see no
     // auth coverage in this suite — explicit is better than implicit.
-    const url = `${server.url}/trpc/workspace.searchFiles?input=${encodeURIComponent(
-      JSON.stringify({ workspaceId: "plain-main", query: "" }),
+    const url = `${server.url}/trpc/worktree.searchFiles?input=${encodeURIComponent(
+      JSON.stringify({ worktreeId: "plain-main", query: "" }),
     )}`;
     const res = await fetch(url);
     expect(res.status).toBe(401);

@@ -51,7 +51,7 @@ function CommandInput({
       <SearchIcon className="mr-2 h-4 w-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
-        // Search boxes take file / branch / workspace names: no autocorrect,
+        // Search boxes take file / branch / worktree names: no autocorrect,
         // capitalisation or QuickType suggestions on mobile keyboards.
         autoComplete="off"
         autoCorrect="off"

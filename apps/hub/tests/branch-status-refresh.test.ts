@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -14,13 +14,13 @@ import {
 import { StatusStream } from "./helpers/status-stream";
 import { waitFor } from "./helpers/wait-for";
 
-// `statuses.refreshBranchStatus` re-reads one workspace's git status on
-// demand (the dashboard calls it when the user selects a workspace) and
+// `statuses.refreshBranchStatus` re-reads one worktree's git status on
+// demand (the dashboard calls it when the user selects a worktree) and
 // pushes it on the status stream, without waiting for the next poll tick.
 
 const TOKEN = "branch-status-refresh-token";
-const PROJECT = "refreshproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "refreshproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 
 const gitEnv = {
   ...process.env,
@@ -41,16 +41,16 @@ describe("statuses.refreshBranchStatus", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-refresh-");
-    repo = join(tmpHome, PROJECT);
+    repo = join(tmpHome, REPO);
     mkdirSync(repo);
     git(repo, ["init", "-q", "-b", "main"]);
     writeFileSync(join(repo, "README.md"), "# refresh\n");
     git(repo, ["add", "."]);
     git(repo, ["commit", "-q", "-m", "init"]);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repo,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repo }],
@@ -70,28 +70,28 @@ describe("statuses.refreshBranchStatus", () => {
     const res = await fetch(`${server.url}/trpc/statuses.refreshBranchStatus`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: WORKSPACE_ID }),
+      body: JSON.stringify({ worktreeId: WORKTREE_ID }),
     });
     expect(res.status).toBe(401);
   });
 
-  it("reports refreshed: false for an unknown workspace", async () => {
+  it("reports refreshed: false for an unknown worktree", async () => {
     const res = await trpcMutate(
       server.url,
       "statuses.refreshBranchStatus",
-      { workspaceId: "no-such-workspace" },
+      { worktreeId: "no-such-worktree" },
       TOKEN,
     );
     expect(res.status).toBe(200);
     expect(await trpcData(res)).toEqual({ refreshed: false });
   });
 
-  it("pushes the workspace's current git status without waiting for a tick", async () => {
+  it("pushes the worktree's current git status without waiting for a tick", async () => {
     const stream = await StatusStream.open(server.url, TOKEN);
     try {
       // The subscription starts the poller; its first tick sees a clean tree.
-      await waitFor(async () => stream.latest(WORKSPACE_ID), { label: "first poll tick" });
-      expect(stream.latest(WORKSPACE_ID)?.dirty).toBe(false);
+      await waitFor(async () => stream.latest(WORKTREE_ID), { label: "first poll tick" });
+      expect(stream.latest(WORKTREE_ID)?.dirty).toBe(false);
       // The next tick is now 60 s away, so only the refresh can report the edit.
       const activity = await trpcMutate(
         server.url,
@@ -105,16 +105,16 @@ describe("statuses.refreshBranchStatus", () => {
       const res = await trpcMutate(
         server.url,
         "statuses.refreshBranchStatus",
-        { workspaceId: WORKSPACE_ID },
+        { worktreeId: WORKTREE_ID },
         TOKEN,
       );
       expect(res.status).toBe(200);
       expect(await trpcData(res)).toEqual({ refreshed: true });
-      await waitFor(async () => stream.latest(WORKSPACE_ID)?.dirty === true, {
+      await waitFor(async () => stream.latest(WORKTREE_ID)?.dirty === true, {
         timeoutMs: 5_000,
         label: "refreshed status on the stream",
       });
-      expect(stream.latest(WORKSPACE_ID)).toEqual({
+      expect(stream.latest(WORKTREE_ID)).toEqual({
         dirty: true,
         conflict: false,
         ahead: 0,

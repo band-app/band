@@ -172,7 +172,7 @@ export function repoRelative(file: string): string | null {
 
 /**
  * Checks the files `build` names. `exists` answers for a repo-relative path
- * and decides what "the repository" means (a worktree, or the project checkout).
+ * and decides what "the repository" means (a worktree, or the repo checkout).
  */
 export async function checkReferences(
   environment: Environment,

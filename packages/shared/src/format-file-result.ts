@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Format-file result returned by `adapter.formatWorkspaceFile`
+// Format-file result returned by `adapter.formatWorktreeFile`
 // ---------------------------------------------------------------------------
 //
-// Mirrors the discriminated-union shape returned by the `workspace.formatFile`
+// Mirrors the discriminated-union shape returned by the `worktree.formatFile`
 // tRPC procedure. The procedure is pure: the client passes in editor content
 // and gets back the formatted string. Disk persistence is the caller's
 // responsibility (typically via the existing save flow).

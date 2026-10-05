@@ -15,7 +15,7 @@ const GITHUB_COM_ALIASES = new Set(["github.com", "www.github.com", "ssh.github.
 /**
  * github.com, GitHub Enterprise Cloud (`<name>.ghe.com`) and GitHub
  * Enterprise Server on the conventional `github.<company>.<tld>` name. The
- * same rule as the project avatar lookup.
+ * same rule as the repo avatar lookup.
  */
 function githubHost(repo: RepoInfo): string | null {
   const host = repo.host.toLowerCase();

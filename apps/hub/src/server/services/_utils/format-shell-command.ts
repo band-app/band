@@ -27,7 +27,7 @@
  * positional arguments still launches cleanly.
  *
  * Shared by the two terminal-spawn paths that compose a vendor-CLI
- * invocation: `workspaces.create --via terminal` (issue #551) and the chat
+ * invocation: `worktrees.create --via terminal` (issue #551) and the chat
  * tab's "Continue in terminal" action.
  */
 

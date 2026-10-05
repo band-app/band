@@ -314,7 +314,7 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
-  # The hub suite again, with every workspace on a real band-worker over
+  # The hub suite again, with every worktree on a real band-worker over
   # loopback (plan step 2.6; docs/integration-testing.md, "Host modes"). It runs
   # beside `check` so the existing jobs don't get longer. The worker runs from
   # its bundle, so the packed package is what the hub talks to.
@@ -499,16 +499,16 @@ jobs:
 
           # CLI: the surface that can trigger the macOS-only worktree
           # path-reconciliation bug: the CLI + its test harness, the server
-          # sync/workspace services, the workspaces query layer, and this
+          # sync/worktree services, the worktrees query layer, and this
           # workflow file itself.
-          if grep -qE '^(apps/cli/|apps/hub/src/server/services/(sync-service|workspace-service)\.ts$|apps/hub/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if grep -qE '^(apps/cli/|apps/hub/src/server/services/(sync-service|worktree-service)\.ts$|apps/hub/src/server/infra/db/queries/worktrees\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "cli=true" >> "$GITHUB_OUTPUT"
           else
             echo "cli=false" >> "$GITHUB_OUTPUT"
           fi
 
           # Web: what the vitest suite exercises beyond the React UI: the
-          # server (terminals, the terminal daemon, workspaces and git live
+          # server (terminals, the terminal daemon, worktrees and git live
           # under apps/hub/src/server/), the code it shares with the client (packages/shared), the tests
           # and their build, the workspace packages and plugins the server
           # loads, the CLI the tests shell out to, the lockfile and Node
@@ -609,9 +609,9 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" $base/api/health)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' $base/api/health)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" $base/)" = 200
-          curl -s -H "$auth" "$base/trpc/projects.list" | grep -q '"result"'
-          # Local workspaces are off by default, so there is no sample project.
-          if curl -s -H "$auth" "$base/trpc/projects.list" | grep -q sample; then echo 'sample project registered'; exit 1; fi
+          curl -s -H "$auth" "$base/trpc/repos.list" | grep -q '"result"'
+          # Local worktrees are off by default, so there is no sample repo.
+          if curl -s -H "$auth" "$base/trpc/repos.list" | grep -q sample; then echo 'sample repo registered'; exit 1; fi
           curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"usable":false'
 
       - name: Compose keeps data across a recreate
@@ -622,10 +622,10 @@ jobs:
           BAND_ADMIN_TOKEN: ci-compose-token
         run: |
           auth='Authorization: Bearer ci-compose-token'
-          # Add a project the entrypoint knows nothing about.
-          docker compose exec -T band sh -c 'mkdir -p /data/projects/persisted && cd /data/projects/persisted && git init -q && git commit -q --allow-empty -m init'
-          docker compose exec -T band band projects add /data/projects/persisted
-          curl -s -H "$auth" http://127.0.0.1:3466/trpc/projects.list | grep -q persisted
+          # Add a repo the entrypoint knows nothing about.
+          docker compose exec -T band sh -c 'mkdir -p /data/repos/persisted && cd /data/repos/persisted && git init -q && git commit -q --allow-empty -m init'
+          docker compose exec -T band band repos add /data/repos/persisted
+          curl -s -H "$auth" http://127.0.0.1:3466/trpc/repos.list | grep -q persisted
           docker compose down
           docker compose up -d --no-build
           for i in $(seq 1 60); do
@@ -634,7 +634,7 @@ jobs:
             sleep 2
           done
           test "$status" = healthy
-          curl -s -H "$auth" http://127.0.0.1:3466/trpc/projects.list | grep -q persisted
+          curl -s -H "$auth" http://127.0.0.1:3466/trpc/repos.list | grep -q persisted
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" http://127.0.0.1:3466/api/health)" = 200
 
       - name: Compose with BAND_SERVE_UI=false
@@ -767,7 +767,7 @@ jobs:
       - name: Build hub
         run: pnpm --filter @band-app/server build
 
-      # The snapshot and restore hooks (plan step 3.10) run in the same job: a container workspace
+      # The snapshot and restore hooks (plan step 3.10) run in the same job: a container worktree
       # sleeps, its /work is snapshotted into an image, and the restored container has an untracked file.
       - name: Docker runner hook
         run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
@@ -931,7 +931,7 @@ jobs:
       # Keep --test-threads=4 (matching ci.yml `check` and release.yml): each
       # test boots its own real Band server on a random port, and unbounded
       # parallelism floods the slower macOS runner so servers aren't ready when
-      # `workspaces create` dispatches, flaking the worktree-dependent tests.
+      # `worktrees create` dispatches, flaking the worktree-dependent tests.
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 

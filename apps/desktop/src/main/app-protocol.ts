@@ -4,7 +4,7 @@
  * The window loads `app://<host>/` instead of the hub's URL, so the UI works
  * with any hub. Files come from the UI build directory. A path with no file
  * extension that matches no file gets the SPA shell (`_shell.html`), so a
- * reload or a deep link such as `app://band/workspace/<id>` keeps its route,
+ * reload or a deep link such as `app://band/worktree/<id>` keeps its route,
  * as the hub does for the browser. A missing asset (a path with an extension)
  * is a 404, not the shell, so a stale chunk name fails loudly.
  *
@@ -187,7 +187,7 @@ export function createAppHandler(
       return fileResponse(await readFile(file), file, immutable, csp);
     }
     // A missing asset is a 404. Any other path is a route, including ones whose
-    // last segment has a dot (a workspace id like "band-release-1.2").
+    // last segment has a dot (a worktree id like "band-release-1.2").
     if (url.pathname.startsWith("/assets/") || ASSET_EXTENSIONS.has(extname(url.pathname))) {
       return new Response("Not found", { status: 404 });
     }

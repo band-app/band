@@ -11,12 +11,12 @@
  *     (also `lost`: three missed heartbeats);
  *   - a machine the `status` hook lists that the hub has no live record of (an orphan);
  *   - a machine past the runner's `maxLifetimeSec`. The reaper first asks the worker to hand
- *     its workspaces over like an idle one (step 3.5: snapshot, agent sessions, exit), and
- *     destroys only after the worker has exited with every workspace stored.
+ *     its worktrees over like an idle one (step 3.5: snapshot, agent sessions, exit), and
+ *     destroys only after the worker has exited with every worktree stored.
  *
- * A machine whose workspaces are not stored is never destroyed early. It waits until the hard
+ * A machine whose worktrees are not stored is never destroyed early. It waits until the hard
  * deadline (`lifetimeGraceSec` after the lifetime, or after the offline threshold). If that
- * passes, the machine is destroyed anyway and the hub logs an error naming the workspaces.
+ * passes, the machine is destroyed anyway and the hub logs an error naming the worktrees.
  *
  * Environment (read on every sweep, except the interval, read at start):
  *   BAND_REAPER_INTERVAL_MS      time between sweeps, default 30 s
@@ -25,7 +25,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   RunnerMachineQueries,
   type RunnerMachineRow,
@@ -54,7 +54,7 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
 
 export class MachineError extends Error {
   constructor(
-    readonly reason: "not-found" | "gone" | "has-workspaces",
+    readonly reason: "not-found" | "gone" | "has-worktrees",
     message: string,
   ) {
     super(message);
@@ -77,8 +77,8 @@ export interface MachineView {
   note: string | null;
   /** Status of the machine's host, or null when the host row is gone. */
   hostStatus: string | null;
-  /** Workspaces the hub tracks on the machine's host. */
-  workspaces: number;
+  /** Worktrees the hub tracks on the machine's host. */
+  worktrees: number;
 }
 
 export class RunnerReaperService {
@@ -112,13 +112,13 @@ export class RunnerReaperService {
   // ---- views -----------------------------------------------------------------
 
   list(): MachineView[] {
-    const counts = ephemeralLifecycleService.workspaceCountsByHost();
+    const counts = ephemeralLifecycleService.worktreeCountsByHost();
     return this.machines.list(LIST_LIMIT).map((m) => this.view(m, counts.get(m.workerId) ?? 0));
   }
 
   private view(
     m: RunnerMachineRow,
-    workspaces = ephemeralLifecycleService.workspaceCount(m.workerId),
+    worktrees = ephemeralLifecycleService.worktreeCount(m.workerId),
   ): MachineView {
     return {
       id: m.id,
@@ -133,14 +133,14 @@ export class RunnerReaperService {
       destroyedAt: m.destroyedAt,
       note: m.error,
       hostStatus: tokenService.hostStatus(m.workerId),
-      workspaces,
+      worktrees,
     };
   }
 
   // ---- admin action ----------------------------------------------------------
 
   /**
-   * Destroys a machine now, for an admin. A machine whose workspaces are not stored is refused
+   * Destroys a machine now, for an admin. A machine whose worktrees are not stored is refused
    * unless `force` is set, because they would be lost with it.
    */
   async destroy(machineId: string, opts: { force?: boolean } = {}): Promise<MachineView> {
@@ -151,8 +151,8 @@ export class RunnerReaperService {
     }
     if (!opts.force && !this.isSafeToDestroy(machine)) {
       throw new MachineError(
-        "has-workspaces",
-        `Machine ${machineId} holds workspaces that are not stored. Let it sleep first, or destroy it with force.`,
+        "has-worktrees",
+        `Machine ${machineId} holds worktrees that are not stored. Let it sleep first, or destroy it with force.`,
       );
     }
     const done = await this.runners.destroyMachine(
@@ -245,7 +245,7 @@ export class RunnerReaperService {
     );
   }
 
-  /** A machine past its maximum lifetime: store the workspaces, wait for the worker to exit, then destroy. */
+  /** A machine past its maximum lifetime: store the worktrees, wait for the worker to exit, then destroy. */
   private async endOfLife(
     machine: RunnerMachineRow,
     runner: RunnerConfig,
@@ -264,10 +264,10 @@ export class RunnerReaperService {
       return;
     }
     if (
-      ephemeralLifecycleService.workspaceCount(machine.workerId) === 0 &&
+      ephemeralLifecycleService.worktreeCount(machine.workerId) === 0 &&
       ephemeralLifecycleService.isStored(machine.workerId)
     ) {
-      await this.destroyNow(machine, `${reason}; it holds no workspaces`);
+      await this.destroyNow(machine, `${reason}; it holds no worktrees`);
       return;
     }
     if (now >= deadline) {
@@ -277,7 +277,7 @@ export class RunnerReaperService {
     if (!ephemeralLifecycleService.isEphemeral(machine.workerId)) {
       this.note(
         machine,
-        "waiting: the worker is not ephemeral, so it cannot hand its workspaces over",
+        "waiting: the worker is not ephemeral, so it cannot hand its worktrees over",
       );
       return;
     }
@@ -286,13 +286,13 @@ export class RunnerReaperService {
     this.note(
       machine,
       asked
-        ? `waiting for the worker to store its workspaces${blocker ? `: ${blocker}` : ""}`
+        ? `waiting for the worker to store its worktrees${blocker ? `: ${blocker}` : ""}`
         : "waiting: the worker did not take the request to sleep",
     );
   }
 
   /**
-   * Destroys the machine once its workspaces are stored (or it has none). Until `deadline` it
+   * Destroys the machine once its worktrees are stored (or it has none). Until `deadline` it
    * waits otherwise. After the deadline it destroys the machine anyway and logs the loss.
    */
   private async guarded(
@@ -308,25 +308,25 @@ export class RunnerReaperService {
     if (now < deadline) {
       this.note(
         machine,
-        `waiting: ${reason}, but its workspaces are not stored; hard deadline in ${Math.ceil((deadline - now) / 1000)}s`,
+        `waiting: ${reason}, but its worktrees are not stored; hard deadline in ${Math.ceil((deadline - now) / 1000)}s`,
       );
       return;
     }
     const lost = this.unstored(machine.workerId);
     log.error(
-      `HARD DEADLINE: destroying machine ${machine.id} (${reason}) although workspace(s) ${lost.join(", ") || "of its host"} were not stored`,
+      `HARD DEADLINE: destroying machine ${machine.id} (${reason}) although worktree(s) ${lost.join(", ") || "of its host"} were not stored`,
     );
     await this.destroyNow(
       machine,
-      `${reason}; hard deadline passed with workspaces NOT stored: ${lost.join(", ")}`,
+      `${reason}; hard deadline passed with worktrees NOT stored: ${lost.join(", ")}`,
     );
   }
 
   private unstored(hostId: string): string[] {
     const out: string[] = [];
-    for (const project of loadState().projects) {
-      for (const wt of project.worktrees) {
-        if (wt.hostId === hostId) out.push(toWorkspaceId(project.name, wt.name));
+    for (const repo of loadState().repos) {
+      for (const wt of repo.worktrees) {
+        if (wt.hostId === hostId) out.push(toWorktreeId(repo.name, wt.name));
       }
     }
     return out;

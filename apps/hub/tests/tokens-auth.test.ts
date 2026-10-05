@@ -42,7 +42,7 @@ beforeAll(async () => {
   seedSettings(home, { tokenSecret: SHARED_TOKEN });
 
   // An install from before this step: every migration except the tokens one,
-  // plus a project row, so the upgrade keeps data.
+  // plus a repo row, so the upgrade keeps data.
   const before = join(home, "migrations-before");
   cpSync(migrationsDir, before, { recursive: true });
   expect(readdirSync(before)).toContain(TOKENS_MIGRATION);
@@ -50,7 +50,7 @@ beforeAll(async () => {
   const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
   migrate(drizzle({ client: sqlite }), { migrationsFolder: before });
   sqlite.exec(
-    "INSERT INTO projects (name, path, default_branch, sort_order) VALUES ('old', '/repos/old', 'main', 0)",
+    "INSERT INTO repos (name, path, default_branch, sort_order) VALUES ('old', '/repos/old', 'main', 0)",
   );
   sqlite.close();
 
@@ -104,19 +104,19 @@ describe("upgrading with the shared token", () => {
     expect(
       (await fetch(`${server.url}/api/health`, { headers: bearer(SHARED_TOKEN) })).status,
     ).toBe(200);
-    const cookie = await fetch(`${server.url}/trpc/projects.list`, {
+    const cookie = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Cookie: `band_token=${SHARED_TOKEN}` },
     });
     expect(cookie.status).toBe(200);
     expect(await wsOutcome(SHARED_TOKEN)).toBe("open");
-    expect((await fetch(`${server.url}/trpc/projects.list`)).status).toBe(401);
+    expect((await fetch(`${server.url}/trpc/repos.list`)).status).toBe(401);
   });
 
   it("lists the shared token as a device token and keeps the old data", async () => {
     const shared = (await listTokens()).find((t) => t.id === "shared");
     expect(shared).toMatchObject({ kind: "device", state: "active", admin: true });
-    const projects = await trpcQuery(server.url, "projects.list", undefined, SHARED_TOKEN);
-    const { projects: listed } = await trpcData<{ projects: Array<{ name: string }> }>(projects);
+    const repos = await trpcQuery(server.url, "repos.list", undefined, SHARED_TOKEN);
+    const { repos: listed } = await trpcData<{ repos: Array<{ name: string }> }>(repos);
     expect(listed.map((p) => p.name)).toContain("old");
   });
 
@@ -134,9 +134,9 @@ describe("device tokens", () => {
     const { token, view } = await createDevice("phone");
     expect(token.startsWith("bdt_")).toBe(true);
     expect(view).toMatchObject({ kind: "device", label: "phone", state: "active" });
-    expect(
-      (await fetch(`${server.url}/trpc/projects.list`, { headers: bearer(token) })).status,
-    ).toBe(200);
+    expect((await fetch(`${server.url}/trpc/repos.list`, { headers: bearer(token) })).status).toBe(
+      200,
+    );
     const row = (await listTokens()).find((t) => t.id === view.id);
     expect(row?.lastUsedAt).not.toBeNull();
   });
@@ -167,15 +167,15 @@ describe("device tokens", () => {
     await closed;
 
     for (const request of [
-      fetch(`${server.url}/trpc/projects.list`, { headers: bearer(token) }),
+      fetch(`${server.url}/trpc/repos.list`, { headers: bearer(token) }),
       fetch(`${server.url}/api/health`, { headers: bearer(token) }),
-      fetch(`${server.url}/trpc/projects.list`, { headers: { Cookie: `band_token=${token}` } }),
+      fetch(`${server.url}/trpc/repos.list`, { headers: { Cookie: `band_token=${token}` } }),
       fetch(`${server.url}/api/uploads/x.png?token=${token}`),
     ]) {
       expect((await request).status).toBe(401);
     }
     expect(await wsOutcome(token)).toBe("closed");
-    expect(await wsOutcome(token, "/terminal?workspaceId=none&terminalId=none")).toBe("closed");
+    expect(await wsOutcome(token, "/terminal?worktreeId=none&terminalId=none")).toBe("closed");
 
     const state = (await listTokens()).find((t) => t.id === view.id)?.state;
     expect(state).toBe("revoked");
@@ -202,7 +202,7 @@ describe("device tokens", () => {
       state: "active",
     });
     expect(
-      (await fetch(`${server.url}/trpc/projects.list`, { headers: bearer(issued.token) })).status,
+      (await fetch(`${server.url}/trpc/repos.list`, { headers: bearer(issued.token) })).status,
     ).toBe(401);
     expect(await wsOutcome(issued.token)).toBe("closed");
 
@@ -240,7 +240,7 @@ describe("admin tokens", () => {
 
     // Nothing happened: the victim still works, and no token or host was created.
     expect(
-      (await fetch(`${server.url}/trpc/projects.list`, { headers: bearer(victim.token) })).status,
+      (await fetch(`${server.url}/trpc/repos.list`, { headers: bearer(victim.token) })).status,
     ).toBe(200);
     const labels = (await listTokens()).map((t) => t.label);
     expect(labels).not.toContain("minted");
@@ -249,7 +249,7 @@ describe("admin tokens", () => {
 
   it("lets a non-admin device token use the rest of the API, including hosts.list", async () => {
     const { token } = await createDevice("reader");
-    expect((await trpcQuery(server.url, "projects.list", undefined, token)).status).toBe(200);
+    expect((await trpcQuery(server.url, "repos.list", undefined, token)).status).toBe(200);
     expect((await trpcQuery(server.url, "hosts.list", undefined, token)).status).toBe(200);
   });
 

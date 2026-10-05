@@ -25,7 +25,7 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  *
  * Execution graph (warm boot — see issue #472 cold-start work):
  *
- *   ensureProjectStateInSync ─────────────────────────────────┐
+ *   ensureRepoStateInSync ─────────────────────────────────┐
  *                                                             │
  *   ensureCliInstalled ──┬─► ensureSettingsDefaults  ──────── ─┤
  *                        ├─► ensureClaudeHooks      ──────── ─┤
@@ -41,11 +41,11 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  *      `band skills install`). `ensureSettingsDefaults` doesn't strictly
  *      need the CLI, but it's grouped here for code clarity and the cost
  *      is negligible on warm boots.
- *   2. `ensureProjectStateInSync` (DB + `git worktree list`) doesn't touch
+ *   2. `ensureRepoStateInSync` (DB + `git worktree list`) doesn't touch
  *      the band CLI at all — kick it off *before* the CLI gate so its
  *      ~100 ms of git fork/exec overlaps with the CLI stat AND the
  *      downstream group, instead of sitting in series after them. On the
- *      author's 28-project host this is the longest single step in the
+ *      author's 28-repo host this is the longest single step in the
  *      pipeline, so getting it off the critical path is the biggest win.
  *
  * Settings.json RMW must stay internally sequential (one reader → mutate →
@@ -55,22 +55,22 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  * `Promise.allSettled` (not `Promise.all`) so one failing step never
  * poisons the others — every `ensureXxx` already has its own try/catch
  * and logs warns, but defense-in-depth is cheap here. The
- * `projectSync` promise is created before the CLI await; if
+ * `repoSync` promise is created before the CLI await; if
  * `ensureCliInstalled` were to throw synchronously (it doesn't — internal
- * try/catch), the project sync promise would still be in flight without
- * a handler attached. That's fine because `ensureProjectStateInSync`
+ * try/catch), the repo sync promise would still be in flight without
+ * a handler attached. That's fine because `ensureRepoStateInSync`
  * itself has a try/catch and never rejects, so no unhandled-rejection
  * risk exists today. If you ever drop that try/catch, attach a
  * `.catch()` here to preserve the invariant.
  */
 export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
-  const projectSync = ensureProjectStateInSync();
+  const repoSync = ensureRepoStateInSync();
 
   await ensureCliInstalled();
 
   const results = await Promise.allSettled([
-    projectSync,
+    repoSync,
     ensureSettingsDefaults(),
     ensureClaudeHooks(),
     ensureSkillsInstalled(),
@@ -145,11 +145,11 @@ async function ensureSettingsDefaults(): Promise<void> {
 }
 
 /**
- * Reconcile every project row against the on-disk filesystem at boot:
+ * Reconcile every repo row against the on-disk filesystem at boot:
  * detect kind from the presence of `.git`, fix orphaned worktrees on
  * `git → plain` flips, and sync the default branch from `origin/HEAD`.
  *
- * This used to live inside the `projects.list` query (so the first
+ * This used to live inside the `repos.list` query (so the first
  * dashboard request triggered the reconcile), but writing to the DB
  * from a tRPC query is a contract violation. The branch-status poller
  * runs the same code on every tick, but the poller only starts when an
@@ -157,12 +157,12 @@ async function ensureSettingsDefaults(): Promise<void> {
  * dashboard attached would never persist kind self-heal corrections.
  * Running it once at boot closes that gap without requiring a client.
  *
- * `syncWorktrees` runs `git worktree list --porcelain` per project,
+ * `syncWorktrees` runs `git worktree list --porcelain` per repo,
  * which can take a non-trivial amount of time on users with many
- * projects on slow/network-mounted drives. We `await` it anyway
+ * repos on slow/network-mounted drives. We `await` it anyway
  * because:
- *   1. Most users have <10 projects and the call completes in <100 ms.
- *   2. The dashboard's first `projects.list` fetch (which happens
+ *   1. Most users have <10 repos and the call completes in <100 ms.
+ *   2. The dashboard's first `repos.list` fetch (which happens
  *      immediately on connect) needs the in-memory state to be
  *      reconciled. If we let the server start listening before the
  *      sync finishes, the first response would show stale data and
@@ -172,15 +172,15 @@ async function ensureSettingsDefaults(): Promise<void> {
  *      reconciled before `band notify` lands.
  *
  * If this ever becomes a startup bottleneck, the better fix is to make
- * the sync parallel-per-project rather than sequential — not to drop
+ * the sync parallel-per-repo rather than sequential — not to drop
  * the await.
  */
-async function ensureProjectStateInSync(): Promise<void> {
+async function ensureRepoStateInSync(): Promise<void> {
   try {
     await syncService.syncWorktrees();
   } catch (err) {
     log.warn(
-      "Failed to sync project state at boot: %s",
+      "Failed to sync repo state at boot: %s",
       err instanceof Error ? err.message : String(err),
     );
   }

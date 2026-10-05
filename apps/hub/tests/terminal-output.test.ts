@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -21,8 +21,8 @@ import { waitFor } from "./helpers/wait-for";
 // the tail is exact: the right length, contiguous, and ending at the end.
 
 const TOKEN = "terminal-output-token";
-const PROJECT = "outputproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "outputproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 const MAX_OUTPUT_CHARS = 100_000;
 
 let tmpHome: string;
@@ -40,12 +40,12 @@ async function outputText(terminalId: string, lines?: number): Promise<string> {
 
 beforeAll(async () => {
   tmpHome = createTmpHome("band-terminal-output-");
-  const worktree = join(tmpHome, PROJECT);
+  const worktree = join(tmpHome, REPO);
   mkdirSync(worktree, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: worktree,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: worktree }],
@@ -67,12 +67,12 @@ describe("terminal.output", () => {
     const created = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id: terminalId },
+      { worktreeId: WORKTREE_ID, id: terminalId },
       TOKEN,
     );
     expect(created.status).toBe(200);
     const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });

@@ -5,7 +5,7 @@ import { PullRequestPanel } from "./PullRequestPanel";
 export default defineClientPlugin({
   id: "github",
   contributions: {
-    "workspace.sideTabs": [
+    "worktree.sideTabs": [
       { id: "pull-request", label: "Checks", icon: GitPullRequest, component: PullRequestPanel },
     ],
   },

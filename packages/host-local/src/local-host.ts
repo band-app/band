@@ -59,14 +59,14 @@ import { checkHooks, installHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
-import { connectLspServer, killAllServers, killWorkspaceServers } from "./lsp/lsp-manager";
+import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
 import { probeTools } from "./process/tools";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
-import { loadEnvironment, loadScriptCommand } from "./setup/project-config";
+import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
-import { copyWorkspaceFiles } from "./setup/workspace-files";
+import { copyWorktreeFiles } from "./setup/worktree-files";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 
 /** How long `info()` keeps the tool versions it probed. */
@@ -109,7 +109,7 @@ export class LocalHost implements Host {
   };
   readonly lsp: HostLsp = {
     connect: (spec) => connectLspServer(spec),
-    killWorkspace: async (workspaceId) => killWorkspaceServers(workspaceId),
+    killWorktree: async (worktreeId) => killWorktreeServers(worktreeId),
     killAll: async () => killAllServers(),
   };
   readonly acp: HostAcp = {
@@ -120,12 +120,11 @@ export class LocalHost implements Host {
     openStdio: (spec) => openMcpStdio(spec),
   };
   readonly scripts: HostScripts = {
-    command: (workspace) => scriptCommand(this, workspace),
+    command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
-    prepare: (workspace) => prepareScript(this, workspace),
-    copyFiles: (projectPath, worktreePath) => copyWorkspaceFiles(this, projectPath, worktreePath),
-    environment: (workspace) =>
-      loadEnvironment(this, workspace.worktreePath, workspace.projectPath),
+    prepare: (worktree) => prepareScript(this, worktree),
+    copyFiles: (repoPath, worktreePath) => copyWorktreeFiles(this, repoPath, worktreePath),
+    environment: (worktree) => loadEnvironment(this, worktree.worktreePath, worktree.repoPath),
   };
   readonly agentEnv: HostAgentEnv = {
     claudeDefaults: async (cwd, cli): Promise<ClaudeDefaults> => {
@@ -377,26 +376,26 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
 
 async function prepareScript(
   host: Host,
-  workspace: {
-    projectPath: string;
+  worktree: {
+    repoPath: string;
     worktreePath: string;
     label: ScriptLabel;
   },
 ): Promise<ScriptPlan | null> {
-  const value = await scriptCommand(host, workspace);
+  const value = await scriptCommand(host, worktree);
   if (value === null) return null;
-  return prepareScriptRun(host, value, workspace.label);
+  return prepareScriptRun(host, value, worktree.label);
 }
 
 async function scriptCommand(
   host: Host,
-  workspace: {
-    projectPath: string;
+  worktree: {
+    repoPath: string;
     worktreePath: string;
     label: ScriptLabel;
   },
 ): Promise<string | null> {
-  return loadScriptCommand(host, workspace.worktreePath, workspace.projectPath, workspace.label);
+  return loadScriptCommand(host, worktree.worktreePath, worktree.repoPath, worktree.label);
 }
 
 /**

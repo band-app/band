@@ -1,5 +1,5 @@
 /**
- * Browser history service — thin pass-through over the per-workspace
+ * Browser history service — thin pass-through over the per-worktree
  * visit log query module.
  *
  * Routers must not import from `infra/` directly (see
@@ -88,26 +88,26 @@ export class BrowserHistoryService {
     this.queries.updateVisitMeta(input);
   }
 
-  listHistory(workspaceId: string, options: ListHistoryOptions = {}): HistoryEntry[] {
-    return this.queries.listHistory(workspaceId, options);
+  listHistory(worktreeId: string, options: ListHistoryOptions = {}): HistoryEntry[] {
+    return this.queries.listHistory(worktreeId, options);
   }
 
-  searchHistory(workspaceId: string, query: string, limit?: number): HistoryEntry[] {
-    return this.queries.searchHistory(workspaceId, query, limit);
+  searchHistory(worktreeId: string, query: string, limit?: number): HistoryEntry[] {
+    return this.queries.searchHistory(worktreeId, query, limit);
   }
 
-  deleteHistoryEntry(id: number, workspaceId: string): void {
-    this.queries.deleteHistoryEntry(id, workspaceId);
+  deleteHistoryEntry(id: number, worktreeId: string): void {
+    this.queries.deleteHistoryEntry(id, worktreeId);
   }
 
-  clearHistory(workspaceId: string, range: ClearRange): number {
-    return this.queries.clearHistory(workspaceId, range);
+  clearHistory(worktreeId: string, range: ClearRange): number {
+    return this.queries.clearHistory(worktreeId, range);
   }
 
   /** Import visits from another browser, each with the favicon `BrowserPanel` would record. */
-  importVisits(workspaceId: string, visits: Omit<ImportedVisit, "faviconUrl">[]): number {
+  importVisits(worktreeId: string, visits: Omit<ImportedVisit, "faviconUrl">[]): number {
     return this.queries.importVisits(
-      workspaceId,
+      worktreeId,
       visits.map((v) => ({ ...v, faviconUrl: guessFaviconUrl(v.url) })),
     );
   }

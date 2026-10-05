@@ -70,7 +70,7 @@ async function sessionState(url: string, chatId: string): Promise<SessionState> 
 
 async function createChat(url: string): Promise<string> {
   const chatId = newChatId();
-  await trpc(url, "chats.create", { workspaceId: "testproject-main", id: chatId });
+  await trpc(url, "chats.create", { worktreeId: "testrepo-main", id: chatId });
   return chatId;
 }
 

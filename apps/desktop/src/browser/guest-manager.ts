@@ -16,7 +16,7 @@
  *     `registerGuest`; events are keyed by that Band browser id and the
  *     CDP bridge resolves a tab to its WebContents through it.
  *   - Ensure-only tabs. The CDP screencast bridge can ask for a tab that
- *     no pane has mounted (an agent working in a workspace the user never
+ *     no pane has mounted (an agent working in a worktree the user never
  *     opened). Those get an offscreen `WebContentsView` in the hidden
  *     window. When a pane later mounts the tab, its guest takes over and
  *     the offscreen page is closed; the pane adopts its URL.
@@ -70,7 +70,7 @@ import { decideWindowOpenAction } from "./window-open.js";
 const log = createLogger("guest-manager");
 
 /** Cap on ensure-only offscreen pages. Guests mounted by panes are bounded
- *  by the renderer's hidden-workspace budget instead. */
+ *  by the renderer's hidden-worktree budget instead. */
 const MAX_OFFSCREEN_VIEWS = 10;
 
 export interface GuestManagerOptions {
@@ -756,7 +756,7 @@ export class BrowserGuestManager {
  * platform modifier F (find), T (new terminal), Shift+N (new chat), Shift+B
  * (new browser), W (close), D / Shift+D (split; Shift+D only off macOS,
  * where plain Ctrl+D is not a Band chord), [ and ] with or without
- * Shift (cycle groups / tabs), Alt+Left / Alt+Right (workspace history), plus
+ * Shift (cycle groups / tabs), Alt+Left / Alt+Right (worktree history), plus
  * Cmd+Opt+T (new chat) on macOS and Alt+Shift+D (split down) elsewhere.
  * Everything else (copy, paste, select-all, the page's own bindings) stays
  * with the page.

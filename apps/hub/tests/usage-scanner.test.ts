@@ -59,14 +59,14 @@ function selectAllUsageEvents(bandHomeDir: string): Array<{
   input_tokens: number;
   provider: string | null;
   session_id: string | null;
-  workspace_id: string;
-  project: string;
+  worktree_id: string;
+  repo: string;
 }> {
   const sqlite = new DatabaseSync(join(bandHomeDir, "band.db"));
   try {
     return sqlite
       .prepare(
-        `SELECT external_key, cost_usd, input_tokens, provider, session_id, workspace_id, project
+        `SELECT external_key, cost_usd, input_tokens, provider, session_id, worktree_id, repo
          FROM usage_events ORDER BY id`,
       )
       .all() as Array<{
@@ -75,23 +75,23 @@ function selectAllUsageEvents(bandHomeDir: string): Array<{
       input_tokens: number;
       provider: string | null;
       session_id: string | null;
-      workspace_id: string;
-      project: string;
+      worktree_id: string;
+      repo: string;
     }>;
   } finally {
     sqlite.close();
   }
 }
 
-function watermark(bandHomeDir: string, workspaceId: string, agentType: string): number {
+function watermark(bandHomeDir: string, worktreeId: string, agentType: string): number {
   const sqlite = new DatabaseSync(join(bandHomeDir, "band.db"));
   try {
     const row = sqlite
       .prepare(
         `SELECT last_scanned_updated_at FROM usage_scan_state
-         WHERE workspace_id = ? AND agent_type = ?`,
+         WHERE worktree_id = ? AND agent_type = ?`,
       )
-      .get(workspaceId, agentType) as { last_scanned_updated_at: number } | undefined;
+      .get(worktreeId, agentType) as { last_scanned_updated_at: number } | undefined;
     return row?.last_scanned_updated_at ?? 0;
   } finally {
     sqlite.close();
@@ -164,8 +164,8 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("UsageScannerService (issue #425)", () => {
-  const workspaceId = "band-main";
-  const project = "band";
+  const worktreeId = "band-main";
+  const repo = "band";
   const worktreePath = "/tmp/band-main";
 
   // Hour anchors used by the bucket-aware assertions below. UTC-aligned
@@ -208,7 +208,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () => makeStubReader({ sessions, usageBySession: { [sessionId]: baseSnap } }),
     });
@@ -221,11 +221,11 @@ describe("UsageScannerService (issue #425)", () => {
     // Sums: 100+80 input, 200 cache, 0.0042+0.0017 cost.
     expect(rowsAfterFirst[0].input_tokens).toBe(180);
     expect(rowsAfterFirst[0].cost_usd).toBeCloseTo(0.0059, 4);
-    expect(rowsAfterFirst.every((r) => r.workspace_id === workspaceId)).toBe(true);
-    expect(rowsAfterFirst.every((r) => r.project === project)).toBe(true);
+    expect(rowsAfterFirst.every((r) => r.worktree_id === worktreeId)).toBe(true);
+    expect(rowsAfterFirst.every((r) => r.repo === repo)).toBe(true);
 
     // Watermark advanced to the listing's `lastModified`.
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(HOUR_A + 60_000);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(HOUR_A + 60_000);
 
     // Second tick on the same listing — the session's lastModified is
     // not past the watermark, so we skip getSessionUsage entirely.
@@ -253,7 +253,7 @@ describe("UsageScannerService (issue #425)", () => {
     const grownScanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () =>
         makeStubReader({
@@ -268,7 +268,7 @@ describe("UsageScannerService (issue #425)", () => {
     // Replaced totals: 100+80+60 input, 0.0042+0.0017+0.001 cost.
     expect(rowsAfterGrowth[0].input_tokens).toBe(240);
     expect(rowsAfterGrowth[0].cost_usd).toBeCloseTo(0.0069, 4);
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(HOUR_A + 120_000);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(HOUR_A + 120_000);
   });
 
   it("splits turns crossing the hour boundary into separate rows", async () => {
@@ -301,7 +301,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () =>
         makeStubReader({
@@ -360,7 +360,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "codex-default", agentType: "codex" }],
       getUsageReader: () =>
         makeStubReader({
@@ -385,7 +385,7 @@ describe("UsageScannerService (issue #425)", () => {
   });
 
   it("chunks a large backlog across multiple ticks via maxSessionsPerTick + ASC sort", async () => {
-    // Simulate the first-boot scenario: a workspace with 5 historical
+    // Simulate the first-boot scenario: a worktree with 5 historical
     // sessions (this is the bounded test stand-in for hundreds in
     // production). The cap is set to 2, so each tick processes the
     // OLDEST two changed sessions, the watermark advances to the last
@@ -426,7 +426,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () => makeStubReader({ sessions, usageBySession }),
       maxSessionsPerTick: 2,
@@ -437,7 +437,7 @@ describe("UsageScannerService (issue #425)", () => {
     let rows = selectAllUsageEvents(tmpHome).map((r) => r.session_id);
     expect(rows.sort()).toEqual(["ses_0", "ses_1"]);
     // Watermark advanced to ses_1's lastModified.
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(baseHour + 1 * HOUR_MS + 1_000);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(baseHour + 1 * HOUR_MS + 1_000);
 
     // Tick 2 — listSessions returns the same 5; the watermark filter
     // drops ses_0 + ses_1 (already processed). Cap of 2 means the
@@ -445,23 +445,23 @@ describe("UsageScannerService (issue #425)", () => {
     await scanner.tick();
     rows = selectAllUsageEvents(tmpHome).map((r) => r.session_id);
     expect(rows.sort()).toEqual(["ses_0", "ses_1", "ses_2", "ses_3"]);
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(baseHour + 3 * HOUR_MS + 1_000);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(baseHour + 3 * HOUR_MS + 1_000);
 
     // Tick 3 — picks up the last remaining ses_4.
     await scanner.tick();
     rows = selectAllUsageEvents(tmpHome).map((r) => r.session_id);
     expect(rows.sort()).toEqual(["ses_0", "ses_1", "ses_2", "ses_3", "ses_4"]);
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(baseHour + 4 * HOUR_MS + 1_000);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(baseHour + 4 * HOUR_MS + 1_000);
 
     // Tick 4 — everything's at the watermark; no work, no new rows.
     await scanner.tick();
     expect(selectAllUsageEvents(tmpHome)).toHaveLength(5);
   });
 
-  it("only advances the watermark for workspaces that actually had sessions", async () => {
-    // One workspace has activity, the other is empty. Both are walked
+  it("only advances the watermark for worktrees that actually had sessions", async () => {
+    // One worktree has activity, the other is empty. Both are walked
     // by `tick()`; only the active one should get its watermark
-    // advanced (the empty-workspace watermark stays at 0 so a future
+    // advanced (the empty-worktree watermark stays at 0 so a future
     // restore-from-backup of session files isn't silently swallowed).
     const sessionA = "ses_a";
     const snap: SessionUsageSnapshot = {
@@ -483,14 +483,14 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [
-        { workspaceId: "band-feat", project: "band", worktreePath: "/tmp/band-feat" },
-        { workspaceId: "other-main", project: "other", worktreePath: "/tmp/other-main" },
+      listWorktrees: () => [
+        { worktreeId: "band-feat", repo: "band", worktreePath: "/tmp/band-feat" },
+        { worktreeId: "other-main", repo: "other", worktreePath: "/tmp/other-main" },
       ],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () => ({
         async listSessions(dir) {
-          // Other workspace has zero sessions on disk.
+          // Other worktree has zero sessions on disk.
           if (dir !== "/tmp/band-feat") return [];
           return [{ sessionId: sessionA, lastModified: HOUR_A + 1_000 }];
         },
@@ -505,9 +505,9 @@ describe("UsageScannerService (issue #425)", () => {
     const rows = selectAllUsageEvents(tmpHome);
     expect(rows).toHaveLength(1);
     expect(rows[0].external_key).toBe(`claude-code:ses_a:${HOUR_A}:claude-sonnet-4-6`);
-    expect(rows[0].workspace_id).toBe("band-feat");
+    expect(rows[0].worktree_id).toBe("band-feat");
 
-    // Other workspace's watermark stays 0 — no sessions observed, so
+    // Other worktree's watermark stays 0 — no sessions observed, so
     // the scanner refused to bump (defensive vs future backfills).
     expect(watermark(tmpHome, "other-main", "claude-code")).toBe(0);
     expect(watermark(tmpHome, "band-feat", "claude-code")).toBe(HOUR_A + 1_000);
@@ -519,14 +519,14 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "minimal", agentType: "minimal" }],
       getUsageReader: () => undefined,
     });
 
     await scanner.tick();
     expect(selectAllUsageEvents(tmpHome)).toHaveLength(0);
-    expect(watermark(tmpHome, workspaceId, "minimal")).toBe(0);
+    expect(watermark(tmpHome, worktreeId, "minimal")).toBe(0);
   });
 
   it("tolerates a failing reader without aborting other pairs", async () => {
@@ -550,7 +550,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [
         { agentId: "broken", agentType: "codex" },
         { agentId: "ok", agentType: "claude-code" },
@@ -608,7 +608,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () => stub,
       isPollingEnabled: () => false,
@@ -620,7 +620,7 @@ describe("UsageScannerService (issue #425)", () => {
     expect(selectAllUsageEvents(tmpHome)).toHaveLength(0);
     // Watermark untouched — the gate is upstream of any state advance,
     // so flipping the toggle back on later resumes from the same place.
-    expect(watermark(tmpHome, workspaceId, "claude-code")).toBe(0);
+    expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(0);
   });
 
   it("re-reads polling state each tick so a runtime toggle takes effect", async () => {
@@ -649,7 +649,7 @@ describe("UsageScannerService (issue #425)", () => {
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
-      listWorkspaces: () => [{ workspaceId, project, worktreePath }],
+      listWorktrees: () => [{ worktreeId, repo, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
       getUsageReader: () =>
         makeStubReader({

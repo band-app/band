@@ -16,30 +16,30 @@ import { isRemoteLoopback } from "./test-host";
 export const STUB_AGENT_PATH = join(import.meta.dirname, "..", "fixtures", "acp-stub-agent.mjs");
 
 /**
- * Where the hub keeps a workspace's chat uploads, and the URL the chat renders
- * them from. A local workspace uses `<home>/.band/uploads`. A workspace on the
- * loopback worker uses `<tmp>/.band-uploads/<workspaceId>`, because the worker
+ * Where the hub keeps a worktree's chat uploads, and the URL the chat renders
+ * them from. A local worktree uses `<home>/.band/uploads`. A worktree on the
+ * loopback worker uses `<tmp>/.band-uploads/<worktreeId>`, because the worker
  * owns those files (`docs/integration-testing.md`, "Host modes").
  */
-export function uploadsLocation(home: string, workspaceId: string) {
+export function uploadsLocation(home: string, worktreeId: string) {
   if (!isRemoteLoopback) {
     return { dir: join(home, ".band", "uploads"), urlPattern: /^\/api\/uploads\/[^/]+$/ };
   }
   return {
-    dir: join(realpathSync(tmpdir()), ".band-uploads", workspaceId),
-    urlPattern: new RegExp(`^/api/uploads/${workspaceId}/[^/]+$`),
+    dir: join(realpathSync(tmpdir()), ".band-uploads", worktreeId),
+    urlPattern: new RegExp(`^/api/uploads/${worktreeId}/[^/]+$`),
   };
 }
 
-/** The first-turn file-sharing hint's path segment: `<shared>/<workspaceId>/`. */
-export function sharedDirHintPattern(workspaceId: string): RegExp {
+/** The first-turn file-sharing hint's path segment: `<shared>/<worktreeId>/`. */
+export function sharedDirHintPattern(worktreeId: string): RegExp {
   const root = isRemoteLoopback ? ".band-shared" : "shared";
   return new RegExp(
-    `^\\[File sharing: to send a file to the user, write or copy it to .*/${root}/${workspaceId}/ `,
+    `^\\[File sharing: to send a file to the user, write or copy it to .*/${root}/${worktreeId}/ `,
   );
 }
 export const TEST_TOKEN = "acp-chat-test-token";
-export const WORKSPACE_ID = "testproject-main";
+export const WORKTREE_ID = "testrepo-main";
 
 /** One scripted turn of the stub agent. See the stub's header for steps. */
 export interface StubTurn {
@@ -55,15 +55,15 @@ export interface AcpServerOptions {
   env?: Record<string, string>;
 }
 
-/** Seeds a git-less project with one workspace and a claude-code agent. */
+/** Seeds a git-less repo with one worktree and a claude-code agent. */
 export function seedAcpHome(prefix = "band-acp-chat-"): string {
   const home = createTmpHome(prefix);
   const repo = join(home, "repo");
   mkdirSync(repo, { recursive: true });
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: "testproject",
+        name: "testrepo",
         path: repo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repo }],
@@ -125,7 +125,7 @@ export interface StubRequest {
     BAND_DISPATCH?: string;
     BAND_SERVER_URL?: string;
     BAND_CHAT_ID?: string;
-    BAND_WORKSPACE_ID?: string;
+    BAND_WORKTREE_ID?: string;
   };
 }
 
@@ -175,7 +175,7 @@ export async function sendMessage(
   const res = await fetch(`${url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders },
-    body: JSON.stringify({ workspaceId: WORKSPACE_ID, text, ...extra }),
+    body: JSON.stringify({ worktreeId: WORKTREE_ID, text, ...extra }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as { ok: boolean; queued: boolean };

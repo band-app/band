@@ -298,7 +298,7 @@ describe("published @band-app/server runs via the bin shim", () => {
 
   it("serves the static shell for / and for a deep link", async () => {
     const shell = readFileSync(join(uiDist, "client/_shell.html"), "utf8");
-    for (const path of ["/", "/workspace/some-workspace"]) {
+    for (const path of ["/", "/worktree/some-worktree"]) {
       const res = await fetch(`${baseUrl}${path}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -309,7 +309,7 @@ describe("published @band-app/server runs via the bin shim", () => {
   });
 
   it("answers HEAD for a deep link without a body", async () => {
-    const head = await fetch(`${baseUrl}/workspace/some-workspace`, {
+    const head = await fetch(`${baseUrl}/worktree/some-worktree`, {
       method: "HEAD",
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -319,7 +319,7 @@ describe("published @band-app/server runs via the bin shim", () => {
   });
 
   it("answers a non-GET page request with 404", async () => {
-    const post = await fetch(`${baseUrl}/workspace/some-workspace`, {
+    const post = await fetch(`${baseUrl}/worktree/some-worktree`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -327,7 +327,7 @@ describe("published @band-app/server runs via the bin shim", () => {
   });
 
   it("requires auth for the shell", async () => {
-    for (const path of ["/", "/workspace/x", "/_shell.html"]) {
+    for (const path of ["/", "/worktree/x", "/_shell.html"]) {
       const res = await fetch(`${baseUrl}${path}`);
       expect(res.status, path).toBe(401);
     }

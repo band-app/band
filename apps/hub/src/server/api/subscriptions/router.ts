@@ -25,7 +25,7 @@ function present(sub: Subscription) {
 
 const agentTarget = {
   chatId: z.string().min(1).optional(),
-  workspaceId: z.string().min(1).optional(),
+  worktreeId: z.string().min(1).optional(),
 };
 
 // One flat object rather than a union: the MCP endpoint turns each input
@@ -60,8 +60,8 @@ const createInput = z.object({
 
 /**
  * Subscriptions sub-router (plan step S.2). `create` fills `chatId` and
- * `workspaceId` from the caller when it is an agent (the `x-band-chat-id`
- * and `x-band-workspace-id` headers), so an agent only names the source.
+ * `worktreeId` from the caller when it is an agent (the `x-band-chat-id`
+ * and `x-band-worktree-id` headers), so an agent only names the source.
  */
 export const subscriptionsRouter = t.router({
   create: publicProcedure.input(createInput).mutation(async ({ input, ctx }) => {
@@ -72,9 +72,8 @@ export const subscriptionsRouter = t.router({
         message: "chatId is required when the call does not come from an agent's chat",
       });
     }
-    const workspaceId =
-      input.workspaceId ?? ctx.workspaceId ?? chatService.get(chatId)?.workspaceId;
-    if (!workspaceId) {
+    const worktreeId = input.worktreeId ?? ctx.worktreeId ?? chatService.get(chatId)?.worktreeId;
+    if (!worktreeId) {
       throw new TRPCError({ code: "NOT_FOUND", message: `Chat ${chatId} not found` });
     }
     try {
@@ -110,7 +109,7 @@ export const subscriptionsRouter = t.router({
             message: "`allowedSenders` applies to `pr` subscriptions only",
           });
         }
-        const base = { ...common, chatId, workspaceId, repo };
+        const base = { ...common, chatId, worktreeId, repo };
         const subscription =
           pr !== undefined
             ? subscriptionService.createGithubPr({
@@ -136,7 +135,7 @@ export const subscriptionsRouter = t.router({
         const { subscription, token } = subscriptionService.createWebhook({
           ...common,
           chatId,
-          workspaceId,
+          worktreeId,
         });
         return {
           ...present(subscription),
@@ -144,7 +143,7 @@ export const subscriptionsRouter = t.router({
           webhook: { path: `/api/hooks/${subscription.id}`, token },
         };
       }
-      return present(subscriptionService.createTimer({ ...common, at, cron, chatId, workspaceId }));
+      return present(subscriptionService.createTimer({ ...common, at, cron, chatId, worktreeId }));
     } catch (err) {
       if (err instanceof SubscriptionChatNotFoundError) {
         throw new TRPCError({ code: "NOT_FOUND", message: err.message });
@@ -165,8 +164,8 @@ export const subscriptionsRouter = t.router({
   list: publicProcedure.input(z.object(agentTarget).optional()).query(({ input, ctx }) => {
     return subscriptionService
       .list({
-        chatId: input?.chatId ?? (input?.workspaceId ? undefined : ctx.chatId),
-        workspaceId: input?.workspaceId,
+        chatId: input?.chatId ?? (input?.worktreeId ? undefined : ctx.chatId),
+        worktreeId: input?.worktreeId,
       })
       .map(present);
   }),

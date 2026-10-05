@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { computeCost } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { hostRegistry } from "../infra/host/registry";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
@@ -16,18 +16,18 @@ import { openSharedDir } from "./_utils/shared-dir";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import {
-  acknowledgeWorkspaceAttention,
+  acknowledgeWorktreeAttention,
   chatStatusSource,
-  setWorkspaceSourceStatus,
-  type WorkspaceStatus,
+  setWorktreeSourceStatus,
+  type WorktreeStatus,
 } from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
-// FRAGILE: ESM cycle leg — `workspace-service` imports `taskService` back
-// from this file. The cycle is safe only because every `workspaceService`
+// FRAGILE: ESM cycle leg — `worktree-service` imports `taskService` back
+// from this file. The cycle is safe only because every `worktreeService`
 // call below sits inside a function body — ESM live binding fills the
-// reference at call time. Capturing `const ws = workspaceService;` at the
+// reference at call time. Capturing `const ws = worktreeService;` at the
 // top of this file would silently get `undefined`.
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("task-service");
 
@@ -40,7 +40,7 @@ const log = createLogger("task-service");
  * and logs how the turn ended. Everything the agent streams in between goes
  * straight from the ACP connection into the log. This module never
  * translates agent output; it only owns turn bookkeeping: the `tasks` table,
- * the one-turn-per-chat rule, the message queue, workspace status and the
+ * the one-turn-per-chat rule, the message queue, worktree status and the
  * shared-files scan.
  */
 
@@ -50,7 +50,7 @@ export type TaskStatus = "running" | "completed" | "failed";
 
 export interface TaskInfo {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   sessionId?: string;
   status: TaskStatus;
@@ -77,7 +77,7 @@ export interface TaskAttachment {
 }
 
 export interface SubmitTaskOptions {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   prompt: string;
   /**
@@ -120,10 +120,10 @@ let observingPending = false;
 function observePending(): void {
   if (observingPending) return;
   observingPending = true;
-  agentSessionService.observePending((chatId, workspaceId) => {
+  agentSessionService.observePending((chatId, worktreeId) => {
     if (tasks.get(chatId)?.status !== "running") return;
     const waiting = agentSessionService.hasPendingRequest(chatId);
-    const updated = setWorkspaceSourceStatus(workspaceId, chatStatusSource(chatId), {
+    const updated = setWorktreeSourceStatus(worktreeId, chatStatusSource(chatId), {
       status: waiting ? "needs_attention" : "working",
     });
     emitStatusEvent({ kind: "update", status: updated });
@@ -131,13 +131,13 @@ function observePending(): void {
 }
 
 function persistTask(task: InternalTask): void {
-  const workspace = workspaceService.resolve(task.workspaceId);
+  const worktree = worktreeService.resolve(task.worktreeId);
   try {
     taskQueries.save({
       id: task.id,
-      workspaceId: task.workspaceId,
-      project: workspace?.project.name ?? "",
-      branch: workspace?.worktree.branch ?? "",
+      worktreeId: task.worktreeId,
+      repo: worktree?.repo.name ?? "",
+      branch: worktree?.worktree.branch ?? "",
       prompt: task.prompt,
       status: task.status,
       sessionId: task.sessionId,
@@ -166,10 +166,10 @@ export class TaskConflictError extends Error {
 }
 
 /**
- * Re-export of the canonical `WorkspaceNotFoundError` from
+ * Re-export of the canonical `WorktreeNotFoundError` from
  * `server/errors.ts`, so callers can keep importing it from here.
  */
-export { WorkspaceNotFoundError };
+export { WorktreeNotFoundError };
 
 // ---------------------------------------------------------------------------
 // Prompt blocks
@@ -190,7 +190,7 @@ async function promptBlocks(
     const name = file.filename ?? file.path.split("/").pop() ?? file.path;
     if (caps.image && file.mediaType.startsWith("image/")) {
       try {
-        const host = hostRegistry.hostFor(task.workspaceId);
+        const host = hostRegistry.hostFor(task.worktreeId);
         const data = Buffer.from(await host.fs.readFile(file.path)).toString("base64");
         blocks.push({ type: "image", mimeType: file.mediaType, data, uri: fileUri(file.path) });
         continue;
@@ -265,11 +265,11 @@ function turnUsage(
 // ---------------------------------------------------------------------------
 
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
-  const { workspaceId, chatId, prompt, sessionId, mode, model, codingAgentId } = options;
+  const { worktreeId, chatId, prompt, sessionId, mode, model, codingAgentId } = options;
 
-  const workspace = workspaceService.resolve(workspaceId);
-  if (!workspace) {
-    throw new WorkspaceNotFoundError(workspaceId);
+  const worktree = worktreeService.resolve(worktreeId);
+  if (!worktree) {
+    throw new WorktreeNotFoundError(worktreeId);
   }
 
   const existing = tasks.get(chatId);
@@ -280,7 +280,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
 
   const task: InternalTask = {
     id: generateTaskId(),
-    workspaceId,
+    worktreeId,
     chatId,
     sessionId,
     status: "running",
@@ -315,9 +315,9 @@ export type SubmitOrQueueResult =
  * starts now.
  */
 export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResult {
-  const { workspaceId, chatId } = options;
-  if (!workspaceService.resolve(workspaceId)) {
-    throw new WorkspaceNotFoundError(workspaceId);
+  const { worktreeId, chatId } = options;
+  if (!worktreeService.resolve(worktreeId)) {
+    throw new WorktreeNotFoundError(worktreeId);
   }
 
   const running = tasks.get(chatId)?.status === "running";
@@ -332,14 +332,14 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
     model: options.model,
     codingAgentId: options.codingAgentId,
   });
-  if (!running) drainQueue(workspaceId, chatId);
+  if (!running) drainQueue(worktreeId, chatId);
   return { queued: true, queuedMessageId: queued.id };
 }
 
 async function runTask(task: InternalTask): Promise<void> {
   const { chatId } = task;
   chatService.updateStatus(chatId, "running");
-  const working = setWorkspaceSourceStatus(task.workspaceId, chatStatusSource(chatId), {
+  const working = setWorktreeSourceStatus(task.worktreeId, chatStatusSource(chatId), {
     status: "working",
   });
   emitStatusEvent({ kind: "update", status: working });
@@ -394,9 +394,9 @@ async function runTask(task: InternalTask): Promise<void> {
   if (task.model) await applyTurnChoice(chatId, "model", task.model);
   if (task.mode) await applyTurnChoice(chatId, "mode", task.mode);
 
-  // Per-workspace shared directory: files the agent drops here become
-  // download cards in the chat. A remote workspace's directory is on its worker.
-  const shared = await openSharedDir(task.workspaceId);
+  // Per-worktree shared directory: files the agent drops here become
+  // download cards in the chat. A remote worktree's directory is on its worker.
+  const shared = await openSharedDir(task.worktreeId);
   const seenShared = new Set(await shared.list());
   const announce = (names: Iterable<string>) => {
     for (const filename of names) {
@@ -405,7 +405,7 @@ async function runTask(task: InternalTask): Promise<void> {
       agentSessionService.record(chatId, {
         type: "file",
         mediaType: mimeTypeFromFilename(filename),
-        url: `/api/shared/${encodeURIComponent(task.workspaceId)}/${encodeURIComponent(filename)}`,
+        url: `/api/shared/${encodeURIComponent(task.worktreeId)}/${encodeURIComponent(filename)}`,
         filename,
       });
     }
@@ -493,7 +493,7 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
 
 /**
  * Settles a task: records its status, then either starts the next queued
- * message or hands the workspace back to the user. A turn that completed or
+ * message or hands the worktree back to the user. A turn that completed or
  * failed asks for the user's attention; one the user stopped (or that ended
  * while a stop was pending) doesn't, since the user already knows.
  */
@@ -505,18 +505,18 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
   persistTask(task);
   if (tasks.get(task.chatId) === task) tasks.delete(task.chatId);
 
-  if (status === "completed" && drainQueue(task.workspaceId, task.chatId)) return;
+  if (status === "completed" && drainQueue(task.worktreeId, task.chatId)) return;
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
-  const updated = setWorkspaceSourceStatus(task.workspaceId, chatStatusSource(task.chatId), {
+  const updated = setWorktreeSourceStatus(task.worktreeId, chatStatusSource(task.chatId), {
     status: stopped ? "waiting" : "needs_attention",
   });
   emitStatusEvent({ kind: "update", status: updated });
 }
 
 /** Starts the chat's next queued message, if any. */
-function drainQueue(workspaceId: string, chatId: string): boolean {
+function drainQueue(worktreeId: string, chatId: string): boolean {
   // Removed only once its turn has started, so a failed start leaves it
   // at the head of the queue for the next attempt.
   const queued = peekQueuedMessage(chatId);
@@ -528,7 +528,7 @@ function drainQueue(workspaceId: string, chatId: string): boolean {
       .filter((f) => f.path)
       .map((f) => ({ path: f.path, mediaType: f.mediaType, url: f.url, filename: f.filename }));
     submitTask({
-      workspaceId,
+      worktreeId,
       chatId,
       prompt: queued.text,
       attachments,
@@ -558,13 +558,13 @@ export function abortTask(chatId: string): boolean {
   return true;
 }
 
-export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
+export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: string } {
   for (const [chatId, task] of tasks) {
     if (task.id === taskId && task.status === "running") {
       task.cancelRequested = true;
       void agentSessionService.cancel(chatId);
       log.info({ chatId, taskId }, "task cancel requested");
-      return { cancelled: true, workspaceId: task.workspaceId };
+      return { cancelled: true, worktreeId: task.worktreeId };
     }
   }
 
@@ -574,15 +574,13 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   if (record) {
     // Tasks saved before chats existed have no chatId, and so no source.
     if (record.chatId) {
-      const updated = setWorkspaceSourceStatus(
-        record.workspaceId,
-        chatStatusSource(record.chatId),
-        { status: "waiting" },
-      );
+      const updated = setWorktreeSourceStatus(record.worktreeId, chatStatusSource(record.chatId), {
+        status: "waiting",
+      });
       emitStatusEvent({ kind: "update", status: updated });
     }
-    log.info({ taskId, workspaceId: record.workspaceId }, "orphaned task cancelled");
-    return { cancelled: true, workspaceId: record.workspaceId };
+    log.info({ taskId, worktreeId: record.worktreeId }, "orphaned task cancelled");
+    return { cancelled: true, worktreeId: record.worktreeId };
   }
   return { cancelled: false };
 }
@@ -619,7 +617,7 @@ export class TaskService {
     return abortTask(chatId);
   }
 
-  cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
+  cancelTask(taskId: string): { cancelled: boolean; worktreeId?: string } {
     return cancelTask(taskId);
   }
 
@@ -627,12 +625,12 @@ export class TaskService {
     return getTask(chatId);
   }
 
-  /** Clears the workspace's attention status, except for chats whose agent
+  /** Clears the worktree's attention status, except for chats whose agent
    *  still waits on the user (a permission or elicitation request). */
-  acknowledgeAttention(workspaceId: string): WorkspaceStatus | null {
-    return acknowledgeWorkspaceAttention(
-      workspaceId,
-      agentSessionService.chatsWithPendingRequest(workspaceId),
+  acknowledgeAttention(worktreeId: string): WorktreeStatus | null {
+    return acknowledgeWorktreeAttention(
+      worktreeId,
+      agentSessionService.chatsWithPendingRequest(worktreeId),
     );
   }
 

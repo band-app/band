@@ -1,6 +1,6 @@
-// Black-box integration tests for the workspace router's git-side
+// Black-box integration tests for the worktree router's git-side
 // procedures that were lifted out of the legacy inline handler into
-// `WorkspaceService` in issue #535: `workspace.gitPull`, `gitPush`,
+// `WorktreeService` in issue #535: `worktree.gitPull`, `gitPush`,
 // `gitCommit`, plus the no-agent pre-flight branch of
 // `generateCommitMessage`.
 //
@@ -28,7 +28,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const DEFAULT_TOKEN = "workspace-git-ops-token";
+const DEFAULT_TOKEN = "worktree-git-ops-token";
 
 const gitEnv = {
   ...process.env,
@@ -129,17 +129,17 @@ function createWorkingClone(parent: string, name: string, originPath: string): s
 }
 
 // ---------------------------------------------------------------------------
-// workspace.gitPull
+// worktree.gitPull
 // ---------------------------------------------------------------------------
 
-describe("tRPC — workspace.gitPull", () => {
+describe("tRPC — worktree.gitPull", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let originPath: string;
   let workingPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-git-pull-");
+    tmpHome = createTmpHome("band-worktree-git-pull-");
     originPath = createBareOrigin(tmpHome, "origin");
     workingPath = createWorkingClone(tmpHome, "alpha", originPath);
 
@@ -154,7 +154,7 @@ describe("tRPC — workspace.gitPull", () => {
     rmSync(seederPath, { recursive: true, force: true });
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: workingPath,
@@ -174,11 +174,11 @@ describe("tRPC — workspace.gitPull", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns ok and fast-forwards the workspace's worktree", async () => {
+  it("returns ok and fast-forwards the worktree's worktree", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPull",
-      { workspaceId: "alpha-main" },
+      "worktree.gitPull",
+      { worktreeId: "alpha-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -196,38 +196,38 @@ describe("tRPC — workspace.gitPull", () => {
     ).toMatch(/added from seeder/);
   });
 
-  it("returns 500 for an unknown workspaceId", async () => {
+  it("returns 500 for an unknown worktreeId", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPull",
-      { workspaceId: "nope-main" },
+      "worktree.gitPull",
+      { worktreeId: "nope-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
   });
 
   it("returns 401 without a token", async () => {
-    const res = await fetch(`${server.url}/trpc/workspace.gitPull`, {
+    const res = await fetch(`${server.url}/trpc/worktree.gitPull`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: "alpha-main" }),
+      body: JSON.stringify({ worktreeId: "alpha-main" }),
     });
     expect(res.status).toBe(401);
   });
 });
 
 // ---------------------------------------------------------------------------
-// workspace.gitPush
+// worktree.gitPush
 // ---------------------------------------------------------------------------
 
-describe("tRPC — workspace.gitPush", () => {
+describe("tRPC — worktree.gitPush", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let originPath: string;
   let workingPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-git-push-");
+    tmpHome = createTmpHome("band-worktree-git-push-");
     originPath = createBareOrigin(tmpHome, "origin");
     workingPath = createWorkingClone(tmpHome, "alpha", originPath);
 
@@ -239,7 +239,7 @@ describe("tRPC — workspace.gitPush", () => {
     git(workingPath, ["commit", "-m", "local change"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: workingPath,
@@ -262,8 +262,8 @@ describe("tRPC — workspace.gitPush", () => {
   it("returns ok and the new commit lands on origin", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPush",
-      { workspaceId: "alpha-main" },
+      "worktree.gitPush",
+      { worktreeId: "alpha-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -283,11 +283,11 @@ describe("tRPC — workspace.gitPush", () => {
     expect(originHead).toBe(workingHead);
   });
 
-  it("returns 500 for an unknown workspaceId", async () => {
+  it("returns 500 for an unknown worktreeId", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPush",
-      { workspaceId: "nope-main" },
+      "worktree.gitPush",
+      { worktreeId: "nope-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -295,16 +295,16 @@ describe("tRPC — workspace.gitPush", () => {
 });
 
 // ---------------------------------------------------------------------------
-// workspace.gitCommit
+// worktree.gitCommit
 // ---------------------------------------------------------------------------
 
-describe("tRPC — workspace.gitCommit", () => {
+describe("tRPC — worktree.gitCommit", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let workingPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-git-commit-");
+    tmpHome = createTmpHome("band-worktree-git-commit-");
     const originPath = createBareOrigin(tmpHome, "origin");
     workingPath = createWorkingClone(tmpHome, "alpha", originPath);
 
@@ -312,7 +312,7 @@ describe("tRPC — workspace.gitCommit", () => {
     writeFileSync(join(workingPath, "new.md"), "# New change\n");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: workingPath,
@@ -335,9 +335,9 @@ describe("tRPC — workspace.gitCommit", () => {
   it("stages every pending file and creates a commit with the supplied message + body", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitCommit",
+      "worktree.gitCommit",
       {
-        workspaceId: "alpha-main",
+        worktreeId: "alpha-main",
         message: "Add new.md",
         body: "Tracks the new note file.",
       },
@@ -367,18 +367,18 @@ describe("tRPC — workspace.gitCommit", () => {
   it("rejects an empty commit message", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitCommit",
-      { workspaceId: "alpha-main", message: "" },
+      "worktree.gitCommit",
+      { worktreeId: "alpha-main", message: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(400);
   });
 
-  it("returns 500 for an unknown workspaceId", async () => {
+  it("returns 500 for an unknown worktreeId", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitCommit",
-      { workspaceId: "nope-main", message: "noop" },
+      "worktree.gitCommit",
+      { worktreeId: "nope-main", message: "noop" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -416,7 +416,7 @@ describe("tRPC — git refusals", () => {
   let brokenPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-git-refusals-");
+    tmpHome = createTmpHome("band-worktree-git-refusals-");
     const originPath = createBareOrigin(tmpHome, "origin");
 
     // "dirty": behind origin by one commit, with an uncommitted edit.
@@ -439,19 +439,19 @@ describe("tRPC — git refusals", () => {
     brokenPath = createWorkingClone(tmpHome, "broken", brokenOrigin);
     rmSync(brokenOrigin, { recursive: true, force: true });
 
-    const project = (name: string, path: string, branch = "main") => ({
+    const repo = (name: string, path: string, branch = "main") => ({
       name,
       path,
       defaultBranch: "main",
       worktrees: [{ branch, path }],
     });
     seedState(tmpHome, {
-      projects: [
-        project("dirty", dirtyPath),
-        project("ahead", aheadPath),
-        project("clean", cleanPath),
-        project("lone", lonePath, "lone-branch"),
-        project("broken", brokenPath),
+      repos: [
+        repo("dirty", dirtyPath),
+        repo("ahead", aheadPath),
+        repo("clean", cleanPath),
+        repo("lone", lonePath, "lone-branch"),
+        repo("broken", brokenPath),
       ],
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
@@ -471,13 +471,13 @@ describe("tRPC — git refusals", () => {
     message: "Pull skipped: commit or stash your local changes first (README.md).",
   };
 
-  it("workspace.gitPull reports local changes and leaves the worktree untouched", async () => {
+  it("worktree.gitPull reports local changes and leaves the worktree untouched", async () => {
     const headBefore = git(dirtyPath, ["rev-parse", "HEAD"]).trim();
 
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPull",
-      { workspaceId: "dirty-main" },
+      "worktree.gitPull",
+      { worktreeId: "dirty-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -487,22 +487,22 @@ describe("tRPC — git refusals", () => {
     expect(git(dirtyPath, ["status", "--porcelain"])).toBe(" M README.md\n");
   });
 
-  it("workspaces.gitPull (the sidebar's pull) reports the same refusal", async () => {
+  it("worktrees.gitPull (the sidebar's pull) reports the same refusal", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspaces.gitPull",
-      { project: "dirty", name: "main" },
+      "worktrees.gitPull",
+      { repo: "dirty", name: "main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
     expect(await trpcData(res)).toEqual(LOCAL_CHANGES);
   });
 
-  it("workspace.gitPull reports a branch with no upstream", async () => {
+  it("worktree.gitPull reports a branch with no upstream", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPull",
-      { workspaceId: "lone-lone-branch" },
+      "worktree.gitPull",
+      { worktreeId: "lone-lone-branch" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -519,35 +519,35 @@ describe("tRPC — git refusals", () => {
     message: "Push rejected: the remote branch has commits you don't have. Pull first.",
   };
 
-  it("workspaces.gitPush reports a non-fast-forward rejection", async () => {
+  it("worktrees.gitPush reports a non-fast-forward rejection", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspaces.gitPush",
-      { project: "ahead", name: "main" },
+      "worktrees.gitPush",
+      { repo: "ahead", name: "main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
     expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
   });
 
-  it("workspace.gitPush reports the same rejection", async () => {
+  it("worktree.gitPush reports the same rejection", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPush",
-      { workspaceId: "ahead-main" },
+      "worktree.gitPush",
+      { worktreeId: "ahead-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
     expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
   });
 
-  it("workspace.gitCommit reports a clean working tree", async () => {
+  it("worktree.gitCommit reports a clean working tree", async () => {
     const headBefore = git(cleanPath, ["rev-parse", "HEAD"]).trim();
 
     const res = await trpcMutate(
       server.url,
-      "workspace.gitCommit",
-      { workspaceId: "clean-main", message: "noop" },
+      "worktree.gitCommit",
+      { worktreeId: "clean-main", message: "noop" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -562,8 +562,8 @@ describe("tRPC — git refusals", () => {
   it("a genuine pull failure still fails, with git's message", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.gitPull",
-      { workspaceId: "broken-main" },
+      "worktree.gitPull",
+      { worktreeId: "broken-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -573,7 +573,7 @@ describe("tRPC — git refusals", () => {
 });
 
 // ---------------------------------------------------------------------------
-// workspace.generateCommitMessage — pre-flight branch only
+// worktree.generateCommitMessage — pre-flight branch only
 // ---------------------------------------------------------------------------
 //
 // The agent-driven branch needs a real `claude-code` / `codex` binary,
@@ -583,17 +583,17 @@ describe("tRPC — git refusals", () => {
 // the service throws "No changes to summarise" BEFORE any agent is
 // spawned, so a /bin/false binary is fine.
 
-describe("tRPC — workspace.generateCommitMessage", () => {
+describe("tRPC — worktree.generateCommitMessage", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-gen-msg-");
+    tmpHome = createTmpHome("band-worktree-gen-msg-");
     const originPath = createBareOrigin(tmpHome, "origin");
     const workingPath = createWorkingClone(tmpHome, "alpha", originPath);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: workingPath,
@@ -626,8 +626,8 @@ describe("tRPC — workspace.generateCommitMessage", () => {
   it("returns 500 with 'No changes to summarise' when the worktree is clean", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.generateCommitMessage",
-      { workspaceId: "alpha-main" },
+      "worktree.generateCommitMessage",
+      { worktreeId: "alpha-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -638,11 +638,11 @@ describe("tRPC — workspace.generateCommitMessage", () => {
     expect(body.error.message).toMatch(/No changes to summarise/i);
   });
 
-  it("returns 500 for an unknown workspaceId", async () => {
+  it("returns 500 for an unknown worktreeId", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.generateCommitMessage",
-      { workspaceId: "nope-main" },
+      "worktree.generateCommitMessage",
+      { worktreeId: "nope-main" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -673,7 +673,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
     workingPath = createWorkingClone(tmpHome, "alpha", originPath);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: workingPath,
@@ -696,8 +696,8 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("saveFile rejects writes under .git/", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.saveFile",
-      { workspaceId: "alpha-main", path: ".git/config", content: "malicious" },
+      "worktree.saveFile",
+      { worktreeId: "alpha-main", path: ".git/config", content: "malicious" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -708,9 +708,9 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("createFile rejects writes under .git/hooks/", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.createFile",
+      "worktree.createFile",
       {
-        workspaceId: "alpha-main",
+        worktreeId: "alpha-main",
         path: ".git/hooks/pre-commit",
         content: "#!/bin/bash\nrm -rf ~",
       },
@@ -724,8 +724,8 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("createDirectory rejects creating .git/refs/heads/<branch>", async () => {
     const res = await trpcMutate(
       server.url,
-      "workspace.createDirectory",
-      { workspaceId: "alpha-main", path: ".git/refs/heads/sneaky" },
+      "worktree.createDirectory",
+      { worktreeId: "alpha-main", path: ".git/refs/heads/sneaky" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -743,9 +743,9 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("getFileDiff rejects non-SHA mergeBase (leading dash)", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getFileDiff",
+      "worktree.getFileDiff",
       {
-        workspaceId: "alpha-main",
+        worktreeId: "alpha-main",
         filePath: "README.md",
         section: "branch",
         mergeBase: "--exec=touch /tmp/pwned",
@@ -760,9 +760,9 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("getFileDiff rejects symbolic-ref mergeBase (HEAD)", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getFileDiff",
+      "worktree.getFileDiff",
       {
-        workspaceId: "alpha-main",
+        worktreeId: "alpha-main",
         filePath: "README.md",
         section: "branch",
         mergeBase: "HEAD",
@@ -777,9 +777,9 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   it("getFileDiff rejects truncated SHA (39 chars)", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getFileDiff",
+      "worktree.getFileDiff",
       {
-        workspaceId: "alpha-main",
+        worktreeId: "alpha-main",
         filePath: "README.md",
         section: "branch",
         mergeBase: "0123456789abcdef0123456789abcdef0123456",

@@ -1,7 +1,7 @@
-// Integration tests for `.band/environment.json` (plan step 3.1): a workspace
+// Integration tests for `.band/environment.json` (plan step 3.1): a worktree
 // runs the file's install and start and opens its terminals, the file wins over
 // `.band/config.json`, a repo with only config.json still works, and
-// `environment.forProject` / `environment.validate` report the parsed file, its
+// `environment.forRepo` / `environment.validate` report the parsed file, its
 // problems and which hosts meet `requires`.
 //
 // Real production server, real git repo, real PTYs, real SQLite, temp BAND_HOME.
@@ -9,7 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -40,7 +40,7 @@ function createRepo(parent: string, name: string, files: Record<string, string>)
   execFileSync("git", ["add", "."], { cwd: repo, env: gitEnv });
   execFileSync("git", ["commit", "-m", "init"], { cwd: repo, env: gitEnv });
   // Written after the commit, so they are untracked and a new worktree reads
-  // them from the project checkout.
+  // them from the repo checkout.
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(join(repo, file, ".."), { recursive: true });
     writeFileSync(join(repo, file), text);
@@ -58,16 +58,16 @@ const query = async <T>(procedure: string, input: unknown): Promise<T> => {
   return trpcData<T>(res);
 };
 
-async function createWorkspace(project: string, branch: string): Promise<string> {
-  const res = await trpcMutate(server.url, "workspaces.create", { project, branch }, TOKEN);
+async function createWorktree(repo: string, branch: string): Promise<string> {
+  const res = await trpcMutate(server.url, "worktrees.create", { repo, branch }, TOKEN);
   const body = await res.text();
   expect(res.status, body).toBe(200);
-  return toWorkspaceId(project, branch);
+  return toWorktreeId(repo, branch);
 }
 
-async function terminalOutputs(workspaceId: string): Promise<string[]> {
+async function terminalOutputs(worktreeId: string): Promise<string[]> {
   const { terminals } = await query<{ terminals: { terminalId: string }[] }>("terminal.list", {
-    workspaceId,
+    worktreeId,
   });
   return Promise.all(
     terminals.map(
@@ -77,14 +77,14 @@ async function terminalOutputs(workspaceId: string): Promise<string[]> {
   );
 }
 
-const waitForOutput = (workspaceId: string, marker: string) =>
+const waitForOutput = (worktreeId: string, marker: string) =>
   waitFor(
     async () =>
-      (await terminalOutputs(workspaceId)).some((o) => o.includes(marker)) ? true : undefined,
+      (await terminalOutputs(worktreeId)).some((o) => o.includes(marker)) ? true : undefined,
     { label: `terminal output containing ${marker}`, timeoutMs: 20_000 },
   );
 
-const PROJECTS = {
+const REPOS = {
   envproj: {
     ".band/environment.json": JSON.stringify({
       install: "echo ENV-INSTALL-$((1+1))",
@@ -112,12 +112,12 @@ const PROJECTS = {
 
 beforeAll(async () => {
   home = createTmpHome("band-environment-");
-  const repos = Object.entries(PROJECTS).map(([name, files]) => ({
+  const repos = Object.entries(REPOS).map(([name, files]) => ({
     name,
     path: createRepo(home, name, files),
   }));
   seedState(home, {
-    projects: repos.map(({ name, path }) => ({
+    repos: repos.map(({ name, path }) => ({
       name,
       path,
       defaultBranch: "main",
@@ -133,29 +133,29 @@ afterAll(async () => {
   rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-describe("workspace setup from environment.json", () => {
+describe("worktree setup from environment.json", () => {
   it("runs install then start, then opens the declared terminals", async () => {
-    const workspaceId = await createWorkspace("envproj", "feat/one");
-    await waitForOutput(workspaceId, "ENV-START-2");
-    const outputs = await terminalOutputs(workspaceId);
+    const worktreeId = await createWorktree("envproj", "feat/one");
+    await waitForOutput(worktreeId, "ENV-START-2");
+    const outputs = await terminalOutputs(worktreeId);
     const setup = outputs.find((o) => o.includes("ENV-INSTALL-2"));
     expect(setup).toContain("ENV-START-2");
     expect(outputs.some((o) => o.includes("OLD-CONFIG-SETUP"))).toBe(false);
-    await waitForOutput(workspaceId, "ENV-DEV-2");
+    await waitForOutput(worktreeId, "ENV-DEV-2");
   });
 
   it("still runs the setup of a repo that has only config.json", async () => {
-    const workspaceId = await createWorkspace("configproj", "feat/one");
-    await waitForOutput(workspaceId, "CONFIG-ONLY-2");
+    const worktreeId = await createWorktree("configproj", "feat/one");
+    await waitForOutput(worktreeId, "CONFIG-ONLY-2");
   });
 
   it("ignores an environment.json with problems and falls back to config.json", async () => {
-    const workspaceId = await createWorkspace("badshapeproj", "feat/one");
-    await waitForOutput(workspaceId, "FALLBACK-2");
+    const worktreeId = await createWorktree("badshapeproj", "feat/one");
+    await waitForOutput(worktreeId, "FALLBACK-2");
   });
 });
 
-describe("environment.forProject", () => {
+describe("environment.forRepo", () => {
   type View = {
     source: string | null;
     environment: { install?: string } | null;
@@ -164,7 +164,7 @@ describe("environment.forProject", () => {
   };
 
   it("returns the parsed file and the hosts that miss its requires", async () => {
-    const view = await query<View>("environment.forProject", { projectName: "envproj" });
+    const view = await query<View>("environment.forRepo", { repoName: "envproj" });
     expect(view.source).toMatch(/envproj\/\.band\/environment\.json$/);
     expect(view.environment?.install).toBe("echo ENV-INSTALL-$((1+1))");
     expect(view.issues).toEqual([]);
@@ -174,29 +174,24 @@ describe("environment.forProject", () => {
   });
 
   it("names a devcontainer file that does not exist", async () => {
-    const view = await query<View>("environment.forProject", { projectName: "brokenproj" });
+    const view = await query<View>("environment.forRepo", { repoName: "brokenproj" });
     expect(view.environment).toBeNull();
     expect(view.issues.map((i) => i.path)).toEqual(["build.devcontainer"]);
     expect(view.hosts).toEqual([]);
   });
 
   it("reports the path of each problem", async () => {
-    const view = await query<View>("environment.forProject", { projectName: "badshapeproj" });
+    const view = await query<View>("environment.forRepo", { repoName: "badshapeproj" });
     expect(view.issues.map((i) => i.path).sort()).toEqual(["instal", "isolation"]);
   });
 
-  it("reports no file for a project without one", async () => {
-    const view = await query<View>("environment.forProject", { projectName: "plainproj" });
+  it("reports no file for a repo without one", async () => {
+    const view = await query<View>("environment.forRepo", { repoName: "plainproj" });
     expect(view).toMatchObject({ source: null, environment: null, issues: [], hosts: [] });
   });
 
-  it("answers 404 for an unknown project", async () => {
-    const res = await trpcQuery(
-      server.url,
-      "environment.forProject",
-      { projectName: "nope" },
-      TOKEN,
-    );
+  it("answers 404 for an unknown repo", async () => {
+    const res = await trpcQuery(server.url, "environment.forRepo", { repoName: "nope" }, TOKEN);
     expect(res.status).toBe(404);
   });
 });
@@ -216,7 +211,7 @@ describe("environment.validate", () => {
 describe("authorization", () => {
   it("answers 401 without a token", async () => {
     for (const [procedure, input] of [
-      ["environment.forProject", { projectName: "envproj" }],
+      ["environment.forRepo", { repoName: "envproj" }],
       ["environment.validate", { path: join(home, "envproj") }],
     ] as const) {
       const res = await trpcQuery(server.url, procedure, input, undefined);

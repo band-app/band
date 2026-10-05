@@ -1,12 +1,12 @@
 // Integration tests for the `.band/config.json` `setup` / `teardown`
-// commands, which run in a terminal tab of the workspace.
+// commands, which run in a terminal tab of the worktree.
 //
 //   - setup runs in parallel with the agent: the first prompt reaches the
 //     agent while setup is still running, and a failing setup neither holds
 //     it back nor drops it. The setup output (and how it ended) is readable
 //     from the setup terminal.
 //   - teardown runs in a terminal (a PTY from the terminal pool, which sets
-//     `BAND_DISPATCH=terminal`) and `workspaces.remove` waits for it before
+//     `BAND_DISPATCH=terminal`) and `worktrees.remove` waits for it before
 //     it returns.
 //
 // Real production server, real git repo, real PTYs, real SQLite. The coding
@@ -25,15 +25,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, trpcMutate, trpcQuery } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const TOKEN = "workspace-setup-teardown-token";
-const PROJECT = "hookproj";
+const TOKEN = "worktree-setup-teardown-token";
+const REPO = "hookproj";
 
 const gitEnv = {
   ...process.env,
@@ -57,21 +57,21 @@ function createGitRepo(parentDir: string, name: string): string {
   return repoPath;
 }
 
-/** Boot a server on a fresh home whose project declares the given hooks. */
+/** Boot a server on a fresh home whose repo declares the given hooks. */
 async function bootWithConfig(
   prefix: string,
   config: { setup?: string; teardown?: string },
 ): Promise<{ server: ServerHandle; home: string; repoPath: string }> {
   const home = createTmpHome(prefix);
-  const repoPath = createGitRepo(home, PROJECT);
+  const repoPath = createGitRepo(home, REPO);
   // Untracked, so new worktrees lack it and the server falls back to the
-  // project's copy, which is the common real-world layout.
+  // repo's copy, which is the common real-world layout.
   mkdirSync(join(repoPath, ".band"), { recursive: true });
   writeFileSync(join(repoPath, ".band", "config.json"), JSON.stringify(config));
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoPath }],
@@ -87,16 +87,16 @@ async function bootWithConfig(
   return { server, home, repoPath };
 }
 
-/** Create a workspace; returns its worktree path. */
-async function createWorkspace(
+/** Create a worktree; returns its worktree path. */
+async function createWorktree(
   server: ServerHandle,
   branch: string,
   prompt?: string,
 ): Promise<string> {
   const res = await trpcMutate(
     server.url,
-    "workspaces.create",
-    { project: PROJECT, branch, ...(prompt ? { prompt } : {}) },
+    "worktrees.create",
+    { repo: REPO, branch, ...(prompt ? { prompt } : {}) },
     TOKEN,
   );
   const body = await res.text();
@@ -104,8 +104,8 @@ async function createWorkspace(
   return (JSON.parse(body) as { result: { data: { path: string } } }).result.data.path;
 }
 
-async function listTerminalIds(server: ServerHandle, workspaceId: string): Promise<string[]> {
-  const res = await trpcQuery(server.url, "terminal.list", { workspaceId }, TOKEN);
+async function listTerminalIds(server: ServerHandle, worktreeId: string): Promise<string[]> {
+  const res = await trpcQuery(server.url, "terminal.list", { worktreeId }, TOKEN);
   const body = await res.text();
   expect(res.status, body).toBe(200);
   return (
@@ -120,15 +120,15 @@ async function readOutput(server: ServerHandle, terminalId: string): Promise<str
   return (JSON.parse(body) as { result: { data: { output: string } } }).result.data.output;
 }
 
-/** Wait until one of the workspace's terminals prints `marker`; returns that terminal. */
+/** Wait until one of the worktree's terminals prints `marker`; returns that terminal. */
 async function waitForTerminalOutput(
   server: ServerHandle,
-  workspaceId: string,
+  worktreeId: string,
   marker: string,
 ): Promise<{ terminalId: string; output: string }> {
   return waitFor(
     async () => {
-      for (const terminalId of await listTerminalIds(server, workspaceId)) {
+      for (const terminalId of await listTerminalIds(server, worktreeId)) {
         const output = await readOutput(server, terminalId);
         if (output.includes(marker)) return { terminalId, output };
       }
@@ -161,12 +161,12 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
   });
 
   it("delivers the prompt while setup is still running in its own terminal", async () => {
-    const workspaceId = toWorkspaceId(PROJECT, "feat/slow-setup");
-    await createWorkspace(server, "feat/slow-setup", "prompt during slow setup");
+    const worktreeId = toWorktreeId(REPO, "feat/slow-setup");
+    await createWorktree(server, "feat/slow-setup", "prompt during slow setup");
 
     const { terminalId: setupTerminal, output } = await waitForTerminalOutput(
       server,
-      workspaceId,
+      worktreeId,
       "SETUP-STARTED",
     );
     expect(output).toContain("[band] running setup: echo SETUP-STARTED; sleep 600");
@@ -201,12 +201,12 @@ describe("a failing setup does not drop the prompt", () => {
   });
 
   it("shows the exit code in the setup terminal and still delivers the prompt", async () => {
-    const workspaceId = toWorkspaceId(PROJECT, "feat/bad-setup");
-    await createWorkspace(server, "feat/bad-setup", "prompt despite failing setup");
+    const worktreeId = toWorktreeId(REPO, "feat/bad-setup");
+    await createWorktree(server, "feat/bad-setup", "prompt despite failing setup");
 
     const { output } = await waitForTerminalOutput(
       server,
-      workspaceId,
+      worktreeId,
       "[band] setup finished with exit code 3",
     );
     expect(output).toContain("SETUP-FAILING");
@@ -222,7 +222,7 @@ describe("a failing setup does not drop the prompt", () => {
   });
 });
 
-describe("teardown runs in a terminal before the workspace is removed", () => {
+describe("teardown runs in a terminal before the worktree is removed", () => {
   let server: ServerHandle;
   let home: string;
   let markerDir: string;
@@ -244,14 +244,14 @@ describe("teardown runs in a terminal before the workspace is removed", () => {
   });
 
   it("runs the teardown in the worktree's terminal and waits for it", async () => {
-    const worktreePath = await createWorkspace(server, "feat/teardown");
+    const worktreePath = await createWorktree(server, "feat/teardown");
     expect(existsSync(worktreePath)).toBe(true);
     const realWorktreePath = realpathSync(worktreePath);
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: PROJECT, name: "feat/teardown" },
+      "worktrees.remove",
+      { repo: REPO, name: "feat/teardown" },
       TOKEN,
     );
     const body = await res.text();
@@ -259,25 +259,25 @@ describe("teardown runs in a terminal before the workspace is removed", () => {
 
     // Written by the teardown before `remove` returned. `BAND_DISPATCH` is
     // set only for shells the terminal pool spawns, so this also proves the
-    // command ran in a workspace terminal rather than a hidden subprocess.
+    // command ran in a worktree terminal rather than a hidden subprocess.
     expect(readFileSync(markerPath, "utf-8")).toBe(`dispatch=terminal cwd=${realWorktreePath}`);
 
-    const workspaceId = toWorkspaceId(PROJECT, "feat/teardown");
+    const worktreeId = toWorktreeId(REPO, "feat/teardown");
     const remaining = await waitFor(
       async () => {
-        const ids = await listTerminalIds(server, workspaceId);
+        const ids = await listTerminalIds(server, worktreeId);
         return ids.length === 0 ? ids : undefined;
       },
-      { label: "teardown terminal killed with the workspace" },
+      { label: "teardown terminal killed with the worktree" },
     );
     expect(remaining).toEqual([]);
   });
 
-  it("rejects workspaces.remove without the band_token cookie (401)", async () => {
-    const res = await fetch(`${server.url}/trpc/workspaces.remove`, {
+  it("rejects worktrees.remove without the band_token cookie (401)", async () => {
+    const res = await fetch(`${server.url}/trpc/worktrees.remove`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: PROJECT, name: "feat/teardown" }),
+      body: JSON.stringify({ repo: REPO, name: "feat/teardown" }),
     });
     expect(res.status).toBe(401);
   });
@@ -298,28 +298,28 @@ describe("a failing teardown does not stop the removal", () => {
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("removes the workspace and its worktree anyway", async () => {
-    const worktreePath = await createWorkspace(server, "feat/bad-teardown");
+  it("removes the worktree and its worktree anyway", async () => {
+    const worktreePath = await createWorktree(server, "feat/bad-teardown");
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: PROJECT, name: "feat/bad-teardown" },
+      "worktrees.remove",
+      { repo: REPO, name: "feat/bad-teardown" },
       TOKEN,
     );
     const body = await res.text();
     expect(res.status, body).toBe(200);
 
-    const listRes = await trpcQuery(server.url, "projects.list", undefined, TOKEN);
+    const listRes = await trpcQuery(server.url, "repos.list", undefined, TOKEN);
     const listBody = await listRes.text();
     expect(listRes.status, listBody).toBe(200);
-    const { projects } = (
+    const { repos } = (
       JSON.parse(listBody) as {
-        result: { data: { projects: { name: string; worktrees: { branch: string }[] }[] } };
+        result: { data: { repos: { name: string; worktrees: { branch: string }[] }[] } };
       }
     ).result.data;
-    const project = projects.find((p) => p.name === PROJECT);
-    expect(project?.worktrees.map((wt) => wt.branch)).toEqual(["main"]);
+    const repo = repos.find((p) => p.name === REPO);
+    expect(repo?.worktrees.map((wt) => wt.branch)).toEqual(["main"]);
 
     // The worktree directory goes in the background after `remove` returns.
     await waitFor(async () => (existsSync(worktreePath) ? undefined : true), {

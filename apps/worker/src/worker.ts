@@ -44,7 +44,7 @@ export const WORKER_VERSION: string = require("../package.json").version;
 
 /**
  * How long an ephemeral worker waits for a hub it has lost before it exits. It
- * cannot persist its workspaces without the hub, so it stays up much longer
+ * cannot persist its worktrees without the hub, so it stays up much longer
  * than the idle time, in case the hub comes back.
  */
 const LOST_HUB_EXIT_MS = 60 * 60_000;
@@ -102,7 +102,7 @@ export class Worker {
     await ensureStateDir(config.stateDir);
     let workerId = config.workerId ?? (await loadOrCreateWorkerId(config.stateDir));
     const policy = await PathPolicy.create(
-      config.roots.length > 0 ? config.roots : [join(config.stateDir, "workspaces")],
+      config.roots.length > 0 ? config.roots : [join(config.stateDir, "worktrees")],
     );
     const resolved = await resolveToken(config, workerId);
     const token = resolved.token;
@@ -262,7 +262,7 @@ export class Worker {
 
   /**
    * Idle for the idle time: asks the hub whether to exit. The hub checks that
-   * nothing runs and stores every workspace on this worker before it says yes,
+   * nothing runs and stores every worktree on this worker before it says yes,
    * so the worker exits only on `exit: true`. Any other answer, or no answer,
    * counts as activity and the question comes again after another idle time.
    */
@@ -276,7 +276,7 @@ export class Worker {
         { timeoutMs: 15 * 60_000 },
       );
       if (reply.exit) {
-        log.info("the hub stored the workspaces, exiting");
+        log.info("the hub stored the worktrees, exiting");
         await this.stop(0);
         return;
       }

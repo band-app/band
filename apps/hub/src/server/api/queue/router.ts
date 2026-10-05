@@ -17,7 +17,7 @@ import {
 } from "../../services/_utils/queued-message-store";
 import {
   isWithinUploads,
-  saveWorkspaceUploads,
+  saveWorktreeUploads,
   uploadPathFromUrl,
 } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
@@ -125,11 +125,11 @@ function isPathWithinUploadDir(p: string): boolean {
  */
 async function resolveQueuedFiles(
   chatId: string,
-  workspaceId: string,
+  worktreeId: string,
   files: QueuedFileInput[] | undefined,
 ): Promise<{ mediaType: string; url: string; path: string; filename?: string }[] | undefined> {
   if (!files || files.length === 0) return undefined;
-  const remote = hostRegistry.hostFor(workspaceId).id !== hostRegistry.local.id;
+  const remote = hostRegistry.hostFor(worktreeId).id !== hostRegistry.local.id;
 
   const resolved: { mediaType: string; url: string; path: string; filename?: string }[] = [];
   const needsSave: QueuedFileInput[] = [];
@@ -143,15 +143,15 @@ async function resolveQueuedFiles(
     // `url: "/api/uploads/<storedName>"`. Reconstructing the path
     // server-side keeps the wire small AND prevents a malicious
     // client from spoofing a path that doesn't match its URL.
-    const derivedPath = file.path ?? (await uploadPathFromUrl(workspaceId, file.url)) ?? undefined;
+    const derivedPath = file.path ?? (await uploadPathFromUrl(worktreeId, file.url)) ?? undefined;
 
     if (derivedPath) {
       // Containment check — never trust a client-supplied path, even
       // a derived one (an attacker could send
       // `url: "/api/uploads/../../etc/passwd"`).
-      // A remote workspace's uploads are on its worker, so only a string check can run here.
+      // A remote worktree's uploads are on its worker, so only a string check can run here.
       const inside = remote
-        ? await isWithinUploads(workspaceId, derivedPath)
+        ? await isWithinUploads(worktreeId, derivedPath)
         : isPathWithinUploadDir(derivedPath);
       if (!inside) {
         log.warn(
@@ -191,7 +191,7 @@ async function resolveQueuedFiles(
   }
 
   if (needsSave.length > 0) {
-    const saved = await saveWorkspaceUploads(workspaceId, needsSave);
+    const saved = await saveWorktreeUploads(worktreeId, needsSave);
     // The splicing loop below is index-aligned: `saved[k]` MUST
     // correspond to `needsSave[k]`. `saveUploadedFilesDetailed` skips
     // entries that fail its data-URL regex (compacted output) and
@@ -231,14 +231,14 @@ export const queueRouter = t.router({
   push: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string().optional(),
         text: z.string(),
         files: z.array(queuedFileSchema).optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       // If disk write fails (ENOSPC, permissions, etc.), degrade to a
       // text-only queue entry rather than reject the whole push with a
       // 500. Losing the attachment is annoying; losing the user's
@@ -247,7 +247,7 @@ export const queueRouter = t.router({
       // the text actually survived.
       let files: Awaited<ReturnType<typeof resolveQueuedFiles>>;
       try {
-        files = await resolveQueuedFiles(chatId, input.workspaceId, input.files);
+        files = await resolveQueuedFiles(chatId, input.worktreeId, input.files);
       } catch (err) {
         log.error(
           { chatId, err: err instanceof Error ? err.message : err },
@@ -266,7 +266,7 @@ export const queueRouter = t.router({
   set: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string().optional(),
         messages: z.array(
           z.object({
@@ -278,7 +278,7 @@ export const queueRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       // Resolve files per message and tolerate per-message failures.
       // `Promise.all` would short-circuit on the first rejection and
       // leave any already-saved files orphaned on disk with no queue
@@ -291,7 +291,7 @@ export const queueRouter = t.router({
             return {
               ...(m.id !== undefined && { id: m.id }),
               text: m.text,
-              files: await resolveQueuedFiles(chatId, input.workspaceId, m.files),
+              files: await resolveQueuedFiles(chatId, input.worktreeId, m.files),
             };
           } catch (err) {
             log.error(
@@ -311,16 +311,16 @@ export const queueRouter = t.router({
     }),
 
   get: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       return { messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
 
   remove: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), id: z.string() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional(), id: z.string() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const removed = removeQueuedMessage(chatId, input.id);
       return {
         ok: true,
@@ -332,14 +332,14 @@ export const queueRouter = t.router({
   update: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         chatId: z.string().optional(),
         id: z.string(),
         text: z.string(),
       }),
     )
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const updated = updateQueuedMessage(chatId, input.id, input.text);
       return {
         ok: true,
@@ -349,25 +349,25 @@ export const queueRouter = t.router({
     }),
 
   shift: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       const message = shiftQueuedMessage(chatId);
       return { message: message ? toWireQueuedMessages([message])[0] : null };
     }),
 
   clear: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
       clearQueuedMessages(chatId);
       return { ok: true };
     }),
 
   stream: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .subscription(async function* (opts) {
-      const chatId = opts.input.chatId ?? chatService.getOrCreateDefault(opts.input.workspaceId).id;
+      const chatId = opts.input.chatId ?? chatService.getOrCreateDefault(opts.input.worktreeId).id;
 
       type Update = { messages: QueuedMessage[] };
       const queue: Update[] = [];

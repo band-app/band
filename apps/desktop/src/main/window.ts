@@ -8,7 +8,7 @@
  *     matches the dark UI; identical to Tauri's NSColor setBackgroundColor),
  *     except on macOS, where the window is transparent over a `sidebar`
  *     vibrancy layer so the renderer can let the blurred desktop show
- *     through the project-list sidebar (see `data-translucent-sidebar` in
+ *     through the repo-list sidebar (see `data-translucent-sidebar` in
  *     apps/web/src/styles/globals.css)
  *   - Hidden inset title bar (overlay) with traffic lights at (13, 16)
  *   - Reopen at the last size, position and maximized / full-screen state
@@ -121,7 +121,7 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     y: 0,
     show: false,
     // On macOS the window is transparent over a `sidebar` vibrancy layer. The
-    // renderer paints every region opaque except the project-list sidebar,
+    // renderer paints every region opaque except the repo-list sidebar,
     // which it tints lightly so the blurred desktop shows through (or paints
     // solid when the user turns the translucent sidebar off in Settings).
     // `visualEffectState: "active"` keeps the blur when the window loses

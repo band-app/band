@@ -8,7 +8,7 @@ import { cleanup, startHub, startWorker, type TestHub, type TestWorker } from ".
 // The host contract suite that LocalHost passes, run against RemoteHost over a
 // loopback link to a real in-process worker (plan step 2.3). Every call goes
 // through the worker's path policy, so the suite also shows the policy admits
-// everything a workspace needs inside the root.
+// everything a worktree needs inside the root.
 let hub: TestHub;
 let w: TestWorker;
 

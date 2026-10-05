@@ -3,8 +3,8 @@
  * (open center tabs, drafts, panel layout). Thin: validates input and
  * delegates to `ClientStateService`.
  *
- * `list` returns one workspace's entries (or the global ones for
- * `workspaceId: null`) for the caller's device type. `set` and `delete` take
+ * `list` returns one worktree's entries (or the global ones for
+ * `worktreeId: null`) for the caller's device type. `set` and `delete` take
  * the version the client last saw and answer `{ ok: false, entry }` with the
  * current row when it is stale, instead of overwriting it.
  */
@@ -14,14 +14,14 @@ import { z } from "zod";
 import {
   ClientStateKeyError,
   ClientStateValueTooLargeError,
-  ClientStateWorkspaceNotFoundError,
+  ClientStateWorktreeNotFoundError,
 } from "../../errors";
 import { clientStateService } from "../../services/client-state-service";
 import { publicProcedure, t } from "../trpc";
 
 const key = z.string().min(1).max(512);
 const scope = z.enum(["all", "desktop", "mobile"]);
-const workspaceId = z.string().min(1).max(512).nullable();
+const worktreeId = z.string().min(1).max(512).nullable();
 
 /** Map the service's domain errors to tRPC codes; rethrow anything else. */
 function rethrowClientStateError(err: unknown): never {
@@ -31,7 +31,7 @@ function rethrowClientStateError(err: unknown): never {
   if (err instanceof ClientStateKeyError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
   }
-  if (err instanceof ClientStateWorkspaceNotFoundError) {
+  if (err instanceof ClientStateWorktreeNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
   throw err;
@@ -41,9 +41,9 @@ const clientId = z.string().min(1).max(100);
 
 export const clientStateRouter = t.router({
   list: publicProcedure
-    .input(z.object({ workspaceId, deviceType: z.enum(["desktop", "mobile"]) }))
+    .input(z.object({ worktreeId, deviceType: z.enum(["desktop", "mobile"]) }))
     .query(({ input }) => {
-      return { entries: clientStateService.list(input.workspaceId, input.deviceType) };
+      return { entries: clientStateService.list(input.worktreeId, input.deviceType) };
     }),
 
   set: publicProcedure

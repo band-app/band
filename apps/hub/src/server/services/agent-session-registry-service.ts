@@ -21,7 +21,7 @@ import { emit } from "./watcher-service";
 const log = createLogger("agent-sessions");
 
 export interface CreateAgentSessionInput {
-  workspaceId: string;
+  worktreeId: string;
   agentDefinitionId: string;
   mode: AgentMode;
   chatId?: string;
@@ -53,9 +53,9 @@ export class AgentSessionRegistryService {
     return this.queries.find(id);
   }
 
-  /** Sessions of a workspace that haven't ended. */
-  listOpen(workspaceId: string): AgentSessionRecord[] {
-    return this.queries.findOpenByWorkspace(workspaceId);
+  /** Sessions of a worktree that haven't ended. */
+  listOpen(worktreeId: string): AgentSessionRecord[] {
+    return this.queries.findOpenByWorktree(worktreeId);
   }
 
   findOpenByChat(chatId: string): AgentSessionRecord | undefined {
@@ -70,7 +70,7 @@ export class AgentSessionRegistryService {
     const now = Date.now();
     const record: AgentSessionRecord = {
       id: randomUUID(),
-      workspaceId: input.workspaceId,
+      worktreeId: input.worktreeId,
       agentDefinitionId: input.agentDefinitionId,
       providerSessionId: input.providerSessionId ?? null,
       mode: input.mode,
@@ -81,9 +81,9 @@ export class AgentSessionRegistryService {
       updatedAt: now,
     };
     this.queries.insert(record);
-    emit({ kind: "agent-session-created", workspaceId: record.workspaceId, agentSession: record });
+    emit({ kind: "agent-session-created", worktreeId: record.worktreeId, agentSession: record });
     log.info(
-      { agentSessionId: record.id, workspaceId: record.workspaceId, mode: record.mode },
+      { agentSessionId: record.id, worktreeId: record.worktreeId, mode: record.mode },
       "agent session created",
     );
     return record;
@@ -96,7 +96,7 @@ export class AgentSessionRegistryService {
    * agent sessions gets its row here, the first time its id is known.
    */
   recordChatProviderSession(
-    chat: { id: string; workspaceId: string; agent: string },
+    chat: { id: string; worktreeId: string; agent: string },
     providerSessionId: string | undefined,
   ): void {
     const open = this.queries.findOpenByChat(chat.id);
@@ -108,7 +108,7 @@ export class AgentSessionRegistryService {
     if (open) this.end(open.id);
     if (!providerSessionId) return;
     this.create({
-      workspaceId: chat.workspaceId,
+      worktreeId: chat.worktreeId,
       agentDefinitionId: chat.agent,
       mode: "gui",
       chatId: chat.id,
@@ -129,12 +129,12 @@ export class AgentSessionRegistryService {
   end(id: string): void {
     const ended = this.queries.update(id, { state: "ended", updatedAt: Date.now() });
     if (!ended) return;
-    emit({ kind: "agent-session-ended", workspaceId: ended.workspaceId, agentSession: ended });
+    emit({ kind: "agent-session-ended", worktreeId: ended.worktreeId, agentSession: ended });
   }
 
-  /** Drop every row of a deleted workspace. */
-  removeAllForWorkspace(workspaceId: string): void {
-    this.queries.deleteForWorkspace(workspaceId);
+  /** Drop every row of a deleted worktree. */
+  removeAllForWorktree(worktreeId: string): void {
+    this.queries.deleteForWorktree(worktreeId);
   }
 
   private update(
@@ -145,7 +145,7 @@ export class AgentSessionRegistryService {
     if (!updated) return;
     emit({
       kind: "agent-session-updated",
-      workspaceId: updated.workspaceId,
+      worktreeId: updated.worktreeId,
       agentSession: updated,
     });
   }

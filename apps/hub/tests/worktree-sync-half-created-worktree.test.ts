@@ -4,10 +4,10 @@
 // `git worktree add` writes an all-zero `HEAD` into the new worktree before it
 // points `HEAD` at the branch. A sync that listed worktrees in that window saw
 // the new worktree detached, labelled it `detached-0000000`, and saved that as
-// the row's immutable `name`. `workspaces.create` then found a row at its path
-// and kept it, so the workspace it had just created was missing under its
-// real id: its setup terminal failed with "Workspace not found" and
-// `workspaces.remove` returned 500 (`workspace-setup-teardown.test.ts`, Release
+// the row's immutable `name`. `worktrees.create` then found a row at its path
+// and kept it, so the worktree it had just created was missing under its
+// real id: its setup terminal failed with "Worktree not found" and
+// `worktrees.remove` returned 500 (`worktree-setup-teardown.test.ts`, Release
 // run 36410132680).
 //
 // The window lasts a few milliseconds, so the test freezes a worktree in it:
@@ -18,7 +18,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -32,8 +32,8 @@ import {
 import { StatusStream } from "./helpers/status-stream";
 import { waitFor } from "./helpers/wait-for";
 
-const TOKEN = "workspace-sync-half-created-token";
-const PROJECT = "proj";
+const TOKEN = "worktree-sync-half-created-token";
+const REPO = "proj";
 
 const gitEnv = {
   ...process.env,
@@ -47,24 +47,24 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-/** Start the poller and wait until its first tick, which syncs first, has polled `workspaceId`. */
-async function syncThroughPoller(server: ServerHandle, workspaceId: string): Promise<void> {
+/** Start the poller and wait until its first tick, which syncs first, has polled `worktreeId`. */
+async function syncThroughPoller(server: ServerHandle, worktreeId: string): Promise<void> {
   const stream = await StatusStream.open(server.url, TOKEN);
   try {
-    await waitFor(async () => stream.latest(workspaceId), {
+    await waitFor(async () => stream.latest(worktreeId), {
       timeoutMs: 20_000,
-      label: `branch status of ${workspaceId}`,
+      label: `branch status of ${worktreeId}`,
     });
   } finally {
     stream.close();
   }
 }
 
-async function listedWorkspaceNames(server: ServerHandle): Promise<string[]> {
-  const { projects } = await trpcData<{
-    projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-  }>(await trpcQuery(server.url, "projects.list", undefined, TOKEN));
-  return (projects.find((p) => p.name === PROJECT)?.worktrees ?? []).map((wt) => wt.name).sort();
+async function listedWorktreeNames(server: ServerHandle): Promise<string[]> {
+  const { repos } = await trpcData<{
+    repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+  }>(await trpcQuery(server.url, "repos.list", undefined, TOKEN));
+  return (repos.find((p) => p.name === REPO)?.worktrees ?? []).map((wt) => wt.name).sort();
 }
 
 describe("worktree sync during git worktree add", () => {
@@ -76,7 +76,7 @@ describe("worktree sync during git worktree add", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-sync-half-created-");
-    repoPath = join(tmpHome, PROJECT);
+    repoPath = join(tmpHome, REPO);
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, ["init", "-b", "main"]);
     git(repoPath, ["commit", "--allow-empty", "-m", "init"]);
@@ -90,9 +90,9 @@ describe("worktree sync during git worktree add", () => {
     writeFileSync(adminLock, "initializing");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ name: "main", branch: "main", path: repoPath }],
@@ -108,8 +108,8 @@ describe("worktree sync during git worktree add", () => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("refuses projects.list without the token", async () => {
-    const res = await fetch(`${server?.url}/trpc/projects.list`);
+  it("refuses repos.list without the token", async () => {
+    const res = await fetch(`${server?.url}/trpc/repos.list`);
     expect(res.status).toBe(401);
   });
 
@@ -117,10 +117,10 @@ describe("worktree sync during git worktree add", () => {
     timeout: 60_000,
   }, async () => {
     if (!server) throw new Error("server not started");
-    await syncThroughPoller(server, toWorkspaceId(PROJECT, "main"));
+    await syncThroughPoller(server, toWorktreeId(REPO, "main"));
 
-    expect(listWorktreeNames(tmpHome, PROJECT)).toEqual(["main"]);
-    expect(await listedWorkspaceNames(server)).toEqual(["main"]);
+    expect(listWorktreeNames(tmpHome, REPO)).toEqual(["main"]);
+    expect(await listedWorktreeNames(server)).toEqual(["main"]);
 
     // What `git worktree add` does next: point HEAD at the branch, unlock.
     writeFileSync(adminHead, "ref: refs/heads/feat/half\n");
@@ -128,9 +128,9 @@ describe("worktree sync during git worktree add", () => {
     // A restart runs the poller's first tick, and its sync, again.
     await server.close();
     server = await startServer({ remoteHost: false, tmpHome });
-    await syncThroughPoller(server, toWorkspaceId(PROJECT, "feat/half"));
+    await syncThroughPoller(server, toWorktreeId(REPO, "feat/half"));
 
-    expect(listWorktreeNames(tmpHome, PROJECT)).toEqual(["feat/half", "main"]);
-    expect(await listedWorkspaceNames(server)).toEqual(["feat/half", "main"]);
+    expect(listWorktreeNames(tmpHome, REPO)).toEqual(["feat/half", "main"]);
+    expect(await listedWorktreeNames(server)).toEqual(["feat/half", "main"]);
   });
 });

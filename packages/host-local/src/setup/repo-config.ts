@@ -9,20 +9,20 @@ import type { EnvironmentReport, Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 
-const log = createLogger("project-config");
+const log = createLogger("repo-config");
 
 /**
  * Load .band/config.json, trying the worktree path first, then falling back
- * to the project's main repo path.  This handles the common case where the
+ * to the repo's main repo path.  This handles the common case where the
  * config file lives on the main branch but is .gitignored, so new worktrees
  * don't contain it.
  */
-export async function loadProjectConfig(
+export async function loadRepoConfig(
   host: Host,
   worktreePath: string,
-  projectPath: string,
+  repoPath: string,
 ): Promise<Record<string, unknown> | null> {
-  for (const base of [worktreePath, projectPath]) {
+  for (const base of [worktreePath, repoPath]) {
     const text = await readConfig(host, join(base, ".band", "config.json"));
     if (text === null) continue;
     try {
@@ -36,17 +36,17 @@ export async function loadProjectConfig(
 
 /**
  * Read and validate `.band/environment.json`, trying the worktree first and
- * then the project checkout (the file may be untracked or ignored, like
+ * then the repo checkout (the file may be untracked or ignored, like
  * `config.json`). The first copy that exists is the one reported, even when it
  * has problems, so a broken file in the worktree is not hidden by a good one
- * in the project.
+ * in the repo.
  */
 export async function loadEnvironment(
   host: Host,
   worktreePath: string,
-  projectPath: string,
+  repoPath: string,
 ): Promise<EnvironmentReport> {
-  for (const base of [worktreePath, projectPath]) {
+  for (const base of [worktreePath, repoPath]) {
     const file = join(base, ENVIRONMENT_FILE);
     const text = await readConfig(host, file);
     if (text === null) continue;
@@ -64,17 +64,17 @@ export async function loadEnvironment(
 }
 
 /**
- * The command a workspace runs for `label`. A valid `.band/environment.json`
+ * The command a worktree runs for `label`. A valid `.band/environment.json`
  * that has one wins. A file with problems is logged and skipped, and
  * `.band/config.json` answers instead.
  */
 export async function loadScriptCommand(
   host: Host,
   worktreePath: string,
-  projectPath: string,
+  repoPath: string,
   label: EnvironmentScript,
 ): Promise<string | null> {
-  const report = await loadEnvironment(host, worktreePath, projectPath);
+  const report = await loadEnvironment(host, worktreePath, repoPath);
   if (report.environment) {
     const fromEnvironment = scriptFor(report.environment, label);
     if (fromEnvironment !== null) return fromEnvironment;
@@ -84,7 +84,7 @@ export async function loadScriptCommand(
       "ignoring invalid .band/environment.json",
     );
   }
-  const value = (await loadProjectConfig(host, worktreePath, projectPath))?.[label];
+  const value = (await loadRepoConfig(host, worktreePath, repoPath))?.[label];
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
@@ -99,7 +99,7 @@ async function readConfig(host: Host, configPath: string): Promise<string | null
 
 /**
  * Schema for the `workspace.copyFiles` block of `.band/config.json`. Used by
- * `WorkspaceService.create` to seed a fresh worktree with untracked files
+ * `WorktreeService.create` to seed a fresh worktree with untracked files
  * (`.env`, local credential overrides, IDE settings) that aren't committed to
  * the repo — a fresh worktree starts without them by definition. See issue
  * #284 for the full design.
@@ -107,21 +107,21 @@ async function readConfig(host: Host, configPath: string): Promise<string | null
  * The shape is intentionally narrow (`string[]` only) so a malformed entry
  * fails validation up front instead of being silently dropped during the
  * copy. Globs are accepted in the strings themselves and expanded against
- * the project root by `copyWorkspaceFiles`.
+ * the repo root by `copyWorktreeFiles`.
  */
 const CopyFilesSchema = z.array(z.string()).optional();
 
 /**
- * Read the `workspace.copyFiles` list from `.band/config.json` at the project
- * root. The config is read directly from `projectPath` rather than going
- * through {@link loadProjectConfig}'s worktree-first fallback: copy
+ * Read the `workspace.copyFiles` list from `.band/config.json` at the repo
+ * root. The config is read directly from `repoPath` rather than going
+ * through {@link loadRepoConfig}'s worktree-first fallback: copy
  * resolution is deterministic only when the source is the main checkout (a
  * fresh worktree never has the file yet, and reading it from another
  * worktree would produce a different result depending on which worktree the
  * server happened to look at).
  *
  * Returns `null` when:
- *   - `.band/config.json` is absent at the project root.
+ *   - `.band/config.json` is absent at the repo root.
  *   - The file fails to parse as JSON.
  *   - The `workspace.copyFiles` block is missing.
  *   - The block is present but fails schema validation (logged at warn).
@@ -129,8 +129,8 @@ const CopyFilesSchema = z.array(z.string()).optional();
  * A `null` return is indistinguishable from an empty list at the call site
  * and intentionally so — both mean "no Option-A copies."
  */
-export async function getCopyFiles(host: Host, projectPath: string): Promise<string[] | null> {
-  const configPath = join(projectPath, ".band", "config.json");
+export async function getCopyFiles(host: Host, repoPath: string): Promise<string[] | null> {
+  const configPath = join(repoPath, ".band", "config.json");
   const text = await readConfig(host, configPath);
   if (text === null) return null;
 
@@ -143,9 +143,9 @@ export async function getCopyFiles(host: Host, projectPath: string): Promise<str
   }
 
   if (!raw || typeof raw !== "object") return null;
-  const workspace = (raw as Record<string, unknown>).workspace;
-  if (!workspace || typeof workspace !== "object") return null;
-  const copyFiles = (workspace as Record<string, unknown>).copyFiles;
+  const worktree = (raw as Record<string, unknown>).workspace;
+  if (!worktree || typeof worktree !== "object") return null;
+  const copyFiles = (worktree as Record<string, unknown>).copyFiles;
   if (copyFiles === undefined) return null;
 
   const parsed = CopyFilesSchema.safeParse(copyFiles);

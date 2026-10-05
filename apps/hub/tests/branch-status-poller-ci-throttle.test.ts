@@ -8,7 +8,7 @@ import { getBatchedCIStatuses } from "../src/server/services/branch-status-polle
 // Exercises the CI-poll failure throttle in `getBatchedCIStatuses` through
 // its real public surface — no mocks, no test hooks. We build a real git
 // repo whose `origin` resolves a host (so the batching loop actually runs),
-// then point the workspace's worktree path at a *non-existent* directory.
+// then point the worktree's worktree path at a *non-existent* directory.
 // The real `gh` subprocess then fails offline and deterministically with
 // `spawn gh ENOENT`, which is exactly the persistent-failure shape the
 // throttle exists to de-noise (a long-running server was writing thousands
@@ -46,8 +46,8 @@ afterEach(() => {
 });
 
 /**
- * Build a `WorkspaceInfo` whose CI query is guaranteed to fail offline.
- * `projectPath` is a real git repo with an `origin` remote (so
+ * Build a `WorktreeInfo` whose CI query is guaranteed to fail offline.
+ * `repoPath` is a real git repo with an `origin` remote (so
  * `getRepoInfo` resolves `remoteUrl`'s host); `worktreePath` is a path that
  * does not exist, so spawning `gh` in it fails with `spawn gh ENOENT`.
  *
@@ -55,7 +55,7 @@ afterEach(() => {
  * persists across tests) can't leak between them — the poller's own
  * post-loop prune drops any host not in the current tick's set.
  */
-function makeFailingWorkspace(remoteUrl: string, id: string) {
+function makeFailingWorktree(remoteUrl: string, id: string) {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-ci-throttle-")));
   const repoPath = join(tmp, "repo");
   mkdirSync(repoPath);
@@ -63,12 +63,12 @@ function makeFailingWorkspace(remoteUrl: string, id: string) {
   execFileSync("git", ["remote", "add", "origin", remoteUrl], { cwd: repoPath, env: gitEnv });
   cleanups.push(() => rmSync(tmp, { recursive: true, force: true }));
   return {
-    workspaceId: id,
-    project: id,
+    worktreeId: id,
+    repo: id,
     branch: "feature",
     defaultBranch: "main",
     worktreePath: join(tmp, "does-not-exist"),
-    projectPath: repoPath,
+    repoPath: repoPath,
     hasOrigin: true,
   };
 }
@@ -83,7 +83,7 @@ function ciPollCalls(spy: ReturnType<typeof vi.spyOn>): unknown[][] {
 describe("getBatchedCIStatuses CI-poll failure throttle", () => {
   it("logs a persistent identical failure once, not once per tick", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const ws = makeFailingWorkspace("git@once.example:fake/repo.git", "once");
+    const ws = makeFailingWorktree("git@once.example:fake/repo.git", "once");
 
     // Three consecutive ticks, all failing with the same error.
     await getBatchedCIStatuses([ws]);
@@ -97,19 +97,19 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
     const calls = ciPollCalls(errorSpy);
     expect(calls).toHaveLength(1);
     // Message wording/prefix preserved so log greppers keep matching.
-    expect(calls[0][0]).toBe(`${CI_POLL_PREFIX} (1 workspaces):`);
+    expect(calls[0][0]).toBe(`${CI_POLL_PREFIX} (1 worktrees):`);
     expect(calls[0][1]).toContain("ENOENT");
   });
 
   it("re-arms logging after a failing host drops out of the polled set", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    // Host A has one workspace, host B two, so their log lines are
-    // distinguishable by the `(N workspaces)` count in the prefix.
-    const a = makeFailingWorkspace("git@host-a.example:fake/repo.git", "a1");
-    const b1 = makeFailingWorkspace("git@host-b.example:fake/repo.git", "b1");
-    const b2 = makeFailingWorkspace("git@host-b.example:fake/other.git", "b2");
+    // Host A has one worktree, host B two, so their log lines are
+    // distinguishable by the `(N worktrees)` count in the prefix.
+    const a = makeFailingWorktree("git@host-a.example:fake/repo.git", "a1");
+    const b1 = makeFailingWorktree("git@host-b.example:fake/repo.git", "b1");
+    const b2 = makeFailingWorktree("git@host-b.example:fake/other.git", "b2");
     const countFor = (n: number) =>
-      ciPollCalls(errorSpy).filter((c) => c[0] === `${CI_POLL_PREFIX} (${n} workspaces):`).length;
+      ciPollCalls(errorSpy).filter((c) => c[0] === `${CI_POLL_PREFIX} (${n} worktrees):`).length;
 
     await getBatchedCIStatuses([a]);
     expect(countFor(1)).toBe(1); // host A's first failure logs
@@ -119,7 +119,7 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
 
     // Host A drops out of the polled set; host B is polled instead. The
     // poller's post-loop prune clears A's throttle state — the real path
-    // hit when a project/host disappears between ticks.
+    // hit when a repo/host disappears between ticks.
     await getBatchedCIStatuses([b1, b2]);
     expect(countFor(2)).toBe(1); // host B logs once
 
@@ -130,8 +130,8 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
 
   it("throttles each host independently", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const github = makeFailingWorkspace("git@indep-a.example:fake/repo.git", "ia");
-    const enterprise = makeFailingWorkspace("git@indep-b.example:fake/repo.git", "ib");
+    const github = makeFailingWorktree("git@indep-a.example:fake/repo.git", "ia");
+    const enterprise = makeFailingWorktree("git@indep-b.example:fake/repo.git", "ib");
 
     // First tick with both hosts failing → one log per host.
     await getBatchedCIStatuses([github, enterprise]);

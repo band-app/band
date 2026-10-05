@@ -4,11 +4,11 @@
 // which shows up as a `locked "{...,\"owner\":\"supacode\",...}"` line in
 // `git worktree list --porcelain` — most likely to stop `git gc` /
 // auto-prune from reclaiming a worktree while an agent is mid-flight.
-// The lock is NOT applied by Band itself: `workspace-service.ts`'s
+// The lock is NOT applied by Band itself: `worktree-service.ts`'s
 // `create` runs a plain `git worktree add` with no `--lock` flag.
 //
 // A locked worktree defeats BOTH branches of the old removal path in
-// `WorkspaceService.remove`'s background cleanup:
+// `WorktreeService.remove`'s background cleanup:
 //
 //   1. `git worktree remove --force <path>` is REFUSED for a locked
 //      worktree ("cannot remove a locked working tree") — a single
@@ -18,14 +18,14 @@
 //      `git worktree prune` SKIPS locked entries.
 //
 // Net effect: the removed path survives in `git worktree list`, and
-// `syncWorktrees` (`reconcileOneProject`) overwrites the persisted DB
+// `syncWorktrees` (`reconcileOneRepo`) overwrites the persisted DB
 // list with git's view on the next tick — re-adding the just-deleted
-// workspace so it reappears in the UI forever.
+// worktree so it reappears in the UI forever.
 //
 // The fix unlocks the worktree (`git worktree unlock`) before removal
 // and again before the prune fallback. This test boots the real
 // server, creates a real LOCKED worktree, drives the real
-// `workspaces.remove` mutation, and asserts:
+// `worktrees.remove` mutation, and asserts:
 //
 //   1. `git worktree list --porcelain` no longer lists the removed
 //      path once the background cleanup finishes.
@@ -37,7 +37,7 @@
 //      process boundary.
 //
 // Integration-only — no mocks, no in-process calls to the system under
-// test. Mirrors `workspace-remove-detached.test.ts`.
+// test. Mirrors `worktree-remove-detached.test.ts`.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -47,7 +47,7 @@ import { listWorktreeBranches, listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
-const DEFAULT_TOKEN = "workspace-remove-locked-token";
+const DEFAULT_TOKEN = "worktree-remove-locked-token";
 
 const gitEnv = {
   ...process.env,
@@ -73,7 +73,7 @@ function listGitWorktreePaths(repoPath: string): string[] {
     .map((line) => line.slice("worktree ".length).trim());
 }
 
-describe("workspaces.remove on a locked worktree", () => {
+describe("worktrees.remove on a locked worktree", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -97,7 +97,7 @@ describe("workspaces.remove on a locked worktree", () => {
     git(repoPath, ["worktree", "lock", "--reason", '{"owner":"supacode"}', featurePath]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repoPath,
@@ -122,10 +122,10 @@ describe("workspaces.remove on a locked worktree", () => {
   it("rejects an unauthenticated remove and leaves the worktree registered", async () => {
     // The mutation is auth-gated; an unauthenticated call must not
     // remove anything. Raw fetch with no `band_token` cookie.
-    const res = await fetch(`${server.url}/trpc/workspaces.remove`, {
+    const res = await fetch(`${server.url}/trpc/worktrees.remove`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: "proj", name: "feature" }),
+      body: JSON.stringify({ repo: "proj", name: "feature" }),
     });
     expect(res.status).toBe(401);
 
@@ -143,8 +143,8 @@ describe("workspaces.remove on a locked worktree", () => {
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.remove",
-      { project: "proj", name: "feature" },
+      "worktrees.remove",
+      { repo: "proj", name: "feature" },
       DEFAULT_TOKEN,
     );
     const body = await res.text();
@@ -153,7 +153,7 @@ describe("workspaces.remove on a locked worktree", () => {
 
     // The persisted row is dropped synchronously by the fast path.
     // Assert on both `branch` and the `name` (identity) column —
-    // `workspaces.remove` filters by `name`, so pinning it guards
+    // `worktrees.remove` filters by `name`, so pinning it guards
     // against a regression that leaves the identity row behind.
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
     expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);

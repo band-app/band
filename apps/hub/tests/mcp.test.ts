@@ -94,7 +94,7 @@ describe("MCP server — tool listing and invocation", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    seedState(tmpHome, { projects: [] });
+    seedState(tmpHome, { repos: [] });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
@@ -141,12 +141,12 @@ describe("MCP server — tool listing and invocation", () => {
 
     // Check some expected tools exist
     const toolNames = tools.map((t) => t.name);
-    expect(toolNames).toContain("band_projects_list");
+    expect(toolNames).toContain("band_repos_list");
     expect(toolNames).toContain("band_tasks_submit");
     expect(toolNames).toContain("band_settings_get");
-    expect(toolNames).toContain("band_workspace_getDiff");
+    expect(toolNames).toContain("band_worktree_getDiff");
     expect(toolNames).toContain("band_tunnel_status");
-    expect(toolNames).toContain("band_workspaces_create");
+    expect(toolNames).toContain("band_worktrees_create");
     expect(toolNames).toContain("band_cronjobs_list");
     // Credentials stay out of agent reach.
     expect(toolNames.filter((n) => n.startsWith("band_vault_"))).toEqual([]);
@@ -160,11 +160,11 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames.filter((n) => /^band_(tokens|hosts)_/.test(n))).toEqual([]);
   });
 
-  it("calls band_projects_list tool and gets results", async () => {
+  it("calls band_repos_list tool and gets results", async () => {
     const callRes = await mcpPost(
       server.url,
       mcpRequest("tools/call", {
-        name: "band_projects_list",
+        name: "band_repos_list",
         arguments: {},
       }),
     );
@@ -179,7 +179,7 @@ describe("MCP server — tool listing and invocation", () => {
 
     // Parse the returned JSON text
     const data = JSON.parse(callResult.result.content[0].text);
-    expect(data.projects).toEqual([]);
+    expect(data.repos).toEqual([]);
   });
 
   it("calls band_settings_get tool and gets results", async () => {
@@ -234,9 +234,9 @@ describe("MCP server — tool listing and invocation", () => {
     };
     const tools = listResult.result.tools;
 
-    const projectsList = tools.find((t) => t.name === "band_projects_list");
-    expect(projectsList?.description).toContain("Query");
-    expect(projectsList?.description).toContain("projects.list");
+    const reposList = tools.find((t) => t.name === "band_repos_list");
+    expect(reposList?.description).toContain("Query");
+    expect(reposList?.description).toContain("repos.list");
 
     const tasksSubmit = tools.find((t) => t.name === "band_tasks_submit");
     expect(tasksSubmit?.description).toContain("Mutation");
@@ -255,7 +255,7 @@ describe("MCP server — auth enforcement", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    seedState(tmpHome, { projects: [] });
+    seedState(tmpHome, { repos: [] });
     seedSettings(tmpHome, { tokenSecret: TOKEN });
     server = await startServer({ tmpHome });
   });

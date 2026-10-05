@@ -146,7 +146,7 @@ beforeAll(async () => {
   const hubHome = createTmpHome("band-mcp-stdio-hub-");
   scratch.push(hubHome);
   seedSettings(hubHome, { tokenSecret: TEST_TOKEN });
-  seedState(hubHome, { projects: [] });
+  seedState(hubHome, { repos: [] });
   server = await startServer({
     tmpHome: hubHome,
     remoteHost: false,

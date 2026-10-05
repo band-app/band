@@ -15,13 +15,13 @@ const GROUPS = [
   "chats",
   "cronjobs",
   "hosts",
-  "projects",
+  "repos",
   "skills",
   "subscriptions",
   "terminals",
   "tokens",
   "tunnel",
-  "workspaces",
+  "worktrees",
 ];
 const TOP_LEVEL = ["notify", "open", "schema", "settings"];
 

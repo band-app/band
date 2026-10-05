@@ -1,6 +1,6 @@
 // Integration tests for remote hosts (plan step 2.3): a real `band-worker`
 // process dials a real hub, registers through the bootstrap exchange, and a
-// workspace on that host runs files, git and a terminal on the worker. The hub
+// worktree on that host runs files, git and a terminal on the worker. The hub
 // is the production bundle (`dist/start-server.mjs`) on a random port with
 // auth on, and everything lives in temp dirs.
 
@@ -72,7 +72,7 @@ function git(cwd: string, ...args: string[]): string {
 function makeRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
-  writeFileSync(join(dir, "hello.txt"), "hello from the project\n");
+  writeFileSync(join(dir, "hello.txt"), "hello from the repo\n");
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "init");
 }
@@ -157,7 +157,7 @@ async function exchange(token: string, workerId?: string): Promise<Response> {
   });
 }
 
-const workspaceId = "proj-remote-feat";
+const worktreeId = "proj-remote-feat";
 
 beforeAll(async () => {
   hubHome = createTmpHome("band-remote-hub-");
@@ -166,13 +166,13 @@ beforeAll(async () => {
   workerState = tmp("band-remote-state-");
   workerHome = tmp("band-remote-whome-");
 
-  // The hub knows the project at a local path. The worker has its own checkout.
+  // The hub knows the repo at a local path. The worker has its own checkout.
   const hubRepo = join(tmp("band-remote-hubrepo-"), "proj");
   makeRepo(hubRepo);
   makeRepo(join(workerRoot, "proj"));
   seedSettings(hubHome, { tokenSecret: SHARED_TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -223,38 +223,38 @@ describe("registering a worker", () => {
   });
 });
 
-describe("a workspace on the remote host", () => {
-  it("creates the workspace under the worker's root", async () => {
-    const created = await trpcM<{ path: string }>("workspaces.create", {
-      project: "proj",
+describe("a worktree on the remote host", () => {
+  it("creates the worktree under the worker's root", async () => {
+    const created = await trpcM<{ path: string }>("worktrees.create", {
+      repo: "proj",
       branch: "remote-feat",
       hostId,
-      hostProjectPath: join(workerRoot, "proj"),
+      hostRepoPath: join(workerRoot, "proj"),
     });
     expect(created.path).toBe(join(workerRoot, ".band-worktrees", "proj", "remote-feat"));
-    const { projects } = await trpcQ<{
-      projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
-    }>("projects.list");
-    const wt = projects
+    const { repos } = await trpcQ<{
+      repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+    }>("repos.list");
+    const wt = repos
       .find((p) => p.name === "proj")
       ?.worktrees.find((w) => w.name === "remote-feat");
     expect(wt?.hostId).toBe(hostId);
   });
 
   it("lists, reads and writes files and runs git on the worker", async () => {
-    const files = await trpcQ<{ entries: Array<{ name: string }> }>("workspace.listFiles", {
-      workspaceId,
+    const files = await trpcQ<{ entries: Array<{ name: string }> }>("worktree.listFiles", {
+      worktreeId,
       path: "",
     });
     expect(files.entries.map((e) => e.name)).toContain("hello.txt");
 
-    await trpcM("workspace.createFile", {
-      workspaceId,
+    await trpcM("worktree.createFile", {
+      worktreeId,
       path: "note.txt",
       content: "from the hub\n",
     });
-    const saved = await trpcQ<{ content: string }>("workspace.getFile", {
-      workspaceId,
+    const saved = await trpcQ<{ content: string }>("worktree.getFile", {
+      worktreeId,
       path: "note.txt",
     });
     expect(saved.content).toBe("from the hub\n");
@@ -263,7 +263,7 @@ describe("a workspace on the remote host", () => {
       git(join(workerRoot, ".band-worktrees", "proj", "remote-feat"), "status", "--porcelain"),
     ).toContain("note.txt");
 
-    const changes = JSON.stringify(await trpcQ("workspace.getChanges", { workspaceId }));
+    const changes = JSON.stringify(await trpcQ("worktree.getChanges", { worktreeId }));
     expect(changes).toContain("note.txt");
   });
 
@@ -273,8 +273,8 @@ describe("a workspace on the remote host", () => {
     symlinkSync(outside, join(workerRoot, ".band-worktrees", "proj", "remote-feat", "escape"));
     const res = await trpcQuery(
       server.url,
-      "workspace.getFile",
-      { workspaceId, path: "escape/secret.txt" },
+      "worktree.getFile",
+      { worktreeId, path: "escape/secret.txt" },
       SHARED_TOKEN,
     );
     expect(res.status).not.toBe(200);
@@ -283,8 +283,8 @@ describe("a workspace on the remote host", () => {
     for (const path of ["escape/pwn.txt", "../../pwn.txt"]) {
       const write = await trpcMutate(
         server.url,
-        "workspace.createFile",
-        { workspaceId, path, content: "x" },
+        "worktree.createFile",
+        { worktreeId, path, content: "x" },
         SHARED_TOKEN,
       );
       expect(write.status).not.toBe(200);
@@ -292,24 +292,24 @@ describe("a workspace on the remote host", () => {
     expect(existsSync(join(outside, "pwn.txt"))).toBe(false);
   });
 
-  it("keeps the remote workspace through a sync and leaves local ones alone", async () => {
-    const { projects } = await trpcQ<{
-      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-    }>("projects.list");
-    const names = projects.find((p) => p.name === "proj")?.worktrees.map((w) => w.name);
+  it("keeps the remote worktree through a sync and leaves local ones alone", async () => {
+    const { repos } = await trpcQ<{
+      repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>("repos.list");
+    const names = repos.find((p) => p.name === "proj")?.worktrees.map((w) => w.name);
     expect(names).toEqual(expect.arrayContaining(["main", "remote-feat"]));
-    // Local workspaces still read their files from the hub's disk.
-    const local = await trpcQ<{ entries: Array<{ name: string }> }>("workspace.listFiles", {
-      workspaceId: "proj-main",
+    // Local worktrees still read their files from the hub's disk.
+    const local = await trpcQ<{ entries: Array<{ name: string }> }>("worktree.listFiles", {
+      worktreeId: "proj-main",
       path: "",
     });
     expect(local.entries.map((e) => e.name)).toContain("hello.txt");
   });
 
   it("streams a shell from the worker", async () => {
-    const created = await trpcM<{ terminalId: string }>("terminal.create", { workspaceId });
+    const created = await trpcM<{ terminalId: string }>("terminal.create", { worktreeId });
     const socket = await TerminalSocket.open(server, {
-      workspaceId,
+      worktreeId,
       terminalId: created.terminalId,
       token: SHARED_TOKEN,
     });
@@ -330,17 +330,17 @@ describe("losing and regaining the worker", () => {
     await worker.exited;
     await waitForStatus("offline", 20_000);
 
-    // Calls to an offline host fail, local workspaces still work.
+    // Calls to an offline host fail, local worktrees still work.
     const res = await trpcQuery(
       server.url,
-      "workspace.listFiles",
-      { workspaceId, path: "" },
+      "worktree.listFiles",
+      { worktreeId, path: "" },
       SHARED_TOKEN,
     );
     expect(res.status).not.toBe(200);
     expect(await res.text()).toMatch(/offline/);
-    const local = await trpcQ<{ entries: unknown[] }>("workspace.listFiles", {
-      workspaceId: "proj-main",
+    const local = await trpcQ<{ entries: unknown[] }>("worktree.listFiles", {
+      worktreeId: "proj-main",
       path: "",
     });
     expect(local.entries.length).toBeGreaterThan(0);
@@ -348,8 +348,8 @@ describe("losing and regaining the worker", () => {
     // The saved session token is enough to come back; the bootstrap token was spent.
     worker = startWorkerProcess("bwb_unused-because-the-session-token-is-saved");
     await waitForStatus("online", 20_000);
-    const files = await trpcQ<{ entries: Array<{ name: string }> }>("workspace.listFiles", {
-      workspaceId,
+    const files = await trpcQ<{ entries: Array<{ name: string }> }>("worktree.listFiles", {
+      worktreeId,
       path: "",
     });
     expect(files.entries.map((e) => e.name)).toContain("note.txt");

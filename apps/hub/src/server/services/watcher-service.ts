@@ -7,9 +7,9 @@
  * without crossing into the services tier. This service adds the parts
  * that *do* belong here:
  *
- *   - the on-connect snapshot replay (current workspace statuses,
+ *   - the on-connect snapshot replay (current worktree statuses,
  *     branch statuses, running setup/teardown scripts) — needs DB access
- *     + the workspace-script registry, both services-tier concerns;
+ *     + the worktree-script registry, both services-tier concerns;
  *   - the branch-status poller lifecycle (start on first subscribe,
  *     stop when the last subscriber disconnects).
  *
@@ -28,7 +28,7 @@ import {
 } from "../infra/events/status-event-bus";
 import { type BranchStatusPoller, branchStatusPoller } from "./branch-status-poller";
 import { loadCurrentStatuses } from "./state";
-import { workspaceScriptService } from "./workspace-script-service";
+import { worktreeScriptService } from "./worktree-script-service";
 
 export type { StatusEvent };
 export { emit };
@@ -47,7 +47,7 @@ export class WatcherService {
     const rows = db.select().from(branchStatusesTable).all();
     return rows.map((row) => ({
       kind: "branch-status" as const,
-      workspaceId: row.workspaceId,
+      worktreeId: row.worktreeId,
       git: {
         dirty: row.gitDirty,
         conflict: row.gitConflict,
@@ -77,9 +77,9 @@ export class WatcherService {
     // Send current agent status snapshot (always include runningSetups for reconciliation)
     const statuses = loadCurrentStatuses();
     // Snapshot the running scripts once — used both for the `snapshot`
-    // event below and the per-workspace `setup-status` loop.
-    const runningScripts = workspaceScriptService.getRunning();
-    const runningSetups = [...new Set(runningScripts.map((run) => run.workspaceId))];
+    // event below and the per-worktree `setup-status` loop.
+    const runningScripts = worktreeScriptService.getRunning();
+    const runningSetups = [...new Set(runningScripts.map((run) => run.worktreeId))];
     listener({ kind: "snapshot", statuses, runningSetups });
 
     // Send current branch status snapshots
@@ -88,8 +88,8 @@ export class WatcherService {
     }
 
     // Send current setup status snapshots
-    for (const { workspaceId, script } of runningScripts) {
-      listener({ kind: "setup-status", workspaceId, script, setupState: "running" });
+    for (const { worktreeId, script } of runningScripts) {
+      listener({ kind: "setup-status", worktreeId, script, setupState: "running" });
     }
 
     return () => {

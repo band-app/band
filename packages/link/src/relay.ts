@@ -19,7 +19,7 @@ export const METHOD_RELAY_HTTP = "relay.http";
 export const RELAY_MAX_BODY_BYTES = 512 * 1024;
 
 export interface RelayScopeParams {
-  workspaceId: string;
+  worktreeId: string;
   chatId?: string;
 }
 
@@ -37,7 +37,7 @@ export interface RelayRevokeParams {
 }
 
 export interface RelayHttpRequest {
-  /** What the worker holds for the caller's token. The hub checks it against the worker's own workspaces. */
+  /** What the worker holds for the caller's token. The hub checks it against the worker's own worktrees. */
   scope: RelayScopeParams;
   method: string;
   /** Path and query, as the caller sent them. */
@@ -78,7 +78,7 @@ export type CliFetchReply =
 /**
  * Worker to hub: an ephemeral worker that has been idle for its idle time asks
  * whether it may exit. The hub checks that nothing runs, persists every
- * workspace on the worker through ordinary calls on this link, and answers
+ * worktree on the worker through ordinary calls on this link, and answers
  * `exit: true` only when all of it is stored (plan step 3.5).
  */
 export const METHOD_LIFECYCLE_IDLE = "lifecycle.idle";
@@ -101,7 +101,7 @@ export interface LifecyclePolicy {
 /**
  * Hub to worker: asks an ephemeral worker to go through the same hand-off as an idle one now. The
  * worker answers at once and sends `lifecycle.idle`, so the hub's checks and the storing of every
- * workspace are the ones an idle worker gets. The reaper uses it at a machine's maximum lifetime
+ * worktree are the ones an idle worker gets. The reaper uses it at a machine's maximum lifetime
  * (plan step 3.7).
  */
 export const METHOD_LIFECYCLE_SLEEP = "lifecycle.sleep";

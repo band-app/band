@@ -20,7 +20,7 @@ export const subscriptionEventSchema = z.object({
   summary: z.string(),
   /** When the event happened, in epoch milliseconds. */
   at: z.number().int().min(0).max(8.64e15),
-  /** Caused by Band's own action (for example a push from a workspace). Never delivered. */
+  /** Caused by Band's own action (for example a push from a worktree). Never delivered. */
   self: z.boolean().optional(),
   /** The commit a push put on a branch. Lets the source tell whether Band pushed it. */
   sha: z.string().optional(),

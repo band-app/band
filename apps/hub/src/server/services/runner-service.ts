@@ -12,7 +12,7 @@
  *   2. runs the runner's `spawn` script with the contract environment
  *      (`docs/runner-hooks.md`), keeping its output in a per-request log,
  *   3. waits for that worker to say hello while it renews the lease, and then
- *      fulfils the request, which makes the hub create the workspace on it.
+ *      fulfils the request, which makes the hub create the worktree on it.
  *
  * An attempt fails when `spawn` exits non-zero or the worker is not online
  * within `timeoutSec`. The service runs `destroy`, drops the host row, and
@@ -107,7 +107,7 @@ const PASSTHROUGH_ENV = [
 export interface RunnerRun {
   requestId: string;
   runnerId: string;
-  workspaceId: string;
+  worktreeId: string;
   status: "running" | "ready" | "failed" | "aborted";
   attempt: number;
   workerId: string | null;
@@ -122,7 +122,7 @@ export interface RunnerView {
   spawn: string;
   destroy: string | null;
   status: string | null;
-  /** Whether sleeping a workspace on this runner's workers snapshots the machine. */
+  /** Whether sleeping a worktree on this runner's workers snapshots the machine. */
   snapshots: boolean;
   maxLifetimeSec: number | null;
   lifetimeGraceSec: number;
@@ -361,7 +361,7 @@ export class RunnerService {
     const run: RunnerRun = {
       requestId: row.id,
       runnerId: runner.id,
-      workspaceId: row.workspaceId,
+      worktreeId: row.worktreeId,
       status: "running",
       attempt: 0,
       workerId: null,
@@ -388,7 +388,7 @@ export class RunnerService {
 
   private async run(runner: RunnerConfig, row: HostRequestRow, run: RunnerRun): Promise<void> {
     const runLog = new RunLog(this.logFile(row.id));
-    runLog.write("hub", `runner ${runner.id} took request ${row.id} for ${row.workspaceId}`);
+    runLog.write("hub", `runner ${runner.id} took request ${row.id} for ${row.worktreeId}`);
     const environment = parseRequestEnvironment(row);
     if (!environment.ok) {
       // No machine can satisfy a malformed environment, so do not start one.
@@ -471,7 +471,7 @@ export class RunnerService {
     } else if (machine) {
       this.finishMachine(machine.id, false, "the runner has no destroy hook");
     }
-    // A host that was woken keeps its row: it still holds the sleeping workspaces.
+    // A host that was woken keeps its row: it still holds the sleeping worktrees.
     if (state.reused) return;
     try {
       tokenService.removeHost(state.hostId);
@@ -514,7 +514,7 @@ export class RunnerService {
   /**
    * One launch of a worker. Returns the id of the worker that said hello. A wake request that this
    * runner holds a snapshot for tries `restore` first, and starts a fresh worker with `spawn` when
-   * that fails, so the git and session state the sleep stored is what brings the workspace back.
+   * that fails, so the git and session state the sleep stored is what brings the worktree back.
    */
   private async attempt(
     runner: RunnerConfig,
@@ -564,7 +564,7 @@ export class RunnerService {
   ): Promise<string> {
     const deadline = Date.now() + runner.timeoutSec * 1000;
     const labelList = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
-    // A worker started for a container or vm workspace serves that workspace only: placement skips hosts with this label.
+    // A worker started for a container or vm worktree serves that worktree only: placement skips hosts with this label.
     const wanted = requestedIsolation(row.environment as Record<string, unknown> | null);
     if (wanted !== "worktree") labelList.push(`${ISOLATION_LABEL_KEY}=${wanted}`);
     // A request to wake a sleeping ephemeral host starts a worker with that host's id.
@@ -598,16 +598,16 @@ export class RunnerService {
       // once it says hello, because the hook has no credential. The hook skips its own clone.
       const hubClone =
         !snapshot && repos[0] && !repos[0].startsWith("/")
-          ? (await gitCredentialService.hasCredentialFor(repos[0], row.project))
+          ? (await gitCredentialService.hasCredentialFor(repos[0], row.repo))
             ? repos[0]
             : null
           : null;
       if (hubClone) {
         env.BAND_CLONE_BY_HUB = "1";
-        gitCredentialService.expectRemote(issued.hostId, hubClone, row.project);
+        gitCredentialService.expectRemote(issued.hostId, hubClone, row.repo);
         runLog.write("hub", "the hub will clone the repository with a vault git credential");
       }
-      let hostProjectPath: string | undefined;
+      let hostRepoPath: string | undefined;
       if (snapshot) {
         env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
         runLog.write("hub", `restoring snapshot ${snapshot.snapshotId} with the restore hook`);
@@ -623,8 +623,8 @@ export class RunnerService {
         runLog,
         watch: () => this.assertHeld(row, runner),
         onStdout: (line) => {
-          const m = /^BAND_HOST_PROJECT_PATH=(.+)$/.exec(line.trim());
-          if (m) hostProjectPath = m[1];
+          const m = /^BAND_HOST_REPO_PATH=(.+)$/.exec(line.trim());
+          if (m) hostRepoPath = m[1];
           const h = HANDLE_LINE.exec(line.trim());
           if (h) this.machines.update(machineId, { handle: h[1] });
         },
@@ -641,14 +641,14 @@ export class RunnerService {
         await sleep(HELLO_POLL_MS);
       }
       this.machines.update(machineId, { state: "running", lastSeenAt: Date.now() });
-      if (hubClone && hostProjectPath) {
-        await this.cloneOnHost(issued.hostId, hubClone, hostProjectPath);
-        runLog.write("hub", `cloned the repository to ${hostProjectPath}`);
+      if (hubClone && hostRepoPath) {
+        await this.cloneOnHost(issued.hostId, hubClone, hostRepoPath);
+        runLog.write("hub", `cloned the repository to ${hostRepoPath}`);
       }
       // From here the machine's disk is the one the snapshot held, so the hub skips its git restore.
       if (snapshot) this.snapshots.markRestored(snapshot.id, Date.now());
       try {
-        placementService.fulfil(row.id, runner.id, issued.hostId, hostProjectPath);
+        placementService.fulfil(row.id, runner.id, issued.hostId, hostRepoPath);
       } catch (err) {
         if (err instanceof HostRequestError) throw new Aborted(err.message);
         throw err;
@@ -870,12 +870,12 @@ export class RunnerService {
   }
 
   /**
-   * Snapshots the machine of a host whose workspaces were just stored. Returns false when the
+   * Snapshots the machine of a host whose worktrees were just stored. Returns false when the
    * runner has no snapshot hook. Throws when the hook fails, which the caller treats as "no
-   * snapshot": the git and session state is what restores the workspaces then. Snapshots this
+   * snapshot": the git and session state is what restores the worktrees then. Snapshots this
    * host took earlier are deleted, since the new one holds the same disk later.
    */
-  async snapshotHost(hostId: string, workspaceIds: string[]): Promise<boolean> {
+  async snapshotHost(hostId: string, worktreeIds: string[]): Promise<boolean> {
     const machine = this.machineOfHost(hostId);
     const runner = machine ? this.findRunner(machine.runnerId) : undefined;
     if (!machine || !runner?.snapshot) return false;
@@ -884,7 +884,7 @@ export class RunnerService {
     let sizeBytes: number | null = null;
     runLog.write("hub", `snapshotting machine ${machine.id} of ${hostId}`);
     const env = this.hookEnv(runner, null, hostId, null, [], machine.handle);
-    env.BAND_WORKSPACE_IDS = workspaceIds.join(",");
+    env.BAND_WORKTREE_IDS = worktreeIds.join(",");
     const code = await this.runHook({
       runner,
       name: "snapshot",
@@ -908,7 +908,7 @@ export class RunnerService {
       runnerId: runner.id,
       hostId,
       machineId: machine.id,
-      workspaceIds,
+      worktreeIds,
       snapshotId,
       sizeBytes,
       restoredAt: null,
@@ -950,7 +950,7 @@ export class RunnerService {
   /**
    * Retention. Per runner the newest `snapshotKeep` snapshots stay, as long as they have not
    * expired. The rest go through the runner's `snapshotDelete` hook. A snapshot a restore is reading
-   * is left alone. A workspace whose snapshot is gone still wakes from its stored git state.
+   * is left alone. A worktree whose snapshot is gone still wakes from its stored git state.
    */
   async sweepSnapshots(): Promise<void> {
     if (this.sweeping) return;
@@ -1044,9 +1044,9 @@ export class RunnerService {
         .map(([k, v]) => `${k}=${v}`)
         .join(","),
       BAND_REQUIRES: JSON.stringify(row?.requires ?? {}),
-      BAND_PROJECT: row?.project ?? "",
-      // The project's current environment image (plan step 3.2), empty before its first ready build.
-      BAND_PROJECT_IMAGE: row ? this.projectImage(row.project) : "",
+      BAND_REPO: row?.repo ?? "",
+      // The repo's current environment image (plan step 3.2), empty before its first ready build.
+      BAND_REPO_IMAGE: row ? this.repoImage(row.repo) : "",
       BAND_RUNNER_ID: runner.id,
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
       BAND_NODE: process.execPath,
@@ -1058,9 +1058,9 @@ export class RunnerService {
     return env;
   }
 
-  private projectImage(project: string): string {
+  private repoImage(repo: string): string {
     try {
-      return environmentBuildService.currentImage(project) ?? "";
+      return environmentBuildService.currentImage(repo) ?? "";
     } catch {
       return "";
     }
@@ -1170,23 +1170,23 @@ function environmentOf(row: HostRequestRow): Environment | null {
 
 /**
  * Where a hook can clone the request's repository from: the origin URL without
- * credentials, or the local path when the project has no origin (only a hook
+ * credentials, or the local path when the repo has no origin (only a hook
  * on this machine can use that).
  */
 async function repoUrls(row: HostRequestRow): Promise<string[]> {
-  const project = loadState().projects.find((p) => p.name === row.project);
-  if (!project?.path) return [];
+  const repo = loadState().repos.find((p) => p.name === row.repo);
+  if (!repo?.path) return [];
   try {
     const { stdout } = await hostRegistry.local.git.exec(
       ["remote", "get-url", "origin"],
-      project.path,
+      repo.path,
     );
     const url = stdout.trim();
     if (url) return [url.replace(/\/\/[^/@]*@/, "//")];
   } catch {
     // No origin remote.
   }
-  return [project.path];
+  return [repo.path];
 }
 
 function sleep(ms: number): Promise<void> {

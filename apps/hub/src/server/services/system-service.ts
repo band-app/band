@@ -29,7 +29,7 @@ export type { WorktreeInfo };
 
 /**
  * Process-wide cap on simultaneous `du` invocations. The client caps its
- * own fan-out at 3 projects in flight, but multiple open tabs / rapid
+ * own fan-out at 3 repos in flight, but multiple open tabs / rapid
  * Refresh clicks could otherwise spawn dozens of `du` processes
  * concurrently and exhaust the per-process FD limit. 8 keeps the cap
  * above the client's-3 plus a safety margin for parallel callers.
@@ -110,22 +110,22 @@ export class SystemService {
   }
 
   /**
-   * Enumerate git worktrees for a project: the local checkout's, then those on
+   * Enumerate git worktrees for a repo: the local checkout's, then those on
    * each remote host that has a checkout of it. Each entry says which host it
    * is on (`hostId` is absent for local ones). A host that cannot answer, for
    * example an offline worker, adds nothing.
    */
   async listWorktrees(
-    project: string,
+    repo: string,
     repoPath: string,
   ): Promise<Array<WorktreeInfo & { hostId?: string }>> {
-    const local = await hostRegistry.hostForProject(project).worktree.list(repoPath);
+    const local = await hostRegistry.hostForRepo(repo).worktree.list(repoPath);
     const remote = await Promise.all(
       hostRegistry
         .all()
         .filter((host) => host.id !== hostRegistry.local.id)
         .map(async (host) => {
-          const path = hostRegistry.projectPathOn(project, host.id, repoPath);
+          const path = hostRegistry.repoPathOn(repo, host.id, repoPath);
           if (!path) return [];
           try {
             const list = await host.worktree.list(path);
@@ -141,11 +141,11 @@ export class SystemService {
   /**
    * Run `du -sk PATH` and return the allocated byte total, gated by the
    * process-wide concurrency cap above. The shell-out runs on the host the
-   * path is on (`host.fs.du`), the project's own host unless `hostId` names
+   * path is on (`host.fs.du`), the repo's own host unless `hostId` names
    * another; this method is just the rate-limit wrapper.
    */
-  async duBytes(project: string, path: string, hostId?: string): Promise<number> {
-    const host = hostId ? hostRegistry.hostById(hostId) : hostRegistry.hostForProject(project);
+  async duBytes(repo: string, path: string, hostId?: string): Promise<number> {
+    const host = hostId ? hostRegistry.hostById(hostId) : hostRegistry.hostForRepo(repo);
     const release = await acquireDuSlot();
     try {
       return await host.fs.du(path);

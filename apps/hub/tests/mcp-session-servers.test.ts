@@ -41,11 +41,11 @@ const mutate = <T>(server: ServerHandle, procedure: string, input: unknown) =>
   });
 
 /** Posts a chat message and waits until the stub has logged the turn's HTTP lines. */
-async function send(server: ServerHandle, chatId: string, workspaceId: string, text: string) {
+async function send(server: ServerHandle, chatId: string, worktreeId: string, text: string) {
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-    body: JSON.stringify({ workspaceId, text }),
+    body: JSON.stringify({ worktreeId, text }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
 }
@@ -71,14 +71,14 @@ interface Booted {
   httpFile: string;
 }
 
-/** A hub with two projects, `alpha` and `beta`, and two proxied servers: `notes` (everywhere) and `alpha-only`. */
+/** A hub with two repos, `alpha` and `beta`, and two proxied servers: `notes` (everywhere) and `alpha-only`. */
 async function boot(caps?: Record<string, boolean>): Promise<Booted> {
   const home = seedAcpHome("band-mcp-session-");
   homes.push(home);
   const alphaRepo = join(home, "repo");
   const betaRepo = join(home, "repo-beta");
   seedState(home, {
-    projects: [
+    repos: [
       {
         name: "alpha",
         path: alphaRepo,
@@ -144,7 +144,7 @@ async function boot(caps?: Record<string, boolean>): Promise<Booted> {
     headerPrefix: "",
   };
   await mutate(server, "mcp.add", { name: "notes", ...keyed });
-  await mutate(server, "mcp.add", { name: "alpha-only", ...keyed, scopeProjects: ["alpha"] });
+  await mutate(server, "mcp.add", { name: "alpha-only", ...keyed, scopeRepos: ["alpha"] });
   return { server, upstream, home, httpFile };
 }
 
@@ -192,7 +192,7 @@ describe("MCP servers in session/new", () => {
     expect(JSON.stringify(stubRequests(b.home))).not.toContain(API_KEY);
   });
 
-  it("gives a server limited to project alpha to alpha's sessions only (S3)", async () => {
+  it("gives a server limited to repo alpha to alpha's sessions only (S3)", async () => {
     expect(alphaEntries.map((e) => e.name).sort()).toEqual(["alpha-only", "notes"]);
     expect(httpLog(b.httpFile).find((l) => l.name === "alpha-call")?.status).toBe(200);
 

@@ -20,7 +20,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 dir="${BAND_SSH_DIR:-.band-runner}/$BAND_WORKER_ID"
 cmd="${BAND_WORKER_CMD:-band-worker}"
-name="$(printf '%s' "${BAND_PROJECT:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
+name="$(printf '%s' "${BAND_REPO:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
 
 # A local path means nothing to another machine, unless it shares the hub's file system.
 repo="${BAND_REPO_URLS:-}"
@@ -43,7 +43,7 @@ mkdir -p "\$base/home/.band" "\$base/state" "\$base/work"
 chmod 700 "\$base"
 if [ -n $(q "$repo") ]; then
   if [ -z $(q "${BAND_CLONE_BY_HUB:-}") ]; then git clone --quiet -- $(q "$repo") "\$base/work/$name"; fi
-  echo "BAND_HOST_PROJECT_PATH=\$base/work/$name"
+  echo "BAND_HOST_REPO_PATH=\$base/work/$name"
 fi
 export BAND_HUB_URL=$(q "$BAND_HUB_URL")
 export BAND_WORKER_ID=$(q "$BAND_WORKER_ID")

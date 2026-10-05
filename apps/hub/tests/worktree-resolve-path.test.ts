@@ -1,12 +1,12 @@
-// Integration tests for the `workspace.resolvePath` tRPC query that backs
+// Integration tests for the `worktree.resolvePath` tRPC query that backs
 // Quick Open's "open a file by absolute path" affordance.
 //
 // We exercise the real server pipeline: boot the production server in a
 // child process (shared `helpers/server.ts` harness — process-group teardown
-// so server grandchildren don't leak), seed a workspace whose worktree is a
+// so server grandchildren don't leak), seed a worktree whose worktree is a
 // real on-disk dir, then call the procedure over HTTP. The assertions pin the
 // full response shape for the branches the resolver owns — a path inside the
-// worktree (→ workspace-relative), a path outside it (→ external), a
+// worktree (→ worktree-relative), a path outside it (→ external), a
 // non-existent path, a directory (not a regular file), and the unauthenticated
 // 401 gate. No mocks; the only seam is the band_token cookie the rest of the
 // integration suite uses.
@@ -14,7 +14,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -25,37 +25,37 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const DEFAULT_TOKEN = "workspace-resolve-path-test-token";
-const PROJECT = "resolve-path-project";
+const DEFAULT_TOKEN = "worktree-resolve-path-test-token";
+const REPO = "resolve-path-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 interface ResolvePathResult {
   exists: boolean;
   isFile: boolean;
   external: boolean;
-  workspaceRelativePath: string | null;
+  worktreeRelativePath: string | null;
 }
 
 async function resolvePath(serverUrl: string, path: string): Promise<ResolvePathResult> {
   const res = await trpcQuery(
     serverUrl,
-    "workspace.resolvePath",
-    { workspaceId: WORKSPACE, path },
+    "worktree.resolvePath",
+    { worktreeId: WORKTREE, path },
     DEFAULT_TOKEN,
   );
   expect(res.status).toBe(200);
   return trpcData<ResolvePathResult>(res);
 }
 
-describe("tRPC — workspace.resolvePath", () => {
+describe("tRPC — worktree.resolvePath", () => {
   let server: ServerHandle;
   let tmpHome: string;
   // The worktree is a real on-disk directory so stat() sees real files.
   let worktree: string;
   let insideDir: string;
   let insideFile: string;
-  // An "outside" dir next to the worktree, modelling a path no workspace
+  // An "outside" dir next to the worktree, modelling a path no worktree
   // would contain (e.g. a `/tmp/notes.md` a user pastes in).
   let outsideDir: string;
   let outsideFile: string;
@@ -74,9 +74,9 @@ describe("tRPC — workspace.resolvePath", () => {
     writeFileSync(outsideFile, "# notes\n", "utf-8");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: BRANCH,
           worktrees: [{ branch: BRANCH, path: worktree }],
@@ -94,14 +94,14 @@ describe("tRPC — workspace.resolvePath", () => {
     rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("resolves an absolute path INSIDE the worktree to its workspace-relative form", async () => {
+  it("resolves an absolute path INSIDE the worktree to its worktree-relative form", async () => {
     const data = await resolvePath(server.url, insideFile);
     expect(data).toEqual({
       exists: true,
       isFile: true,
       external: false,
       // POSIX-separated, relative to the worktree root.
-      workspaceRelativePath: "src/inside.ts",
+      worktreeRelativePath: "src/inside.ts",
     });
   });
 
@@ -111,7 +111,7 @@ describe("tRPC — workspace.resolvePath", () => {
       exists: true,
       isFile: true,
       external: true,
-      workspaceRelativePath: null,
+      worktreeRelativePath: null,
     });
   });
 
@@ -121,7 +121,7 @@ describe("tRPC — workspace.resolvePath", () => {
       exists: false,
       isFile: false,
       external: true,
-      workspaceRelativePath: null,
+      worktreeRelativePath: null,
     });
   });
 
@@ -131,7 +131,7 @@ describe("tRPC — workspace.resolvePath", () => {
       exists: true,
       isFile: false,
       external: false,
-      workspaceRelativePath: "src",
+      worktreeRelativePath: "src",
     });
   });
 
@@ -140,8 +140,8 @@ describe("tRPC — workspace.resolvePath", () => {
     // band_token is the only gate. Pin 401 specifically (a generic non-200
     // would also pass on a crash 500).
     const res = await fetch(
-      `${server.url}/trpc/workspace.resolvePath?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: WORKSPACE, path: outsideFile }),
+      `${server.url}/trpc/worktree.resolvePath?input=${encodeURIComponent(
+        JSON.stringify({ worktreeId: WORKTREE, path: outsideFile }),
       )}`,
     );
     expect(res.status).toBe(401);

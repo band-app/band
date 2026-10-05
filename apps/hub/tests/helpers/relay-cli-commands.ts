@@ -29,7 +29,7 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "cronjobs update",
   "notify",
   "open",
-  "projects list",
+  "repos list",
   "subscriptions create",
   "subscriptions list",
   "subscriptions remove",
@@ -38,15 +38,15 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "terminals list",
   "terminals output",
   "terminals send",
-  "workspaces create",
-  "workspaces list",
-  "workspaces remove",
+  "worktrees create",
+  "worktrees list",
+  "worktrees remove",
 ];
 
 /** Commands the relay refuses or cannot carry, each with the reason. */
 export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
-  "projects add": "adds a repository on the hub's machine, not a worker action",
-  "projects remove": "removes a project for every host",
+  "repos add": "adds a repository on the hub's machine, not a worker action",
+  "repos remove": "removes a repo for every host",
   settings: "reads the hub's settings, which hold credentials",
   "tunnel start": "controls the hub's tunnel",
   "tunnel status": "reads the hub's tunnel",
@@ -71,7 +71,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "runners log": "reads what the hub's runner scripts printed",
   "env validate": "admin only, reads a path on the hub's machine",
   "env build": "admin only, runs repository commands on the builder host",
-  "env status": "reads a project's image builds, which a worker has no need to see",
+  "env status": "reads a repo's image builds, which a worker has no need to see",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
   "terminals attach":
     "streams over a WebSocket, which the relay does not carry yet (follow-up in the PR)",

@@ -10,7 +10,7 @@ const CLAUDE_CODE_INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"
 /**
  * Translate a Claude Code hook payload (the JSON Claude Code pipes to
  * `band notify` on stdin via the hooks Band registers in
- * `~/.claude/settings.json`) into a Band workspace status.
+ * `~/.claude/settings.json`) into a Band worktree status.
  *
  * `needs_attention` means the ball is in the user's court — the agent either
  * finished its turn or is blocked waiting for the user to act:
@@ -49,7 +49,7 @@ export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): Agent
 
 /**
  * Map a coding agent's lifecycle-notification payload (the JSON its hook pipes
- * to `band notify` on stdin) to a Band workspace status.
+ * to `band notify` on stdin) to a Band worktree status.
  *
  * Adding hook support for a new agent means adding a mapper above and a case
  * here. The Band CLI never changes — it forwards the raw payload and the
@@ -90,7 +90,7 @@ export function detectHookAgentType(payload: Record<string, unknown>): string | 
 /**
  * The agent session behind this hook is over (Claude Code's `SessionEnd`:
  * exit, `/clear`, logout). Its status should stop counting toward the
- * workspace's.
+ * worktree's.
  */
 export function isHookSessionEnd(agentType: string, payload: Record<string, unknown>): boolean {
   return agentType === "claude-code" && payload.hook_event_name === "SessionEnd";

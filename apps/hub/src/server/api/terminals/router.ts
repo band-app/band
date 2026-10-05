@@ -20,14 +20,14 @@ import { stripTerminalQueries } from "./strip-queries";
  */
 
 const terminalRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    return { terminals: await terminalService.list(input.workspaceId) };
+  list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(async ({ input }) => {
+    return { terminals: await terminalService.list(input.worktreeId) };
   }),
 
   create: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         // Constrain to a UUID: every caller (the dashboard's
         // `newTerminalId()` and the server's `randomUUID()` fallback)
         // already sends one, and it stops a hostile id from being used
@@ -40,18 +40,18 @@ const terminalRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const terminalId = input.id ?? randomUUID();
-      // `terminalService.spawn` resolves the workspace, asks the backend to
+      // `terminalService.spawn` resolves the worktree, asks the backend to
       // fork the PTY, and registers the new terminal in the saved
       // dockview layout. The event emit stays here so the WebSocket
       // spawn path (which goes through the same service method) doesn't
       // double-broadcast.
-      const entry = await terminalService.spawn(input.workspaceId, terminalId, {
+      const entry = await terminalService.spawn(input.worktreeId, terminalId, {
         command: input.command,
         cwd: input.cwd,
         env: input.env,
       });
-      emit({ kind: "terminal-created", workspaceId: input.workspaceId, terminalId });
-      return { terminalId, workspaceId: input.workspaceId, pid: entry.pid };
+      emit({ kind: "terminal-created", worktreeId: input.worktreeId, terminalId });
+      return { terminalId, worktreeId: input.worktreeId, pid: entry.pid };
     }),
 
   send: publicProcedure

@@ -1,7 +1,7 @@
 import type { SessionUsageSnapshot, UsageReader } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
-import { ProjectQueries } from "../db/queries/projects";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { RepoQueries } from "../db/queries/repos";
 import { SettingsQueries } from "../db/queries/settings";
 import { UsageEventQueries } from "../db/queries/usage-events";
 import { UsageScanStateQueries } from "../db/queries/usage-scan-state";
@@ -91,10 +91,10 @@ const log = createLogger("usage-scanner");
 /**
  * Reports usage scanner (issue #425).
  *
- * Per-tick: iterate every Band workspace × every installed coding agent.
- * For each pair, ask the agent's usage reader `listSessions(workspaceDir)`
+ * Per-tick: iterate every Band worktree × every installed coding agent.
+ * For each pair, ask the agent's usage reader `listSessions(worktreeDir)`
  * for the sessions tied to that cwd, filter by `lastModified > watermark`,
- * and call `reader.getSessionUsage(sessionId, workspaceDir)` for the ones
+ * and call `reader.getSessionUsage(sessionId, worktreeDir)` for the ones
  * that have changed. The returned per-turn snapshot is **bucketed by
  * (hour, model)** and one row per bucket is upserted into
  * `usage_events`, keyed by
@@ -103,7 +103,7 @@ const log = createLogger("usage-scanner");
  * **Why hour buckets, not per-turn rows.** A single provider session
  * can produce dozens of turns; per-turn rows balloon the table without
  * adding signal to Reports' actual breakdowns (by-model / by-day /
- * by-workspace / by-agent / by-project, plus the daily cost-trend
+ * by-worktree / by-agent / by-repo, plus the daily cost-trend
  * chart). Hour-grain preserves sub-day resolution (time-of-day patterns,
  * "what spike happened at 3pm?") at one or two orders of magnitude
  * fewer rows. Cross-midnight sessions split cleanly because each
@@ -120,10 +120,10 @@ const log = createLogger("usage-scanner");
  *   • **Reader ownership.** Each usage reader in `@band-app/coding-agent`
  *     knows its provider's on-disk format and handles its own ratecard
  *     fallback (`pricing.ts`). This
- *     module is provider-agnostic — it sequences workspaces × agents,
+ *     module is provider-agnostic — it sequences worktrees × agents,
  *     buckets the returned turns, and writes the resulting rows.
  *
- *   • **Watermark is per (workspace, agent).** A workspace with many
+ *   • **Watermark is per (worktree, agent).** A worktree with many
  *     agents installed but only one in use still scans cheaply: the
  *     unused agents return zero sessions and the watermark stays at 0
  *     forever, which is fine because the upsert is idempotent anyway.
@@ -143,11 +143,11 @@ const log = createLogger("usage-scanner");
 export interface UsageScannerDeps {
   usageEvents: UsageEventQueries;
   scanState: UsageScanStateQueries;
-  /** Override for tests — defaults to enumerating every workspace from
-   *  `ProjectQueries` and every installed agent from `SettingsQueries`. */
-  listWorkspaces?: () => Array<{
-    workspaceId: string;
-    project: string;
+  /** Override for tests — defaults to enumerating every worktree from
+   *  `RepoQueries` and every installed agent from `SettingsQueries`. */
+  listWorktrees?: () => Array<{
+    worktreeId: string;
+    repo: string;
     worktreePath: string;
   }>;
   /** Override for tests — defaults to enumerating settings.codingAgents.
@@ -163,7 +163,7 @@ export interface UsageScannerDeps {
   }) => UsageReader | undefined | Promise<UsageReader | undefined>;
   /** Wall-clock — overridable for tests. */
   now?: () => number;
-  /** Per-(workspace, agent) cap on sessions processed each tick.
+  /** Per-(worktree, agent) cap on sessions processed each tick.
    *  Defaults to `MAX_SESSIONS_PER_TICK` (100). Tests drop this to
    *  small values to exercise the multi-tick backfill path. */
   maxSessionsPerTick?: number;
@@ -204,7 +204,7 @@ const schedulerState = g[SCHEDULER_KEY] as SchedulerState;
  *     calls `tick()` on every open, so dialog freshness is bounded by
  *     the user's next refresh click, not this interval.
  *
- *   • At 30 s and a real-world inventory (~39 workspaces × 3 agents,
+ *   • At 30 s and a real-world inventory (~39 worktrees × 3 agents,
  *     each `listSessions` taking ~500 ms) the scanner saturates the
  *     event loop in steady state: one full tick takes ~30 s, so the
  *     next tick lands as soon as the previous one finishes. Bumping to
@@ -218,7 +218,7 @@ const schedulerState = g[SCHEDULER_KEY] as SchedulerState;
 export const USAGE_SCAN_INTERVAL_MS = 5 * 60 * 1_000;
 
 /**
- * Maximum sessions one (workspace, agent) pair processes per tick.
+ * Maximum sessions one (worktree, agent) pair processes per tick.
  *
  * Bounded so the very first scan after install doesn't synchronously
  * parse hundreds of MB of provider session JSONL in one go — each
@@ -258,7 +258,7 @@ function yieldToEventLoop(): Promise<void> {
 export class UsageScannerService {
   private readonly usageEvents: UsageEventQueries;
   private readonly scanState: UsageScanStateQueries;
-  private readonly listWorkspaces: NonNullable<UsageScannerDeps["listWorkspaces"]>;
+  private readonly listWorktrees: NonNullable<UsageScannerDeps["listWorktrees"]>;
   private readonly listAgents: NonNullable<UsageScannerDeps["listAgents"]>;
   private readonly getUsageReader: NonNullable<UsageScannerDeps["getUsageReader"]>;
   private readonly now: () => number;
@@ -268,7 +268,7 @@ export class UsageScannerService {
   constructor(deps: UsageScannerDeps) {
     this.usageEvents = deps.usageEvents;
     this.scanState = deps.scanState;
-    this.listWorkspaces = deps.listWorkspaces ?? defaultListWorkspaces;
+    this.listWorktrees = deps.listWorktrees ?? defaultListWorktrees;
     this.listAgents = deps.listAgents ?? defaultListAgents;
     this.getUsageReader = deps.getUsageReader ?? defaultGetUsageReader;
     this.now = deps.now ?? Date.now;
@@ -277,7 +277,7 @@ export class UsageScannerService {
   }
 
   /**
-   * Run one full scan pass. Resolves when every (workspace, agent) pair
+   * Run one full scan pass. Resolves when every (worktree, agent) pair
    * has been visited and its watermark advanced. Concurrent calls share
    * a single in-flight promise — the second caller awaits the first.
    *
@@ -299,17 +299,17 @@ export class UsageScannerService {
 
   private async runTick(): Promise<void> {
     const started = this.now();
-    const workspaces = this.listWorkspaces();
+    const worktrees = this.listWorktrees();
     const agents = this.listAgents();
     let totalRows = 0;
 
-    for (const ws of workspaces) {
+    for (const ws of worktrees) {
       for (const a of agents) {
         try {
           totalRows += await this.scanPair(ws, a);
         } catch (err) {
           log.warn(
-            { err, workspaceId: ws.workspaceId, agentType: a.agentType },
+            { err, worktreeId: ws.worktreeId, agentType: a.agentType },
             "usage scanner pair failed",
           );
         }
@@ -317,13 +317,13 @@ export class UsageScannerService {
     }
 
     log.debug(
-      { durationMs: this.now() - started, workspaces: workspaces.length, rowsWritten: totalRows },
+      { durationMs: this.now() - started, worktrees: worktrees.length, rowsWritten: totalRows },
       "usage scanner tick complete",
     );
   }
 
   /**
-   * Scan one (workspace, agent) pair. Returns the number of new rows
+   * Scan one (worktree, agent) pair. Returns the number of new rows
    * written so the caller can log a useful aggregate.
    *
    * **Three-step shape (one chunk per tick):**
@@ -358,7 +358,7 @@ export class UsageScannerService {
    * `lastModified > watermark` and will be processed then.
    */
   private async scanPair(
-    ws: { workspaceId: string; project: string; worktreePath: string },
+    ws: { worktreeId: string; repo: string; worktreePath: string },
     a: { agentId: string; agentType: string; command?: string },
   ): Promise<number> {
     let reader: UsageReader | undefined;
@@ -366,14 +366,14 @@ export class UsageScannerService {
       reader = await this.getUsageReader(a);
     } catch (err) {
       // Broken config — log debug and bail; next tick will retry. We
-      // don't punish all workspaces for one bad agent.
+      // don't punish all worktrees for one bad agent.
       log.debug({ err, agentId: a.agentId }, "failed to resolve usage reader for scan");
       return 0;
     }
 
     if (!reader) return 0;
 
-    const watermark = this.scanState.get(ws.workspaceId, a.agentType) ?? EPOCH_SENTINEL;
+    const watermark = this.scanState.get(ws.worktreeId, a.agentType) ?? EPOCH_SENTINEL;
 
     let sessions: Awaited<ReturnType<UsageReader["listSessions"]>>;
     try {
@@ -433,8 +433,8 @@ export class UsageScannerService {
       const records = buckets.map((bucket) => ({
         taskId: "",
         chatId: undefined,
-        workspaceId: ws.workspaceId,
-        project: ws.project,
+        worktreeId: ws.worktreeId,
+        repo: ws.repo,
         sessionId: snap.sessionId,
         codingAgentId: a.agentId,
         provider: a.agentType,
@@ -455,7 +455,7 @@ export class UsageScannerService {
 
     // Only advance the watermark when we actually processed something
     // newer than where we started. Defensive — listSessions on an empty
-    // workspace returns `[]`, and bumping the watermark to "now" then
+    // worktree returns `[]`, and bumping the watermark to "now" then
     // would silently swallow any future backfill from before that
     // timestamp (e.g. user restores `~/.claude/projects/` from backup).
     //
@@ -464,13 +464,13 @@ export class UsageScannerService {
     // `lastModified > maxObserved` so the next listing still surfaces
     // it.
     if (maxObserved > watermark) {
-      this.scanState.set(ws.workspaceId, a.agentType, maxObserved);
+      this.scanState.set(ws.worktreeId, a.agentType, maxObserved);
     }
 
     if (changed.length > slice.length) {
       log.debug(
         {
-          workspaceId: ws.workspaceId,
+          worktreeId: ws.worktreeId,
           agentType: a.agentType,
           processed: slice.length,
           remaining: changed.length - slice.length,
@@ -483,17 +483,17 @@ export class UsageScannerService {
   }
 }
 
-/** Default workspace lister — every worktree of every project.
- *  Walks `ProjectQueries.loadAll()` directly (the infra-tier query) so
+/** Default worktree lister — every worktree of every repo.
+ *  Walks `RepoQueries.loadAll()` directly (the infra-tier query) so
  *  this module doesn't depend on the services tier. */
-function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listWorkspaces"]>> {
-  const projects = new ProjectQueries().loadAll();
-  const out: Array<{ workspaceId: string; project: string; worktreePath: string }> = [];
-  for (const project of projects) {
-    for (const worktree of project.worktrees) {
+function defaultListWorktrees(): ReturnType<NonNullable<UsageScannerDeps["listWorktrees"]>> {
+  const repos = new RepoQueries().loadAll();
+  const out: Array<{ worktreeId: string; repo: string; worktreePath: string }> = [];
+  for (const repo of repos) {
+    for (const worktree of repo.worktrees) {
       out.push({
-        workspaceId: toWorkspaceId(project.name, worktree.name),
-        project: project.name,
+        worktreeId: toWorktreeId(repo.name, worktree.name),
+        repo: repo.name,
         worktreePath: worktree.path,
       });
     }

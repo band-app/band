@@ -24,7 +24,7 @@ import {
   stubRequests,
   trpc,
   turnEnded,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
@@ -95,7 +95,7 @@ describe("chat over ACP", () => {
         _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
       },
     });
-    // The agent runs in the workspace, with chat dispatch for nested `band`
+    // The agent runs in the worktree, with chat dispatch for nested `band`
     // calls. (Other `session/new`s come from the boot-time model probe,
     // which runs in `~/.band`.)
     const newSession = stubRequests(server.home, "session/new").find(
@@ -108,7 +108,7 @@ describe("chat over ACP", () => {
       { type: "text", text: "hello there" },
       {
         type: "text",
-        text: expect.stringMatching(sharedDirHintPattern(WORKSPACE_ID)),
+        text: expect.stringMatching(sharedDirHintPattern(WORKTREE_ID)),
       },
     ]);
   });
@@ -288,9 +288,7 @@ describe("chat over ACP", () => {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "permission") {
-          answers.push(
-            trpc(server.url, "tasks.abort", { workspaceId: "testproject-main", chatId }),
-          );
+          answers.push(trpc(server.url, "tasks.abort", { worktreeId: "testrepo-main", chatId }));
         }
       },
     });
@@ -391,7 +389,7 @@ describe("chat over ACP", () => {
     // No message yet: the pane has no chat row and no session.
     const { state } = await trpc<{ state: ConfigState }>(server.url, "chats.setConfigOption", {
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       configId: "effort",
       value: "high",
     });
@@ -451,7 +449,7 @@ describe("chat over ACP", () => {
 
     await trpc(server.url, "chats.setConfigOption", {
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       configId: "mode",
       value: "plan",
     });
@@ -470,7 +468,7 @@ describe("chat over ACP", () => {
     expect(inRepo).toHaveLength(0);
   });
 
-  it("rejects an option change for an unknown chat without a workspace", async () => {
+  it("rejects an option change for an unknown chat without a worktree", async () => {
     const server = await boot();
     await expect(
       trpc(server.url, "chats.setConfigOption", {
@@ -564,16 +562,16 @@ describe("chat over ACP: sessions", () => {
     await trpc(server.url, "chats.remove", { chatId: chatA });
 
     const chatB = newChatId();
-    await trpc(server.url, "chats.create", { workspaceId: "testproject-main", id: chatB });
+    await trpc(server.url, "chats.create", { worktreeId: "testrepo-main", id: chatB });
     const listed = await trpc<{ sessions: { sessionId: string; summary: string }[] }>(
       server.url,
       "sessions.list",
-      { workspaceId: "testproject-main", chatId: chatB },
+      { worktreeId: "testrepo-main", chatId: chatB },
       "query",
     );
     expect(listed.sessions.map((s) => s.sessionId)).toContain(sessionId);
     await trpc(server.url, "chats.setActiveSession", {
-      workspaceId: "testproject-main",
+      worktreeId: "testrepo-main",
       chatId: chatB,
       sessionId,
     });
@@ -597,7 +595,7 @@ describe("chat over ACP: sessions", () => {
     expect(reconnect[0]).toMatchObject({ type: "subscription-opened", reset: true, revision: 1 });
   });
 
-  it("lists only the sessions started in the workspace's directory", async () => {
+  it("lists only the sessions started in the worktree's directory", async () => {
     // The Claude adapter lists sessions from every git worktree of the repo.
     const home = seedAcpHome();
     homes.push(home);
@@ -621,7 +619,7 @@ describe("chat over ACP: sessions", () => {
     const listed = await trpc<{ sessions: { sessionId: string }[] }>(
       server.url,
       "sessions.list",
-      { workspaceId: WORKSPACE_ID, chatId },
+      { worktreeId: WORKTREE_ID, chatId },
       "query",
     );
     expect(stubRequests(home, "session/list").length).toBeGreaterThan(0);
@@ -637,7 +635,7 @@ describe("chat over ACP: sessions", () => {
     const listed = await trpc<{ supported: boolean; sessions: { summary: string }[] }>(
       server.url,
       "sessions.list",
-      { workspaceId: "testproject-main", chatId },
+      { worktreeId: "testrepo-main", chatId },
       "query",
     );
     expect(listed.supported).toBe(true);

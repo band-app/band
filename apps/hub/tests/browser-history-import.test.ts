@@ -12,7 +12,7 @@ import {
 
 // Integration tests for `history.import`, which stores the browsing history
 // the desktop app read from a Chrome profile (the browser import dialog)
-// in a workspace's history. Driven through the production server bundle
+// in a worktree's history. Driven through the production server bundle
 // over tRPC HTTP.
 //
 // Reading Chrome's History DB runs in the desktop app and is covered by
@@ -36,8 +36,8 @@ interface Entry {
   visitCount: number;
 }
 
-async function listHistory(serverUrl: string, workspaceId: string): Promise<Entry[]> {
-  const res = await trpcQuery(serverUrl, "history.list", { workspaceId, limit: 500 });
+async function listHistory(serverUrl: string, worktreeId: string): Promise<Entry[]> {
+  const res = await trpcQuery(serverUrl, "history.list", { worktreeId, limit: 500 });
   expect(res.status).toBe(200);
   const { entries } = await trpcData<{ entries: (Entry & { id: number })[] }>(res);
   return entries.map(({ url, title, faviconUrl, lastVisitedAt, visitCount }) => ({
@@ -49,8 +49,8 @@ async function listHistory(serverUrl: string, workspaceId: string): Promise<Entr
   }));
 }
 
-async function importHistory(serverUrl: string, workspaceId: string, entries: unknown[]) {
-  const res = await trpcMutate(serverUrl, "history.import", { workspaceId, entries });
+async function importHistory(serverUrl: string, worktreeId: string, entries: unknown[]) {
+  const res = await trpcMutate(serverUrl, "history.import", { worktreeId, entries });
   expect(res.status).toBe(200);
   return (await trpcData<{ imported: number }>(res)).imported;
 }
@@ -74,7 +74,7 @@ describe("history.import", () => {
     const res = await fetch(`${server.url}/trpc/history.import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: "ws-unauth", entries: [] }),
+      body: JSON.stringify({ worktreeId: "ws-unauth", entries: [] }),
     });
     expect(res.status).toBe(401);
   });
@@ -88,7 +88,7 @@ describe("history.import", () => {
     };
     for (const url of ["javascript:alert(1)", "https://user:pass@creds.example.com/"]) {
       const res = await trpcMutate(server.url, "history.import", {
-        workspaceId: "ws-invalid",
+        worktreeId: "ws-invalid",
         entries: [valid, { ...valid, url }],
       });
       expect(res.status).toBe(400);
@@ -104,14 +104,14 @@ describe("history.import", () => {
       lastVisitedAt: 1_000,
     }));
     const res = await trpcMutate(server.url, "history.import", {
-      workspaceId: "ws-too-many",
+      worktreeId: "ws-too-many",
       entries,
     });
     expect(res.status).toBe(400);
     expect(await listHistory(server.url, "ws-too-many")).toEqual([]);
   });
 
-  it("adds imported visits to the workspace's history, newest first", async () => {
+  it("adds imported visits to the worktree's history, newest first", async () => {
     const imported = await importHistory(server.url, "ws-fresh", [
       {
         url: "https://docs.example.com/guide",
@@ -148,15 +148,15 @@ describe("history.import", () => {
   });
 
   it("merges into existing rows and is a no-op when repeated", async () => {
-    const workspaceId = "ws-merge";
+    const worktreeId = "ws-merge";
     for (const input of [
-      { workspaceId, url: "https://kept.example.com/", title: "Title recorded in Band" },
-      { workspaceId, url: "https://filled.example.com/" },
+      { worktreeId, url: "https://kept.example.com/", title: "Title recorded in Band" },
+      { worktreeId, url: "https://filled.example.com/" },
     ]) {
       const res = await trpcMutate(server.url, "history.record", input);
       expect(res.status).toBe(200);
     }
-    const before = await listHistory(server.url, workspaceId);
+    const before = await listHistory(server.url, worktreeId);
     const recordedAt = (url: string) => before.find((e) => e.url === url)?.lastVisitedAt;
     const futureVisit = Date.now() + 86_400_000;
 
@@ -176,10 +176,10 @@ describe("history.import", () => {
         lastVisitedAt: futureVisit,
       },
     ];
-    await importHistory(server.url, workspaceId, visits);
-    await importHistory(server.url, workspaceId, visits);
+    await importHistory(server.url, worktreeId, visits);
+    await importHistory(server.url, worktreeId, visits);
 
-    expect(await listHistory(server.url, workspaceId)).toEqual([
+    expect(await listHistory(server.url, worktreeId)).toEqual([
       {
         url: "https://filled.example.com/",
         title: "Title only Chrome knows",

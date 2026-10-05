@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -23,12 +23,12 @@ import { waitFor } from "./helpers/wait-for";
 // on-disk shape a periodic checkpoint during a genuine crash would leave.
 
 const TOKEN = "terminal-cold-restore-token";
-const PROJECT = "coldrestoreproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "coldrestoreproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 
 interface TerminalEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
@@ -39,12 +39,12 @@ describe("terminal cold restore", () => {
 
   beforeEach(() => {
     tmpHome = createTmpHome("band-td-cold-");
-    worktree = `${tmpHome}/${PROJECT}`;
+    worktree = `${tmpHome}/${REPO}`;
     mkdirSync(`${worktree}/subdir`, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -72,7 +72,7 @@ describe("terminal cold restore", () => {
       server.url,
       "terminal.create",
       {
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         id: opts.id,
         cwd: opts.cwd,
         command: opts.command,
@@ -90,7 +90,7 @@ describe("terminal cold restore", () => {
     const created = await createTerminal({ id: terminalId, cwd: "subdir" });
 
     const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -108,7 +108,7 @@ describe("terminal cold restore", () => {
     expect(reopened.pid).not.toBe(created.pid);
 
     const reopenedSocket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -147,7 +147,7 @@ describe("terminal cold restore", () => {
 
     await createTerminal({ id: terminalId, cwd: "subdir", command: "claude", env: stubEnv });
     const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -164,7 +164,7 @@ describe("terminal cold restore", () => {
     // resolve to a resume command instead of a plain re-run.
     await createTerminal({ id: terminalId, env: stubEnv });
     const reopenedSocket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -181,7 +181,7 @@ describe("terminal cold restore", () => {
     await createTerminal({ id: terminalId });
 
     const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });
@@ -210,7 +210,7 @@ describe("terminal cold restore", () => {
     // must not see the killed tab's old scrollback.
     await createTerminal({ id: terminalId });
     const reopenedSocket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
     });

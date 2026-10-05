@@ -1,6 +1,6 @@
 // Integration tests for git credentials on workers (plan step 4.1). A real hub
 // (the production bundle, temp BAND_HOME) starts a real `band-worker` through
-// the bundled `local` runner hook. The project's origin is a local git HTTP
+// the bundled `local` runner hook. The repo's origin is a local git HTTP
 // server that requires basic auth, and the hub holds a `git` vault item for it.
 // The hook has no credential, so the hub clones the repository through the
 // worker, whose git asks the hub for the token (`git.credential` over the link).
@@ -56,15 +56,15 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...identity } });
 }
 
-interface ProjectsList {
-  projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+interface ReposList {
+  repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
 }
 
 let server: ServerHandle;
 let stub: GitHttpAuthStub;
 let bare: string;
 let runnerDir: string;
-let workspaceId = "";
+let worktreeId = "";
 let hostId = "";
 
 const q = <T>(procedure: string, input?: unknown) =>
@@ -104,10 +104,10 @@ function filesContaining(dir: string, needle: string): string[] {
   return hits;
 }
 
-/** Runs one shell line in a terminal on the workspace's worker and returns what it printed. */
+/** Runs one shell line in a terminal on the worktree's worker and returns what it printed. */
 async function inWorkerShell(line: string): Promise<string> {
-  const { terminalId } = await m<{ terminalId: string }>("terminal.create", { workspaceId });
-  const socket = await TerminalSocket.open(server, { workspaceId, terminalId, token: TOKEN });
+  const { terminalId } = await m<{ terminalId: string }>("terminal.create", { worktreeId });
+  const socket = await TerminalSocket.open(server, { worktreeId, terminalId, token: TOKEN });
   try {
     socket.type(`${line}; echo END-$((6*7))\r`);
     await socket.waitForOutput("END-42", 30_000);
@@ -145,7 +145,7 @@ beforeAll(async () => {
 
   seedSettings(hubHome, { tokenSecret: TOKEN });
   seedState(hubHome, {
-    projects: [
+    repos: [
       {
         name: "proj",
         path: hubRepo,
@@ -243,22 +243,22 @@ describe("a worker the runner starts", () => {
         },
       ],
     });
-    const created = await m<{ provisioning?: { requestId: string } }>("workspaces.create", {
-      project: "proj",
+    const created = await m<{ provisioning?: { requestId: string } }>("worktrees.create", {
+      repo: "proj",
       branch: "git-feat",
       placement: { labels: { pool: "git" } },
     });
     expect(created.provisioning?.requestId).toBeTruthy();
     const wt = await waitFor(
       async () =>
-        (await q<ProjectsList>("projects.list")).projects
+        (await q<ReposList>("repos.list")).repos
           .find((p) => p.name === "proj")
           ?.worktrees.find((w) => w.name === "git-feat"),
-      { label: "workspace on the worker", timeoutMs: 90_000, intervalMs: 250 },
+      { label: "worktree on the worker", timeoutMs: 90_000, intervalMs: 250 },
     );
     hostId = wt.hostId ?? "";
     expect(hostId).toMatch(/^h-/);
-    workspaceId = "proj-git-feat";
+    worktreeId = "proj-git-feat";
 
     // The server saw the credential, and the clone is on the worker's disk.
     expect(stub.authenticated).toContain(GIT_USER);
@@ -276,14 +276,14 @@ describe("a worker the runner starts", () => {
   }, 150_000);
 
   it("pushes a commit from the worktree through the helper (S2)", async () => {
-    await m("workspace.createFile", {
-      workspaceId,
+    await m("worktree.createFile", {
+      worktreeId,
       path: "pushed.txt",
       content: "from the worker\n",
     });
-    await m("workspace.gitCommit", { workspaceId, message: "add pushed.txt" });
+    await m("worktree.gitCommit", { worktreeId, message: "add pushed.txt" });
     const before = stub.authenticated.length;
-    await m("workspace.gitPush", { workspaceId });
+    await m("worktree.gitPush", { worktreeId });
     expect(stub.authenticated.length).toBeGreaterThan(before);
     expect(git(bare, "show", "git-feat:pushed.txt")).toBe("from the worker\n");
     expect(filesContaining(join(runnerDir, hostId), GIT_TOKEN)).toEqual([]);

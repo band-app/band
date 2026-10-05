@@ -7,11 +7,11 @@ import { FormatterError } from "../../services/formatter";
 import { gitGraphService } from "../../services/git-graph-service";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
-import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
+import { WorktreeNotFoundError, worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
- * Workspace (singular) sub-router — per-workspace operations: file CRUD,
+ * Worktree (singular) sub-router — per-worktree operations: file CRUD,
  * search, diff, git pull/push/commit, format. The router
  * is validation + delegation only (issue #535, follow-up 1): every line of
  * business logic lives behind a service-tier seam:
@@ -21,16 +21,16 @@ import { publicProcedure, t } from "../trpc";
  *   - `diffService`   → branch listing, Changes sections, file diff,
  *     stage / unstage / discard.
  *   - `gitGraphService` → commit history, commit files, per-commit file diff.
- *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
+ *   - `worktreeService` → gitPull/gitPush/gitCommit (worktreeId-keyed),
  *     generateCommitMessage.
  *   - `editorService` → file watcher subscription + Prettier formatFile.
- *   - `terminalService.getWorkspaceConfig` → per-workspace terminal config.
+ *   - `terminalService.getWorktreeConfig` → per-worktree terminal config.
  *
- * The plural `workspaces.*` namespace handles workspace lifecycle
- * (create, remove, runScript, gitPull/Push by `(project, branch)`); see
- * `api/workspaces/router.ts`. Every existing client (FileBrowser,
+ * The plural `worktrees.*` namespace handles worktree lifecycle
+ * (create, remove, runScript, gitPull/Push by `(repo, branch)`); see
+ * `api/worktrees/router.ts`. Every existing client (FileBrowser,
  * Changes sidepanel, diff leaves, search popups, agent picker) speaks
- * `trpc.workspace.*`.
+ * `trpc.worktree.*`.
  */
 
 /**
@@ -84,44 +84,44 @@ const commitShaSchema = z
   .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
 
 /**
- * Wire-contract note: every workspace-tier service error (including
- * `WorkspaceNotFoundError`) bubbles as a plain `Error` and the tRPC
+ * Wire-contract note: every worktree-tier service error (including
+ * `WorktreeNotFoundError`) bubbles as a plain `Error` and the tRPC
  * adapter surfaces it as HTTP 500. That's pinned by the trpc
- * integration tests in `tests/trpc.test.ts` and mirrors the project-
- * tier `ProjectNotFoundError` / `PlainProjectError` handling in
- * `api/workspaces/router.ts`. Promoting `WorkspaceNotFoundError` to a
+ * integration tests in `tests/trpc.test.ts` and mirrors the repo-
+ * tier `RepoNotFoundError` / `PlainRepoError` handling in
+ * `api/worktrees/router.ts`. Promoting `WorktreeNotFoundError` to a
  * tRPC `NOT_FOUND` (404) is a separate change that needs to land
  * alongside the pinned-test update.
  *
  *
- * TODO(#535-followup): the `WorkspaceNotFoundError` → 404 migration
+ * TODO(#535-followup): the `WorktreeNotFoundError` → 404 migration
  * should cover `listBranches`, `getDiff`, `getChanges`, `getFile`,
  * `getFileDiff`, `stageFiles`, `discardChanges`, the `git*` mutations, the `*Path` /
  * `*File` / `*Directory` file CRUD, and the two search procedures —
- * any procedure that goes through `WorkspaceService.resolve` or its
- * `WorkspaceNotFoundError`-throwing siblings. When that lands, the
+ * any procedure that goes through `WorktreeService.resolve` or its
+ * `WorktreeNotFoundError`-throwing siblings. When that lands, the
  * `tests/trpc.test.ts` cases that pin status=500 for "unknown
- * workspace" need to flip to 404 in the same change.
+ * worktree" need to flip to 404 in the same change.
  *
  * `formatFile` is the historical exception — it threw
- * `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup branch even
+ * `TRPCError({code: "NOT_FOUND"})` for the worktree-lookup branch even
  * before the follow-up-1 split, and is kept as-is to preserve the
  * pre-existing wire contract; a future cleanup can align it with the
  * rest of the router.
  */
-export const workspaceRouter = t.router({
+export const worktreeRouter = t.router({
   getTerminalConfig: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(z.object({ worktreeId: z.string() }))
     .query(async ({ input }) => {
-      return { config: await terminalService.getWorkspaceConfig(input.workspaceId) };
+      return { config: await terminalService.getWorktreeConfig(input.worktreeId) };
     }),
 
   /**
    * Format the supplied `content` using Prettier as if it were the file at
-   * `filePath` inside `workspaceId`. The procedure is pure — it does not
+   * `filePath` inside `worktreeId`. The procedure is pure — it does not
    * read or write the file on disk. The client passes in the live editor
    * buffer and applies the returned `formatted` string back to the editor.
-   * Persistence is the caller's responsibility via `workspace.saveFile`.
+   * Persistence is the caller's responsibility via `worktree.saveFile`.
    *
    * Returns `{ skipped: true, reason }` when Prettier has no parser for
    * the file's extension (or it's covered by `.prettierignore`). Editors
@@ -131,12 +131,12 @@ export const workspaceRouter = t.router({
    *
    * Auth: enforced at the transport layer (the `band_token` cookie gates
    * the WebSocket upgrade and HTTP requests in start-server.ts) — same
-   * pattern as the rest of `workspaceRouter`.
+   * pattern as the rest of `worktreeRouter`.
    */
   formatFile: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         filePath: z.string().min(1),
         // 1 MB ceiling — covers every realistic source file (the largest
         // human-authored .ts in the world is well under 500 KB) and stops a
@@ -146,13 +146,13 @@ export const workspaceRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      // Single workspace lookup happens inside editorService.formatFile;
-      // a WorkspaceNotFoundError propagates up here and maps to 404,
+      // Single worktree lookup happens inside editorService.formatFile;
+      // a WorktreeNotFoundError propagates up here and maps to 404,
       // matching the pre-#535 wire contract. FormatterError maps to 400.
       try {
-        return await editorService.formatFile(input.workspaceId, input.filePath, input.content);
+        return await editorService.formatFile(input.worktreeId, input.filePath, input.content);
       } catch (err) {
-        if (err instanceof WorkspaceNotFoundError) {
+        if (err instanceof WorktreeNotFoundError) {
           throw new TRPCError({ code: "NOT_FOUND", message: err.message });
         }
         if (err instanceof FormatterError) {
@@ -167,22 +167,22 @@ export const workspaceRouter = t.router({
     }),
 
   /**
-   * Subscribe to external file-system changes inside a single workspace.
-   * The watcher is started on demand for that workspace and torn down when
+   * Subscribe to external file-system changes inside a single worktree.
+   * The watcher is started on demand for that worktree and torn down when
    * the last subscriber disconnects, so we don't keep OS watch handles
    * open on every worktree the user has ever added (see issue #384).
    *
    * Yields one event per coalesced (parentDir) change; `path` is the
-   * workspace-relative parent directory ("" for the worktree root). The
+   * worktree-relative parent directory ("" for the worktree root). The
    * FileBrowser uses it as a cache invalidation key.
    *
    * Auth: enforced at the transport layer (the `band_token` cookie gates
    * the WebSocket upgrade and HTTP requests in start-server.ts), so no
    * per-procedure guard is needed — consistent with the rest of
-   * `workspaceRouter`.
+   * `worktreeRouter`.
    */
   fileChanges: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(z.object({ worktreeId: z.string() }))
     .subscription(async function* (opts) {
       // We rely on the tRPC adapter supplying a cancellation signal — both
       // the WebSocket and HTTP transports we use today set it on every
@@ -190,7 +190,7 @@ export const workspaceRouter = t.router({
       // silently parking this generator forever.
       if (!opts.signal) {
         throw new Error(
-          "workspace.fileChanges requires a cancellable subscription (opts.signal missing)",
+          "worktree.fileChanges requires a cancellable subscription (opts.signal missing)",
         );
       }
       const signal = opts.signal;
@@ -202,7 +202,7 @@ export const workspaceRouter = t.router({
       // of waiting forever for an event from a dead handle.
       let watcherClosed = false;
 
-      const unsubscribe = editorService.subscribeToFileChanges(opts.input.workspaceId, (path) => {
+      const unsubscribe = editorService.subscribeToFileChanges(opts.input.worktreeId, (path) => {
         if (path === null) {
           watcherClosed = true;
         } else {
@@ -242,49 +242,49 @@ export const workspaceRouter = t.router({
   listBranches: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         query: z.string().max(200).optional(),
         limit: z.number().int().min(1).max(500).optional(),
       }),
     )
     .query(({ input }) =>
-      diffService.listBranches(input.workspaceId, { query: input.query, limit: input.limit }),
+      diffService.listBranches(input.worktreeId, { query: input.query, limit: input.limit }),
     ),
 
   getCommitHistory: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         skip: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(500).optional(),
       }),
     )
     .query(({ input }) =>
-      gitGraphService.getCommitHistory(input.workspaceId, {
+      gitGraphService.getCommitHistory(input.worktreeId, {
         skip: input.skip,
         limit: input.limit,
       }),
     ),
 
   getCommitHistorySignature: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => gitGraphService.getCommitHistorySignature(input.workspaceId)),
+    .input(z.object({ worktreeId: z.string() }))
+    .query(({ input }) => gitGraphService.getCommitHistorySignature(input.worktreeId)),
 
   getCommitDetails: publicProcedure
-    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
-    .query(({ input }) => gitGraphService.getCommitDetails(input.workspaceId, input.sha)),
+    .input(z.object({ worktreeId: z.string(), sha: commitShaSchema }))
+    .query(({ input }) => gitGraphService.getCommitDetails(input.worktreeId, input.sha)),
 
   getCommitFileDiff: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         sha: commitShaSchema,
         filePath: z.string().min(1).regex(/^[^-]/, "filePath must not start with '-'"),
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
     )
     .query(({ input }) =>
-      gitGraphService.getCommitFileDiff(input.workspaceId, input.sha, input.filePath, {
+      gitGraphService.getCommitFileDiff(input.worktreeId, input.sha, input.filePath, {
         contextLines: input.contextLines,
       }),
     ),
@@ -292,14 +292,14 @@ export const workspaceRouter = t.router({
   getDiff: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         contextLines: z.number().int().min(0).max(99999).optional(),
         diffMode: z.enum(["uncommitted", "branch"]).optional(),
         compareBranch: compareBranchSchema,
       }),
     )
     .query(({ input }) =>
-      diffService.getDiff(input.workspaceId, {
+      diffService.getDiff(input.worktreeId, {
         contextLines: input.contextLines,
         diffMode: input.diffMode,
         compareBranch: input.compareBranch,
@@ -307,15 +307,15 @@ export const workspaceRouter = t.router({
     ),
 
   getChanges: publicProcedure
-    .input(z.object({ workspaceId: z.string(), compareBranch: compareBranchSchema }))
+    .input(z.object({ worktreeId: z.string(), compareBranch: compareBranchSchema }))
     .query(({ input }) =>
-      diffService.getChanges(input.workspaceId, { compareBranch: input.compareBranch }),
+      diffService.getChanges(input.worktreeId, { compareBranch: input.compareBranch }),
     ),
 
   getFileDiff: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         filePath: filePathSchema,
         section: changeSectionSchema,
         /** Required for the `branch` section. */
@@ -326,7 +326,7 @@ export const workspaceRouter = t.router({
       }),
     )
     .query(({ input }) =>
-      diffService.getFileDiff(input.workspaceId, {
+      diffService.getFileDiff(input.worktreeId, {
         filePath: input.filePath,
         section: input.section,
         mergeBase: input.mergeBase,
@@ -336,119 +336,117 @@ export const workspaceRouter = t.router({
     ),
 
   stageFiles: publicProcedure
-    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
-    .mutation(({ input }) => diffService.stageFiles(input.workspaceId, input.paths)),
+    .input(z.object({ worktreeId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.stageFiles(input.worktreeId, input.paths)),
 
   unstageFiles: publicProcedure
-    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
-    .mutation(({ input }) => diffService.unstageFiles(input.workspaceId, input.paths)),
+    .input(z.object({ worktreeId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.unstageFiles(input.worktreeId, input.paths)),
 
   discardChanges: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         paths: pathListSchema,
         section: z.enum(["unstaged", "staged", "untracked"]),
       }),
     )
     .mutation(({ input }) =>
-      diffService.discardChanges(input.workspaceId, {
+      diffService.discardChanges(input.worktreeId, {
         paths: input.paths,
         section: input.section,
       }),
     ),
 
   gitPull: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .mutation(({ input }) => workspaceService.gitPullByWorkspaceId(input.workspaceId)),
+    .input(z.object({ worktreeId: z.string() }))
+    .mutation(({ input }) => worktreeService.gitPullByWorktreeId(input.worktreeId)),
 
   gitPush: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .mutation(({ input }) => workspaceService.gitPushByWorkspaceId(input.workspaceId)),
+    .input(z.object({ worktreeId: z.string() }))
+    .mutation(({ input }) => worktreeService.gitPushByWorktreeId(input.worktreeId)),
 
   gitCommit: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         message: z.string().min(1, "commit message is required"),
         body: z.string().optional(),
       }),
     )
     .mutation(({ input }) =>
-      workspaceService.gitCommit(input.workspaceId, {
+      worktreeService.gitCommit(input.worktreeId, {
         message: input.message,
         body: input.body,
       }),
     ),
 
   generateCommitMessage: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .mutation(({ input }) => workspaceService.generateCommitMessage(input.workspaceId)),
+    .input(z.object({ worktreeId: z.string() }))
+    .mutation(({ input }) => worktreeService.generateCommitMessage(input.worktreeId)),
 
   listFiles: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string().default("") }))
-    .query(({ input }) => filesService.listFiles(input.workspaceId, input.path)),
+    .input(z.object({ worktreeId: z.string(), path: z.string().default("") }))
+    .query(({ input }) => filesService.listFiles(input.worktreeId, input.path)),
 
   getFile: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
-    .query(({ input }) => filesService.getFile(input.workspaceId, input.path)),
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .query(({ input }) => filesService.getFile(input.worktreeId, input.path)),
 
   saveFile: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         path: z.string().min(1),
         content: z.string(),
       }),
     )
-    .mutation(({ input }) => filesService.saveFile(input.workspaceId, input.path, input.content)),
+    .mutation(({ input }) => filesService.saveFile(input.worktreeId, input.path, input.content)),
 
   createFile: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         path: z.string().min(1),
         content: z.string().default(""),
       }),
     )
-    .mutation(({ input }) => filesService.createFile(input.workspaceId, input.path, input.content)),
+    .mutation(({ input }) => filesService.createFile(input.worktreeId, input.path, input.content)),
 
   createDirectory: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
-    .mutation(({ input }) => filesService.createDirectory(input.workspaceId, input.path)),
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .mutation(({ input }) => filesService.createDirectory(input.worktreeId, input.path)),
 
   deletePath: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
-    .mutation(({ input }) => filesService.deletePath(input.workspaceId, input.path)),
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .mutation(({ input }) => filesService.deletePath(input.worktreeId, input.path)),
 
   renamePath: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         fromPath: z.string().min(1),
         toPath: z.string().min(1),
       }),
     )
     .mutation(({ input }) =>
-      filesService.renamePath(input.workspaceId, input.fromPath, input.toPath),
+      filesService.renamePath(input.worktreeId, input.fromPath, input.toPath),
     ),
 
   copyPath: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         fromPath: z.string().min(1),
         toPath: z.string().min(1),
       }),
     )
-    .mutation(({ input }) =>
-      filesService.copyPath(input.workspaceId, input.fromPath, input.toPath),
-    ),
+    .mutation(({ input }) => filesService.copyPath(input.worktreeId, input.fromPath, input.toPath)),
 
   searchFiles: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         query: z.string().default(""),
         // Raised from 50 → 200 to match the corpus expansion in issue
         // #530: with files from nested git repos now visible to Quick
@@ -458,17 +456,17 @@ export const workspaceRouter = t.router({
       }),
     )
     .query(({ input }) =>
-      searchService.searchFiles(input.workspaceId, {
+      searchService.searchFiles(input.worktreeId, {
         query: input.query,
         limit: input.limit,
       }),
     ),
 
-  // Resolve an absolute (or workspace-relative) path against this
-  // workspace: does it exist, is it a regular file, and does it live inside
-  // the worktree (→ workspace-relative path) or outside it (→ external tab)?
+  // Resolve an absolute (or worktree-relative) path against this
+  // worktree: does it exist, is it a regular file, and does it live inside
+  // the worktree (→ worktree-relative path) or outside it (→ external tab)?
   // Quick Open calls this for an absolute-path query so a path that happens
-  // to be inside the current workspace opens as a normal file rather than an
+  // to be inside the current worktree opens as a normal file rather than an
   // external tab. Shares `openFile`'s canonicalize + containment logic.
   //
   // Intentional tradeoff: this reports `exists`/`isFile` for ANY absolute
@@ -476,18 +474,18 @@ export const workspaceRouter = t.router({
   // is a filesystem-existence oracle. That is acceptable under Band's threat
   // model — the same auth scope already reads arbitrary absolute paths via
   // `host.readFile` — and the `external` flag is load-bearing, not dead code:
-  // it's how the client decides between a workspace-relative and an external
+  // it's how the client decides between a worktree-relative and an external
   // tab. Do not "harden" this by dropping the out-of-worktree classification.
   resolvePath: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
     .query(({ input }) =>
-      editorService.resolvePath({ workspaceId: input.workspaceId, filePath: input.path }),
+      editorService.resolvePath({ worktreeId: input.worktreeId, filePath: input.path }),
     ),
 
   searchContent: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         query: z.string().min(1),
         caseSensitive: z.boolean().default(false),
         wholeWord: z.boolean().default(false),
@@ -496,7 +494,7 @@ export const workspaceRouter = t.router({
       }),
     )
     .query(({ input }) =>
-      searchService.searchContent(input.workspaceId, {
+      searchService.searchContent(input.worktreeId, {
         query: input.query,
         caseSensitive: input.caseSensitive,
         wholeWord: input.wholeWord,
@@ -506,4 +504,4 @@ export const workspaceRouter = t.router({
     ),
 });
 
-export type WorkspaceRouter = typeof workspaceRouter;
+export type WorktreeRouter = typeof worktreeRouter;

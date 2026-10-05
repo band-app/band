@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -17,8 +17,8 @@ import { waitFor } from "./helpers/wait-for";
 // backends: the daemon (hold/release notifies) and in-process PTYs.
 
 const TOKEN = "terminal-output-flow-token";
-const PROJECT = "flowproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "flowproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 const FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; print $l while 1'\r`;
 /** A flood that also records how many lines it has printed, in `count` in its cwd. */
 const COUNTING_FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; for (my $i = 1; ; $i++) { print $l; if ($i % 1000 == 0) { open(my $f, ">", "count.tmp"); print $f $i; close $f; rename "count.tmp", "count" } }'\r`;
@@ -81,7 +81,7 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id: terminalId },
+      { worktreeId: WORKTREE_ID, id: terminalId },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -90,7 +90,7 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
 
   async function openSocket(terminalId: string, flow: boolean): Promise<TerminalSocket> {
     return await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId,
       token: TOKEN,
       maxOutputChars: 64 * 1024,
@@ -116,12 +116,12 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-output-flow-");
-    worktree = join(tmpHome, PROJECT);
+    worktree = join(tmpHome, REPO);
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -224,7 +224,7 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     // The upgrade is destroyed before the handshake, so the socket never opens.
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/terminal?workspaceId=${encodeURIComponent(WORKSPACE_ID)}&terminalId=${randomUUID()}`,
+      `ws://${url.host}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${randomUUID()}`,
     );
     const opened = await new Promise<boolean>((resolve) => {
       ws.once("open", () => resolve(true));

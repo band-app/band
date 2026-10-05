@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Tests that run pnpm under a temp HOME (dev-server, plain-projects) would make
+// Tests that run pnpm under a temp HOME (dev-server, plain-repos) would make
 // corepack look for pnpm in an empty cache and download it. Point it at the
 // cache of the real HOME, read here before any test changes HOME, and never
 // prompt, so nothing needs the network after `pnpm install`.

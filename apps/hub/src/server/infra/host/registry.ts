@@ -1,15 +1,15 @@
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
-import { ProjectQueries } from "../db/queries/projects";
-import { WorkspaceQueries } from "../db/queries/workspaces";
+import { RepoQueries } from "../db/queries/repos";
+import { WorktreeQueries } from "../db/queries/worktrees";
 
-const workspaceQueries = new WorkspaceQueries();
-const projectQueries = new ProjectQueries();
+const worktreeQueries = new WorktreeQueries();
+const repoQueries = new RepoQueries();
 
 /**
- * Finds the host a workspace or project lives on. A workspace's host is the
+ * Finds the host a worktree or repo lives on. A worktree's host is the
  * `worktrees.host_id` column. Every row is `local` until the hub can register
- * other machines, and a workspace with no row is treated as local.
+ * other machines, and a worktree with no row is treated as local.
  */
 export class HostRegistry {
   private readonly hosts = new Map<string, Host>();
@@ -34,34 +34,34 @@ export class HostRegistry {
     return host;
   }
 
-  hostFor(workspaceId: string): Host {
+  hostFor(worktreeId: string): Host {
     // With only the local host there is nothing to look up.
     if (this.hosts.size === 1) return this.local;
-    return this.hostById(workspaceQueries.findHostId(workspaceId) ?? this.local.id);
+    return this.hostById(worktreeQueries.findHostId(worktreeId) ?? this.local.id);
   }
 
   /**
-   * The host a project's main checkout is on for hub-wide work (sync, GitHub
+   * The host a repo's main checkout is on for hub-wide work (sync, GitHub
    * polling). That is always the local host: a remote checkout only holds the
-   * worktrees workspaces on that host use, and {@link projectPathOn} finds it.
+   * worktrees worktrees on that host use, and {@link repoPathOn} finds it.
    */
-  hostForProject(_projectName: string): Host {
+  hostForRepo(_repoName: string): Host {
     return this.local;
   }
 
   /**
-   * Where a project's checkout is on a host. `fallback` (the project's own
+   * Where a repo's checkout is on a host. `fallback` (the repo's own
    * path) answers for the local host, and a remote host answers from
-   * `project_hosts`. Null when the project has no checkout on that host.
+   * `repo_hosts`. Null when the repo has no checkout on that host.
    */
-  projectPathOn(projectName: string, hostId: string, fallback: string): string | null {
+  repoPathOn(repoName: string, hostId: string, fallback: string): string | null {
     if (hostId === this.local.id) return fallback;
-    return projectQueries.findHostPath(projectName, hostId);
+    return repoQueries.findHostPath(repoName, hostId);
   }
 
-  /** Records a project's checkout on a remote host. */
-  setProjectPathOn(projectName: string, hostId: string, path: string): void {
-    projectQueries.setHostPath(projectName, hostId, path);
+  /** Records a repo's checkout on a remote host. */
+  setRepoPathOn(repoName: string, hostId: string, path: string): void {
+    repoQueries.setHostPath(repoName, hostId, path);
   }
 
   /** Every host the hub can place work on. */
@@ -76,7 +76,7 @@ let terminalBackend: TerminalBackend | null = null;
  * Called by `TerminalService` whenever it picks the local backend, so
  * `local.pty` is the backend the terminal service uses. Returns the backend it
  * replaced. The registry can't import the service, which depends on the
- * workspace service that depends on the registry.
+ * worktree service that depends on the registry.
  */
 export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBackend | null {
   const previous = terminalBackend;

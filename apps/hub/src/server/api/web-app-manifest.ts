@@ -5,12 +5,12 @@ import { join } from "node:path";
 // ---------------------------------------------------------------------------
 // The web app manifest and its icons. Without a manifest, iOS derives a
 // home-screen app's scope from the URL it was added from (often
-// `/workspace/<id>`), and a client-side switch to another project's workspace
+// `/worktree/<id>`), and a client-side switch to another repo's worktree
 // leaves that scope and brings up Safari's browser bars. `scope: "/"` keeps
 // every Band URL in the app.
 //
 // iOS fetches the manifest and icons without the session cookie, so these
-// routes are answered before auth. They carry no token and no workspace data.
+// routes are answered before auth. They carry no token and no worktree data.
 // ---------------------------------------------------------------------------
 
 /** Linked from the page head in `routes/__root.tsx`. */

@@ -42,7 +42,7 @@ const common = {
   readOnly: z.boolean().optional(),
   readOnlyTools: toolNames.optional(),
   enabled: z.boolean().optional(),
-  scopeProjects: z.array(z.string().min(1).max(200)).max(200).nullable().optional(),
+  scopeRepos: z.array(z.string().min(1).max(200)).max(200).nullable().optional(),
   scopeHosts: z.array(z.string().min(1).max(200)).max(200).nullable().optional(),
 };
 

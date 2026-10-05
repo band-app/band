@@ -12,7 +12,7 @@ export type AgentSessionState = "starting" | "running" | "ended";
 
 export interface AgentSessionRecord {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   agentDefinitionId: string;
   /** The agent's own session id (e.g. Claude's `session_id`), null until known. */
   providerSessionId: string | null;

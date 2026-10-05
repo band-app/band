@@ -69,7 +69,7 @@ beforeAll(async () => {
     noenvproj: createRepo(home, "noenvproj", {}),
   };
   seedState(home, {
-    projects: Object.entries(repos).map(([name, path]) => ({
+    repos: Object.entries(repos).map(([name, path]) => ({
       name,
       path,
       defaultBranch: "main",
@@ -189,7 +189,7 @@ describe("a dockerfile environment", () => {
     expect(done.key).not.toBe(before.key);
   });
 
-  it("starts one build at a time per project", async () => {
+  it("starts one build at a time per repo", async () => {
     commit(join(home, "cacheproj"), { "pnpm-lock.yaml": "lockfileVersion: 3\n" }, "bump lock");
     const [a, b] = await Promise.all([build("cacheproj"), build("cacheproj")]);
     expect(a.status, a.body).toBe(200);
@@ -234,7 +234,7 @@ describe("refusals", () => {
     const anonymous = await trpcMutate(
       server.url,
       "environment.build",
-      { projectName: "cacheproj" },
+      { repoName: "cacheproj" },
       undefined,
     );
     expect(anonymous.status).toBe(401);
@@ -245,7 +245,7 @@ describe("refusals", () => {
     const device = await trpcMutate(
       server.url,
       "environment.build",
-      { projectName: "cacheproj" },
+      { repoName: "cacheproj" },
       token,
     );
     expect(device.status).toBe(403);
@@ -265,13 +265,13 @@ describe("refusals", () => {
     expect(res.body).toContain("Set build.devcontainer, build.dockerfile or build.image");
   });
 
-  it("refuses a project with no environment file", async () => {
+  it("refuses a repo with no environment file", async () => {
     const res = await build("noenvproj");
     expect(res.status).toBe(400);
     expect(res.body).toContain("does not exist");
   });
 
-  it("refuses an unknown project", async () => {
+  it("refuses an unknown repo", async () => {
     const res = await build("nope");
     expect(res.status).toBe(404);
   });

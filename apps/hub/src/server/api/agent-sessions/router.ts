@@ -1,20 +1,20 @@
 /**
- * Agent sessions (issue #682): list a workspace's running agent sessions and
+ * Agent sessions (issue #682): list a worktree's running agent sessions and
  * start new ones. Thin: validates, delegates to `AgentLaunchService` /
  * `AgentSessions`, maps domain errors onto tRPC codes.
  */
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { WorkspaceNotFoundError } from "../../errors";
-import { agentLaunchService, ChatNotInWorkspaceError } from "../../services/agent-launch-service";
+import { WorktreeNotFoundError } from "../../errors";
+import { agentLaunchService, ChatNotInWorktreeError } from "../../services/agent-launch-service";
 import { agentSessionRegistry } from "../../services/agent-session-registry-service";
 import { TaskConflictError } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 export const agentSessionsRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { agentSessions: agentSessionRegistry.listOpen(input.workspaceId) };
+  list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
+    return { agentSessions: agentSessionRegistry.listOpen(input.worktreeId) };
   }),
 
   /**
@@ -25,9 +25,9 @@ export const agentSessionsRouter = t.router({
   launch: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         agentId: z.string().optional(),
-        // Same cap as `workspaces.create`: a `tui` launch embeds the prompt
+        // Same cap as `worktrees.create`: a `tui` launch embeds the prompt
         // in the PTY command line.
         prompt: z.string().max(100_000).optional(),
         mode: z.enum(["gui", "tui"]).optional(),
@@ -40,7 +40,7 @@ export const agentSessionsRouter = t.router({
     .mutation(async ({ input }) => {
       try {
         const { ready, ...result } = agentLaunchService.launch({
-          workspaceId: input.workspaceId,
+          worktreeId: input.worktreeId,
           agentDefinitionId: input.agentId,
           prompt: input.prompt,
           mode: input.mode,
@@ -50,10 +50,10 @@ export const agentSessionsRouter = t.router({
         await ready;
         return result;
       } catch (err) {
-        if (err instanceof WorkspaceNotFoundError) {
+        if (err instanceof WorktreeNotFoundError) {
           throw new TRPCError({ code: "NOT_FOUND", message: err.message });
         }
-        if (err instanceof ChatNotInWorkspaceError) {
+        if (err instanceof ChatNotInWorktreeError) {
           throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
         }
         if (err instanceof TaskConflictError) {

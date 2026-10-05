@@ -146,7 +146,7 @@ describe("fuzzyScore – real-world ranking", () => {
     "apps/hub/src/server/services/state.ts",
     "apps/hub/src/server/infra/git/git-client.ts",
     "apps/hub/tests/trpc.test.ts",
-    "apps/hub/src/server/services/workspace.ts",
+    "apps/hub/src/server/services/worktree.ts",
     "schema.prisma",
     "src/old/scattered_chars_hema.ts",
   ];

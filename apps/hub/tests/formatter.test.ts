@@ -7,7 +7,7 @@ import { FormatterError, formatFile } from "../src/server/services/formatter";
 // Black-box tests for the Prettier-backed formatter. The dispatcher is a
 // pure function — content in, formatted content out — so almost every test
 // here can run without touching the filesystem. We do drop a real
-// `.prettierrc` next to the file in the project-config test, since that
+// `.prettierrc` next to the file in the repo-config test, since that
 // codepath exercises Prettier's filesystem walk-up resolver.
 
 describe("formatFile (Prettier dispatcher)", () => {
@@ -123,7 +123,7 @@ describe("formatFile (Prettier dispatcher)", () => {
     }
   });
 
-  it("respects a project-level .prettierrc when configOverride is omitted", async () => {
+  it("respects a repo-level .prettierrc when configOverride is omitted", async () => {
     // Drop a config file at the worktree root that flips singleQuote on.
     writeFileSync(join(worktree, ".prettierrc"), JSON.stringify({ singleQuote: true }));
     const file = join(worktree, "quoted.js");

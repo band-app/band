@@ -159,25 +159,25 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   // ---- scripts ------------------------------------------------------------
 
   const plans = new Map<string, ScriptPlan>();
-  const workspacePaths = async (a: Params) => ({
-    projectPath: await path(a, "projectPath"),
+  const worktreePaths = async (a: Params) => ({
+    repoPath: await path(a, "repoPath"),
     worktreePath: await path(a, "worktreePath"),
   });
 
   r.json("scripts.command", async (a) =>
-    host.scripts.command({ ...(await workspacePaths(a)), label: label(a) }),
+    host.scripts.command({ ...(await worktreePaths(a)), label: label(a) }),
   );
-  r.json("scripts.environment", async (a) => host.scripts.environment(await workspacePaths(a)));
+  r.json("scripts.environment", async (a) => host.scripts.environment(await worktreePaths(a)));
   r.json("scripts.runHidden", async (a) =>
     host.scripts.runHidden(str(a, "script"), await path(a, "cwd"), optNum(a, "timeoutMs")),
   );
   r.json("scripts.copyFiles", async (a) => {
-    const { projectPath, worktreePath } = await workspacePaths(a);
-    return host.scripts.copyFiles(projectPath, worktreePath);
+    const { repoPath, worktreePath } = await worktreePaths(a);
+    return host.scripts.copyFiles(repoPath, worktreePath);
   });
   // A plan lives on the worker until `scripts.dispose`. Its exit comes back as a `scripts.exited` notification.
   r.json("scripts.prepare", async (a) => {
-    const plan = await host.scripts.prepare({ ...(await workspacePaths(a)), label: label(a) });
+    const plan = await host.scripts.prepare({ ...(await worktreePaths(a)), label: label(a) });
     if (!plan) return null;
     const planId = randomUUID();
     plans.set(planId, plan);

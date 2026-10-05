@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -28,13 +28,13 @@ import { waitFor } from "./helpers/wait-for";
 // shells running untouched throughout.
 
 const TOKEN = "terminal-restart-daemon-token";
-const PROJECT = "restartproj";
-const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+const REPO = "restartproj";
+const WORKTREE_ID = toWorktreeId(REPO, "main");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
@@ -45,12 +45,12 @@ describe("terminal.restartDaemon", () => {
 
   beforeEach(() => {
     tmpHome = createTmpHome("band-td-restart-");
-    worktree = `${tmpHome}/${PROJECT}`;
+    worktree = `${tmpHome}/${REPO}`;
     mkdirSync(worktree, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: worktree,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: worktree }],
@@ -72,7 +72,7 @@ describe("terminal.restartDaemon", () => {
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id },
+      { worktreeId: WORKTREE_ID, id },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -85,9 +85,9 @@ describe("terminal.restartDaemon", () => {
     const old = await startDaemonOfBuild(tmpHome, { entry: DAEMON_ENTRY, buildId: "old-build" });
     const oldTerminalId = randomUUID();
     const oldShellPid = await old.spawnShell({
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: oldTerminalId,
-      workspaceRoot: worktree,
+      worktreeRoot: worktree,
     });
 
     server = await startServer({ remoteHost: false, tmpHome });
@@ -99,12 +99,12 @@ describe("terminal.restartDaemon", () => {
     expect(currentDaemonPid).not.toBe(old.pid);
 
     const socketA = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: a.terminalId,
       token: TOKEN,
     });
     const socketB = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       terminalId: b.terminalId,
       token: TOKEN,
     });

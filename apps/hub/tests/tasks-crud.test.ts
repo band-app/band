@@ -74,8 +74,8 @@ function seedTask(
   tmpHome: string,
   task: {
     id: string;
-    workspaceId: string;
-    project: string;
+    worktreeId: string;
+    repo: string;
     branch: string;
     prompt: string;
     status: "running" | "completed" | "failed";
@@ -87,13 +87,13 @@ function seedTask(
   const sqlite = openDb(tmpHome);
   sqlite
     .prepare(
-      `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
+      `INSERT OR REPLACE INTO tasks (id, worktree_id, repo, branch, prompt, status, session_id, started_at, completed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
-      task.workspaceId,
-      task.project,
+      task.worktreeId,
+      task.repo,
       task.branch,
       task.prompt,
       task.status,
@@ -144,7 +144,7 @@ describe("tRPC — tasks.list filtering", () => {
     const repo2 = createGitRepo(tmpHome, "beta");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "alpha",
           path: repo1,
@@ -165,8 +165,8 @@ describe("tRPC — tasks.list filtering", () => {
 
     seedTask(tmpHome, {
       id: "tsk_a1",
-      workspaceId: "alpha-main",
-      project: "alpha",
+      worktreeId: "alpha-main",
+      repo: "alpha",
       branch: "main",
       prompt: "alpha running task",
       status: "running",
@@ -175,8 +175,8 @@ describe("tRPC — tasks.list filtering", () => {
 
     seedTask(tmpHome, {
       id: "tsk_a2",
-      workspaceId: "alpha-main",
-      project: "alpha",
+      worktreeId: "alpha-main",
+      repo: "alpha",
       branch: "main",
       prompt: "alpha completed task",
       status: "completed",
@@ -186,8 +186,8 @@ describe("tRPC — tasks.list filtering", () => {
 
     seedTask(tmpHome, {
       id: "tsk_a3",
-      workspaceId: "alpha-main",
-      project: "alpha",
+      worktreeId: "alpha-main",
+      repo: "alpha",
       branch: "main",
       prompt: "alpha failed task",
       status: "failed",
@@ -197,8 +197,8 @@ describe("tRPC — tasks.list filtering", () => {
 
     seedTask(tmpHome, {
       id: "tsk_b1",
-      workspaceId: "beta-main",
-      project: "beta",
+      worktreeId: "beta-main",
+      repo: "beta",
       branch: "main",
       prompt: "beta completed task",
       status: "completed",
@@ -222,13 +222,13 @@ describe("tRPC — tasks.list filtering", () => {
     expect(data.tasks).toHaveLength(4);
   });
 
-  it("filters by project", async () => {
-    const res = await trpcQuery(server.url, "tasks.list", { project: "alpha" });
+  it("filters by repo", async () => {
+    const res = await trpcQuery(server.url, "tasks.list", { repo: "alpha" });
     expect(res.status).toBe(200);
-    const data = await trpcData<{ tasks: Array<{ id: string; project: string }> }>(res);
+    const data = await trpcData<{ tasks: Array<{ id: string; repo: string }> }>(res);
     expect(data.tasks).toHaveLength(3);
     for (const task of data.tasks) {
-      expect(task.project).toBe("alpha");
+      expect(task.repo).toBe("alpha");
     }
   });
 
@@ -242,17 +242,17 @@ describe("tRPC — tasks.list filtering", () => {
     }
   });
 
-  it("filters by workspaceId", async () => {
-    const res = await trpcQuery(server.url, "tasks.list", { workspaceId: "beta-main" });
+  it("filters by worktreeId", async () => {
+    const res = await trpcQuery(server.url, "tasks.list", { worktreeId: "beta-main" });
     expect(res.status).toBe(200);
-    const data = await trpcData<{ tasks: Array<{ id: string; workspaceId: string }> }>(res);
+    const data = await trpcData<{ tasks: Array<{ id: string; worktreeId: string }> }>(res);
     expect(data.tasks).toHaveLength(1);
-    expect(data.tasks[0].workspaceId).toBe("beta-main");
+    expect(data.tasks[0].worktreeId).toBe("beta-main");
   });
 
-  it("filters by project and status combined", async () => {
+  it("filters by repo and status combined", async () => {
     const res = await trpcQuery(server.url, "tasks.list", {
-      project: "alpha",
+      repo: "alpha",
       status: "completed",
     });
     expect(res.status).toBe(200);
@@ -261,20 +261,20 @@ describe("tRPC — tasks.list filtering", () => {
     expect(data.tasks[0].id).toBe("tsk_a2");
   });
 
-  it("returns empty list for non-existent project", async () => {
-    const res = await trpcQuery(server.url, "tasks.list", { project: "nonexistent" });
+  it("returns empty list for non-existent repo", async () => {
+    const res = await trpcQuery(server.url, "tasks.list", { repo: "nonexistent" });
     expect(res.status).toBe(200);
     const data = await trpcData<{ tasks: unknown[] }>(res);
     expect(data.tasks).toEqual([]);
   });
 
   it("returns tasks with expected fields", async () => {
-    const res = await trpcQuery(server.url, "tasks.list", { workspaceId: "beta-main" });
+    const res = await trpcQuery(server.url, "tasks.list", { worktreeId: "beta-main" });
     const data = await trpcData<{
       tasks: Array<{
         id: string;
-        workspaceId: string;
-        project: string;
+        worktreeId: string;
+        repo: string;
         branch: string;
         prompt: string;
         status: string;
@@ -285,8 +285,8 @@ describe("tRPC — tasks.list filtering", () => {
 
     const task = data.tasks[0];
     expect(task.id).toBe("tsk_b1");
-    expect(task.workspaceId).toBe("beta-main");
-    expect(task.project).toBe("beta");
+    expect(task.worktreeId).toBe("beta-main");
+    expect(task.repo).toBe("beta");
     expect(task.branch).toBe("main");
     expect(task.prompt).toBe("beta completed task");
     expect(task.status).toBe("completed");
@@ -296,7 +296,7 @@ describe("tRPC — tasks.list filtering", () => {
 });
 
 // ---------------------------------------------------------------------------
-// tasks.get — returns currently running in-memory task for a workspace
+// tasks.get — returns currently running in-memory task for a worktree
 // ---------------------------------------------------------------------------
 
 describe("tRPC — tasks.get", () => {
@@ -308,7 +308,7 @@ describe("tRPC — tasks.get", () => {
     const repo = createGitRepo(tmpHome, "proj");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repo,
@@ -327,15 +327,15 @@ describe("tRPC — tasks.get", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("returns null when no task is running for a workspace", async () => {
-    const res = await trpcQuery(server.url, "tasks.get", { workspaceId: "proj-main" });
+  it("returns null when no task is running for a worktree", async () => {
+    const res = await trpcQuery(server.url, "tasks.get", { worktreeId: "proj-main" });
     expect(res.status).toBe(200);
     const data = await trpcData<{ task: null }>(res);
     expect(data.task).toBeNull();
   });
 
-  it("returns null for a non-existent workspace", async () => {
-    const res = await trpcQuery(server.url, "tasks.get", { workspaceId: "nonexistent-main" });
+  it("returns null for a non-existent worktree", async () => {
+    const res = await trpcQuery(server.url, "tasks.get", { worktreeId: "nonexistent-main" });
     expect(res.status).toBe(200);
     const data = await trpcData<{ task: null }>(res);
     expect(data.task).toBeNull();

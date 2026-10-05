@@ -2,15 +2,15 @@
  * Client state: small UI values the dashboard keeps on the server so the
  * phone and the desktop show the same tabs, drafts and panel layout.
  *
- * The dashboard reads a workspace's (or the global) entries in one call,
+ * The dashboard reads a worktree's (or the global) entries in one call,
  * writes one key at a time with the version it last saw, and learns about
  * other devices' writes from the `client-state-changed` status event. A write
  * whose base version is stale is refused and answered with the current row,
  * so a client coming back online can't overwrite a newer value.
  *
  * Only the keys in `shared/client-state-keys.ts` are accepted. A key's
- * workspace comes from the key itself, and a write for a workspace that no
- * longer exists is refused, so a device that missed a workspace's deletion
+ * worktree comes from the key itself, and a write for a worktree that no
+ * longer exists is refused, so a device that missed a worktree's deletion
  * can't bring its rows back.
  */
 
@@ -23,11 +23,11 @@ import {
   type DeviceType,
 } from "@band-app/shared/client-state";
 import { matchKey } from "@band-app/shared/client-state-keys";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   ClientStateKeyError,
   ClientStateValueTooLargeError,
-  ClientStateWorkspaceNotFoundError,
+  ClientStateWorktreeNotFoundError,
 } from "../errors";
 import { ClientStateQueries } from "../infra/db/queries/client-state";
 import { loadState } from "./state";
@@ -45,18 +45,18 @@ export interface ClientStateSetInput {
 
 export type ClientStateDeleteInput = Omit<ClientStateSetInput, "value">;
 
-function workspaceExists(workspaceId: string): boolean {
-  return loadState().projects.some((p) =>
-    p.worktrees.some((wt) => toWorkspaceId(p.name, wt.name) === workspaceId),
+function worktreeExists(worktreeId: string): boolean {
+  return loadState().repos.some((p) =>
+    p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId),
   );
 }
 
 export class ClientStateService {
   constructor(private readonly queries = new ClientStateQueries()) {}
 
-  /** Live entries of one workspace (or global ones) visible to a device type. */
-  list(workspaceId: string | null, deviceType: DeviceType): ClientStateEntry[] {
-    return this.queries.list(workspaceId, ["all", deviceType]);
+  /** Live entries of one worktree (or global ones) visible to a device type. */
+  list(worktreeId: string | null, deviceType: DeviceType): ClientStateEntry[] {
+    return this.queries.list(worktreeId, ["all", deviceType]);
   }
 
   set(input: ClientStateSetInput): ClientStateWriteResult {
@@ -74,27 +74,27 @@ export class ClientStateService {
     return this.write(input, null);
   }
 
-  /** Drop every entry of a deleted workspace. */
-  removeAllForWorkspace(workspaceId: string): void {
-    const removed = this.queries.removeForWorkspace(workspaceId);
-    if (removed > 0) log.info({ workspaceId, removed }, "removed workspace client state");
+  /** Drop every entry of a deleted worktree. */
+  removeAllForWorktree(worktreeId: string): void {
+    const removed = this.queries.removeForWorktree(worktreeId);
+    if (removed > 0) log.info({ worktreeId, removed }, "removed worktree client state");
   }
 
-  /** The workspace a key belongs to (null for a global key). Throws for a key or scope that isn't synced. */
-  private workspaceOf(key: string, scope: ClientStateScope): string | null {
+  /** The worktree a key belongs to (null for a global key). Throws for a key or scope that isn't synced. */
+  private worktreeOf(key: string, scope: ClientStateScope): string | null {
     const matched = matchKey(key);
     if (!matched) throw new ClientStateKeyError(`Not a client-state key: ${key}`);
     const wanted = scope === "all" ? "all" : "device";
     if (!matched.parts.some((p) => p.scope === wanted)) {
       throw new ClientStateKeyError(`Key ${key} has no "${scope}" scope`);
     }
-    return matched.workspaceId;
+    return matched.worktreeId;
   }
 
   private write(input: ClientStateDeleteInput, value: string | null): ClientStateWriteResult {
-    const workspaceId = this.workspaceOf(input.key, input.scope);
-    if (workspaceId !== null && !workspaceExists(workspaceId)) {
-      throw new ClientStateWorkspaceNotFoundError(workspaceId);
+    const worktreeId = this.worktreeOf(input.key, input.scope);
+    if (worktreeId !== null && !worktreeExists(worktreeId)) {
+      throw new ClientStateWorktreeNotFoundError(worktreeId);
     }
     const updatedAt = Date.now();
     const version = input.baseVersion + 1;
@@ -103,7 +103,7 @@ export class ClientStateService {
         ? this.queries.insertIfAbsent({
             key: input.key,
             scope: input.scope,
-            workspaceId,
+            worktreeId,
             value,
             version,
             updatedAt,
@@ -113,12 +113,12 @@ export class ClientStateService {
             version,
             updatedAt,
           });
-    // The client thinks a row exists that doesn't (its workspace was deleted
+    // The client thinks a row exists that doesn't (its worktree was deleted
     // and recreated): answer with an empty version 0 so it rebases on nothing.
     const entry = this.queries.find(input.key, input.scope) ?? {
       key: input.key,
       scope: input.scope,
-      workspaceId,
+      worktreeId,
       value: null,
       version: 0,
       updatedAt,
@@ -126,7 +126,7 @@ export class ClientStateService {
     if (written) {
       emit({
         kind: "client-state-changed",
-        workspaceId: workspaceId ?? undefined,
+        worktreeId: worktreeId ?? undefined,
         clientState: entry,
         clientId: input.clientId,
       });
@@ -135,5 +135,5 @@ export class ClientStateService {
   }
 }
 
-/** Shared instance for the API tier and the workspace delete path. */
+/** Shared instance for the API tier and the worktree delete path. */
 export const clientStateService = new ClientStateService();

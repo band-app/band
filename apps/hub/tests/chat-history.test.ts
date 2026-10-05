@@ -31,10 +31,10 @@ import {
   startAcpServer,
   TEST_TOKEN,
   trpc,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
-import { listTasksForWorkspace } from "./helpers/tasks";
+import { listTasksForWorktree } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 const CHAT_ID = "hist-chat-id";
@@ -52,7 +52,7 @@ beforeAll(async () => {
   for (const text of prompts) await sendMessage(server.url, CHAT_ID, text);
   await waitFor(
     async () => {
-      const tasks = await listTasksForWorkspace(server.url, WORKSPACE_ID, TEST_TOKEN);
+      const tasks = await listTasksForWorktree(server.url, WORKTREE_ID, TEST_TOKEN);
       return tasks.filter((t) => t.status === "completed").length === TURNS;
     },
     { timeoutMs: 60_000, intervalMs: 200, label: `${TURNS} turns completed` },
@@ -159,7 +159,7 @@ describe("GET /api/chats/:chatId/history", () => {
   });
 
   it("returns an empty page for a chat with no session", async () => {
-    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: "hist-empty-chat" });
+    await trpc(server.url, "chats.create", { worktreeId: WORKTREE_ID, id: "hist-empty-chat" });
     const res = await getHistory("hist-empty-chat", { before: 1000 });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });

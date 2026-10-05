@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -9,11 +9,11 @@ import { createTmpHome, type ServerHandle, startServer } from "./helpers/server"
 import { StatusStream } from "./helpers/status-stream";
 import { waitFor } from "./helpers/wait-for";
 
-// The git half of each workspace's branch status, as the poller pushes it on
-// the status stream: one `git status --porcelain=v2 --branch` per workspace.
+// The git half of each worktree's branch status, as the poller pushes it on
+// the status stream: one `git status --porcelain=v2 --branch` per worktree.
 
 const TOKEN = "branch-status-git-token";
-const PROJECT = "gitproj";
+const REPO = "gitproj";
 const BRANCHES = ["main", "local", "dirty", "ahead", "behind", "diverged", "gone", "conflict"];
 
 const gitEnv = {
@@ -43,7 +43,7 @@ describe("branch status git fields", () => {
     tmpHome = createTmpHome("band-branch-status-git-");
     const origin = join(tmpHome, "origin.git");
     execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin], { env: gitEnv });
-    const repo = join(tmpHome, PROJECT);
+    const repo = join(tmpHome, REPO);
     mkdirSync(repo);
     git(repo, ["init", "-q", "-b", "main"]);
     git(repo, ["remote", "add", "origin", origin]);
@@ -52,7 +52,7 @@ describe("branch status git fields", () => {
     paths.main = repo;
 
     const worktree = (branch: string) => {
-      const path = join(tmpHome, `${PROJECT}-${branch}`);
+      const path = join(tmpHome, `${REPO}-${branch}`);
       git(repo, ["worktree", "add", "-q", "-b", branch, path, "main"]);
       paths[branch] = path;
       return path;
@@ -93,7 +93,7 @@ describe("branch status git fields", () => {
     const conflict = worktree("conflict");
     git(repo, ["branch", "conflict-other", "main"]);
     commit(conflict, "README.md", "ours\n");
-    const other = join(tmpHome, `${PROJECT}-conflict-other`);
+    const other = join(tmpHome, `${REPO}-conflict-other`);
     git(repo, ["worktree", "add", "-q", other, "conflict-other"]);
     commit(other, "README.md", "theirs\n");
     try {
@@ -103,9 +103,9 @@ describe("branch status git fields", () => {
     }
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repo,
           defaultBranch: "main",
           worktrees: BRANCHES.map((branch) => ({ branch, path: paths[branch] })),
@@ -132,15 +132,15 @@ describe("branch status git fields", () => {
     expect(outcome).toBe("ECONNRESET");
   });
 
-  it("reports dirty, conflict, ahead/behind and sync state for each workspace", async () => {
+  it("reports dirty, conflict, ahead/behind and sync state for each worktree", async () => {
     const stream = await StatusStream.open(server.url, TOKEN);
-    const status = (branch: string) => stream.latest(toWorkspaceId(PROJECT, branch));
+    const status = (branch: string) => stream.latest(toWorktreeId(REPO, branch));
     try {
       // The first tick's worktree sync also finds the `conflict-other` helper
-      // worktree, so wait for these workspaces by name, not by count.
+      // worktree, so wait for these worktrees by name, not by count.
       await waitFor(async () => BRANCHES.every((branch) => status(branch)) || undefined, {
         timeoutMs: 20_000,
-        label: "a branch status for every workspace",
+        label: "a branch status for every worktree",
       });
       const clean = { dirty: false, conflict: false, ahead: 0, behind: 0 };
       expect(status("main")).toEqual({ ...clean, sync_state: "synced" });

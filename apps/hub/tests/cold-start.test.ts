@@ -26,7 +26,7 @@
  *     `wal_checkpoint(TRUNCATE)` added in #472 the WAL would persist at
  *     its grown size across restarts.
  *
- * All tests follow the project convention: black-box only, real
+ * All tests follow the repo convention: black-box only, real
  * SQLite + real HTTP listener on a random port, temp `bandHome`. No
  * production code is modified to make a test pass.
  */
@@ -47,7 +47,7 @@ import { removeTmpHome } from "./helpers/tmp-home";
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "server", "infra", "db", "migrations");
 const DEFAULT_TOKEN = "cold-start-test-token";
-const WORKSPACE_ID = "coldstart-main";
+const WORKTREE_ID = "coldstart-main";
 
 // ---------------------------------------------------------------------------
 // Subprocess helpers (model after cronjobs.test.ts / chat.test.ts)
@@ -64,7 +64,7 @@ function startServer(tmpHome: string): Promise<ServerHandle> {
 
 interface SeededPanel {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   panelType: "chat" | "browser";
   state: object;
 }
@@ -79,11 +79,11 @@ function seedPanelStates(tmpHome: string, panels: SeededPanel[]): void {
 
   const now = Date.now();
   const stmt = sqlite.prepare(
-    `INSERT INTO panel_states (id, workspace_id, panel_type, state, created_at, updated_at)
+    `INSERT INTO panel_states (id, worktree_id, panel_type, state, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
   for (const panel of panels) {
-    stmt.run(panel.id, panel.workspaceId, panel.panelType, JSON.stringify(panel.state), now, now);
+    stmt.run(panel.id, panel.worktreeId, panel.panelType, JSON.stringify(panel.state), now, now);
   }
   sqlite.close();
 }
@@ -135,13 +135,13 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cold-boot-test-");
 
-    // Seed a project so the workspace resolves cleanly (the trpc routes
+    // Seed a repo so the worktree resolves cleanly (the trpc routes
     // don't strictly require this, but matching what other tests do
     // keeps the boot path realistic).
     const repoDir = join(tmpHome, "repo");
     mkdirSync(repoDir, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "coldstart",
           path: repoDir,
@@ -160,7 +160,7 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
     for (let i = 0; i < CHAT_COUNT; i++) {
       panels.push({
         id: `chat_seed_${i}`,
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         panelType: "chat",
         state: {
           name: `Chat ${i}`,
@@ -178,7 +178,7 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
     for (let i = 0; i < BROWSER_COUNT; i++) {
       panels.push({
         id: `browser_seed_${i}`,
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
         panelType: "browser",
         state: {
           name: `Tab ${i}`,
@@ -208,7 +208,7 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
   });
 
   it("chats.list returns seeded chats with status reset to idle", async () => {
-    const res = await trpcQuery(server.url, "chats.list", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "chats.list", { worktreeId: WORKTREE_ID });
     expect(res.status).toBe(200);
     const data = await trpcData<{ chats: Array<{ id: string; name: string; status: string }> }>(
       res,
@@ -231,7 +231,7 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
   });
 
   it("browsers.list returns seeded tabs with status reset to idle", async () => {
-    const res = await trpcQuery(server.url, "browsers.list", { workspaceId: WORKSPACE_ID });
+    const res = await trpcQuery(server.url, "browsers.list", { worktreeId: WORKTREE_ID });
     expect(res.status).toBe(200);
     const data = await trpcData<{
       browsers: Array<{ id: string; name: string; url: string; status: string }>;
@@ -402,7 +402,7 @@ describe("cold-start — WAL truncation on closeDb()", () => {
         tx.insert(schema.panelStates)
           .values({
             id: `chat_grow_${i}`,
-            workspaceId: WORKSPACE_ID,
+            worktreeId: WORKTREE_ID,
             panelType: "chat",
             state: JSON.stringify({
               name: `Chat ${i}`,

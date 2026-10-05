@@ -11,11 +11,11 @@ export interface FilePart {
 }
 
 export interface SavedFile {
-  /** Absolute path where the file was written, on the machine the workspace lives on. */
+  /** Absolute path where the file was written, on the machine the worktree lives on. */
   path: string;
   /** The leaf filename used on disk. */
   storedName: string;
-  /** What the chat renders the file from: `/api/uploads/<name>`, or `/api/uploads/<workspaceId>/<name>` for a remote workspace. */
+  /** What the chat renders the file from: `/api/uploads/<name>`, or `/api/uploads/<worktreeId>/<name>` for a remote worktree. */
   url: string;
   mediaType: string;
   /** Original filename supplied by the client, if any. */
@@ -77,26 +77,26 @@ export async function saveUploadedFilesDetailed(fileParts: FilePart[]): Promise<
   return saved;
 }
 
-/** Where a remote host keeps one workspace's uploads. Rejects when the host declares no directory. */
-async function remoteUploadDir(host: Host, workspaceId: string): Promise<string> {
+/** Where a remote host keeps one worktree's uploads. Rejects when the host declares no directory. */
+async function remoteUploadDir(host: Host, worktreeId: string): Promise<string> {
   const dirs = (await host.info()).dirs;
   if (!dirs) throw new Error(`Host ${host.id} has no directory for uploads`);
-  return join(dirs.uploads, workspaceId);
+  return join(dirs.uploads, worktreeId);
 }
 
 /**
- * Persist uploads for a workspace on the machine it lives on, so the agent
- * reads them from its own disk. A local workspace uses `~/.band/uploads/`.
+ * Persist uploads for a worktree on the machine it lives on, so the agent
+ * reads them from its own disk. A local worktree uses `~/.band/uploads/`.
  * A remote one gets them written through its host and the hub keeps no copy.
  */
-export async function saveWorkspaceUploads(
-  workspaceId: string,
+export async function saveWorktreeUploads(
+  worktreeId: string,
   fileParts: FilePart[],
 ): Promise<SavedFile[]> {
-  const host = hostRegistry.hostFor(workspaceId);
+  const host = hostRegistry.hostFor(worktreeId);
   if (host.id === hostRegistry.local.id) return saveUploadedFilesDetailed(fileParts);
 
-  const dir = await remoteUploadDir(host, workspaceId);
+  const dir = await remoteUploadDir(host, worktreeId);
   await host.fs.mkdir(dir, { recursive: true });
   const saved: SavedFile[] = [];
   for (const part of decodeParts(fileParts)) {
@@ -105,7 +105,7 @@ export async function saveWorkspaceUploads(
     saved.push({
       path: filePath,
       storedName: part.storedName,
-      url: `/api/uploads/${encodeURIComponent(workspaceId)}/${encodeURIComponent(part.storedName)}`,
+      url: `/api/uploads/${encodeURIComponent(worktreeId)}/${encodeURIComponent(part.storedName)}`,
       mediaType: part.mediaType,
       originalName: part.originalName,
     });
@@ -114,32 +114,32 @@ export async function saveWorkspaceUploads(
 }
 
 /**
- * The path an upload URL stands for on the workspace's machine, or null when
- * the URL is not an upload URL of this workspace. The result is not checked
+ * The path an upload URL stands for on the worktree's machine, or null when
+ * the URL is not an upload URL of this worktree. The result is not checked
  * for containment: pass it to {@link isWithinUploads}.
  */
-export async function uploadPathFromUrl(workspaceId: string, url: string): Promise<string | null> {
-  const host = hostRegistry.hostFor(workspaceId);
+export async function uploadPathFromUrl(worktreeId: string, url: string): Promise<string | null> {
+  const host = hostRegistry.hostFor(worktreeId);
   const match = url.match(/^\/api\/uploads\/(.+)$/);
   if (!match) return null;
   if (host.id === hostRegistry.local.id) return join(bandHome(), "uploads", match[1]);
   const rest = match[1].split("/");
   if (rest.length !== 2) return null;
   try {
-    if (decodeURIComponent(rest[0]) !== workspaceId) return null;
-    return join(await remoteUploadDir(host, workspaceId), decodeURIComponent(rest[1]));
+    if (decodeURIComponent(rest[0]) !== worktreeId) return null;
+    return join(await remoteUploadDir(host, worktreeId), decodeURIComponent(rest[1]));
   } catch {
     return null;
   }
 }
 
-/** Whether `path` is inside the directory holding this workspace's uploads. A string check, with no disk access. */
-export async function isWithinUploads(workspaceId: string, path: string): Promise<boolean> {
-  const host = hostRegistry.hostFor(workspaceId);
+/** Whether `path` is inside the directory holding this worktree's uploads. A string check, with no disk access. */
+export async function isWithinUploads(worktreeId: string, path: string): Promise<boolean> {
+  const host = hostRegistry.hostFor(worktreeId);
   const dir =
     host.id === hostRegistry.local.id
       ? join(bandHome(), "uploads")
-      : await remoteUploadDir(host, workspaceId).catch(() => null);
+      : await remoteUploadDir(host, worktreeId).catch(() => null);
   if (!dir) return false;
   const normalized = resolve(path);
   return normalized === dir || normalized.startsWith(dir + sep);

@@ -74,7 +74,7 @@ describe("ephemeral worker", () => {
     const session = await connected;
     const root = session.hello.roots[0] as string;
 
-    await call(session, "pty.spawn", { workspaceId: "ws", terminalId: "t", workspaceRoot: root });
+    await call(session, "pty.spawn", { worktreeId: "ws", terminalId: "t", worktreeRoot: root });
     const { chan } = (await session.request("pty.attach", {
       terminalId: "t",
       killOnClose: true,

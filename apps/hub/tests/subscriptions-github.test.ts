@@ -8,7 +8,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { type GhInvocation, type GhStub, ghStub } from "./fixtures/gh-stub";
-import { startAcpServer, stubRequests, trpc, WORKSPACE_ID } from "./helpers/acp-chat";
+import { startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
@@ -38,7 +38,7 @@ async function boot(env: Record<string, string> = {}) {
 let seq = 0;
 async function newChat(url: string): Promise<string> {
   const id = `gh-sub-${Date.now()}-${seq++}`;
-  await trpc(url, "chats.create", { workspaceId: WORKSPACE_ID, id });
+  await trpc(url, "chats.create", { worktreeId: WORKTREE_ID, id });
   return id;
 }
 
@@ -107,7 +107,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       pr: 7,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
 
@@ -166,7 +166,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       branch: "feature/x",
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
 
@@ -206,7 +206,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       branch: "big",
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     // 100 passing checks fill page 1. The pending one is only on page 2, so a
@@ -245,7 +245,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       branch: "cancel",
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     stub.setCheckRuns(REPO, sha, [
@@ -265,7 +265,7 @@ describe("github subscriptions", () => {
     const { url, stub } = await boot({ BAND_PUBLIC_URL: "https://hub.example.test/ignored?x=1" });
     stub.setHookCreate(REPO);
     const chatId = await newChat(url);
-    const base = { source: "github", repo: FULL, chatId, workspaceId: WORKSPACE_ID };
+    const base = { source: "github", repo: FULL, chatId, worktreeId: WORKTREE_ID };
 
     const first = await trpc<{ webhook?: { status: string } }>(url, "subscriptions.create", {
       ...base,
@@ -312,7 +312,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       pr: 1,
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
     });
     expect(created.webhook?.status).toBe("waiting-for-url");
     expect(hookCalls(stub)).toHaveLength(0);
@@ -329,7 +329,7 @@ describe("github subscriptions", () => {
       repo: FULL,
       pr: 1,
       chatId: chatA,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
     });
     expect(ok.webhook?.status).toBe("registered");
 
@@ -339,7 +339,7 @@ describe("github subscriptions", () => {
     const failed = await trpc<{ webhook?: { status: string; error?: string } }>(
       broken.url,
       "subscriptions.create",
-      { source: "github", repo: FULL, pr: 1, chatId: chatB, workspaceId: WORKSPACE_ID },
+      { source: "github", repo: FULL, pr: 1, chatId: chatB, worktreeId: WORKTREE_ID },
     );
     expect(failed.webhook?.status).toBe("failed");
     expect(failed.webhook?.error).toContain("404");

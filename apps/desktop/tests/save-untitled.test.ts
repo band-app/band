@@ -23,7 +23,7 @@
  *
  * `resolveSaveDialogSeed` is the small piece of pre-dialog logic that
  * decides what to hand to `defaultPath` based on the renderer's
- * suggested name + workspace dir. Covered here too because it's
+ * suggested name + worktree dir. Covered here too because it's
  * easy to get wrong on the "only filename" / "only directory" /
  * "neither" branches.
  */
@@ -39,15 +39,15 @@ import { resolveSaveDialogSeed, writeSavedFile } from "../src/main/ipc/save-help
 describe("resolveSaveDialogSeed", () => {
   test("joins defaultPath and defaultName when both are provided", () => {
     const seed = resolveSaveDialogSeed({
-      defaultPath: "/Users/alice/projects/band",
+      defaultPath: "/Users/alice/repos/band",
       defaultName: "Untitled-1.txt",
     });
-    assert.equal(seed, "/Users/alice/projects/band/Untitled-1.txt");
+    assert.equal(seed, "/Users/alice/repos/band/Untitled-1.txt");
   });
 
   test("uses defaultPath alone when defaultName is omitted", () => {
-    const seed = resolveSaveDialogSeed({ defaultPath: "/Users/alice/projects/band" });
-    assert.equal(seed, "/Users/alice/projects/band");
+    const seed = resolveSaveDialogSeed({ defaultPath: "/Users/alice/repos/band" });
+    assert.equal(seed, "/Users/alice/repos/band");
   });
 
   test("uses defaultName alone when defaultPath is omitted", () => {

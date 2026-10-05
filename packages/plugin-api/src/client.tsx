@@ -1,18 +1,18 @@
 import { type ComponentType, createContext, useContext } from "react";
-import type { MergeMethod, WorkspaceReview } from "./providers";
+import type { MergeMethod, WorktreeReview } from "./providers";
 
-export interface WorkspaceReviewQuery {
-  data: WorkspaceReview | undefined;
+export interface WorktreeReviewQuery {
+  data: WorktreeReview | undefined;
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
   refetch(): void;
 }
 
-export interface WorkspaceReviewQueryOptions {
+export interface WorktreeReviewQueryOptions {
   enabled: boolean;
   /** Poll interval in ms, or `false` to stop polling. May depend on the last result. */
-  refetchInterval: number | false | ((data: WorkspaceReview | undefined) => number | false);
+  refetchInterval: number | false | ((data: WorktreeReview | undefined) => number | false);
 }
 
 /**
@@ -20,13 +20,10 @@ export interface WorkspaceReviewQueryOptions {
  * tRPC client; they reach the core only through this object.
  */
 export interface ClientPluginHost {
-  useWorkspaceReview(
-    workspaceId: string,
-    options: WorkspaceReviewQueryOptions,
-  ): WorkspaceReviewQuery;
-  mergeReview(workspaceId: string, method: MergeMethod): Promise<void>;
-  /** Start a coding agent in the workspace with a first prompt, in this device's agent mode. */
-  startAgent(workspaceId: string, prompt: string): Promise<void>;
+  useWorktreeReview(worktreeId: string, options: WorktreeReviewQueryOptions): WorktreeReviewQuery;
+  mergeReview(worktreeId: string, method: MergeMethod): Promise<void>;
+  /** Start a coding agent in the worktree with a first prompt, in this device's agent mode. */
+  startAgent(worktreeId: string, prompt: string): Promise<void>;
   /** Open a URL in the system browser (the desktop app) or a new tab (the web app). */
   openUrl(url: string): void;
 }
@@ -41,24 +38,24 @@ export function useClientPluginHost(): ClientPluginHost {
   return host;
 }
 
-export interface WorkspaceSideTabProps {
-  workspaceId: string;
+export interface WorktreeSideTabProps {
+  worktreeId: string;
   /** False while the side panel is collapsed; stop polling then. */
   visible: boolean;
 }
 
-/** A tab in the workspace's right side panel, after Explorer and Changes. */
-export interface WorkspaceSideTab {
+/** A tab in the worktree's right side panel, after Explorer and Changes. */
+export interface WorktreeSideTab {
   /** Unique within the plugin. */
   id: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
-  component: ComponentType<WorkspaceSideTabProps>;
+  component: ComponentType<WorktreeSideTabProps>;
 }
 
 /** Keyed by slot id (`ClientSlotId`). */
 export interface ClientContributions {
-  "workspace.sideTabs"?: WorkspaceSideTab[];
+  "worktree.sideTabs"?: WorktreeSideTab[];
 }
 
 export interface ClientPlugin {

@@ -5,14 +5,14 @@
  * a plugin can later move out of process without changing the interfaces.
  */
 
-/** Forge coordinates of a project's `origin` remote. */
+/** Forge coordinates of a repo's `origin` remote. */
 export interface RepoInfo {
   host: string;
   owner: string;
   repo: string;
 }
 
-/** Where a provider call runs: the workspace's worktree and its project's default branch. */
+/** Where a provider call runs: the worktree's worktree and its repo's default branch. */
 export interface ProviderContext {
   cwd: string;
   defaultBranch: string;
@@ -106,10 +106,10 @@ export interface ChecksProvider {
 }
 
 /**
- * What the core returns for a workspace's review panel: the review for the
- * workspace's branch, or when there is none, the checks on the branch.
+ * What the core returns for a worktree's review panel: the review for the
+ * worktree's branch, or when there is none, the checks on the branch.
  */
-export type WorkspaceReview =
+export type WorktreeReview =
   | {
       status: "ok";
       provider: { id: string; name: string };
@@ -122,7 +122,7 @@ export type WorkspaceReview =
     }
   | {
       status: "unavailable";
-      reason: "plain-project" | "detached-head" | "no-remote" | "no-provider";
+      reason: "plain-repo" | "detached-head" | "no-remote" | "no-provider";
       message: string;
     }
   | {

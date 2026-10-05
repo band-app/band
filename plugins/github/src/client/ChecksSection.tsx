@@ -43,13 +43,13 @@ function useNow(ticking: boolean): number {
 
 /** The failing banner with Fix, the summary row and the list of checks. */
 export function ChecksSection({
-  workspaceId,
+  worktreeId,
   branch,
   review,
   checks,
   visible,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   branch: string;
   review: ReviewInfo | null;
   checks: ChecksReport;
@@ -79,7 +79,7 @@ export function ChecksSection({
     setFixState("starting");
     setFixError(null);
     try {
-      await host.startAgent(workspaceId, fixPrompt(branch, review, failing));
+      await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
       setFixState("started");
     } catch (err) {
       setFixState("idle");

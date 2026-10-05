@@ -12,7 +12,7 @@ import {
   stubRequests,
   TEST_TOKEN,
   trpc,
-  WORKSPACE_ID,
+  WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
@@ -32,7 +32,7 @@ async function boot() {
 let seq = 0;
 async function newChat(url: string): Promise<string> {
   const id = `sub-api-${Date.now()}-${seq++}`;
-  await trpc(url, "chats.create", { workspaceId: WORKSPACE_ID, id });
+  await trpc(url, "chats.create", { worktreeId: WORKTREE_ID, id });
   return id;
 }
 
@@ -59,7 +59,7 @@ describe("subscriptions api", () => {
     const created = await trpc<Created>(url, "subscriptions.create", {
       source: "webhook",
       chatId,
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       coalesceSeconds: 0,
     });
     const token = created.webhook?.token ?? "";
@@ -216,7 +216,7 @@ describe("subscriptions api", () => {
       trpc(url, "subscriptions.create", {
         source: "webhook",
         chatId: "no-such-chat",
-        workspaceId: WORKSPACE_ID,
+        worktreeId: WORKTREE_ID,
       }),
     ).rejects.toThrow(/404/);
   });
@@ -226,7 +226,7 @@ describe("subscriptions api", () => {
     const create = await fetch(`${url}/trpc/subscriptions.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: "webhook", chatId: "x", workspaceId: WORKSPACE_ID }),
+      body: JSON.stringify({ source: "webhook", chatId: "x", worktreeId: WORKTREE_ID }),
     });
     expect(create.status).toBe(401);
     const list = await fetch(`${url}/trpc/subscriptions.list`);
@@ -242,7 +242,7 @@ describe("subscriptions api", () => {
         "Content-Type": "application/json",
         Cookie: `band_token=${TEST_TOKEN}`,
         "x-band-chat-id": chatId,
-        "x-band-workspace-id": WORKSPACE_ID,
+        "x-band-worktree-id": WORKTREE_ID,
       },
       body: JSON.stringify({ source: "webhook" }),
     });
@@ -251,13 +251,13 @@ describe("subscriptions api", () => {
     expect(body.result.data.chatId).toBe(chatId);
   });
 
-  it("gives an ACP agent its chat and workspace ids (S3)", async () => {
+  it("gives an ACP agent its chat and worktree ids (S3)", async () => {
     const { url, home } = await boot();
     const chatId = await newChat(url);
     await runTurn(url, chatId, "hello");
     const [sent] = stubRequests(home, "session/prompt");
     expect(sent.env.BAND_CHAT_ID).toBe(chatId);
-    expect(sent.env.BAND_WORKSPACE_ID).toBe(WORKSPACE_ID);
+    expect(sent.env.BAND_WORKTREE_ID).toBe(WORKTREE_ID);
   });
 
   it("lists the subscription tools on the MCP endpoint (S4)", async () => {

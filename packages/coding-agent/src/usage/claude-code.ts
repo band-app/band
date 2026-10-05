@@ -9,14 +9,14 @@ import type { UsageReader, UsageSessionItem } from "./types.ts";
 /**
  * Claude Code usage reader for the Reports scanner (issue #425).
  *
- * Reads Claude Code's per-project session transcripts directly from
- * `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/<sessionId>.jsonl` (default
+ * Reads Claude Code's per-repo session transcripts directly from
+ * `$CLAUDE_CONFIG_DIR/repos/<encoded-cwd>/<sessionId>.jsonl` (default
  * `~/.claude/projects/...`). No SDK import: the directory layout and the
  * cwd encoding below mirror `@anthropic-ai/claude-agent-sdk`'s own
  * `listSessions` / `getSessionMessages` implementation.
  */
 
-/** Longest encoded project-dir name before the SDK appends a hash suffix. */
+/** Longest encoded repo-dir name before the SDK appends a hash suffix. */
 const MAX_ENCODED_DIR_LENGTH = 200;
 
 /** Bytes read from the head of a session file to find its `cwd`. */
@@ -39,7 +39,7 @@ function hashString(value: string): number {
 }
 
 /**
- * Encode an absolute cwd into Claude's project directory name: every
+ * Encode an absolute cwd into Claude's repo directory name: every
  * non-alphanumeric character becomes `-`. Names longer than 200 characters
  * are truncated and suffixed with `-<base36 hash of the original path>`,
  * matching the SDK's `x1` encoder.
@@ -59,25 +59,25 @@ async function canonicalDir(dir: string): Promise<string> {
 }
 
 /**
- * Project directories that may hold sessions for `canonical`. For long paths
+ * Repo directories that may hold sessions for `canonical`. For long paths
  * the SDK also accepts any sibling that shares the truncated prefix, because
  * the Claude Code CLI (built on Bun) may hash the path differently.
  */
-async function projectDirsFor(canonical: string): Promise<string[]> {
-  const projectsRoot = join(claudeConfigDir(), "projects");
-  const exact = join(projectsRoot, encodeClaudeProjectDir(canonical));
+async function repoDirsFor(canonical: string): Promise<string[]> {
+  const reposRoot = join(claudeConfigDir(), "projects");
+  const exact = join(reposRoot, encodeClaudeProjectDir(canonical));
   const dirs = [exact];
   const encoded = canonical.replace(/[^a-zA-Z0-9]/g, "-");
   if (encoded.length <= MAX_ENCODED_DIR_LENGTH) return dirs;
   const prefix = `${encoded.slice(0, MAX_ENCODED_DIR_LENGTH)}-`;
   try {
-    for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
+    for (const entry of await readdir(reposRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
-      const full = join(projectsRoot, entry.name);
+      const full = join(reposRoot, entry.name);
       if (full !== exact) dirs.push(full);
     }
   } catch {
-    // No projects root yet — only the exact candidate applies.
+    // No repos root yet — only the exact candidate applies.
   }
   return dirs;
 }
@@ -116,7 +116,7 @@ async function readSessionCwd(file: string): Promise<string | undefined | null> 
   }
 }
 
-/** How many session files `listSessions` reads at once. A project dir can
+/** How many session files `listSessions` reads at once. A repo dir can
  *  hold thousands; reading them all at once would hold one fd and one head
  *  buffer per file. */
 const READ_CONCURRENCY = 16;
@@ -139,17 +139,17 @@ async function forEachLimited<T>(
  * Mirrors the retired adapter's `listSessions`, which called the SDK's
  * `listSessions({ dir })` and kept only sessions whose recorded `cwd`
  * equals `dir`. Sessions from sibling git worktrees live in their own
- * project directories, so a scan of `dir`'s directory plus the `cwd`
+ * repo directories, so a scan of `dir`'s directory plus the `cwd`
  * check returns the same set.
  */
 async function listSessions(dir: string): Promise<UsageSessionItem[]> {
   const canonical = await canonicalDir(dir);
   const bySession = new Map<string, UsageSessionItem>();
 
-  for (const projectDir of await projectDirsFor(canonical)) {
+  for (const repoDir of await repoDirsFor(canonical)) {
     let names: string[];
     try {
-      names = await readdir(projectDir);
+      names = await readdir(repoDir);
     } catch {
       continue;
     }
@@ -157,10 +157,10 @@ async function listSessions(dir: string): Promise<UsageSessionItem[]> {
       if (!name.endsWith(".jsonl")) return;
       const sessionId = name.slice(0, -".jsonl".length);
       if (!SESSION_ID_RE.test(sessionId)) return;
-      const file = join(projectDir, name);
+      const file = join(repoDir, name);
       const cwd = await readSessionCwd(file);
       if (cwd === null) return;
-      // Files without a recorded cwd are attributed to the project dir
+      // Files without a recorded cwd are attributed to the repo dir
       // they live in, as the SDK does.
       if (cwd !== undefined && cwd !== dir && cwd !== canonical) return;
       let lastModified: number;
@@ -180,12 +180,12 @@ async function listSessions(dir: string): Promise<UsageSessionItem[]> {
 }
 
 async function findSessionFile(sessionId: string, dir: string): Promise<string | undefined> {
-  for (const projectDir of await projectDirsFor(await canonicalDir(dir))) {
-    const file = join(projectDir, `${sessionId}.jsonl`);
+  for (const repoDir of await repoDirsFor(await canonicalDir(dir))) {
+    const file = join(repoDir, `${sessionId}.jsonl`);
     try {
       if ((await stat(file)).size > 0) return file;
     } catch {
-      // Not in this project dir.
+      // Not in this repo dir.
     }
   }
   return undefined;

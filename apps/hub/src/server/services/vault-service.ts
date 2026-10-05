@@ -45,7 +45,7 @@ const log = createLogger("vault-service");
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9 _.@:/-]{0,99}$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const SCOPE = /^(global|project:[^\s:]{1,100})$/;
+const SCOPE = /^(global|repo:[^\s:]{1,100})$/;
 const FLOW_TTL_MS = 10 * 60 * 1000;
 const MAX_FLOWS = 50;
 const DEFAULT_REFRESH_POLL_MS = 30_000;
@@ -61,8 +61,8 @@ export interface GitCredentialMatch {
   host: string;
   /** Repository path without a leading slash or a `.git` suffix, such as `owner/repo`. */
   path: string;
-  /** The project the repository belongs to. An item scoped to another project does not apply. */
-  project: string | null;
+  /** The repo the repository belongs to. An item scoped to another repo does not apply. */
+  repo: string | null;
   /** Looks without recording a use. */
   peek?: boolean;
 }
@@ -137,7 +137,7 @@ function view(row: VaultRow): VaultItemView {
 
 export function validateScope(scope: string): string {
   if (!SCOPE.test(scope)) {
-    throw new VaultInputError('The scope must be "global" or "project:<name>".');
+    throw new VaultInputError('The scope must be "global" or "repo:<name>".');
   }
   return scope;
 }
@@ -300,7 +300,7 @@ export class VaultService {
   /**
    * The `git` item that applies to a remote, or undefined. An item matches when its host is the
    * remote's, its path pattern matches the repository path and its scope is `global` or the
-   * remote's project. A project-scoped item beats a global one, then the pattern with the most
+   * remote's repo. A repo-scoped item beats a global one, then the pattern with the most
    * literal characters wins. For hub services, never an API.
    */
   findGitCredential(match: GitCredentialMatch): { username: string; password: string } | undefined {
@@ -311,8 +311,7 @@ export class VaultService {
       .filter((row) => row.metadata.host === host)
       .filter(
         (row) =>
-          row.scope === "global" ||
-          (match.project !== null && row.scope === `project:${match.project}`),
+          row.scope === "global" || (match.repo !== null && row.scope === `repo:${match.repo}`),
       )
       .filter(
         (row) =>

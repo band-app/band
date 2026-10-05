@@ -60,10 +60,10 @@ describe("app:// handler", () => {
 
   test("deep links and reloads inside the app get the shell (route kept)", async () => {
     for (const path of [
-      "/workspace/abc",
-      "/workspace/a%20b/",
+      "/worktree/abc",
+      "/worktree/a%20b/",
       "/some/unknown/route",
-      "/workspace/band-release-1.2",
+      "/worktree/band-release-1.2",
     ]) {
       const res = await get(path);
       assert.equal(res.status, 200, path);
@@ -105,7 +105,7 @@ describe("app:// handler", () => {
   });
 
   test("every response carries a CSP that names the current hub", async () => {
-    for (const path of ["/", "/assets/main-abc123.js", "/workspace/x"]) {
+    for (const path of ["/", "/assets/main-abc123.js", "/worktree/x"]) {
       const res = await get(path);
       const csp = res.headers.get("content-security-policy") ?? "";
       assert.match(

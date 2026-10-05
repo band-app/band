@@ -3,7 +3,7 @@
 ##############################################################################
 # band-worker image (plan step 2.6)
 #
-# A machine for a Band hub to run workspaces on. It dials the hub, so it needs
+# A machine for a Band hub to run worktrees on. It dials the hub, so it needs
 # no inbound port. Run it with the hub URL and a bootstrap token:
 #
 #   docker build -f docker/worker.Dockerfile -t band-worker .
@@ -39,7 +39,7 @@ RUN pnpm install --frozen-lockfile --filter "@band-app/worker..." \
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime. Same Debian base as the builder, so node-pty's binary
-# matches. git is what workspaces are made of. The rest is what an agent
+# matches. git is what worktrees are made of. The rest is what an agent
 # usually reaches for.
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
@@ -68,7 +68,7 @@ RUN git config --global user.email "band-worker@localhost" \
  && git config --global init.defaultBranch main \
  && git config --global --add safe.directory '*'
 
-# /work holds the workspaces the worker serves. The worker state (its id and
+# /work holds the worktrees the worker serves. The worker state (its id and
 # session token) lives in the second volume, so a recreated container is still
 # the same host.
 ENV HOME=/home/worker \

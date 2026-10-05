@@ -1,6 +1,6 @@
 // Black-box integration tests for the Changes view's sections: the
-// `workspace.getChanges` query (conflicts, unstaged, staged, untracked, and
-// committed on the branch), the per-section `workspace.getFileDiff`, and the
+// `worktree.getChanges` query (conflicts, unstaged, staged, untracked, and
+// committed on the branch), the per-section `worktree.getFileDiff`, and the
 // `stageFiles` / `unstageFiles` / `discardChanges` mutations.
 //
 // Boots the real production server against a tmp `$HOME` and real git repos
@@ -20,7 +20,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const TOKEN = "workspace-changes-token";
+const TOKEN = "worktree-changes-token";
 
 const gitEnv = {
   ...process.env,
@@ -75,11 +75,11 @@ let opsRepo: string;
 let conflictRepo: string;
 let freshRepo: string;
 
-async function getChanges(workspaceId: string, compareBranch?: string): Promise<Changes> {
+async function getChanges(worktreeId: string, compareBranch?: string): Promise<Changes> {
   const res = await trpcQuery(
     server.url,
-    "workspace.getChanges",
-    { workspaceId, compareBranch },
+    "worktree.getChanges",
+    { worktreeId, compareBranch },
     TOKEN,
   );
   expect(res.status).toBe(200);
@@ -87,11 +87,11 @@ async function getChanges(workspaceId: string, compareBranch?: string): Promise<
 }
 
 async function getFileDiff(input: Record<string, unknown>): Promise<Response> {
-  return trpcQuery(server.url, "workspace.getFileDiff", input, TOKEN);
+  return trpcQuery(server.url, "worktree.getFileDiff", input, TOKEN);
 }
 
 async function mutate(procedure: string, input: Record<string, unknown>): Promise<Response> {
-  return trpcMutate(server.url, `workspace.${procedure}`, input, TOKEN);
+  return trpcMutate(server.url, `worktree.${procedure}`, input, TOKEN);
 }
 
 beforeAll(async () => {
@@ -157,7 +157,7 @@ beforeAll(async () => {
   expect(() => git(conflictRepo, ["merge", "main"])).toThrow();
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: "sections",
         path: sectionsRepo,
@@ -194,11 +194,11 @@ afterAll(async () => {
   rmSync(tmpHome, { recursive: true, force: true });
 });
 
-describe("workspace.getChanges", () => {
+describe("worktree.getChanges", () => {
   it("returns 401 without a token", async () => {
     const res = await fetch(
-      `${server.url}/trpc/workspace.getChanges?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: "sections-feature" }),
+      `${server.url}/trpc/worktree.getChanges?input=${encodeURIComponent(
+        JSON.stringify({ worktreeId: "sections-feature" }),
       )}`,
     );
     expect(res.status).toBe(401);
@@ -268,21 +268,21 @@ describe("workspace.getChanges", () => {
     expect(changes.staged).toEqual([]);
   });
 
-  it("rejects an unknown workspace", async () => {
+  it("rejects an unknown worktree", async () => {
     const res = await trpcQuery(
       server.url,
-      "workspace.getChanges",
-      { workspaceId: "nope-main" },
+      "worktree.getChanges",
+      { worktreeId: "nope-main" },
       TOKEN,
     );
     expect(res.status).toBe(500);
   });
 });
 
-describe("workspace.getFileDiff per section", () => {
+describe("worktree.getFileDiff per section", () => {
   it("shows only the staged edit for the staged section", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "keep.txt",
       section: "staged",
     });
@@ -294,7 +294,7 @@ describe("workspace.getFileDiff per section", () => {
 
   it("shows only the unstaged edit for the unstaged section", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "keep.txt",
       section: "unstaged",
     });
@@ -305,7 +305,7 @@ describe("workspace.getFileDiff per section", () => {
 
   it("pairs both sides of a staged rename", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "renamed.txt",
       oldPath: "rename-me.txt",
       section: "staged",
@@ -317,7 +317,7 @@ describe("workspace.getFileDiff per section", () => {
 
   it("shows an untracked file as all added lines", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "notes/todo.md",
       section: "untracked",
     });
@@ -328,7 +328,7 @@ describe("workspace.getFileDiff per section", () => {
   it("shows the committed change against the merge base for the branch section", async () => {
     const { mergeBase } = await getChanges("sections-feature");
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "README.md",
       section: "branch",
       mergeBase,
@@ -339,7 +339,7 @@ describe("workspace.getFileDiff per section", () => {
 
   it("fails the branch section without a merge base", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "README.md",
       section: "branch",
     });
@@ -348,7 +348,7 @@ describe("workspace.getFileDiff per section", () => {
 
   it("rejects a path outside the worktree", async () => {
     const res = await getFileDiff({
-      workspaceId: "sections-feature",
+      worktreeId: "sections-feature",
       filePath: "../ops/a.txt",
       section: "unstaged",
     });
@@ -362,7 +362,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "new.txt"), "new\n");
 
     const res = await mutate("stageFiles", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       paths: ["a.txt", "new.txt"],
     });
     expect(res.status).toBe(200);
@@ -377,7 +377,7 @@ describe("stage, unstage and discard", () => {
   });
 
   it("unstages a file back into the working tree", async () => {
-    const res = await mutate("unstageFiles", { workspaceId: "ops-main", paths: ["a.txt"] });
+    const res = await mutate("unstageFiles", { worktreeId: "ops-main", paths: ["a.txt"] });
     expect(res.status).toBe(200);
 
     const changes = await getChanges("ops-main");
@@ -388,7 +388,7 @@ describe("stage, unstage and discard", () => {
 
   it("discards an unstaged edit, restoring the file", async () => {
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "unstaged",
       paths: ["a.txt"],
     });
@@ -400,7 +400,7 @@ describe("stage, unstage and discard", () => {
 
   it("discards a staged new file, deleting it", async () => {
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "staged",
       paths: ["new.txt"],
     });
@@ -414,7 +414,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "junk.txt"), "junk\n");
 
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "untracked",
       paths: ["junk.txt", "b.txt"],
     });
@@ -431,7 +431,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "b.txt"), "b\nstaged\nunstaged\n");
 
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "staged",
       paths: ["b.txt"],
     });
@@ -449,7 +449,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "a.txt"), "a\nkept\n");
 
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "unstaged",
       paths: ["[a].txt"],
     });
@@ -464,7 +464,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "stray.txt"), "stray\n");
 
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "untracked",
       paths: ["*"],
     });
@@ -476,7 +476,7 @@ describe("stage, unstage and discard", () => {
 
   it("unstages and discards a staged file in a repo with no commits yet", async () => {
     const unstage = await mutate("unstageFiles", {
-      workspaceId: "fresh-main",
+      worktreeId: "fresh-main",
       paths: ["first.txt"],
     });
     expect(unstage.status).toBe(200);
@@ -486,7 +486,7 @@ describe("stage, unstage and discard", () => {
 
     git(freshRepo, ["add", "first.txt"]);
     const discard = await mutate("discardChanges", {
-      workspaceId: "fresh-main",
+      worktreeId: "fresh-main",
       section: "staged",
       paths: ["first.txt"],
     });
@@ -500,7 +500,7 @@ describe("stage, unstage and discard", () => {
   it("marks a conflict resolved by staging it", async () => {
     writeFileSync(join(conflictRepo, "c.txt"), "resolved\n");
 
-    const res = await mutate("stageFiles", { workspaceId: "conflict-feature", paths: ["c.txt"] });
+    const res = await mutate("stageFiles", { worktreeId: "conflict-feature", paths: ["c.txt"] });
     expect(res.status).toBe(200);
 
     const changes = await getChanges("conflict-feature");
@@ -509,18 +509,18 @@ describe("stage, unstage and discard", () => {
   });
 
   it("rejects an empty path list", async () => {
-    const res = await mutate("stageFiles", { workspaceId: "ops-main", paths: [] });
+    const res = await mutate("stageFiles", { worktreeId: "ops-main", paths: [] });
     expect(res.status).toBe(400);
   });
 
   it("rejects a path starting with '-'", async () => {
-    const res = await mutate("stageFiles", { workspaceId: "ops-main", paths: ["--all"] });
+    const res = await mutate("stageFiles", { worktreeId: "ops-main", paths: ["--all"] });
     expect(res.status).toBe(400);
   });
 
   it("rejects a path outside the worktree", async () => {
     const res = await mutate("discardChanges", {
-      workspaceId: "ops-main",
+      worktreeId: "ops-main",
       section: "unstaged",
       paths: ["../sections/keep.txt"],
     });

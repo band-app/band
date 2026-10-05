@@ -85,8 +85,8 @@ interface SeedUsageEvent {
    *  `taskId` would collapse to one session by default. Set explicitly
    *  to test rows that share a task but split across sessions. */
   sessionId?: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   codingAgentId?: string;
   provider?: string;
   model?: string;
@@ -102,7 +102,7 @@ function seedUsageEvent(sqlite: DatabaseSync, ev: SeedUsageEvent): void {
   sqlite
     .prepare(
       `INSERT INTO usage_events
-        (task_id, session_id, workspace_id, project, coding_agent_id, provider, model,
+        (task_id, session_id, worktree_id, repo, coding_agent_id, provider, model,
          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
          reasoning_output_tokens, cost_usd, captured_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -110,8 +110,8 @@ function seedUsageEvent(sqlite: DatabaseSync, ev: SeedUsageEvent): void {
     .run(
       ev.taskId,
       ev.sessionId ?? ev.taskId,
-      ev.workspaceId,
-      ev.project,
+      ev.worktreeId,
+      ev.repo,
       ev.codingAgentId ?? null,
       ev.provider ?? null,
       ev.model ?? null,
@@ -146,9 +146,9 @@ interface ReportsSummary {
   toMs: number;
   total: AggregateRow;
   byModel: AggregateRow[];
-  byProject: AggregateRow[];
+  byRepo: AggregateRow[];
   byAgent: AggregateRow[];
-  byWorkspace: AggregateRow[];
+  byWorktree: AggregateRow[];
   byBucket: AggregateRow[];
   bucketSize: "day" | "week" | "month";
 }
@@ -174,7 +174,7 @@ describe("reports.summary (issue #425)", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    seedState(tmpHome, { projects: [] });
+    seedState(tmpHome, { repos: [] });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const sqlite = openDb(tmpHome);
@@ -185,8 +185,8 @@ describe("reports.summary (issue #425)", () => {
       // Day 0 (today) — task A, two turns + cost
       seedUsageEvent(sqlite, {
         taskId: "tsk_a",
-        workspaceId: "band-feat",
-        project: "band",
+        worktreeId: "band-feat",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-sonnet-4-6",
@@ -198,8 +198,8 @@ describe("reports.summary (issue #425)", () => {
       });
       seedUsageEvent(sqlite, {
         taskId: "tsk_a",
-        workspaceId: "band-feat",
-        project: "band",
+        worktreeId: "band-feat",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-sonnet-4-6",
@@ -210,8 +210,8 @@ describe("reports.summary (issue #425)", () => {
       });
       seedUsageEvent(sqlite, {
         taskId: "tsk_a",
-        workspaceId: "band-feat",
-        project: "band",
+        worktreeId: "band-feat",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-sonnet-4-6",
@@ -219,11 +219,11 @@ describe("reports.summary (issue #425)", () => {
         capturedAt: dayStart + 10 * 60 * 60 * 1000 + 1,
       });
 
-      // Day -1 — task B, single turn + cost on sonnet, different workspace
+      // Day -1 — task B, single turn + cost on sonnet, different worktree
       seedUsageEvent(sqlite, {
         taskId: "tsk_b",
-        workspaceId: "band-main",
-        project: "band",
+        worktreeId: "band-main",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-sonnet-4-6",
@@ -233,8 +233,8 @@ describe("reports.summary (issue #425)", () => {
       });
       seedUsageEvent(sqlite, {
         taskId: "tsk_b",
-        workspaceId: "band-main",
-        project: "band",
+        worktreeId: "band-main",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-sonnet-4-6",
@@ -242,11 +242,11 @@ describe("reports.summary (issue #425)", () => {
         capturedAt: dayStart - DAY_MS + 15 * 60 * 60 * 1000 + 1,
       });
 
-      // Day -2 — task C, Codex with zero cost, different project
+      // Day -2 — task C, Codex with zero cost, different repo
       seedUsageEvent(sqlite, {
         taskId: "tsk_c",
-        workspaceId: "other-main",
-        project: "other",
+        worktreeId: "other-main",
+        repo: "other",
         codingAgentId: "codex",
         provider: "codex",
         model: "gpt-5",
@@ -258,8 +258,8 @@ describe("reports.summary (issue #425)", () => {
       // Way old row — outside the 7-day window, must NOT show up
       seedUsageEvent(sqlite, {
         taskId: "tsk_old",
-        workspaceId: "band-main",
-        project: "band",
+        worktreeId: "band-main",
+        repo: "band",
         codingAgentId: "claude-code",
         provider: "claude",
         model: "claude-opus-4-7",
@@ -322,25 +322,25 @@ describe("reports.summary (issue #425)", () => {
     expect(gpt5.sessionCount).toBe(1);
   });
 
-  it("groups by project, agent, and workspace", async () => {
+  it("groups by repo, agent, and worktree", async () => {
     const res = await trpcQuery(server.url, "reports.summary", {
       fromMs: dayStart - 6 * DAY_MS,
       toMs: dayStart + DAY_MS,
     });
     const data = await trpcData<ReportsSummary>(res);
 
-    const projects = new Map(data.byProject.map((r) => [r.bucket, r]));
-    expect(new Set(projects.keys())).toEqual(new Set(["band", "other"]));
-    expect(projects.get("band")!.sessionCount).toBe(2); // tsk_a + tsk_b
-    expect(projects.get("other")!.sessionCount).toBe(1);
+    const repos = new Map(data.byRepo.map((r) => [r.bucket, r]));
+    expect(new Set(repos.keys())).toEqual(new Set(["band", "other"]));
+    expect(repos.get("band")!.sessionCount).toBe(2); // tsk_a + tsk_b
+    expect(repos.get("other")!.sessionCount).toBe(1);
 
     const agents = new Map(data.byAgent.map((r) => [r.bucket, r]));
     expect(new Set(agents.keys())).toEqual(new Set(["claude-code", "codex"]));
     expect(agents.get("claude-code")!.costUsd).toBeCloseTo(0.0544, 4);
     expect(agents.get("codex")!.costUsd).toBe(0);
 
-    const workspaces = new Map(data.byWorkspace.map((r) => [r.bucket, r]));
-    expect(new Set(workspaces.keys())).toEqual(new Set(["band-feat", "band-main", "other-main"]));
+    const worktrees = new Map(data.byWorktree.map((r) => [r.bucket, r]));
+    expect(new Set(worktrees.keys())).toEqual(new Set(["band-feat", "band-main", "other-main"]));
   });
 
   it("buckets the daily cost trend by local-time day", async () => {

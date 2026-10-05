@@ -182,7 +182,7 @@ export interface OpenExternalArgs {
 /**
  * Open the system "Save As" picker and persist `content` to the chosen
  * path. `defaultName` seeds the filename field (e.g. "Untitled-1.txt");
- * `defaultPath` seeds the directory (e.g. the active workspace root).
+ * `defaultPath` seeds the directory (e.g. the active worktree root).
  *
  * Backs the editor's "Save untitled tab" flow — see `pickSaveFile` in
  * `apps/desktop/src/main/ipc/macos-shell.ts`. The renderer never writes

@@ -37,7 +37,7 @@ const DEFAULT_TOKEN = "browsers-test-token";
 // ---------------------------------------------------------------------------
 // tRPC HTTP helpers — `trpcMutate` and `trpcQuery` live in
 // `./helpers/server` (shared with `chat-labels.test.ts` /
-// `workspace-remove-detached.test.ts`). The wrappers below bake in
+// `worktree-remove-detached.test.ts`). The wrappers below bake in
 // `DEFAULT_TOKEN` so call sites in this suite don't have to thread it
 // through every invocation.
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
 
 // ---------------------------------------------------------------------------
 // Git helpers — a real git repo is required so `seedState` can register
-// a `git`-kind project whose workspaces resolve cleanly.
+// a `git`-kind repo whose worktrees resolve cleanly.
 // ---------------------------------------------------------------------------
 
 const gitEnv = {
@@ -99,18 +99,18 @@ function readPanelState(
   }
 }
 
-function readBrowserLayoutRow(tmpHome: string, workspaceId: string): { state: string } | undefined {
-  // `DockviewLayoutManager` stores the layout under `${panelType}_${workspaceId}`
+function readBrowserLayoutRow(tmpHome: string, worktreeId: string): { state: string } | undefined {
+  // `DockviewLayoutManager` stores the layout under `${panelType}_${worktreeId}`
   // (see `dockview-layout-manager.ts::layoutId`). Mirror that shape here
   // rather than re-deriving it through tRPC so we can prove the row is
-  // physically gone after `removeAllForWorkspace`, not just hidden behind
+  // physically gone after `removeAllForWorktree`, not just hidden behind
   // a service-level cache.
-  return readPanelState(tmpHome, `browser_layout_${workspaceId}`);
+  return readPanelState(tmpHome, `browser_layout_${worktreeId}`);
 }
 
 interface BrowserRecord {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   name: string;
   url: string;
   status: string;
@@ -123,15 +123,15 @@ interface BrowserRecord {
 describe("browsers — CRUD round-trip", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const workspaceId = "myproject-main";
+  const worktreeId = "myrepo-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-browsers-");
-    const repoPath = createGitRepo(tmpHome, "myproject");
+    const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "myproject",
+          name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -154,20 +154,20 @@ describe("browsers — CRUD round-trip", () => {
     const res = await fetch(`${server.url}/trpc/browsers.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId }),
+      body: JSON.stringify({ worktreeId }),
     });
     expect(res.status).toBe(401);
   });
 
   it("browsers.create persists a tab and registers it in the saved layout", async () => {
     const res = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "Docs",
       url: "https://docs.test/start",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ browser: BrowserRecord }>(res);
-    expect(data.browser.workspaceId).toBe(workspaceId);
+    expect(data.browser.worktreeId).toBe(worktreeId);
     expect(data.browser.name).toBe("Docs");
     expect(data.browser.url).toBe("https://docs.test/start");
     expect(data.browser.status).toBe("idle");
@@ -184,10 +184,10 @@ describe("browsers — CRUD round-trip", () => {
 
     // `browserService.create` also registers the panel in the saved
     // dockview layout (see `BrowserService.create` comment). Without
-    // this, reopening the workspace after a restart would leave a
+    // this, reopening the worktree after a restart would leave a
     // ghost browser record with no tab. Prove the layout row is
     // present and references the new id.
-    const layoutRow = readBrowserLayoutRow(tmpHome, workspaceId);
+    const layoutRow = readBrowserLayoutRow(tmpHome, worktreeId);
     expect(layoutRow).toBeDefined();
     const layout = JSON.parse(layoutRow!.state) as {
       panels: Record<string, { params?: { browserId?: string } }>;
@@ -196,17 +196,17 @@ describe("browsers — CRUD round-trip", () => {
     expect(layout.panels[data.browser.id].params?.browserId).toBe(data.browser.id);
   });
 
-  it("browsers.list returns every browser persisted for the workspace", async () => {
+  it("browsers.list returns every browser persisted for the worktree", async () => {
     // Seed a second browser so the assertion catches a regression that
     // accidentally returns only the most-recently-created tab.
     const second = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "Issue tracker",
       url: "https://issues.test/1",
     });
     const secondData = await trpcData<{ browser: BrowserRecord }>(second);
 
-    const listRes = await trpcQuery(server.url, "browsers.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "browsers.list", { worktreeId });
     expect(listRes.status).toBe(200);
     const listData = await trpcData<{ browsers: BrowserRecord[] }>(listRes);
     const names = listData.browsers.map((b) => b.name);
@@ -218,7 +218,7 @@ describe("browsers — CRUD round-trip", () => {
 
   it("browsers.update changes the tab name on disk", async () => {
     const createRes = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "Stale name",
       url: "https://example.test",
     });
@@ -253,7 +253,7 @@ describe("browsers — CRUD round-trip", () => {
 
   it("browsers.navigate updates the persisted URL", async () => {
     const createRes = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "Nav target",
       url: "https://before.test",
     });
@@ -285,14 +285,14 @@ describe("browsers — CRUD round-trip", () => {
 
   it("browsers.remove drops the row AND the panel from the saved layout", async () => {
     const createRes = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "To be removed",
       url: "https://remove.test",
     });
     const { browser: created } = await trpcData<{ browser: BrowserRecord }>(createRes);
 
     // Sanity-check the precondition: layout knows about the panel.
-    const beforeLayoutRow = readBrowserLayoutRow(tmpHome, workspaceId);
+    const beforeLayoutRow = readBrowserLayoutRow(tmpHome, worktreeId);
     const beforeLayout = JSON.parse(beforeLayoutRow!.state) as {
       panels: Record<string, unknown>;
     };
@@ -312,7 +312,7 @@ describe("browsers — CRUD round-trip", () => {
     // separate layout-save step. Without this assertion a regression
     // that re-splits the cleanup (the same shape the pre-refactor
     // router had) would go unnoticed.
-    const afterLayoutRow = readBrowserLayoutRow(tmpHome, workspaceId);
+    const afterLayoutRow = readBrowserLayoutRow(tmpHome, worktreeId);
     expect(afterLayoutRow).toBeDefined();
     const afterLayout = JSON.parse(afterLayoutRow!.state) as {
       panels: Record<string, unknown>;
@@ -320,7 +320,7 @@ describe("browsers — CRUD round-trip", () => {
     expect(afterLayout.panels[created.id]).toBeUndefined();
 
     // And `browsers.list` no longer hands it out.
-    const listRes = await trpcQuery(server.url, "browsers.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "browsers.list", { worktreeId });
     const listData = await trpcData<{ browsers: BrowserRecord[] }>(listRes);
     expect(listData.browsers.find((b) => b.id === created.id)).toBeUndefined();
   });
@@ -336,7 +336,7 @@ describe("browsers — CRUD round-trip", () => {
 
   it("browsers survive a server restart — rehydrate from SQLite", async () => {
     const createRes = await trpcMutate(server.url, "browsers.create", {
-      workspaceId,
+      worktreeId,
       name: "Restart survivor",
       url: "https://survives.test",
     });
@@ -348,7 +348,7 @@ describe("browsers — CRUD round-trip", () => {
     await server.close();
     server = await startServer({ tmpHome });
 
-    const listRes = await trpcQuery(server.url, "browsers.list", { workspaceId });
+    const listRes = await trpcQuery(server.url, "browsers.list", { worktreeId });
     const listData = await trpcData<{ browsers: BrowserRecord[] }>(listRes);
     const found = listData.browsers.find((b) => b.id === created.id);
     expect(found).toBeDefined();

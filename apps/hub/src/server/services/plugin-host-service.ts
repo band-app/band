@@ -2,7 +2,7 @@ import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import {
   type ChecksProvider,
-  matchesProjectRemote,
+  matchesRepoRemote,
   type PluginManifest,
   pluginManifestSchema,
   type RepoInfo,
@@ -49,7 +49,7 @@ export class PluginHost {
 
   constructor(
     private readonly bundled: BundledPlugin[],
-    /** The host a plugin's `exec` runs on. Plugin calls carry a path, not a workspace, so it is the local host until plugins are bound to a workspace's host. */
+    /** The host a plugin's `exec` runs on. Plugin calls carry a path, not a worktree, so it is the local host until plugins are bound to a worktree's host. */
     private readonly host: () => Host = () => hostRegistry.local,
   ) {}
 
@@ -80,7 +80,7 @@ export class PluginHost {
 
   /**
    * The review provider for a repository, activating the plugins whose
-   * `onProjectRemote` events match its host first. Null when no enabled
+   * `onRepoRemote` events match its host first. Null when no enabled
    * plugin handles the host.
    */
   async reviewProviderFor(repo: RepoInfo): Promise<ReviewProvider | null> {
@@ -119,7 +119,7 @@ export class PluginHost {
   private async activateForRemote(host: string): Promise<void> {
     await Promise.all(
       this.load()
-        .filter((p) => matchesProjectRemote(p.manifest, host))
+        .filter((p) => matchesRepoRemote(p.manifest, host))
         .map((p) => this.activate(p)),
     );
   }

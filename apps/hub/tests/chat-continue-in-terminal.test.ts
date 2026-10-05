@@ -19,7 +19,7 @@
 // Real production server (`dist/start-server.mjs`), real PTY (node-pty),
 // real git repo, real SQLite. No tRPC mocking, no MSW. Each describe block
 // boots its own server with a tmp `$HOME`, mirroring
-// `workspace-create-via.test.ts`, so an adapter that misbehaves in one
+// `worktree-create-via.test.ts`, so an adapter that misbehaves in one
 // scenario can't cascade into the next.
 //
 // The spawned-process surface is a `stub-claude.sh` shell stub (the same
@@ -33,7 +33,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -87,16 +87,16 @@ function writeStubVendorCli(tmpHome: string, name: string): string {
 
 interface TerminalListEntry {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   pid: number;
 }
 
 async function listTerminals(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   token: string,
 ): Promise<TerminalListEntry[]> {
-  const res = await trpcQuery(serverUrl, "terminal.list", { workspaceId }, token);
+  const res = await trpcQuery(serverUrl, "terminal.list", { worktreeId }, token);
   const body = await res.text();
   expect(res.status, `terminal.list failed: ${body}`).toBe(200);
   return (JSON.parse(body) as { result: { data: { terminals: TerminalListEntry[] } } }).result.data
@@ -117,11 +117,11 @@ async function readTerminalOutput(
 
 async function createChat(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   agent: string,
   token: string,
 ): Promise<string> {
-  const res = await trpcMutate(serverUrl, "chats.create", { workspaceId, agent }, token);
+  const res = await trpcMutate(serverUrl, "chats.create", { worktreeId, agent }, token);
   const body = await res.text();
   expect(res.status, `chats.create failed: ${body}`).toBe(200);
   return (JSON.parse(body) as { result: { data: { chat: { id: string } } } }).result.data.chat.id;
@@ -129,7 +129,7 @@ async function createChat(
 
 async function setActiveSession(
   serverUrl: string,
-  workspaceId: string,
+  worktreeId: string,
   chatId: string,
   sessionId: string,
   token: string,
@@ -137,7 +137,7 @@ async function setActiveSession(
   const res = await trpcMutate(
     serverUrl,
     "chats.setActiveSession",
-    { workspaceId, chatId, sessionId },
+    { worktreeId, chatId, sessionId },
     token,
   );
   const body = await res.text();
@@ -146,7 +146,7 @@ async function setActiveSession(
 
 interface ContinueResponse {
   terminalId: string;
-  workspaceId: string;
+  worktreeId: string;
   sessionId: string;
 }
 
@@ -156,19 +156,19 @@ interface ContinueResponse {
 
 describe("chats.continueInTerminal — claude-code", () => {
   const TOKEN = "continue-terminal-claude-token";
-  const PROJECT = "cont-proj";
-  const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+  const REPO = "cont-proj";
+  const WORKTREE_ID = toWorktreeId(REPO, "main");
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-continue-terminal-claude-");
-    const repoPath = createGitRepo(tmpHome, PROJECT);
+    const repoPath = createGitRepo(tmpHome, REPO);
     const stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -184,7 +184,7 @@ describe("chats.continueInTerminal — claude-code", () => {
     // The fire-and-forget boot model refresh fires for this claude-code
     // agent and can't complete a model query against the 2-line stub; the
     // adapter's internal timeout catches it and the "refresh failed" log
-    // line is expected and benign (same note as workspace-create-via).
+    // line is expected and benign (same note as worktree-create-via).
     server = await startServer({ tmpHome });
   });
 
@@ -195,8 +195,8 @@ describe("chats.continueInTerminal — claude-code", () => {
 
   it("spawns a terminal running the resume command and returns the session id", async () => {
     const SESSION_ID = "sess-resume-abc123";
-    const chatId = await createChat(server.url, WORKSPACE_ID, "claude-code", TOKEN);
-    await setActiveSession(server.url, WORKSPACE_ID, chatId, SESSION_ID, TOKEN);
+    const chatId = await createChat(server.url, WORKTREE_ID, "claude-code", TOKEN);
+    await setActiveSession(server.url, WORKTREE_ID, chatId, SESSION_ID, TOKEN);
 
     const res = await trpcMutate(server.url, "chats.continueInTerminal", { chatId }, TOKEN);
     const body = await res.text();
@@ -207,10 +207,10 @@ describe("chats.continueInTerminal — claude-code", () => {
     expect(typeof data.terminalId).toBe("string");
     expect(data.terminalId.length).toBeGreaterThan(0);
 
-    // The terminal is registered against the workspace.
+    // The terminal is registered against the worktree.
     const terminals = await waitFor(
       async () => {
-        const list = await listTerminals(server.url, WORKSPACE_ID, TOKEN);
+        const list = await listTerminals(server.url, WORKTREE_ID, TOKEN);
         return list.find((t) => t.terminalId === data.terminalId) ? list : undefined;
       },
       { label: "resume terminal registered" },
@@ -229,7 +229,7 @@ describe("chats.continueInTerminal — claude-code", () => {
   });
 
   it("rejects a chat with no active session (412) and spawns no terminal", async () => {
-    const chatId = await createChat(server.url, WORKSPACE_ID, "claude-code", TOKEN);
+    const chatId = await createChat(server.url, WORKTREE_ID, "claude-code", TOKEN);
 
     const res = await trpcMutate(server.url, "chats.continueInTerminal", { chatId }, TOKEN);
     const body = await res.text();
@@ -248,19 +248,19 @@ describe("chats.continueInTerminal — claude-code", () => {
 
 describe("chats.continueInTerminal — unsupported agent", () => {
   const TOKEN = "continue-terminal-gemini-token";
-  const PROJECT = "cont-gem-proj";
-  const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
+  const REPO = "cont-gem-proj";
+  const WORKTREE_ID = toWorktreeId(REPO, "main");
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-continue-terminal-gemini-");
-    const repoPath = createGitRepo(tmpHome, PROJECT);
+    const repoPath = createGitRepo(tmpHome, REPO);
     const stubBin = writeStubVendorCli(tmpHome, "stub-gemini.sh");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],
@@ -283,8 +283,8 @@ describe("chats.continueInTerminal — unsupported agent", () => {
   });
 
   it("rejects with 400 when the agent has no resume CLI", async () => {
-    const chatId = await createChat(server.url, WORKSPACE_ID, "gemini-cli", TOKEN);
-    await setActiveSession(server.url, WORKSPACE_ID, chatId, "gemini-session-1", TOKEN);
+    const chatId = await createChat(server.url, WORKTREE_ID, "gemini-cli", TOKEN);
+    await setActiveSession(server.url, WORKTREE_ID, chatId, "gemini-session-1", TOKEN);
 
     const res = await trpcMutate(server.url, "chats.continueInTerminal", { chatId }, TOKEN);
     const body = await res.text();
@@ -293,8 +293,8 @@ describe("chats.continueInTerminal — unsupported agent", () => {
     // rename of the message still trips this.
     expect(body).toContain("Gemini CLI has no session-resume invocation");
 
-    // No terminal was spawned for the workspace.
-    const terminals = await listTerminals(server.url, WORKSPACE_ID, TOKEN);
+    // No terminal was spawned for the worktree.
+    const terminals = await listTerminals(server.url, WORKTREE_ID, TOKEN);
     expect(terminals).toEqual([]);
   });
 });
@@ -306,17 +306,17 @@ describe("chats.continueInTerminal — unsupported agent", () => {
 
 describe("chats.continueInTerminal — auth", () => {
   const TOKEN = "continue-terminal-auth-token";
-  const PROJECT = "cont-auth-proj";
+  const REPO = "cont-auth-proj";
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-continue-terminal-auth-");
-    const repoPath = createGitRepo(tmpHome, PROJECT);
+    const repoPath = createGitRepo(tmpHome, REPO);
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: PROJECT,
+          name: REPO,
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath }],

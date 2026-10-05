@@ -1,9 +1,9 @@
-// Black-box integration tests for GitHub project avatars.
+// Black-box integration tests for GitHub repo avatars.
 //
 // Real production server against a tmp HOME, real git repos with real
 // `origin` remotes, and github.com replaced by an Express stub through
-// `BAND_GITHUB_URL`. Assertions go through `projects.list`, the
-// `/api/project-avatar/<name>` route, the stub's request log, and a server
+// `BAND_GITHUB_URL`. Assertions go through `repos.list`, the
+// `/api/repo-avatar/<name>` route, the stub's request log, and a server
 // restart (the on-disk cache must survive it and serve while offline).
 
 import { execFileSync } from "node:child_process";
@@ -22,9 +22,9 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const TOKEN = "project-avatars-token";
+const TOKEN = "repo-avatars-token";
 
-interface ListedProject {
+interface ListedRepo {
   name: string;
   avatar: { src: string; label: string } | null;
 }
@@ -49,20 +49,20 @@ function makeRepo(home: string, name: string, origin?: string): string {
   return path;
 }
 
-function fetchAvatar(server: ServerHandle, project: string, token: string | null = TOKEN) {
-  return fetch(`${server.url}/api/project-avatar/${encodeURIComponent(project)}`, {
+function fetchAvatar(server: ServerHandle, repo: string, token: string | null = TOKEN) {
+  return fetch(`${server.url}/api/repo-avatar/${encodeURIComponent(repo)}`, {
     headers: token ? { Cookie: `band_token=${token}` } : {},
   });
 }
 
-async function listProjects(server: ServerHandle): Promise<Map<string, ListedProject>> {
-  const res = await trpcQuery(server.url, "projects.list", undefined, TOKEN);
+async function listRepos(server: ServerHandle): Promise<Map<string, ListedRepo>> {
+  const res = await trpcQuery(server.url, "repos.list", undefined, TOKEN);
   expect(res.status).toBe(200);
-  const data = await trpcData<{ projects: ListedProject[] }>(res);
-  return new Map(data.projects.map((p) => [p.name, p]));
+  const data = await trpcData<{ repos: ListedRepo[] }>(res);
+  return new Map(data.repos.map((p) => [p.name, p]));
 }
 
-describe("GitHub project avatars", () => {
+describe("GitHub repo avatars", () => {
   let tmpHome: string;
   let stub: GitHubStub;
   let server: ServerHandle;
@@ -72,37 +72,37 @@ describe("GitHub project avatars", () => {
   const evilRedirectRequests: CapturedAvatarRequest[] = [];
 
   beforeAll(async () => {
-    tmpHome = createTmpHome("band-project-avatars-");
-    const project = (name: string, origin?: string) => {
+    tmpHome = createTmpHome("band-repo-avatars-");
+    const repo = (name: string, origin?: string) => {
       const path = makeRepo(tmpHome, name, origin);
       return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
     };
     const plainPath = join(tmpHome, "notes");
     mkdirSync(plainPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
-        project("widgets", "https://github.com/Acme-Org/widgets.git"),
+      repos: [
+        repo("widgets", "https://github.com/Acme-Org/widgets.git"),
         // Same owner over SSH, different case: shares the cached avatar.
-        project("gadgets", "git@github.com:acme-org/gadgets.git"),
-        project("ghost", "https://github.com/ghost-owner/haunt.git"),
-        project("flaky", "https://github.com/flaky-owner/outage.git"),
-        project("html", "https://github.com/html-owner/page.git"),
-        project("vector", "https://github.com/svg-owner/drawing.git"),
-        project("moved", "https://github.com/moved-owner/relocated.git"),
-        project("hijack", "https://github.com/evil-owner/redirect.git"),
+        repo("gadgets", "git@github.com:acme-org/gadgets.git"),
+        repo("ghost", "https://github.com/ghost-owner/haunt.git"),
+        repo("flaky", "https://github.com/flaky-owner/outage.git"),
+        repo("html", "https://github.com/html-owner/page.git"),
+        repo("vector", "https://github.com/svg-owner/drawing.git"),
+        repo("moved", "https://github.com/moved-owner/relocated.git"),
+        repo("hijack", "https://github.com/evil-owner/redirect.git"),
         // Never fetched before the offline restart below.
-        project("fresh", "https://github.com/fresh-owner/new.git"),
-        // Remote forms and hosts, checked through `projects.list` only.
-        project("ssh-url", "ssh://git@github.com/acme-org/tools"),
-        project("ssh-443", "ssh://git@ssh.github.com:443/acme-org/infra.git"),
-        project("www", "https://www.GitHub.com/acme-org/site.git"),
-        project("ghes", "git@github.example.com:platform/api.git"),
-        project("ghec", "https://octo.ghe.com/team/app.git"),
-        project("tool", "https://gitlab.com/acme/tool.git"),
-        project("bucket", "git@bitbucket.org:acme/bucket.git"),
-        project("selfhosted", "https://git.example.com/acme/internal.git"),
-        project("dotted", "https://github.com/a.b/dotted.git"),
-        project("local"),
+        repo("fresh", "https://github.com/fresh-owner/new.git"),
+        // Remote forms and hosts, checked through `repos.list` only.
+        repo("ssh-url", "ssh://git@github.com/acme-org/tools"),
+        repo("ssh-443", "ssh://git@ssh.github.com:443/acme-org/infra.git"),
+        repo("www", "https://www.GitHub.com/acme-org/site.git"),
+        repo("ghes", "git@github.example.com:platform/api.git"),
+        repo("ghec", "https://octo.ghe.com/team/app.git"),
+        repo("tool", "https://gitlab.com/acme/tool.git"),
+        repo("bucket", "git@bitbucket.org:acme/bucket.git"),
+        repo("selfhosted", "https://git.example.com/acme/internal.git"),
+        repo("dotted", "https://github.com/a.b/dotted.git"),
+        repo("local"),
         {
           name: "notes",
           path: plainPath,
@@ -144,21 +144,21 @@ describe("GitHub project avatars", () => {
     expect(res.status).toBe(401);
   });
 
-  it("projects.list offers an avatar for github.com and GitHub Enterprise remotes only", async () => {
-    const projects = await listProjects(server);
+  it("repos.list offers an avatar for github.com and GitHub Enterprise remotes only", async () => {
+    const repos = await listRepos(server);
     const avatar = (name: string, label: string) => ({
-      src: `/api/project-avatar/${name}`,
+      src: `/api/repo-avatar/${name}`,
       label,
     });
-    expect(projects.get("widgets")?.avatar).toEqual(avatar("widgets", "Acme-Org/widgets"));
-    expect(projects.get("gadgets")?.avatar).toEqual(avatar("gadgets", "acme-org/gadgets"));
-    expect(projects.get("ssh-url")?.avatar).toEqual(avatar("ssh-url", "acme-org/tools"));
-    expect(projects.get("ssh-443")?.avatar).toEqual(avatar("ssh-443", "acme-org/infra"));
-    expect(projects.get("www")?.avatar).toEqual(avatar("www", "acme-org/site"));
-    expect(projects.get("ghes")?.avatar).toEqual(avatar("ghes", "platform/api"));
-    expect(projects.get("ghec")?.avatar).toEqual(avatar("ghec", "team/app"));
+    expect(repos.get("widgets")?.avatar).toEqual(avatar("widgets", "Acme-Org/widgets"));
+    expect(repos.get("gadgets")?.avatar).toEqual(avatar("gadgets", "acme-org/gadgets"));
+    expect(repos.get("ssh-url")?.avatar).toEqual(avatar("ssh-url", "acme-org/tools"));
+    expect(repos.get("ssh-443")?.avatar).toEqual(avatar("ssh-443", "acme-org/infra"));
+    expect(repos.get("www")?.avatar).toEqual(avatar("www", "acme-org/site"));
+    expect(repos.get("ghes")?.avatar).toEqual(avatar("ghes", "platform/api"));
+    expect(repos.get("ghec")?.avatar).toEqual(avatar("ghec", "team/app"));
     for (const name of ["tool", "bucket", "selfhosted", "dotted", "local", "notes"]) {
-      expect(projects.get(name)?.avatar, name).toBeNull();
+      expect(repos.get(name)?.avatar, name).toBeNull();
     }
   });
 
@@ -179,7 +179,7 @@ describe("GitHub project avatars", () => {
     expect(acmeRequests).toEqual([{ method: "GET", path: "/Acme-Org.png", query: { size: "64" } }]);
   });
 
-  it("returns 404 for projects without a GitHub avatar and for unknown projects", async () => {
+  it("returns 404 for repos without a GitHub avatar and for unknown repos", async () => {
     for (const name of ["tool", "local", "notes", "does-not-exist"]) {
       const res = await fetchAvatar(server, name);
       expect(res.status, name).toBe(404);
@@ -192,8 +192,8 @@ describe("GitHub project avatars", () => {
     expect(ghostRequests).toEqual([
       { method: "GET", path: "/ghost-owner.png", query: { size: "64" } },
     ]);
-    const projects = await listProjects(server);
-    expect(projects.get("ghost")?.avatar).toBeNull();
+    const repos = await listRepos(server);
+    expect(repos.get("ghost")?.avatar).toBeNull();
   });
 
   it("backs off after a GitHub server error instead of retrying on every request", async () => {
@@ -203,9 +203,9 @@ describe("GitHub project avatars", () => {
       { method: "GET", path: "/flaky-owner.png", query: { size: "64" } },
     ]);
     // A transient failure is not "no avatar": the UI keeps asking later.
-    const projects = await listProjects(server);
-    expect(projects.get("flaky")?.avatar).toEqual({
-      src: "/api/project-avatar/flaky",
+    const repos = await listRepos(server);
+    expect(repos.get("flaky")?.avatar).toEqual({
+      src: "/api/repo-avatar/flaky",
       label: "flaky-owner/outage",
     });
   });
@@ -213,9 +213,9 @@ describe("GitHub project avatars", () => {
   it("refuses non-raster responses, including SVG", async () => {
     expect((await fetchAvatar(server, "html")).status).toBe(404);
     expect((await fetchAvatar(server, "vector")).status).toBe(404);
-    const projects = await listProjects(server);
-    expect(projects.get("html")?.avatar).toBeNull();
-    expect(projects.get("vector")?.avatar).toBeNull();
+    const repos = await listRepos(server);
+    expect(repos.get("html")?.avatar).toBeNull();
+    expect(repos.get("vector")?.avatar).toBeNull();
   });
 
   it("follows a same-origin redirect and refuses one to another host", async () => {

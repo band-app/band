@@ -208,7 +208,7 @@ export interface SessionAttachedEvent {
   models: LegacyModelState | null;
 }
 
-/** A file the agent wrote into the workspace's shared directory, rendered
+/** A file the agent wrote into the worktree's shared directory, rendered
  *  as a download card. */
 export interface FileEvent {
   type: "file";

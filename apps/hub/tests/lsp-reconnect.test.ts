@@ -1,13 +1,13 @@
 /**
  * The `/lsp` WebSocket proxy across reconnects.
  *
- * The language server a workspace uses outlives any one WebSocket: a page
+ * The language server a worktree uses outlives any one WebSocket: a page
  * reload, or a second editor after the first one closed, connects again to
  * the same `typescript-language-server` process. A connection that goes away
  * without closing its documents used to leave them open in that process, so
  * the next connection's `didOpen` of the same file was rejected ("Can't open
  * already open document") and every request on it failed with tsserver's
- * "No Project". The proxy now closes a connection's open documents when it
+ * "No Repo". The proxy now closes a connection's open documents when it
  * disconnects.
  *
  * Real server, real language server: the fixture repo's `node_modules` links
@@ -17,7 +17,7 @@
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createTsLspRepo } from "./fixtures/ts-lsp-repo";
@@ -25,7 +25,7 @@ import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 
 const TOKEN = "lsp-reconnect-token";
-const PROJECT = "lsp-reconnect-repo";
+const REPO = "lsp-reconnect-repo";
 const MAIN_TS =
   "function addNumbers(a: number, b: number): number {\n  return a + b;\n}\nexport const total = addNumbers(1, 2);\n";
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -36,13 +36,13 @@ let repoPath: string;
 
 beforeAll(async () => {
   tmpHome = createTmpHome("band-lsp-reconnect-");
-  repoPath = join(tmpHome, PROJECT);
+  repoPath = join(tmpHome, REPO);
   createTsLspRepo({ repoPath, branch: "main", committed: { "src/main.ts": MAIN_TS } });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoPath }],
@@ -83,7 +83,7 @@ class LspSocket {
   static async open(cookie?: string, idBase = 0): Promise<LspSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/lsp?workspaceId=${encodeURIComponent(toWorkspaceId(PROJECT, "main"))}&lang=typescript`,
+      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(toWorktreeId(REPO, "main"))}&lang=typescript`,
       cookie ? { headers: { Cookie: cookie } } : {},
     );
     await new Promise<void>((resolve, reject) => {
@@ -173,7 +173,7 @@ describe("/lsp proxy reconnects", () => {
   }, 60_000);
 
   it("keeps a file open for a client while another client that had it open disconnects", async () => {
-    // Two tabs on one workspace share the language server.
+    // Two tabs on one worktree share the language server.
     const leaving = await LspSocket.open(`band_token=${TOKEN}`);
     const staying = await LspSocket.open(`band_token=${TOKEN}`, 1_000);
     expect((await definitionOfAddNumbers(leaving)).result).toEqual([definition()]);

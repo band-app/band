@@ -312,9 +312,9 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       const unsubscribe = host.pty.onExit((event) => exits.push(event));
       try {
         const entry = await host.pty.spawn({
-          workspaceId: "contract-ws",
+          worktreeId: "contract-ws",
           terminalId: "contract-term",
-          workspaceRoot: repo,
+          worktreeRoot: repo,
           options: { command: "echo contract-ready" },
         });
         assert.equal(entry.terminalId, "contract-term");
@@ -337,18 +337,18 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         const exit = await waitFor("the exit event", () =>
           exits.find((event) => event.terminalId === "contract-term"),
         );
-        assert.equal(exit.workspaceId, "contract-ws");
+        assert.equal(exit.worktreeId, "contract-ws");
         assert.equal(exit.exitCode, 0);
         assert.equal(exit.killed, false);
         assert.equal(await host.pty.write("contract-term", "x"), false);
       } finally {
         unsubscribe();
-        await host.pty.killWorkspace("contract-ws");
+        await host.pty.killWorktree("contract-ws");
       }
     });
 
-    it("connects to a language server and stops it with the workspace", async () => {
-      const spec = { workspaceId: "contract-lsp", lang: "typescript", root: repo };
+    it("connects to a language server and stops it with the worktree", async () => {
+      const spec = { worktreeId: "contract-lsp", lang: "typescript", root: repo };
       await assert.rejects(host.lsp.connect({ ...spec, lang: "no-such-language" }));
 
       const first = await host.lsp.connect(spec);
@@ -393,20 +393,20 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         second.write(frameFor(2));
         assert.match(await readResponse(second, 2), /"capabilities"/);
 
-        // Stopping the workspace ends the remaining connection's output.
+        // Stopping the worktree ends the remaining connection's output.
         const ended = (async () => {
           for await (const _chunk of second.output) {
             // drain until the server exits
           }
         })();
-        await host.lsp.killWorkspace(spec.workspaceId);
+        await host.lsp.killWorktree(spec.worktreeId);
         let timer: NodeJS.Timeout | undefined;
         try {
           await Promise.race([
             ended,
             new Promise((_, reject) => {
               timer = setTimeout(
-                () => reject(new Error("output did not end after killWorkspace")),
+                () => reject(new Error("output did not end after killWorktree")),
                 TIMEOUT_MS,
               );
             }),
@@ -417,7 +417,7 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       } finally {
         first.close();
         second.close();
-        await host.lsp.killWorkspace(spec.workspaceId);
+        await host.lsp.killWorktree(spec.worktreeId);
       }
     });
 
@@ -486,35 +486,35 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       }
     });
 
-    it("finds no setup script in a project without one", async () => {
+    it("finds no setup script in a repo without one", async () => {
       assert.equal(
-        await host.scripts.prepare({ projectPath: repo, worktreePath: repo, label: "setup" }),
+        await host.scripts.prepare({ repoPath: repo, worktreePath: repo, label: "setup" }),
         null,
       );
     });
 
     it("reads a script's command from the config", async () => {
-      const project = join(fixture.workDir, "commanded");
-      await host.fs.mkdir(join(project, ".band"), { recursive: true });
+      const repoDir = join(fixture.workDir, "commanded");
+      await host.fs.mkdir(join(repoDir, ".band"), { recursive: true });
       await host.fs.writeFile(
-        join(project, ".band", "config.json"),
+        join(repoDir, ".band", "config.json"),
         JSON.stringify({ teardown: "echo bye" }),
       );
-      const workspace = { projectPath: project, worktreePath: project };
-      assert.equal(await host.scripts.command({ ...workspace, label: "teardown" }), "echo bye");
-      assert.equal(await host.scripts.command({ ...workspace, label: "setup" }), null);
+      const worktree = { repoPath: repoDir, worktreePath: repoDir };
+      assert.equal(await host.scripts.command({ ...worktree, label: "teardown" }), "echo bye");
+      assert.equal(await host.scripts.command({ ...worktree, label: "setup" }), null);
     });
 
-    it("prepares a project's setup script", async () => {
-      const project = join(fixture.workDir, "scripted");
-      await host.fs.mkdir(join(project, ".band"), { recursive: true });
+    it("prepares a repo's setup script", async () => {
+      const repoDir = join(fixture.workDir, "scripted");
+      await host.fs.mkdir(join(repoDir, ".band"), { recursive: true });
       await host.fs.writeFile(
-        join(project, ".band", "config.json"),
+        join(repoDir, ".band", "config.json"),
         JSON.stringify({ setup: "echo from-setup" }),
       );
       const plan = await host.scripts.prepare({
-        projectPath: project,
-        worktreePath: project,
+        repoPath: repoDir,
+        worktreePath: repoDir,
         label: "setup",
       });
       assert.ok(plan);
@@ -523,19 +523,19 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
     });
 
     describe("environment.json", () => {
-      async function project(name: string, files: Record<string, string>) {
+      async function seedRepo(name: string, files: Record<string, string>) {
         const dir = join(fixture.workDir, name);
         await host.fs.mkdir(join(dir, ".band"), { recursive: true });
         for (const [file, text] of Object.entries(files)) {
           await host.fs.mkdir(join(dir, file, ".."), { recursive: true });
           await host.fs.writeFile(join(dir, file), text);
         }
-        return { projectPath: dir, worktreePath: dir };
+        return { repoPath: dir, worktreePath: dir };
       }
 
-      it("reports no file for a project without one", async () => {
-        const workspace = await project("env-none", {});
-        assert.deepEqual(await host.scripts.environment(workspace), {
+      it("reports no file for a repo without one", async () => {
+        const worktree = await seedRepo("env-none", {});
+        assert.deepEqual(await host.scripts.environment(worktree), {
           source: null,
           environment: null,
           issues: [],
@@ -543,7 +543,7 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       });
 
       it("parses a valid file and checks the devcontainer it names", async () => {
-        const workspace = await project("env-valid", {
+        const worktree = await seedRepo("env-valid", {
           ".band/environment.json": JSON.stringify({
             build: { devcontainer: ".devcontainer/devcontainer.json" },
             install: "echo install",
@@ -552,29 +552,29 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
           }),
           ".devcontainer/devcontainer.json": "{}",
         });
-        const report = await host.scripts.environment(workspace);
-        assert.equal(report.source, join(workspace.projectPath, ".band", "environment.json"));
+        const report = await host.scripts.environment(worktree);
+        assert.equal(report.source, join(worktree.repoPath, ".band", "environment.json"));
         assert.deepEqual(report.issues, []);
         assert.equal(report.environment?.install, "echo install");
         assert.deepEqual(report.environment?.terminals, [{ name: "dev", command: "echo dev" }]);
       });
 
       it("reports each problem with its path", async () => {
-        const workspace = await project("env-bad", {
+        const worktree = await seedRepo("env-bad", {
           ".band/environment.json": JSON.stringify({ isolation: "docker", instal: "x" }),
         });
-        const report = await host.scripts.environment(workspace);
+        const report = await host.scripts.environment(worktree);
         assert.equal(report.environment, null);
         assert.deepEqual(report.issues.map((i) => i.path).sort(), ["instal", "isolation"]);
       });
 
       it("names a devcontainer file that is missing", async () => {
-        const workspace = await project("env-no-devcontainer", {
+        const worktree = await seedRepo("env-no-devcontainer", {
           ".band/environment.json": JSON.stringify({
             build: { devcontainer: ".devcontainer/missing.json" },
           }),
         });
-        const report = await host.scripts.environment(workspace);
+        const report = await host.scripts.environment(worktree);
         assert.equal(report.environment, null);
         assert.deepEqual(
           report.issues.map((i) => i.path),
@@ -583,26 +583,26 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       });
 
       it("prefers environment.json for setup and teardown, and falls back per script", async () => {
-        const workspace = await project("env-supersede", {
+        const worktree = await seedRepo("env-supersede", {
           ".band/environment.json": JSON.stringify({ install: "echo i", start: "echo s" }),
           ".band/config.json": JSON.stringify({ setup: "echo old", teardown: "echo old-bye" }),
         });
         assert.equal(
-          await host.scripts.command({ ...workspace, label: "setup" }),
+          await host.scripts.command({ ...worktree, label: "setup" }),
           "{\necho i\n} && {\necho s\n}",
         );
         assert.equal(
-          await host.scripts.command({ ...workspace, label: "teardown" }),
+          await host.scripts.command({ ...worktree, label: "teardown" }),
           "echo old-bye",
         );
       });
 
       it("falls back to config.json when environment.json has problems", async () => {
-        const workspace = await project("env-broken", {
+        const worktree = await seedRepo("env-broken", {
           ".band/environment.json": "{ nope",
           ".band/config.json": JSON.stringify({ setup: "echo old" }),
         });
-        assert.equal(await host.scripts.command({ ...workspace, label: "setup" }), "echo old");
+        assert.equal(await host.scripts.command({ ...worktree, label: "setup" }), "echo old");
       });
     });
   });

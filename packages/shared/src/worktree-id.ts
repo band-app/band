@@ -1,3 +1,3 @@
-export function toWorkspaceId(project: string, branch: string): string {
-  return `${project}-${branch.replaceAll("/", "-")}`;
+export function toWorktreeId(repo: string, branch: string): string {
+  return `${repo}-${branch.replaceAll("/", "-")}`;
 }

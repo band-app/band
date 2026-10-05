@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { cliInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessions";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 import { chatService } from "./chat-service";
@@ -22,20 +22,20 @@ import { settingsService } from "./settings-service";
 import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-launch");
 
-/** A launch named an existing chat that belongs to another workspace. */
-export class ChatNotInWorkspaceError extends Error {
-  constructor(chatId: string, workspaceId: string) {
-    super(`Chat ${chatId} is not in workspace ${workspaceId}`);
-    this.name = "ChatNotInWorkspaceError";
+/** A launch named an existing chat that belongs to another worktree. */
+export class ChatNotInWorktreeError extends Error {
+  constructor(chatId: string, worktreeId: string) {
+    super(`Chat ${chatId} is not in worktree ${worktreeId}`);
+    this.name = "ChatNotInWorktreeError";
   }
 }
 
 export interface LaunchAgentInput {
-  workspaceId: string;
+  worktreeId: string;
   /** Agent definition id from `settings.codingAgents`; the default agent when omitted. */
   agentDefinitionId?: string;
   prompt?: string;
@@ -43,7 +43,7 @@ export interface LaunchAgentInput {
   mode?: AgentMode;
   /**
    * Chat pane for a `gui` session. An existing chat is reused, so a
-   * workspace's default chat can host its first prompt. A new id creates
+   * worktree's default chat can host its first prompt. A new id creates
    * the chat. Omitted means a fresh chat.
    */
   chatId?: string;
@@ -72,8 +72,8 @@ export interface LaunchAgentResult {
 
 export class AgentLaunchService {
   launch(input: LaunchAgentInput): LaunchAgentResult {
-    if (!workspaceService.resolve(input.workspaceId)) {
-      throw new WorkspaceNotFoundError(input.workspaceId);
+    if (!worktreeService.resolve(input.worktreeId)) {
+      throw new WorktreeNotFoundError(input.worktreeId);
     }
     const agentDef = settingsService.getAgentDefinition(input.agentDefinitionId);
     const requested = input.mode ?? settingsService.defaultAgentMode();
@@ -88,7 +88,7 @@ export class AgentLaunchService {
         );
       }
       log.warn(
-        { workspaceId: input.workspaceId, agentId: agentDef.id, reason: invocation.reason },
+        { worktreeId: input.worktreeId, agentId: agentDef.id, reason: invocation.reason },
         "agent has no TUI invocation; starting it in a chat",
       );
       return { ...this.launchGui(input, agentDef.id), notice: invocation.reason };
@@ -98,17 +98,17 @@ export class AgentLaunchService {
 
   private launchGui(input: LaunchAgentInput, agentDefinitionId: string): LaunchAgentResult {
     const existing = input.chatId ? chatService.get(input.chatId) : undefined;
-    if (existing && existing.workspaceId !== input.workspaceId) {
-      throw new ChatNotInWorkspaceError(existing.id, input.workspaceId);
+    if (existing && existing.worktreeId !== input.worktreeId) {
+      throw new ChatNotInWorktreeError(existing.id, input.worktreeId);
     }
     const chat =
       existing ??
-      chatService.create(input.workspaceId, { id: input.chatId, agent: agentDefinitionId });
+      chatService.create(input.worktreeId, { id: input.chatId, agent: agentDefinitionId });
     // Submit first: a prompt for another agent switches the chat to it
     // synchronously, and the session row should name the agent that runs.
     if (input.prompt) {
       taskService.submitTask({
-        workspaceId: input.workspaceId,
+        worktreeId: input.worktreeId,
         chatId: chat.id,
         prompt: input.prompt,
         mode: input.permissionMode,
@@ -120,7 +120,7 @@ export class AgentLaunchService {
     const agentSession =
       agentSessionRegistry.findOpenByChat(chat.id) ??
       agentSessionRegistry.create({
-        workspaceId: input.workspaceId,
+        worktreeId: input.worktreeId,
         agentDefinitionId: current.agent,
         mode: "gui",
         chatId: chat.id,
@@ -134,21 +134,21 @@ export class AgentLaunchService {
     agentDefinitionId: string,
     command: string,
   ): LaunchAgentResult {
-    const { workspaceId } = input;
+    const { worktreeId } = input;
     const terminalId = input.terminalId ?? randomUUID();
     const agentSession = agentSessionRegistry.create({
-      workspaceId,
+      worktreeId,
       agentDefinitionId,
       mode: "tui",
       terminalId,
     });
-    const ready = terminalService.spawn(workspaceId, terminalId, { command }).then(() => {
-      emit({ kind: "terminal-created", workspaceId, terminalId });
+    const ready = terminalService.spawn(worktreeId, terminalId, { command }).then(() => {
+      emit({ kind: "terminal-created", worktreeId, terminalId });
     });
     ready.catch((err) => {
       agentSessionRegistry.end(agentSession.id);
       log.error(
-        { err: err instanceof Error ? err.message : String(err), workspaceId, terminalId },
+        { err: err instanceof Error ? err.message : String(err), worktreeId, terminalId },
         "failed to spawn the agent's terminal",
       );
     });

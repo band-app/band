@@ -3,7 +3,7 @@ import type { Environment } from "./schema.ts";
 export type EnvironmentScript = "setup" | "teardown";
 
 /**
- * The shell text a workspace runs for `script`, or `null` when the
+ * The shell text a worktree runs for `script`, or `null` when the
  * environment has none. Setup is `install` then `start`, and it stops at the
  * first one that fails. Teardown is `teardown`.
  */

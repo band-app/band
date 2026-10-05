@@ -1,8 +1,8 @@
-// Integration test for workspace file copying (issue #284).
+// Integration test for worktree file copying (issue #284).
 //
 // A fresh git worktree starts empty of any untracked files — `.env`, local
-// credentials, IDE overrides, anything `.gitignore`d. Workspace creation
-// can now declaratively copy a set of those files from the project's main
+// credentials, IDE overrides, anything `.gitignore`d. Worktree creation
+// can now declaratively copy a set of those files from the repo's main
 // checkout into the new worktree, driven by either:
 //
 //   1. `.band/config.json::workspace.copyFiles` — explicit list, supports
@@ -15,7 +15,7 @@
 // UNION, de-duped by absolute source path.
 //
 // This file boots the real server (`apps/hub/dist/start-server.mjs`)
-// against a fresh tmp `$HOME`, drives `workspaces.create` over real tRPC,
+// against a fresh tmp `$HOME`, drives `worktrees.create` over real tRPC,
 // and asserts on the filesystem contents of the resulting worktree.
 //
 // The eight scenarios spelled out in the acceptance criteria each get
@@ -31,7 +31,7 @@
 //   - matched-but-tracked (skipped)
 //   - symlink-escape guard (symlink pointing outside the root, skipped)
 //
-// Each scenario uses its own project subdirectory inside the shared tmp
+// Each scenario uses its own repo subdirectory inside the shared tmp
 // home so the eight creates don't fight over the same `.band/config.json`
 // / `.worktreeinclude` files. The server boots once for the file.
 
@@ -43,7 +43,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
-const DEFAULT_TOKEN = "workspace-copy-files-token";
+const DEFAULT_TOKEN = "worktree-copy-files-token";
 
 const gitEnv = {
   ...process.env,
@@ -74,11 +74,11 @@ function git(cwd: string, args: string[]): string {
   }
 }
 
-interface ProjectFixture {
+interface RepoFixture {
   name: string;
-  /** Absolute path to the project's main checkout. */
+  /** Absolute path to the repo's main checkout. */
   repoPath: string;
-  /** Expected path of the worktree this project's create will produce. */
+  /** Expected path of the worktree this repo's create will produce. */
   worktreePath: string;
 }
 
@@ -118,19 +118,19 @@ interface CreateRepoOpts {
 }
 
 /**
- * Build a project fixture: create a real git repo with the given tracked
+ * Build a repo fixture: create a real git repo with the given tracked
  * + untracked files, optionally write `.band/config.json` and
  * `.worktreeinclude`, and seed the state DB so the server knows about it.
  *
  * Each fixture uses its own subdirectory of `tmpHome` so creates from
  * different scenarios don't clobber each other's config / include files.
  */
-function buildProject(
+function buildRepo(
   tmpHome: string,
   name: string,
   branch: string,
   opts: CreateRepoOpts,
-): ProjectFixture {
+): RepoFixture {
   const repoPath = join(tmpHome, name);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", "main"]);
@@ -162,29 +162,29 @@ function buildProject(
     writeFileSync(join(repoPath, ".worktreeinclude"), opts.worktreeInclude);
   }
 
-  // Worktree path lands under `<tmpHome>/.band/worktrees/<project>/<branch>`
+  // Worktree path lands under `<tmpHome>/.band/worktrees/<repo>/<branch>`
   // because `seedSettings` below sets `worktreesDir` to that location.
   const worktreePath = join(tmpHome, ".band", "worktrees", name, branch);
 
   return { name, repoPath, worktreePath };
 }
 
-describe("workspaces.create copies workspace files into the new worktree", () => {
+describe("worktrees.create copies worktree files into the new worktree", () => {
   let server: ServerHandle;
   let tmpHome: string;
   const branch = "feat-copy";
 
-  // Eight independent project fixtures — one per acceptance criterion. We
-  // build them all up front so `seedState` can register every project in
+  // Eight independent repo fixtures — one per acceptance criterion. We
+  // build them all up front so `seedState` can register every repo in
   // a single transaction before the server boots.
-  let pConfigOnly: ProjectFixture;
-  let pIncludeOnly: ProjectFixture;
-  let pBoth: ProjectFixture;
-  let pMissing: ProjectFixture;
-  let pGlob: ProjectFixture;
-  let pIgnoredButNotIncluded: ProjectFixture;
-  let pMatchedButTracked: ProjectFixture;
-  let pSymlinkEscape: ProjectFixture;
+  let pConfigOnly: RepoFixture;
+  let pIncludeOnly: RepoFixture;
+  let pBoth: RepoFixture;
+  let pMissing: RepoFixture;
+  let pGlob: RepoFixture;
+  let pIgnoredButNotIncluded: RepoFixture;
+  let pMatchedButTracked: RepoFixture;
+  let pSymlinkEscape: RepoFixture;
   // Initialised to "" so a `beforeAll` failure before the assignment
   // below doesn't make `afterAll`'s cleanup call `rmSync(undefined)` and
   // swallow the original error with a TypeError.
@@ -193,7 +193,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   beforeAll(async () => {
     tmpHome = createTmpHome("band-copy-files-");
 
-    pConfigOnly = buildProject(tmpHome, "config-only", branch, {
+    pConfigOnly = buildRepo(tmpHome, "config-only", branch, {
       trackedFiles: { ".gitignore": ".env\n.env.local\nconfig/*.local.json\n" },
       untrackedFiles: {
         ".env": "ENV_FROM_MAIN=1\n",
@@ -207,7 +207,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       },
     });
 
-    pIncludeOnly = buildProject(tmpHome, "include-only", branch, {
+    pIncludeOnly = buildRepo(tmpHome, "include-only", branch, {
       trackedFiles: { ".gitignore": ".env*\nconfig/*.local.json\n" },
       untrackedFiles: {
         ".env": "INCLUDE_ENV=1\n",
@@ -217,7 +217,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       worktreeInclude: ".env*\nconfig/*.local.json\n",
     });
 
-    pBoth = buildProject(tmpHome, "both", branch, {
+    pBoth = buildRepo(tmpHome, "both", branch, {
       trackedFiles: { ".gitignore": ".env\n.env.local\nshared.local\n" },
       untrackedFiles: {
         ".env": "BOTH_ENV=1\n",
@@ -235,7 +235,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       worktreeInclude: ".env*\n*.local\n",
     });
 
-    pMissing = buildProject(tmpHome, "missing", branch, {
+    pMissing = buildRepo(tmpHome, "missing", branch, {
       trackedFiles: { ".gitignore": ".env\nphantom.txt\n" },
       untrackedFiles: { ".env": "PRESENT=1\n" }, // phantom.txt is deliberately absent
       bandConfig: {
@@ -245,7 +245,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       },
     });
 
-    pGlob = buildProject(tmpHome, "glob", branch, {
+    pGlob = buildRepo(tmpHome, "glob", branch, {
       trackedFiles: { ".gitignore": "config/*.local.json\n" },
       untrackedFiles: {
         "config/a.local.json": '{"a":1}\n',
@@ -259,7 +259,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       },
     });
 
-    pIgnoredButNotIncluded = buildProject(tmpHome, "ignored-not-included", branch, {
+    pIgnoredButNotIncluded = buildRepo(tmpHome, "ignored-not-included", branch, {
       trackedFiles: { ".gitignore": ".env\nsecret.key\n" },
       untrackedFiles: {
         ".env": "INCLUDED=1\n",
@@ -270,7 +270,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       worktreeInclude: ".env\n",
     });
 
-    pMatchedButTracked = buildProject(tmpHome, "matched-but-tracked", branch, {
+    pMatchedButTracked = buildRepo(tmpHome, "matched-but-tracked", branch, {
       // `config.json` is committed (tracked) AND matches the `*.json`
       // pattern in `.worktreeinclude`. Tracked files must never be
       // duplicated by Option B — git already provides them via the
@@ -296,29 +296,29 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       worktreeInclude: "*.json\n.env\n",
     });
 
-    pSymlinkEscape = buildProject(tmpHome, "symlink-escape", branch, {
+    pSymlinkEscape = buildRepo(tmpHome, "symlink-escape", branch, {
       trackedFiles: { ".gitignore": "escape.txt\n" },
       untrackedFiles: {},
       bandConfig: {
         workspace: {
           // The symlink at `<repo>/escape.txt` is created below — it
-          // points OUTSIDE the project root. Listing it here exercises
+          // points OUTSIDE the repo root. Listing it here exercises
           // the symlink-escape guard.
           copyFiles: ["escape.txt"],
         },
       },
     });
-    // Drop the secret outside the project root in a sibling tmpdir so a
+    // Drop the secret outside the repo root in a sibling tmpdir so a
     // resolved-real-path check sees a path that does NOT start with the
-    // project root prefix. Using `tmpdir()` rather than parent dirs of
+    // repo root prefix. Using `tmpdir()` rather than parent dirs of
     // the home keeps the test robust to whatever directory layout the
     // test runner picks.
     symlinkEscapeTarget = join(tmpdir(), `band-symlink-escape-target-${Date.now()}.txt`);
-    writeFileSync(symlinkEscapeTarget, "SECRET-OUTSIDE-PROJECT\n");
+    writeFileSync(symlinkEscapeTarget, "SECRET-OUTSIDE-REPO\n");
     symlinkSync(symlinkEscapeTarget, join(pSymlinkEscape.repoPath, "escape.txt"));
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: pConfigOnly.name,
           path: pConfigOnly.repoPath,
@@ -387,8 +387,8 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
     if (symlinkEscapeTarget) rmSync(symlinkEscapeTarget, { force: true });
   });
 
-  async function create(project: string): Promise<Response> {
-    return trpcMutate(server.url, "workspaces.create", { project, branch }, DEFAULT_TOKEN);
+  async function create(repo: string): Promise<Response> {
+    return trpcMutate(server.url, "worktrees.create", { repo, branch }, DEFAULT_TOKEN);
   }
 
   it("copies files declared only in .band/config.json::workspace.copyFiles", async () => {
@@ -519,14 +519,14 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
     );
   });
 
-  it("refuses to follow a symlink that points outside the project root", async () => {
+  it("refuses to follow a symlink that points outside the repo root", async () => {
     const res = await create(pSymlinkEscape.name);
     // Create still succeeds — the symlink-escape guard is non-fatal,
-    // matching the project's "missing source files are skipped, not
+    // matching the repo's "missing source files are skipped, not
     // errors" contract.
     expect(res.status).toBe(200);
 
-    // The symlink target sits OUTSIDE the project root and contains a
+    // The symlink target sits OUTSIDE the repo root and contains a
     // secret. A regression that follows the symlink would land its
     // bytes inside the new worktree at `escape.txt`. The guard MUST
     // refuse to copy: the worktree must not contain `escape.txt` at
@@ -535,17 +535,17 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
     expect(existsSync(join(pSymlinkEscape.worktreePath, "escape.txt"))).toBe(false);
   });
 
-  it("rejects workspaces.create without an auth token (401)", async () => {
+  it("rejects worktrees.create without an auth token (401)", async () => {
     // Negative auth case — boots the same server but skips the
     // `Cookie: band_token=...` header by bypassing the `trpcMutate`
     // helper. Pins that the file-copy feature can't be reached
     // unauthenticated; a future regression that loosened auth on the
-    // workspaces.create handler would surface here, not just in the
+    // worktrees.create handler would surface here, not just in the
     // shared `trpc.test.ts` suite.
-    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+    const res = await fetch(`${server.url}/trpc/worktrees.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: pConfigOnly.name, branch: "unauth-attempt" }),
+      body: JSON.stringify({ repo: pConfigOnly.name, branch: "unauth-attempt" }),
     });
     expect(res.status).toBe(401);
   });

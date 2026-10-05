@@ -8,19 +8,19 @@ import type {
   RepoInfo,
   ReviewInfo,
   ReviewProvider,
-  WorkspaceReview,
+  WorktreeReview,
 } from "@band-app/plugin-api";
-import { WorkspaceNotFoundError } from "../errors";
+import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
-import { type WorkspaceService, workspaceService } from "./workspace-service";
+import { type WorktreeService, worktreeService } from "./worktree-service";
 
 const log = createLogger("review-service");
 
-/** Thrown by `merge` when the workspace's branch has no open review to merge. */
+/** Thrown by `merge` when the worktree's branch has no open review to merge. */
 export class NoOpenReviewError extends Error {
-  constructor(workspaceId: string) {
-    super(`No open review to merge for workspace ${workspaceId}`);
+  constructor(worktreeId: string) {
+    super(`No open review to merge for worktree ${worktreeId}`);
     this.name = "NoOpenReviewError";
   }
 }
@@ -35,21 +35,21 @@ export class ReviewProviderError extends Error {
 
 type Target =
   | { ok: true; repo: RepoInfo; branch: string; ctx: ProviderContext; provider: ReviewProvider }
-  | { ok: false; result: WorkspaceReview };
+  | { ok: false; result: WorktreeReview };
 
 /**
- * The code review and checks for a workspace's branch, from whichever plugin
- * provides reviews for the project's `origin` host. The core knows nothing
- * about the forge; it resolves the workspace and asks the provider.
+ * The code review and checks for a worktree's branch, from whichever plugin
+ * provides reviews for the repo's `origin` host. The core knows nothing
+ * about the forge; it resolves the worktree and asks the provider.
  */
 export class ReviewService {
   constructor(
     private readonly host: PluginHost,
-    private readonly workspaces: WorkspaceService,
+    private readonly worktrees: WorktreeService,
   ) {}
 
-  async forWorkspace(workspaceId: string): Promise<WorkspaceReview> {
-    const target = await this.resolve(workspaceId);
+  async forWorktree(worktreeId: string): Promise<WorktreeReview> {
+    const target = await this.resolve(worktreeId);
     if (!target.ok) return target.result;
     const { repo, branch, ctx, provider } = target;
 
@@ -73,16 +73,16 @@ export class ReviewService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.warn("Review lookup failed for %s (%s): %s", workspaceId, provider.id, message);
+      log.warn("Review lookup failed for %s (%s): %s", worktreeId, provider.id, message);
       return { status: "error", message };
     }
   }
 
-  async merge(workspaceId: string, method: MergeMethod): Promise<void> {
-    const target = await this.resolve(workspaceId);
-    if (!target.ok) throw new NoOpenReviewError(workspaceId);
+  async merge(worktreeId: string, method: MergeMethod): Promise<void> {
+    const target = await this.resolve(worktreeId);
+    if (!target.ok) throw new NoOpenReviewError(worktreeId);
     const { repo, branch, ctx, provider } = target;
-    if (!provider.merge) throw new NoOpenReviewError(workspaceId);
+    if (!provider.merge) throw new NoOpenReviewError(worktreeId);
 
     let review: ReviewInfo | null;
     try {
@@ -91,7 +91,7 @@ export class ReviewService {
       throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
     }
     if (!review || (review.state !== "open" && review.state !== "draft")) {
-      throw new NoOpenReviewError(workspaceId);
+      throw new NoOpenReviewError(worktreeId);
     }
     try {
       await provider.merge(repo, review.number, method, ctx);
@@ -100,36 +100,36 @@ export class ReviewService {
     }
   }
 
-  private async resolve(workspaceId: string): Promise<Target> {
-    const resolved = this.workspaces.resolve(workspaceId);
-    if (!resolved) throw new WorkspaceNotFoundError(workspaceId);
-    const { project, worktree, host } = resolved;
+  private async resolve(worktreeId: string): Promise<Target> {
+    const resolved = this.worktrees.resolve(worktreeId);
+    if (!resolved) throw new WorktreeNotFoundError(worktreeId);
+    const { repo, worktree, host } = resolved;
 
-    if (project.kind === "plain") {
-      return unavailable("plain-project", "This project is not a git repository.");
+    if (repo.kind === "plain") {
+      return unavailable("plain-repo", "This repo is not a git repository.");
     }
     if (worktree.branch.startsWith(DETACHED_BRANCH_PREFIX)) {
-      return unavailable("detached-head", "The workspace is not on a branch.");
+      return unavailable("detached-head", "The worktree is not on a branch.");
     }
-    // A remote workspace's repository is the worker's checkout, not the hub's copy.
-    const checkout = hostRegistry.projectPathOn(project.name, host.id, project.path);
-    const repo = await getRepoInfo(checkout ?? worktree.path, gitRunner(host));
-    if (!repo) {
-      return unavailable("no-remote", "The project has no origin remote.");
+    // A remote worktree's repository is the worker's checkout, not the hub's copy.
+    const checkout = hostRegistry.repoPathOn(repo.name, host.id, repo.path);
+    const repoInfo = await getRepoInfo(checkout ?? worktree.path, gitRunner(host));
+    if (!repoInfo) {
+      return unavailable("no-remote", "The repo has no origin remote.");
     }
-    const provider = await this.host.reviewProviderFor(repo);
+    const provider = await this.host.reviewProviderFor(repoInfo);
     if (!provider) {
-      return unavailable("no-provider", `No enabled plugin handles ${repo.host}.`);
+      return unavailable("no-provider", `No enabled plugin handles ${repoInfo.host}.`);
     }
     return {
       ok: true,
-      repo,
+      repo: repoInfo,
       branch: worktree.branch,
       // The provider's `gh` calls name the repository, so they need no checkout. They
-      // run on the hub, where a remote workspace's path does not exist.
+      // run on the hub, where a remote worktree's path does not exist.
       ctx: {
         cwd: host.id === hostRegistry.local.id ? worktree.path : tmpdir(),
-        defaultBranch: project.defaultBranch,
+        defaultBranch: repo.defaultBranch,
       },
       provider,
     };
@@ -137,10 +137,10 @@ export class ReviewService {
 }
 
 function unavailable(
-  reason: Extract<WorkspaceReview, { status: "unavailable" }>["reason"],
+  reason: Extract<WorktreeReview, { status: "unavailable" }>["reason"],
   message: string,
 ): Target {
   return { ok: false, result: { status: "unavailable", reason, message } };
 }
 
-export const reviewService = new ReviewService(pluginHost, workspaceService);
+export const reviewService = new ReviewService(pluginHost, worktreeService);

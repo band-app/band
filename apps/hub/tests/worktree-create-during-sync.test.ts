@@ -1,16 +1,16 @@
-// A workspace created while a worktree sync is running must stay listed.
+// A worktree created while a worktree sync is running must stay listed.
 //
-// `syncWorktrees` loads the whole projects state, awaits git calls per
-// project, and saves the whole state back when anything changed. A
-// `workspaces.create` that saved its new row in between used to be wiped by
-// that save, so `band workspaces list` right after `band workspaces create`
-// could miss the new workspace (CLI test `workspaces_list_shows_created_worktrees`,
+// `syncWorktrees` loads the whole repos state, awaits git calls per
+// repo, and saves the whole state back when anything changed. A
+// `worktrees.create` that saved its new row in between used to be wiped by
+// that save, so `band worktrees list` right after `band worktrees create`
+// could miss the new worktree (CLI test `worktrees_list_shows_created_worktrees`,
 // CI run 36390074407).
 //
-// The test parks the server's boot sync on a remote: the project's `origin`
+// The test parks the server's boot sync on a remote: the repo's `origin`
 // is a git remote stub that holds every request, and the sync's
 // `git remote set-head --auto` waits on it after the sync has loaded state
-// and listed worktrees. While it waits, the test creates a workspace. On
+// and listed worktrees. While it waits, the test creates a worktree. On
 // release the remote reports `trunk` as its default branch, so the sync has a
 // change to save.
 
@@ -19,7 +19,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GitRemoteStub, startGitRemoteStub } from "./fixtures/git-remote-stub";
-import { listWorktreeNames, readProjectDefaultBranch } from "./helpers/db-read";
+import { listWorktreeNames, readRepoDefaultBranch } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -30,7 +30,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const TOKEN = "workspace-create-during-sync-token";
+const TOKEN = "worktree-create-during-sync-token";
 
 const gitEnv = {
   ...process.env,
@@ -44,7 +44,7 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-describe("workspaces.create while a worktree sync is running", () => {
+describe("worktrees.create while a worktree sync is running", () => {
   let tmpHome: string;
   let remote: GitRemoteStub;
   let server: ServerHandle;
@@ -69,7 +69,7 @@ describe("workspaces.create while a worktree sync is running", () => {
     git(repoPath, ["update-ref", "refs/remotes/origin/trunk", "HEAD"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "proj",
           path: repoPath,
@@ -91,24 +91,24 @@ describe("workspaces.create while a worktree sync is running", () => {
   });
 
   it("rejects an unauthenticated create", async () => {
-    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+    const res = await fetch(`${server.url}/trpc/worktrees.create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: "proj", branch: "feat/unauth" }),
+      body: JSON.stringify({ repo: "proj", branch: "feat/unauth" }),
     });
     expect(res.status).toBe(401);
     expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);
   });
 
-  it("keeps the new workspace when the sync saves after it", async () => {
+  it("keeps the new worktree when the sync saves after it", async () => {
     // The boot sync has loaded state and listed worktrees, and now waits on
     // the remote.
     await remote.firstRequest;
 
     const res = await trpcMutate(
       server.url,
-      "workspaces.create",
-      { project: "proj", branch: "feat/b" },
+      "worktrees.create",
+      { repo: "proj", branch: "feat/b" },
       TOKEN,
     );
     expect(res.status, await res.clone().text()).toBe(200);
@@ -117,14 +117,14 @@ describe("workspaces.create while a worktree sync is running", () => {
     remote.release();
     // The sync saves once it has the remote's default branch.
     await expect
-      .poll(() => readProjectDefaultBranch(tmpHome, "proj"), { timeout: 10_000, interval: 50 })
+      .poll(() => readRepoDefaultBranch(tmpHome, "proj"), { timeout: 10_000, interval: 50 })
       .toBe("trunk");
 
     expect(listWorktreeNames(tmpHome, "proj")).toEqual(["feat/b", "main"]);
     const listed = await trpcData<{
-      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-    }>(await trpcQuery(server.url, "projects.list", undefined, TOKEN));
-    const proj = listed.projects.find((p) => p.name === "proj");
+      repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>(await trpcQuery(server.url, "repos.list", undefined, TOKEN));
+    const proj = listed.repos.find((p) => p.name === "proj");
     expect(proj?.worktrees.map((wt) => wt.name).sort()).toEqual(["feat/b", "main"]);
   });
 });

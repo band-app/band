@@ -1,10 +1,10 @@
 import type { SessionUsageSnapshot } from "../types.ts";
 
-/** One provider session tied to a workspace directory. */
+/** One provider session tied to a worktree directory. */
 export interface UsageSessionItem {
   sessionId: string;
   /** Epoch ms of the session's last on-disk change. The Reports scanner
-   *  compares it against its per-(workspace, agent) watermark. */
+   *  compares it against its per-(worktree, agent) watermark. */
   lastModified: number;
 }
 

@@ -65,7 +65,7 @@ function git(cwd: string, args: string[]): string {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("workspace.getTerminalConfig", () => {
+describe("worktree.getTerminalConfig", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -82,7 +82,7 @@ describe("workspace.getTerminalConfig", () => {
     git(repoPath, ["commit", "-m", "initial commit"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "repo",
           path: repoPath,
@@ -104,8 +104,8 @@ describe("workspace.getTerminalConfig", () => {
   });
 
   it("returns null when no config exists", async () => {
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -118,8 +118,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify({ setup: "npm install" }));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -144,8 +144,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -202,8 +202,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -241,8 +241,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -276,8 +276,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(invalidConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -301,17 +301,17 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(invalidConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
     expect(data.config).toBeNull();
   });
 
-  it("returns null for unknown workspace", async () => {
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "nonexistent-branch",
+  it("returns null for unknown worktree", async () => {
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "nonexistent-branch",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -335,8 +335,8 @@ describe("workspace.getTerminalConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
-    const res = await trpcQuery(server.url, "workspace.getTerminalConfig", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
+      worktreeId: "repo-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{

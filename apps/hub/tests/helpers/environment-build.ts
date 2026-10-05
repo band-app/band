@@ -73,11 +73,11 @@ export function environmentClient(getServer: () => ServerHandle, getStatePath: (
   const dockerCalls = (command: string) =>
     stub().calls.filter((c) => c.tool === "docker" && c.args[0] === command);
 
-  async function build(project: string, force = false) {
+  async function build(repo: string, force = false) {
     const res = await trpcMutate(
       getServer().url,
       "environment.build",
-      { projectName: project, force },
+      { repoName: repo, force },
       ENV_BUILD_TOKEN,
     );
     const body = await res.clone().text();
@@ -91,11 +91,11 @@ export function environmentClient(getServer: () => ServerHandle, getStatePath: (
     };
   }
 
-  async function imageStatus(project: string): Promise<ImageStatus> {
+  async function imageStatus(repo: string): Promise<ImageStatus> {
     const res = await trpcQuery(
       getServer().url,
       "environment.imageStatus",
-      { projectName: project },
+      { repoName: repo },
       ENV_BUILD_TOKEN,
     );
     expect(res.status, await res.clone().text()).toBe(200);
@@ -103,17 +103,17 @@ export function environmentClient(getServer: () => ServerHandle, getStatePath: (
   }
 
   /** Starts a build and waits until it ends. */
-  async function buildAndWait(project: string, force = false): Promise<Build> {
-    const started = await build(project, force);
+  async function buildAndWait(repo: string, force = false): Promise<Build> {
+    const started = await build(repo, force);
     expect(started.status, started.body).toBe(200);
     return waitFor(
       async () => {
-        const s = await imageStatus(project);
+        const s = await imageStatus(repo);
         return s.latest && s.latest.id === started.data?.build.id && s.latest.status !== "building"
           ? s.latest
           : undefined;
       },
-      { label: `build of ${project} to end`, timeoutMs: 30_000, intervalMs: 100 },
+      { label: `build of ${repo} to end`, timeoutMs: 30_000, intervalMs: 100 },
     );
   }
 

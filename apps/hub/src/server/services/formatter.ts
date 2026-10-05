@@ -52,7 +52,7 @@ interface FormatFileOptions {
    * Override Prettier's config resolution (test hook). Production callers
    * always omit this so Prettier walks the worktree to discover
    * `.prettierrc*`, `prettier.config.js`, or the `package.json::prettier`
-   * field — matching how the project's own `pnpm prettier --write` runs.
+   * field — matching how the repo's own `pnpm prettier --write` runs.
    */
   configOverride?: prettier.Options | null;
   /**
@@ -105,7 +105,7 @@ export async function formatFile(
 
   // `inferredParser` is null when Prettier has no built-in parser for the
   // file's extension (and no plugin registers one). That's our soft-skip
-  // signal — explicitly preferred over `getSupportInfo` so any project-
+  // signal — explicitly preferred over `getSupportInfo` so any repo-
   // level `plugins` config a user has set is honoured.
   //
   // `ignorePath` has to be supplied explicitly: Prettier's programmatic API
@@ -189,7 +189,7 @@ const JSON_CONFIGS = [".prettierrc", ".prettierrc.json"];
 /**
  * Finds the Prettier config for a file on a remote host: the nearest JSON
  * `.prettierrc`, `.prettierrc.json` or `package.json` with a `prettier` key,
- * from the file's directory up to the worktree root. A project that keeps its
+ * from the file's directory up to the worktree root. A repo that keeps its
  * config in YAML or JavaScript gets Prettier's defaults.
  */
 async function resolveConfigOnHost(

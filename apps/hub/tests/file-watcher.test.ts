@@ -1,18 +1,18 @@
 // Integration tests for the FileBrowser cache-invalidation flow:
 //
 //   * `apps/hub/src/server/services/file-watcher.ts` starts a recursive `fs.watch` on
-//     demand when a client subscribes to a workspace's file changes, and
+//     demand when a client subscribes to a worktree's file changes, and
 //     tears it down when the last subscriber disconnects.
-//   * The tRPC `workspace.fileChanges({ workspaceId })` subscription
+//   * The tRPC `worktree.fileChanges({ worktreeId })` subscription
 //     forwards coalesced events to the WebSocket client.
 //   * The web adapter's `subscribeFileChanges` is a thin wrapper around it.
 //
 // We exercise the full server pipeline by spawning the production server,
-// subscribing via WebSocket for a specific workspace, mutating files on
+// subscribing via WebSocket for a specific worktree, mutating files on
 // disk from outside the server's own mutation endpoints (the exact
 // scenario issue #384 describes — terminals, IDEs, drag-drop, agents)
 // and asserting that the right events arrive (and nothing leaks across
-// workspaces).
+// worktrees).
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -91,14 +91,14 @@ interface Subscription {
 }
 
 /**
- * Subscribe to `workspace.fileChanges` for a single workspace. The
+ * Subscribe to `worktree.fileChanges` for a single worktree. The
  * resolved `ready` promise waits for the server to confirm the
  * subscription has started AND adds a grace period so the recursive
  * `fs.watch` handle is fully primed before the test touches the FS.
  * 500 ms is conservative for slow / shared CI runners — at 250 ms the
  * very first write occasionally races the kernel setting up the watch.
  */
-function subscribeFileChanges(serverUrl: string, workspaceId: string): Subscription {
+function subscribeFileChanges(serverUrl: string, worktreeId: string): Subscription {
   const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
   const fileChanges: FileChangePayload[] = [];
   const listeners: Array<{
@@ -118,7 +118,7 @@ function subscribeFileChanges(serverUrl: string, workspaceId: string): Subscript
         id: 1,
         jsonrpc: "2.0",
         method: "subscription",
-        params: { path: "workspace.fileChanges", input: { workspaceId } },
+        params: { path: "worktree.fileChanges", input: { worktreeId } },
       }),
     );
   });
@@ -181,14 +181,14 @@ describe("file-watcher — external file change events", () => {
   let tmpHome: string;
   let repoPath: string;
   let otherRepoPath: string;
-  const workspaceId = "myrepo-main";
+  const worktreeId = "myrepo-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-file-watcher-test-");
     repoPath = createGitRepo(tmpHome, "myrepo");
     otherRepoPath = createGitRepo(tmpHome, "otherrepo");
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "myrepo",
           path: repoPath,
@@ -212,8 +212,8 @@ describe("file-watcher — external file change events", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("emits a file-change event when a file is created at the workspace root", async () => {
-    const sub = subscribeFileChanges(server.url, workspaceId);
+  it("emits a file-change event when a file is created at the worktree root", async () => {
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       const wait = sub.waitForFileChange((p) => p === "");
@@ -226,7 +226,7 @@ describe("file-watcher — external file change events", () => {
   });
 
   it("emits a file-change event when a file is created in a subdirectory", async () => {
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       const wait = sub.waitForFileChange((p) => p === "src");
@@ -248,7 +248,7 @@ describe("file-watcher — external file change events", () => {
     // assertion isn't satisfied by stale traffic on the wire.
     await new Promise((r) => setTimeout(r, 400));
 
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       const wait = sub.waitForFileChange((p) => p === "src");
@@ -265,7 +265,7 @@ describe("file-watcher — external file change events", () => {
     // suppressed so the FileBrowser isn't drowned in `pnpm install` noise.
     await mkdir(join(repoPath, "node_modules", "junk"), { recursive: true });
 
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
 
@@ -285,14 +285,14 @@ describe("file-watcher — external file change events", () => {
     }
   });
 
-  it("does not start a watcher for an unknown workspace", async () => {
-    // Subscribing for a workspace that doesn't exist returns a silent no-op
+  it("does not start a watcher for an unknown worktree", async () => {
+    // Subscribing for a worktree that doesn't exist returns a silent no-op
     // — no events ever arrive. This is what protects us from runaway
     // watchers on misconfigured clients.
-    const sub = subscribeFileChanges(server.url, "definitely-not-a-real-workspace");
+    const sub = subscribeFileChanges(server.url, "definitely-not-a-real-worktree");
     try {
       await sub.ready;
-      // Touch a file in the OTHER workspace — should NOT leak to this sub.
+      // Touch a file in the OTHER worktree — should NOT leak to this sub.
       await writeFile(join(repoPath, "isolation-test.txt"), "x\n");
       await expect(sub.waitForFileChange(undefined, 600)).rejects.toThrow(/Timed out/);
     } finally {
@@ -300,20 +300,20 @@ describe("file-watcher — external file change events", () => {
     }
   });
 
-  it("scopes events to the subscribed workspace and ignores changes in other workspaces", async () => {
-    // The point of the per-workspace subscription model: a client viewing
-    // workspace A must not be woken up by file activity in workspace B,
+  it("scopes events to the subscribed worktree and ignores changes in other worktrees", async () => {
+    // The point of the per-worktree subscription model: a client viewing
+    // worktree A must not be woken up by file activity in worktree B,
     // and a watcher for B must not start at all just because A is being
     // viewed (see issue #384 — watching every worktree doesn't scale).
-    const subA = subscribeFileChanges(server.url, workspaceId);
+    const subA = subscribeFileChanges(server.url, worktreeId);
     try {
       await subA.ready;
 
-      // Change a file in workspace B — subA must NOT receive it.
+      // Change a file in worktree B — subA must NOT receive it.
       await writeFile(join(otherRepoPath, "B-only.txt"), "B\n");
       await expect(subA.waitForFileChange(undefined, 600)).rejects.toThrow(/Timed out/);
 
-      // Change a file in workspace A — subA must receive it.
+      // Change a file in worktree A — subA must receive it.
       const wait = subA.waitForFileChange((p) => p === "");
       await writeFile(join(repoPath, "A-only.txt"), "A\n");
       const event = await wait;
@@ -323,13 +323,13 @@ describe("file-watcher — external file change events", () => {
     }
   });
 
-  it("delivers a file-change event to every subscriber of the same workspace", async () => {
-    // Two browser tabs / dockview panels viewing the same workspace should
+  it("delivers a file-change event to every subscriber of the same worktree", async () => {
+    // Two browser tabs / dockview panels viewing the same worktree should
     // share one underlying `fs.watch` handle but each receive every event.
     // If a future change accidentally replaced (instead of accumulated) the
     // listener set on second subscribe, only one sub would receive events.
-    const subA = subscribeFileChanges(server.url, workspaceId);
-    const subB = subscribeFileChanges(server.url, workspaceId);
+    const subA = subscribeFileChanges(server.url, worktreeId);
+    const subB = subscribeFileChanges(server.url, worktreeId);
     try {
       await Promise.all([subA.ready, subB.ready]);
 
@@ -351,8 +351,8 @@ describe("file-watcher — external file change events", () => {
     // is still listening. Without proper refcounting, the second tab
     // would silently stop receiving events as soon as the first tab is
     // closed.
-    const subA = subscribeFileChanges(server.url, workspaceId);
-    const subB = subscribeFileChanges(server.url, workspaceId);
+    const subA = subscribeFileChanges(server.url, worktreeId);
+    const subB = subscribeFileChanges(server.url, worktreeId);
     try {
       await Promise.all([subA.ready, subB.ready]);
 
@@ -374,7 +374,7 @@ describe("file-watcher — external file change events", () => {
     // `.git/` is the noisiest source of churn on a real worktree (every
     // `git` command rewrites refs, HEAD, index, etc.). The FileBrowser
     // never displays it, so it must not produce events.
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       await writeFile(join(repoPath, ".git", "PROBE"), "probe\n");
@@ -393,7 +393,7 @@ describe("file-watcher — external file change events", () => {
     // satisfied by the delete event, not the earlier write.
     await new Promise((r) => setTimeout(r, 400));
 
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       const wait = sub.waitForFileChange((p) => p === "src");
@@ -411,7 +411,7 @@ describe("file-watcher — external file change events", () => {
     // Allow the watcher to register the directory creation.
     await new Promise((r) => setTimeout(r, 400));
 
-    const sub = subscribeFileChanges(server.url, workspaceId);
+    const sub = subscribeFileChanges(server.url, worktreeId);
     try {
       await sub.ready;
       const before = sub.fileChanges.length;

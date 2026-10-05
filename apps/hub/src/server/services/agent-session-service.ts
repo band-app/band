@@ -19,7 +19,7 @@
  *   - Neither works: a new session, with a notice in the chat.
  * A session with a turn in flight is never loaded.
  *
- * Turn lifecycle (prompt records, queue, workspace status) lives in
+ * Turn lifecycle (prompt records, queue, worktree status) lives in
  * `task-service`, which calls `ensureSession` / `prompt` / `cancel` here.
  */
 
@@ -61,7 +61,7 @@ import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
-import { workspaceService } from "./workspace-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
 
@@ -96,7 +96,7 @@ interface LiveState {
 }
 
 interface PendingRequest {
-  workspaceId: string;
+  worktreeId: string;
   cancel(): void;
   permission?(optionId: string | null): void;
   /** Option ids the agent offered; an answer must be one of them. */
@@ -106,7 +106,7 @@ interface PendingRequest {
 
 interface Runtime {
   chatId: string;
-  workspaceId: string;
+  worktreeId: string;
   agentDefId: string;
   process: AcpAgentProcess | null;
   /** Bumped per spawned process, so a late exit of an old one is ignored. */
@@ -179,7 +179,7 @@ const defaultsChangedAt = g[DEFAULTS_CHANGED_KEY] as Map<string, number>;
  *  a client's gap-fill cursor. */
 let transientId = -1_000_000_000;
 
-let pendingObserver: ((chatId: string, workspaceId: string) => void) | null = null;
+let pendingObserver: ((chatId: string, worktreeId: string) => void) | null = null;
 
 function emptyLive(): LiveState {
   return { configOptions: [], modes: null, models: null, commands: [], usage: null, title: null };
@@ -254,7 +254,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
   if (!rt) {
     rt = {
       chatId: chat.id,
-      workspaceId: chat.workspaceId,
+      worktreeId: chat.worktreeId,
       agentDefId: def.id,
       process: null,
       generation: 0,
@@ -412,9 +412,9 @@ async function readClaudeDefaults(
   learn: boolean,
 ): Promise<ResolvedDefaults | undefined> {
   if (def.type !== "claude-code") return undefined;
-  const workspace = chat ? workspaceService.resolve(chat.workspaceId) : undefined;
-  const cwd = workspace?.worktree.path;
-  const host = workspace?.host ?? hostRegistry.local;
+  const worktree = chat ? worktreeService.resolve(chat.worktreeId) : undefined;
+  const cwd = worktree?.worktree.path;
+  const host = worktree?.host ?? hostRegistry.local;
   const configured = await host.agentEnv.claudeDefaults(
     cwd,
     runtimes.get(chatId)?.claudeCli ?? undefined,
@@ -526,7 +526,7 @@ function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
 function openRequest(
   rt: Runtime,
   signal: AbortSignal,
-  make: (done: (answer: string) => void) => Omit<PendingRequest, "workspaceId" | "cancel">,
+  make: (done: (answer: string) => void) => Omit<PendingRequest, "worktreeId" | "cancel">,
   onCancel: () => void,
 ): string {
   const requestId = randomUUID();
@@ -536,7 +536,7 @@ function openRequest(
     settled = true;
     rt.pending.delete(requestId);
     record(rt, { type: "request-resolved", requestId, answer });
-    pendingObserver?.(rt.chatId, rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.worktreeId);
   };
   const handlers = make(done);
   const cancel = () => {
@@ -544,7 +544,7 @@ function openRequest(
     done("cancelled");
     onCancel();
   };
-  rt.pending.set(requestId, { workspaceId: rt.workspaceId, cancel, ...handlers });
+  rt.pending.set(requestId, { worktreeId: rt.worktreeId, cancel, ...handlers });
   signal.addEventListener("abort", cancel, { once: true });
   return requestId;
 }
@@ -568,7 +568,7 @@ function requestPermission(
       () => resolve({ outcome: "cancelled" }),
     );
     record(rt, { type: "permission", requestId, request });
-    pendingObserver?.(rt.chatId, rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.worktreeId);
   });
 }
 
@@ -591,7 +591,7 @@ function requestElicitation(
       () => resolve({ action: "cancel" }),
     );
     record(rt, { type: "elicitation", requestId, request });
-    pendingObserver?.(rt.chatId, rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.worktreeId);
   });
 }
 
@@ -634,12 +634,12 @@ async function ensureProcess(
   if (rt.starting) return rt.starting;
   const generation = ++rt.generation;
   rt.starting = (async () => {
-    const host = hostRegistry.hostFor(rt.workspaceId);
+    const host = hostRegistry.hostFor(rt.worktreeId);
     const launch = await host.acp.resolveLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
     // An agent on a remote host reaches the hub through the worker's relay,
     // with a token that works for this chat's host only.
-    const grant = await host.relay?.issue({ workspaceId: rt.workspaceId, chatId: rt.chatId });
+    const grant = await host.relay?.issue({ worktreeId: rt.worktreeId, chatId: rt.chatId });
     // Lets the agent say which chat it runs in, for `subscriptions.create`.
     const withChat = {
       ...launch,
@@ -647,7 +647,7 @@ async function ensureProcess(
         ...launch.env,
         ...grant?.env,
         BAND_CHAT_ID: rt.chatId,
-        BAND_WORKSPACE_ID: rt.workspaceId,
+        BAND_WORKTREE_ID: rt.worktreeId,
       },
     };
     const handlers = handlersFor(rt, generation);
@@ -775,9 +775,9 @@ function localHubUrl(): string {
  */
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
   try {
-    const workspace = workspaceService.resolve(rt.workspaceId);
-    if (!workspace) return [];
-    const servers = mcpProxyService.serversForSession(workspace.project.name, workspace.host.id);
+    const worktree = worktreeService.resolve(rt.worktreeId);
+    if (!worktree) return [];
+    const servers = mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id);
     if (servers.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -824,7 +824,7 @@ async function attachNew(
   try {
     attached = await proc.newSession(
       cwd,
-      await agentExtraDirs(rt.workspaceId),
+      await agentExtraDirs(rt.worktreeId),
       sessionMcpServers(rt, proc),
     );
   } catch (err) {
@@ -979,7 +979,7 @@ export class AgentSessionService {
 
   /** Called whenever a permission or elicitation request opens or closes,
    *  so task-service can flip the chat's attention status. */
-  observePending(observer: (chatId: string, workspaceId: string) => void): void {
+  observePending(observer: (chatId: string, worktreeId: string) => void): void {
     pendingObserver = observer;
   }
 
@@ -992,16 +992,16 @@ export class AgentSessionService {
   async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    // A message to a sleeping workspace brings its worker back first.
-    if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.workspaceId);
-    const workspace = workspaceService.resolve(chat.workspaceId);
-    if (!workspace) throw new Error(`Workspace not found: ${chat.workspaceId}`);
+    // A message to a sleeping worktree brings its worker back first.
+    if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
+    const worktree = worktreeService.resolve(chat.worktreeId);
+    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;
-    rt.attaching = attach(rt, fresh, def, workspace.worktree.path, purpose);
+    rt.attaching = attach(rt, fresh, def, worktree.worktree.path, purpose);
     try {
       await rt.attaching;
     } finally {
@@ -1087,7 +1087,7 @@ export class AgentSessionService {
     const pid = rt.process?.pid;
     const sessionId = rt.sessionId;
     if (!pid || !sessionId) return;
-    const args = await hostRegistry.hostFor(rt.workspaceId).agentEnv.claudeCliArgs(pid, sessionId);
+    const args = await hostRegistry.hostFor(rt.worktreeId).agentEnv.claudeCliArgs(pid, sessionId);
     if (!args || rt.sessionId !== sessionId) return;
     rt.claudeCli = args;
     await this.pushClaudeDefaults(rt.chatId, false);
@@ -1154,12 +1154,12 @@ export class AgentSessionService {
     return (runtimes.get(chatId)?.pending.size ?? 0) > 0;
   }
 
-  /** Chats of the workspace whose agent waits on the user. */
-  chatsWithPendingRequest(workspaceId: string): string[] {
+  /** Chats of the worktree whose agent waits on the user. */
+  chatsWithPendingRequest(worktreeId: string): string[] {
     const chatIds: string[] = [];
     for (const rt of runtimes.values()) {
       for (const p of rt.pending.values()) {
-        if (p.workspaceId === workspaceId) {
+        if (p.worktreeId === worktreeId) {
           chatIds.push(rt.chatId);
           break;
         }
@@ -1191,18 +1191,18 @@ export class AgentSessionService {
    * like effort and fast mode, and it reshapes the option list when the
    * model changes (fast mode only exists on some models).
    *
-   * With `workspaceId`, a chat that has no row yet (a new pane, created
+   * With `worktreeId`, a chat that has no row yet (a new pane, created
    * lazily like on its first message) gets one with the default agent.
    */
   async setConfigOption(
     chatId: string,
     configId: string,
     value: string,
-    workspaceId?: string,
+    worktreeId?: string,
   ): Promise<SessionState> {
     const chat =
       chatService.get(chatId) ??
-      (workspaceId ? chatService.create(workspaceId, { id: chatId, name: "Chat" }) : undefined);
+      (worktreeId ? chatService.create(worktreeId, { id: chatId, name: "Chat" }) : undefined);
     if (!chat) throw new ChatNotFoundError(chatId);
     const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
     const category =
@@ -1383,18 +1383,18 @@ export class AgentSessionService {
   }
 
   /**
-   * Past sessions for the chat's agent in its workspace: the agent's
+   * Past sessions for the chat's agent in its worktree: the agent's
    * `session/list` when it supports it, with Band's own log filling in
    * titles and covering agents that can't list.
    */
   async listSessions(chatId: string): Promise<SessionListing> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const workspace = workspaceService.resolve(chat.workspaceId);
-    if (!workspace) throw new Error(`Workspace not found: ${chat.workspaceId}`);
+    const worktree = worktreeService.resolve(chat.worktreeId);
+    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
     const sameAgent = chatService
-      .list(chat.workspaceId)
+      .list(chat.worktreeId)
       .filter((c) => definitionFor(c).id === def.id)
       .map((c) => c.id);
     const logged = events.listSessions(sameAgent);
@@ -1403,9 +1403,9 @@ export class AgentSessionService {
     const rt = runtimeFor(chat, def);
     let agentSessions: acp.SessionInfo[] | null = null;
     try {
-      const proc = await ensureProcess(rt, def, workspace.worktree.path);
+      const proc = await ensureProcess(rt, def, worktree.worktree.path);
       if (!rt.inTurn) scheduleIdle(rt);
-      if (proc.canList) agentSessions = await proc.listSessions(workspace.worktree.path);
+      if (proc.canList) agentSessions = await proc.listSessions(worktree.worktree.path);
     } catch (err) {
       log.warn({ chatId, err }, "session/list failed; using Band's log");
       // Let the idle timer drop a runtime that never got a process.
@@ -1548,7 +1548,7 @@ export class AgentSessionService {
    * so only read-only calls (`read`, `search`) are approved, once; anything
    * else the agent's rules would ask about is refused. Read-only git
    * commands don't reach this: Claude Code allows them without asking and
-   * Codex runs them in its workspace sandbox.
+   * Codex runs them in its worktree sandbox.
    */
   async oneShot(
     def: CodingAgentDefinition,

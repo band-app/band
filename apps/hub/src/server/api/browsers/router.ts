@@ -41,37 +41,37 @@ function rethrowProfileNotFound(err: unknown): never {
 }
 
 export const browsersRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { browsers: browserService.list(input.workspaceId) };
+  list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
+    return { browsers: browserService.list(input.worktreeId) };
   }),
 
   create: publicProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        worktreeId: z.string(),
         id: z.string().optional(),
         name: z.string().optional(),
         url: z.string().optional(),
-        // Omitted: the project's default profile. `null`: the Default profile.
+        // Omitted: the repo's default profile. `null`: the Default profile.
         profileId: z.string().regex(BROWSER_PROFILE_ID_PATTERN).nullish(),
       }),
     )
     .mutation(({ input }) => {
       let profileId: string | null;
       try {
-        profileId = browserProfileService.resolveForNewTab(input.workspaceId, input.profileId);
+        profileId = browserProfileService.resolveForNewTab(input.worktreeId, input.profileId);
       } catch (err) {
         rethrowProfileNotFound(err);
       }
       // `browserService.create` also registers the tab in the saved
       // dockview layout — see `chatService.create` for the same pattern.
-      const browser = browserService.create(input.workspaceId, {
+      const browser = browserService.create(input.worktreeId, {
         id: input.id,
         name: input.name,
         url: input.url,
         profileId,
       });
-      emit({ kind: "browser-created", workspaceId: input.workspaceId, browserId: browser.id });
+      emit({ kind: "browser-created", worktreeId: input.worktreeId, browserId: browser.id });
       return { browser };
     }),
 
@@ -104,8 +104,8 @@ export const browsersRouter = t.router({
 
   /**
    * Switch a tab to another profile (`null` is Default). Also makes it the
-   * default profile of the tab's project, so new tabs in any workspace of
-   * that project open with it.
+   * default profile of the tab's repo, so new tabs in any worktree of
+   * that repo open with it.
    */
   setProfile: publicProcedure
     .input(
@@ -135,13 +135,13 @@ export const browsersRouter = t.router({
   remove: publicProcedure.input(z.object({ browserId: z.string() })).mutation(({ input }) => {
     // `browserService.remove` handles DB + layout + in-memory cleanup in
     // one call (mirrors `chatService.remove`) and returns the removed tab
-    // so we can carry its `workspaceId` into the lifecycle event without
+    // so we can carry its `worktreeId` into the lifecycle event without
     // a pre-remove `get()` — a separate read would race with concurrent
-    // deletes and could surface `workspaceId: undefined` on the event.
+    // deletes and could surface `worktreeId: undefined` on the event.
     const removed = browserService.remove(input.browserId);
     emit({
       kind: "browser-removed",
-      workspaceId: removed === false ? undefined : removed.workspaceId,
+      worktreeId: removed === false ? undefined : removed.worktreeId,
       browserId: input.browserId,
     });
     return { ok: true };

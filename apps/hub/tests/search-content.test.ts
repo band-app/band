@@ -55,12 +55,12 @@ function git(cwd: string, args: string[]): string {
 type SearchResult = { file: string; line: number; content: string };
 
 // ---------------------------------------------------------------------------
-// workspace.searchContent — verifies the ripgrep-backed find-in-files
+// worktree.searchContent — verifies the ripgrep-backed find-in-files
 // procedure finds both tracked and untracked files (the original `git grep`
 // implementation silently dropped untracked files; see issue #431).
 // ---------------------------------------------------------------------------
 
-describe("tRPC — workspace.searchContent (ripgrep)", () => {
+describe("tRPC — worktree.searchContent (ripgrep)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -106,7 +106,7 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
     git(repoPath, ["commit", "-m", "ci workflow"]);
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "repo",
           path: repoPath,
@@ -128,8 +128,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   });
 
   it("returns matches from both tracked and untracked files", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND_RG_MARKER",
     });
     expect(res.status).toBe(200);
@@ -149,8 +149,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   });
 
   it("returns matches from tracked files inside dot-directories (#536)", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND_RG_MARKER",
     });
     expect(res.status).toBe(200);
@@ -172,8 +172,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
     // it sticks. The query "ref:" is chosen because none of the seeded
     // fixture files contain it, so any match would have to come from
     // .git/ itself.
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "ref:",
     });
     expect(res.status).toBe(200);
@@ -182,8 +182,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   });
 
   it("respects .gitignore and excludes ignored files", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND_RG_MARKER",
     });
     const { results } = await trpcData<{ results: SearchResult[] }>(res);
@@ -192,16 +192,16 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
 
   it("supports case-sensitive search", async () => {
     // Lowercase query, case-insensitive (default): matches the uppercase marker.
-    const insensitive = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const insensitive = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "band_rg_marker",
     });
     const insensitiveData = await trpcData<{ results: SearchResult[] }>(insensitive);
     expect(insensitiveData.results.length).toBeGreaterThan(0);
 
     // Same query case-sensitive: no matches.
-    const sensitive = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const sensitive = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "band_rg_marker",
       caseSensitive: true,
     });
@@ -213,16 +213,16 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
     // The tracked.txt content is "tracked-file BAND_RG_MARKER hello". The
     // word "hello" matches as a whole word; "ello" should not when wholeWord
     // is true.
-    const wholeWordMatch = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const wholeWordMatch = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "hello",
       wholeWord: true,
     });
     const matchData = await trpcData<{ results: SearchResult[] }>(wholeWordMatch);
     expect(matchData.results.some((r) => r.file === "tracked.txt")).toBe(true);
 
-    const wholeWordMiss = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const wholeWordMiss = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "ello",
       wholeWord: true,
     });
@@ -233,16 +233,16 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   it("treats fixed-string queries literally (regex disabled)", async () => {
     // A regex meta-character that would match anything in regex mode. With
     // fixed strings (the default), it should match literally and find nothing.
-    const literal = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const literal = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND.*MARKER",
     });
     const literalData = await trpcData<{ results: SearchResult[] }>(literal);
     expect(literalData.results.length).toBe(0);
 
     // Same query with regex enabled should match all marker lines.
-    const regex = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const regex = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND.*MARKER",
       regex: true,
     });
@@ -251,8 +251,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   });
 
   it("respects the limit parameter", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "BAND_RG_MARKER",
       limit: 1,
     });
@@ -261,8 +261,8 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
   });
 
   it("returns an empty result set when there are no matches", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "repo-main",
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "repo-main",
       query: "this-string-does-not-exist-anywhere-in-the-repo-zzz",
     });
     expect(res.status).toBe(200);
@@ -270,9 +270,9 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
     expect(results).toEqual([]);
   });
 
-  it("returns an error for an unknown workspace", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "nonexistent-main",
+  it("returns an error for an unknown worktree", async () => {
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "nonexistent-main",
       query: "anything",
     });
     expect(res.status).toBe(500);
@@ -280,13 +280,13 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// workspace.searchContent — non-git workspaces.
+// worktree.searchContent — non-git worktrees.
 //
 // ripgrep does not require a git repository (unlike `git grep`). Verify the
 // procedure works for plain directories that contain files.
 // ---------------------------------------------------------------------------
 
-describe("tRPC — workspace.searchContent in non-git directories", () => {
+describe("tRPC — worktree.searchContent in non-git directories", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let plainDir: string;
@@ -299,7 +299,7 @@ describe("tRPC — workspace.searchContent in non-git directories", () => {
     writeFileSync(join(plainDir, "file.txt"), "plain BAND_PLAIN_MARKER content\n");
 
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "plain",
           path: plainDir,
@@ -320,9 +320,9 @@ describe("tRPC — workspace.searchContent in non-git directories", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("finds files in a workspace that is not a git repository", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchContent", {
-      workspaceId: "plain-main",
+  it("finds files in a worktree that is not a git repository", async () => {
+    const res = await trpcQuery(server.url, "worktree.searchContent", {
+      worktreeId: "plain-main",
       query: "BAND_PLAIN_MARKER",
     });
     expect(res.status).toBe(200);

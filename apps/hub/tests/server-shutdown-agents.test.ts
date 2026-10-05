@@ -12,7 +12,7 @@
 // so without the fix it is still running when `close()` returns.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sendMessage, startAcpServer, stubRequests, trpc, WORKSPACE_ID } from "./helpers/acp-chat";
+import { sendMessage, startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
@@ -39,7 +39,7 @@ describe("server shutdown", () => {
 
   it("stops an agent that is in the middle of a turn", async () => {
     const { chat } = await trpc<{ chat: { id: string } }>(server.url, "chats.create", {
-      workspaceId: WORKSPACE_ID,
+      worktreeId: WORKTREE_ID,
       name: "Busy agent",
     });
     await sendMessage(server.url, chat.id, "take your time");

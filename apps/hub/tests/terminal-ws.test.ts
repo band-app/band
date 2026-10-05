@@ -1,7 +1,7 @@
 // Integration test for the terminal WebSocket handler.
 //
 // Reproduces the crash reported in production: a stale worktree path
-// triggers `Workspace directory does not exist: <long path>` in the
+// triggers `Worktree directory does not exist: <long path>` in the
 // terminal pool, which the WS handler tried to pass to `ws.close(code,
 // reason)`. RFC 6455 caps close reasons at 123 bytes, and `ws` throws an
 // async `RangeError` over the limit — bubbling up as an Unhandled
@@ -55,7 +55,7 @@ async function startServer(
 }
 
 // A deliberately long, nonexistent worktree path. The terminal pool
-// throws `Workspace directory does not exist: ${cwd}` (36 + cwd bytes), so
+// throws `Worktree directory does not exist: ${cwd}` (36 + cwd bytes), so
 // any cwd longer than 87 bytes will overrun the 123-byte close-reason
 // limit. The path below is 117 bytes — message total ≈ 153 bytes, well
 // over the cap.
@@ -84,7 +84,7 @@ describe("terminal WebSocket — close-reason byte cap", () => {
     // Sanity check: the message we expect the handler to emit must exceed
     // the 123-byte cap, otherwise the test would pass with the bug in
     // place. If this throws, bump the path length above.
-    const expectedMsg = `Workspace directory does not exist: ${stalePath}`;
+    const expectedMsg = `Worktree directory does not exist: ${stalePath}`;
     if (Buffer.byteLength(expectedMsg, "utf8") <= 123) {
       throw new Error(
         `Test fixture broken: expected message is only ${Buffer.byteLength(
@@ -94,11 +94,11 @@ describe("terminal WebSocket — close-reason byte cap", () => {
       );
     }
 
-    // Seed a project with a worktree pointing at a path that DOES NOT exist
+    // Seed a repo with a worktree pointing at a path that DOES NOT exist
     // on disk. TerminalPool.spawn will throw the long error
-    // message when the WS handler tries to spawn into this workspace.
+    // message when the WS handler tries to spawn into this worktree.
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
           name: "journoo_app",
           path: join(tmpHome, "Clients", "journoo", "journoo-ai", "journoo_app"),
@@ -121,9 +121,9 @@ describe("terminal WebSocket — close-reason byte cap", () => {
   });
 
   it("clamps close reason to ≤123 bytes and ships the full message in a JSON frame", async () => {
-    const workspaceId = "journoo_app-feat-journaling-promptkey";
+    const worktreeId = "journoo_app-feat-journaling-promptkey";
     const terminalId = "test-terminal-1";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
 
     const ws = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
@@ -168,7 +168,7 @@ describe("terminal WebSocket — close-reason byte cap", () => {
 
     // 1. Full error message arrived as a JSON frame BEFORE the close.
     expect(outcome.jsonError).toBeDefined();
-    expect(outcome.jsonError!.message).toContain("Workspace directory does not exist");
+    expect(outcome.jsonError!.message).toContain("Worktree directory does not exist");
     expect(outcome.jsonError!.message).toContain(stalePath);
 
     // 2. Close frame uses the handler's app-level code and a clamped reason.
@@ -177,7 +177,7 @@ describe("terminal WebSocket — close-reason byte cap", () => {
     expect(outcome.closeReason!.byteLength).toBeLessThanOrEqual(123);
     // The clamped reason should still be a prefix of the real message so
     // it's debuggable from network logs without needing the JSON frame.
-    expect(outcome.closeReason!.toString("utf8")).toMatch(/^Workspace directory does not exist:/);
+    expect(outcome.closeReason!.toString("utf8")).toMatch(/^Worktree directory does not exist:/);
 
     // 3. The server is still alive — the regression was an unhandled
     //    rejection that killed the entire process. Any HTTP response
@@ -200,15 +200,15 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
     tmpHome = createTmpHome();
     // A real, existing worktree directory so the PTY actually spawns — the
     // ping/pong path only runs once a session is attached.
-    const projectPath = join(tmpHome, "workspace");
-    mkdirSync(projectPath, { recursive: true });
+    const repoPath = join(tmpHome, "worktree");
+    mkdirSync(repoPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "workspace",
-          path: projectPath,
+          name: "worktree",
+          path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: projectPath }],
+          worktrees: [{ branch: "main", path: repoPath }],
         },
       ],
     });
@@ -225,9 +225,9 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
   });
 
   it("responds with a {type:'pong'} frame to a client {type:'ping'}", async () => {
-    const workspaceId = "workspace-main";
+    const worktreeId = "worktree-main";
     const terminalId = "ping-pong-terminal";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
 
     const ws = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
@@ -281,15 +281,15 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    const projectPath = join(tmpHome, "workspace");
-    mkdirSync(projectPath, { recursive: true });
+    const repoPath = join(tmpHome, "worktree");
+    mkdirSync(repoPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "workspace",
-          path: projectPath,
+          name: "worktree",
+          path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: projectPath }],
+          worktrees: [{ branch: "main", path: repoPath }],
         },
       ],
     });
@@ -321,7 +321,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
   const COMMAND =
     "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007\\033]12;?\\007'; echo DONE\"\"MARKER\r";
 
-  const WORKSPACE_ID = "workspace-main";
+  const WORKTREE_ID = "worktree-main";
 
   // Spawn a PTY over the `/terminal` WebSocket, run the OSC-emitting command,
   // and resolve only once BOTH the raw OSC bytes AND the trailing marker have
@@ -332,7 +332,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
   // before the marker reaches scrollback and make the replay assertions flake.
   // Then close the socket; the pool keeps the PTY alive for reconnect/replay.
   async function seedOscScrollback(terminalId: string): Promise<void> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let live = Buffer.alloc(0);
@@ -387,7 +387,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     // sends an `attach` carrying its fitted dims, and the server serializes the
     // mirror at those dims and replays it through stripTerminalQueries on the
     // `/terminal` WS path.
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
     const ws2 = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
     });
@@ -610,7 +610,7 @@ describe("terminal WebSocket — authentication", () => {
     // No cookie → the upgrade handler destroys the socket before the 101
     // handshake, so the client never opens. Assert we observe a failure
     // (error / unexpected-response / close) and never an `open`.
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=noauth`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=noauth`;
     const ws = new WebSocket(wsUrl); // deliberately no Cookie header
 
     const opened = await new Promise<boolean>((resolve, reject) => {
@@ -650,19 +650,19 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
-  const WORKSPACE_ID = "workspace-main";
+  const WORKTREE_ID = "worktree-main";
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    const projectPath = join(tmpHome, "workspace");
-    mkdirSync(projectPath, { recursive: true });
+    const repoPath = join(tmpHome, "worktree");
+    mkdirSync(repoPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "workspace",
-          path: projectPath,
+          name: "worktree",
+          path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: projectPath }],
+          worktrees: [{ branch: "main", path: repoPath }],
         },
       ],
     });
@@ -687,7 +687,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     until: string,
     resize?: { cols: number; rows: number },
   ): Promise<void> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let live = Buffer.alloc(0);
@@ -735,7 +735,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     terminalId: string,
     dims: { cols: number; rows: number } = { cols: 80, rows: 24 },
   ): Promise<Buffer> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let replay: Buffer | null = null;
@@ -989,15 +989,15 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    const projectPath = join(tmpHome, "workspace");
-    mkdirSync(projectPath, { recursive: true });
+    const repoPath = join(tmpHome, "worktree");
+    mkdirSync(repoPath, { recursive: true });
     seedState(tmpHome, {
-      projects: [
+      repos: [
         {
-          name: "workspace",
-          path: projectPath,
+          name: "worktree",
+          path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: projectPath }],
+          worktrees: [{ branch: "main", path: repoPath }],
         },
       ],
     });
@@ -1022,7 +1022,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
   it("spawns the pane shell without NO_COLOR / FORCE_COLOR / CLICOLOR", async () => {
     const terminalId = "color-env-strip";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     // Markers are split with `""` in the typed command so the shell's echo
@@ -1066,7 +1066,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
   // TERM_PROGRAM. Without this, it repaints the whole screen per wheel tick.
   it("tells Claude Code the pane supports synchronized output", async () => {
     const terminalId = "claude-sync-output-env";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
     // `""` keeps the shell's echo of the typed line from matching.
     const COMMAND = `echo "CFS""=\${CLAUDE_CODE_FORCE_SYNC_OUTPUT:-unset}"\r`;

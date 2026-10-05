@@ -9,9 +9,9 @@ import { appRouter } from "../server/api/router.ts";
 // ---------------------------------------------------------------------------
 
 interface ProcedureInfo {
-  /** Dot-separated tRPC path, e.g. "projects.list" */
+  /** Dot-separated tRPC path, e.g. "repos.list" */
   path: string;
-  /** MCP tool name, e.g. "band_projects_list" */
+  /** MCP tool name, e.g. "band_repos_list" */
   toolName: string;
   /** "query" | "mutation" */
   type: string;
@@ -92,7 +92,7 @@ function createMcpServer(req: IncomingMessage): McpServer {
     // biome-ignore lint/suspicious/noExplicitAny: dynamic tRPC caller traversal
     const handler = async (args: any) => {
       try {
-        // Navigate the caller proxy: "projects.list" → caller.projects.list(args)
+        // Navigate the caller proxy: "repos.list" → caller.repos.list(args)
         const parts = proc.path.split(".");
         // biome-ignore lint/suspicious/noExplicitAny: dynamic proxy traversal
         let target: any = caller;
