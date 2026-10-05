@@ -109,4 +109,66 @@ export class ProjectsPage {
     await expect(browser.root).toBeVisible();
     return browser;
   }
+
+  /** The coordinator section of the open project. Its `data-state` is `started` once the chat exists. */
+  coordinator(): Locator {
+    return this.detail.getByTestId("projects__coordinator");
+  }
+
+  coordinatorWorktree(): Locator {
+    return this.detail.getByTestId("projects__coordinator-worktree");
+  }
+
+  autonomy(): Locator {
+    return this.detail.getByTestId("projects__autonomy");
+  }
+
+  async chooseAutonomy(level: "observe" | "steer" | "autonomous"): Promise<void> {
+    await test.step(`Set autonomy to ${level}`, async () => {
+      await this.autonomy().selectOption(level);
+      await expect(this.detail.getByTestId("projects__policy")).toHaveAttribute(
+        "data-autonomy",
+        level,
+      );
+    });
+  }
+
+  /** The select for one model lane: coordinator, worker or reviewer. */
+  lane(lane: "coordinator" | "worker" | "reviewer"): Locator {
+    return lane === "coordinator"
+      ? this.detail.getByTestId("projects__model-select")
+      : this.detail.getByTestId(`projects__lane-${lane}`);
+  }
+
+  maxConcurrent(): Locator {
+    return this.detail.getByTestId("projects__max-concurrent");
+  }
+
+  budget(): Locator {
+    return this.detail.getByTestId("projects__budget");
+  }
+
+  isolationFloor(): Locator {
+    return this.detail.getByTestId("projects__isolation-floor");
+  }
+
+  async savePolicy(limits: {
+    maxConcurrent?: string;
+    budget?: string;
+    isolationFloor?: "worktree" | "container" | "vm";
+    workerModel?: string;
+  }): Promise<void> {
+    await test.step("Save the policy", async () => {
+      if (limits.maxConcurrent !== undefined) await this.maxConcurrent().fill(limits.maxConcurrent);
+      if (limits.budget !== undefined) await this.budget().fill(limits.budget);
+      if (limits.isolationFloor) await this.isolationFloor().selectOption(limits.isolationFloor);
+      if (limits.workerModel) await this.lane("worker").selectOption(limits.workerModel);
+      // The dialog gives no other sign that the save finished.
+      const saved = this.page.waitForResponse(
+        (res) => res.url().includes("projects.update") && res.ok(),
+      );
+      await this.detail.getByTestId("projects__policy-save").click();
+      await saved;
+    });
+  }
 }

@@ -2,7 +2,7 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../connection";
-import { projectRepos, projects, worktrees } from "../schema";
+import { branchStatuses, projectRepos, projects, worktrees } from "../schema";
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectRepoRow = typeof projectRepos.$inferSelect;
@@ -30,6 +30,27 @@ export class ProjectQueries {
 
   findByContext(contextName: string): ProjectRow | undefined {
     return getDb().select().from(projects).where(eq(projects.contextName, contextName)).get();
+  }
+
+  findByCoordinatorChat(chatId: string): ProjectRow | undefined {
+    return getDb().select().from(projects).where(eq(projects.coordinatorChatId, chatId)).get();
+  }
+
+  findByCoordinatorWorktree(worktreeId: string): ProjectRow | undefined {
+    return getDb()
+      .select()
+      .from(projects)
+      .where(eq(projects.coordinatorWorktreeId, worktreeId))
+      .get();
+  }
+
+  /** The CI state and pull request the branch-status poller last stored for a worktree. */
+  branchStatus(worktreeId: string) {
+    return getDb()
+      .select({ ciState: branchStatuses.ciState, ciPr: branchStatuses.ciPr })
+      .from(branchStatuses)
+      .where(eq(branchStatuses.worktreeId, worktreeId))
+      .get();
   }
 
   insert(row: ProjectRow, repos: Array<{ repoName: string; role: string | null }>): void {

@@ -58,12 +58,16 @@ import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
+import { COORDINATOR_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { contextPreambleService } from "./context-preamble-service";
 import { contextSyncService } from "./context-sync-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
+// FRAGILE: ESM cycle leg, `project-coordinator-service` imports this file back.
+// Safe because it is only used inside function bodies.
+import { projectCoordinatorService } from "./project-coordinator-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -786,11 +790,14 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   try {
     const worktree = worktreeService.resolve(rt.worktreeId);
     if (!worktree) return [];
-    const servers = mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id);
-    if (servers.length === 0) return [];
+    // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
+    const names = projectCoordinatorService.projectOfChat(rt.chatId)
+      ? [COORDINATOR_SERVER]
+      : mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name);
+    if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
-        { chatId: rt.chatId, agent: proc.agentName, servers: servers.map((s) => s.name) },
+        { chatId: rt.chatId, agent: proc.agentName, servers: names },
         "agent does not support HTTP MCP servers, so none are passed",
       );
       return [];
@@ -799,7 +806,7 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     mcpProxyService.revokeSession(rt.chatId);
     const { token } = mcpProxyService.issueSessionToken(
       rt.chatId,
-      servers.map((s) => s.name),
+      names,
       // The process can outlive the default hour. Exit and chat removal revoke it.
       MAX_TOKEN_TTL_MS,
     );
@@ -808,15 +815,34 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     if (rt.relayEnv?.BAND_TOKEN) {
       headers.push({ name: "X-Band-Relay-Token", value: rt.relayEnv.BAND_TOKEN });
     }
-    return servers.map((s) => ({
+    return names.map((name) => ({
       type: "http" as const,
-      name: s.name,
-      url: `${base}/mcp-proxy/${encodeURIComponent(s.name)}`,
+      name,
+      url: `${base}/mcp-proxy/${encodeURIComponent(name)}`,
       headers,
     }));
   } catch (err) {
     log.warn({ chatId: rt.chatId, err }, "could not prepare MCP servers for the session");
     return [];
+  }
+}
+
+/**
+ * A project's coordinator chat starts with its charter ahead of the context preamble (plan
+ * step 6.2), so the charter takes the same way into each agent. Any other chat is unchanged.
+ */
+function withCharter(chatId: string, preamble: SessionPreamble | null): SessionPreamble | null {
+  try {
+    const project = projectCoordinatorService.projectOfChat(chatId);
+    if (!project) return preamble;
+    const charter = projectCoordinatorService.charter(project);
+    return {
+      text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
+      memoryDir: preamble?.memoryDir ?? null,
+    };
+  } catch (err) {
+    log.warn({ chatId, err }, "could not prepare the coordinator charter");
+    return preamble;
   }
 }
 
@@ -1034,7 +1060,10 @@ export class AgentSessionService {
     const viewNeedsNothing =
       purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
     if (!attachedAlready && !viewNeedsNothing) {
-      rt.preamble = await contextPreambleService.forWorktree(chat.worktreeId);
+      rt.preamble = withCharter(
+        rt.chatId,
+        await contextPreambleService.forWorktree(chat.worktreeId),
+      );
       if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
         log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
       }

@@ -149,3 +149,49 @@ test("refuses to remove a repo that still has a worktree in the project", async 
   await projects.removeRepo(CLIENT);
   await expect(projects.repo(CLIENT)).toHaveCount(0);
 });
+
+test("a new project starts its coordinator and shows the default policy and model lanes", async ({
+  page,
+}) => {
+  await trpc("projects.create", { name: "ledger", repos: [{ repo: CLIENT }] });
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.goto();
+  await projects.open();
+  await projects.openProject("ledger");
+
+  await expect(projects.coordinator()).toHaveAttribute("data-state", "started");
+  await expect(projects.coordinatorWorktree()).toHaveText(`${CLIENT}-coordinator-ledger`);
+  await expect(projects.autonomy()).toHaveValue("steer");
+  await expect(projects.lane("coordinator")).toHaveValue("opus");
+  await expect(projects.lane("worker")).toHaveValue("sonnet");
+  await expect(projects.lane("reviewer")).toHaveValue("sonnet");
+  await expect(projects.maxConcurrent()).toHaveValue("");
+  await expect(projects.isolationFloor()).toHaveValue("worktree");
+});
+
+test("edits the autonomy and the policy limits and keeps them after a reload", async ({ page }) => {
+  await trpc("projects.create", { name: "payments", repos: [{ repo: API }] });
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.goto();
+  await projects.open();
+  await projects.openProject("payments");
+
+  await projects.chooseAutonomy("observe");
+  await projects.savePolicy({
+    maxConcurrent: "2",
+    budget: "25",
+    isolationFloor: "container",
+    workerModel: "haiku",
+  });
+  await expect(projects.maxConcurrent()).toHaveValue("2");
+
+  await projects.goto();
+  await projects.open();
+  await projects.openProject("payments");
+  await expect(projects.autonomy()).toHaveValue("observe");
+  await expect(projects.maxConcurrent()).toHaveValue("2");
+  await expect(projects.budget()).toHaveValue("25");
+  await expect(projects.isolationFloor()).toHaveValue("container");
+  await expect(projects.lane("worker")).toHaveValue("haiku");
+  await expect(projects.lane("reviewer")).toHaveValue("sonnet");
+});

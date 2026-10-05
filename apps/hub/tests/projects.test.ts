@@ -165,14 +165,14 @@ describe("projects.create", () => {
       description: "Checkout revamp",
       repos: [{ repo: "api", role: "api" }, { repo: "client" }],
       labels: ["pool=eu"],
-      policy: { maxConcurrent: 3, isolation: "container" },
+      policy: { maxConcurrent: 3, isolationFloor: "container" },
     });
     expect(created).toMatchObject({
       name: "shop",
       description: "Checkout revamp",
       contextName: "shop",
       labels: ["pool=eu"],
-      policy: { maxConcurrent: 3, isolation: "container" },
+      policy: { maxConcurrent: 3, isolationFloor: "container" },
       repos: [
         { repo: "api", role: "api" },
         { repo: "client", role: null },
