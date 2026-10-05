@@ -29,6 +29,10 @@
  *                           `extra` adds select options after model and
  *                           mode, settable through set_config_option.
  *   BAND_TEST_ACP_FAIL_START  When set, `initialize` fails with this message.
+ *   BAND_TEST_ACP_START_DELAY_FILE  Path to a file. While it exists, `initialize`
+ *                           waits (polling every 50 ms) and answers once the
+ *                           file is removed, so a test can hold a chat's agent
+ *                           start open for exactly as long as it needs.
  *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
  *                           default `echo` and `review` commands, in the
  *                           order the agent advertises them.
@@ -342,10 +346,13 @@ async function runSteps(cx, sessionId, steps, signal, record) {
 
 acp
   .agent({ name: "band-acp-stub" })
-  .onRequest("initialize", (ctx) => {
+  .onRequest("initialize", async (ctx) => {
     logRequest("initialize", ctx.params);
     const air = ctx.params.clientCapabilities?._meta?.jetbrains?.air;
     clientAsyncTasks = air?.version >= 1 && (air.capabilities ?? []).includes("asyncTasks");
+    while (env.BAND_TEST_ACP_START_DELAY_FILE && existsSync(env.BAND_TEST_ACP_START_DELAY_FILE)) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     if (env.BAND_TEST_ACP_FAIL_START) throw new acp.RequestError(-32000, env.BAND_TEST_ACP_FAIL_START);
     return {
       protocolVersion: acp.PROTOCOL_VERSION,

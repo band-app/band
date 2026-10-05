@@ -346,6 +346,7 @@ describe("maximum lifetime and the destroy action", () => {
     ...extra,
   });
   let runnerEnv: Record<string, string>;
+  let startDelayFile: string;
   const setRunner = (extra: Record<string, unknown> = {}) =>
     call(server, "m", "settings.update", {
       runners: [{ ...baseRunner(extra), env: runnerEnv }],
@@ -397,6 +398,7 @@ describe("maximum lifetime and the destroy action", () => {
     git(checkout, "push", "-q", "origin", "main");
 
     const stubState = tmp("band-reaper-stub-state-");
+    startDelayFile = join(tmp("band-reaper-start-delay-"), "delay-ms");
     const scenario = join(tmp("band-reaper-scenario-"), "scenario.json");
     writeFileSync(
       scenario,
@@ -409,6 +411,7 @@ describe("maximum lifetime and the destroy action", () => {
       BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
       BAND_TEST_ACP_STATE: stubState,
       BAND_TEST_ACP_SCENARIO: scenario,
+      BAND_TEST_ACP_START_DELAY_FILE: startDelayFile,
       BAND_AGENT_SESSION_DIRS: stubState,
     };
     seedSettings(hubHome, {
@@ -563,6 +566,47 @@ describe("maximum lifetime and the destroy action", () => {
     expect(destroyed.note).toContain("hard deadline passed with workspaces NOT stored");
     expect(destroyed.note).toContain("lifeproj-life-b");
     await waitFor(async () => !isAlive(pid), { label: "worker stopped", timeoutMs: 10_000 });
+    await setRunner();
+  }, 240_000);
+
+  it("keeps a machine whose agent has not started its turn yet (S2)", async () => {
+    const wt = await createWorkspace("life-d");
+    const hostId = wt.hostId;
+    // The agent's start is held until the file is removed, so the message is accepted but no turn runs.
+    writeFileSync(startDelayFile, "hold");
+    try {
+      const res = await fetch(`${server.url}/api/chats/life-slow-start/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
+        body: JSON.stringify({ workspaceId: "lifeproj-life-d", text: "hello" }),
+      });
+      expect(res.ok).toBe(true);
+      const running = await waitFor(() => machineOf(hostId, "running"), {
+        label: "the machine is running",
+        timeoutMs: 30_000,
+        intervalMs: 250,
+      });
+      const age = Math.ceil((Date.now() - (await spawnedAt(running.id))) / 1000);
+      await setRunner({ maxLifetimeSec: age, lifetimeGraceSec: 120 });
+
+      await waitFor(
+        async () =>
+          (await machineOf(hostId))?.note?.includes("an agent is working") ? true : undefined,
+        { label: "the starting agent keeps the worker", timeoutMs: 30_000, intervalMs: 100 },
+      );
+      expect(workerLog(hostId)).not.toContain("the hub stored the workspaces");
+      expect((await machineOf(hostId))?.state).toBe("stopping");
+    } finally {
+      rmSync(startDelayFile, { force: true });
+    }
+    // Once the turn is over, nothing is working and the machine goes the normal way.
+    const destroyed = await waitFor(() => machineOf(hostId, "destroyed"), {
+      label: "the machine destroyed after the turn",
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    });
+    expect(destroyed.note).toContain("maximum lifetime");
+    expect(destroyed.note).not.toContain("NOT stored");
     await setRunner();
   }, 240_000);
 
