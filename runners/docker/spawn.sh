@@ -150,7 +150,8 @@ fi
 id="$(docker create "$@" --entrypoint /bin/sh "$image" -c "$start")"
 if ! docker run --rm --user 65532:65532 --volumes-from "$name" --entrypoint /bin/sh "$BAND_SNAPSHOT_ID" -c '
   set -e
-  tar -C /snapshot -cf - . | tar -C /work -xf - --no-overwrite-dir
+  # The entries, not ".": the volume root is root-owned and sticky, so a non-root tar cannot change its mode.
+  ls -A /snapshot | tar -C /snapshot -cf - -T - | tar -C /work -xf -
   rm -f /work/.band-worker/session-token'; then
   docker rm --force --volumes "$name" >/dev/null 2>&1 || true
   echo "could not copy the snapshot $BAND_SNAPSHOT_ID into the new container" >&2

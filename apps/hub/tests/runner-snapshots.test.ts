@@ -303,6 +303,8 @@ describe("a runner with snapshot hooks", () => {
     const wt = await createWorkspace("proja", "snap-a");
     const hostId = wt.hostId as string;
     leaveWork(wt.path, "a");
+    // `spawn` prints a handle of its own first, and the `local` hook then prints the worker's pid. The last one counts.
+    const handle = readFileSync(join(runnerBase(hostId), "pid"), "utf8").trim();
     const spawns = hookLines("spawn").length;
 
     await sleeping("proja", "snap-a");
@@ -310,7 +312,7 @@ describe("a runner with snapshot hooks", () => {
     // The hook got the machine handle spawn printed and the workspaces the host held.
     const taken = await snapshotTaken(hostId);
     expect(field(taken as string, "worker")).toBe(hostId);
-    expect(field(taken as string, "handle")).toBe(`m-${hostId}`);
+    expect(field(taken as string, "handle")).toBe(handle);
     expect(field(taken as string, "workspaces")).toBe("proja-snap-a");
     const recorded = await snapshots();
     expect(recorded).toHaveLength(1);
