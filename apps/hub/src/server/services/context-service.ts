@@ -149,6 +149,24 @@ export async function git(
   return r.stdout;
 }
 
+const PROJECT_README = `# Project context
+
+Shared by every agent in the project.
+
+## Who writes what
+
+- notes.md: the coordinator only. Running notes and decisions. Workers read it and do not edit it.
+- docs/: design notes and contracts between repos. Anyone may add a file.
+- media/: screenshots and recordings.
+- learnings/: append-only. Add an entry, never rewrite or delete one.
+
+## Inbox and handoffs
+
+- A handoff is one file in handoffs/, written with context_handoff. The recipient also gets a pointer line in inbox/<agent>.md.
+- A new file in inbox/ or handoffs/ wakes the coordinator with its path.
+- The coordinator marks an inbox item handled by moving it into inbox/done/. A file in inbox/done/ wakes nobody.
+`;
+
 const SCAFFOLD: Record<ContextRow["kind"], Array<[string, string]>> = {
   user: [
     ["preferences.md", "# Preferences\n\nHow you like agents to work. Agents read this first.\n"],
@@ -156,6 +174,7 @@ const SCAFFOLD: Record<ContextRow["kind"], Array<[string, string]>> = {
   ],
   project: [
     ["notes.md", "# Notes\n\nWritten by the coordinator. Keep it short.\n"],
+    ["README.md", PROJECT_README],
     ["docs/.gitkeep", ""],
     ["media/.gitkeep", ""],
     ["inbox/.gitkeep", ""],
@@ -247,6 +266,7 @@ export interface CreateContextInput {
 export class ContextService {
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly pushTimers = new Map<string, NodeJS.Timeout>();
+  private readonly changeListeners = new Set<(name: string) => void>();
   private pollTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly queries = new ContextQueries()) {}
@@ -455,6 +475,7 @@ export class ContextService {
           ? `Moved on both sides, left as is: ${result.diverged.join(", ")}`
           : null;
         this.queries.update(name, { syncError, lastSyncAt: Date.now() });
+        if (result.pulled.length > 0) this.notifyChanged(name);
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -473,6 +494,7 @@ export class ContextService {
 
   /** Called after a push to the hub: mirrors to the remote shortly, coalescing bursts. */
   syncSoon(name: string): void {
+    this.notifyChanged(name);
     const row = this.queries.find(name);
     if (!row?.remoteUrl || this.pushTimers.has(name)) return;
     const timer = setTimeout(() => {
@@ -481,6 +503,27 @@ export class ContextService {
     }, PUSH_DEBOUNCE_MS);
     timer.unref();
     this.pushTimers.set(name, timer);
+  }
+
+  /**
+   * Runs `listener` after the hub's copy of a context changed: a push from a host, a tool commit,
+   * a browser edit or a pull from the linked remote. The listener works out what changed itself.
+   */
+  onChanged(listener: (name: string) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notifyChanged(name: string): void {
+    for (const listener of [...this.changeListeners]) {
+      try {
+        listener(name);
+      } catch (err) {
+        log.warn(`a change listener of context ${name} failed: ${String(err)}`);
+      }
+    }
   }
 
   // ---- internals ---------------------------------------------------------------

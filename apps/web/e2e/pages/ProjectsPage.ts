@@ -204,4 +204,14 @@ export class ProjectsPage {
   groupMembers(branch: string): Locator {
     return this.group(branch).getByTestId("projects__group-member");
   }
+
+  /** The subscriptions that wake the open project's coordinator. */
+  subscriptions(): Locator {
+    return this.detail.getByTestId("projects__subscription");
+  }
+
+  /** The recent wake-ups the open project page lists. */
+  wakeups(): Locator {
+    return this.detail.getByTestId("projects__wakeup");
+  }
 }

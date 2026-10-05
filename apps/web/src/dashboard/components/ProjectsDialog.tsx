@@ -722,6 +722,71 @@ function DispatchSection({ project, canEdit }: { project: Project; canEdit: bool
   );
 }
 
+function WakeupSection({ project }: { project: Project }) {
+  const subscriptions = useQuery({
+    queryKey: ["projects.subscriptions", project.id],
+    queryFn: () => trpc.projects.subscriptions.query({ project: project.id }),
+    refetchInterval: 5000,
+  });
+  const subs = subscriptions.data?.subscriptions ?? [];
+  const wakeups = subscriptions.data?.wakeups ?? [];
+  return (
+    <section className="space-y-2" data-testid="projects__subscriptions">
+      <h3 className="text-sm font-medium">What wakes the coordinator</h3>
+      {subs.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="projects__no-subscriptions">
+          No active subscriptions. They start with the coordinator.
+        </p>
+      ) : (
+        <ul className="space-y-1 text-sm">
+          {subs.map((s) => (
+            <li
+              key={s.id}
+              data-testid="projects__subscription"
+              data-kind={s.kind}
+              className="flex justify-between gap-2"
+            >
+              <span>
+                {s.kind === "project" ? "Worker chats and the context inbox" : s.filterKey}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {s.wakeups} of {s.maxWakeups} wake-ups
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h4 className="text-xs font-medium text-muted-foreground">Recent wake-ups</h4>
+      {wakeups.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="projects__no-wakeups">
+          Nothing has woken the coordinator yet.
+        </p>
+      ) : (
+        <ul className="space-y-1 text-xs">
+          {wakeups.map((w) => (
+            <li
+              key={`${w.subscriptionId}-${w.receivedAt}-${w.summary}`}
+              data-testid="projects__wakeup"
+              data-state={w.droppedReason ? "dropped" : w.deliveredAt ? "delivered" : "waiting"}
+            >
+              <span className="text-muted-foreground">
+                {new Date(w.receivedAt).toLocaleString()}
+                {w.droppedReason
+                  ? `, dropped (${w.droppedReason})`
+                  : w.deliveredAt
+                    ? ""
+                    : ", waiting"}
+                {": "}
+              </span>
+              {w.summary}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ProjectDetail({
   project,
   canEdit,
@@ -955,6 +1020,8 @@ function ProjectDetail({
       </section>
 
       <DispatchSection project={project} canEdit={canEdit} />
+
+      <WakeupSection project={project} />
 
       <ErrorLine message={error} />
       {editing ? <EditProjectDialog project={project} open onOpenChange={setEditing} /> : null}

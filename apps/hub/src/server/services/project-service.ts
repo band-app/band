@@ -382,6 +382,26 @@ export class ProjectService {
     return this.require(ref);
   }
 
+  /** Every project row, with no repos or policy resolved. */
+  rows(): ProjectRow[] {
+    return this.queries.list();
+  }
+
+  find(id: string): ProjectRow | undefined {
+    return this.queries.find(id);
+  }
+
+  findByContext(contextName: string): ProjectRow | undefined {
+    return this.queries.findByContext(contextName);
+  }
+
+  /** The project a worker worktree belongs to. The coordinator's own worktree and a worktree in no project give undefined. */
+  projectOfWorker(worktreeId: string): ProjectRow | undefined {
+    const projectId = this.worktreeQueries.findProjectId(worktreeId);
+    const row = projectId ? this.queries.find(projectId) : undefined;
+    return row && row.coordinatorWorktreeId !== worktreeId ? row : undefined;
+  }
+
   findByCoordinatorChat(chatId: string): ProjectRow | undefined {
     return this.queries.findByCoordinatorChat(chatId);
   }

@@ -29,6 +29,7 @@ import {
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { type ProjectView, projectService } from "./project-service";
+import { projectSubscriptionService } from "./project-subscription-service";
 import { abortTask, hasRunningTask, submitOrQueueTask } from "./task-service";
 import { worktreeService } from "./worktree-service";
 
@@ -129,6 +130,10 @@ export class ProjectCoordinatorService {
       }
       this.startErrors.delete(row.id);
       const chatId = chat.id;
+      // Wake-ups for the coordinator: worker chats, member PRs, the context inbox.
+      void projectSubscriptionService.reconcile(row.id).catch((err) => {
+        log.warn({ projectId: row.id, err }, "could not subscribe the coordinator");
+      });
       // Starting the agent attaches the session, which carries the charter and the tools.
       void agentSessionService.ensureSession(chatId, "prompt").catch((err) => {
         this.startErrors.set(row.id, err instanceof Error ? err.message : String(err));
@@ -218,6 +223,8 @@ export class ProjectCoordinatorService {
       `\nContext. The project context repo "${view.contextName}" is shared by every agent in the project, and the user context holds the user's preferences. Read them before you plan. Layout of the project context: notes.md (running notes), docs/ (design and contracts), media/ (screenshots, recordings), inbox/<agent>.md (pointers to handoffs for an agent), handoffs/ (one file per handoff), learnings/ (what agents learned). Use context_search to find things, context_append_learning to record what future agents should know, and context_handoff to pass work on. Write contracts between repos (API shapes, event formats) to docs/ so the agent on the other side can read them.`,
       `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, chats_read, chats_send, worktree_stop and worktrees_create. They are limited to this project's worktrees. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
       "\nDispatching. worktrees_create starts a worker agent in a new worktree. Write the brief so the worker can act on it alone: the goal, the constraints, the contracts with other repos and what is out of scope, plus acceptance scenarios it can check. For work across repos, pass a group in mode split with the merge order. In steer mode the call waits for the user's approval, so tell the user it is pending and do not call it again.",
+      `\nWake-ups. Band wakes you with a "Subscription update" message when something needs you: a worker chat ended its turn with an error, is waiting for a permission or an answer, or finished; a pull request of a task group has a review comment, a CI result or was merged or closed; or a new file appeared in inbox/ or handoffs/ of the project context. The message names the chat id or the file path. Read the source before you act on it. Events are batched, so one message can carry several. A pull request's subscriptions end when it merges or closes.`,
+      `\nNotes and the inbox. You are the only writer of notes.md in the project context: workers do not edit it, so keep it current with decisions and status. learnings/ is append-only: add entries, never rewrite or delete them. Handoffs from workers land in handoffs/<stamp>-<from>-to-<to>.md and a pointer line in inbox/<to>.md. When you have dealt with an item in inbox/ or handoffs/, move the file into inbox/done/ (git mv in your working copy of the project context, which syncs after your turn). A file in inbox/done/ does not wake you again.`,
       "\nMerging. Never merge a pull request unless the user confirmed it in this conversation or auto-merge is on.",
     ]
       .filter(Boolean)
