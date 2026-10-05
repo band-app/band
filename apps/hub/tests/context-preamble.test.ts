@@ -125,7 +125,7 @@ beforeAll(async () => {
     },
   });
   await m("context.create", { name: "user" });
-  await m("context.create", { name: "acme", kind: "project", repos: ["testrepo"] });
+  await m("context.create", { name: "acme", kind: "mission", repos: ["testrepo"] });
   await write("user", "preferences.md", "# Preferences\nAlways use pnpm.\n");
   await write("acme", "notes.md", "# Notes\nThe release train leaves on Fridays.\n");
   await write(
