@@ -111,7 +111,11 @@ A hook has only the bootstrap token, so it cannot clone a private repository. Wo
    Settings > Credentials has the same form. `--scope project:<name>` limits an item to one project, and a project-scoped item wins over a global one, then the pattern with more literal characters wins. `--username` defaults to `x-access-token`, which GitHub accepts for a token.
 3. Nothing else is configured. When a worker starts, it adds a git credential helper to the environment of every git command, agent and terminal it runs (`GIT_CONFIG_*` and `GIT_TERMINAL_PROMPT=0`). The helper (`band-worker git-credential`) asks the worker over a Unix socket in a private temp directory, and the worker asks the hub with the `git.credential` call on its link. The hub answers only for a remote of a repository placed on that worker: a project with a checkout or a workspace there, or the repository it is about to clone there. Any other repository is refused, and a remote with no matching vault item gets no credential.
 
-The token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, host and path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token, which is what lets an agent push, so give the token only the permissions agents need.
+The token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, host and path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
+
+- Use a fine-grained PAT limited to the repositories the workers need and to the permissions above, so a leaked token reaches nothing else.
+- The hub logs every request (worker, host and path, never the credential), so each use is traceable to a worker.
+- The token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits.
 
 The credential source sits behind the `GitTokenSource` interface (`services/_utils/git-token-source.ts`), so a GitHub App that mints installation tokens can replace the vault lookup later.
 
