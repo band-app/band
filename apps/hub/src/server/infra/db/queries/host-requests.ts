@@ -20,14 +20,14 @@ export class HostRequestQueries {
     return getDb().select().from(hostRequests).where(eq(hostRequests.id, id)).get();
   }
 
-  /** The newest request for a workspace that has not been cancelled or failed. */
-  findOpenForWorkspace(workspaceId: string): HostRequestRow | undefined {
+  /** The newest request for a worktree that has not been cancelled or failed. */
+  findOpenForWorktree(worktreeId: string): HostRequestRow | undefined {
     return getDb()
       .select()
       .from(hostRequests)
       .where(
         and(
-          eq(hostRequests.workspaceId, workspaceId),
+          eq(hostRequests.worktreeId, worktreeId),
           inArray(hostRequests.status, ["pending", "leased", "fulfilled"]),
           isNull(hostRequests.completedAt),
         ),
@@ -46,7 +46,7 @@ export class HostRequestQueries {
       .get();
   }
 
-  /** Requests the UI shows: not cancelled, and not yet turned into a workspace. */
+  /** Requests the UI shows: not cancelled, and not yet turned into a worktree. */
   listActive(): HostRequestRow[] {
     return getDb()
       .select()
@@ -56,7 +56,7 @@ export class HostRequestQueries {
       .all();
   }
 
-  /** Fulfilled requests whose workspace is not created yet. */
+  /** Fulfilled requests whose worktree is not created yet. */
   listAwaitingHost(): HostRequestRow[] {
     return getDb()
       .select()
@@ -163,7 +163,7 @@ export class HostRequestQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
-  /** Cancels a request that has not become a workspace. */
+  /** Cancels a request that has not become a worktree. */
   cancel(id: string, now: number): boolean {
     const result = getDb()
       .update(hostRequests)
@@ -179,7 +179,7 @@ export class HostRequestQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
-  /** Records that the workspace now exists. Guarded so a cancel that won stays cancelled. */
+  /** Records that the worktree now exists. Guarded so a cancel that won stays cancelled. */
   complete(id: string, now: number): boolean {
     const result = getDb()
       .update(hostRequests)

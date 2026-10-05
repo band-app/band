@@ -1,5 +1,5 @@
 /**
- * Persistence for Band browser profiles and the per-project default
+ * Persistence for Band browser profiles and the per-repo default
  * profile.
  *
  * A profile row is metadata only (id, display name, where its cookies came
@@ -9,7 +9,7 @@
 
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "../connection";
-import { browserProfiles, projectBrowserProfiles } from "../schema";
+import { browserProfiles, repoBrowserProfiles } from "../schema";
 
 export interface BrowserProfileRow {
   id: string;
@@ -31,49 +31,46 @@ export class BrowserProfileQueries {
     getDb().insert(browserProfiles).values(row).run();
   }
 
-  /** Delete a profile and every project default that points at it. */
+  /** Delete a profile and every repo default that points at it. */
   remove(id: string): void {
     const db = getDb();
     db.transaction((tx) => {
-      tx.delete(projectBrowserProfiles).where(eq(projectBrowserProfiles.profileId, id)).run();
+      tx.delete(repoBrowserProfiles).where(eq(repoBrowserProfiles.profileId, id)).run();
       tx.delete(browserProfiles).where(eq(browserProfiles.id, id)).run();
     });
   }
 
-  getProjectDefault(projectName: string): string | null {
+  getRepoDefault(repoName: string): string | null {
     const row = getDb()
-      .select({ profileId: projectBrowserProfiles.profileId })
-      .from(projectBrowserProfiles)
-      .where(eq(projectBrowserProfiles.projectName, projectName))
+      .select({ profileId: repoBrowserProfiles.profileId })
+      .from(repoBrowserProfiles)
+      .where(eq(repoBrowserProfiles.repoName, repoName))
       .get();
     return row?.profileId ?? null;
   }
 
-  findAllProjectDefaults(): { projectName: string; profileId: string }[] {
+  findAllRepoDefaults(): { repoName: string; profileId: string }[] {
     return getDb()
       .select({
-        projectName: projectBrowserProfiles.projectName,
-        profileId: projectBrowserProfiles.profileId,
+        repoName: repoBrowserProfiles.repoName,
+        profileId: repoBrowserProfiles.profileId,
       })
-      .from(projectBrowserProfiles)
+      .from(repoBrowserProfiles)
       .all();
   }
 
-  setProjectDefault(projectName: string, profileId: string, updatedAt: number): void {
+  setRepoDefault(repoName: string, profileId: string, updatedAt: number): void {
     getDb()
-      .insert(projectBrowserProfiles)
-      .values({ projectName, profileId, updatedAt })
+      .insert(repoBrowserProfiles)
+      .values({ repoName, profileId, updatedAt })
       .onConflictDoUpdate({
-        target: projectBrowserProfiles.projectName,
+        target: repoBrowserProfiles.repoName,
         set: { profileId, updatedAt },
       })
       .run();
   }
 
-  clearProjectDefault(projectName: string): void {
-    getDb()
-      .delete(projectBrowserProfiles)
-      .where(eq(projectBrowserProfiles.projectName, projectName))
-      .run();
+  clearRepoDefault(repoName: string): void {
+    getDb().delete(repoBrowserProfiles).where(eq(repoBrowserProfiles.repoName, repoName)).run();
   }
 }

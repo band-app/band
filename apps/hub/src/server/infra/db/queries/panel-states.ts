@@ -20,7 +20,7 @@ import { panelStates } from "../schema";
 
 export interface PanelStateRow {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   panelType: string;
   state: string; // raw JSON string
   /**
@@ -63,36 +63,33 @@ export function deletePanelState(id: string): void {
 }
 
 /**
- * Delete all panel state rows for a workspace.
+ * Delete all panel state rows for a worktree.
  * If `panelType` is provided, only deletes rows of that type.
  */
-export function deletePanelStatesForWorkspace(workspaceId: string, panelType?: string): void {
+export function deletePanelStatesForWorktree(worktreeId: string, panelType?: string): void {
   const db = getDb();
   if (panelType) {
     db.delete(panelStates)
-      .where(and(eq(panelStates.workspaceId, workspaceId), eq(panelStates.panelType, panelType)))
+      .where(and(eq(panelStates.worktreeId, worktreeId), eq(panelStates.panelType, panelType)))
       .run();
   } else {
-    db.delete(panelStates).where(eq(panelStates.workspaceId, workspaceId)).run();
+    db.delete(panelStates).where(eq(panelStates.worktreeId, worktreeId)).run();
   }
 }
 
-/** List all panel state rows of a given type (across all workspaces). */
+/** List all panel state rows of a given type (across all worktrees). */
 export function listPanelStates(panelType: string): PanelStateRow[] {
   const db = getDb();
   return db.select().from(panelStates).where(eq(panelStates.panelType, panelType)).all();
 }
 
-/** List panel state rows for a specific workspace and type. */
-export function listPanelStatesForWorkspace(
-  workspaceId: string,
-  panelType: string,
-): PanelStateRow[] {
+/** List panel state rows for a specific worktree and type. */
+export function listPanelStatesForWorktree(worktreeId: string, panelType: string): PanelStateRow[] {
   const db = getDb();
   return db
     .select()
     .from(panelStates)
-    .where(and(eq(panelStates.workspaceId, workspaceId), eq(panelStates.panelType, panelType)))
+    .where(and(eq(panelStates.worktreeId, worktreeId), eq(panelStates.panelType, panelType)))
     .all();
 }
 

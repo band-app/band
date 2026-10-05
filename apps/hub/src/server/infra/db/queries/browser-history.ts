@@ -1,7 +1,7 @@
 /**
  * Persistent browser pane history.
  *
- * One row per `(workspaceId, url)` — revisits bump `visitCount` and
+ * One row per `(worktreeId, url)` — revisits bump `visitCount` and
  * `lastVisitedAt` instead of inserting a duplicate row. This bounds
  * storage growth and lets `searchHistory` rank candidates with a single
  * SQL frecency expression (`visit_count / (1 + age_days)`).
@@ -25,7 +25,7 @@ import { browserHistory } from "../schema";
  */
 export interface HistoryEntry {
   id: number;
-  workspaceId: string;
+  worktreeId: string;
   url: string;
   title: string | null;
   faviconUrl: string | null;
@@ -53,7 +53,7 @@ export function shouldRecord(url: string): boolean {
 }
 
 export interface RecordVisitInput {
-  workspaceId: string;
+  worktreeId: string;
   url: string;
   title?: string;
   faviconUrl?: string;
@@ -61,7 +61,7 @@ export interface RecordVisitInput {
 }
 
 /**
- * Record a visit. Upserts on the `(workspace_id, url)` unique index:
+ * Record a visit. Upserts on the `(worktree_id, url)` unique index:
  *  - First visit → insert with `visitCount = 1`.
  *  - Subsequent visits → increment `visitCount`, refresh `lastVisitedAt`,
  *    and only overwrite `title` / `faviconUrl` when the new call carries
@@ -77,7 +77,7 @@ export function recordVisit(input: RecordVisitInput): boolean {
 
   db.insert(browserHistory)
     .values({
-      workspaceId: input.workspaceId,
+      worktreeId: input.worktreeId,
       url: input.url,
       title: input.title ?? null,
       faviconUrl: input.faviconUrl ?? null,
@@ -85,7 +85,7 @@ export function recordVisit(input: RecordVisitInput): boolean {
       visitCount: 1,
     })
     .onConflictDoUpdate({
-      target: [browserHistory.workspaceId, browserHistory.url],
+      target: [browserHistory.worktreeId, browserHistory.url],
       set: {
         lastVisitedAt: now,
         visitCount: sql`${browserHistory.visitCount} + 1`,
@@ -112,14 +112,14 @@ export interface ImportedVisit {
 const IMPORT_CHUNK_SIZE = 500;
 
 /**
- * Merge visits imported from another browser into a workspace's history,
+ * Merge visits imported from another browser into a worktree's history,
  * in one transaction. A URL already in the history keeps the larger visit
  * count and the later visit time, and keeps its own title and favicon when
  * it has them, so importing the same profile twice changes nothing.
  *
  * Returns how many visits were accepted (after `shouldRecord`).
  */
-export function importVisits(workspaceId: string, visits: ImportedVisit[]): number {
+export function importVisits(worktreeId: string, visits: ImportedVisit[]): number {
   const accepted = visits.filter((v) => shouldRecord(v.url));
   if (accepted.length === 0) return 0;
   const db = getDb();
@@ -128,7 +128,7 @@ export function importVisits(workspaceId: string, visits: ImportedVisit[]): numb
       tx.insert(browserHistory)
         .values(
           accepted.slice(i, i + IMPORT_CHUNK_SIZE).map((v) => ({
-            workspaceId,
+            worktreeId,
             url: v.url,
             title: v.title,
             faviconUrl: v.faviconUrl,
@@ -137,7 +137,7 @@ export function importVisits(workspaceId: string, visits: ImportedVisit[]): numb
           })),
         )
         .onConflictDoUpdate({
-          target: [browserHistory.workspaceId, browserHistory.url],
+          target: [browserHistory.worktreeId, browserHistory.url],
           set: {
             lastVisitedAt: sql`MAX(${browserHistory.lastVisitedAt}, excluded.last_visited_at)`,
             visitCount: sql`MAX(${browserHistory.visitCount}, excluded.visit_count)`,
@@ -152,7 +152,7 @@ export function importVisits(workspaceId: string, visits: ImportedVisit[]): numb
 }
 
 export interface UpdateMetaInput {
-  workspaceId: string;
+  worktreeId: string;
   url: string;
   title?: string;
   faviconUrl?: string;
@@ -176,9 +176,7 @@ export function updateVisitMeta(input: UpdateMetaInput): void {
 
   db.update(browserHistory)
     .set(updates)
-    .where(
-      and(eq(browserHistory.workspaceId, input.workspaceId), eq(browserHistory.url, input.url)),
-    )
+    .where(and(eq(browserHistory.worktreeId, input.worktreeId), eq(browserHistory.url, input.url)))
     .run();
 }
 
@@ -187,8 +185,8 @@ export interface ListHistoryOptions {
   offset?: number;
 }
 
-/** Recency-ordered list of history entries for a workspace. */
-export function listHistory(workspaceId: string, opts: ListHistoryOptions = {}): HistoryEntry[] {
+/** Recency-ordered list of history entries for a worktree. */
+export function listHistory(worktreeId: string, opts: ListHistoryOptions = {}): HistoryEntry[] {
   const db = getDb();
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const offset = Math.max(opts.offset ?? 0, 0);
@@ -196,7 +194,7 @@ export function listHistory(workspaceId: string, opts: ListHistoryOptions = {}):
   return db
     .select()
     .from(browserHistory)
-    .where(eq(browserHistory.workspaceId, workspaceId))
+    .where(eq(browserHistory.worktreeId, worktreeId))
     .orderBy(desc(browserHistory.lastVisitedAt))
     .limit(limit)
     .offset(offset)
@@ -211,7 +209,7 @@ export function listHistory(workspaceId: string, opts: ListHistoryOptions = {}):
  * default; we lowercase the search term to be safe).
  */
 export function searchHistory(
-  workspaceId: string,
+  worktreeId: string,
   query: string,
   limit = 8,
   now: number = Date.now(),
@@ -222,7 +220,7 @@ export function searchHistory(
 
   // SQLite's LIKE treats `%`, `_`, and `\` as wildcards / escape
   // chars — without escaping, a bare `%` query would match every
-  // row in the workspace. Escape the user input and tell LIKE that
+  // row in the worktree. Escape the user input and tell LIKE that
   // `\` is the escape character (see the `ESCAPE '\\'` raw-SQL
   // suffix on each `like()` below; Drizzle's `like()` helper
   // doesn't take an escape argument so we splice it in via `sql`).
@@ -243,7 +241,7 @@ export function searchHistory(
     .from(browserHistory)
     .where(
       and(
-        eq(browserHistory.workspaceId, workspaceId),
+        eq(browserHistory.worktreeId, worktreeId),
         or(
           sql`LOWER(${browserHistory.url}) LIKE ${pattern} ESCAPE '\\'`,
           sql`LOWER(COALESCE(${browserHistory.title}, '')) LIKE ${pattern} ESCAPE '\\'`,
@@ -256,34 +254,31 @@ export function searchHistory(
 }
 
 /**
- * Delete a single history entry by id. Scoped to the workspace so a
+ * Delete a single history entry by id. Scoped to the worktree so a
  * compromised renderer that knows an integer row id can't reach
- * across workspaces. No-op if not found or if the row belongs to a
- * different workspace.
+ * across worktrees. No-op if not found or if the row belongs to a
+ * different worktree.
  */
-export function deleteHistoryEntry(id: number, workspaceId: string): void {
+export function deleteHistoryEntry(id: number, worktreeId: string): void {
   const db = getDb();
   db.delete(browserHistory)
-    .where(and(eq(browserHistory.id, id), eq(browserHistory.workspaceId, workspaceId)))
+    .where(and(eq(browserHistory.id, id), eq(browserHistory.worktreeId, worktreeId)))
     .run();
 }
 
 /**
- * Clear all (or a recent slice) of a workspace's history.
+ * Clear all (or a recent slice) of a worktree's history.
  * Returns the number of rows actually deleted.
  */
 export function clearHistory(
-  workspaceId: string,
+  worktreeId: string,
   range: ClearRange,
   now: number = Date.now(),
 ): number {
   const db = getDb();
 
   if (range === "all") {
-    const result = db
-      .delete(browserHistory)
-      .where(eq(browserHistory.workspaceId, workspaceId))
-      .run();
+    const result = db.delete(browserHistory).where(eq(browserHistory.worktreeId, worktreeId)).run();
     return Number(result.changes ?? 0);
   }
 
@@ -299,7 +294,7 @@ export function clearHistory(
   const result = db
     .delete(browserHistory)
     .where(
-      and(eq(browserHistory.workspaceId, workspaceId), gte(browserHistory.lastVisitedAt, cutoff)),
+      and(eq(browserHistory.worktreeId, worktreeId), gte(browserHistory.lastVisitedAt, cutoff)),
     )
     .run();
   return Number(result.changes ?? 0);

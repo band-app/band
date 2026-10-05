@@ -4,7 +4,7 @@ import { pendingRemovals } from "../schema";
 
 export type PendingRemoval = typeof pendingRemovals.$inferSelect;
 
-/** Persistence for worktrees waiting to be removed from a host that was offline when their workspace was. */
+/** Persistence for worktrees waiting to be removed from a host that was offline when their worktree was. */
 export class PendingRemovalQueries {
   /** Records a worktree to remove. Recording the same one again changes nothing. */
   add(row: Omit<PendingRemoval, "createdAt">, now = Date.now()): void {

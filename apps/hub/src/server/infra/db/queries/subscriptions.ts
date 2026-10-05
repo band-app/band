@@ -9,7 +9,7 @@ export type SubscriptionCreator = Row["createdBy"];
 export interface SubscriptionRecord {
   id: string;
   chatId: string;
-  workspaceId: string;
+  worktreeId: string;
   source: string;
   /** Event kinds that match; empty matches every kind. */
   kinds: string[];
@@ -115,12 +115,12 @@ export class SubscriptionQueries {
     });
   }
 
-  /** Ids of the subscriptions of a chat, or of a workspace's chats. */
-  idsFor(scope: { chatId: string } | { workspaceId: string }): string[] {
+  /** Ids of the subscriptions of a chat, or of a worktree's chats. */
+  idsFor(scope: { chatId: string } | { worktreeId: string }): string[] {
     const where =
       "chatId" in scope
         ? eq(subscriptions.chatId, scope.chatId)
-        : eq(subscriptions.workspaceId, scope.workspaceId);
+        : eq(subscriptions.worktreeId, scope.worktreeId);
     return getDb()
       .select({ id: subscriptions.id })
       .from(subscriptions)
@@ -171,11 +171,11 @@ export class SubscriptionQueries {
       .run();
   }
 
-  /** Remembers a head commit Band pushed from a workspace. */
-  recordPushedSha(sha: string, workspaceId: string, pushedAt: number): void {
+  /** Remembers a head commit Band pushed from a worktree. */
+  recordPushedSha(sha: string, worktreeId: string, pushedAt: number): void {
     getDb()
       .insert(pushedShas)
-      .values({ sha: sha.toLowerCase(), workspaceId, pushedAt })
+      .values({ sha: sha.toLowerCase(), worktreeId, pushedAt })
       .onConflictDoNothing()
       .run();
   }

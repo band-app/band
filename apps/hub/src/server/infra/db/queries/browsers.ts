@@ -15,7 +15,7 @@
 import { createLogger } from "@band-app/logger";
 import {
   deletePanelState,
-  deletePanelStatesForWorkspace,
+  deletePanelStatesForWorktree,
   insertPanelState,
   listPanelStates,
   resetPanelStatesToIdle,
@@ -46,7 +46,7 @@ export type BrowserStatus = "idle" | "loading" | "error";
  */
 export interface BrowserRow {
   id: string;
-  workspaceId: string;
+  worktreeId: string;
   name: string;
   url: string;
   status: BrowserStatus;
@@ -72,7 +72,7 @@ export interface BrowserUpdatePatch {
 /**
  * Shape of the JSON blob stored in `panel_states.state` for browser rows.
  *
- * Mirrors `BrowserRow` minus the `id`/`workspaceId` keys (those live on
+ * Mirrors `BrowserRow` minus the `id`/`worktreeId` keys (those live on
  * the row itself).
  */
 interface BrowserStateBlob {
@@ -110,7 +110,7 @@ export class BrowserQueries {
   insert(row: BrowserRow & { createdAt: number; updatedAt: number }): void {
     insertPanelState({
       id: row.id,
-      workspaceId: row.workspaceId,
+      worktreeId: row.worktreeId,
       panelType: BROWSER_PANEL_TYPE,
       state: serializeState(row),
       createdAt: row.createdAt,
@@ -154,9 +154,9 @@ export class BrowserQueries {
     deletePanelState(id);
   }
 
-  /** Delete every browser-tab row for a workspace. */
-  removeAllForWorkspace(workspaceId: string): void {
-    deletePanelStatesForWorkspace(workspaceId, BROWSER_PANEL_TYPE);
+  /** Delete every browser-tab row for a worktree. */
+  removeAllForWorktree(worktreeId: string): void {
+    deletePanelStatesForWorktree(worktreeId, BROWSER_PANEL_TYPE);
   }
 
   /**
@@ -167,7 +167,7 @@ export class BrowserQueries {
    * caller. The service hydrates lazily (`ensureInitialized`) on the
    * first read, so a single corrupted blob would otherwise turn a
    * `browsers.list` request into a 500 on every request after a deploy.
-   * Skipping the bad row keeps the rest of the workspace's browsers
+   * Skipping the bad row keeps the rest of the worktree's browsers
    * usable; operators get the broken `id` in the warning so they can
    * inspect or delete the row manually. Mirrors `ChatQueries.findAll`.
    */
@@ -180,14 +180,14 @@ export class BrowserQueries {
         parsed = JSON.parse(row.state) as BrowserStateBlob;
       } catch (err) {
         log.warn(
-          { browserId: row.id, workspaceId: row.workspaceId, err },
+          { browserId: row.id, worktreeId: row.worktreeId, err },
           "browser row state failed to parse as JSON, skipping",
         );
         continue;
       }
       out.push({
         id: row.id,
-        workspaceId: row.workspaceId,
+        worktreeId: row.worktreeId,
         name: parsed.name,
         url: parsed.url,
         status: parsed.status,

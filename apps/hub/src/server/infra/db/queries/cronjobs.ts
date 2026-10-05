@@ -5,18 +5,18 @@ import { cronjobs } from "../schema";
 
 /**
  * One scheduled cron-style task — a prompt the agent runs on a recurring
- * schedule against a project's main branch or a specific workspace.
+ * schedule against a repo's main branch or a specific worktree.
  *
- * Persisted shape matches the Drizzle row 1:1; the `workspaceId` and
+ * Persisted shape matches the Drizzle row 1:1; the `worktreeId` and
  * `lastRun*` columns are nullable in SQLite but exposed here as optional
  * `T | undefined` to make consumers' optional-chaining ergonomic. Conversion
  * happens inside `CronjobQueries.rowToDefinition` below.
  */
-export type CronjobScope = "project" | "workspace";
+export type CronjobScope = "repo" | "worktree";
 
 /**
  * Where a cronjob fire dispatches its prompt (issue #581). Defined inline here
- * rather than importing `workspaceVia` from the services tier: Infra must not
+ * rather than importing `worktreeVia` from the services tier: Infra must not
  * depend on `services/`. Keep this `CronjobVia` and the `cronjobVia` zod enum in
  * `cronjob-service.ts` in sync — they intentionally carry the same two values.
  */
@@ -31,10 +31,10 @@ export interface CronjobDefinition {
   prompt: string;
   /** Standard cron expression (5-field format) */
   cronExpression: string;
-  /** Whether this runs on the project's main branch or a specific workspace */
+  /** Whether this runs on the repo's main branch or a specific worktree */
   scope: CronjobScope;
-  /** For workspace-scoped jobs, the workspace ID (project-branch) */
-  workspaceId?: string;
+  /** For worktree-scoped jobs, the worktree ID (repo-branch) */
+  worktreeId?: string;
   /** Where a fire dispatches the prompt: chat pane (default) or terminal PTY */
   via: CronjobVia;
   /** Whether the job is enabled */
@@ -54,7 +54,7 @@ export interface CronjobDefinition {
 }
 
 /**
- * The set of jobs that share a `fileKey` (project name or workspace id).
+ * The set of jobs that share a `fileKey` (repo name or worktree id).
  *
  * Kept as an object (rather than a bare `CronjobDefinition[]`) because this
  * shape is the tRPC response payload of `cronjobs.list` / `cronjobs.get`:
@@ -98,10 +98,10 @@ export function generateCronjobId(): string {
  * helpers so the service tier can be a near-mechanical port of the existing
  * router code. The one shape difference is `listAll()` returns
  * `CronjobDefinition & { fileKey }` because callers (the scheduler in
- * particular) need both pieces to resolve which workspace to fire into.
+ * particular) need both pieces to resolve which worktree to fire into.
  */
 export class CronjobQueries {
-  /** Load all jobs for a specific key (project name or workspace id). */
+  /** Load all jobs for a specific key (repo name or worktree id). */
   loadFile(key: string): CronjobFile {
     const db = getDb();
     const rows = db.select().from(cronjobs).where(eq(cronjobs.fileKey, key)).all();
@@ -135,7 +135,7 @@ export class CronjobQueries {
             prompt: job.prompt,
             cronExpression: job.cronExpression,
             scope: job.scope,
-            workspaceId: job.workspaceId ?? null,
+            worktreeId: job.worktreeId ?? null,
             via: job.via ?? "chat",
             enabled: job.enabled,
             createdAt: job.createdAt,
@@ -158,7 +158,7 @@ export class CronjobQueries {
     }));
   }
 
-  /** Delete all jobs for a key (used during workspace/project removal). */
+  /** Delete all jobs for a key (used during worktree/repo removal). */
   deleteFile(key: string): void {
     const db = getDb();
     db.delete(cronjobs).where(eq(cronjobs.fileKey, key)).run();
@@ -208,7 +208,7 @@ export class CronjobQueries {
       prompt: row.prompt,
       cronExpression: row.cronExpression,
       scope: row.scope as CronjobDefinition["scope"],
-      workspaceId: row.workspaceId ?? undefined,
+      worktreeId: row.worktreeId ?? undefined,
       via: (row.via ?? "chat") as CronjobDefinition["via"],
       enabled: row.enabled,
       createdAt: row.createdAt,

@@ -9,7 +9,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// A machine Band can run workspaces on. The `local` row is seeded by the
+// A machine Band can run worktrees on. The `local` row is seeded by the
 // migration and is the only one until remote hosts are registered. `host_id`
 // columns elsewhere default to it, so existing rows need no backfill.
 export const hosts = sqliteTable(
@@ -35,9 +35,9 @@ export const hosts = sqliteTable(
 
 const hostId = () => text("host_id").notNull().default("local");
 
-export const workspaceStatuses = sqliteTable("workspace_statuses", {
-  workspaceId: text("workspace_id").primaryKey(),
-  project: text("project").notNull(),
+export const worktreeStatuses = sqliteTable("worktree_statuses", {
+  worktreeId: text("worktree_id").primaryKey(),
+  repo: text("repo").notNull(),
   branch: text("branch").notNull(),
   worktreePath: text("worktree_path").notNull(),
   agentName: text("agent_name"),
@@ -49,29 +49,29 @@ export const workspaceStatuses = sqliteTable("workspace_statuses", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-// One row per agent reporting into a workspace: `chat:<chatId>` for a chat
+// One row per agent reporting into a worktree: `chat:<chatId>` for a chat
 // pane's ACP turns, `hook:<sessionId>` for a hook-reporting CLI session,
-// `manual` for `statuses.update`. `workspace_statuses.agent_status` is
+// `manual` for `statuses.update`. `worktree_statuses.agent_status` is
 // derived from these rows (needs_attention > working > waiting).
 // `terminal_id` is set when the hook came from a Band terminal, so closing
 // that terminal drops the row.
-export const workspaceStatusSources = sqliteTable(
-  "workspace_status_sources",
+export const worktreeStatusSources = sqliteTable(
+  "worktree_status_sources",
   {
-    workspaceId: text("workspace_id").notNull(),
+    worktreeId: text("worktree_id").notNull(),
     sourceId: text("source_id").notNull(),
     status: text("status").notNull(),
     terminalId: text("terminal_id"),
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.sourceId] }),
-    index("workspace_status_sources_terminal_idx").on(t.terminalId),
+    primaryKey({ columns: [t.worktreeId, t.sourceId] }),
+    index("worktree_status_sources_terminal_idx").on(t.terminalId),
   ],
 );
 
 export const branchStatuses = sqliteTable("branch_statuses", {
-  workspaceId: text("workspace_id").primaryKey(),
+  worktreeId: text("worktree_id").primaryKey(),
   gitDirty: integer("git_dirty", { mode: "boolean" }).notNull(),
   gitConflict: integer("git_conflict", { mode: "boolean" }).notNull(),
   gitAhead: integer("git_ahead").notNull(),
@@ -84,20 +84,20 @@ export const branchStatuses = sqliteTable("branch_statuses", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-export const projects = sqliteTable("projects", {
+export const repos = sqliteTable("repos", {
   name: text("name").primaryKey(),
   path: text("path").notNull(),
   defaultBranch: text("default_branch").notNull(),
   label: text("label"),
   sortOrder: integer("sort_order").notNull(),
-  // Discriminates between git-backed projects (worktree-per-workspace,
-  // branches, PR/CI features) and plain folders (single implicit workspace,
+  // Discriminates between git-backed repos (one worktree per branch,
+  // branches, PR/CI features) and plain folders (single implicit worktree,
   // no isolation, git features disabled). Defaults to "git" so existing
   // rows keep their behavior unchanged after migration.
   kind: text("kind", { enum: ["git", "plain"] })
     .notNull()
     .default("git"),
-  // Whether the project's git repo has an `origin` remote we can use for
+  // Whether the repo's git repo has an `origin` remote we can use for
   // CI / PR queries. Populated by `syncWorktrees` (see `sync-state.ts`) at
   // the CI tick cadence — `null` means "not yet probed" and is treated as
   // `true` (best-effort) so the first poll after a fresh boot still issues
@@ -107,32 +107,32 @@ export const projects = sqliteTable("projects", {
   hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
 });
 
-// A project's checkout path on each host. `projects.path` stays the source
-// that readers use and `ProjectQueries.saveAll` mirrors it here as the `local`
+// A repo's checkout path on each host. `repos.path` stays the source
+// that readers use and `RepoQueries.saveAll` mirrors it here as the `local`
 // row, so Phase 2 can add a row per remote host without a schema change.
-export const projectHosts = sqliteTable(
-  "project_hosts",
+export const repoHosts = sqliteTable(
+  "repo_hosts",
   {
-    projectName: text("project_name")
+    repoName: text("repo_name")
       .notNull()
-      .references(() => projects.name, { onDelete: "cascade" }),
+      .references(() => repos.name, { onDelete: "cascade" }),
     hostId: text("host_id")
       .notNull()
       .references(() => hosts.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.projectName, t.hostId] })],
+  (t) => [primaryKey({ columns: [t.repoName, t.hostId] })],
 );
 
 export const worktrees = sqliteTable("worktrees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  projectName: text("project_name")
+  repoName: text("repo_name")
     .notNull()
-    .references(() => projects.name, { onDelete: "cascade" }),
-  // Immutable workspace identity, set once at creation to the (slugified)
-  // branch name. The workspace id is derived from this (`toWorkspaceId`),
+    .references(() => repos.name, { onDelete: "cascade" }),
+  // Immutable worktree identity, set once at creation to the (slugified)
+  // branch name. The worktree id is derived from this (`toWorktreeId`),
   // NOT from `branch` — so switching the git branch inside the worktree
-  // doesn't change the id (and everything keyed by it) or the projects-list
+  // doesn't change the id (and everything keyed by it) or the repos-list
   // label. Sync updates `branch` to track git; it never touches `name`.
   // Backfilled to `branch` for pre-existing rows by the migration.
   name: text("name").notNull(),
@@ -146,9 +146,9 @@ export const worktrees = sqliteTable("worktrees", {
   hostId: hostId(),
 });
 
-// Worktrees on a remote host whose workspace was removed while the host was
-// offline. The workspace is gone from the hub at once; the worker deletes the
-// checkout the next time it connects (`WorkspaceService.finishPendingRemovals`).
+// Worktrees on a remote host whose worktree was removed while the host was
+// offline. The worktree is gone from the hub at once; the worker deletes the
+// checkout the next time it connects (`WorktreeService.finishPendingRemovals`).
 export const pendingRemovals = sqliteTable(
   "pending_removals",
   {
@@ -156,7 +156,7 @@ export const pendingRemovals = sqliteTable(
       .notNull()
       .references(() => hosts.id, { onDelete: "cascade" }),
     worktreePath: text("worktree_path").notNull(),
-    // The project's checkout on that host, which git runs the removal from.
+    // The repo's checkout on that host, which git runs the removal from.
     repoPath: text("repo_path").notNull(),
     // The branch to delete after the worktree, or null when there is none to delete.
     branch: text("branch"),
@@ -165,18 +165,18 @@ export const pendingRemovals = sqliteTable(
   (t) => [primaryKey({ columns: [t.hostId, t.worktreePath] })],
 );
 
-// A workspace waiting for a host (plan step 3.3). `workspaces.create` with
+// A worktree waiting for a host (plan step 3.3). `worktrees.create` with
 // `placement` records one when no online host fits. A runner leases it
 // (`leased_by`, `lease_expires_at`), starts a machine and fulfils it with the
-// host id; the hub then finishes creating the workspace (`completed_at`). An
+// host id; the hub then finishes creating the worktree (`completed_at`). An
 // expired lease makes the request leasable again. `input` is the create call
 // to replay on the host.
 export const hostRequests = sqliteTable(
   "host_requests",
   {
     id: text("id").primaryKey(),
-    workspaceId: text("workspace_id").notNull(),
-    project: text("project").notNull(),
+    worktreeId: text("worktree_id").notNull(),
+    repo: text("repo").notNull(),
     branch: text("branch").notNull(),
     labels: text("labels", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
     requires: text("requires", { mode: "json" })
@@ -198,19 +198,19 @@ export const hostRequests = sqliteTable(
   },
   (t) => [
     index("host_requests_status_idx").on(t.status, t.createdAt),
-    index("host_requests_workspace_idx").on(t.workspaceId),
+    index("host_requests_worktree_idx").on(t.worktreeId),
   ],
 );
 
-// One build of a project's environment image (plan step 3.2). `key` is the
+// One build of a repo's environment image (plan step 3.2). `key` is the
 // hash of the environment file, what it references, the lockfiles and the
 // worker base. `ready` rows hold the image tag; the newest ready row is the
-// project's current image, and a failed build never replaces it.
+// repo's current image, and a failed build never replaces it.
 export const environmentBuilds = sqliteTable(
   "environment_builds",
   {
     id: text("id").primaryKey(),
-    project: text("project").notNull(),
+    repo: text("repo").notNull(),
     key: text("key").notNull(),
     status: text("status", { enum: ["building", "ready", "failed"] }).notNull(),
     image: text("image"),
@@ -224,23 +224,23 @@ export const environmentBuilds = sqliteTable(
     endedAt: integer("ended_at"),
   },
   (t) => [
-    index("environment_builds_project_idx").on(t.project, t.startedAt),
-    index("environment_builds_key_idx").on(t.project, t.key),
+    index("environment_builds_repo_idx").on(t.repo, t.startedAt),
+    index("environment_builds_key_idx").on(t.repo, t.key),
   ],
 );
 
-// A workspace whose ephemeral worker exited after persisting it (plan step 3.5).
+// A worktree whose ephemeral worker exited after persisting it (plan step 3.5).
 // The row records where the checkout went (`store`, `ref`, `snapshot_sha`) and
 // the agent session ids whose files the hub holds. It stays until a new
-// worker restores the workspace. `waking_since` is set while a host request
+// worker restores the worktree. `waking_since` is set while a host request
 // for that restore is open.
-export const workspaceSleep = sqliteTable(
-  "workspace_sleep",
+export const worktreeSleep = sqliteTable(
+  "worktree_sleep",
   {
-    workspaceId: text("workspace_id").primaryKey(),
+    worktreeId: text("worktree_id").primaryKey(),
     hostId: text("host_id").notNull(),
-    project: text("project").notNull(),
-    // The workspace's immutable name (the worktree's `name`), also its branch at creation.
+    repo: text("repo").notNull(),
+    // The worktree's immutable name (the worktree's `name`), also its branch at creation.
     name: text("name").notNull(),
     // The branch checked out when the worker exited. Empty for a detached HEAD.
     branch: text("branch").notNull(),
@@ -256,7 +256,7 @@ export const workspaceSleep = sqliteTable(
     wakingSince: integer("waking_since"),
     createdAt: integer("created_at").notNull(),
   },
-  (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
+  (t) => [index("worktree_sleep_host_idx").on(t.hostId)],
 );
 
 // Machine snapshots a runner's `snapshot` hook took when an ephemeral worker went to sleep.
@@ -269,7 +269,7 @@ export const runnerSnapshots = sqliteTable(
     hostId: text("host_id").notNull(),
     // The `runner_machines` row of the machine that was snapshotted.
     machineId: text("machine_id"),
-    workspaceIds: text("workspace_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    worktreeIds: text("worktree_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
     snapshotId: text("snapshot_id").notNull(),
     sizeBytes: integer("size_bytes"),
     restoredAt: integer("restored_at"),
@@ -315,8 +315,8 @@ export const runnerMachines = sqliteTable(
 
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
-  workspaceId: text("workspace_id").notNull(),
-  project: text("project").notNull(),
+  worktreeId: text("worktree_id").notNull(),
+  repo: text("repo").notNull(),
   branch: text("branch").notNull(),
   prompt: text("prompt").notNull(),
   status: text("status", { enum: ["running", "completed", "failed"] }).notNull(),
@@ -373,7 +373,7 @@ export const chatEvents = sqliteTable(
 
 export const panelStates = sqliteTable("panel_states", {
   id: text("id").primaryKey(),
-  workspaceId: text("workspace_id").notNull(),
+  worktreeId: text("worktree_id").notNull(),
   panelType: text("panel_type").notNull(),
   state: text("state").notNull(), // JSON blob — panel-type-specific
   // Free-form labels for taxonomy and dispatch lookups (issue #520). JSON-encoded
@@ -391,12 +391,12 @@ export const cronjobs = sqliteTable("cronjobs", {
   name: text("name").notNull(),
   prompt: text("prompt").notNull(),
   cronExpression: text("cron_expression").notNull(),
-  scope: text("scope", { enum: ["project", "workspace"] }).notNull(),
-  workspaceId: text("workspace_id"),
+  scope: text("scope", { enum: ["repo", "worktree"] }).notNull(),
+  worktreeId: text("worktree_id"),
   // Where a fire dispatches the prompt (issue #581): "chat" submits a task to
-  // the workspace's cron chat pane (default, backward-compatible); "terminal"
+  // the worktree's cron chat pane (default, backward-compatible); "terminal"
   // spawns the agent's vendor CLI in a fresh self-closing PTY pane. Mirrors the
-  // `via` discriminator on `workspaces.create` (#551).
+  // `via` discriminator on `worktrees.create` (#551).
   via: text("via", { enum: ["chat", "terminal"] })
     .notNull()
     .default("chat"),
@@ -424,7 +424,7 @@ export const cronjobs = sqliteTable("cronjobs", {
 // Pruned by the background sweep in `queries/usage-events.ts` on the same
 // 30-day retention window as the tasks table. Indexes match the three
 // primary aggregate filters (period range, drill-into-task,
-// drill-into-workspace).
+// drill-into-worktree).
 export const usageEvents = sqliteTable(
   "usage_events",
   {
@@ -436,8 +436,8 @@ export const usageEvents = sqliteTable(
      */
     taskId: text("task_id").notNull(),
     chatId: text("chat_id"),
-    workspaceId: text("workspace_id").notNull(),
-    project: text("project").notNull(),
+    worktreeId: text("worktree_id").notNull(),
+    repo: text("repo").notNull(),
     sessionId: text("session_id"),
     codingAgentId: text("coding_agent_id"),
     // "claude" | "codex" | "gemini" | "opencode" | "cursor"
@@ -462,32 +462,32 @@ export const usageEvents = sqliteTable(
   (t) => [
     index("usage_events_captured_at_idx").on(t.capturedAt),
     index("usage_events_task_idx").on(t.taskId),
-    index("usage_events_workspace_idx").on(t.workspaceId),
+    index("usage_events_worktree_idx").on(t.worktreeId),
     uniqueIndex("usage_events_external_key_uq").on(t.externalKey),
   ],
 );
 
 /**
- * Per-(workspace, agent) watermark for the Reports usage scanner
+ * Per-(worktree, agent) watermark for the Reports usage scanner
  * (issue #425). Tracks the highest `lastModified` timestamp the scanner
  * has already processed so each tick only re-reads sessions touched
- * since the previous run. Workspaces aren't a first-class DB row, so
- * cleanup on workspace removal is explicit (see `workspace-service`).
+ * since the previous run. Worktrees aren't a first-class DB row, so
+ * cleanup on worktree removal is explicit (see `worktree-service`).
  */
 export const usageScanState = sqliteTable(
   "usage_scan_state",
   {
-    workspaceId: text("workspace_id").notNull(),
+    worktreeId: text("worktree_id").notNull(),
     agentType: text("agent_type").notNull(),
     lastScannedUpdatedAt: integer("last_scanned_updated_at").notNull(),
     hostId: hostId(),
   },
-  (t) => [uniqueIndex("usage_scan_state_pk").on(t.workspaceId, t.agentType)],
+  (t) => [uniqueIndex("usage_scan_state_pk").on(t.worktreeId, t.agentType)],
 );
 
-// Persistent browser pane history (per-workspace).
+// Persistent browser pane history (per-worktree).
 //
-// One row per (workspaceId, url): revisiting a URL bumps `visitCount` and
+// One row per (worktreeId, url): revisiting a URL bumps `visitCount` and
 // `lastVisitedAt` rather than inserting a duplicate row. Keeps storage
 // bounded and makes frecency a single SQL expression
 // (`visit_count / (1 + age_days)`).
@@ -495,7 +495,7 @@ export const browserHistory = sqliteTable(
   "browser_history",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    workspaceId: text("workspace_id").notNull(),
+    worktreeId: text("worktree_id").notNull(),
     url: text("url").notNull(),
     title: text("title"),
     faviconUrl: text("favicon_url"),
@@ -503,8 +503,8 @@ export const browserHistory = sqliteTable(
     visitCount: integer("visit_count").notNull().default(1),
   },
   (t) => [
-    uniqueIndex("browser_history_workspace_url_uq").on(t.workspaceId, t.url),
-    index("browser_history_workspace_visited_idx").on(t.workspaceId, t.lastVisitedAt),
+    uniqueIndex("browser_history_worktree_url_uq").on(t.worktreeId, t.url),
+    index("browser_history_worktree_visited_idx").on(t.worktreeId, t.lastVisitedAt),
   ],
 );
 
@@ -524,12 +524,12 @@ export const browserProfiles = sqliteTable("browser_profiles", {
   createdAt: integer("created_at").notNull(),
 });
 
-// The browser profile each project opens new browser tabs with. Keyed by
-// project name with no FK, because `ProjectQueries.saveAll` rewrites the
-// `projects` table wholesale and a cascade would wipe this mapping. The
-// projects router removes the row when a project is removed.
-export const projectBrowserProfiles = sqliteTable("project_browser_profiles", {
-  projectName: text("project_name").primaryKey(),
+// The browser profile each repo opens new browser tabs with. Keyed by
+// repo name with no FK, because `RepoQueries.saveAll` rewrites the
+// `repos` table wholesale and a cascade would wipe this mapping. The
+// repos router removes the row when a repo is removed.
+export const repoBrowserProfiles = sqliteTable("repo_browser_profiles", {
+  repoName: text("repo_name").primaryKey(),
   profileId: text("profile_id").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
@@ -544,7 +544,7 @@ export const agentSessions = sqliteTable(
   "agent_sessions",
   {
     id: text("id").primaryKey(),
-    workspaceId: text("workspace_id").notNull(),
+    worktreeId: text("worktree_id").notNull(),
     agentDefinitionId: text("agent_definition_id").notNull(),
     providerSessionId: text("provider_session_id"),
     mode: text("mode", { enum: ["gui", "tui"] }).notNull(),
@@ -555,7 +555,7 @@ export const agentSessions = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
-    index("agent_sessions_workspace_idx").on(t.workspaceId),
+    index("agent_sessions_worktree_idx").on(t.worktreeId),
     index("agent_sessions_chat_idx").on(t.chatId),
     index("agent_sessions_terminal_idx").on(t.terminalId),
   ],
@@ -566,21 +566,21 @@ export const agentSessions = sqliteTable(
 // `scope` is `all` for one value on every device, or `desktop` / `mobile` for
 // a value per device type. `value` is JSON, NULL once the key is deleted: the
 // row stays as a tombstone so its version keeps counting and a stale client
-// can't recreate the key. `workspace_id` is null for a global key; the
-// workspace delete path removes a workspace's rows.
+// can't recreate the key. `worktree_id` is null for a global key; the
+// worktree delete path removes a worktree's rows.
 export const clientState = sqliteTable(
   "client_state",
   {
     key: text("key").notNull(),
     scope: text("scope", { enum: ["all", "desktop", "mobile"] }).notNull(),
-    workspaceId: text("workspace_id"),
+    worktreeId: text("worktree_id"),
     value: text("value"),
     version: integer("version").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.key, t.scope] }),
-    index("client_state_workspace_idx").on(t.workspaceId),
+    index("client_state_worktree_idx").on(t.worktreeId),
   ],
 );
 
@@ -588,13 +588,13 @@ export const clientState = sqliteTable(
 // key arrive (`github:pr:owner/repo#123`). `kinds` is a JSON array of event
 // kinds, empty meaning every kind. `wakeups` counts delivered messages;
 // the row is deleted at `max_wakeups` or `expires_at`. Rows go away with
-// their chat or workspace.
+// their chat or worktree.
 export const subscriptions = sqliteTable(
   "subscriptions",
   {
     id: text("id").primaryKey(),
     chatId: text("chat_id").notNull(),
-    workspaceId: text("workspace_id").notNull(),
+    worktreeId: text("worktree_id").notNull(),
     source: text("source").notNull(),
     kinds: text("kinds").notNull(),
     filterKey: text("filter_key").notNull(),
@@ -609,7 +609,7 @@ export const subscriptions = sqliteTable(
   },
   (t) => [
     index("subscriptions_chat_idx").on(t.chatId),
-    index("subscriptions_workspace_idx").on(t.workspaceId),
+    index("subscriptions_worktree_idx").on(t.worktreeId),
   ],
 );
 
@@ -639,11 +639,11 @@ export const subscriptionCursors = sqliteTable("subscription_cursors", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-// Head commits Band pushed from its workspaces. Subscriptions use them to
+// Head commits Band pushed from its worktrees. Subscriptions use them to
 // tell their own agent's work from a human's.
 export const pushedShas = sqliteTable("pushed_shas", {
   sha: text("sha").primaryKey(),
-  workspaceId: text("workspace_id").notNull(),
+  worktreeId: text("worktree_id").notNull(),
   pushedAt: integer("pushed_at").notNull(),
 });
 
@@ -685,7 +685,7 @@ export const vaultItems = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     kind: text("kind", { enum: ["api_key", "oauth", "env", "git"] }).notNull(),
-    // `global` or `project:<name>`.
+    // `global` or `repo:<name>`.
     scope: text("scope").notNull().default("global"),
     encrypted: text("encrypted").notNull(),
     metadata: text("metadata", { mode: "json" })
@@ -737,7 +737,7 @@ export const mcpServers = sqliteTable(
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     // Which agent sessions get this server (plan step 4.3). Null means no
     // limit on that axis. A session needs to match both lists that are set.
-    scopeProjects: text("scope_projects", { mode: "json" }).$type<string[] | null>(),
+    scopeRepos: text("scope_repos", { mode: "json" }).$type<string[] | null>(),
     scopeHosts: text("scope_hosts", { mode: "json" }).$type<string[] | null>(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),

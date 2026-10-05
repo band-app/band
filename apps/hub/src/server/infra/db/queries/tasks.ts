@@ -22,8 +22,8 @@ export type TaskStatus = "running" | "completed" | "failed";
  */
 export interface TaskRecord {
   id: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   branch: string;
   prompt: string;
   status: TaskStatus;
@@ -37,8 +37,8 @@ export interface TaskRecord {
 }
 
 export interface TaskFilters {
-  project?: string;
-  workspaceId?: string;
+  repo?: string;
+  worktreeId?: string;
   status?: TaskStatus;
   sessionId?: string;
   chatId?: string;
@@ -97,8 +97,8 @@ export class TaskQueries {
     db.insert(tasksTable)
       .values({
         id: task.id,
-        workspaceId: task.workspaceId,
-        project: task.project,
+        worktreeId: task.worktreeId,
+        repo: task.repo,
         branch: task.branch,
         prompt: task.prompt,
         status: task.status,
@@ -113,8 +113,8 @@ export class TaskQueries {
       .onConflictDoUpdate({
         target: tasksTable.id,
         set: {
-          workspaceId: task.workspaceId,
-          project: task.project,
+          worktreeId: task.worktreeId,
+          repo: task.repo,
           branch: task.branch,
           prompt: task.prompt,
           status: task.status,
@@ -149,11 +149,11 @@ export class TaskQueries {
     const db = getDb();
     const conditions = [];
 
-    if (filters?.project) {
-      conditions.push(eq(tasksTable.project, filters.project));
+    if (filters?.repo) {
+      conditions.push(eq(tasksTable.repo, filters.repo));
     }
-    if (filters?.workspaceId) {
-      conditions.push(eq(tasksTable.workspaceId, filters.workspaceId));
+    if (filters?.worktreeId) {
+      conditions.push(eq(tasksTable.worktreeId, filters.worktreeId));
     }
     if (filters?.status) {
       conditions.push(eq(tasksTable.status, filters.status));
@@ -201,18 +201,18 @@ export class TaskQueries {
   }
 
   /**
-   * Delete all tasks belonging to a workspace.
+   * Delete all tasks belonging to a worktree.
    *
-   * Called when a workspace is removed. Workspaces are not first-class DB
+   * Called when a worktree is removed. Worktrees are not first-class DB
    * rows (they live in `state.json`), so we can't lean on `ON DELETE
    * CASCADE` — the caller is responsible for invoking this helper next to
-   * the other workspace-scoped cleanups.
+   * the other worktree-scoped cleanups.
    *
    * Returns the number of rows deleted.
    */
-  deleteWorkspaceTasks(workspaceId: string): number {
+  deleteWorktreeTasks(worktreeId: string): number {
     const db = getDb();
-    const result = db.delete(tasksTable).where(eq(tasksTable.workspaceId, workspaceId)).run();
+    const result = db.delete(tasksTable).where(eq(tasksTable.worktreeId, worktreeId)).run();
     return Number(result.changes ?? 0);
   }
 
@@ -286,8 +286,8 @@ export class TaskQueries {
   private static rowToRecord(row: typeof tasksTable.$inferSelect): TaskRecord {
     return {
       id: row.id,
-      workspaceId: row.workspaceId,
-      project: row.project,
+      worktreeId: row.worktreeId,
+      repo: row.repo,
       branch: row.branch,
       prompt: row.prompt,
       status: row.status as TaskStatus,

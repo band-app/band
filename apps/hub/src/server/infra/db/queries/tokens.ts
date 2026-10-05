@@ -114,8 +114,8 @@ export class TokenQueries {
       .run();
   }
 
-  /** How many workspaces (worktree rows) live on a host. */
-  countWorkspacesOnHost(id: string): number {
+  /** How many worktrees (worktree rows) live on a host. */
+  countWorktreesOnHost(id: string): number {
     const row = this.db()
       .select({ n: count() })
       .from(worktrees)
@@ -133,7 +133,7 @@ export class TokenQueries {
       .all();
   }
 
-  /** Deletes a host row. Its tokens, project paths and pending removals go with it (cascade). */
+  /** Deletes a host row. Its tokens, repo paths and pending removals go with it (cascade). */
   deleteHost(id: string): void {
     this.db().delete(hosts).where(eq(hosts.id, id)).run();
   }

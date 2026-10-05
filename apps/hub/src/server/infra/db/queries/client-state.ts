@@ -23,7 +23,7 @@ function toEntry(row: Row): ClientStateEntry {
   return {
     key: row.key,
     scope: row.scope,
-    workspaceId: row.workspaceId,
+    worktreeId: row.worktreeId,
     value,
     version: row.version,
     updatedAt: row.updatedAt,
@@ -31,12 +31,10 @@ function toEntry(row: Row): ClientStateEntry {
 }
 
 export class ClientStateQueries {
-  /** Live rows (not tombstones) of one workspace, or the global rows when null, in the given scopes. */
-  list(workspaceId: string | null, scopes: ClientStateScope[]): ClientStateEntry[] {
+  /** Live rows (not tombstones) of one worktree, or the global rows when null, in the given scopes. */
+  list(worktreeId: string | null, scopes: ClientStateScope[]): ClientStateEntry[] {
     const where = and(
-      workspaceId === null
-        ? isNull(clientState.workspaceId)
-        : eq(clientState.workspaceId, workspaceId),
+      worktreeId === null ? isNull(clientState.worktreeId) : eq(clientState.worktreeId, worktreeId),
       inArray(clientState.scope, scopes),
       isNotNull(clientState.value),
     );
@@ -79,12 +77,9 @@ export class ClientStateQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
-  /** Delete every row of a workspace. Returns the number removed. */
-  removeForWorkspace(workspaceId: string): number {
-    const result = getDb()
-      .delete(clientState)
-      .where(eq(clientState.workspaceId, workspaceId))
-      .run();
+  /** Delete every row of a worktree. Returns the number removed. */
+  removeForWorktree(worktreeId: string): number {
+    const result = getDb().delete(clientState).where(eq(clientState.worktreeId, worktreeId)).run();
     return Number(result.changes ?? 0);
   }
 }
