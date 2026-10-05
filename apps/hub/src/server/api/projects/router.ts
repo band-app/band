@@ -15,6 +15,10 @@ import {
   ProjectNotFoundError,
 } from "../../errors";
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
+import {
+  DispatchInputError,
+  projectDispatchService,
+} from "../../services/project-dispatch-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
@@ -33,7 +37,11 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
     if (err instanceof ProjectConflictError) {
       throw new TRPCError({ code: "CONFLICT", message: err.message });
     }
-    if (err instanceof ProjectInputError || err instanceof ContextInputError) {
+    if (
+      err instanceof ProjectInputError ||
+      err instanceof ContextInputError ||
+      err instanceof DispatchInputError
+    ) {
       throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
     }
     throw err;
@@ -120,6 +128,46 @@ export const projectsRouter = t.router({
           })
           .then(() => ({ removed: true })),
       ),
+    ),
+
+  /** Task groups of a project: one piece of work across several repos, with its PR merge order. */
+  groups: publicProcedure
+    .input(z.object({ project: ref }))
+    .query(({ input }) =>
+      guard(() => ({ groups: projectDispatchService.groupsOf(projectService.row(input.project)) })),
+    ),
+
+  /** Dispatches the coordinator asked for. `status` narrows the list, `pending` is what waits for the user. */
+  dispatches: publicProcedure
+    .input(
+      z.object({
+        project: ref,
+        status: z.enum(["pending", "approved", "rejected", "failed"]).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      guard(() => ({
+        dispatches: projectDispatchService.requestsOf(
+          projectService.row(input.project),
+          input.status,
+        ),
+      })),
+    ),
+
+  /** Runs a pending dispatch. The project's limits are checked again first. */
+  approveDispatch: adminProcedure
+    .input(z.object({ requestId: z.string().min(1).max(100) }))
+    .mutation(({ input }) =>
+      guard(async () => ({ result: await projectDispatchService.approve(input.requestId) })),
+    ),
+
+  rejectDispatch: adminProcedure
+    .input(z.object({ requestId: z.string().min(1).max(100) }))
+    .mutation(({ input }) =>
+      guard(() => {
+        projectDispatchService.reject(input.requestId);
+        return { rejected: true };
+      }),
     ),
 
   addRepo: adminProcedure

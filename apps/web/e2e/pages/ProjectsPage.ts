@@ -171,4 +171,37 @@ export class ProjectsPage {
       await saved;
     });
   }
+
+  /** The pending or failed dispatch request cards of the open project. */
+  dispatches(): Locator {
+    return this.detail.getByTestId("projects__dispatch");
+  }
+
+  async approveDispatch(): Promise<void> {
+    await test.step("Approve the dispatch", async () => {
+      await this.detail.getByTestId("projects__dispatch-approve").click();
+    });
+  }
+
+  async rejectDispatch(): Promise<void> {
+    await test.step("Reject the dispatch", async () => {
+      await this.detail.getByTestId("projects__dispatch-reject").click();
+    });
+  }
+
+  noDispatches(): Locator {
+    return this.detail.getByTestId("projects__no-dispatches");
+  }
+
+  worktree(id: string): Locator {
+    return this.detail.locator(`[data-testid="projects__worktree"][data-worktree="${id}"]`);
+  }
+
+  group(branch: string): Locator {
+    return this.detail.locator(`[data-testid="projects__group"][data-branch="${branch}"]`);
+  }
+
+  groupMembers(branch: string): Locator {
+    return this.group(branch).getByTestId("projects__group-member");
+  }
 }

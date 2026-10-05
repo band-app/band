@@ -868,3 +868,61 @@ export const projectRepos = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.repoName] })],
 );
+
+// A task group is one piece of work that spans several repos of a project (plan step 6.3,
+// section 13). `mode` is `split` (one worktree and agent per repo, on the same branch) or
+// `combined` (one root with the repos side by side). `merge_order` lists the repos in the
+// order their pull requests merge. `worktree_id` and `host_id` of a member stay null while a
+// host is still being provisioned for it.
+export const taskGroups = sqliteTable(
+  "task_groups",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    brief: text("brief").notNull(),
+    branch: text("branch").notNull(),
+    mode: text("mode").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("task_groups_project_idx").on(t.projectId)],
+);
+
+export const taskGroupMembers = sqliteTable(
+  "task_group_members",
+  {
+    groupId: text("group_id")
+      .notNull()
+      .references(() => taskGroups.id, { onDelete: "cascade" }),
+    repo: text("repo").notNull(),
+    worktreeId: text("worktree_id"),
+    hostId: text("host_id"),
+    prNumber: integer("pr_number"),
+    mergeOrder: integer("merge_order").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.repo] })],
+);
+
+// A dispatch the coordinator of a `steer` project asked for and the user has yet to decide
+// (plan step 6.3). `input` is the validated `worktrees_create` call. A decided row stays as a
+// record: `status` is `pending`, `approved` (dispatched), `rejected` or `failed` (approved,
+// but the dispatch threw, with the message in `error`).
+export const dispatchRequests = sqliteTable(
+  "dispatch_requests",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    input: text("input", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    status: text("status").notNull().default("pending"),
+    error: text("error"),
+    result: text("result", { mode: "json" }).$type<Record<string, unknown>>(),
+    createdAt: integer("created_at").notNull(),
+    decidedAt: integer("decided_at"),
+  },
+  (t) => [index("dispatch_requests_project_idx").on(t.projectId, t.status)],
+);

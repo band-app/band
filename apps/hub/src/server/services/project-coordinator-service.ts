@@ -216,7 +216,8 @@ export class ProjectCoordinatorService {
       `\nPolicy: ${limits}.`,
       `\n${autonomy[p.autonomy]}`,
       `\nContext. The project context repo "${view.contextName}" is shared by every agent in the project, and the user context holds the user's preferences. Read them before you plan. Layout of the project context: notes.md (running notes), docs/ (design and contracts), media/ (screenshots, recordings), inbox/<agent>.md (pointers to handoffs for an agent), handoffs/ (one file per handoff), learnings/ (what agents learned). Use context_search to find things, context_append_learning to record what future agents should know, and context_handoff to pass work on. Write contracts between repos (API shapes, event formats) to docs/ so the agent on the other side can read them.`,
-      `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, chats_read, chats_send and worktree_stop. They are limited to this project's worktrees. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
+      `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, chats_read, chats_send, worktree_stop and worktrees_create. They are limited to this project's worktrees. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
+      "\nDispatching. worktrees_create starts a worker agent in a new worktree. Write the brief so the worker can act on it alone: the goal, the constraints, the contracts with other repos and what is out of scope, plus acceptance scenarios it can check. For work across repos, pass a group in mode split with the merge order. In steer mode the call waits for the user's approval, so tell the user it is pending and do not call it again.",
       "\nMerging. Never merge a pull request unless the user confirmed it in this conversation or auto-merge is on.",
     ]
       .filter(Boolean)
@@ -341,9 +342,9 @@ export class ProjectCoordinatorService {
   /**
    * Checks whether the project may take more worker work. `observe` refuses.
    * The budget applies to every message. The concurrency limit applies only to
-   * a message that starts a new turn. Dispatch of new worktrees is step 6.3.
+   * a message that starts a new turn. A dispatch passes `runs`, the number of worker agents it starts.
    */
-  checkDispatch(row: ProjectRow, opts: { newRun: boolean }): void {
+  checkDispatch(row: ProjectRow, opts: { newRun: boolean; runs?: number }): void {
     this.requireMutation(row);
     const p = projectService.get(row.id).effectivePolicy;
     if (p.budgetUsd !== null) {
@@ -356,9 +357,10 @@ export class ProjectCoordinatorService {
     }
     if (opts.newRun && p.maxConcurrent !== null) {
       const running = this.status(row).running;
-      if (running >= p.maxConcurrent) {
+      const runs = opts.runs ?? 1;
+      if (running + runs > p.maxConcurrent) {
         throw new CoordinatorToolError(
-          `Refused: ${running} worker agents are already running and project "${row.name}" allows ${p.maxConcurrent} at once. Wait for one to finish, or stop one with worktree_stop.`,
+          `Refused: ${running} worker agents are already running, ${runs === 1 ? "one more" : `${runs} more`} would pass the limit, and project "${row.name}" allows ${p.maxConcurrent} at once. Wait for one to finish, or stop one with worktree_stop.`,
         );
       }
     }
@@ -395,7 +397,7 @@ export class ProjectCoordinatorService {
     return { worktreeId, stoppedChats: stopped };
   }
 
-  private requireMutation(row: ProjectRow): void {
+  requireMutation(row: ProjectRow): void {
     const { autonomy } = resolvePolicy(projectService.get(row.id).policy);
     if (autonomy === "observe") {
       throw new CoordinatorToolError(

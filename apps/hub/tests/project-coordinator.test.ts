@@ -253,6 +253,7 @@ describe("the coordinator session starts with the project (S1)", () => {
       "chats_send",
       "project_status",
       "worktree_stop",
+      "worktrees_create",
       "worktrees_list",
     ]);
   });

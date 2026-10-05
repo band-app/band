@@ -14,10 +14,12 @@ import { createLogger } from "@band-app/logger";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { dispatchInputShape } from "../../services/_utils/dispatch-input";
 import {
   CoordinatorToolError,
   projectCoordinatorService,
 } from "../../services/project-coordinator-service";
+import { projectDispatchService } from "../../services/project-dispatch-service";
 import { sendJson } from "./http-util";
 
 const log = createLogger("coordinator-mcp");
@@ -87,6 +89,12 @@ function createServer(projectId: string): McpServer {
     "Stop the running turns of every chat in a worktree of this project. Refused in observe mode.",
     { worktreeId: z.string().min(1).max(300) },
     (args) => projectCoordinatorService.stopWorktree(project(), args.worktreeId),
+  );
+  tool(
+    "worktrees_create",
+    "Dispatch work: create a worktree in a repo of this project (or a group of repos), write your brief to .am/BRIEF.md in it, and start a worker agent on the project's worker model that reads it. Pass `repo`, or `group` ({repos:[{repo, role}], mode: split, mergeOrder:[repo...]}) for work across repos: split makes one worktree and agent per repo on the same branch and tells each the siblings and the pull request order. `brief` is markdown the worker works from alone, so state the goal, the constraints and what is out of scope. `scenarios` are the acceptance scenarios the worker must check. `placement` takes labels, requires and isolation within the project's policy. In steer mode the call answers \"pending approval\" and the user decides on the project page. Returns the worktree ids.",
+    dispatchInputShape,
+    (args) => projectDispatchService.dispatch(project(), args),
   );
   return server;
 }
