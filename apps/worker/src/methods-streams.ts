@@ -1,6 +1,6 @@
 import { delimiter, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { AgentStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
+import type { AgentStdio, McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
 import { shellPath } from "@band-app/host-local/process/path";
 import type { Channel } from "@band-app/link";
 import type { Registrar, WorkerContext } from "./context.ts";
@@ -108,6 +108,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   // ---- agents -------------------------------------------------------------
 
   const agents = new Map<string, RunningAgent>();
+  const mcpProcesses = new Set<McpStdio>();
 
   r.json("acp.resolveLaunch", (a) =>
     host.acp.resolveLaunch({
@@ -152,6 +153,53 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.json("acp.kill", (a) => {
     const signal = optStr(a, "signal") as NodeJS.Signals | undefined;
     agents.get(str(a, "agentId"))?.stdio.kill(signal);
+  });
+
+  // ---- stdio MCP servers --------------------------------------------------
+
+  // One channel carries the server's JSON-RPC lines: the hub writes stdin, the worker writes stdout.
+  // The hub resetting the channel kills the process. The hub ending its side closes stdin, and the
+  // process gets a grace period to exit before it is killed. `env` may hold vault secrets, so it
+  // is passed straight to the process and nothing here logs or stores it.
+  const MCP_STDIN_GRACE_MS = 2_000;
+  r.raw("mcp.stdio.open", async (a) => {
+    const stdio = await host.mcp.openStdio({
+      serverId: str(a, "serverId"),
+      command: str(a, "command"),
+      args: strArray(a, "args"),
+      env: strRecord(a, "env"),
+      cwd: optStr(a, "cwd") === undefined ? undefined : await path(a, "cwd"),
+    });
+    mcpProcesses.add(stdio);
+    let ch: ReturnType<typeof session.openChannel>;
+    try {
+      ch = session.openChannel("mcp.stdio", { serverId: str(a, "serverId") });
+    } catch (err) {
+      stdio.kill();
+      mcpProcesses.delete(stdio);
+      throw err;
+    }
+    const output = (async function* () {
+      try {
+        yield* stdio.stdout;
+      } finally {
+        mcpProcesses.delete(stdio);
+      }
+    })();
+    serve(ch, output, {
+      release: activity.hold(),
+      stopSourceOn: "reset",
+      onInput: (chunk) => stdio.stdin.write(chunk),
+      onClosed: (how) => {
+        if (how === "reset") {
+          stdio.kill();
+          return;
+        }
+        stdio.stdin.end();
+        setTimeout(() => stdio.kill(), MCP_STDIN_GRACE_MS).unref();
+      },
+    });
+    return { chan: ch.id, pid: stdio.pid ?? null };
   });
 
   // ---- terminals ----------------------------------------------------------
@@ -267,6 +315,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   return async () => {
     unsubscribeExit();
     for (const { stdio } of agents.values()) stdio.kill();
+    for (const proc of mcpProcesses) proc.kill();
     await pty.close();
     await host.lsp.killAll();
   };

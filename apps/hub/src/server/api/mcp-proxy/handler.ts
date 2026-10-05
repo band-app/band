@@ -1,5 +1,6 @@
 /**
- * `/mcp-proxy/<server>`: the hub's proxy for HTTP MCP servers (plan step 4.2).
+ * `/mcp-proxy/<server>`: the hub's proxy for MCP servers (plan steps 4.2 and 4.4).
+ * This file handles HTTP servers; `stdio.ts` handles the ones that run on a worker.
  *
  * An agent presents a per-session `mcp_` token. The hub checks it, adds the
  * vault credential to the upstream request and forwards the JSON-RPC (streamable
@@ -19,26 +20,28 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import {
-  type CallDecision,
-  decideCall,
-  listedToolAllowed,
-  readOnlyHintOf,
-  type ToolPolicy,
-} from "../../services/_utils/mcp-policy";
 import { rewriteSse, SseEventTooLargeError, sseDataOf } from "../../services/_utils/mcp-sse";
 import { type McpServerView, mcpProxyService } from "../../services/mcp-proxy-service";
+import {
+  auditUnanswered,
+  BodyTooLargeError,
+  collect,
+  inspectJson,
+  isObject,
+  type JsonObject,
+  type ListPage,
+  MAX_INSPECT_BYTES,
+  type Plan,
+  planRequest,
+} from "./filter";
+import { readBody, sendJson } from "./http-util";
+import { handleStdioProxy } from "./stdio";
 
 const log = createLogger("mcp-proxy");
 
 export const MCP_PROXY_PREFIX = "/mcp-proxy/";
 const ROUTE = /^\/mcp-proxy\/([^/]+)\/?$/;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
-/** The most the proxy holds in memory to inspect one answer. */
-const MAX_INSPECT_BYTES = 8 * 1024 * 1024;
-const MAX_LIST_PAGES = 10;
-const TOOL_DENIED = -32602;
-const BATCH_REJECTED = -32600;
 
 /** Request headers passed upstream. The caller's credentials never are. */
 const UPSTREAM_HEADERS = [
@@ -50,50 +53,6 @@ const UPSTREAM_HEADERS = [
 ];
 /** Response headers passed back. */
 const REPLY_HEADERS = ["content-type", "cache-control", "mcp-session-id"];
-
-type JsonObject = Record<string, unknown>;
-const isObject = (value: unknown): value is JsonObject =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
-/** A JSON-RPC id as a map key, or null for a notification (no id). */
-function idKey(id: unknown): string | null {
-  return typeof id === "string" || typeof id === "number" ? JSON.stringify(id) : null;
-}
-
-function sendJson(
-  res: ServerResponse,
-  status: number,
-  body: unknown,
-  extra: Record<string, string> = {},
-): void {
-  if (res.headersSent) {
-    res.destroy();
-    return;
-  }
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Cache-Control": "no-store",
-    ...extra,
-  });
-  res.end(JSON.stringify(body));
-}
-
-function rpcError(id: unknown, code: number, message: string): JsonObject {
-  return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
-}
-
-class BodyTooLargeError extends Error {}
-
-async function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).byteLength;
-    if (size > max) throw new BodyTooLargeError();
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks);
-}
 
 /** Writes a chunk and waits for the socket to drain, or for the caller to go away. */
 function write(res: ServerResponse, chunk: Uint8Array): Promise<void> {
@@ -107,17 +66,6 @@ function write(res: ServerResponse, chunk: Uint8Array): Promise<void> {
     res.once("drain", done);
     res.once("close", done);
   });
-}
-
-async function collect(body: AsyncIterable<Uint8Array>, max: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of body) {
-    size += chunk.byteLength;
-    if (size > max) throw new BodyTooLargeError();
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
 }
 
 interface UpstreamInit {
@@ -153,48 +101,13 @@ async function sendUpstream(server: McpServerView, init: UpstreamInit): Promise<
   return attempt(renewed.headers);
 }
 
-function policyOf(server: McpServerView): ToolPolicy {
-  return {
-    allowTools: server.allowTools,
-    readOnly: server.readOnly,
-    readOnlyTools: server.readOnlyTools,
-  };
-}
-
-const lookupsInFlight = new Map<string, Promise<void>>();
-const lookupMissedAt = new Map<string, number>();
-/** A server whose lookup just ran is not asked again for this long, whatever the callers name. */
-const LOOKUP_COOLDOWN_MS = 5_000;
-
-/** Runs one lookup per server at a time, and none within the cooldown after the last. */
-function lookUpToolsOnce(
+/** Asks an HTTP upstream for one page of its tool list, for the read-only lookup. */
+function httpListPage(
   server: McpServerView,
   headers: Record<string, string>,
   signal: AbortSignal,
-): Promise<void> {
-  const running = lookupsInFlight.get(server.id);
-  if (running) return running;
-  const last = lookupMissedAt.get(server.id);
-  if (last !== undefined && Date.now() - last < LOOKUP_COOLDOWN_MS) return Promise.resolve();
-  const run = lookUpTools(server, headers, signal)
-    .catch(() => undefined)
-    .finally(() => {
-      lookupsInFlight.delete(server.id);
-      lookupMissedAt.set(server.id, Date.now());
-    });
-  lookupsInFlight.set(server.id, run);
-  return run;
-}
-
-/** Learns each tool's `readOnlyHint` from the upstream's own `tools/list`, for a read-only server. */
-async function lookUpTools(
-  server: McpServerView,
-  headers: Record<string, string>,
-  signal: AbortSignal,
-): Promise<void> {
-  const tools = new Map<string, boolean>();
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+): ListPage {
+  return async (cursor) => {
     const res = await sendUpstream(server, {
       method: "POST",
       headers: {
@@ -214,7 +127,7 @@ async function lookUpTools(
     });
     if (!res.ok || !res.body) {
       await res.body?.cancel().catch(() => undefined);
-      return;
+      return undefined;
     }
     const text = (
       await collect(res.body as unknown as AsyncIterable<Uint8Array>, MAX_INSPECT_BYTES)
@@ -235,188 +148,8 @@ async function lookUpTools(
         // not JSON, so not the answer
       }
     }
-    if (!result || !Array.isArray(result.tools)) return;
-    for (const tool of result.tools) {
-      if (isObject(tool) && typeof tool.name === "string") {
-        tools.set(tool.name, readOnlyHintOf(tool));
-      }
-    }
-    cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
-    if (!cursor) break;
-  }
-  mcpProxyService.rememberTools(server.id, tools);
-}
-
-interface Plan {
-  /** A reply to send without contacting the upstream, when a call was refused. */
-  immediate?: { status: number; body?: unknown };
-  /** Ids of `tools/list` requests being forwarded, whose answers get filtered. */
-  listIds: Set<string>;
-  /** Ids of `tools/call` requests being forwarded, with the tool, for the audit log. */
-  callIds: Map<string, string>;
-}
-
-/** Decides what to do with one POST body. Refused calls are audited here. */
-async function planRequest(
-  server: McpServerView,
-  sessionId: string,
-  text: string,
-  headers: Record<string, string>,
-  signal: AbortSignal,
-): Promise<Plan> {
-  const plan: Plan = { listIds: new Set(), callIds: new Map() };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    plan.immediate = { status: 400, body: rpcError(null, -32700, "Parse error") };
-    return plan;
-  }
-  const batch = Array.isArray(parsed);
-  const messages: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-  const policy = policyOf(server);
-  const refused = new Map<number, string>();
-
-  // Answers are matched to requests by id, so one id used twice could route a list answer past the filter.
-  const ids = messages.flatMap((m) => (isObject(m) && idKey(m.id) !== null ? [idKey(m.id)] : []));
-  if (new Set(ids).size !== ids.length) {
-    plan.immediate = {
-      status: 400,
-      body: rpcError(null, BATCH_REJECTED, "A request id was used more than once"),
-    };
-    return plan;
-  }
-
-  for (const [index, message] of messages.entries()) {
-    if (!isObject(message)) continue;
-    const key = idKey(message.id);
-    if (message.method === "tools/list" && key !== null) plan.listIds.add(key);
-    if (message.method !== "tools/call") continue;
-    const params = isObject(message.params) ? message.params : {};
-    const tool = typeof params.name === "string" ? params.name : "";
-    // A call with no id would be forwarded with no answer to audit.
-    let decision: CallDecision =
-      tool && key !== null
-        ? decideCall(policy, tool, mcpProxyService.knownReadOnly(server.id, tool))
-        : "deny";
-    if (decision === "unknown") {
-      await lookUpToolsOnce(server, headers, signal);
-      decision = decideCall(policy, tool, mcpProxyService.knownReadOnly(server.id, tool));
-    }
-    if (decision !== "allow") {
-      refused.set(index, tool);
-      mcpProxyService.recordCall({
-        server: server.name,
-        tool: tool || "(unnamed)",
-        sessionId,
-        ok: false,
-        error: "not-allowed",
-      });
-    } else if (key !== null) {
-      plan.callIds.set(key, tool);
-    }
-  }
-
-  if (refused.size === 0) return plan;
-  const replies: JsonObject[] = [];
-  for (const [index, message] of messages.entries()) {
-    if (!isObject(message) || idKey(message.id) === null) continue;
-    const tool = refused.get(index);
-    replies.push(
-      tool !== undefined
-        ? rpcError(message.id, TOOL_DENIED, `Tool "${tool}" is not available through this proxy`)
-        : rpcError(message.id, BATCH_REJECTED, "Rejected with the other requests in its batch"),
-    );
-  }
-  if (replies.length === 0) {
-    plan.immediate = { status: 202 };
-  } else {
-    plan.immediate = { status: 200, body: batch ? replies : replies[0] };
-  }
-  plan.listIds.clear();
-  plan.callIds.clear();
-  return plan;
-}
-
-/**
- * Applies the plan to one JSON-RPC message from the upstream: filters a
- * `tools/list` answer and audits a `tools/call` answer. Returns the same
- * object when nothing changed.
- */
-function inspectMessage(
-  message: unknown,
-  server: McpServerView,
-  sessionId: string,
-  plan: Plan,
-): unknown {
-  if (!isObject(message) || "method" in message) return message;
-  const key = idKey(message.id);
-  if (key === null) return message;
-
-  const tool = plan.callIds.get(key);
-  if (tool !== undefined) {
-    plan.callIds.delete(key);
-    const failed = "error" in message || (isObject(message.result) && message.result.isError);
-    mcpProxyService.recordCall({
-      server: server.name,
-      tool,
-      sessionId,
-      ok: !failed,
-      error: failed ? "upstream-error" : undefined,
-    });
-    return message;
-  }
-
-  if (!plan.listIds.delete(key)) return message;
-  const result = message.result;
-  if (!isObject(result) || !Array.isArray(result.tools)) return message;
-  const seen = new Map<string, boolean>();
-  for (const entry of result.tools) {
-    if (isObject(entry) && typeof entry.name === "string") {
-      seen.set(entry.name, readOnlyHintOf(entry));
-    }
-  }
-  mcpProxyService.rememberTools(server.id, seen);
-  const policy = policyOf(server);
-  const kept = result.tools.filter((entry) => listedToolAllowed(policy, entry));
-  if (kept.length === result.tools.length) return message;
-  return { ...message, result: { ...result, tools: kept } };
-}
-
-/** Rewrites a JSON value (one message or a batch). Returns null when nothing changed. */
-function inspectJson(
-  text: string,
-  server: McpServerView,
-  sessionId: string,
-  plan: Plan,
-): string | null {
-  if (plan.listIds.size === 0 && plan.callIds.size === 0) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  const next = Array.isArray(parsed)
-    ? parsed.map((m) => inspectMessage(m, server, sessionId, plan))
-    : inspectMessage(parsed, server, sessionId, plan);
-  const changed = Array.isArray(parsed)
-    ? (next as unknown[]).some((m, i) => m !== parsed[i])
-    : next !== parsed;
-  return changed ? JSON.stringify(next) : null;
-}
-
-/** Records the calls whose answer never came, so every forwarded call has an audit row. */
-function auditUnanswered(
-  server: McpServerView,
-  sessionId: string,
-  plan: Plan,
-  error: string,
-): void {
-  for (const tool of plan.callIds.values()) {
-    mcpProxyService.recordCall({ server: server.name, tool, sessionId, ok: false, error });
-  }
-  plan.callIds.clear();
+    return result;
+  };
 }
 
 /** An error's name and code only: a fetch error's message may quote a request header. */
@@ -459,6 +192,8 @@ export async function handleMcpProxy(req: IncomingMessage, res: ServerResponse):
   const server = mcpProxyService.getEnabledServer(name);
   if (!server) return sendJson(res, 404, { error: "No such MCP server" });
 
+  if (server.transport === "stdio") return handleStdioProxy(req, res, server, auth);
+
   let body: Buffer | undefined;
   if (method === "POST") {
     try {
@@ -485,7 +220,12 @@ export async function handleMcpProxy(req: IncomingMessage, res: ServerResponse):
   res.on("close", () => abort.abort());
 
   const plan: Plan = body
-    ? await planRequest(server, auth.sessionId, body.toString("utf8"), headers, abort.signal)
+    ? await planRequest(
+        server,
+        auth.sessionId,
+        body.toString("utf8"),
+        httpListPage(server, headers, abort.signal),
+      )
     : { listIds: new Set(), callIds: new Map() };
   if (plan.immediate) {
     const { status, body: reply } = plan.immediate;

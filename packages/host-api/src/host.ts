@@ -24,6 +24,8 @@ export interface Host {
   readonly search: HostSearch;
   readonly lsp: HostLsp;
   readonly acp: HostAcp;
+  /** Stdio MCP servers, which run on this host and speak JSON-RPC lines. */
+  readonly mcp: HostMcp;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;
@@ -334,6 +336,35 @@ export interface HostAcp {
   resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
   /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
   spawn(launch: AcpLaunch, cwd: string): Promise<AgentStdio>;
+}
+
+/** What it takes to start a stdio MCP server (plan step 4.4). */
+export interface McpStdioSpec {
+  /** The hub's id for the server, for the worker's own bookkeeping. Not a path or a command. */
+  serverId: string;
+  command: string;
+  args: string[];
+  /** Merged over the host's environment. May hold secrets: held in memory, never logged or written. */
+  env: Record<string, string>;
+  /** Working directory. On a worker it must be inside the worker's roots. Defaults to the user's home. */
+  cwd?: string;
+}
+
+/**
+ * A running stdio MCP server. `stdout` ends when the process does or when the
+ * link carrying it is lost. `kill` stops the process, and a process with no
+ * traffic for the host's idle time is killed too.
+ */
+export interface McpStdio {
+  pid: number | undefined;
+  stdin: { write(chunk: Uint8Array | string): void; end(): void };
+  stdout: Stream<Uint8Array>;
+  kill(): void;
+}
+
+export interface HostMcp {
+  /** Starts one server process. Rejects when it cannot start, or with `HostOfflineError` on a worker with no link. */
+  openStdio(spec: McpStdioSpec): Promise<McpStdio>;
 }
 
 // ---------------------------------------------------------------------------

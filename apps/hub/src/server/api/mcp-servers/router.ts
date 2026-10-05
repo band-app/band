@@ -28,8 +28,12 @@ function guard<T>(fn: () => T): T {
   }
 }
 
-const settings = {
-  url: z.string().url().max(2000),
+const envEntry = z.union([
+  z.object({ name: z.string().min(1).max(128), value: z.string().max(4096) }).strict(),
+  z.object({ name: z.string().min(1).max(128), vaultItemId: z.string().min(1).max(100) }).strict(),
+]);
+
+const common = {
   vaultItemId: z.string().min(1).max(100).nullable().optional(),
   headerName: z.string().min(1).max(64).optional(),
   headerPrefix: z.string().max(32).optional(),
@@ -41,6 +45,18 @@ const settings = {
   scopeHosts: z.array(z.string().min(1).max(200)).max(200).nullable().optional(),
 };
 
+const settings = {
+  ...common,
+  url: z.string().url().max(2000).optional(),
+  transport: z.enum(["http", "stdio"]).optional(),
+  // A stdio server: runs `command` on the worker `hostId`. The command is the admin's, never an agent's.
+  hostId: z.string().min(1).max(100).optional(),
+  command: z.string().min(1).max(1000).optional(),
+  args: z.array(z.string().max(4096)).max(100).optional(),
+  env: z.array(envEntry).max(50).optional(),
+  cwd: z.string().max(4096).nullable().optional(),
+};
+
 export const mcpServersRouter = t.router({
   list: adminProcedure.query(() => ({ servers: mcpProxyService.listServers() })),
 
@@ -49,7 +65,7 @@ export const mcpServersRouter = t.router({
     .mutation(({ input }) => guard(() => ({ server: mcpProxyService.addServer(input) }))),
 
   update: adminProcedure
-    .input(z.object({ name, ...z.object(settings).partial().shape }))
+    .input(z.object({ name, ...z.object(settings).partial().omit({ transport: true }).shape }))
     .mutation(({ input: { name: serverName, ...patch } }) =>
       guard(() => ({ server: mcpProxyService.updateServer(serverName, patch) })),
     ),

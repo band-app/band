@@ -703,15 +703,26 @@ export const vaultItems = sqliteTable(
 // credential is a vault item (`vault_item_id`), never stored here. `allow_tools`
 // null means every tool; `read_only` keeps only tools in `read_only_tools` or
 // annotated `readOnlyHint`. Only `streamable HTTP` upstreams are proxied.
+export type McpStdioEnvEntry =
+  | { name: string; value: string }
+  | { name: string; vaultItemId: string };
+
 export const mcpServers = sqliteTable(
   "mcp_servers",
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     url: text("url").notNull(),
-    transport: text("transport", { enum: ["http"] })
+    transport: text("transport", { enum: ["http", "stdio"] })
       .notNull()
       .default("http"),
+    // A stdio server (plan step 4.4) runs `command` on the worker `host_id`, and `url` is empty.
+    // `env` holds names with a literal value or a vault item id, never a secret.
+    hostId: text("host_id"),
+    command: text("command"),
+    args: text("args", { mode: "json" }).$type<string[]>().notNull().default([]),
+    env: text("env", { mode: "json" }).$type<McpStdioEnvEntry[]>().notNull().default([]),
+    cwd: text("cwd"),
     vaultItemId: text("vault_item_id"),
     // Where an `api_key` credential goes: `<header_name>: <header_prefix><secret>`.
     // An OAuth credential always goes as `Authorization: Bearer <access token>`.

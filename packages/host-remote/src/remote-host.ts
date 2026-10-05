@@ -20,6 +20,7 @@ import type {
   HostGit,
   HostInfo,
   HostLsp,
+  HostMcp,
   HostRelay,
   HostScripts,
   HostSearch,
@@ -178,6 +179,38 @@ export class RemoteHost implements Host {
         command: def.command,
       }),
     spawn: (launch, cwd) => this.spawnAgent(launch, cwd),
+  };
+
+  readonly mcp: HostMcp = {
+    openStdio: async (spec) => {
+      const reply = await this.rpc.request<{ chan: number; pid: number | null }>(
+        "mcp.stdio.open",
+        spec,
+      );
+      const stdio = this.rpc.channel(reply.chan);
+      let closed = false;
+      return {
+        pid: reply.pid ?? undefined,
+        stdin: {
+          write: (chunk) => {
+            if (closed) return;
+            stdio
+              .send(typeof chunk === "string" ? Buffer.from(chunk) : chunk)
+              .catch(() => undefined);
+          },
+          end: () => {
+            closed = true;
+            stdio.end();
+          },
+        },
+        stdout: channelBytes(stdio),
+        // The worker kills the process when its channel is reset.
+        kill: () => {
+          closed = true;
+          stdio.reset("mcp session closed");
+        },
+      };
+    },
   };
 
   readonly scripts: HostScripts = {
