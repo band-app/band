@@ -18,11 +18,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   ContextConflict,
   ContextFinding,
+  ContextPreamble,
+  ContextPreambleRequest,
   ContextPullRequest,
   ContextPullResult,
   ContextPushRequest,
@@ -31,6 +33,7 @@ import type {
   SecretFingerprint,
 } from "@band-app/host-api";
 import { scanText } from "@band-app/host-api";
+import { buildPreamble } from "./preamble";
 
 /** Where a context is fetched from, and the environment that authenticates the call. */
 export interface ContextRemote {
@@ -148,6 +151,21 @@ export class ContextSync {
     }
     const base = join(this.source.bandHome(), "context");
     return spec.kind === "user" ? join(base, "user") : join(base, "projects", spec.name);
+  }
+
+  /** The always-loaded files and an index of the working copies, within a line budget (step 5.3). */
+  async preamble(request: ContextPreambleRequest): Promise<ContextPreamble> {
+    const result = await buildPreamble(request, (spec) => this.dirOf(spec));
+    // Claude Code's auto memory writes here, so the directory has to exist before the session.
+    if (result.memoryDir) {
+      // A pushed `memory` symlink would point the agent's memory writes at another host directory.
+      const existing = await lstat(result.memoryDir).catch(() => null);
+      if (existing?.isSymbolicLink()) {
+        return { ...result, memoryDir: null };
+      }
+      await mkdir(result.memoryDir, { recursive: true });
+    }
+    return result;
   }
 
   async pull(request: ContextPullRequest): Promise<ContextPullResult[]> {

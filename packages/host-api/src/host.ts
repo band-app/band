@@ -637,7 +637,27 @@ export interface ContextPushResult {
   error?: string;
 }
 
+export interface ContextPreambleRequest {
+  /** The contexts to read, as `pull` takes them. A project context's `notes.md` is included. */
+  contexts: ContextSpec[];
+  /** Total lines the preamble may take. The host default is 200. */
+  maxLines?: number;
+}
+
+export interface ContextPreamble {
+  /** The text for the agent's instructions. Empty when the working copies hold nothing to say. */
+  text: string;
+  /**
+   * `memory/` inside the first project context's working copy, created on the host. Claude
+   * Code's auto memory goes there, so the next push carries it to the hub. Null without a
+   * project context.
+   */
+  memoryDir: string | null;
+}
+
 export interface HostContext {
+  /** Reads the always-loaded files and an index of the working copies, within a line budget. */
+  preamble(request: ContextPreambleRequest): Promise<ContextPreamble>;
   /** Brings each context's working copy up to the hub's head. Never rejects for a hub failure. */
   pull(request: ContextPullRequest): Promise<ContextPullResult[]>;
   /** Commits what changed in each working copy, scans it, rebases on the hub's head and pushes. */

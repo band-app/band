@@ -161,6 +161,7 @@ export class LocalHost implements Host {
     const source = options.context;
     const sync = source ? new ContextSync(source) : null;
     this.context = {
+      preamble: async (request) => (sync ? sync.preamble(request) : { text: "", memoryDir: null }),
       pull: async (request) =>
         sync
           ? sync.pull(request)

@@ -1,10 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "049b5c26-6640-4add-8947-fb1e7bcb8155",
+  "id": "295130d8-8a8d-4826-b427-1424362051fb",
   "prevIds": [
-    "295130d8-8a8d-4826-b427-1424362051fb",
-    "357972f7-43af-4cdb-b95c-15a09e10f12d"
+    "97137f84-cbd8-4ac4-a318-41e5e4af1886"
   ],
   "ddl": [
     {
@@ -73,14 +72,6 @@
     },
     {
       "name": "pending_removals",
-      "entityType": "tables"
-    },
-    {
-      "name": "project_repos",
-      "entityType": "tables"
-    },
-    {
-      "name": "projects",
       "entityType": "tables"
     },
     {
@@ -1807,156 +1798,6 @@
     },
     {
       "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "project_id",
-      "entityType": "columns",
-      "table": "project_repos"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "repo_name",
-      "entityType": "columns",
-      "table": "project_repos"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "role",
-      "entityType": "columns",
-      "table": "project_repos"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "name",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "''",
-      "generated": null,
-      "name": "description",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "context_name",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "coordinator_agent",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'opus'",
-      "generated": null,
-      "name": "coordinator_model",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'[]'",
-      "generated": null,
-      "name": "labels",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'{}'",
-      "generated": null,
-      "name": "policy",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "coordinator_worktree_id",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "coordinator_chat_id",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "coordinator_host_id",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "table": "projects"
-    },
-    {
-      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -3466,16 +3307,6 @@
       "table": "worktrees"
     },
     {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "project_id",
-      "entityType": "columns",
-      "table": "worktrees"
-    },
-    {
       "columns": [
         "host_id"
       ],
@@ -3489,21 +3320,6 @@
       "name": "fk_pending_removals_host_id_hosts_id_fk",
       "entityType": "fks",
       "table": "pending_removals"
-    },
-    {
-      "columns": [
-        "project_id"
-      ],
-      "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_project_repos_project_id_projects_id_fk",
-      "entityType": "fks",
-      "table": "project_repos"
     },
     {
       "columns": [
@@ -3567,21 +3383,6 @@
     },
     {
       "columns": [
-        "project_id"
-      ],
-      "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "SET NULL",
-      "nameExplicit": false,
-      "name": "fk_worktrees_project_id_projects_id_fk",
-      "entityType": "fks",
-      "table": "worktrees"
-    },
-    {
-      "columns": [
         "key",
         "scope"
       ],
@@ -3599,16 +3400,6 @@
       "name": "pending_removals_pk",
       "entityType": "pks",
       "table": "pending_removals"
-    },
-    {
-      "columns": [
-        "project_id",
-        "repo_name"
-      ],
-      "nameExplicit": false,
-      "name": "project_repos_pk",
-      "entityType": "pks",
-      "table": "project_repos"
     },
     {
       "columns": [
@@ -3763,15 +3554,6 @@
       "nameExplicit": false,
       "name": "panel_states_pk",
       "table": "panel_states",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "id"
-      ],
-      "nameExplicit": false,
-      "name": "projects_pk",
-      "table": "projects",
       "entityType": "pks"
     },
     {
@@ -4280,20 +4062,6 @@
       "name": "mcp_servers_name_idx",
       "entityType": "indexes",
       "table": "mcp_servers"
-    },
-    {
-      "columns": [
-        {
-          "value": "name",
-          "isExpression": false
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "origin": "manual",
-      "name": "projects_name_idx",
-      "entityType": "indexes",
-      "table": "projects"
     },
     {
       "columns": [
