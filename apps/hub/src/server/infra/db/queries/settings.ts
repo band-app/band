@@ -9,11 +9,14 @@ export interface RunnerSettings {
   kind: "hook";
   spawn: string;
   destroy?: string;
+  status?: string;
   labels: Record<string, string>;
   provides?: Record<string, string>;
   isolation: "process" | "worktree" | "container" | "vm";
   maxConcurrent: number;
   timeoutSec: number;
+  maxLifetimeSec?: number;
+  lifetimeGraceSec: number;
   env: Record<string, string>;
   snapshot?: string;
   restore?: string;

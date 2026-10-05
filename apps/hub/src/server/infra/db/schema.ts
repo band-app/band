@@ -259,16 +259,6 @@ export const workspaceSleep = sqliteTable(
   (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
 );
 
-// The runner and machine behind an ephemeral host, kept so the hub can snapshot the machine when
-// its worker idles (plan step 3.10). `machine_handle` is what the spawn hook printed as
-// `BAND_MACHINE_HANDLE`, empty when it printed none.
-export const hostMachines = sqliteTable("host_machines", {
-  hostId: text("host_id").primaryKey(),
-  runnerId: text("runner_id").notNull(),
-  machineHandle: text("machine_handle").notNull().default(""),
-  createdAt: integer("created_at").notNull(),
-});
-
 // Machine snapshots a runner's `snapshot` hook took when an ephemeral worker went to sleep.
 // `restored_at` is set once a `restore` hook brought the machine back from it.
 export const runnerSnapshots = sqliteTable(
@@ -277,6 +267,8 @@ export const runnerSnapshots = sqliteTable(
     id: text("id").primaryKey(),
     runnerId: text("runner_id").notNull(),
     hostId: text("host_id").notNull(),
+    // The `runner_machines` row of the machine that was snapshotted.
+    machineId: text("machine_id"),
     workspaceIds: text("workspace_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
     snapshotId: text("snapshot_id").notNull(),
     sizeBytes: integer("size_bytes"),
@@ -287,6 +279,37 @@ export const runnerSnapshots = sqliteTable(
   (t) => [
     index("runner_snapshots_host_idx").on(t.hostId),
     index("runner_snapshots_runner_idx").on(t.runnerId, t.createdAt),
+  ],
+);
+
+// A machine a runner hook started (plan step 3.7). The reaper compares these
+// rows with the hosts and with the runner's `status` hook, and destroys the
+// ones that are lost, orphaned or past the runner's maximum lifetime.
+// `worker_id` is the host id. `handle` is what the spawn hook printed as
+// `BAND_MACHINE_HANDLE=` (a container id, a pid, a VM id).
+export const runnerMachines = sqliteTable(
+  "runner_machines",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id").notNull(),
+    requestId: text("request_id"),
+    workerId: text("worker_id").notNull(),
+    handle: text("handle"),
+    state: text("state", { enum: ["spawning", "running", "stopping", "destroyed", "lost"] })
+      .notNull()
+      .default("spawning"),
+    spawnedAt: integer("spawned_at").notNull(),
+    lastSeenAt: integer("last_seen_at"),
+    // When the reaper began to stop the machine for its maximum lifetime.
+    stoppingSince: integer("stopping_since"),
+    destroyedAt: integer("destroyed_at"),
+    // Failed runs of the destroy hook. The reaper tries again until the third, then marks the machine lost.
+    destroyAttempts: integer("destroy_attempts").notNull().default(0),
+    error: text("error"),
+  },
+  (t) => [
+    index("runner_machines_state_idx").on(t.state),
+    index("runner_machines_worker_idx").on(t.workerId),
   ],
 );
 

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "785d5ea0-5de3-4d0c-abc5-5dcbe2c2625b",
+  "id": "9c426faa-a47e-44ca-aa25-aad1b33922b5",
   "prevIds": [
     "58919332-059b-43f4-8037-db9614000a74"
   ],
@@ -39,10 +39,6 @@
       "entityType": "tables"
     },
     {
-      "name": "host_machines",
-      "entityType": "tables"
-    },
-    {
       "name": "host_requests",
       "entityType": "tables"
     },
@@ -75,7 +71,7 @@
       "entityType": "tables"
     },
     {
-      "name": "runner_snapshots",
+      "name": "runner_machines",
       "entityType": "tables"
     },
     {
@@ -868,46 +864,6 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "host_id",
-      "entityType": "columns",
-      "table": "host_machines"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "runner_id",
-      "entityType": "columns",
-      "table": "host_machines"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "''",
-      "generated": null,
-      "name": "machine_handle",
-      "entityType": "columns",
-      "table": "host_machines"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "table": "host_machines"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
       "name": "id",
       "entityType": "columns",
       "table": "host_requests"
@@ -1450,7 +1406,7 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "type": "text",
@@ -1460,7 +1416,17 @@
       "generated": null,
       "name": "runner_id",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "runner_machines"
     },
     {
       "type": "text",
@@ -1468,29 +1434,39 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "host_id",
+      "name": "worker_id",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "handle",
+      "entityType": "columns",
+      "table": "runner_machines"
     },
     {
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'[]'",
+      "default": "'spawning'",
       "generated": null,
-      "name": "workspace_ids",
+      "name": "state",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
-      "type": "text",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "snapshot_id",
+      "name": "spawned_at",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "type": "integer",
@@ -1498,9 +1474,9 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "size_bytes",
+      "name": "last_seen_at",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "type": "integer",
@@ -1508,29 +1484,39 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "restored_at",
+      "name": "stopping_since",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "destroyed_at",
+      "entityType": "columns",
+      "table": "runner_machines"
     },
     {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
-      "default": null,
+      "default": "0",
       "generated": null,
-      "name": "created_at",
+      "name": "destroy_attempts",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
-      "type": "integer",
-      "notNull": true,
+      "type": "text",
+      "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "expires_at",
+      "name": "error",
       "entityType": "columns",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "type": "text",
@@ -2752,15 +2738,6 @@
     },
     {
       "columns": [
-        "host_id"
-      ],
-      "nameExplicit": false,
-      "name": "host_machines_pk",
-      "table": "host_machines",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
         "id"
       ],
       "nameExplicit": false,
@@ -2818,8 +2795,8 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "runner_snapshots_pk",
-      "table": "runner_snapshots",
+      "name": "runner_machines_pk",
+      "table": "runner_machines",
       "entityType": "pks"
     },
     {
@@ -3194,34 +3171,30 @@
     {
       "columns": [
         {
-          "value": "host_id",
+          "value": "state",
           "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
-      "name": "runner_snapshots_host_idx",
+      "name": "runner_machines_state_idx",
       "entityType": "indexes",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "columns": [
         {
-          "value": "runner_id",
-          "isExpression": false
-        },
-        {
-          "value": "created_at",
+          "value": "worker_id",
           "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
-      "name": "runner_snapshots_runner_idx",
+      "name": "runner_machines_worker_idx",
       "entityType": "indexes",
-      "table": "runner_snapshots"
+      "table": "runner_machines"
     },
     {
       "columns": [

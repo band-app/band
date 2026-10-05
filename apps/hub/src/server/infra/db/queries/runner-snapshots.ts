@@ -1,31 +1,12 @@
-/** Persistence for `host_machines` and `runner_snapshots` (plan step 3.10). */
+/** Persistence for `runner_snapshots` (plan step 3.10). */
 
 import { asc, desc, eq, lte } from "drizzle-orm";
 import { getDb } from "../connection";
-import { hostMachines, runnerSnapshots } from "../schema";
+import { runnerSnapshots } from "../schema";
 
-export type HostMachineRow = typeof hostMachines.$inferSelect;
 export type RunnerSnapshotRow = typeof runnerSnapshots.$inferSelect;
 
 export class RunnerSnapshotQueries {
-  // ---- machines -------------------------------------------------------------
-
-  setMachine(row: HostMachineRow): void {
-    getDb()
-      .insert(hostMachines)
-      .values(row)
-      .onConflictDoUpdate({ target: hostMachines.hostId, set: row })
-      .run();
-  }
-
-  getMachine(hostId: string): HostMachineRow | undefined {
-    return getDb().select().from(hostMachines).where(eq(hostMachines.hostId, hostId)).get();
-  }
-
-  deleteMachine(hostId: string): void {
-    getDb().delete(hostMachines).where(eq(hostMachines.hostId, hostId)).run();
-  }
-
   // ---- snapshots ------------------------------------------------------------
 
   insert(row: RunnerSnapshotRow): void {

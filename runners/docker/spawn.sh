@@ -135,9 +135,9 @@ mkdir -p "$HOME" "$BAND_WORKER_STATE_DIR"
 if [ -n "$BAND_CLONE_URL" ]; then env -u BAND_BOOTSTRAP_TOKEN GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- "$BAND_CLONE_URL" "/work/$BAND_CLONE_NAME"; fi
 exec band-worker'
 
-echo "BAND_MACHINE_HANDLE=$name"
 if [ -z "$restore" ]; then
   id="$(docker run --detach "$@" --entrypoint /bin/sh "$image" -c "$start")"
+  echo "BAND_MACHINE_HANDLE=$id"
   echo "started container $name (${id%"${id#????????????}"}) from $image"
   exit 0
 fi
@@ -157,4 +157,5 @@ if ! docker run --rm --user 65532:65532 --volumes-from "$name" --entrypoint /bin
   exit 1
 fi
 docker start "$name" >/dev/null
+echo "BAND_MACHINE_HANDLE=$id"
 echo "restored container $name (${id%"${id#????????????}"}) from snapshot $BAND_SNAPSHOT_ID on $image"

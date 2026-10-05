@@ -210,7 +210,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       tmpHome: hubHome,
       remoteHost: false,
       port: Number(process.env.BAND_DOCKER_TEST_PORT) || undefined,
-      env: { BAND_SERVE_UI: "false" },
+      env: { BAND_SERVE_UI: "false", BAND_REAPER_INTERVAL_MS: "500" },
     });
     await m("settings.update", {
       runners: [
@@ -218,6 +218,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
           id: "docker",
           spawn: "bundled:docker",
           destroy: "bundled:docker",
+          status: "bundled:docker",
           labels: { pool: "docker" },
           isolation: "container",
           maxConcurrent: 2,
@@ -326,6 +327,67 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       expect(docker("volume", "ls", "--quiet", "--filter", `name=${v}`)).toBe("");
     }
   }, 60_000);
+
+  it("records the container id as the machine handle, lists it in status, and reaps a stray (3.7)", async () => {
+    const w = await workspace("docker-b");
+    const hostId = w.hostId as string;
+    const [short] = containerOf(hostId);
+    const full = docker("inspect", "--format", "{{.Id}}", short);
+
+    // The machine row carries the full container id that spawn printed.
+    const machines = (
+      await q<{ machines: Array<{ workerId: string; handle: string | null; state: string }> }>(
+        "runners.machines",
+      )
+    ).machines;
+    const machine = machines.find((x) => x.workerId === hostId);
+    expect(machine).toMatchObject({ handle: full, state: "running" });
+
+    // The status hook lists this runner's containers, by full id.
+    const statusHook = join(import.meta.dirname, "../../../runners/docker/status.sh");
+    const env = {
+      PATH: process.env.PATH ?? "",
+      ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
+      BAND_RUNNER_ID: "docker",
+    };
+    expect(execFileSync("sh", [statusHook], { env, encoding: "utf8" }).split("\n")).toContain(full);
+
+    // A container the hub has no record of is destroyed by handle. One of another runner is left alone.
+    const stray = (labelOwner: string) =>
+      docker(
+        "run",
+        "--detach",
+        "--rm",
+        "--label",
+        `band.runner=${labelOwner}`,
+        "--entrypoint",
+        "sleep",
+        IMAGE,
+        "300",
+      );
+    const orphan = stray("docker");
+    const foreign = stray("someone-else");
+    try {
+      await waitFor(
+        async () => {
+          const alive = docker("ps", "--quiet", "--no-trunc", "--filter", `id=${orphan}`);
+          return alive === "" ? true : undefined;
+        },
+        { label: "the stray container is removed", timeoutMs: 60_000, intervalMs: 500 },
+      );
+      expect(docker("ps", "--quiet", "--no-trunc", "--filter", `id=${foreign}`)).toBe(foreign);
+      // The workspace's own container was not taken for a stray.
+      expect(containerOf(hostId)).toEqual([short]);
+    } finally {
+      for (const id of [orphan, foreign]) {
+        try {
+          docker("rm", "--force", id);
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+  }, 120_000);
 
   it("runs the project's environment image, else the worker base image", async () => {
     const spawnHook = join(import.meta.dirname, "../../../runners/docker/spawn.sh");

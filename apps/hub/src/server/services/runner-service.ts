@@ -19,26 +19,33 @@
  * tries once more with a fresh token. After the second failure the request
  * fails with the tail of the hook's log.
  *
+ * Every attempt also records its machine in `runner_machines` (plan step 3.7),
+ * with the handle `spawn` prints as `BAND_MACHINE_HANDLE=<id>`. The reaper
+ * (`runner-reaper-service.ts`) reads those rows, and asks this service to run
+ * the `destroy` and `status` hooks.
+ *
  * Hibernate (plan step 3.10). A runner with `snapshot` and `restore` hooks
  * takes a machine snapshot when the hub puts an ephemeral worker to sleep
  * (`snapshotHost`, called by `EphemeralLifecycleService` after it has stored
- * the git state and agent sessions, which stay the fallback). A wake request
- * leased by the same runner runs `restore` with that snapshot instead of
- * `spawn`, and starts a fresh worker with `spawn` when `restore` fails.
+ * the git state and agent sessions, which stay the fallback). The machine is
+ * the worker's `runner_machines` row, and its handle goes to the hook. A wake
+ * request leased by the same runner runs `restore` with that snapshot instead
+ * of `spawn`, and starts a fresh worker with `spawn` when `restore` fails.
  * Snapshots are kept per runner (`snapshotKeep`, `snapshotTtlSec`) and removed
  * through `snapshotDelete`.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Environment, parseEnvironment } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
+import { RunnerMachineQueries, type RunnerMachineRow } from "../infra/db/queries/runner-machines";
 import {
-  type RunnerSnapshotRow,
   RunnerSnapshotQueries,
+  type RunnerSnapshotRow,
 } from "../infra/db/queries/runner-snapshots";
 import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
@@ -61,6 +68,9 @@ const POLL_MS = 1000;
 const HELLO_POLL_MS = 200;
 const LEASE_MS = 30_000;
 const DESTROY_TIMEOUT_MS = 60_000;
+const STATUS_TIMEOUT_MS = 60_000;
+/** Runs of a failing `destroy` hook before the machine counts as lost. */
+const DESTROY_ATTEMPTS = 3;
 const ATTEMPTS = 2;
 const LOG_FILE_LIMIT = 512 * 1024;
 const LOG_LINE_LIMIT = 2000;
@@ -76,14 +86,6 @@ const SNAPSHOT_DELETE_RETRY_MS = 10 * 60_000;
 function snapshotSweepMs(): number {
   const raw = Number(process.env.BAND_SNAPSHOT_SWEEP_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : SNAPSHOT_SWEEP_MS;
-}
-
-interface AttemptState {
-  hostId: string | null;
-  token: string | null;
-  reused?: boolean;
-  /** `BAND_MACHINE_HANDLE` of the hook's last spawn or restore. */
-  handle?: string;
 }
 
 /** Matches any Band token, so a hook that echoes its environment still leaks nothing. */
@@ -118,8 +120,11 @@ export interface RunnerView {
   kind: "hook";
   spawn: string;
   destroy: string | null;
+  status: string | null;
   /** Whether sleeping a workspace on this runner's workers snapshots the machine. */
   snapshots: boolean;
+  maxLifetimeSec: number | null;
+  lifetimeGraceSec: number;
   labels: Record<string, string>;
   isolation: string;
   maxConcurrent: number;
@@ -191,6 +196,17 @@ function pipeLines(stream: NodeJS.ReadableStream | null, sink: (line: string) =>
 
 class Aborted extends Error {}
 
+/** What an attempt has made so far, for the cleanup after it fails. */
+interface AttemptState {
+  hostId: string | null;
+  token: string | null;
+  reused?: boolean;
+  machineId?: string;
+}
+
+/** The line a spawn hook prints to name the machine it made. */
+const HANDLE_LINE = /^BAND_MACHINE_HANDLE=(\S{1,200})$/;
+
 export interface RunnerServiceOptions {
   /** The loopback URL of this hub, when `BAND_RUNNER_HUB_URL` and `BAND_PUBLIC_URL` say nothing else. */
   hubUrl?: () => string | undefined;
@@ -204,6 +220,8 @@ export class RunnerService {
   private readonly running = new Map<string, RunnerRun>();
   private readonly history: RunnerRun[] = [];
   private readonly settled = new Set<Promise<void>>();
+  private readonly machines = new RunnerMachineQueries();
+  private readonly destroying = new Map<string, Promise<RunnerMachineRow>>();
   private readonly snapshots = new RunnerSnapshotQueries();
   /** Snapshots a restore is reading right now. Retention leaves them alone. */
   private readonly restoring = new Set<string>();
@@ -244,7 +262,10 @@ export class RunnerService {
         kind: r.kind,
         spawn: r.spawn,
         destroy: r.destroy ?? null,
+        status: r.status ?? null,
         snapshots: r.snapshot !== undefined,
+        maxLifetimeSec: r.maxLifetimeSec ?? null,
+        lifetimeGraceSec: r.lifetimeGraceSec,
         labels: r.labels,
         isolation: r.isolation,
         maxConcurrent: r.maxConcurrent,
@@ -272,6 +293,27 @@ export class RunnerService {
 
   private logFile(requestId: string): string {
     return join(bandHome(), "runners", "logs", `${requestId}.log`);
+  }
+
+  /** Every valid runner in settings. */
+  configs(): RunnerConfig[] {
+    return parseRunners(settingsService.get().runners).runners;
+  }
+
+  /** The configured runner with this id, or undefined (removed from settings, or invalid). */
+  findRunner(runnerId: string): RunnerConfig | undefined {
+    return this.configs().find((r) => r.id === runnerId);
+  }
+
+  /** Whether an attempt of this runner is between its token and its hello. Their machines are not the reaper's yet. */
+  hasAttemptInFlight(runnerId: string): boolean {
+    return this.runningCount(runnerId) > 0;
+  }
+
+  /** Whether the worker id belongs to an attempt in flight. */
+  isAttempting(workerId: string): boolean {
+    for (const run of this.running.values()) if (run.workerId === workerId) return true;
+    return false;
   }
 
   private runningCount(runnerId: string): number {
@@ -408,33 +450,64 @@ export class RunnerService {
     runLog: RunLog,
   ): Promise<void> {
     if (!state.hostId) return;
+    const machine = state.machineId ? this.machines.get(state.machineId) : undefined;
     if (runner.destroy) {
       try {
-        const code = await this.runHook(
+        const code = await this.runDestroy(
           runner,
-          "destroy",
-          resolveHookPath(runner.destroy, "destroy"),
-          this.hookEnv(runner, row, state.hostId, null, [], state.handle),
-          DESTROY_TIMEOUT_MS,
+          row,
+          state.hostId,
+          machine?.handle ?? null,
           runLog,
         );
         if (code !== 0) runLog.write("hub", `destroy exited with code ${code}`);
+        if (machine) this.finishMachine(machine.id, code === 0, `destroy exited with code ${code}`);
       } catch (err) {
-        runLog.write("hub", `destroy failed: ${err instanceof Error ? err.message : err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        runLog.write("hub", `destroy failed: ${message}`);
+        if (machine) this.finishMachine(machine.id, false, `destroy failed: ${message}`);
       }
+    } else if (machine) {
+      this.finishMachine(machine.id, false, "the runner has no destroy hook");
     }
     // A host that was woken keeps its row: it still holds the sleeping workspaces.
     if (state.reused) return;
     try {
       tokenService.removeHost(state.hostId);
       hostRegistry.unregister(state.hostId);
-      this.snapshots.deleteMachine(state.hostId);
     } catch (err) {
       runLog.write(
         "hub",
         `could not remove host ${state.hostId}: ${err instanceof Error ? err.message : err}`,
       );
     }
+  }
+
+  private runDestroy(
+    runner: RunnerConfig,
+    row: HostRequestRow | null,
+    workerId: string | null,
+    handle: string | null,
+    runLog: RunLog | null,
+  ): Promise<number> {
+    if (!runner.destroy) return Promise.reject(new Error("the runner has no destroy hook"));
+    return this.runHook({
+      runner,
+      name: "destroy",
+      path: resolveHookPath(runner.destroy, "destroy"),
+      env: this.hookEnv(runner, row, workerId, null, [], handle),
+      timeoutMs: DESTROY_TIMEOUT_MS,
+      runLog,
+    });
+  }
+
+  /** The end of a failed attempt's machine: destroyed when the hook succeeded, else lost. */
+  private finishMachine(id: string, destroyed: boolean, note: string): void {
+    this.machines.update(id, {
+      state: destroyed ? "destroyed" : "lost",
+      destroyedAt: destroyed ? Date.now() : null,
+      error: destroyed ? "the attempt failed" : note,
+    });
   }
 
   /**
@@ -505,6 +578,8 @@ export class RunnerService {
     runLog.addSecret(issued.token);
     run.workerId = issued.hostId;
     runLog.write("hub", `issued worker ${issued.hostId}`);
+    const machineId = this.recordMachine(runner, row, issued.hostId);
+    state.machineId = machineId;
 
     const renew = setInterval(() => {
       try {
@@ -516,39 +591,32 @@ export class RunnerService {
     renew.unref?.();
     try {
       const env = this.hookEnv(runner, row, issued.hostId, issued.token, await repoUrls(row));
-      if (snapshot) env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
       let hostProjectPath: string | undefined;
-      let handle = "";
-      const script = kind === "restore" ? (runner.restore as string) : runner.spawn;
-      if (kind === "restore") {
-        runLog.write("hub", `restoring snapshot ${snapshot?.snapshotId} with the restore hook`);
-        // A restore the wait below gives up on must not leave the old mark behind.
-        if (snapshot) this.snapshots.markUnrestored(snapshot.id);
+      if (snapshot) {
+        env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
+        runLog.write("hub", `restoring snapshot ${snapshot.snapshotId} with the restore hook`);
+        // A restore that fails must not leave an earlier mark behind.
+        this.snapshots.markUnrestored(snapshot.id);
       }
-      const code = await this.runHook(
+      const code = await this.runHook({
         runner,
-        kind,
-        resolveHookPath(script, kind),
+        name: kind,
+        path: resolveHookPath(kind === "restore" ? (runner.restore as string) : runner.spawn, kind),
         env,
-        Math.max(deadline - Date.now(), 1),
+        timeoutMs: Math.max(deadline - Date.now(), 1),
         runLog,
-        () => this.assertHeld(row, runner),
-        (line) => {
+        watch: () => this.assertHeld(row, runner),
+        onStdout: (line) => {
           const m = /^BAND_HOST_PROJECT_PATH=(.+)$/.exec(line.trim());
           if (m) hostProjectPath = m[1];
-          const h = /^BAND_MACHINE_HANDLE=(.*)$/.exec(line.trim());
-          if (h) handle = h[1]?.trim() ?? "";
+          const h = HANDLE_LINE.exec(line.trim());
+          if (h) this.machines.update(machineId, { handle: h[1] });
         },
-      );
-      if (code !== 0) throw new Error(`${kind} exited with code ${code}`);
-      state.handle = handle;
-      this.snapshots.setMachine({
-        hostId: issued.hostId,
-        runnerId: runner.id,
-        machineHandle: handle,
-        createdAt: Date.now(),
       });
+      if (code !== 0) throw new Error(`${kind} exited with code ${code}`);
       runLog.write("hub", `${kind} finished; waiting for the worker's hello`);
+      const handle = this.machines.get(machineId)?.handle;
+      if (handle) runLog.write("hub", `machine handle ${handle}`);
       while (!this.isOnline(issued.hostId)) {
         this.assertHeld(row, runner);
         if (Date.now() >= deadline) {
@@ -556,6 +624,7 @@ export class RunnerService {
         }
         await sleep(HELLO_POLL_MS);
       }
+      this.machines.update(machineId, { state: "running", lastSeenAt: Date.now() });
       // From here the machine's disk is the one the snapshot held, so the hub skips its git restore.
       if (snapshot) this.snapshots.markRestored(snapshot.id, Date.now());
       try {
@@ -570,6 +639,35 @@ export class RunnerService {
     }
   }
 
+  /** Records the machine of an attempt. An older machine of the same worker id is gone by now, so it is retired. */
+  private recordMachine(runner: RunnerConfig, row: HostRequestRow, workerId: string): string {
+    const id = `rm-${randomBytes(6).toString("hex")}`;
+    this.machines.insert({
+      id,
+      runnerId: runner.id,
+      requestId: row.id,
+      workerId,
+      handle: null,
+      state: "spawning",
+      spawnedAt: Date.now(),
+      lastSeenAt: null,
+      stoppingSince: null,
+      destroyedAt: null,
+      destroyAttempts: 0,
+      error: null,
+    });
+    // A worker that wakes up gets a new machine under the same id, and the hook wipes the old one
+    // (docs/runner-hooks.md). Destroying the old record later would hit the new machine.
+    for (const old of this.machines.liveForWorker(workerId, id)) {
+      this.machines.update(old.id, {
+        state: "destroyed",
+        destroyedAt: Date.now(),
+        error: `replaced by machine ${id}`,
+      });
+    }
+    return id;
+  }
+
   /** Stops the run when the request was cancelled or the lease went to someone else. */
   private assertHeld(row: HostRequestRow, runner: RunnerConfig): void {
     const current = placementService.get(row.id);
@@ -582,32 +680,156 @@ export class RunnerService {
     return tokenService.hostStatus(hostId) === "online";
   }
 
+  // ---- machines (used by the reaper) ---------------------------------------
+
+  /**
+   * Runs the runner's `destroy` hook for a machine and records the result: `destroyed` when the
+   * hook exits 0, `lost` when it fails or there is none. `reason` is stored on the row. Two calls
+   * for one machine share one run.
+   */
+  destroyMachine(machineId: string, reason: string): Promise<RunnerMachineRow> {
+    const inflight = this.destroying.get(machineId);
+    if (inflight) return inflight;
+    const run = this.doDestroyMachine(machineId, reason).finally(() =>
+      this.destroying.delete(machineId),
+    );
+    this.destroying.set(machineId, run);
+    return run;
+  }
+
+  private async doDestroyMachine(machineId: string, reason: string): Promise<RunnerMachineRow> {
+    const machine = this.machines.get(machineId);
+    if (!machine) throw new Error(`No machine ${machineId}`);
+    if (machine.state === "destroyed") return machine;
+    const runner = this.findRunner(machine.runnerId);
+    const request = machine.requestId ? placementService.get(machine.requestId) : undefined;
+    const runLog = new RunLog(
+      machine.requestId
+        ? this.logFile(machine.requestId)
+        : join(bandHome(), "runners", "logs", `${machine.id}.log`),
+    );
+    runLog.write(
+      "hub",
+      `destroying machine ${machine.id} of worker ${machine.workerId}: ${reason}`,
+    );
+    let outcome: Partial<RunnerMachineRow>;
+    if (!runner) {
+      outcome = {
+        state: "lost",
+        error: `runner "${machine.runnerId}" is no longer configured`,
+      };
+    } else if (!runner.destroy) {
+      outcome = { state: "lost", error: `runner "${runner.id}" has no destroy hook` };
+    } else {
+      let failure: string | null = null;
+      try {
+        const code = await this.runDestroy(
+          runner,
+          request ?? null,
+          machine.workerId,
+          machine.handle,
+          runLog,
+        );
+        if (code !== 0) failure = `destroy exited with code ${code}`;
+      } catch (err) {
+        failure = `destroy failed: ${err instanceof Error ? err.message : err}`;
+      }
+      if (failure === null) {
+        outcome = { state: "destroyed", destroyedAt: Date.now(), error: reason };
+      } else {
+        // A hook can fail for a moment (a worker still shutting down). The reaper's next sweep
+        // runs it again, and after the third failure the machine counts as lost.
+        const attempts = machine.destroyAttempts + 1;
+        outcome =
+          attempts >= DESTROY_ATTEMPTS
+            ? { state: "lost", destroyAttempts: attempts, error: failure }
+            : {
+                destroyAttempts: attempts,
+                error: `${failure} (try ${attempts} of ${DESTROY_ATTEMPTS})`,
+              };
+      }
+    }
+    runLog.write(
+      "hub",
+      `machine ${machine.id} is ${outcome.state ?? machine.state}${outcome.error ? `: ${outcome.error}` : ""}`,
+    );
+    this.machines.update(machine.id, outcome);
+    return this.machines.get(machine.id) ?? machine;
+  }
+
+  /** Runs `destroy` for a machine the hub has no record of, named only by the handle `status` printed. */
+  async destroyHandle(runner: RunnerConfig, handle: string, reason: string): Promise<boolean> {
+    if (!runner.destroy) return false;
+    const file = join(bandHome(), "runners", "logs", "reaper.log");
+    try {
+      if (statSync(file).size > LOG_FILE_LIMIT) rmSync(file, { force: true });
+    } catch {
+      // No log yet.
+    }
+    const runLog = new RunLog(file);
+    runLog.write("hub", `destroying machine ${handle} of runner ${runner.id}: ${reason}`);
+    try {
+      const code = await this.runDestroy(runner, null, null, handle, runLog);
+      runLog.write("hub", `destroy of ${handle} exited with code ${code}`);
+      return code === 0;
+    } catch (err) {
+      runLog.write(
+        "hub",
+        `destroy of ${handle} failed: ${err instanceof Error ? err.message : err}`,
+      );
+      return false;
+    }
+  }
+
+  /** The handles the runner's `status` hook lists, or null when it has no such hook. Throws when the hook fails. */
+  async listHandles(runner: RunnerConfig): Promise<string[] | null> {
+    if (!runner.status) return null;
+    const handles: string[] = [];
+    const errors: string[] = [];
+    const code = await this.runHook({
+      runner,
+      name: "status",
+      path: resolveHookPath(runner.status, "status"),
+      env: this.hookEnv(runner, null, null, null),
+      timeoutMs: STATUS_TIMEOUT_MS,
+      runLog: null,
+      onStdout: (line) => {
+        // A line is a handle, or `BAND_MACHINE_HANDLE=<id> key=value ...` like the VM hooks print.
+        const handle = line
+          .trim()
+          .split(/\s+/)[0]
+          ?.replace(/^BAND_MACHINE_HANDLE=/, "");
+        if (handle && handle.length <= 200 && /^[A-Za-z0-9_][A-Za-z0-9_.:/-]*$/.test(handle)) {
+          handles.push(handle);
+        }
+      },
+      onStderr: (line) => {
+        if (errors.length < 5) errors.push(line.slice(0, 300));
+      },
+    });
+    if (code !== 0) {
+      throw new Error(
+        `status exited with code ${code}${errors.length ? `: ${errors.join("; ")}` : ""}`,
+      );
+    }
+    return [...new Set(handles)];
+  }
+
   // ---- hibernate (plan step 3.10) --------------------------------------------
 
-  /** The runner that started a host's machine, when it is still configured. */
-  private runnerOfHost(hostId: string): RunnerConfig | undefined {
-    const machine = this.snapshots.getMachine(hostId);
-    if (!machine) return undefined;
-    return parseRunners(settingsService.get().runners).runners.find(
-      (r) => r.id === machine.runnerId,
-    );
+  /** The machine a host's worker runs on, while it lives. */
+  private machineOfHost(hostId: string): RunnerMachineRow | undefined {
+    return this.machines.latestLiveForWorker(hostId);
   }
 
   private hostLog(hostId: string): RunLog {
     return new RunLog(this.logFile(hostId));
   }
 
-  /** The environment of a hook that runs for a host's machine, outside any request. */
-  private machineEnv(runner: RunnerConfig, hostId: string): NodeJS.ProcessEnv {
-    const env = this.baseEnv(runner, hostId);
-    const handle = this.snapshots.getMachine(hostId)?.machineHandle;
-    if (handle) env.BAND_MACHINE_HANDLE = handle;
-    return env;
-  }
-
   /** Whether the runner behind this host can snapshot its machine. */
   supportsSnapshot(hostId: string): boolean {
-    return this.runnerOfHost(hostId)?.snapshot !== undefined;
+    const machine = this.machineOfHost(hostId);
+    return machine !== undefined && this.findRunner(machine.runnerId)?.snapshot !== undefined;
   }
 
   /**
@@ -617,35 +839,38 @@ export class RunnerService {
    * host took earlier are deleted, since the new one holds the same disk later.
    */
   async snapshotHost(hostId: string, workspaceIds: string[]): Promise<boolean> {
-    const runner = this.runnerOfHost(hostId);
-    if (!runner?.snapshot) return false;
+    const machine = this.machineOfHost(hostId);
+    const runner = machine ? this.findRunner(machine.runnerId) : undefined;
+    if (!machine || !runner?.snapshot) return false;
     const runLog = this.hostLog(hostId);
     let snapshotId = "";
     let sizeBytes: number | null = null;
-    runLog.write("hub", `snapshotting the machine of ${hostId}`);
-    const code = await this.runHook(
+    runLog.write("hub", `snapshotting machine ${machine.id} of ${hostId}`);
+    const env = this.hookEnv(runner, null, hostId, null, [], machine.handle);
+    env.BAND_WORKSPACE_IDS = workspaceIds.join(",");
+    const code = await this.runHook({
       runner,
-      "snapshot",
-      resolveHookPath(runner.snapshot, "snapshot"),
-      { ...this.machineEnv(runner, hostId), BAND_WORKSPACE_IDS: workspaceIds.join(",") },
-      runner.snapshotTimeoutSec * 1000,
+      name: "snapshot",
+      path: resolveHookPath(runner.snapshot, "snapshot"),
+      env,
+      timeoutMs: runner.snapshotTimeoutSec * 1000,
       runLog,
-      undefined,
-      (line) => {
-        const id = /^BAND_SNAPSHOT_ID=(.+)$/.exec(line.trim());
-        if (id) snapshotId = id[1]?.trim() ?? "";
+      onStdout: (line) => {
+        const id = /^BAND_SNAPSHOT_ID=(\S+)$/.exec(line.trim());
+        if (id) snapshotId = id[1] ?? "";
         const size = /^BAND_SNAPSHOT_SIZE=(\d+)$/.exec(line.trim());
         if (size) sizeBytes = Number(size[1]);
       },
-    );
+    });
     if (code !== 0) throw new Error(`snapshot hook exited with code ${code}`);
     if (!snapshotId) throw new Error("snapshot hook printed no BAND_SNAPSHOT_ID");
     const now = Date.now();
     const previous = this.snapshots.listByHost(hostId);
     this.snapshots.insert({
-      id: `sn-${randomUUID().slice(0, 12)}`,
+      id: `sn-${randomBytes(6).toString("hex")}`,
       runnerId: runner.id,
       hostId,
+      machineId: machine.id,
       workspaceIds,
       snapshotId,
       sizeBytes,
@@ -659,24 +884,14 @@ export class RunnerService {
     return true;
   }
 
-  /** Runs `destroy` for a host's machine once its worker has gone, after a snapshot took its place. */
-  async destroyMachine(hostId: string): Promise<void> {
-    const runner = this.runnerOfHost(hostId);
-    if (!runner?.destroy) return;
-    const runLog = this.hostLog(hostId);
-    try {
-      const code = await this.runHook(
-        runner,
-        "destroy",
-        resolveHookPath(runner.destroy, "destroy"),
-        this.machineEnv(runner, hostId),
-        DESTROY_TIMEOUT_MS,
-        runLog,
-      );
-      if (code !== 0) runLog.write("hub", `destroy exited with code ${code}`);
-    } catch (err) {
-      runLog.write("hub", `destroy failed: ${err instanceof Error ? err.message : err}`);
-    }
+  /**
+   * Destroys the machine of a host whose worker has exited after a snapshot took its place, so it
+   * does not wait for the reaper's offline threshold.
+   */
+  async destroyAfterSleep(hostId: string): Promise<void> {
+    const machine = this.machineOfHost(hostId);
+    if (!machine) return;
+    await this.destroyMachine(machine.id, "its worker went to sleep and a snapshot holds its disk");
   }
 
   /** The newest snapshot of a host, when a restore brought its machine back from it. */
@@ -704,7 +919,7 @@ export class RunnerService {
     if (this.sweeping) return;
     this.sweeping = true;
     try {
-      const { runners } = parseRunners(settingsService.get().runners);
+      const runners = this.configs();
       const now = Date.now();
       const doomed = new Map<string, RunnerSnapshotRow>();
       for (const row of this.snapshots.listExpired(now)) doomed.set(row.id, row);
@@ -729,9 +944,7 @@ export class RunnerService {
 
   /** Runs `snapshotDelete` for a snapshot and forgets it. A failing hook keeps the row for a later sweep. */
   private async deleteSnapshot(row: RunnerSnapshotRow): Promise<void> {
-    const runner = parseRunners(settingsService.get().runners).runners.find(
-      (r) => r.id === row.runnerId,
-    );
+    const runner = this.findRunner(row.runnerId);
     const runLog = this.hostLog(row.hostId);
     if (!runner?.snapshotDelete) {
       log.warn(
@@ -741,14 +954,17 @@ export class RunnerService {
       return;
     }
     try {
-      const code = await this.runHook(
+      const machine = row.machineId ? this.machines.get(row.machineId) : undefined;
+      const env = this.hookEnv(runner, null, row.hostId, null, [], machine?.handle ?? null);
+      env.BAND_SNAPSHOT_ID = row.snapshotId;
+      const code = await this.runHook({
         runner,
-        "snapshot-delete",
-        resolveHookPath(runner.snapshotDelete, "snapshot-delete"),
-        { ...this.machineEnv(runner, row.hostId), BAND_SNAPSHOT_ID: row.snapshotId },
-        SNAPSHOT_DELETE_TIMEOUT_MS,
+        name: "snapshot-delete",
+        path: resolveHookPath(runner.snapshotDelete, "snapshot-delete"),
+        env,
+        timeoutMs: SNAPSHOT_DELETE_TIMEOUT_MS,
         runLog,
-      );
+      });
       if (code !== 0) throw new Error(`exited with code ${code}`);
       runLog.write("hub", `deleted snapshot ${row.snapshotId}`);
       this.snapshots.delete(row.id);
@@ -763,49 +979,45 @@ export class RunnerService {
 
   // ---- hooks ---------------------------------------------------------------
 
+  /**
+   * The contract environment (`docs/runner-hooks.md`). `row` and `workerId` are null for the
+   * `status` hook and for the `destroy` of a machine the hub has no record of.
+   */
   private hookEnv(
     runner: RunnerConfig,
-    row: HostRequestRow,
-    workerId: string,
+    row: HostRequestRow | null,
+    workerId: string | null,
     token: string | null,
     repos: string[] = [],
-    handle?: string,
+    handle: string | null = null,
   ): NodeJS.ProcessEnv {
-    const env = this.baseEnv(runner, workerId);
-    Object.assign(env, {
-      BAND_REPO_URLS: repos.join(","),
-      BAND_ENVIRONMENT: JSON.stringify(environmentOf(row) ?? {}),
-      BAND_ISOLATION: environmentOf(row)?.isolation ?? runnerLevel(runner.isolation),
-      BAND_LABELS: Object.entries(row.labels)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(","),
-      BAND_REQUIRES: JSON.stringify(row.requires ?? {}),
-      BAND_PROJECT: row.project,
-      // The project's current environment image (plan step 3.2), empty before its first ready build.
-      BAND_PROJECT_IMAGE: this.projectImage(row.project),
-      BAND_REQUEST_ID: row.id,
-    });
-    if (token) env.BAND_BOOTSTRAP_TOKEN = token;
-    if (handle) env.BAND_MACHINE_HANDLE = handle;
-    return env;
-  }
-
-  /** What every hook gets: the hub's passthrough variables, the runner's `env`, then the contract variables. */
-  private baseEnv(runner: RunnerConfig, workerId: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const name of PASSTHROUGH_ENV) {
       const v = process.env[name];
       if (v !== undefined) env[name] = v;
     }
     Object.assign(env, runner.env);
+    const environment = row ? environmentOf(row) : null;
     Object.assign(env, {
       BAND_HUB_URL: this.hubUrlFor(runner),
-      BAND_WORKER_ID: workerId,
+      BAND_REPO_URLS: repos.join(","),
+      BAND_ENVIRONMENT: JSON.stringify(environment ?? {}),
+      BAND_ISOLATION: environment?.isolation ?? runnerLevel(runner.isolation),
+      BAND_LABELS: Object.entries(row?.labels ?? {})
+        .map(([k, v]) => `${k}=${v}`)
+        .join(","),
+      BAND_REQUIRES: JSON.stringify(row?.requires ?? {}),
+      BAND_PROJECT: row?.project ?? "",
+      // The project's current environment image (plan step 3.2), empty before its first ready build.
+      BAND_PROJECT_IMAGE: row ? this.projectImage(row.project) : "",
       BAND_RUNNER_ID: runner.id,
-      BAND_ISOLATION: runnerLevel(runner.isolation),
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
       BAND_NODE: process.execPath,
     });
+    if (workerId) env.BAND_WORKER_ID = workerId;
+    if (row) env.BAND_REQUEST_ID = row.id;
+    if (handle) env.BAND_MACHINE_HANDLE = handle;
+    if (token) env.BAND_BOOTSTRAP_TOKEN = token;
     return env;
   }
 
@@ -832,16 +1044,18 @@ export class RunnerService {
    * Runs a hook script and resolves with its exit code. The script is killed
    * after `timeoutMs`. Its output goes to `runLog` line by line.
    */
-  private runHook(
-    runner: RunnerConfig,
-    name: HookScript,
-    path: string,
-    env: NodeJS.ProcessEnv,
-    timeoutMs: number,
-    runLog: RunLog,
-    watch?: () => void,
-    onStdout?: (line: string) => void,
-  ): Promise<number> {
+  private runHook(opts: {
+    runner: RunnerConfig;
+    name: HookScript;
+    path: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    runLog: RunLog | null;
+    watch?: () => void;
+    onStdout?: (line: string) => void;
+    onStderr?: (line: string) => void;
+  }): Promise<number> {
+    const { runner, name, path, env, timeoutMs, runLog, watch, onStdout, onStderr } = opts;
     const cwd = join(bandHome(), "runners", runner.id);
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
     return new Promise<number>((resolve, reject) => {
@@ -853,10 +1067,13 @@ export class RunnerService {
         return;
       }
       const flushOut = pipeLines(child.stdout, (line) => {
-        runLog.write(`${name} stdout`, line);
+        runLog?.write(`${name} stdout`, line);
         onStdout?.(line);
       });
-      const flushErr = pipeLines(child.stderr, (line) => runLog.write(`${name} stderr`, line));
+      const flushErr = pipeLines(child.stderr, (line) => {
+        runLog?.write(`${name} stderr`, line);
+        onStderr?.(line);
+      });
       let settled = false;
       const finish = (fn: () => void) => {
         if (settled) return;

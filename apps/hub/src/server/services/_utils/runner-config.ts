@@ -19,7 +19,16 @@ export const DEFAULT_SNAPSHOT_TIMEOUT_SEC = 600;
 export const MAX_SNAPSHOT_TIMEOUT_SEC = 780;
 
 /** The hook scripts a runner can have. The bundled name is `<runner dir>/<name>.sh`. */
-export type HookScript = "spawn" | "destroy" | "snapshot" | "restore" | "snapshot-delete";
+export type HookScript =
+  | "spawn"
+  | "destroy"
+  | "status"
+  | "snapshot"
+  | "restore"
+  | "snapshot-delete";
+/** Seconds after `maxLifetimeSec` before the reaper destroys a machine that could not be put to sleep. */
+export const DEFAULT_LIFETIME_GRACE_SEC = 600;
+const MAX_LIFETIME_SEC = 60 * 60 * 24 * 90;
 
 /** Prefix that names a hook shipped in the repo's `runners/` directory, like `bundled:local`. */
 export const BUNDLED_PREFIX = "bundled:";
@@ -39,6 +48,11 @@ export const runnerSchema = z
     /** A script path (absolute, or relative to BAND_HOME), or `bundled:<name>` for the hooks in `runners/`. */
     spawn: hookPath,
     destroy: hookPath.optional(),
+    /**
+     * Optional. Prints the handle of every live machine of this runner, one per line, so the reaper
+     * can destroy machines the hub has no record of.
+     */
+    status: hookPath.optional(),
     /** What this runner offers. A request is leasable when every label it asks for is here. */
     labels: z.record(z.string(), z.string()).default({}),
     /**
@@ -60,6 +74,21 @@ export const runnerSchema = z
       .min(1)
       .max(MAX_RUNNER_TIMEOUT_SEC)
       .default(DEFAULT_RUNNER_TIMEOUT_SEC),
+    /**
+     * How long a machine may live, counted from its spawn. Past it the reaper has the worker store
+     * its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits.
+     */
+    maxLifetimeSec: z.number().int().min(1).max(MAX_LIFETIME_SEC).optional(),
+    /**
+     * Seconds after `maxLifetimeSec` the reaper waits for the workspaces to be stored. Past that
+     * deadline it destroys the machine whether or not they were, and logs it as an error.
+     */
+    lifetimeGraceSec: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_LIFETIME_SEC)
+      .default(DEFAULT_LIFETIME_GRACE_SEC),
     /** Extra environment for the hook (`BAND_SSH_TARGET`, `BAND_WORKER_BIN`). Not secret: the settings file shows it. */
     env: z.record(envName, z.string()).default({}),
     /**
