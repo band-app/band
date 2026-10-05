@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PROTOCOL_VERSION } from "@band-app/link";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -408,7 +409,7 @@ function helloReply(token: string, workerId: string): Promise<{ type: string; re
       ws.send(
         JSON.stringify({
           type: "hello",
-          protocol: 2,
+          protocol: PROTOCOL_VERSION,
           workerId,
           token,
           buildId: "test",
