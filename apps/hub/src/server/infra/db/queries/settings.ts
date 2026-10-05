@@ -15,6 +15,12 @@ export interface RunnerSettings {
   maxConcurrent: number;
   timeoutSec: number;
   env: Record<string, string>;
+  snapshot?: string;
+  restore?: string;
+  snapshotDelete?: string;
+  snapshotKeep: number;
+  snapshotTtlSec: number;
+  snapshotTimeoutSec: number;
 }
 
 /**

@@ -18,18 +18,37 @@
  * within `timeoutSec`. The service runs `destroy`, drops the host row, and
  * tries once more with a fresh token. After the second failure the request
  * fails with the tail of the hook's log.
+ *
+ * Hibernate (plan step 3.10). A runner with `snapshot` and `restore` hooks
+ * takes a machine snapshot when the hub puts an ephemeral worker to sleep
+ * (`snapshotHost`, called by `EphemeralLifecycleService` after it has stored
+ * the git state and agent sessions, which stay the fallback). A wake request
+ * leased by the same runner runs `restore` with that snapshot instead of
+ * `spawn`, and starts a fresh worker with `spawn` when `restore` fails.
+ * Snapshots are kept per runner (`snapshotKeep`, `snapshotTtlSec`) and removed
+ * through `snapshotDelete`.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Environment, parseEnvironment } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
+import {
+  type RunnerSnapshotRow,
+  RunnerSnapshotQueries,
+} from "../infra/db/queries/runner-snapshots";
 import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { ISOLATION_LABEL_KEY, requestedIsolation, runnerLevel } from "./_utils/isolation";
-import { parseRunners, type RunnerConfig, resolveHookPath } from "./_utils/runner-config";
+import {
+  type HookScript,
+  parseRunners,
+  type RunnerConfig,
+  resolveHookPath,
+} from "./_utils/runner-config";
 import { environmentBuildService } from "./environment-build-service";
 import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
@@ -48,6 +67,24 @@ const LOG_LINE_LIMIT = 2000;
 const TAIL_LINES = 20;
 const REASON_LIMIT = 1800;
 const HISTORY_LIMIT = 50;
+const SNAPSHOT_SWEEP_MS = 60_000;
+const SNAPSHOT_DELETE_TIMEOUT_MS = 5 * 60_000;
+/** A `snapshot-delete` that failed is tried again after this long. */
+const SNAPSHOT_DELETE_RETRY_MS = 10 * 60_000;
+
+/** How often retention runs, from `BAND_SNAPSHOT_SWEEP_MS`. Read on every tick. */
+function snapshotSweepMs(): number {
+  const raw = Number(process.env.BAND_SNAPSHOT_SWEEP_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : SNAPSHOT_SWEEP_MS;
+}
+
+interface AttemptState {
+  hostId: string | null;
+  token: string | null;
+  reused?: boolean;
+  /** `BAND_MACHINE_HANDLE` of the hook's last spawn or restore. */
+  handle?: string;
+}
 
 /** Matches any Band token, so a hook that echoes its environment still leaks nothing. */
 const TOKEN_PATTERN = /\b(?:bwb|bws|bdt|brt)_[A-Za-z0-9_-]{6,}/g;
@@ -81,6 +118,8 @@ export interface RunnerView {
   kind: "hook";
   spawn: string;
   destroy: string | null;
+  /** Whether sleeping a workspace on this runner's workers snapshots the machine. */
+  snapshots: boolean;
   labels: Record<string, string>;
   isolation: string;
   maxConcurrent: number;
@@ -165,6 +204,12 @@ export class RunnerService {
   private readonly running = new Map<string, RunnerRun>();
   private readonly history: RunnerRun[] = [];
   private readonly settled = new Set<Promise<void>>();
+  private readonly snapshots = new RunnerSnapshotQueries();
+  /** Snapshots a restore is reading right now. Retention leaves them alone. */
+  private readonly restoring = new Set<string>();
+  private readonly deleteFailedAt = new Map<string, number>();
+  private lastSweep = 0;
+  private sweeping = false;
 
   constructor(private readonly options: RunnerServiceOptions = {}) {}
 
@@ -199,6 +244,7 @@ export class RunnerService {
         kind: r.kind,
         spawn: r.spawn,
         destroy: r.destroy ?? null,
+        snapshots: r.snapshot !== undefined,
         labels: r.labels,
         isolation: r.isolation,
         maxConcurrent: r.maxConcurrent,
@@ -215,7 +261,8 @@ export class RunnerService {
 
   /** The log of a request's runs, or null when there is none. */
   readLog(requestId: string): string | null {
-    if (!/^hr-[A-Za-z0-9-]+$/.test(requestId)) return null;
+    // `hr-...` is a request, `h-...` a host whose machine was snapshotted or restored.
+    if (!/^hr?-[A-Za-z0-9-]+$/.test(requestId)) return null;
     try {
       return readFileSync(this.logFile(requestId), "utf8");
     } catch {
@@ -255,6 +302,10 @@ export class RunnerService {
           if (!row) break;
           this.begin(runner, row);
         }
+      }
+      if (Date.now() - this.lastSweep >= snapshotSweepMs()) {
+        this.lastSweep = Date.now();
+        void this.sweepSnapshots();
       }
     } catch (err) {
       log.warn(`tick failed: ${err instanceof Error ? err.message : err}`);
@@ -312,10 +363,7 @@ export class RunnerService {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       run.attempt = attempt;
       runLog.write("hub", `attempt ${attempt} of ${ATTEMPTS}`);
-      const attemptState: { hostId: string | null; token: string | null; reused?: boolean } = {
-        hostId: null,
-        token: null,
-      };
+      const attemptState: AttemptState = { hostId: null, token: null };
       try {
         const hostId = await this.attempt(runner, row, run, runLog, attemptState);
         run.workerId = hostId;
@@ -356,7 +404,7 @@ export class RunnerService {
   private async cleanup(
     runner: RunnerConfig,
     row: HostRequestRow,
-    state: { hostId: string | null; token: string | null; reused?: boolean },
+    state: AttemptState,
     runLog: RunLog,
   ): Promise<void> {
     if (!state.hostId) return;
@@ -366,7 +414,7 @@ export class RunnerService {
           runner,
           "destroy",
           resolveHookPath(runner.destroy, "destroy"),
-          this.hookEnv(runner, row, state.hostId, null),
+          this.hookEnv(runner, row, state.hostId, null, [], state.handle),
           DESTROY_TIMEOUT_MS,
           runLog,
         );
@@ -380,6 +428,7 @@ export class RunnerService {
     try {
       tokenService.removeHost(state.hostId);
       hostRegistry.unregister(state.hostId);
+      this.snapshots.deleteMachine(state.hostId);
     } catch (err) {
       runLog.write(
         "hub",
@@ -388,13 +437,56 @@ export class RunnerService {
     }
   }
 
-  /** One spawn. Returns the id of the worker that said hello. */
+  /**
+   * One launch of a worker. Returns the id of the worker that said hello. A wake request that this
+   * runner holds a snapshot for tries `restore` first, and starts a fresh worker with `spawn` when
+   * that fails, so the git and session state the sleep stored is what brings the workspace back.
+   */
   private async attempt(
     runner: RunnerConfig,
     row: HostRequestRow,
     run: RunnerRun,
     runLog: RunLog,
-    state: { hostId: string | null; token: string | null; reused?: boolean },
+    state: AttemptState,
+  ): Promise<string> {
+    const wake = wakeOf(row);
+    const snapshot = wake ? this.restorableSnapshot(runner, wake.hostId) : undefined;
+    if (snapshot) {
+      this.restoring.add(snapshot.id);
+      try {
+        return await this.launch(runner, row, run, runLog, state, "restore", snapshot);
+      } catch (err) {
+        if (err instanceof Aborted) throw err;
+        runLog.write(
+          "hub",
+          `restore of snapshot ${snapshot.snapshotId} failed: ${err instanceof Error ? err.message : err}; starting a fresh worker`,
+        );
+        this.snapshots.markUnrestored(snapshot.id);
+        await this.cleanup(runner, row, state, runLog);
+      } finally {
+        this.restoring.delete(snapshot.id);
+      }
+    }
+    return this.launch(runner, row, run, runLog, state, "spawn");
+  }
+
+  /** The snapshot a wake can restore from: this runner's, still alive, and the runner has a `restore` hook. */
+  private restorableSnapshot(runner: RunnerConfig, hostId: string): RunnerSnapshotRow | undefined {
+    if (!runner.restore) return undefined;
+    const latest = this.snapshots.latestForHost(hostId);
+    if (!latest || latest.runnerId !== runner.id || latest.expiresAt <= Date.now())
+      return undefined;
+    return latest;
+  }
+
+  private async launch(
+    runner: RunnerConfig,
+    row: HostRequestRow,
+    run: RunnerRun,
+    runLog: RunLog,
+    state: AttemptState,
+    kind: "spawn" | "restore",
+    snapshot?: RunnerSnapshotRow,
   ): Promise<string> {
     const deadline = Date.now() + runner.timeoutSec * 1000;
     const labelList = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
@@ -424,11 +516,19 @@ export class RunnerService {
     renew.unref?.();
     try {
       const env = this.hookEnv(runner, row, issued.hostId, issued.token, await repoUrls(row));
+      if (snapshot) env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
       let hostProjectPath: string | undefined;
+      let handle = "";
+      const script = kind === "restore" ? (runner.restore as string) : runner.spawn;
+      if (kind === "restore") {
+        runLog.write("hub", `restoring snapshot ${snapshot?.snapshotId} with the restore hook`);
+        // A restore the wait below gives up on must not leave the old mark behind.
+        if (snapshot) this.snapshots.markUnrestored(snapshot.id);
+      }
       const code = await this.runHook(
         runner,
-        "spawn",
-        resolveHookPath(runner.spawn, "spawn"),
+        kind,
+        resolveHookPath(script, kind),
         env,
         Math.max(deadline - Date.now(), 1),
         runLog,
@@ -436,10 +536,19 @@ export class RunnerService {
         (line) => {
           const m = /^BAND_HOST_PROJECT_PATH=(.+)$/.exec(line.trim());
           if (m) hostProjectPath = m[1];
+          const h = /^BAND_MACHINE_HANDLE=(.*)$/.exec(line.trim());
+          if (h) handle = h[1]?.trim() ?? "";
         },
       );
-      if (code !== 0) throw new Error(`spawn exited with code ${code}`);
-      runLog.write("hub", "spawn finished; waiting for the worker's hello");
+      if (code !== 0) throw new Error(`${kind} exited with code ${code}`);
+      state.handle = handle;
+      this.snapshots.setMachine({
+        hostId: issued.hostId,
+        runnerId: runner.id,
+        machineHandle: handle,
+        createdAt: Date.now(),
+      });
+      runLog.write("hub", `${kind} finished; waiting for the worker's hello`);
       while (!this.isOnline(issued.hostId)) {
         this.assertHeld(row, runner);
         if (Date.now() >= deadline) {
@@ -447,6 +556,8 @@ export class RunnerService {
         }
         await sleep(HELLO_POLL_MS);
       }
+      // From here the machine's disk is the one the snapshot held, so the hub skips its git restore.
+      if (snapshot) this.snapshots.markRestored(snapshot.id, Date.now());
       try {
         placementService.fulfil(row.id, runner.id, issued.hostId, hostProjectPath);
       } catch (err) {
@@ -471,6 +582,185 @@ export class RunnerService {
     return tokenService.hostStatus(hostId) === "online";
   }
 
+  // ---- hibernate (plan step 3.10) --------------------------------------------
+
+  /** The runner that started a host's machine, when it is still configured. */
+  private runnerOfHost(hostId: string): RunnerConfig | undefined {
+    const machine = this.snapshots.getMachine(hostId);
+    if (!machine) return undefined;
+    return parseRunners(settingsService.get().runners).runners.find(
+      (r) => r.id === machine.runnerId,
+    );
+  }
+
+  private hostLog(hostId: string): RunLog {
+    return new RunLog(this.logFile(hostId));
+  }
+
+  /** The environment of a hook that runs for a host's machine, outside any request. */
+  private machineEnv(runner: RunnerConfig, hostId: string): NodeJS.ProcessEnv {
+    const env = this.baseEnv(runner, hostId);
+    const handle = this.snapshots.getMachine(hostId)?.machineHandle;
+    if (handle) env.BAND_MACHINE_HANDLE = handle;
+    return env;
+  }
+
+  /** Whether the runner behind this host can snapshot its machine. */
+  supportsSnapshot(hostId: string): boolean {
+    return this.runnerOfHost(hostId)?.snapshot !== undefined;
+  }
+
+  /**
+   * Snapshots the machine of a host whose workspaces were just stored. Returns false when the
+   * runner has no snapshot hook. Throws when the hook fails, which the caller treats as "no
+   * snapshot": the git and session state is what restores the workspaces then. Snapshots this
+   * host took earlier are deleted, since the new one holds the same disk later.
+   */
+  async snapshotHost(hostId: string, workspaceIds: string[]): Promise<boolean> {
+    const runner = this.runnerOfHost(hostId);
+    if (!runner?.snapshot) return false;
+    const runLog = this.hostLog(hostId);
+    let snapshotId = "";
+    let sizeBytes: number | null = null;
+    runLog.write("hub", `snapshotting the machine of ${hostId}`);
+    const code = await this.runHook(
+      runner,
+      "snapshot",
+      resolveHookPath(runner.snapshot, "snapshot"),
+      { ...this.machineEnv(runner, hostId), BAND_WORKSPACE_IDS: workspaceIds.join(",") },
+      runner.snapshotTimeoutSec * 1000,
+      runLog,
+      undefined,
+      (line) => {
+        const id = /^BAND_SNAPSHOT_ID=(.+)$/.exec(line.trim());
+        if (id) snapshotId = id[1]?.trim() ?? "";
+        const size = /^BAND_SNAPSHOT_SIZE=(\d+)$/.exec(line.trim());
+        if (size) sizeBytes = Number(size[1]);
+      },
+    );
+    if (code !== 0) throw new Error(`snapshot hook exited with code ${code}`);
+    if (!snapshotId) throw new Error("snapshot hook printed no BAND_SNAPSHOT_ID");
+    const now = Date.now();
+    const previous = this.snapshots.listByHost(hostId);
+    this.snapshots.insert({
+      id: `sn-${randomUUID().slice(0, 12)}`,
+      runnerId: runner.id,
+      hostId,
+      workspaceIds,
+      snapshotId,
+      sizeBytes,
+      restoredAt: null,
+      createdAt: now,
+      expiresAt: now + runner.snapshotTtlSec * 1000,
+    });
+    runLog.write("hub", `snapshot ${snapshotId} of ${hostId} recorded`);
+    for (const old of previous) await this.deleteSnapshot(old);
+    void this.sweepSnapshots();
+    return true;
+  }
+
+  /** Runs `destroy` for a host's machine once its worker has gone, after a snapshot took its place. */
+  async destroyMachine(hostId: string): Promise<void> {
+    const runner = this.runnerOfHost(hostId);
+    if (!runner?.destroy) return;
+    const runLog = this.hostLog(hostId);
+    try {
+      const code = await this.runHook(
+        runner,
+        "destroy",
+        resolveHookPath(runner.destroy, "destroy"),
+        this.machineEnv(runner, hostId),
+        DESTROY_TIMEOUT_MS,
+        runLog,
+      );
+      if (code !== 0) runLog.write("hub", `destroy exited with code ${code}`);
+    } catch (err) {
+      runLog.write("hub", `destroy failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /** The newest snapshot of a host, when a restore brought its machine back from it. */
+  restoredSnapshot(hostId: string): RunnerSnapshotRow | undefined {
+    const latest = this.snapshots.latestForHost(hostId);
+    return latest?.restoredAt != null ? latest : undefined;
+  }
+
+  /** Deletes every snapshot of a host: a restore used them up, or the worker that was to sleep stayed. */
+  async dropHostSnapshots(hostId: string): Promise<void> {
+    for (const row of this.snapshots.listByHost(hostId)) await this.deleteSnapshot(row);
+  }
+
+  /** Every snapshot the hub holds, newest first. */
+  snapshotList(): RunnerSnapshotRow[] {
+    return this.snapshots.listAll();
+  }
+
+  /**
+   * Retention. Per runner the newest `snapshotKeep` snapshots stay, as long as they have not
+   * expired. The rest go through the runner's `snapshotDelete` hook. A snapshot a restore is reading
+   * is left alone. A workspace whose snapshot is gone still wakes from its stored git state.
+   */
+  async sweepSnapshots(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      const { runners } = parseRunners(settingsService.get().runners);
+      const now = Date.now();
+      const doomed = new Map<string, RunnerSnapshotRow>();
+      for (const row of this.snapshots.listExpired(now)) doomed.set(row.id, row);
+      for (const runnerId of new Set(this.snapshots.listAll().map((r) => r.runnerId))) {
+        const keep = runners.find((r) => r.id === runnerId)?.snapshotKeep ?? 0;
+        // A runner that is not configured any more cannot delete anything, so its rows go with a warning.
+        const rows = this.snapshots.listByRunner(runnerId).filter((r) => !doomed.has(r.id));
+        for (const row of rows.slice(keep)) doomed.set(row.id, row);
+      }
+      for (const row of doomed.values()) {
+        if (this.restoring.has(row.id)) continue;
+        const failedAt = this.deleteFailedAt.get(row.id);
+        if (failedAt !== undefined && now - failedAt < SNAPSHOT_DELETE_RETRY_MS) continue;
+        await this.deleteSnapshot(row);
+      }
+    } catch (err) {
+      log.warn(`snapshot retention failed: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  /** Runs `snapshotDelete` for a snapshot and forgets it. A failing hook keeps the row for a later sweep. */
+  private async deleteSnapshot(row: RunnerSnapshotRow): Promise<void> {
+    const runner = parseRunners(settingsService.get().runners).runners.find(
+      (r) => r.id === row.runnerId,
+    );
+    const runLog = this.hostLog(row.hostId);
+    if (!runner?.snapshotDelete) {
+      log.warn(
+        `snapshot ${row.snapshotId} of runner ${row.runnerId} cannot be deleted: ${runner ? "the runner has no snapshotDelete hook" : "the runner is not configured"}. Remove it by hand.`,
+      );
+      this.snapshots.delete(row.id);
+      return;
+    }
+    try {
+      const code = await this.runHook(
+        runner,
+        "snapshot-delete",
+        resolveHookPath(runner.snapshotDelete, "snapshot-delete"),
+        { ...this.machineEnv(runner, row.hostId), BAND_SNAPSHOT_ID: row.snapshotId },
+        SNAPSHOT_DELETE_TIMEOUT_MS,
+        runLog,
+      );
+      if (code !== 0) throw new Error(`exited with code ${code}`);
+      runLog.write("hub", `deleted snapshot ${row.snapshotId}`);
+      this.snapshots.delete(row.id);
+      this.deleteFailedAt.delete(row.id);
+    } catch (err) {
+      this.deleteFailedAt.set(row.id, Date.now());
+      const message = err instanceof Error ? err.message : String(err);
+      runLog.write("hub", `snapshot-delete of ${row.snapshotId} failed: ${message}`);
+      log.warn(`snapshot-delete of ${row.snapshotId} failed: ${message}`);
+    }
+  }
+
   // ---- hooks ---------------------------------------------------------------
 
   private hookEnv(
@@ -479,16 +769,10 @@ export class RunnerService {
     workerId: string,
     token: string | null,
     repos: string[] = [],
+    handle?: string,
   ): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = {};
-    for (const name of PASSTHROUGH_ENV) {
-      const v = process.env[name];
-      if (v !== undefined) env[name] = v;
-    }
-    Object.assign(env, runner.env);
+    const env = this.baseEnv(runner, workerId);
     Object.assign(env, {
-      BAND_HUB_URL: this.hubUrlFor(runner),
-      BAND_WORKER_ID: workerId,
       BAND_REPO_URLS: repos.join(","),
       BAND_ENVIRONMENT: JSON.stringify(environmentOf(row) ?? {}),
       BAND_ISOLATION: environmentOf(row)?.isolation ?? runnerLevel(runner.isolation),
@@ -499,12 +783,29 @@ export class RunnerService {
       BAND_PROJECT: row.project,
       // The project's current environment image (plan step 3.2), empty before its first ready build.
       BAND_PROJECT_IMAGE: this.projectImage(row.project),
-      BAND_RUNNER_ID: runner.id,
       BAND_REQUEST_ID: row.id,
+    });
+    if (token) env.BAND_BOOTSTRAP_TOKEN = token;
+    if (handle) env.BAND_MACHINE_HANDLE = handle;
+    return env;
+  }
+
+  /** What every hook gets: the hub's passthrough variables, the runner's `env`, then the contract variables. */
+  private baseEnv(runner: RunnerConfig, workerId: string): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {};
+    for (const name of PASSTHROUGH_ENV) {
+      const v = process.env[name];
+      if (v !== undefined) env[name] = v;
+    }
+    Object.assign(env, runner.env);
+    Object.assign(env, {
+      BAND_HUB_URL: this.hubUrlFor(runner),
+      BAND_WORKER_ID: workerId,
+      BAND_RUNNER_ID: runner.id,
+      BAND_ISOLATION: runnerLevel(runner.isolation),
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
       BAND_NODE: process.execPath,
     });
-    if (token) env.BAND_BOOTSTRAP_TOKEN = token;
     return env;
   }
 
@@ -533,7 +834,7 @@ export class RunnerService {
    */
   private runHook(
     runner: RunnerConfig,
-    name: "spawn" | "destroy",
+    name: HookScript,
     path: string,
     env: NodeJS.ProcessEnv,
     timeoutMs: number,

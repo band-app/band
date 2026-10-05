@@ -767,15 +767,20 @@ jobs:
       - name: Build hub
         run: pnpm --filter @band-app/server build
 
+      # The snapshot and restore hooks (plan step 3.10) run in the same job: a container workspace
+      # sleeps, its /work is snapshotted into an image, and the restored container has an untracked file.
       - name: Docker runner hook
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts
+        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
         env:
           BAND_DOCKER_TEST_IMAGE: band-worker-check
           BAND_DOCKER_TEST_NETWORK: host
 
       - name: Remove runner containers
         if: always()
-        run: docker ps --all --quiet --filter label=band.runner=docker | xargs -r docker rm --force --volumes
+        run: |
+          docker ps --all --quiet --filter label=band.runner=docker | xargs -r docker rm --force --volumes
+          docker ps --all --quiet --filter label=band.runner=docker-hib | xargs -r docker rm --force --volumes
+          docker images --quiet --filter label=band.runner=docker-hib | sort -u | xargs -r docker rmi --force
 
       - name: Worker logs
         if: failure()

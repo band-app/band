@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runner hook "docker": starts a band-worker in a hardened container with `docker run --rm`.
-# Contract: docs/runner-hooks.md.
+# Contract: docs/runner-hooks.md. restore.sh runs this script with BAND_DOCKER_RESTORE=1, which starts the
+# container from a snapshot instead (see snapshot.sh).
 #
 # The flags follow Bunny's docker runtime (bunny packages/runner/src/runtime/dockerRuntimeAdapter.ts
 # and docker/client.ts): uid 65532, CapDrop ALL, AutoRemove, a pids and memory limit, ownership labels.
@@ -56,10 +57,20 @@ docker_size() {
   printf '%s' "$1" | sed -E 's/^([0-9.]+) ?(Ki|K|KB)$/\1k/; s/^([0-9.]+) ?(Mi|M|MB)$/\1m/; s/^([0-9.]+) ?(Gi|G|GB)$/\1g/; s/^([0-9.]+) ?(Ti|T|TB)$/\1024g/'
 }
 
-# The project's own image holds its toolchain and installed dependencies, and the worker (layer 1 of
-# docs/agent-environments.md). When this daemon cannot get it (a build on another host without a
+# A restore (restore.sh) runs the image the snapshot was taken from, and puts the snapshot's /work back
+# into the new container's volume before the worker starts. See snapshot.sh for what the snapshot is.
+restore="${BAND_DOCKER_RESTORE:-}"
+# Otherwise the project's own image holds its toolchain and installed dependencies, and the worker (layer 1
+# of docs/agent-environments.md). When this daemon cannot get it (a build on another host without a
 # registry), the worker base image runs instead.
-if [ -n "${BAND_PROJECT_IMAGE:-}" ]; then
+if [ -n "$restore" ]; then
+  : "${BAND_SNAPSHOT_ID:?}"
+  image="$(docker image inspect --format '{{index .Config.Labels "band.snapshot.base"}}' "$BAND_SNAPSHOT_ID")"
+  if [ -z "$image" ]; then
+    echo "$BAND_SNAPSHOT_ID is not a snapshot of this runner (no band.snapshot.base label)" >&2
+    exit 1
+  fi
+elif [ -n "${BAND_PROJECT_IMAGE:-}" ]; then
   if docker image inspect "$BAND_PROJECT_IMAGE" >/dev/null 2>&1 || docker pull --quiet "$BAND_PROJECT_IMAGE" >/dev/null 2>&1; then
     image="$BAND_PROJECT_IMAGE"
   else
@@ -76,7 +87,7 @@ if [ -n "$memory" ]; then memory="$(docker_size "$memory")"; else memory="${BAND
 # the path from the line printed below, and only uses it once the worker has said hello.
 repo=""
 repo_name=""
-if [ -n "${BAND_REPO_URLS:-}" ]; then
+if [ -z "$restore" ] && [ -n "${BAND_REPO_URLS:-}" ]; then
   repo="${BAND_REPO_URLS%%,*}"
   case "$repo" in
     /*) echo "the project has no origin URL a container can clone (got $repo)" >&2; exit 1 ;;
@@ -89,7 +100,7 @@ fi
 # -e NAME without a value copies it from this script's environment, so the token never shows in `ps`
 # or in the docker command line.
 set -- \
-  --detach --rm --name "$name" \
+  --rm --name "$name" \
   --label "band.runner=${BAND_RUNNER_ID:-}" \
   --label "band.request=${BAND_REQUEST_ID:-}" \
   --label "band.worker=$BAND_WORKER_ID" \
@@ -124,5 +135,26 @@ mkdir -p "$HOME" "$BAND_WORKER_STATE_DIR"
 if [ -n "$BAND_CLONE_URL" ]; then env -u BAND_BOOTSTRAP_TOKEN GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- "$BAND_CLONE_URL" "/work/$BAND_CLONE_NAME"; fi
 exec band-worker'
 
-id="$(docker run "$@" --entrypoint /bin/sh "$image" -c "$start")"
-echo "started container $name (${id%"${id#????????????}"}) from $image"
+echo "BAND_MACHINE_HANDLE=$name"
+if [ -z "$restore" ]; then
+  id="$(docker run --detach "$@" --entrypoint /bin/sh "$image" -c "$start")"
+  echo "started container $name (${id%"${id#????????????}"}) from $image"
+  exit 0
+fi
+
+# Restore: create the container (its /work volume starts empty), fill the volume from the snapshot with
+# a short-lived container that shares it, then start the worker. The worker's old session token is in
+# the copied state dir and is dead (the hub revoked it), so it goes, and the worker trades the new
+# bootstrap token. The snapshot image is only read by the helper, so it can be deleted afterwards
+# even while this container runs.
+id="$(docker create "$@" --entrypoint /bin/sh "$image" -c "$start")"
+if ! docker run --rm --user 65532:65532 --volumes-from "$name" --entrypoint /bin/sh "$BAND_SNAPSHOT_ID" -c '
+  set -e
+  tar -C /snapshot -cf - . | tar -C /work -xf - --no-overwrite-dir
+  rm -f /work/.band-worker/session-token'; then
+  docker rm --force --volumes "$name" >/dev/null 2>&1 || true
+  echo "could not copy the snapshot $BAND_SNAPSHOT_ID into the new container" >&2
+  exit 1
+fi
+docker start "$name" >/dev/null
+echo "restored container $name (${id%"${id#????????????}"}) from snapshot $BAND_SNAPSHOT_ID on $image"

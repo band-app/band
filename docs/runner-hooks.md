@@ -2,7 +2,7 @@
 
 A runner is a pair of scripts the hub runs to get a machine for a workspace that has none. When `workspaces.create` carries a `placement` that no online host satisfies, the hub records a host request. `RunnerService` (`apps/hub/src/server/services/runner-service.ts`) takes that request, runs the runner's `spawn` script, and completes the request once the worker that script started says hello.
 
-The hub ships five hooks in `runners/`: `local`, `ssh`, `docker`, `hetzner` and `contabo`. The last two start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). Any executable can be a hook.
+The hub ships five hooks in `runners/`: `local`, `ssh`, `docker`, `hetzner` and `contabo`. The last two start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). `docker` and `hetzner` also have snapshot hooks (see [Snapshots](#snapshots)). Any executable can be a hook.
 
 ## Configure a runner
 
@@ -38,6 +38,11 @@ Runners live in `~/.band/settings.json` under `runners`. `settings.update` valid
 | `maxConcurrent` | How many requests the runner has in flight at once. Default 1. |
 | `timeoutSec` | Seconds from the start of an attempt to the worker's hello. Default 120. |
 | `env` | Extra environment for the hook, such as `BAND_SSH_TARGET`. The settings file is readable by any device token, so put no secrets here. |
+| `snapshot`, `restore` | Optional, set both or neither. The hooks that snapshot a sleeping worker's machine and start it again from the snapshot (see [Snapshots](#snapshots)). `bundled:<name>` means `runners/<name>/snapshot.sh` and `restore.sh`. |
+| `snapshotDelete` | Optional. The script that removes a snapshot. `bundled:<name>` means `runners/<name>/snapshot-delete.sh`. Without it the hub forgets a snapshot it no longer wants but cannot remove it, and logs a warning. |
+| `snapshotKeep` | How many snapshots of this runner to keep, newest first. Default 3. |
+| `snapshotTtlSec` | Seconds a snapshot lives. Default 7 days. |
+| `snapshotTimeoutSec` | Seconds the `snapshot` hook may run. Default 600, at most 780. |
 
 `bundled:` hooks are found in the nearest `runners/` directory above the hub's bundle, or in `BAND_RUNNERS_DIR`.
 
@@ -83,6 +88,50 @@ A hook must:
 - Optionally print `BAND_HOST_PROJECT_PATH=<path>` on its own line: where the repository is on the worker. The hub passes it as `hostProjectPath` when it fulfils the request. The path must be inside one of the worker's roots.
 
 `destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo.
+
+## Snapshots
+
+A runner with `snapshot` and `restore` hooks keeps the disk of a sleeping workspace. Without them a wake builds the workspace again from the git state and agent session files the hub stored when it went to sleep (see [Ephemeral workers](ephemeral-workers.md)), so ignored files such as `node_modules` and build output are lost. With them, the wake starts a machine from the disk image that was taken at sleep, so installed dependencies, build output and untracked files are there at once.
+
+The git and session state is still stored first, on every sleep. The snapshot comes on top of it, and the wake falls back to the stored state when anything about the snapshot goes wrong. A snapshot can make a wake faster and fuller, and it can fail without losing work.
+
+| Hook | Environment | Output |
+| --- | --- | --- |
+| `snapshot` | `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` (what `spawn` printed, empty when it printed none), `BAND_WORKSPACE_IDS` (comma-separated ids of the workspaces on the host), `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL`, `BAND_ISOLATION`, `BAND_NODE` and the runner's `env`. | `BAND_SNAPSHOT_ID=<id>` on its own line, required. `BAND_SNAPSHOT_SIZE=<bytes>` optional. Exit 0. |
+| `restore` | The `spawn` environment, with a new `BAND_BOOTSTRAP_TOKEN`, and `BAND_SNAPSHOT_ID`. | Optional `BAND_MACHINE_HANDLE=<id>`. It starts the worker with `BAND_WORKER_ID` and the token, as `spawn` does, and exits 0. |
+| `snapshot-delete` | `BAND_SNAPSHOT_ID`, `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` and the common variables. | Exit 0, also when the snapshot is gone already. |
+
+`spawn` and `restore` print `BAND_MACHINE_HANDLE=<id>` for the machine they made, and the hub passes it to `snapshot`, `destroy` and `snapshot-delete` of that machine. A hook that finds its machine by the worker id needs no handle.
+
+A `restore` hook must not reuse the session token the snapshot holds. The hub revoked it when the worker went to sleep, and a worker that finds a saved session token uses it instead of the bootstrap token, so it would never connect. Delete the worker's saved `session-token` file from the restored disk (in `BAND_WORKER_STATE_DIR`) before the worker starts. The bundled hooks do. The restored worker has the same `BAND_WORKER_ID` as before.
+
+### Sleep
+
+1. The worker is idle and asks to exit. The hub stores the git state and the agent sessions, as without snapshots.
+2. The hub runs `snapshot` while the worker still runs. It runs for at most `snapshotTimeoutSec`, because the worker waits 15 minutes for the hub's answer. A failing or timed out hook is logged, and the sleep goes on without a snapshot.
+3. The hub records the snapshot in `runner_snapshots` (`runners.snapshots` lists them) and deletes the host's older ones.
+4. The worker exits. The hub then runs `destroy` for its machine, so the machine does not outlive the snapshot.
+
+### Wake
+
+A wake is a host request like any other, and any runner whose labels fit may lease it. The runner that took the snapshot runs `restore` with it. Another runner, or one whose snapshot was removed or has expired, runs `spawn` and the hub restores from the stored git state.
+
+1. `restore` starts a new machine from the snapshot, with a new bootstrap token. A `restore` that fails, or whose worker does not say hello within `timeoutSec`, runs `destroy` and then `spawn` in the same attempt, and the git restore takes over.
+2. When the worker says hello after a restore, the hub checks that each workspace's checkout is on the machine at the commit it had. If it is, the hub only writes the agent session files again. If it is not, it restores from git.
+3. The used snapshot is deleted with `snapshot-delete`.
+
+### Retention and cost
+
+A snapshot is storage you pay for until it is deleted. The hub deletes a snapshot when a wake has used it, when a newer one of the same host replaces it, and in a sweep every minute (`BAND_SNAPSHOT_SWEEP_MS`) that removes anything past `snapshotTtlSec` and everything beyond the newest `snapshotKeep` of a runner. A workspace whose snapshot is deleted before its wake still wakes, from the stored git state, only without its ignored files. Leave `snapshotKeep` at least as large as the number of ephemeral workers you expect to sleep at once, or the oldest sleepers lose their snapshots to newer ones.
+
+A `snapshot-delete` that fails leaves the snapshot recorded, and the sweep tries again after 10 minutes, so a flaky provider API does not leak it. A snapshot whose runner has no `snapshotDelete` hook, or was removed from the settings, is forgotten with a warning in the hub log, and you remove it by hand. The log of each snapshot, restore and delete is `BAND_HOME/runners/logs/<worker id>.log` (`band runners log <worker id>`).
+
+### Limits
+
+- A snapshot holds disk state only. Running processes, memory, open terminals and dev servers do not survive. The environment's `start` and `terminals` run again after a wake, as on any new worker.
+- The disk is copied while the worker runs, so it is crash-consistent. The hub has stored the work before it takes the snapshot and nothing writes after that, since the worker is idle and its agents and terminals have stopped.
+- A snapshot belongs to the runner and the machine that made it. It is not portable to another runner, region, architecture or docker daemon.
+- A host with several workspaces has one snapshot for the machine. Waking one workspace restores all of them.
 
 ## What the hub does
 
@@ -150,7 +199,9 @@ Settings (`env`):
 | `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
 | `DOCKER_HOST` | A remote docker daemon, such as `ssh://user@build-host`. |
 
-A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
+`snapshot.sh`, `restore.sh` and `snapshot-delete.sh` give the runner the snapshot hooks (`"snapshot": "bundled:docker"`, `"restore": "bundled:docker"`, `"snapshotDelete": "bundled:docker"`). `docker commit` leaves volumes out and `/work` is a volume, so `snapshot.sh` copies the contents of `/work` (the checkouts, the worker's `HOME` and its state) into a plain directory `/snapshot` of a helper container made from the worker's own image, and commits the helper as the image `band-snapshot:<worker id>-<time>`. The image carries the labels `band.snapshot.base` (the ID of the image the worker ran from), `band.worker` and `band.runner`. `restore.sh` is `spawn.sh` in restore mode: it runs the base image, fills the new container's `/work` volume from `/snapshot` with a short-lived container that shares the volume, removes the worker's dead session token and starts the worker. It does not clone. The snapshot image is only read during that copy, so `snapshot-delete.sh` (`docker rmi`) can remove it while the new container runs. The image lives on the docker daemon (`DOCKER_HOST`), takes the size of `/work` on top of the base image, and `docker image prune -a` removes it, so do not run that on the daemon of a runner that has sleeping workspaces.
+
+A wake of an ephemeral host without a snapshot runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
 
 A worker takes plain `http` only for a loopback hub, and a container on the `bridge` network cannot reach the hub's loopback. So the hub URL must be `https`, or on Linux the runner uses `"BAND_DOCKER_NETWORK": "host"` with the default `http://127.0.0.1:<port>`.
 
@@ -244,6 +295,8 @@ Creates a Hetzner Cloud server per request with the labels `band.runner`, `band.
 ```
 
 Allow several minutes in `timeoutSec`: the machine boots, installs Node and the worker, and clones before the worker says hello.
+
+`snapshot.sh`, `restore.sh` and `snapshot-delete.sh` give the runner the snapshot hooks (`"snapshot": "bundled:hetzner"` and so on). `snapshot` calls `create_image` with type `snapshot` on the server (the handle, else the server with the worker's label), waits for the action and prints the image id and its size. The image carries the labels `band.runner`, `band.worker` and `band.snapshot`. `restore` creates a server from that image with the same labels and a cloud-init made for a restore: it skips the install and the clone (they are on the disk), deletes the saved session token and starts the worker with the new bootstrap token. `snapshot-delete` deletes the image. Hetzner bills snapshots per GB and month, and a snapshot of a running server is crash-consistent. Set `snapshotTimeoutSec` to cover the snapshot: it takes minutes for a large disk. A snapshot is for the same server type or one with at least the same disk, in the same architecture. The restore uses the runner's `HCLOUD_SERVER_TYPE`.
 
 ### contabo
 

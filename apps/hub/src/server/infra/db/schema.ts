@@ -259,6 +259,37 @@ export const workspaceSleep = sqliteTable(
   (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
 );
 
+// The runner and machine behind an ephemeral host, kept so the hub can snapshot the machine when
+// its worker idles (plan step 3.10). `machine_handle` is what the spawn hook printed as
+// `BAND_MACHINE_HANDLE`, empty when it printed none.
+export const hostMachines = sqliteTable("host_machines", {
+  hostId: text("host_id").primaryKey(),
+  runnerId: text("runner_id").notNull(),
+  machineHandle: text("machine_handle").notNull().default(""),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Machine snapshots a runner's `snapshot` hook took when an ephemeral worker went to sleep.
+// `restored_at` is set once a `restore` hook brought the machine back from it.
+export const runnerSnapshots = sqliteTable(
+  "runner_snapshots",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id").notNull(),
+    hostId: text("host_id").notNull(),
+    workspaceIds: text("workspace_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    snapshotId: text("snapshot_id").notNull(),
+    sizeBytes: integer("size_bytes"),
+    restoredAt: integer("restored_at"),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [
+    index("runner_snapshots_host_idx").on(t.hostId),
+    index("runner_snapshots_runner_idx").on(t.runnerId, t.createdAt),
+  ],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),
