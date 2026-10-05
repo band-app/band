@@ -408,7 +408,10 @@ export function McpSettings() {
 
   const hostStatus = (server: McpServer) =>
     server.hostId ? (hosts.data ?? []).find((h) => h.id === server.hostId)?.status : undefined;
-  const credentials = (vault.data ?? []).filter((i: VaultItem) => i.kind !== "env");
+  // Only an API key or an OAuth connection can authenticate a server. A git credential cannot.
+  const credentials = (vault.data ?? []).filter(
+    (i: VaultItem) => i.kind === "api_key" || i.kind === "oauth",
+  );
   const envItems = vault.data ?? [];
   const toolNames = new Set([...(tools ?? []).map((t) => t.name), ...(form?.allowed ?? [])]);
 
@@ -613,7 +616,9 @@ export function McpSettings() {
                         >
                           <option value="">Choose an item</option>
                           {envItems
-                            .filter((item: VaultItem) => item.kind !== "oauth")
+                            .filter(
+                              (item: VaultItem) => item.kind === "api_key" || item.kind === "env",
+                            )
                             .map((item: VaultItem) => (
                               <option key={item.id} value={item.id}>
                                 {item.name}

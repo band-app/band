@@ -60,6 +60,37 @@ test("adds an API key whose value is never shown again, then deletes it", async 
   await expect(row).toHaveCount(0);
 });
 
+test("adds a git credential on the Credentials page, and the MCP form does not offer it", async ({
+  page,
+}) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog("credentials");
+
+  await settingsPage.addGitCredential(
+    "E2E_GIT_TOKEN",
+    "ghp_E2E_GIT_SECRET_123",
+    "github.com",
+    "acme/*",
+  );
+  const row = settingsPage.credentialRow("E2E_GIT_TOKEN");
+  await settingsPage.expectRowVisible(row);
+  await expect(row).toHaveAttribute("data-kind", "git");
+  await expect(settingsPage.dialog).not.toContainText("ghp_E2E_GIT_SECRET_123");
+
+  // A git credential cannot authenticate an MCP server, so the picker leaves it out.
+  await settingsPage.openSection("mcp");
+  await settingsPage.dialog.getByTestId("settings__mcp-add").click();
+  await expect(settingsPage.mcpCredentialOptions().first()).toBeAttached();
+  await expect(
+    settingsPage.mcpCredentialOptions().filter({ hasText: "E2E_GIT_TOKEN" }),
+  ).toHaveCount(0);
+
+  await settingsPage.openSection("credentials");
+  await settingsPage.deleteCredential("E2E_GIT_TOKEN");
+  await expect(row).toHaveCount(0);
+});
+
 test("connects an OAuth server through the consent window, then deletes and revokes it", async ({
   page,
 }) => {

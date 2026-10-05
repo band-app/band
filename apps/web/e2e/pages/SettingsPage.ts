@@ -483,6 +483,25 @@ export class SettingsPage {
     return row.getByTestId("settings__credential-oauth");
   }
 
+  /** Adds a git credential for `host` and a repository pattern, from the "Add a key" form. */
+  async addGitCredential(name: string, value: string, host: string, pathPattern: string) {
+    await test.step(`Add the git credential ${name}`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Credential name" }).fill(name);
+      await this.dialog
+        .getByRole("combobox", { name: "Credential kind" })
+        .selectOption({ label: "Git credential (access token)" });
+      await this.dialog.getByRole("textbox", { name: "Git host" }).fill(host);
+      await this.dialog.getByRole("textbox", { name: "Git path pattern" }).fill(pathPattern);
+      await this.dialog.getByLabel("Credential value").fill(value);
+      await this.dialog.getByTestId("settings__credential-add").click();
+    });
+  }
+
+  /** The options of the credential picker in the MCP add form. */
+  mcpCredentialOptions(): Locator {
+    return this.dialog.getByRole("combobox", { name: "MCP credential" }).getByRole("option");
+  }
+
   /** The error shown under the Credentials section. */
   credentialError(): Locator {
     return this.dialog.getByTestId("settings__credential-error");
