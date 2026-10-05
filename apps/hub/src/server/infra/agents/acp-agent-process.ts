@@ -208,14 +208,6 @@ function toAttached(
   };
 }
 
-/**
- * Text appended to the agent's system prompt, in the `_meta.systemPrompt.append`
- * field the Claude Code adapter reads on `session/new`, `load` and `resume`.
- */
-function systemPromptMeta(append: string | undefined): { _meta?: Record<string, unknown> } {
-  return append ? { _meta: { systemPrompt: { append } } } : {};
-}
-
 export class AcpAgentProcess {
   private closed = false;
   private constructor(
@@ -347,14 +339,14 @@ export class AcpAgentProcess {
     cwd: string,
     additionalDirectories?: string[],
     mcpServers: acp.McpServer[] = [],
-    systemPromptAppend?: string,
+    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
         this.connection.agent.request(acp.methods.agent.session.new, {
           cwd,
           mcpServers,
-          ...systemPromptMeta(systemPromptAppend),
+          ...(meta ? { _meta: meta } : {}),
           ...(additionalDirectories?.length && this.supportsAdditionalDirectories
             ? { additionalDirectories }
             : {}),
@@ -370,7 +362,7 @@ export class AcpAgentProcess {
     sessionId: string,
     cwd: string,
     mcpServers: acp.McpServer[] = [],
-    systemPromptAppend?: string,
+    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
@@ -378,7 +370,7 @@ export class AcpAgentProcess {
           sessionId,
           cwd,
           mcpServers,
-          ...systemPromptMeta(systemPromptAppend),
+          ...(meta ? { _meta: meta } : {}),
         }),
         this.label,
         LOAD_TIMEOUT_MS,
@@ -392,7 +384,7 @@ export class AcpAgentProcess {
     sessionId: string,
     cwd: string,
     mcpServers: acp.McpServer[] = [],
-    systemPromptAppend?: string,
+    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
@@ -400,7 +392,7 @@ export class AcpAgentProcess {
           sessionId,
           cwd,
           mcpServers,
-          ...systemPromptMeta(systemPromptAppend),
+          ...(meta ? { _meta: meta } : {}),
         }),
         this.label,
       ),

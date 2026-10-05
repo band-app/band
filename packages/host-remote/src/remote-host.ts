@@ -215,6 +215,7 @@ export class RemoteHost implements Host {
   };
 
   readonly context: HostContext = {
+    preamble: (request) => this.rpc.call("context.preamble", request),
     // The worker pulls its contexts in parallel and bounds each by `timeoutMs`.
     pull: (request) =>
       this.rpc.call("context.pull", request, { timeoutMs: (request.timeoutMs ?? 10_000) + 10_000 }),

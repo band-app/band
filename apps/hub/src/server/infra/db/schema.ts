@@ -807,6 +807,9 @@ export const contexts = sqliteTable(
     workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
       .notNull()
       .default("read-write"),
+    // Whether sessions get this context's files in their instructions (plan step 5.3). Off on a
+    // project context turns the whole preamble off for that project's sessions.
+    preamble: integer("preamble", { mode: "boolean" }).notNull().default(true),
     // Outcome of the last mirror run with the remote: null when it was clean.
     syncError: text("sync_error"),
     lastSyncAt: integer("last_sync_at"),

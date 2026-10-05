@@ -57,9 +57,11 @@ import {
 import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
+import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
 import { COORDINATOR_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
+import { contextPreambleService } from "./context-preamble-service";
 import { contextSyncService } from "./context-sync-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
@@ -142,6 +144,8 @@ interface Runtime {
   claudeCli: ClaudeCliArgs | null;
   /** `BAND_SERVER_URL` and `BAND_TOKEN` of the host's relay, for an agent on a worker. */
   relayEnv: Record<string, string> | null;
+  /** The context preamble this chat's agent starts with, or null when off or empty. */
+  preamble: SessionPreamble | null;
 }
 
 /** What an agent offers before a chat has a session: gathered from probes
@@ -278,6 +282,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       idleTimer: null,
       claudeCli: null,
       relayEnv: null,
+      preamble: null,
     };
     runtimes.set(chat.id, rt);
   }
@@ -653,6 +658,9 @@ async function ensureProcess(
         ...grant?.env,
         BAND_CHAT_ID: rt.chatId,
         BAND_WORKTREE_ID: rt.worktreeId,
+        ...(rt.preamble
+          ? injectionFor(def.type, rt.preamble, { ...process.env, ...launch.env })?.env
+          : undefined),
       },
     };
     const handlers = handlersFor(rt, generation);
@@ -830,6 +838,25 @@ function sessionCharter(rt: Runtime): string | undefined {
   }
 }
 
+/** `_meta` that carries the preamble to agents that take it per session. */
+function preambleMeta(
+  rt: Runtime,
+  def: CodingAgentDefinition,
+): Record<string, unknown> | undefined {
+  if (!rt.preamble) return undefined;
+  return injectionFor(def.type, rt.preamble)?.sessionMeta;
+}
+
+/** The `_meta` of a session: the preamble, with a coordinator's charter appended to the system prompt. */
+function sessionMeta(rt: Runtime, def: CodingAgentDefinition): Record<string, unknown> | undefined {
+  const meta = preambleMeta(rt, def);
+  const charter = sessionCharter(rt);
+  if (!charter) return meta;
+  const prompt = (meta?.systemPrompt ?? {}) as { append?: string };
+  const append = [prompt.append, charter].filter(Boolean).join("\n\n");
+  return { ...meta, systemPrompt: { ...prompt, append } };
+}
+
 async function attachNew(
   rt: Runtime,
   proc: AcpAgentProcess,
@@ -845,7 +872,7 @@ async function attachNew(
       cwd,
       await agentExtraDirs(rt.worktreeId),
       sessionMcpServers(rt, proc),
-      sessionCharter(rt),
+      sessionMeta(rt, def),
     );
   } catch (err) {
     rt.routing = "log";
@@ -886,8 +913,13 @@ async function attachExisting(
   try {
     const attached =
       how === "load"
-        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionCharter(rt))
-        : await proc.resumeSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionCharter(rt));
+        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionMeta(rt, def))
+        : await proc.resumeSession(
+            sessionId,
+            cwd,
+            sessionMcpServers(rt, proc),
+            sessionMeta(rt, def),
+          );
     rt.routing = "log";
     setLive(rt, def, attached);
     logAttached(rt, proc, how, attached);
@@ -1023,6 +1055,18 @@ export class AgentSessionService {
     const def = definitionFor(chat);
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
+    // Read after the pull, so the agent starts on the newest files the host has.
+    // Only a call that starts a process or attaches a session uses it, so skip the host call otherwise.
+    const target = chat.activeSessionId;
+    const attachedAlready = Boolean(target && rt.sessionId === target && rt.process?.alive);
+    const viewNeedsNothing =
+      purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
+    if (!attachedAlready && !viewNeedsNothing) {
+      rt.preamble = await contextPreambleService.forWorktree(chat.worktreeId);
+      if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
+        log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
+      }
+    }
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;
     rt.attaching = attach(rt, fresh, def, worktree.worktree.path, purpose);
