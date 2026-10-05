@@ -31,7 +31,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -40,11 +40,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-emoji-width-token";
-const PROJECT = "alpha-emoji-width";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-emoji-width";
+const WORKTREE = toWorktreeId(REPO, "main");
 const EMOJI = "\u{1F7E0}";
 const TEXT = "GAPTAIL";
 // Emoji (two cells: the glyph, then an empty right half) followed by TEXT.
@@ -82,9 +82,9 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = makeGitWorkdir("band-emoji-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -106,13 +106,13 @@ test.describe("Terminal wide emoji width", () => {
     page,
   }) => {
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
 
     // Enter the alt screen and draw both rows, then block on `read` so no
     // prompt moves the cursor. The script holds the emoji bytes, so only the
@@ -120,28 +120,24 @@ test.describe("Terminal wide emoji width", () => {
     const drawScript = join(workdir, "draw.sh");
     const draw = `\\033[?1049h\\033[1;1H${EMOJI}${TEXT}\\033[2;1H${EMOJI}\\033[2;3H${TEXT}`;
     writeFileSync(drawScript, `printf '${draw}'\nread -r _\n`, "utf-8");
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE,
-      `bash ${drawScript}`,
-      new RegExp(TEXT),
-    );
+    await worktreePage.runInTerminalUntilRendered(WORKTREE, `bash ${drawScript}`, new RegExp(TEXT));
 
     await expect
-      .poll(() => workspacePage.readTerminalBufferCells(WORKSPACE, 2, EXPECTED_CELLS.length), {
+      .poll(() => worktreePage.readTerminalBufferCells(WORKTREE, 2, EXPECTED_CELLS.length), {
         timeout: 10_000,
       })
       .toEqual(EXPECTED_SCREEN);
 
     // Tear the client down and reconnect: the new client draws the screen
     // from the server mirror's serialized snapshot.
-    await workspacePage.navigateToBlank();
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.navigateToBlank();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
 
     await expect
-      .poll(() => workspacePage.readTerminalBufferCells(WORKSPACE, 2, EXPECTED_CELLS.length), {
+      .poll(() => worktreePage.readTerminalBufferCells(WORKTREE, 2, EXPECTED_CELLS.length), {
         timeout: 20_000,
       })
       .toEqual(EXPECTED_SCREEN);

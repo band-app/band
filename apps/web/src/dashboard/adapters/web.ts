@@ -15,11 +15,11 @@ import type {
   FormatFileResult,
   GitStatus,
   HooksStatus,
-  ListWorkspaceBranchesResult,
-  ProjectInfo,
+  ListWorktreeBranchesResult,
+  RepoInfo,
   Settings,
-  WorkspaceDiff,
-  WorkspaceStatus,
+  WorktreeDiff,
+  WorktreeStatus,
 } from "../types";
 
 const wsClient = createWSClient({
@@ -48,92 +48,92 @@ export class WebDashboardAdapter implements DashboardAdapter {
     ],
   });
 
-  async listProjects(): Promise<ProjectInfo[]> {
-    const data = await this.trpc.projects.list.query();
+  async listRepos(): Promise<RepoInfo[]> {
+    const data = await this.trpc.repos.list.query();
     // Normalise `kind` at the adapter boundary so downstream consumers
     // can treat it as required. Newer servers always set it, but the
     // dashboard may briefly run against an older server during a rolling
     // upgrade — default to "git" in that case (matches the migration's
     // DEFAULT 'git' for pre-existing rows).
-    return (data.projects as ProjectInfo[]).map((p) => ({
+    return (data.repos as RepoInfo[]).map((p) => ({
       ...p,
       kind: p.kind ?? "git",
     }));
   }
 
-  async addProject(path: string, label?: string): Promise<void> {
-    await this.trpc.projects.add.mutate({ path, label });
+  async addRepo(path: string, label?: string): Promise<void> {
+    await this.trpc.repos.add.mutate({ path, label });
   }
 
-  async removeProject(name: string): Promise<void> {
-    await this.trpc.projects.remove.mutate({ name });
+  async removeRepo(name: string): Promise<void> {
+    await this.trpc.repos.remove.mutate({ name });
   }
 
-  async reorderProjects(names: string[]): Promise<void> {
-    await this.trpc.projects.reorder.mutate({ names });
+  async reorderRepos(names: string[]): Promise<void> {
+    await this.trpc.repos.reorder.mutate({ names });
   }
 
-  async updateProjectLabel(name: string, label: string | null): Promise<void> {
-    await this.trpc.projects.updateLabel.mutate({ name, label });
+  async updateRepoLabel(name: string, label: string | null): Promise<void> {
+    await this.trpc.repos.updateLabel.mutate({ name, label });
   }
 
   async checkPath(path: string): Promise<{ isGitRepo: boolean }> {
-    return await this.trpc.projects.checkPath.query({ path });
+    return await this.trpc.repos.checkPath.query({ path });
   }
 
   async gitInit(path: string): Promise<void> {
-    await this.trpc.projects.gitInit.mutate({ path });
+    await this.trpc.repos.gitInit.mutate({ path });
   }
 
-  async promoteProjectToGit(name: string): Promise<void> {
-    await this.trpc.projects.promoteToGit.mutate({ name });
+  async promoteRepoToGit(name: string): Promise<void> {
+    await this.trpc.repos.promoteToGit.mutate({ name });
   }
 
-  async createWorkspace(
-    project: string,
+  async createWorktree(
+    repo: string,
     branch: string,
     base?: string,
     prompt?: string,
     agentMode?: AgentMode,
-    host?: { hostId: string; hostProjectPath?: string },
+    host?: { hostId: string; hostRepoPath?: string },
   ): Promise<void> {
-    await this.trpc.workspaces.create.mutate({
-      project,
+    await this.trpc.worktrees.create.mutate({
+      repo,
       branch,
       base,
       prompt,
       agentMode,
       hostId: host?.hostId,
-      hostProjectPath: host?.hostProjectPath,
+      hostRepoPath: host?.hostRepoPath,
     });
   }
 
-  async removeWorkspace(project: string, name: string): Promise<void> {
-    await this.trpc.workspaces.remove.mutate({ project, name });
+  async removeWorktree(repo: string, name: string): Promise<void> {
+    await this.trpc.worktrees.remove.mutate({ repo, name });
   }
 
-  async setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void> {
-    await this.trpc.workspaces.setPinned.mutate({ project, name, pinned });
+  async setWorktreePinned(repo: string, name: string, pinned: boolean): Promise<void> {
+    await this.trpc.worktrees.setPinned.mutate({ repo, name, pinned });
   }
 
-  async clearNeedsAttention(workspaceId: string): Promise<void> {
-    await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
+  async clearNeedsAttention(worktreeId: string): Promise<void> {
+    await this.trpc.statuses.clearNeedsAttention.mutate({ worktreeId });
   }
 
-  async refreshBranchStatus(workspaceId: string): Promise<void> {
-    await this.trpc.statuses.refreshBranchStatus.mutate({ workspaceId });
+  async refreshBranchStatus(worktreeId: string): Promise<void> {
+    await this.trpc.statuses.refreshBranchStatus.mutate({ worktreeId });
   }
 
   async runScript(path: string, scriptType: string): Promise<void> {
-    await this.trpc.workspaces.runScript.mutate({ path, scriptType });
+    await this.trpc.worktrees.runScript.mutate({ path, scriptType });
   }
 
-  gitPull(project: string, name: string): Promise<GitOpResult> {
-    return this.trpc.workspaces.gitPull.mutate({ project, name });
+  gitPull(repo: string, name: string): Promise<GitOpResult> {
+    return this.trpc.worktrees.gitPull.mutate({ repo, name });
   }
 
-  gitPush(project: string, name: string): Promise<GitOpResult> {
-    return this.trpc.workspaces.gitPush.mutate({ project, name });
+  gitPush(repo: string, name: string): Promise<GitOpResult> {
+    return this.trpc.worktrees.gitPush.mutate({ repo, name });
   }
 
   async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {
@@ -145,17 +145,17 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.browserProfiles.remove.mutate({ profileId });
   }
 
-  async listProjectBrowserProfiles(): Promise<Record<string, string>> {
-    const data = await this.trpc.browserProfiles.projectDefaults.query();
-    const byProject: Record<string, string> = {};
-    for (const row of data.defaults as { projectName: string; profileId: string }[]) {
-      byProject[row.projectName] = row.profileId;
+  async listRepoBrowserProfiles(): Promise<Record<string, string>> {
+    const data = await this.trpc.browserProfiles.repoDefaults.query();
+    const byRepo: Record<string, string> = {};
+    for (const row of data.defaults as { repoName: string; profileId: string }[]) {
+      byRepo[row.repoName] = row.profileId;
     }
-    return byProject;
+    return byRepo;
   }
 
-  async setProjectBrowserProfile(projectName: string, profileId: string | null): Promise<void> {
-    await this.trpc.browserProfiles.setProjectDefault.mutate({ projectName, profileId });
+  async setRepoBrowserProfile(repoName: string, profileId: string | null): Promise<void> {
+    await this.trpc.browserProfiles.setRepoDefault.mutate({ repoName, profileId });
   }
 
   async getSettings(): Promise<Settings> {
@@ -230,7 +230,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
   private statusSubscription: { unsubscribe: () => void } | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /**
-   * The newest `branch-status` event per workspace. The server sends each
+   * The newest `branch-status` event per worktree. The server sends each
    * status once (in the on-connect snapshot, then only when it changes), and
    * the stream is shared: a handler added after the snapshot arrived gets
    * these replayed instead.
@@ -238,15 +238,15 @@ export class WebDashboardAdapter implements DashboardAdapter {
   private latestBranchStatuses = new Map<string, SSEEvent>();
 
   private createStatusSubscription() {
-    // The on-connect snapshot refills it. A workspace removed while the
+    // The on-connect snapshot refills it. A worktree removed while the
     // stream was down sent no `remove` event, so its entry would stay.
     this.latestBranchStatuses.clear();
     this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
       onData: (data: SSEEvent) => {
-        if (data.kind === "branch-status" && data.workspaceId) {
-          this.latestBranchStatuses.set(data.workspaceId, data);
-        } else if (data.kind === "remove" && data.workspaceId) {
-          this.latestBranchStatuses.delete(data.workspaceId);
+        if (data.kind === "branch-status" && data.worktreeId) {
+          this.latestBranchStatuses.set(data.worktreeId, data);
+        } else if (data.kind === "remove" && data.worktreeId) {
+          this.latestBranchStatuses.delete(data.worktreeId);
         }
         for (const h of this.statusHandlers) {
           h(data);
@@ -304,63 +304,63 @@ export class WebDashboardAdapter implements DashboardAdapter {
   /**
    * Cache so we only post to the server when the value actually changes —
    * the React tree can re-render and call this on routes that don't
-   * change the workspace, and we don't want to spam the mutation.
+   * change the worktree, and we don't want to spam the mutation.
    */
-  private lastActiveWorkspaceId: string | null | undefined = undefined;
+  private lastActiveWorktreeId: string | null | undefined = undefined;
 
-  async setActiveWorkspace(workspaceId: string | null): Promise<void> {
-    if (this.lastActiveWorkspaceId === workspaceId) return;
-    this.lastActiveWorkspaceId = workspaceId;
+  async setActiveWorktree(worktreeId: string | null): Promise<void> {
+    if (this.lastActiveWorktreeId === worktreeId) return;
+    this.lastActiveWorktreeId = worktreeId;
     try {
-      await this.trpc.editor.setActiveWorkspace.mutate({ workspaceId });
+      await this.trpc.editor.setActiveWorktree.mutate({ worktreeId });
     } catch {
-      // Best-effort: the active-workspace hint is a UX nicety, not a
+      // Best-effort: the active-worktree hint is a UX nicety, not a
       // correctness invariant. Reset the cache so the next change attempt
       // re-posts (rather than silently agreeing with a stale value the
       // server never received).
-      this.lastActiveWorkspaceId = undefined;
+      this.lastActiveWorktreeId = undefined;
     }
   }
 
   subscribeAgentStatus(
-    onSnapshot: (statuses: WorkspaceStatus[]) => void,
-    onUpdate: (status: WorkspaceStatus) => void,
-    onRemove: (workspaceId: string) => void,
+    onSnapshot: (statuses: WorktreeStatus[]) => void,
+    onUpdate: (status: WorktreeStatus) => void,
+    onRemove: (worktreeId: string) => void,
   ): Unsubscribe {
     return this.subscribeStatusStream((data) => {
       if (data.kind === "snapshot" && data.statuses) {
         onSnapshot(data.statuses);
       } else if (data.kind === "update" && data.status) {
         onUpdate(data.status);
-      } else if (data.kind === "remove" && data.workspaceId) {
-        onRemove(data.workspaceId);
+      } else if (data.kind === "remove" && data.worktreeId) {
+        onRemove(data.worktreeId);
       }
     });
   }
 
   subscribeBranchStatus(
-    onGit: (workspaceId: string, git: GitStatus) => void,
-    onCI: (workspaceId: string, ci: CIStatus) => void,
+    onGit: (worktreeId: string, git: GitStatus) => void,
+    onCI: (worktreeId: string, ci: CIStatus) => void,
   ): Unsubscribe {
     const handle = (data: SSEEvent) => {
-      if (data.kind === "branch-status" && data.workspaceId) {
-        if (data.git) onGit(data.workspaceId, data.git);
-        if (data.ci) onCI(data.workspaceId, data.ci);
+      if (data.kind === "branch-status" && data.worktreeId) {
+        if (data.git) onGit(data.worktreeId, data.git);
+        if (data.ci) onCI(data.worktreeId, data.ci);
       }
     };
     for (const data of this.latestBranchStatuses.values()) handle(data);
     return this.subscribeStatusStream(handle);
   }
 
-  subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {
+  subscribeFileChanges(worktreeId: string, handler: (path: string) => void): Unsubscribe {
     // The server tears the underlying watcher down (and the subscription
     // completes) when its `fs.watch` hits an unrecoverable error — e.g.
     // the worktree directory was deleted. We reconnect with exponential
     // backoff so the FileBrowser silently re-acquires auto-refresh when
-    // the workspace comes back, but doesn't busy-loop if the workspace
+    // the worktree comes back, but doesn't busy-loop if the worktree
     // is permanently gone (server returns immediately each time). The
     // `active` flag stops reconnects after the caller unsubscribes; in
-    // the steady state the FileBrowser unmounts when the workspace is
+    // the steady state the FileBrowser unmounts when the worktree is
     // removed, so the loop terminates naturally.
     let active = true;
     let currentSub: { unsubscribe: () => void } | null = null;
@@ -385,8 +385,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     };
 
     const connect = () => {
-      currentSub = this.trpc.workspace.fileChanges.subscribe(
-        { workspaceId },
+      currentSub = this.trpc.worktree.fileChanges.subscribe(
+        { worktreeId },
         {
           onData: (data: { path: string }) => {
             // A successful data delivery proves the watcher is healthy;
@@ -431,145 +431,145 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.cli.install.mutate(opts);
   }
 
-  async getWorkspaceDiff(
-    workspaceId: string,
+  async getWorktreeDiff(
+    worktreeId: string,
     contextLines?: number,
     diffMode?: DiffMode,
     compareBranch?: string,
-  ): Promise<WorkspaceDiff> {
-    return (await this.trpc.workspace.getDiff.query({
-      workspaceId,
+  ): Promise<WorktreeDiff> {
+    return (await this.trpc.worktree.getDiff.query({
+      worktreeId,
       contextLines,
       diffMode,
       compareBranch,
-    })) as WorkspaceDiff;
+    })) as WorktreeDiff;
   }
 
-  async listWorkspaceBranches(
-    workspaceId: string,
+  async listWorktreeBranches(
+    worktreeId: string,
     options?: { query?: string; limit?: number },
-  ): Promise<ListWorkspaceBranchesResult> {
-    return await this.trpc.workspace.listBranches.query({ workspaceId, ...options });
+  ): Promise<ListWorktreeBranchesResult> {
+    return await this.trpc.worktree.listBranches.query({ worktreeId, ...options });
   }
 
-  async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
-    return (await this.trpc.workspace.listFiles.query({ workspaceId, path })) as FileListResult;
+  async listWorktreeFiles(worktreeId: string, path: string): Promise<FileListResult> {
+    return (await this.trpc.worktree.listFiles.query({ worktreeId, path })) as FileListResult;
   }
 
-  async getWorkspaceFile(workspaceId: string, path: string): Promise<FileContentResult> {
-    return (await this.trpc.workspace.getFile.query({ workspaceId, path })) as FileContentResult;
+  async getWorktreeFile(worktreeId: string, path: string): Promise<FileContentResult> {
+    return (await this.trpc.worktree.getFile.query({ worktreeId, path })) as FileContentResult;
   }
 
-  async saveWorkspaceFile(workspaceId: string, path: string, content: string): Promise<void> {
-    await this.trpc.workspace.saveFile.mutate({ workspaceId, path, content });
+  async saveWorktreeFile(worktreeId: string, path: string, content: string): Promise<void> {
+    await this.trpc.worktree.saveFile.mutate({ worktreeId, path, content });
   }
 
   async readExternalFile(absolutePath: string): Promise<FileContentResult> {
     // tRPC infers a discriminated union (`{ tooLarge } | { binary } | { content }`)
     // for the procedure's return. `FileContentResult` widens those into a single
-    // shape with all variants as optional fields — same pattern `getWorkspaceFile`
+    // shape with all variants as optional fields — same pattern `getWorktreeFile`
     // uses (and the downstream `FileViewer` consumer already keys off the flags
     // before reading `.content`).
     return (await this.trpc.host.readFile.query({ absolutePath })) as FileContentResult;
   }
 
-  async resolveWorkspacePath(
-    workspaceId: string,
+  async resolveWorktreePath(
+    worktreeId: string,
     path: string,
   ): Promise<{
     exists: boolean;
     isFile: boolean;
     external: boolean;
-    workspaceRelativePath: string | null;
+    worktreeRelativePath: string | null;
   }> {
-    return await this.trpc.workspace.resolvePath.query({ workspaceId, path });
+    return await this.trpc.worktree.resolvePath.query({ worktreeId, path });
   }
 
   async saveExternalFile(absolutePath: string, content: string): Promise<void> {
     await this.trpc.host.saveFile.mutate({ absolutePath, content });
   }
 
-  async formatWorkspaceFile(
-    workspaceId: string,
+  async formatWorktreeFile(
+    worktreeId: string,
     filePath: string,
     content: string,
   ): Promise<FormatFileResult> {
-    return await this.trpc.workspace.formatFile.mutate({
-      workspaceId,
+    return await this.trpc.worktree.formatFile.mutate({
+      worktreeId,
       filePath,
       content,
     });
   }
 
-  async createWorkspaceFile(workspaceId: string, path: string, content = ""): Promise<void> {
-    await this.trpc.workspace.createFile.mutate({ workspaceId, path, content });
+  async createWorktreeFile(worktreeId: string, path: string, content = ""): Promise<void> {
+    await this.trpc.worktree.createFile.mutate({ worktreeId, path, content });
   }
 
-  async createWorkspaceDirectory(workspaceId: string, path: string): Promise<void> {
-    await this.trpc.workspace.createDirectory.mutate({ workspaceId, path });
+  async createWorktreeDirectory(worktreeId: string, path: string): Promise<void> {
+    await this.trpc.worktree.createDirectory.mutate({ worktreeId, path });
   }
 
-  async deleteWorkspacePath(
-    workspaceId: string,
+  async deleteWorktreePath(
+    worktreeId: string,
     path: string,
   ): Promise<{ kind: "file" | "directory" }> {
-    return (await this.trpc.workspace.deletePath.mutate({ workspaceId, path })) as {
+    return (await this.trpc.worktree.deletePath.mutate({ worktreeId, path })) as {
       kind: "file" | "directory";
     };
   }
 
-  async renameWorkspacePath(
-    workspaceId: string,
+  async renameWorktreePath(
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }> {
-    return (await this.trpc.workspace.renamePath.mutate({
-      workspaceId,
+    return (await this.trpc.worktree.renamePath.mutate({
+      worktreeId,
       fromPath,
       toPath,
     })) as { kind: "file" | "directory" };
   }
 
-  async copyWorkspacePath(
-    workspaceId: string,
+  async copyWorktreePath(
+    worktreeId: string,
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }> {
-    return (await this.trpc.workspace.copyPath.mutate({
-      workspaceId,
+    return (await this.trpc.worktree.copyPath.mutate({
+      worktreeId,
       fromPath,
       toPath,
     })) as { kind: "file" | "directory" };
   }
 
-  getWorkspaceFileUrl(workspaceId: string, path: string): string {
+  getWorktreeFileUrl(worktreeId: string, path: string): string {
     return hubAssetUrl(
-      `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
+      `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
         .split("/")
         .map(encodeURIComponent)
         .join("/")}`,
     );
   }
 
-  async searchWorkspaceFiles(
-    workspaceId: string,
+  async searchWorktreeFiles(
+    worktreeId: string,
     query: string,
     limit?: number,
   ): Promise<{ files: string[] }> {
-    return (await this.trpc.workspace.searchFiles.query({
-      workspaceId,
+    return (await this.trpc.worktree.searchFiles.query({
+      worktreeId,
       query,
       limit,
     })) as { files: string[] };
   }
 
-  async searchWorkspaceContent(
-    workspaceId: string,
+  async searchWorktreeContent(
+    worktreeId: string,
     query: string,
     options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number },
   ): Promise<{ results: ContentSearchMatch[] }> {
-    return (await this.trpc.workspace.searchContent.query({
-      workspaceId,
+    return (await this.trpc.worktree.searchContent.query({
+      worktreeId,
       query,
       caseSensitive: options?.caseSensitive,
       wholeWord: options?.wholeWord,
@@ -583,13 +583,13 @@ export class WebCapabilities implements PlatformCapabilities {
   copyPath = false;
   navigate?: (href: string) => void;
 
-  // The workspace URL no longer carries a sub-path for the active tab —
-  // tab state lives entirely inside `MobileWorkspaceLayout`, and the
+  // The worktree URL no longer carries a sub-path for the active tab —
+  // tab state lives entirely inside `MobileWorktreeLayout`, and the
   // desktop dockview at AppShell renders every panel regardless of URL.
   // See issue #467 for the refactor that removed the `band-tab:` session
   // store and the `/changes` / `/code` / `/terminal` child routes.
-  getWorkspaceHref(workspaceId: string): string {
-    return `/workspace/${encodeURIComponent(workspaceId)}`;
+  getWorktreeHref(worktreeId: string): string {
+    return `/worktree/${encodeURIComponent(worktreeId)}`;
   }
 
   async openUrl(url: string): Promise<void> {

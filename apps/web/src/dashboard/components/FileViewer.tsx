@@ -32,7 +32,7 @@ import { LanguagePickerDialog } from "./LanguagePickerDialog";
 import { PdfPreview } from "./PdfPreview";
 
 interface FileViewerProps {
-  workspaceId: string;
+  worktreeId: string;
   filePath: string;
   onBack?: () => void;
   /** 1-based line number to scroll to and highlight */
@@ -81,7 +81,7 @@ interface FileViewerProps {
   onViewModeChange?: (mode: "preview" | "source") => void;
   /** Optional LSP extension to wire into the editor for code intelligence */
   lspExtension?: Extension | null;
-  /** Subscribe to the workspace file watcher (default true). While false the
+  /** Subscribe to the worktree file watcher (default true). While false the
    *  subscription is closed; turning it back on reloads the file once, since
    *  changes made in between were not observed. */
   watchFileChanges?: boolean;
@@ -95,10 +95,10 @@ interface FileViewerProps {
   onEditedContentChange?: (content: string | null) => void;
   /**
    * When true, `filePath` is treated as an absolute filesystem path
-   * outside the workspace root (the "Open File…" flow), and reads
+   * outside the worktree root (the "Open File…" flow), and reads
    * /writes go through the host file IO surface
    * (`adapter.readExternalFile` / `adapter.saveExternalFile`) instead of
-   * the workspace one. `workspaceId` is still required by the prop
+   * the worktree one. `worktreeId` is still required by the prop
    * shape but is unused on this path — image/PDF preview URLs and LSP
    * are intentionally not wired for external files.
    */
@@ -106,7 +106,7 @@ interface FileViewerProps {
   /**
    * When true, the viewer renders an untitled (scratch) buffer that
    * has no backing file. `filePath` carries the synthetic `untitled:N`
-   * key from `useFileTabs`; no remote IO happens (no `getWorkspaceFile`
+   * key from `useFileTabs`; no remote IO happens (no `getWorktreeFile`
    * / `readExternalFile` call). Buffer state lives entirely in
    * `initialEditedContent` / `onEditedContentChange` until the user
    * picks a destination via `onSaveAs` — that callback is responsible
@@ -159,11 +159,11 @@ interface FileViewerProps {
     showMarkdownToggle: boolean;
   }) => void;
   /**
-   * Called when the workspace/external loader rejects (typically
+   * Called when the worktree/external loader rejects (typically
    * `ENOENT: no such file or directory ...` from the server's `stat`
    * call). The parent can use this to self-heal stale tab state — e.g.
    * dropping a persisted active tab that points at a path which doesn't
-   * exist in the current workspace (issue #539: a cross-workspace leak
+   * exist in the current worktree (issue #539: a cross-worktree leak
    * could write a non-existent path into `band-open-tabs:<ws>`).
    */
   onLoadError?: (err: { filePath: string; message: string }) => void;
@@ -180,7 +180,7 @@ function getExtension(path: string): string {
 }
 
 /**
- * Workspace-relative parent directory of a path, matching the semantics
+ * Worktree-relative parent directory of a path, matching the semantics
  * of the server-side file watcher (`file-watcher.ts::parentDirOf`): a
  * top-level file ("README.md") has parent `""`, a nested file
  * ("src/app.ts") has parent "src". The `fileChanges` subscription emits
@@ -203,24 +203,24 @@ function detectLanguage(filePath: string, serverHint?: string): string {
 }
 
 /**
- * Should this FileViewer respond to a workspace-scoped event whose
+ * Should this FileViewer respond to a worktree-scoped event whose
  * `detail.filePath` may or may not match the currently-viewed file?
  *
- * The dispatcher in `DockviewWorkspaceLayout` reads
+ * The dispatcher in `DockviewWorktreeLayout` reads
  * `currentFileRef.current`, which is updated only through
  * `notifySelectFile` — and that path deliberately filters out
  * untitled / external paths (they can't round-trip through the
- * workspace-relative URL). So:
+ * worktree-relative URL). So:
  *
  *   - **No hint sent** — accept. The dispatcher couldn't read a path
  *     (e.g. restored-on-boot tab that hasn't been activated yet, or
  *     the user is currently viewing an untitled / external tab whose
- *     path was filtered out of the ref). Workspace ID alone scopes
+ *     path was filtered out of the ref). Worktree ID alone scopes
  *     the response.
  *   - **Hint matches our viewer path** — accept. Authoritative match.
  *   - **Hint is a non-matching real path** — depends on the viewer:
- *       - Regular workspace viewer: REJECT. Some other file-backed
- *         viewer in this workspace (split-pane future) is the
+ *       - Regular worktree viewer: REJECT. Some other file-backed
+ *         viewer in this worktree (split-pane future) is the
  *         intended recipient; we shouldn't double-handle.
  *       - Untitled / external viewer: ACCEPT. The hint is a stale ref
  *         from the dispatcher (the previously-viewed real file) —
@@ -249,7 +249,7 @@ function matchesFilePathHint(
 }
 
 export function FileViewer({
-  workspaceId,
+  worktreeId,
   filePath,
   onBack,
   line,
@@ -352,13 +352,13 @@ export function FileViewer({
   // post-review and fixed here.
   const canEdit =
     editable &&
-    (untitled ? true : external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
+    (untitled ? true : external ? !!adapter.saveExternalFile : !!adapter.saveWorktreeFile);
 
   const canSave = untitled
     ? !!onSaveAs
     : external
       ? !!adapter.saveExternalFile
-      : !!adapter.saveWorkspaceFile;
+      : !!adapter.saveWorktreeFile;
 
   // Untitled tabs never have a backing file extension to drive the
   // preview-type heuristic — force "code" so the editor renders rather
@@ -375,7 +375,7 @@ export function FileViewer({
     setEditedContent(initialEditedContent ?? null);
     setSaveError(null);
     setFormatStatus(null);
-  }, [workspaceId, filePath]);
+  }, [worktreeId, filePath]);
 
   // Listen for discard-edits events from handleTabClose.  When the parent
   // closes a tab with "Close Without Saving", it dispatches this event
@@ -426,9 +426,9 @@ export function FileViewer({
     }
 
     // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed.
-    // External files don't have a workspace-relative URL; for the moment we
+    // External files don't have a worktree-relative URL; for the moment we
     // fall through to the text-content path (binary detection will catch
-    // genuine images), since opening an arbitrary binary outside the workspace
+    // genuine images), since opening an arbitrary binary outside the worktree
     // root is rare and the image preview UI isn't a goal of the external-file
     // flow.
     if (!external && (previewType === "image" || previewType === "pdf")) {
@@ -438,7 +438,7 @@ export function FileViewer({
       return;
     }
 
-    const loader = external ? adapter.readExternalFile : adapter.getWorkspaceFile;
+    const loader = external ? adapter.readExternalFile : adapter.getWorktreeFile;
     if (!loader) {
       setError("File viewing not supported");
       setLoading(false);
@@ -452,7 +452,7 @@ export function FileViewer({
 
     const promise = external
       ? adapter.readExternalFile!(filePath)
-      : adapter.getWorkspaceFile!(workspaceId, filePath);
+      : adapter.getWorktreeFile!(worktreeId, filePath);
     promise
       .then((result) => {
         if (!cancelled) setData(result);
@@ -463,7 +463,7 @@ export function FileViewer({
         setError(message);
         // Notify the parent so it can self-heal stale state (e.g. drop a
         // persisted active tab pointing at a path that doesn't exist in
-        // this workspace, the leak path described in issue #539). The
+        // this worktree, the leak path described in issue #539). The
         // callback is intentionally fire-and-forget — the FileViewer
         // still surfaces the error itself, and the parent decides
         // whether the error is worth acting on (ENOENT vs. transient).
@@ -475,7 +475,7 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, workspaceId, filePath, previewType, external, untitled]);
+  }, [adapter, worktreeId, filePath, previewType, external, untitled]);
 
   // The user's explicit choice from the language picker always wins over
   // file-extension detection (issue #434: "manual override sticks for the
@@ -489,11 +489,11 @@ export function FileViewer({
         ? detectLanguage(filePath, data.language)
         : "plaintext";
 
-  // External files don't have a workspace-relative raw URL endpoint, so
+  // External files don't have a worktree-relative raw URL endpoint, so
   // image/PDF rendering for external paths is intentionally not wired.
   const fileUrl =
-    !external && adapter.getWorkspaceFileUrl
-      ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
+    !external && adapter.getWorktreeFileUrl
+      ? adapter.getWorktreeFileUrl(worktreeId, filePath)
       : undefined;
 
   const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
@@ -503,17 +503,17 @@ export function FileViewer({
   // against the markdown file's directory through the raw file URL.
   const markdownPreview = useMemo(() => {
     if (!renderMarkdownBlock) return undefined;
-    const canLoadFiles = !external && !!adapter.getWorkspaceFileUrl;
+    const canLoadFiles = !external && !!adapter.getWorktreeFileUrl;
     const resolveImageUrl = (src: string): string | undefined => {
       if (/^(https?:|data:)/i.test(src)) return src;
       // Absolute paths and other schemes (including protocol-relative `//host`)
-      // don't map to a workspace file.
+      // don't map to a worktree file.
       if (!canLoadFiles || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
       const path = resolveRelativePath(parentDirOf(filePath), src.split(/[?#]/)[0]);
-      return path == null ? undefined : adapter.getWorkspaceFileUrl?.(workspaceId, path);
+      return path == null ? undefined : adapter.getWorktreeFileUrl?.(worktreeId, path);
     };
     return { renderBlock: renderMarkdownBlock, resolveImageUrl };
-  }, [renderMarkdownBlock, external, adapter, workspaceId, filePath]);
+  }, [renderMarkdownBlock, external, adapter, worktreeId, filePath]);
 
   // The content to display — use edited content when available, otherwise server content
   const displayContent = editedContent ?? data?.content;
@@ -558,8 +558,8 @@ export function FileViewer({
     if (editedContentRef.current === null) return;
     const save = external
       ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
-      : adapter.saveWorkspaceFile &&
-        ((c: string) => adapter.saveWorkspaceFile!(workspaceId, filePath, c));
+      : adapter.saveWorktreeFile &&
+        ((c: string) => adapter.saveWorktreeFile!(worktreeId, filePath, c));
     if (!save) return;
     setSaving(true);
     setSaveError(null);
@@ -577,7 +577,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [adapter, workspaceId, filePath, external, untitled, onSaveAs]);
+  }, [adapter, worktreeId, filePath, external, untitled, onSaveAs]);
 
   // Report title-bar action state to a host that renders its own chrome (the
   // center `file` leaf lifts Save + the markdown toggle into the group header).
@@ -609,7 +609,7 @@ export function FileViewer({
    * indiscriminately without yelling at the user for `.png` files.
    */
   const handleFormat = useCallback(async (): Promise<void> => {
-    if (!adapter.formatWorkspaceFile) {
+    if (!adapter.formatWorktreeFile) {
       setFormatStatus({ kind: "error", message: "Formatting not supported by this adapter" });
       return;
     }
@@ -638,7 +638,7 @@ export function FileViewer({
     setFormatStatus(null);
     try {
       // Untitled tabs have no real extension for Prettier to dispatch
-      // on — synthesize a virtual filename inside the workspace from
+      // on — synthesize a virtual filename inside the worktree from
       // the user's language choice (`languageOverride`) so the server-
       // side formatter picks the right parser. Untitled tabs default
       // to plain text, which Prettier has no parser for; short-circuit
@@ -659,7 +659,7 @@ export function FileViewer({
         }
         // The server's formatter requires the path to resolve inside
         // the worktree; using a leading "." filename keeps it inside
-        // the workspace root and doesn't clobber any real file. Include
+        // the worktree root and doesn't clobber any real file. Include
         // the synthetic tab key (`untitled:N` → `untitled-N`) so two
         // simultaneously-formatting untitled tabs of the same language
         // don't collide on the virtual filename — relevant if any
@@ -669,7 +669,7 @@ export function FileViewer({
         const tabKey = filePath.replace(/[^a-z0-9]/gi, "-");
         formatPath = `.band-${tabKey}${ext}`;
       }
-      const result = await adapter.formatWorkspaceFile(workspaceId, formatPath, sourceContent);
+      const result = await adapter.formatWorktreeFile(worktreeId, formatPath, sourceContent);
       if (result.skipped) {
         setFormatStatus({ kind: "info", message: result.reason });
         return;
@@ -714,32 +714,32 @@ export function FileViewer({
       formattingRef.current = false;
       setFormatting(false);
     }
-  }, [adapter, workspaceId, filePath, untitled, languageOverride]);
+  }, [adapter, worktreeId, filePath, untitled, languageOverride]);
 
   // Listen for the global "Format Current File" event (⇧⌥F + palette).
   // The dispatcher reads `currentFileRef.current`, which is only
   // updated by `notifySelectFile` — and that path filters out untitled
   // / external tabs (their paths can't round-trip through the
-  // workspace-relative URL). So when the user is currently viewing an
+  // worktree-relative URL). So when the user is currently viewing an
   // untitled or external tab, `detail.filePath` is either absent or
   // stale (the previously-viewed real file). We accept those cases
   // here, but still reject when a non-matching filePath is sent and
-  // the current viewer is a regular workspace tab — that preserves
-  // the original cross-workspace / future-split-pane safety net
-  // (workspaceId alone would silently double-format if two file-backed
+  // the current viewer is a regular worktree tab — that preserves
+  // the original cross-worktree / future-split-pane safety net
+  // (worktreeId alone would silently double-format if two file-backed
   // FileViewers were ever mounted concurrently).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { workspaceId?: string; filePath?: string | null }
+        | { worktreeId?: string; filePath?: string | null }
         | undefined;
-      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!detail || detail.worktreeId !== worktreeId) return;
       if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
       void handleFormat();
     };
     window.addEventListener("band:format-current-file", handler);
     return () => window.removeEventListener("band:format-current-file", handler);
-  }, [workspaceId, filePath, untitled, external, handleFormat]);
+  }, [worktreeId, filePath, untitled, external, handleFormat]);
 
   // Auto-clear the "Formatted" success flash so it doesn't linger next to
   // the filename. Errors stay until the user changes files or saves.
@@ -784,15 +784,15 @@ export function FileViewer({
   // during the round-trip.
   const reloadFromDisk = useCallback(async () => {
     // Untitled buffers have no backing file; external files aren't covered
-    // by the workspace watcher. Both are out of scope for auto-refresh.
+    // by the worktree watcher. Both are out of scope for auto-refresh.
     if (untitled || external) return;
-    if (!adapter.getWorkspaceFile) return;
+    if (!adapter.getWorktreeFile) return;
     // Don't clobber unsaved edits.
     if (editedContentRef.current !== null) return;
 
     let result: FileContentResult;
     try {
-      result = await adapter.getWorkspaceFile(workspaceId, filePath);
+      result = await adapter.getWorktreeFile(worktreeId, filePath);
     } catch {
       // The file may have just been deleted/renamed, or the read raced a
       // write. Leave the current view as-is — the file tree handles
@@ -842,9 +842,9 @@ export function FileViewer({
         userEvent: "band.reload",
       });
     }
-  }, [adapter, workspaceId, filePath, untitled, external]);
+  }, [adapter, worktreeId, filePath, untitled, external]);
 
-  // Subscribe to the workspace file watcher and reload when the directory
+  // Subscribe to the worktree file watcher and reload when the directory
   // containing this file reports a change. The server coalesces events per
   // parent directory, so we match on `parentDirOf(filePath)`. Image/PDF
   // previews render straight off the raw file URL (no in-memory content to
@@ -864,14 +864,14 @@ export function FileViewer({
       void reloadFromDisk();
     }
     const watchedDir = parentDirOf(filePath);
-    const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedDir) => {
+    const unsubscribe = adapter.subscribeFileChanges(worktreeId, (changedDir) => {
       if (changedDir !== watchedDir) return;
       void reloadFromDisk();
     });
     return unsubscribe;
   }, [
     adapter,
-    workspaceId,
+    worktreeId,
     filePath,
     untitled,
     external,
@@ -904,15 +904,15 @@ export function FileViewer({
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { workspaceId?: string; filePath?: string | null }
+        | { worktreeId?: string; filePath?: string | null }
         | undefined;
-      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!detail || detail.worktreeId !== worktreeId) return;
       if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
       setLanguagePickerOpen(true);
     };
     window.addEventListener("band:open-language-picker", handler);
     return () => window.removeEventListener("band:open-language-picker", handler);
-  }, [workspaceId, filePath, untitled, external]);
+  }, [worktreeId, filePath, untitled, external]);
 
   return (
     // min-w-0 prevents intrinsic-width content (CodeMirror's long unwrapped
@@ -1236,8 +1236,8 @@ export function FileViewer({
 }
 
 /**
- * Join a workspace-relative directory and a relative path (`./a.png`,
- * `../img/b.png`). Returns null when the path climbs above the workspace root.
+ * Join a worktree-relative directory and a relative path (`./a.png`,
+ * `../img/b.png`). Returns null when the path climbs above the worktree root.
  */
 function resolveRelativePath(dir: string, relative: string): string | null {
   // Decode before splitting, so an encoded `%2E%2E` or `%2F` is validated as

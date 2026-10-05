@@ -1,29 +1,29 @@
 /**
  * Regression coverage for issue #539 —
  * `band:open-file` events dispatched from a chat-message file link must
- * be scoped to the workspace whose chat fired the click, so a click in
- * workspace A's chat cannot open a file against the (different) active
- * workspace B.
+ * be scoped to the worktree whose chat fired the click, so a click in
+ * worktree A's chat cannot open a file against the (different) active
+ * worktree B.
  *
  * Pre-fix, `dispatchOpenFile` in `file-link-components.tsx` carried only
  * `{ filename }`. The single window-event listener in
- * `SharedDockviewLayout.tsx` was bound to the currently-active workspace,
+ * `SharedDockviewLayout.tsx` was bound to the currently-active worktree,
  * so any chat-link click anywhere in the tree (A's chat or B's chat or
- * any hidden mounted workspace's chat) opened the file against whichever
- * workspace happened to be focused — typically NOT the intended one —
+ * any hidden mounted worktree's chat) opened the file against whichever
+ * worktree happened to be focused — typically NOT the intended one —
  * and the QuickOpenDialog's auto-open path persisted a bogus tab into
- * `band-open-tabs:<active-workspace>`. The fix:
+ * `band-open-tabs:<active-worktree>`. The fix:
  *
- *   1. `FileLinkWorkspaceProvider` wraps every ChatView's message tree
- *      so `dispatchOpenFile` reads the *owning* workspace id at click
+ *   1. `FileLinkWorktreeProvider` wraps every ChatView's message tree
+ *      so `dispatchOpenFile` reads the *owning* worktree id at click
  *      time and attaches it to the event detail.
  *   2. The two `band:open-file` listeners
- *      (`SharedDockviewLayout`, `workspace.$workspaceId.tsx`) filter on
- *      `detail.workspaceId`: ignore the event unless it's addressed to
- *      this listener's workspace.
- *   3. `QuickOpenDialog`'s auto-open captures the workspace id at
+ *      (`SharedDockviewLayout`, `worktree.$worktreeId.tsx`) filter on
+ *      `detail.worktreeId`: ignore the event unless it's addressed to
+ *      this listener's worktree.
+ *   3. `QuickOpenDialog`'s auto-open captures the worktree id at
  *      open-time and bails if the prop has flipped by the time the
- *      search resolves — belt-and-braces for the in-flight workspace
+ *      search resolves — belt-and-braces for the in-flight worktree
  *      switch race.
  *
  * Test architecture:
@@ -34,21 +34,21 @@
  *   - No tRPC mocking, no MSW, no page.route() interception of own
  *     routes — external services would be stubbed via Express on a
  *     random port, but this spec drives DOM events directly via
- *     `workspacePage.dispatchOpenFileEvent(...)` so no stub is needed.
+ *     `worktreePage.dispatchOpenFileEvent(...)` so no stub is needed.
  *
  * The dispatcher half of the fix (the React context + useContext read
  * in `FileLinkedAnchor`) is intentionally not driven from this spec —
  * there is currently no unit-test surface for the React click→dispatch
  * chain. A follow-up could render a real chat message containing a
  * `band-file:` link, click it, and assert the dispatched event's
- * `detail.workspaceId` matches the chat's owning workspace; that would
+ * `detail.worktreeId` matches the chat's owning worktree; that would
  * close the dispatcher-side coverage gap.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -59,22 +59,22 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-chat-file-link-workspace-token";
+const TOKEN = "e2e-chat-file-link-worktree-token";
 
-const PROJECT = "chat-file-link-repo";
+const REPO = "chat-file-link-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-a";
 const BRANCH_B = "feature-b";
 
-const WORKSPACE_A = toWorkspaceId(PROJECT, BRANCH_A);
-const WORKSPACE_B = toWorkspaceId(PROJECT, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout where multiple
-// workspaces can be alive at once under `MultiWorkspacePanelHost`. The mobile layout mounts one workspace at a time, so there's no
-// cross-workspace event leak to guard against there in the same way.
+// worktrees can be alive at once under `MultiWorktreePanelHost`. The mobile layout mounts one worktree at a time, so there's no
+// cross-worktree event leak to guard against there in the same way.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server!: ServerHandle;
@@ -84,42 +84,42 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
   // Real git repo with two worktrees. Each worktree has a distinctly
-  // named file so a `searchWorkspaceFiles("only-in-a.ts")` invocation
+  // named file so a `searchWorktreeFiles("only-in-a.ts")` invocation
   // returns exactly one match in A and zero in B — and vice versa.
   // Without the fix, dispatching `band:open-file` for
   // "only-in-a.ts" while B is active would land the file as a tab in
   // B (where it doesn't exist) and the FileViewer would surface ENOENT.
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Chat file link test\n");
   git(repoPath, ["add", "."], tmpHome);
   git(repoPath, ["commit", "-m", "initial commit"], tmpHome);
 
-  const worktreeAPath = join(tmpHome, `${PROJECT}-${BRANCH_A}`);
-  const worktreeBPath = join(tmpHome, `${PROJECT}-${BRANCH_B}`);
+  const worktreeAPath = join(tmpHome, `${REPO}-${BRANCH_A}`);
+  const worktreeBPath = join(tmpHome, `${REPO}-${BRANCH_B}`);
   git(repoPath, ["worktree", "add", "-b", BRANCH_A, worktreeAPath], tmpHome);
   git(repoPath, ["worktree", "add", "-b", BRANCH_B, worktreeBPath], tmpHome);
 
-  // Workspace-distinct files. The names are chosen so a file in A's
+  // Worktree-distinct files. The names are chosen so a file in A's
   // search index never matches a file in B's, so the auto-open
   // single-match shortcut cleanly routes through the new
-  // workspace-scoped event detail.
-  writeFileSync(join(worktreeAPath, "only-in-a.ts"), "// only in workspace A\n");
-  writeFileSync(join(worktreeBPath, "only-in-b.ts"), "// only in workspace B\n");
-  // Same path in BOTH workspaces — used by the in-flight workspace
+  // worktree-scoped event detail.
+  writeFileSync(join(worktreeAPath, "only-in-a.ts"), "// only in worktree A\n");
+  writeFileSync(join(worktreeBPath, "only-in-b.ts"), "// only in worktree B\n");
+  // Same path in BOTH worktrees — used by the in-flight worktree
   // switch race test. The single-match auto-open shortcut resolves
-  // in both A and B, so the test can rely on "switching workspaces
-  // mid-search would land the file in the WRONG workspace" as the
-  // baseline bug behaviour the openedWorkspaceIdRef bail guards
+  // in both A and B, so the test can rely on "switching worktrees
+  // mid-search would land the file in the WRONG worktree" as the
+  // baseline bug behaviour the openedWorktreeIdRef bail guards
   // against.
   writeFileSync(join(worktreeAPath, "shared.ts"), "// shared name, different file in A\n");
   writeFileSync(join(worktreeBPath, "shared.ts"), "// shared name, different file in B\n");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [
@@ -130,8 +130,8 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // The bug only manifests when BOTH workspace trees are alive
-  // simultaneously (every visited workspace stays mounted) and the event
+  // The bug only manifests when BOTH worktree trees are alive
+  // simultaneously (every visited worktree stays mounted) and the event
   // listener has to decide which one to route to.
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
@@ -152,16 +152,16 @@ test.afterAll(async () => {
 });
 
 // TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
-// asserts the old `useFileTabs` / per-workspace `openTabs` self-heal that the
+// asserts the old `useFileTabs` / per-worktree `openTabs` self-heal that the
 // desktop CodeBrowserView flow owned. That flow was removed in Phase 2 (files
 // now open as bare per-path leaves with no `openTabs` persistence), so the
 // behaviour under test no longer exists. Re-enable when the file-tab model is
 // reworked.
-test.describe("chat file-link workspace scoping (issue #539)", () => {
-  // NOTE: the original "event addressed to an inactive workspace is
+test.describe("chat file-link worktree scoping (issue #539)", () => {
+  // NOTE: the original "event addressed to an inactive worktree is
   // ignored" test (which dispatched `{ filename: "only-in-a.ts",
-  // workspaceId: A }` while B was active and asserted dialog
-  // visibility) was deleted as redundant — the cross-workspace
+  // worktreeId: A }` while B was active and asserted dialog
+  // visibility) was deleted as redundant — the cross-worktree
   // tab-leak test below covers the same listener-filter contract
   // with a stronger, persistent-state assertion that actually
   // distinguishes bug code from fix code. The visibility-snapshot
@@ -170,30 +170,30 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
   // 0-result branch and never leaked anything observable through the
   // dialog's `open` state.
 
-  test("event with no workspaceId in its detail falls through to the active workspace (backwards-compat)", async ({
+  test("event with no worktreeId in its detail falls through to the active worktree (backwards-compat)", async ({
     page: _page,
   }) => {
-    const workspacePage = new WorkspacePage(_page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(_page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_B);
-    await workspacePage.waitForReady();
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    await worktreePage.goto(WORKTREE_B);
+    await worktreePage.waitForReady();
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
 
-    // Contract: dispatching without `workspaceId` must open the
+    // Contract: dispatching without `worktreeId` must open the
     // dialog. The 0-result filename forces the auto-open shortcut
     // into its reveal branch so the assertion has something to wait
     // on.
-    await workspacePage.dispatchOpenFileEvent({
+    await worktreePage.dispatchOpenFileEvent({
       filename: "does-not-resolve-anywhere-67890.ts",
     });
 
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
+    await expect(worktreePage.quickOpenDialog()).toBeVisible();
   });
 
   test("persisted active tab pointing at a non-existent path self-heals on mount (ENOENT defensive)", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     // Seed a restored center layout that holds a REAL file leaf (only-in-a.ts,
     // which exists in A's worktree) plus a STALE one whose path doesn't exist
@@ -201,18 +201,18 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // a file that was since deleted/relocated. Seeding happens before the
     // first mount (addInitScript), so the file leaves restore on the initial
     // render and each FileViewer immediately tries to load its path.
-    const STALE_PATH = "path/from/another/workspace/that-does-not-exist.ts";
+    const STALE_PATH = "path/from/another/worktree/that-does-not-exist.ts";
     const REAL_PATH = "only-in-a.ts";
-    await workspacePage.seedFileLeaves(WORKSPACE_A, [REAL_PATH, STALE_PATH], STALE_PATH);
+    await worktreePage.seedFileLeaves(WORKTREE_A, [REAL_PATH, STALE_PATH], STALE_PATH);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
 
     // Positive anchor: the seed took and restored — the real file leaf is
     // present. Without this, the negative self-heal assertion could pass
     // trivially on a build where the layout never restored at all.
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE_A))?.tabs ?? [], {
         timeout: 15_000,
       })
       .toContain(REAL_PATH);
@@ -222,63 +222,63 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // well beyond the actual round-trip (a load failure surfaces in tens of ms
     // on a tiny worktree) but bounded so a regression trips deterministically.
     await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
+      .poll(async () => (await worktreePage.readOpenTabsState(WORKTREE_A))?.tabs ?? [], {
         timeout: 5000,
       })
       .not.toContain(STALE_PATH);
   });
 
-  // The `QuickOpenDialog.openedWorkspaceIdRef` bail (defence layer 3
+  // The `QuickOpenDialog.openedWorktreeIdRef` bail (defence layer 3
   // in the issue #539 fix) has an exercise path that resists
-  // black-box integration testing: it only fires when the workspace
-  // flips BEFORE the dialog's first `searchWorkspaceFiles` resolves,
+  // black-box integration testing: it only fires when the worktree
+  // flips BEFORE the dialog's first `searchWorktreeFiles` resolves,
   // which on a tiny test fixture happens within the first few
   // milliseconds — faster than Playwright's await granularity can
   // reliably interleave. A test that dispatches the event then
-  // immediately clicks the workspace card passes both with and
+  // immediately clicks the worktree card passes both with and
   // without the bail because by the time the click commits, the
   // search has already resolved and `autoOpened.current` is true, so
   // the bail check is never reached. The correctness of the ref
   // isolation (only capture on `open: false → true`, never on
-  // mid-flight `workspaceId` changes) is documented inline at the
+  // mid-flight `worktreeId` changes) is documented inline at the
   // capture-effect site and exercised by the `shouldBailAutoOpen`
   // pure-helper unit suite.
 
-  test("cross-workspace event with a matching filename does NOT leak the file into the wrong workspace's persisted tab list", async ({
+  test("cross-worktree event with a matching filename does NOT leak the file into the wrong worktree's persisted tab list", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     // Both worktrees have a file at `shared.ts`. Without the fix, the
-    // SharedDockviewLayout listener would catch a workspace-agnostic
+    // SharedDockviewLayout listener would catch a worktree-agnostic
     // `band:open-file` event addressed to A while B is active, route
     // it through QuickOpenDialog.autoOpen, find `shared.ts` in B's
     // index, and write the path into `band-open-tabs:<B>` — the
-    // exact symptom in the issue #539 description ("workspace B's
-    // Files panel tries to open the same workspace-relative path
+    // exact symptom in the issue #539 description ("worktree B's
+    // Files panel tries to open the same worktree-relative path
     // against B's root"). With the fix, the listener filters on
-    // `detail.workspaceId` and silently drops the cross-workspace
+    // `detail.worktreeId` and silently drops the cross-worktree
     // event before the dialog can open.
     //
     // Verified against origin/main (the bug code): without the fix,
-    // after dispatching `{ filename: "shared.ts", workspaceId: A }`
+    // after dispatching `{ filename: "shared.ts", worktreeId: A }`
     // while B is active and waiting ~2 s for the full debounce +
     // search + autoOpen + persist effect, B's tab list reads
     // `{"tabs":["shared.ts"],"active":"shared.ts"}`. The fix code
     // leaves B's tab list empty.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeVisible();
+    await worktreePage.switchWorktree(WORKTREE_B);
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
+    expect(await worktreePage.cachedPanelEntries(WORKTREE_A).count()).toBeGreaterThan(0);
+    expect(await worktreePage.cachedPanelEntries(WORKTREE_B).count()).toBeGreaterThan(0);
 
-    await workspacePage.writeOpenTabsState(WORKSPACE_B, { tabs: [], active: null });
+    await worktreePage.writeOpenTabsState(WORKTREE_B, { tabs: [], active: null });
 
-    await workspacePage.dispatchOpenFileEvent({
+    await worktreePage.dispatchOpenFileEvent({
       filename: "shared.ts",
-      workspaceId: WORKSPACE_A,
+      worktreeId: WORKTREE_A,
     });
 
     // Positive-shaped poll for the leak's APPEARANCE within a
@@ -287,7 +287,7 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // would succeed trivially at t=0 because the seed above leaves
     // B's tab list empty — the poll returns success before the
     // bug's full lifecycle (150 ms debounce + search + autoOpen +
-    // per-workspace-state propagation + CodeBrowserView
+    // per-worktree-state propagation + CodeBrowserView
     // openTabPinned + useFileTabs persist) has had time to write
     // the leak (~200-300 ms post-dispatch). The
     // poll-for-appearance shape catches the regression by FAILING
@@ -298,7 +298,7 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
       await expect
         .poll(
           async () => {
-            const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
+            const state = await worktreePage.readOpenTabsState(WORKTREE_B);
             return state?.tabs ?? [];
           },
           { timeout: 2000 },

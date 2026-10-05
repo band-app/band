@@ -12,7 +12,7 @@ import {
 import { FolderOpen, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
-import { useAddProject } from "../hooks/use-project-mutations";
+import { useAddRepo } from "../hooks/use-repo-mutations";
 
 interface Props {
   open: boolean;
@@ -20,7 +20,7 @@ interface Props {
   defaultLabel?: string | null;
 }
 
-export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
+export function AddRepoDialog({ open, onOpenChange, defaultLabel }: Props) {
   const [path, setPath] = useState("");
   // `null` means we haven't checked yet (or the path is empty). `true`/`false`
   // come from a debounced adapter.checkPath() call and drive the inline
@@ -28,7 +28,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
   // instead of only on submit because the user benefits from knowing up-front
   // what they're signing up for — see #427's "show a one-line note" requirement.
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null);
-  const addProjectMutation = useAddProject();
+  const addRepoMutation = useAddRepo();
   const adapter = useAdapter();
   const capabilities = useCapabilities();
 
@@ -70,7 +70,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
 
     const trimmedPath = path.trim();
 
-    await addProjectMutation.mutateAsync({
+    await addRepoMutation.mutateAsync({
       path: trimmedPath,
       label: defaultLabel ?? undefined,
     });
@@ -107,24 +107,24 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
     }
   };
 
-  const isBusy = addProjectMutation.isPending;
+  const isBusy = addRepoMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent variant="bottom-sheet" className="lg:max-w-[425px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Register Project</DialogTitle>
+            <DialogTitle>Register Repo</DialogTitle>
             <DialogDescription>
-              Add a folder to manage its workspaces. Git repositories enable branches and PRs; plain
-              folders work too, with a single implicit workspace.
+              Add a folder to manage its worktrees. Git repositories enable branches and PRs; plain
+              folders work too, with a single implicit worktree.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-4">
-            <Label htmlFor="project-path">Folder path</Label>
+            <Label htmlFor="repo-path">Folder path</Label>
             <div className="flex gap-2">
               <Input
-                id="project-path"
+                id="repo-path"
                 placeholder="Path to folder (git repo or plain folder)"
                 value={path}
                 onChange={handlePathChange}
@@ -141,7 +141,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
                 <Info className="size-4 shrink-0 text-blue-500 mt-0.5" />
                 <span>
                   This folder isn't a git repo. Branch and PR features will be disabled. You can
-                  promote it to git later from the project context menu.
+                  promote it to git later from the repo context menu.
                 </span>
               </div>
             )}
@@ -151,7 +151,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
               Cancel
             </Button>
             <Button type="submit" disabled={isBusy}>
-              Add Project
+              Add Repo
             </Button>
           </DialogFooter>
         </form>

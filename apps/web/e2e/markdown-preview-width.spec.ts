@@ -12,7 +12,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -24,12 +24,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-markdown-preview-width-token";
-const PROJECT = "md-width-repo";
+const REPO = "md-width-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 const FILE = "LONG.md";
 const WIDTH_KEY = "band:markdown-preview-width";
 /** 61.25rem, the narrow column cap in `markdownPreviewWidthTheme`. */
@@ -68,16 +68,16 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   writeFileSync(join(repo, FILE), LONG_DOC);
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -99,11 +99,11 @@ test("full width sticks across a reload and a restart, and toggling keeps edits 
   page,
   browser,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf(FILE);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf(FILE);
   await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
 
   // Narrow by default: a centered column wider than the old 48rem (768px)
@@ -132,13 +132,13 @@ test("full width sticks across a reload and a restart, and toggling keeps edits 
   await expect(viewer.markdownPreview).toContainText(EDIT);
 
   await expect
-    .poll(() => workspacePage.readServerClientState(null, WIDTH_KEY, "desktop"))
+    .poll(() => worktreePage.readServerClientState(null, WIDTH_KEY, "desktop"))
     .toBe("full");
   // Per device type: the phone keeps its own (default) width.
-  expect(await workspacePage.readServerClientState(null, WIDTH_KEY, "mobile")).toBeNull();
+  expect(await worktreePage.readServerClientState(null, WIDTH_KEY, "mobile")).toBeNull();
 
-  await workspacePage.reload();
-  await workspacePage.waitForReady();
+  await worktreePage.reload();
+  await worktreePage.waitForReady();
   await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
   await expect(viewer.previewWidthToggle).toHaveAttribute("aria-pressed", "true");
   await expectFullWidth(viewer);
@@ -149,9 +149,9 @@ test("full width sticks across a reload and a restart, and toggling keeps edits 
   const context = await browser.newContext(DESKTOP);
   try {
     const freshPage = await context.newPage();
-    const fresh = new WorkspacePage(freshPage, server.url, TOKEN);
+    const fresh = new WorktreePage(freshPage, server.url, TOKEN);
     const freshViewer = new FileViewerPage(freshPage);
-    await fresh.goto(WORKSPACE);
+    await fresh.goto(WORKTREE);
     await fresh.waitForReady();
     await fresh.openFileLeaf(FILE);
     await expect(freshViewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
@@ -172,11 +172,11 @@ test("a phone shows the preview without the width toggle", async ({ browser }) =
   const context = await browser.newContext(PHONE);
   try {
     const page = await context.newPage();
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const viewer = new FileViewerPage(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openFileLeaf(FILE);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openFileLeaf(FILE);
     await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
     await expect(viewer.previewWidthToggle).toHaveCount(0);
   } finally {

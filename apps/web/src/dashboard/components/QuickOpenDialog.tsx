@@ -23,12 +23,12 @@ import { getFileIcon } from "../lib/file-icon";
 import { shouldBailAutoOpen } from "../lib/quick-open-bail";
 
 interface QuickOpenDialogProps {
-  workspaceId: string;
+  worktreeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenFile: (path: string) => void;
   /**
-   * Open a file that lives OUTSIDE the workspace worktree, by absolute
+   * Open a file that lives OUTSIDE the worktree worktree, by absolute
    * path (optionally with a `:line[:col]` suffix). Offered when the query
    * is an absolute path to an existing file — e.g. a path pasted in, or a
    * terminal/chat link to `/tmp/notes.md`. When omitted, the external
@@ -51,7 +51,7 @@ interface QuickOpenDialogProps {
 }
 
 export function QuickOpenDialog({
-  workspaceId,
+  worktreeId,
   open,
   onOpenChange,
   onOpenFile,
@@ -67,7 +67,7 @@ export function QuickOpenDialog({
   const capabilities = useCapabilities();
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<string[]>([]);
-  // Result of probing an absolute-path query against the workspace.
+  // Result of probing an absolute-path query against the worktree.
   // `resolved` gates auto-open (terminal/chat links) until the probe has
   // settled; `hit` is the file to offer (with the path to open and whether
   // it lives outside the worktree), or null when the query isn't an absolute
@@ -126,13 +126,13 @@ export function QuickOpenDialog({
   const searchQuery = parsedQuery.filePath;
 
   // An absolute-path query isn't a worktree-relative fuzzy match — resolve
-  // it against the workspace to find out if it exists and whether it lives
+  // it against the worktree to find out if it exists and whether it lives
   // inside the worktree (open as a normal file) or outside it (external
   // tab). Gated on the host exposing the resolver. Memoised so it's a stable
   // dependency for the two effects and the `probeReady`/`probeHit` derivations.
   const isAbsoluteQuery = useMemo(
-    () => !!adapter.resolveWorkspacePath && isAbsoluteFilePath(searchQuery),
-    [adapter.resolveWorkspacePath, searchQuery],
+    () => !!adapter.resolveWorktreePath && isAbsoluteFilePath(searchQuery),
+    [adapter.resolveWorktreePath, searchQuery],
   );
 
   // Only trust the probe result when it's for the CURRENT query (see the
@@ -148,7 +148,7 @@ export function QuickOpenDialog({
     searchQuery === "" && parsedQuery.line == null && recentFiles && recentFiles.length > 0;
 
   useEffect(() => {
-    if (!open || !adapter.searchWorkspaceFiles) return;
+    if (!open || !adapter.searchWorktreeFiles) return;
 
     // Skip file search when the query is a pure go-to-line (":42")
     if (searchQuery === "" && parsedQuery.line != null) {
@@ -187,9 +187,9 @@ export function QuickOpenDialog({
     const delay = searchQuery ? 150 : 0;
     debounceRef.current = setTimeout(() => {
       // Limit raised from 50 → 200 (issue #530) so substring matches in
-      // workspaces with nested git repos / large monorepos can't get
+      // worktrees with nested git repos / large monorepos can't get
       // pushed off the result list when the user types a short query.
-      adapter.searchWorkspaceFiles!(workspaceId, searchQuery, 200)
+      adapter.searchWorktreeFiles!(worktreeId, searchQuery, 200)
         .then((result) => {
           if (!cancelled) setFiles(result.files);
         })
@@ -206,9 +206,9 @@ export function QuickOpenDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open, showRecent, isAbsoluteQuery]);
+  }, [adapter, worktreeId, searchQuery, parsedQuery.line, open, showRecent, isAbsoluteQuery]);
 
-  // Resolve an absolute-path query against the workspace so we can offer to
+  // Resolve an absolute-path query against the worktree so we can offer to
   // open it — as a normal file when it lives inside the worktree, or as an
   // external tab when outside (e.g. `/tmp/notes.md` pasted in, or a terminal
   // link that dispatched `band:open-file`). Debounced like the worktree
@@ -216,10 +216,10 @@ export function QuickOpenDialog({
   useEffect(() => {
     if (!open) return;
 
-    if (!isAbsoluteQuery || !adapter.resolveWorkspacePath) {
+    if (!isAbsoluteQuery || !adapter.resolveWorktreePath) {
       // Nothing to probe — mark resolved so the auto-open gate below passes.
       // Also clear `loading`: if a prior probe left it set and the worktree
-      // search effect can't clear it (an adapter without `searchWorkspaceFiles`
+      // search effect can't clear it (an adapter without `searchWorktreeFiles`
       // early-returns), the "Searching…" state would otherwise stick.
       setLoading(false);
       setProbe({ query: searchQuery, resolved: true, hit: null });
@@ -234,16 +234,16 @@ export function QuickOpenDialog({
 
     if (probeStatRef.current) clearTimeout(probeStatRef.current);
     probeStatRef.current = setTimeout(() => {
-      adapter.resolveWorkspacePath!(workspaceId, searchQuery)
+      adapter.resolveWorktreePath!(worktreeId, searchQuery)
         .then((res) => {
           if (cancelled) return;
           const hit =
             res.exists && res.isFile
               ? {
-                  // Inside the worktree → open the workspace-relative path so
+                  // Inside the worktree → open the worktree-relative path so
                   // it flows through the normal Files-panel / route plumbing.
                   // Outside → open the absolute path as an external tab.
-                  openPath: res.external ? searchQuery : (res.workspaceRelativePath ?? searchQuery),
+                  openPath: res.external ? searchQuery : (res.worktreeRelativePath ?? searchQuery),
                   external: res.external,
                 }
               : null;
@@ -261,7 +261,7 @@ export function QuickOpenDialog({
       cancelled = true;
       if (probeStatRef.current) clearTimeout(probeStatRef.current);
     };
-  }, [adapter, workspaceId, searchQuery, isAbsoluteQuery, open]);
+  }, [adapter, worktreeId, searchQuery, isAbsoluteQuery, open]);
 
   // Auto-open: wait for the initial search to resolve, then either open the
   // single result directly or reveal the dialog for the user to pick.
@@ -269,17 +269,17 @@ export function QuickOpenDialog({
   const autoOpened = useRef(false);
   const [dialogVisible, setDialogVisible] = useState(!autoOpen);
 
-  // Workspace the dialog was opened against. Captured at the moment of
-  // open so a workspace switch in flight (between `open` going true and
+  // Worktree the dialog was opened against. Captured at the moment of
+  // open so a worktree switch in flight (between `open` going true and
   // the search resolving) can't cause the dialog to auto-open the file
-  // against the NEW workspace — that's how a chat-file click in
-  // workspace A used to leak into workspace B's tab list and write a
+  // against the NEW worktree — that's how a chat-file click in
+  // worktree A used to leak into worktree B's tab list and write a
   // bogus path into `band-open-tabs:<B>` (issue #539). Even with the
-  // workspace-scoped `band:open-file` dispatcher in place, this is the
-  // belt-and-braces guard inside the dialog: if `workspaceId` flips
+  // worktree-scoped `band:open-file` dispatcher in place, this is the
+  // belt-and-braces guard inside the dialog: if `worktreeId` flips
   // between open and resolve, we abandon the auto-open silently rather
-  // than running `onOpenFile` against a stale workspace handler.
-  const openedWorkspaceIdRef = useRef<string | null>(null);
+  // than running `onOpenFile` against a stale worktree handler.
+  const openedWorktreeIdRef = useRef<string | null>(null);
 
   // When the dialog opens with autoOpen, hide it until search resolves.
   // When opened normally (no autoOpen), show it immediately.
@@ -291,31 +291,31 @@ export function QuickOpenDialog({
     }
   }, [open, autoOpen]);
 
-  // Mirror `workspaceId` into a ref so the open-capture effect below
+  // Mirror `worktreeId` into a ref so the open-capture effect below
   // can read the current value without depending on it. The capture
   // MUST fire only on the `open: false → true` transition — if the
-  // workspaceId changes while the dialog is already open, we must
+  // worktreeId changes while the dialog is already open, we must
   // KEEP the originally-captured value (so the bail in the autoOpen
   // effect below has something to compare against). Re-running the
-  // capture on every workspaceId change would overwrite the ref with
-  // the new workspace, silently defeating the bail and re-opening the
-  // cross-workspace leak this guard exists to prevent.
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
+  // capture on every worktreeId change would overwrite the ref with
+  // the new worktree, silently defeating the bail and re-opening the
+  // cross-worktree leak this guard exists to prevent.
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
   useEffect(() => {
-    // `workspaceIdRef` is read via the ref so this effect's dep array
-    // does NOT include `workspaceId` — including it would re-fire the
-    // capture on every workspace switch and silently defeat the bail
-    // (the ref would track the LATEST workspaceId, so the bail
-    // comparison `capturedWorkspaceId !== currentWorkspaceId` would
+    // `worktreeIdRef` is read via the ref so this effect's dep array
+    // does NOT include `worktreeId` — including it would re-fire the
+    // capture on every worktree switch and silently defeat the bail
+    // (the ref would track the LATEST worktreeId, so the bail
+    // comparison `capturedWorktreeId !== currentWorktreeId` would
     // never trip). This timing contract resists end-to-end test
-    // coverage because the race window (workspace flips between
+    // coverage because the race window (worktree flips between
     // dialog-open and search-resolve) is faster than Playwright's
     // black-box await granularity on a tiny fixture. The bail's
     // pure decision logic IS covered by the
     // `shouldBailAutoOpen` unit suite.
     if (open) {
-      openedWorkspaceIdRef.current = workspaceIdRef.current;
+      openedWorktreeIdRef.current = worktreeIdRef.current;
     }
   }, [open]);
 
@@ -333,16 +333,16 @@ export function QuickOpenDialog({
     // don't prematurely reveal "No files found" before it resolves.
     if (isAbsoluteQuery && !probeReady) return;
 
-    // Bail if the workspace switched while we were waiting for the
-    // search. `onOpenFile` is bound to the parent's *current* workspace
-    // (e.g. `handleOpenFile(activeWorkspaceId, filename)` in
+    // Bail if the worktree switched while we were waiting for the
+    // search. `onOpenFile` is bound to the parent's *current* worktree
+    // (e.g. `handleOpenFile(activeWorktreeId, filename)` in
     // `SharedDockviewLayout`), so firing it after a switch would write
-    // the file into the wrong workspace's tab state — exactly the leak
+    // the file into the wrong worktree's tab state — exactly the leak
     // path described in issue #539. Closing the dialog cleanly returns
     // the parent to the pre-open state without a bogus tab append.
     // The decision logic is in `shouldBailAutoOpen` (sibling lib
     // module) so the four-branch contract has direct unit coverage.
-    if (shouldBailAutoOpen(openedWorkspaceIdRef.current, workspaceId)) {
+    if (shouldBailAutoOpen(openedWorktreeIdRef.current, worktreeId)) {
       autoOpened.current = true;
       onOpenChange(false);
       return;
@@ -351,7 +351,7 @@ export function QuickOpenDialog({
     autoOpened.current = true;
     if (probeHit) {
       // Absolute path to an existing file — open it directly, never show the
-      // dialog. Inside the worktree → normal (workspace-relative) tab;
+      // dialog. Inside the worktree → normal (worktree-relative) tab;
       // outside → external tab.
       const location = formatFileLocation(probeHit.openPath, parsedQuery.line, {
         lineEnd: parsedQuery.lineEnd,
@@ -380,7 +380,7 @@ export function QuickOpenDialog({
     onOpenFile,
     onOpenExternalFile,
     onOpenChange,
-    workspaceId,
+    worktreeId,
     isAbsoluteQuery,
     probeReady,
     probeHit,
@@ -403,7 +403,7 @@ export function QuickOpenDialog({
       setProbe({ query: "", resolved: false, hit: null });
       autoOpened.current = false;
       searchResolved.current = false;
-      openedWorkspaceIdRef.current = null;
+      openedWorktreeIdRef.current = null;
     }
   }, [open, onQueryChange]);
 
@@ -454,20 +454,20 @@ export function QuickOpenDialog({
   const handleOpenExternal = useCallback(() => {
     // Dispatch via the same event pattern Quick Open / Search in Files
     // use — CodeBrowserView owns the OS-picker invocation and tab plumbing,
-    // so this dialog stays free of workspace-state knowledge.
+    // so this dialog stays free of worktree-state knowledge.
     //
-    // Address the event to *this* workspace: multiple CodeBrowserView
-    // instances may be mounted (every visited workspace stays mounted),
+    // Address the event to *this* worktree: multiple CodeBrowserView
+    // instances may be mounted (every visited worktree stays mounted),
     // and an undelimited broadcast would race every cached instance to
     // open its own picker — the file would land in whichever instance
     // won, not the one the user is looking at.
     onOpenChange(false);
     window.dispatchEvent(
       new CustomEvent("band:open-file-external", {
-        detail: { workspaceId },
+        detail: { worktreeId },
       }),
     );
-  }, [onOpenChange, workspaceId]);
+  }, [onOpenChange, worktreeId]);
 
   // The list of files to render: recent files when query is empty, search results otherwise
   const displayFiles = showRecent ? recentFiles : files;
@@ -573,7 +573,7 @@ export function QuickOpenDialog({
                       </div>
                       {probeHit.external && (
                         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                          Outside this workspace
+                          Outside this worktree
                         </span>
                       )}
                     </CommandItem>
@@ -602,7 +602,7 @@ export function QuickOpenDialog({
                       <FileInput className="size-4 shrink-0 text-muted-foreground" />
                       <span className="text-sm">Open File…</span>
                       <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                        Pick a file outside this workspace
+                        Pick a file outside this worktree
                         <kbd className="rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
                           ⌘O
                         </kbd>

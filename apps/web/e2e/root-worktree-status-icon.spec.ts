@@ -1,15 +1,15 @@
 /**
- * Root workspace status-icon swap.
+ * Root worktree status-icon swap.
  *
- * The default-branch ("root") workspace card shows a house icon as its
+ * The default-branch ("root") worktree card shows a house icon as its
  * identity marker. When its agent has a live status ("working" /
  * "needs_attention") the status dot must REPLACE the house — occupying the
  * same slot — exactly the way the branch glyph is replaced on every other
- * workspace card. The regression this guards against: the root card showed
+ * worktree card. The regression this guards against: the root card showed
  * the status dot AND the house side by side, instead of swapping.
  *
  * Real production binary, real git repo so the default branch reconciles to a
- * WorkspaceCard, no tRPC mocks. The status is driven live via the real
+ * WorktreeCard, no tRPC mocks. The status is driven live via the real
  * `statuses.update` mutation (the same procedure the dashboard calls), whose
  * SSE update the mounted status watcher consumes — so the swap happens the
  * same way it would in production. Page objects only.
@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -29,15 +29,15 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-root-workspace-status-icon-token";
-const PROJECT = "status-icon-repo";
+const TOKEN = "e2e-root-worktree-status-icon-token";
+const REPO = "status-icon-repo";
 const DEFAULT_BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 // Wide viewport so `useIsDesktop()` reports true (threshold 1024px) and the
-// desktop sidebar renders the project list with its workspace cards.
+// desktop sidebar renders the repo list with its worktree cards.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
@@ -63,7 +63,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Status icon test\n");
@@ -71,9 +71,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "init"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -93,28 +93,28 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Root workspace status icon", () => {
+test.describe("Root worktree status icon", () => {
   test("shows the home icon and no status dot while the agent is idle", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     // The house is the root card's idle identity marker…
-    await expect(workspacePage.rootWorkspaceHomeIcon(WORKSPACE)).toBeVisible();
+    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toBeVisible();
     // …and with no live agent status there is no status dot beside it.
-    await expect(workspacePage.agentStatusDot(WORKSPACE)).toHaveCount(0);
+    await expect(worktreePage.agentStatusDot(WORKTREE)).toHaveCount(0);
   });
 
   test("replaces the home icon with the status dot when the agent is active", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
     // Anchor the starting state: house present, no dot.
-    await expect(workspacePage.rootWorkspaceHomeIcon(WORKSPACE)).toBeVisible();
-    await expect(workspacePage.agentStatusDot(WORKSPACE)).toHaveCount(0);
+    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toBeVisible();
+    await expect(worktreePage.agentStatusDot(WORKTREE)).toHaveCount(0);
 
     // Drive a live "working" status through the real mutation + SSE path.
     // `statuses.update` emits to currently-subscribed SSE listeners with no
@@ -126,8 +126,8 @@ test.describe("Root workspace status icon", () => {
     await expect
       .poll(
         async () => {
-          await workspacePage.setAgentStatus(WORKSPACE, "working");
-          return workspacePage.agentStatusDot(WORKSPACE).count();
+          await worktreePage.setAgentStatus(WORKTREE, "working");
+          return worktreePage.agentStatusDot(WORKTREE).count();
         },
         // Match the `waitForReady` budget: on a slow CI worker the SSE
         // subscription can take longer than the default 5 s poll window to
@@ -137,8 +137,8 @@ test.describe("Root workspace status icon", () => {
       .toBeGreaterThan(0);
 
     // Positive anchor: the status dot appeared (the swap happened)…
-    await expect(workspacePage.agentStatusDot(WORKSPACE)).toBeVisible();
+    await expect(worktreePage.agentStatusDot(WORKTREE)).toBeVisible();
     // …and it REPLACED the house rather than sitting beside it.
-    await expect(workspacePage.rootWorkspaceHomeIcon(WORKSPACE)).toHaveCount(0);
+    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toHaveCount(0);
   });
 });

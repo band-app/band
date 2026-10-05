@@ -19,7 +19,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -28,11 +28,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-restart-token";
-const PROJECT = "alpha-terminal-restart";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-terminal-restart";
+const WORKTREE = toWorktreeId(REPO, "main");
 const SHELL_VALUE = "band-restart-shell-4b1d";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
@@ -41,16 +41,16 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
-/** A real directory for the project: the PTY spawns with it as cwd. */
+/** A real directory for the repo: the PTY spawns with it as cwd. */
 let workdir: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = realpathSync(mkdtempSync(join(tmpdir(), "band-term-restart-")));
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -76,18 +76,18 @@ function readFileOrNull(file: string): string | null {
 }
 
 test("a terminal keeps its shell and its screen across a server restart", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const afterFile = join(workdir, "after-restart.txt");
 
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await workspacePage.waitForTerminalReady();
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await worktreePage.waitForTerminalReady();
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
 
   // The quotes keep the typed line's own echo from matching the marker.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     `SHELL_VALUE=${SHELL_VALUE}; echo BEFORE_"RESTART"`,
     /BEFORE_RESTART/,
   );
@@ -95,17 +95,17 @@ test("a terminal keeps its shell and its screen across a server restart", async 
   server = await server.restart();
 
   // Fresh page: its xterm starts empty, so anything on screen was replayed.
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await workspacePage.waitForTerminalReady();
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await worktreePage.waitForTerminalReady();
   await expect
-    .poll(() => workspacePage.readTerminalRenderedText(WORKSPACE), { timeout: 20_000 })
+    .poll(() => worktreePage.readTerminalRenderedText(WORKTREE), { timeout: 20_000 })
     .toMatch(/BEFORE_RESTART/);
 
   // Same shell, still taking input: only it has SHELL_VALUE set.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     `echo $SHELL_VALUE>${afterFile}; echo AFTER_"RESTART"`,
     /AFTER_RESTART/,
   );

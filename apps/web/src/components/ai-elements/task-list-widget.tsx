@@ -3,9 +3,9 @@ import { cn } from "@band-app/ui";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 
-function readCollapsed(workspaceId: string): boolean {
+function readCollapsed(worktreeId: string): boolean {
   try {
-    return sessionStorage.getItem(`band-tasks-collapsed:${workspaceId}`) === "true";
+    return sessionStorage.getItem(`band-tasks-collapsed:${worktreeId}`) === "true";
   } catch {
     return false;
   }
@@ -16,23 +16,23 @@ function readCollapsed(workspaceId: string): boolean {
  * task tools arrive this way), pinned above the prompt input while any
  * entry is unfinished.
  */
-export function TaskListWidget({ plan, workspaceId }: { plan: PlanEntry[]; workspaceId: string }) {
-  const [collapsed, setCollapsed] = useState(() => readCollapsed(workspaceId));
+export function TaskListWidget({ plan, worktreeId }: { plan: PlanEntry[]; worktreeId: string }) {
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(worktreeId));
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
       try {
         if (next) {
-          sessionStorage.setItem(`band-tasks-collapsed:${workspaceId}`, "true");
+          sessionStorage.setItem(`band-tasks-collapsed:${worktreeId}`, "true");
         } else {
-          sessionStorage.removeItem(`band-tasks-collapsed:${workspaceId}`);
+          sessionStorage.removeItem(`band-tasks-collapsed:${worktreeId}`);
         }
       } catch {
         // ignore storage errors
       }
       return next;
     });
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   if (plan.length === 0) return null;
 

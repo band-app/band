@@ -104,7 +104,7 @@ test("revokes a device token, which then gets 401", async ({ page }) => {
     { label: "e2e phone" },
   );
   const authed = () =>
-    fetch(`${server.url}/trpc/projects.list`, {
+    fetch(`${server.url}/trpc/repos.list`, {
       headers: { Authorization: `Bearer ${deviceToken}` },
     });
   expect((await authed()).status).toBe(200);

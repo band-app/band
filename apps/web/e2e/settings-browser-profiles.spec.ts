@@ -1,16 +1,16 @@
 /**
  * Settings › Browser: the browser profile list and, in a collapsed
- * "Project defaults" accordion, each project's default profile, driven
+ * "Repo defaults" accordion, each repo's default profile, driven
  * through the real Settings dialog against the real server.
  *
  * Profiles are seeded over tRPC (the Chrome import that normally creates
  * them runs in the desktop app, which the e2e harness does not boot). The
- * assertions read the server back over tRPC: a project's default decides
- * which profile a new browser tab in any of its workspaces opens with.
+ * assertions read the server back over tRPC: a repo's default decides
+ * which profile a new browser tab in any of its worktrees opens with.
  */
 
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -24,9 +24,9 @@ import { trpcMutate, trpcQuery } from "./helpers/trpc";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-browser-profiles-token";
-const PROJECT = "alpha-profiles";
-const OTHER_PROJECT = "beta-profiles";
-// Both projects carry the same project label. The rows used to be named
+const REPO = "alpha-profiles";
+const OTHER_REPO = "beta-profiles";
+// Both repos carry the same repo label. The rows used to be named
 // after it, so the two showed up as one repeated `lbl_...` id.
 const SHARED_LABEL = "lbl_e2e_shared";
 const FEATURE_BRANCH = "feat/login";
@@ -39,23 +39,23 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        name: REPO,
+        path: `/tmp/fake/${REPO}`,
         defaultBranch: "main",
         label: SHARED_LABEL,
         worktrees: [
-          { branch: "main", path: `/tmp/fake/${PROJECT}` },
-          { branch: FEATURE_BRANCH, path: `/tmp/fake/${PROJECT}-feature` },
+          { branch: "main", path: `/tmp/fake/${REPO}` },
+          { branch: FEATURE_BRANCH, path: `/tmp/fake/${REPO}-feature` },
         ],
       },
       {
-        name: OTHER_PROJECT,
-        path: `/tmp/fake/${OTHER_PROJECT}`,
+        name: OTHER_REPO,
+        path: `/tmp/fake/${OTHER_REPO}`,
         defaultBranch: "main",
         label: SHARED_LABEL,
-        worktrees: [{ branch: "main", path: `/tmp/fake/${OTHER_PROJECT}` }],
+        worktrees: [{ branch: "main", path: `/tmp/fake/${OTHER_REPO}` }],
       },
     ],
   });
@@ -77,29 +77,29 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-async function projectDefault(): Promise<string | null> {
+async function repoDefault(): Promise<string | null> {
   const data = await trpcQuery<{ profileId: string | null }>(
     server.url,
     TOKEN,
-    "browserProfiles.getProjectDefault",
-    { projectName: PROJECT },
+    "browserProfiles.getRepoDefault",
+    { repoName: REPO },
   );
   return data.profileId;
 }
 
-async function newTabProfile(workspaceId: string): Promise<string | null> {
+async function newTabProfile(worktreeId: string): Promise<string | null> {
   const before = await trpcQuery<{ browsers: { id: string }[] }>(
     server.url,
     TOKEN,
     "browsers.list",
-    { workspaceId },
+    { worktreeId },
   );
-  await trpcMutate(server.url, TOKEN, "browsers.create", { workspaceId });
+  await trpcMutate(server.url, TOKEN, "browsers.create", { worktreeId });
   const after = await trpcQuery<{ browsers: { id: string; profileId: string | null }[] }>(
     server.url,
     TOKEN,
     "browsers.list",
-    { workspaceId },
+    { worktreeId },
   );
   const known = new Set(before.browsers.map((b) => b.id));
   const created = after.browsers.find((b) => !known.has(b.id));
@@ -107,27 +107,27 @@ async function newTabProfile(workspaceId: string): Promise<string | null> {
   return created.profileId;
 }
 
-test("project defaults start collapsed and list each project once by name", async ({ page }) => {
+test("repo defaults start collapsed and list each repo once by name", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog("browser");
 
   await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
-  await settingsPage.expectRowVisible(settingsPage.projectDefaultsTrigger());
-  await expect(settingsPage.projectDefaultsTrigger()).toHaveAttribute("aria-expanded", "false");
-  await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toBeHidden();
+  await settingsPage.expectRowVisible(settingsPage.repoDefaultsTrigger());
+  await expect(settingsPage.repoDefaultsTrigger()).toHaveAttribute("aria-expanded", "false");
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toBeHidden();
 
-  await settingsPage.expandProjectDefaults();
+  await settingsPage.expandRepoDefaults();
 
-  await expect(settingsPage.projectBrowserProfileRows()).toHaveCount(2);
-  // The project names come from the seed above, so matching on their text is safe.
-  await expect(settingsPage.projectBrowserProfileRows()).toContainText([PROJECT, OTHER_PROJECT]);
-  await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toBeVisible();
-  await expect(settingsPage.projectBrowserProfileSelect(OTHER_PROJECT)).toBeVisible();
-  await expect(settingsPage.projectBrowserProfileSelect(SHARED_LABEL)).toHaveCount(0);
+  await expect(settingsPage.repoBrowserProfileRows()).toHaveCount(2);
+  // The repo names come from the seed above, so matching on their text is safe.
+  await expect(settingsPage.repoBrowserProfileRows()).toContainText([REPO, OTHER_REPO]);
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toBeVisible();
+  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toBeVisible();
+  await expect(settingsPage.repoBrowserProfileSelect(SHARED_LABEL)).toHaveCount(0);
 });
 
-test("picking a project's browser profile makes new tabs in every workspace use it", async ({
+test("picking a repo's browser profile makes new tabs in every worktree use it", async ({
   page,
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
@@ -136,33 +136,33 @@ test("picking a project's browser profile makes new tabs in every workspace use 
 
   await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
   await expect(settingsPage.browserProfileRows()).toHaveCount(1);
-  await settingsPage.expandProjectDefaults();
-  await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toContainText("Default");
+  await settingsPage.expandRepoDefaults();
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
 
-  await settingsPage.selectProjectBrowserProfile(PROJECT, PROFILE_NAME);
+  await settingsPage.selectRepoBrowserProfile(REPO, PROFILE_NAME);
 
-  await expect.poll(projectDefault).toBe(PROFILE_ID);
-  await expect(settingsPage.projectBrowserProfileSelect(OTHER_PROJECT)).toContainText("Default");
-  expect(await newTabProfile(toWorkspaceId(PROJECT, FEATURE_BRANCH))).toBe(PROFILE_ID);
-  expect(await newTabProfile(toWorkspaceId(PROJECT, "main"))).toBe(PROFILE_ID);
+  await expect.poll(repoDefault).toBe(PROFILE_ID);
+  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toContainText("Default");
+  expect(await newTabProfile(toWorktreeId(REPO, FEATURE_BRANCH))).toBe(PROFILE_ID);
+  expect(await newTabProfile(toWorktreeId(REPO, "main"))).toBe(PROFILE_ID);
 });
 
-test("deleting a profile removes it and puts its project back on Default", async ({ page }) => {
-  await trpcMutate(server.url, TOKEN, "browserProfiles.setProjectDefault", {
-    projectName: PROJECT,
+test("deleting a profile removes it and puts its repo back on Default", async ({ page }) => {
+  await trpcMutate(server.url, TOKEN, "browserProfiles.setRepoDefault", {
+    repoName: REPO,
     profileId: PROFILE_ID,
   });
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog("browser");
-  await settingsPage.expandProjectDefaults();
-  await settingsPage.expectRowVisible(settingsPage.projectBrowserProfileSelect(PROJECT));
-  await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toContainText(PROFILE_NAME);
+  await settingsPage.expandRepoDefaults();
+  await settingsPage.expectRowVisible(settingsPage.repoBrowserProfileSelect(REPO));
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText(PROFILE_NAME);
 
   await settingsPage.deleteBrowserProfile(PROFILE_NAME);
 
   await expect(settingsPage.browserProfileRows()).toHaveCount(0);
-  await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toContainText("Default");
-  await expect.poll(projectDefault).toBeNull();
-  expect(await newTabProfile(toWorkspaceId(PROJECT, "main"))).toBeNull();
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
+  await expect.poll(repoDefault).toBeNull();
+  expect(await newTabProfile(toWorktreeId(REPO, "main"))).toBeNull();
 });

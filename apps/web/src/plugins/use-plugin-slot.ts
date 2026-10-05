@@ -1,4 +1,4 @@
-import type { WorkspaceSideTab } from "@band-app/plugin-api/client";
+import type { WorktreeSideTab } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { trpc } from "../lib/trpc-client";
@@ -10,15 +10,15 @@ export interface SideTabContribution {
   /** `<pluginId>-<tabId>`, for test ids. */
   slug: string;
   pluginId: string;
-  tab: WorkspaceSideTab;
+  tab: WorktreeSideTab;
 }
 
 /**
- * The `workspace.sideTabs` contributions of the bundled plugins the server
+ * The `worktree.sideTabs` contributions of the bundled plugins the server
  * reports as enabled. Nothing renders until the server has answered, so a
  * disabled plugin's tab never flashes in.
  */
-export function useWorkspaceSideTabs(): SideTabContribution[] {
+export function useWorktreeSideTabs(): SideTabContribution[] {
   const plugins = useQuery({
     queryKey: ["plugins"],
     queryFn: () => trpc.plugins.list.query(),
@@ -28,7 +28,7 @@ export function useWorkspaceSideTabs(): SideTabContribution[] {
     if (!plugins.data) return [];
     const enabled = new Set(plugins.data.filter((p) => p.status !== "disabled").map((p) => p.id));
     return BUNDLED_CLIENT_PLUGINS.filter((p) => enabled.has(p.id)).flatMap((plugin) =>
-      (plugin.contributions["workspace.sideTabs"] ?? []).map((tab) => ({
+      (plugin.contributions["worktree.sideTabs"] ?? []).map((tab) => ({
         key: `${plugin.id}.${tab.id}`,
         slug: `${plugin.id}-${tab.id}`,
         pluginId: plugin.id,

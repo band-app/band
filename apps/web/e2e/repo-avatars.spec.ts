@@ -1,9 +1,9 @@
 /**
- * GitHub project avatars in the sidebar.
+ * GitHub repo avatars in the sidebar.
  *
- * A git project whose `origin` is on github.com shows its owner's avatar in
- * the project header instead of the folder icon. A project on another host
- * keeps the folder, and so does a GitHub project whose avatar cannot be
+ * A git repo whose `origin` is on github.com shows its owner's avatar in
+ * the repo header instead of the folder icon. A repo on another host
+ * keeps the folder, and so does a GitHub repo whose avatar cannot be
  * fetched (GitHub down or offline, nothing cached).
  *
  * Real production binary, real git repos with real remotes, github.com
@@ -14,7 +14,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { type GitHubStub, githubStub } from "../../hub/tests/fixtures/github-stub";
 import { AVATAR_PNG } from "../../hub/tests/fixtures/github-test-data";
 import { gitInHome } from "./helpers/git";
@@ -28,15 +28,15 @@ import {
   startServer,
 } from "./helpers/server";
 import { CronjobsDialog } from "./pages/CronjobsDialog";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-project-avatars-token";
-const GITHUB_PROJECT = "widgets";
-const GITLAB_PROJECT = "tool";
-const UNREACHABLE_PROJECT = "outage";
+const TOKEN = "e2e-repo-avatars-token";
+const GITHUB_REPO = "widgets";
+const GITLAB_REPO = "tool";
+const UNREACHABLE_REPO = "outage";
 
 // Wide viewport so `useIsDesktop()` reports true and the desktop sidebar
-// renders the project list.
+// renders the repo list.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -54,15 +54,15 @@ function makeRepo(name: string, origin: string): string {
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const project = (name: string, origin: string) => {
+  const repo = (name: string, origin: string) => {
     const path = makeRepo(name, origin);
     return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
   };
   seedState(tmpHome, {
-    projects: [
-      project(GITHUB_PROJECT, "git@github.com:acme-org/widgets.git"),
-      project(GITLAB_PROJECT, "https://gitlab.com/acme/tool.git"),
-      project(UNREACHABLE_PROJECT, "https://github.com/outage-owner/down.git"),
+    repos: [
+      repo(GITHUB_REPO, "git@github.com:acme-org/widgets.git"),
+      repo(GITLAB_REPO, "https://gitlab.com/acme/tool.git"),
+      repo(UNREACHABLE_REPO, "https://github.com/outage-owner/down.git"),
     ],
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
@@ -83,51 +83,48 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("GitHub project avatars", () => {
-  test("a GitHub project shows its owner's avatar instead of the folder icon", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(toWorkspaceId(GITHUB_PROJECT, "main"));
+test.describe("GitHub repo avatars", () => {
+  test("a GitHub repo shows its owner's avatar instead of the folder icon", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(toWorktreeId(GITHUB_REPO, "main"));
 
-    await expect(workspacePage.projectAvatar(GITHUB_PROJECT)).toBeVisible();
-    await expect(workspacePage.projectAvatar(GITHUB_PROJECT)).toHaveAttribute(
-      "alt",
-      "acme-org/widgets",
-    );
-    expect(await workspacePage.readProjectAvatarNaturalWidth(GITHUB_PROJECT)).toBe(1);
-    await expect(workspacePage.projectFolderIcon(GITHUB_PROJECT)).toHaveCount(0);
+    await expect(worktreePage.repoAvatar(GITHUB_REPO)).toBeVisible();
+    await expect(worktreePage.repoAvatar(GITHUB_REPO)).toHaveAttribute("alt", "acme-org/widgets");
+    expect(await worktreePage.readRepoAvatarNaturalWidth(GITHUB_REPO)).toBe(1);
+    await expect(worktreePage.repoFolderIcon(GITHUB_REPO)).toHaveCount(0);
   });
 
-  test("a project hosted elsewhere keeps the folder icon", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(toWorkspaceId(GITLAB_PROJECT, "main"));
+  test("a repo hosted elsewhere keeps the folder icon", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(toWorktreeId(GITLAB_REPO, "main"));
 
-    await expect(workspacePage.projectFolderIcon(GITLAB_PROJECT)).toBeVisible();
-    await expect(workspacePage.projectAvatar(GITLAB_PROJECT)).toHaveCount(0);
+    await expect(worktreePage.repoFolderIcon(GITLAB_REPO)).toBeVisible();
+    await expect(worktreePage.repoAvatar(GITLAB_REPO)).toHaveCount(0);
   });
 
-  test("a GitHub project whose avatar cannot be fetched falls back to the folder icon", async ({
+  test("a GitHub repo whose avatar cannot be fetched falls back to the folder icon", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(toWorkspaceId(UNREACHABLE_PROJECT, "main"));
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(toWorktreeId(UNREACHABLE_REPO, "main"));
 
-    // Positive anchor: the neighbouring GitHub project's avatar rendered, so
-    // the project list has loaded its avatar data.
-    await expect(workspacePage.projectAvatar(GITHUB_PROJECT)).toBeVisible();
-    await expect(workspacePage.projectFolderIcon(UNREACHABLE_PROJECT)).toBeVisible();
+    // Positive anchor: the neighbouring GitHub repo's avatar rendered, so
+    // the repo list has loaded its avatar data.
+    await expect(worktreePage.repoAvatar(GITHUB_REPO)).toBeVisible();
+    await expect(worktreePage.repoFolderIcon(UNREACHABLE_REPO)).toBeVisible();
     // The failed image is removed rather than left as a broken glyph.
-    await expect(workspacePage.projectAvatar(UNREACHABLE_PROJECT)).toHaveCount(0);
+    await expect(worktreePage.repoAvatar(UNREACHABLE_REPO)).toHaveCount(0);
   });
 
-  test("the cronjob project picker shows the avatar next to GitHub projects", async ({ page }) => {
+  test("the cronjob repo picker shows the avatar next to GitHub repos", async ({ page }) => {
     const cronjobs = new CronjobsDialog(page, server.url, TOKEN);
     await cronjobs.goto();
     await cronjobs.open();
-    await cronjobs.openProjectPicker();
+    await cronjobs.openRepoPicker();
 
-    await expect(cronjobs.projectAvatar(GITHUB_PROJECT)).toBeVisible();
-    // Positive anchor: the GitLab project's option rendered, without an avatar.
-    await expect(cronjobs.projectOption(GITLAB_PROJECT)).toBeVisible();
-    await expect(cronjobs.projectAvatar(GITLAB_PROJECT)).toHaveCount(0);
+    await expect(cronjobs.repoAvatar(GITHUB_REPO)).toBeVisible();
+    // Positive anchor: the GitLab repo's option rendered, without an avatar.
+    await expect(cronjobs.repoOption(GITLAB_REPO)).toBeVisible();
+    await expect(cronjobs.repoAvatar(GITLAB_REPO)).toHaveCount(0);
   });
 });

@@ -17,7 +17,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -31,10 +31,10 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-composer-stop-send-token";
-// One project per test, so a task one test leaves running (or queued)
+// One repo per test, so a task one test leaves running (or queued)
 // doesn't reach the next.
-const PROJECTS = ["stopsendidle", "stopsendrunning", "stopsendescape"];
-const [IDLE_WS, RUNNING_WS, ESCAPE_WS] = PROJECTS.map((p) => toWorkspaceId(p, "main"));
+const REPOS = ["stopsendidle", "stopsendrunning", "stopsendescape"];
+const [IDLE_WS, RUNNING_WS, ESCAPE_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
 // A 1x1 PNG, the smallest image the composer accepts as an attachment.
 const PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -49,7 +49,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: PROJECTS.map((name) => {
+    repos: REPOS.map((name) => {
       const repoDir = join(tmpHome, name);
       mkdirSync(repoDir, { recursive: true });
       return {

@@ -9,11 +9,11 @@
  * Architecture (mirrors the rest of the e2e suite):
  *   - REAL production `dist/start-server.mjs` boots against a fresh tmp
  *     `$HOME` with an on-disk git worktree. No tRPC mocking — the file
- *     read and the `workspace.fileChanges` subscription run through the
+ *     read and the `worktree.fileChanges` subscription run through the
  *     same pipelines production uses.
  *   - "External" changes are plain `writeFileSync` calls into the worktree
  *     (the exact scenario the server watcher exists for: agents,
- *     terminals, `git`, other editors), which the server's per-workspace
+ *     terminals, `git`, other editors), which the server's per-worktree
  *     `fs.watch` reports to the client.
  *
  * Delivery determinism for the negative ("don't clobber") test: we write
@@ -29,7 +29,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -42,7 +42,7 @@ import {
 } from "./helpers/server";
 import { FileTreesPage } from "./pages/FileTreesPage";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 // Wide viewport so `useIsDesktop()` reports true and the dockview Files
 // panel + viewer render the desktop layout (same reasoning as the other
@@ -60,7 +60,7 @@ const ORIGINAL = "ALPHA-ORIGINAL";
 let server: ServerHandle;
 let tmpHome: string;
 let repoPath: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -73,7 +73,7 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial"]);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -84,7 +84,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -107,12 +107,12 @@ test.beforeEach(() => {
 
 test.describe("Files view auto-refresh", () => {
   test("reloads an open file when it changes on disk and the buffer is clean", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const trees = new FileTreesPage(page, workspace);
+    const worktree = new WorktreePage(page, server.url, TOKEN);
+    const trees = new FileTreesPage(page, worktree);
     const viewer = new FileViewerPage(page);
 
-    await workspace.goto(workspaceId);
-    await workspace.waitForReady();
+    await worktree.goto(worktreeId);
+    await worktree.waitForReady();
 
     await trees.openFilesTab(DIR_PATH);
     await trees.expandFileTreeFolder(DIR_PATH, FILE_PATH);
@@ -128,12 +128,12 @@ test.describe("Files view auto-refresh", () => {
   });
 
   test("does not clobber unsaved edits when the file changes on disk", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const trees = new FileTreesPage(page, workspace);
+    const worktree = new WorktreePage(page, server.url, TOKEN);
+    const trees = new FileTreesPage(page, worktree);
     const viewer = new FileViewerPage(page);
 
-    await workspace.goto(workspaceId);
-    await workspace.waitForReady();
+    await worktree.goto(worktreeId);
+    await worktree.waitForReady();
 
     await trees.openFilesTab(DIR_PATH);
     await trees.expandFileTreeFolder(DIR_PATH, FILE_PATH);

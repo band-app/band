@@ -1,5 +1,5 @@
 /**
- * With BAND_LOCAL_HOST=off the New Workspace dialog does not offer the hub's
+ * With BAND_LOCAL_HOST=off the New Worktree dialog does not offer the hub's
  * own machine. Real hub, real `band-worker` processes, no mocking. The control
  * hub (local on) shows Local next to the worker.
  */
@@ -18,12 +18,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const TOKEN = "e2e-local-host-off-token";
-const PROJECT = "local-off-project";
+const REPO = "local-off-repo";
 const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
 
 interface Hub {
@@ -54,14 +54,14 @@ async function trpc<T>(url: string, procedure: string, body?: unknown): Promise<
 async function bootHub(localHost: "on" | "off", workerCount: number): Promise<Hub> {
   const home = createTmpHome();
   seedState(home, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        name: REPO,
+        path: `/tmp/fake/${REPO}`,
         defaultBranch: "main",
         worktrees: [
-          { branch: "main", path: `/tmp/fake/${PROJECT}` },
-          { branch: "feat", path: `/tmp/fake/${PROJECT}-feat` },
+          { branch: "main", path: `/tmp/fake/${REPO}` },
+          { branch: "feat", path: `/tmp/fake/${REPO}-feat` },
         ],
       },
     ],
@@ -121,26 +121,26 @@ test.afterAll(async () => {
   }
 });
 
-test("the host picker offers Local next to a worker when local workspaces are on", async ({
+test("the host picker offers Local next to a worker when local worktrees are on", async ({
   page,
 }) => {
   const hub = await bootHub("on", 1);
   resetClientState(hub.home);
-  const workspacePage = new WorkspacePage(page, hub.server.url, TOKEN);
-  await workspacePage.goto(`${PROJECT}-feat`);
-  await workspacePage.waitForReady();
-  await workspacePage.openNewWorkspaceDialog(PROJECT);
+  const worktreePage = new WorktreePage(page, hub.server.url, TOKEN);
+  await worktreePage.goto(`${REPO}-feat`);
+  await worktreePage.waitForReady();
+  await worktreePage.openNewWorktreeDialog(REPO);
   await expect
-    .poll(() => workspacePage.newWorkspaceHostOptionValues())
+    .poll(() => worktreePage.newWorktreeHostOptionValues())
     .toEqual(["local", ...hub.workerIds]);
 });
 
-test("the host picker does not offer Local when local workspaces are off", async ({ page }) => {
+test("the host picker does not offer Local when local worktrees are off", async ({ page }) => {
   const hub = await bootHub("off", 2);
   resetClientState(hub.home);
-  const workspacePage = new WorkspacePage(page, hub.server.url, TOKEN);
-  await workspacePage.goto(`${PROJECT}-feat`);
-  await workspacePage.waitForReady();
-  await workspacePage.openNewWorkspaceDialog(PROJECT);
-  await expect.poll(() => workspacePage.newWorkspaceHostOptionValues()).toEqual(hub.workerIds);
+  const worktreePage = new WorktreePage(page, hub.server.url, TOKEN);
+  await worktreePage.goto(`${REPO}-feat`);
+  await worktreePage.waitForReady();
+  await worktreePage.openNewWorktreeDialog(REPO);
+  await expect.poll(() => worktreePage.newWorktreeHostOptionValues()).toEqual(hub.workerIds);
 });

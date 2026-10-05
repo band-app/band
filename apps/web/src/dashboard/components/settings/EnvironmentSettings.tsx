@@ -2,9 +2,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button } 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
-import { useProjects } from "../../hooks/use-projects";
+import { useRepos } from "../../hooks/use-repos";
 
-type ProjectEnvironment = Awaited<ReturnType<typeof trpc.environment.forProject.query>>;
+type RepoEnvironment = Awaited<ReturnType<typeof trpc.environment.forRepo.query>>;
 
 function Summary({ label, value }: { label: string; value: string | undefined }) {
   if (!value) return null;
@@ -19,19 +19,19 @@ function Summary({ label, value }: { label: string; value: string | undefined })
 type ImageStatus = Awaited<ReturnType<typeof trpc.environment.imageStatus.query>>;
 
 /**
- * The project's environment image: the current one (what a runner boots), the
+ * The repo's environment image: the current one (what a runner boots), the
  * latest build with its status and log, and a button to build now. The status
  * refreshes every two seconds while a build runs.
  */
-function EnvironmentImage({ projectName }: { projectName: string }) {
+function EnvironmentImage({ repoName }: { repoName: string }) {
   const queryClient = useQueryClient();
-  const queryKey = ["environment.imageStatus", projectName];
+  const queryKey = ["environment.imageStatus", repoName];
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const { data } = useQuery<ImageStatus>({
     queryKey,
-    queryFn: () => trpc.environment.imageStatus.query({ projectName }),
+    queryFn: () => trpc.environment.imageStatus.query({ repoName }),
     refetchInterval: (query) => (query.state.data?.latest?.status === "building" ? 2000 : false),
   });
 
@@ -40,7 +40,7 @@ function EnvironmentImage({ projectName }: { projectName: string }) {
     setNotice(null);
     setStarting(true);
     try {
-      const started = await trpc.environment.build.mutate({ projectName });
+      const started = await trpc.environment.build.mutate({ repoName });
       if (started.cacheHit) setNotice("Cache hit: the image is already built.");
       else setNotice(null);
       await queryClient.invalidateQueries({ queryKey });
@@ -105,10 +105,10 @@ function EnvironmentImage({ projectName }: { projectName: string }) {
   );
 }
 
-function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
-  const { data, isLoading, error } = useQuery<ProjectEnvironment>({
-    queryKey: ["environment.forProject", projectName],
-    queryFn: () => trpc.environment.forProject.query({ projectName }),
+function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
+  const { data, isLoading, error } = useQuery<RepoEnvironment>({
+    queryKey: ["environment.forRepo", repoName],
+    queryFn: () => trpc.environment.forRepo.query({ repoName }),
   });
 
   if (isLoading) return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
@@ -121,7 +121,7 @@ function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
         className="px-4 py-3 text-xs text-muted-foreground"
         data-testid="settings__environment-none"
       >
-        No .band/environment.json in this project.
+        No .band/environment.json in this repo.
       </p>
     );
   }
@@ -186,7 +186,7 @@ function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
         </dl>
       ) : null}
 
-      {environment?.build ? <EnvironmentImage projectName={projectName} /> : null}
+      {environment?.build ? <EnvironmentImage repoName={repoName} /> : null}
 
       {data.hosts.length > 0 && environment?.requires ? (
         <div className="space-y-1">
@@ -221,38 +221,36 @@ function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
 
 /**
  * Rows for the Settings dialog's Environment section: one collapsed entry per
- * project that, when opened, shows the project's `.band/environment.json`
+ * repo that, when opened, shows the repo's `.band/environment.json`
  * parsed, its validation problems, which hosts meet its `requires` and, when it
  * has a `build`, its image with a button to build it. The file is read-only.
  * Edit it in the repository, or check it with `band env validate`.
  */
 export function EnvironmentSettings() {
-  const { projects } = useProjects();
+  const { repos } = useRepos();
   const [open, setOpen] = useState<string>("");
 
-  if (projects.length === 0) {
-    return <p className="px-4 py-3 text-sm text-muted-foreground">No projects yet.</p>;
+  if (repos.length === 0) {
+    return <p className="px-4 py-3 text-sm text-muted-foreground">No repos yet.</p>;
   }
 
   return (
     <Accordion type="single" collapsible value={open} onValueChange={setOpen}>
-      {projects.map((project) => (
+      {repos.map((repo) => (
         <AccordionItem
-          key={project.name}
-          value={project.name}
+          key={repo.name}
+          value={repo.name}
           className="border-b-0"
-          data-testid="settings__environment-project"
+          data-testid="settings__environment-repo"
         >
           <AccordionTrigger
             className="px-4 py-3 hover:no-underline"
-            data-testid={`settings__environment-trigger-${project.name}`}
+            data-testid={`settings__environment-trigger-${repo.name}`}
           >
-            <span className="min-w-0 truncate text-sm font-medium">{project.name}</span>
+            <span className="min-w-0 truncate text-sm font-medium">{repo.name}</span>
           </AccordionTrigger>
           <AccordionContent className="pb-0">
-            {open === project.name ? (
-              <ProjectEnvironmentDetails projectName={project.name} />
-            ) : null}
+            {open === repo.name ? <RepoEnvironmentDetails repoName={repo.name} /> : null}
           </AccordionContent>
         </AccordionItem>
       ))}

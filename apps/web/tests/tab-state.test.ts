@@ -12,7 +12,7 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 // Minimal renderHook utility
 // ---------------------------------------------------------------------------
-function renderHook(workspaceId: string): {
+function renderHook(worktreeId: string): {
   result: { current: UseTabStateReturn };
   unmount: () => void;
 } {
@@ -20,7 +20,7 @@ function renderHook(workspaceId: string): {
   let root: Root;
 
   function TestComponent() {
-    result.current = useTabState(workspaceId);
+    result.current = useTabState(worktreeId);
     return null;
   }
 
@@ -311,7 +311,7 @@ describe("useTabState – language override", () => {
     // Issue: the language picker didn't take effect on untitled tabs.
     // The storage layer keys overrides by filePath string, so the
     // synthetic `untitled:N` key has to round-trip the same as a
-    // regular workspace path. This test pins that down so the
+    // regular worktree path. This test pins that down so the
     // storage contract can't regress while the rest of the picker
     // wiring evolves.
     const { result, unmount } = renderHook("ws-1");
@@ -393,7 +393,7 @@ describe("useTabState – language override", () => {
   // available seam where this contract can be pinned in isolation.
   // The minimal `Parent → Child` rig below is the smallest reproduction
   // of the bug — reproducing it at the full-component level would
-  // require mounting CodeBrowserView with its workspace/adapter/dockview
+  // require mounting CodeBrowserView with its worktree/adapter/dockview
   // dependencies, well past the value of the regression guard. Move
   // this test (and only this test) if/when CodeBrowserView grows its
   // own integration-style suite.
@@ -517,7 +517,7 @@ describe("useTabState – localStorage persistence", () => {
     u2();
   });
 
-  it("uses the correct localStorage key per workspace", () => {
+  it("uses the correct localStorage key per worktree", () => {
     const { result: r1, unmount: u1 } = renderHook("ws-1");
     act(() => {
       r1.current.update("foo.ts", { editedContent: "modified" });
@@ -535,10 +535,10 @@ describe("useTabState – localStorage persistence", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Workspace isolation
+// Worktree isolation
 // ---------------------------------------------------------------------------
-describe("useTabState – workspace isolation", () => {
-  it("different workspaces have independent stores", () => {
+describe("useTabState – worktree isolation", () => {
+  it("different worktrees have independent stores", () => {
     const { result: r1, unmount: u1 } = renderHook("ws-1");
     act(() => {
       r1.current.update("foo.ts", { editedContent: "ws1 content" });

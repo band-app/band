@@ -21,12 +21,12 @@ import {
 } from "../lib/git-history-graph";
 import { trpc } from "../lib/trpc-client";
 
-// The Commits section at the bottom of the Changes tab: the workspace's
+// The Commits section at the bottom of the Changes tab: the worktree's
 // HEAD history as a swimlane graph (after Orca's source-control sidebar),
 // with ref pills, and commits that expand to their changed files. A file
 // click opens that file's diff for the commit in the center dockview.
 
-type HistoryPage = Awaited<ReturnType<typeof trpc.workspace.getCommitHistory.query>>;
+type HistoryPage = Awaited<ReturnType<typeof trpc.worktree.getCommitHistory.query>>;
 type HistoryCommit = HistoryPage["commits"][number];
 type CommitRef = HistoryCommit["refs"][number];
 
@@ -301,11 +301,11 @@ function LaneContinuation({ lanes }: { lanes: GraphLane[] }) {
 }
 
 function CommitFiles({
-  workspaceId,
+  worktreeId,
   row,
   onOpenFile,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   row: GraphRow<HistoryCommit>;
   onOpenFile: (sha: string, path: string, pinned: boolean) => void;
 }) {
@@ -314,8 +314,8 @@ function CommitFiles({
   const indent = { paddingLeft: 4 + LANE_WIDTH * (Math.max(outputSwimlanes.length, 1) + 1) + 6 };
   // A commit's files never change, so the query never goes stale.
   const detailsQuery = useQuery({
-    queryKey: ["commitDetails", workspaceId, commit.sha],
-    queryFn: () => trpc.workspace.getCommitDetails.query({ workspaceId, sha: commit.sha }),
+    queryKey: ["commitDetails", worktreeId, commit.sha],
+    queryFn: () => trpc.worktree.getCommitDetails.query({ worktreeId, sha: commit.sha }),
     staleTime: Number.POSITIVE_INFINITY,
   });
   const meta = [commit.author, dateFormatter.format(commit.ts * 1000), commit.sha.slice(0, 7)].join(
@@ -378,11 +378,11 @@ function CommitFiles({
 // ---------------------------------------------------------------------------
 
 export function CommitsPanel({
-  workspaceId,
+  worktreeId,
   visible,
   onOpenFile,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   /** False while the sidepanel is collapsed: stops the signature poll. */
   visible: boolean;
   onOpenFile: (sha: string, path: string, pinned: boolean) => void;
@@ -403,9 +403,9 @@ export function CommitsPanel({
   }, []);
 
   const historyQuery = useInfiniteQuery({
-    queryKey: ["commitHistory", workspaceId],
+    queryKey: ["commitHistory", worktreeId],
     queryFn: ({ pageParam }) =>
-      trpc.workspace.getCommitHistory.query({ workspaceId, skip: pageParam, limit: PAGE_SIZE }),
+      trpc.worktree.getCommitHistory.query({ worktreeId, skip: pageParam, limit: PAGE_SIZE }),
     initialPageParam: 0,
     getNextPageParam: (last: HistoryPage, pages: HistoryPage[]) =>
       last.hasMore ? pages.reduce((n, p) => n + p.commits.length, 0) : undefined,
@@ -418,8 +418,8 @@ export function CommitsPanel({
   // reset, fetch, new branch or tag). Polling the signature is one cheap
   // `git show-ref` instead of a full `git log` every tick.
   const signatureQuery = useQuery({
-    queryKey: ["commitHistorySignature", workspaceId],
-    queryFn: () => trpc.workspace.getCommitHistorySignature.query({ workspaceId }),
+    queryKey: ["commitHistorySignature", worktreeId],
+    queryFn: () => trpc.worktree.getCommitHistorySignature.query({ worktreeId }),
     enabled: active,
     refetchInterval: active ? SIGNATURE_POLL_MS : false,
   });
@@ -433,11 +433,11 @@ export function CommitsPanel({
   const { refetch: refetchHistory } = historyQuery;
   const reloadHistory = useCallback(() => {
     queryClient.setQueryData<InfiniteData<HistoryPage, number>>(
-      ["commitHistory", workspaceId],
+      ["commitHistory", worktreeId],
       (data) => data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
     );
     return refetchHistory();
-  }, [queryClient, workspaceId, refetchHistory]);
+  }, [queryClient, worktreeId, refetchHistory]);
   const { refetch: refetchSignature } = signatureQuery;
   // Reload once per new signature, so a failing reload is not retried in a
   // loop; the next ref change or the Refresh button tries again.
@@ -585,7 +585,7 @@ export function CommitsPanel({
                   <div key={row.commit.sha}>
                     <CommitRow row={row} expanded={isExpanded} onToggle={toggleExpanded} />
                     {isExpanded && (
-                      <CommitFiles workspaceId={workspaceId} row={row} onOpenFile={onOpenFile} />
+                      <CommitFiles worktreeId={worktreeId} row={row} onOpenFile={onOpenFile} />
                     )}
                   </div>
                 );

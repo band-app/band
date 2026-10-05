@@ -30,13 +30,13 @@ import {
   type ChangeSection,
   ChangesFileTree,
   type ChangesTreeAction,
-  type WorkspaceChanges,
+  type WorktreeChanges,
 } from "@/dashboard";
 import {
   CHANGE_SECTIONS,
-  invalidateWorkspaceChanges,
+  invalidateWorktreeChanges,
   SECTION_LABELS,
-} from "../hooks/useWorkspaceChanges";
+} from "../hooks/useWorktreeChanges";
 import { clientStorage } from "../lib/client-state";
 import { trpc } from "../lib/trpc-client";
 
@@ -75,25 +75,25 @@ interface PendingDiscard {
 }
 
 export interface ChangesSectionsProps {
-  workspaceId: string;
-  changes: WorkspaceChanges | undefined;
+  worktreeId: string;
+  changes: WorktreeChanges | undefined;
   onOpen: (section: ChangeSection, entry: ChangeEntry, pinned: boolean) => void;
   /** "View all": open every file of a section in one diff tab. Hidden when unset. */
   onViewAll?: (section: ChangeSection) => void;
   /** Offer stage / unstage / discard. The mobile sheet leaves them off. */
   editable?: boolean;
   activeFile?: string | null;
-  workspacePath?: string;
+  worktreePath?: string;
 }
 
 export function ChangesSections({
-  workspaceId,
+  worktreeId,
   changes,
   onOpen,
   onViewAll,
   editable = false,
   activeFile,
-  workspacePath,
+  worktreePath,
 }: ChangesSectionsProps) {
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState<Set<ChangeSection>>(() => readCollapsed());
@@ -119,30 +119,30 @@ export function ChangesSections({
       } catch (err) {
         setError(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
-        await invalidateWorkspaceChanges(queryClient, workspaceId);
+        await invalidateWorktreeChanges(queryClient, worktreeId);
       }
     },
-    [queryClient, workspaceId],
+    [queryClient, worktreeId],
   );
 
   const stage = useCallback(
     (entries: ChangeEntry[]) =>
       run("Stage", () =>
-        trpc.workspace.stageFiles.mutate({ workspaceId, paths: entries.map((e) => e.path) }),
+        trpc.worktree.stageFiles.mutate({ worktreeId, paths: entries.map((e) => e.path) }),
       ),
-    [run, workspaceId],
+    [run, worktreeId],
   );
 
   const unstage = useCallback(
     (entries: ChangeEntry[]) =>
       run("Unstage", () =>
-        trpc.workspace.unstageFiles.mutate({
-          workspaceId,
+        trpc.worktree.unstageFiles.mutate({
+          worktreeId,
           // A staged rename is two index entries; unstage both sides.
           paths: entries.flatMap((e) => (e.oldPath ? [e.path, e.oldPath] : [e.path])),
         }),
       ),
-    [run, workspaceId],
+    [run, worktreeId],
   );
 
   const confirmDiscard = useCallback(async () => {
@@ -150,8 +150,8 @@ export function ChangesSections({
     setDiscarding(true);
     const { section, entries } = pendingDiscard;
     await run("Discard", () =>
-      trpc.workspace.discardChanges.mutate({
-        workspaceId,
+      trpc.worktree.discardChanges.mutate({
+        worktreeId,
         section,
         paths: entries.flatMap((e) =>
           section === "staged" && e.oldPath ? [e.path, e.oldPath] : [e.path],
@@ -160,7 +160,7 @@ export function ChangesSections({
     );
     setDiscarding(false);
     setPendingDiscard(null);
-  }, [pendingDiscard, run, workspaceId]);
+  }, [pendingDiscard, run, worktreeId]);
 
   const actionsBySection = useMemo(() => {
     const discard = (section: DiscardSection): ChangesTreeAction => ({
@@ -251,7 +251,7 @@ export function ChangesSections({
                   actions={actions}
                   onSelectFile={(entry) => onOpen(section, entry, false)}
                   onSelectFilePinned={(entry) => onOpen(section, entry, true)}
-                  workspacePath={workspacePath}
+                  worktreePath={worktreePath}
                   activeFile={activeFile}
                 />
               )}
@@ -421,7 +421,7 @@ export function discardWarning(section: DiscardSection): string {
   }
 }
 
-function branchUnavailableMessage(changes: WorkspaceChanges): string {
+function branchUnavailableMessage(changes: WorktreeChanges): string {
   switch (changes.branchStatus) {
     case "invalid-base":
       return `Can't compare with ${changes.compareBranch}: the branch doesn't exist.`;

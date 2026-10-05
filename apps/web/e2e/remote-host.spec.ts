@@ -1,10 +1,10 @@
 /**
- * A worker joins and leaves the Hosts screen live, and a workspace can be
- * created on it from the New Workspace dialog (plan step 2.3).
+ * A worker joins and leaves the Hosts screen live, and a worktree can be
+ * created on it from the New Worktree dialog (plan step 2.3).
  *
  * The test follows the user's path: "Add worker" prints the bootstrap token and
  * command, the real `band-worker` binary runs that command's environment, and
- * the host row turns online without a reload. The outcome of the workspace
+ * the host row turns online without a reload. The outcome of the worktree
  * creation is read back from the hub, which records the host on the worktree.
  * Everything runs in temp dirs, never the real `~/.band`.
  */
@@ -26,10 +26,10 @@ import {
 import { trpcQuery } from "./helpers/trpc";
 import { parseWorkerCommand, startWorker, type WorkerHandle } from "./helpers/worker";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-remote-host-token";
-const PROJECT = "remote-proj";
+const REPO = "remote-proj";
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -61,13 +61,13 @@ let hubRepo: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  hubRepo = join(tmpDir("band-e2e-hubrepo-"), PROJECT);
+  hubRepo = join(tmpDir("band-e2e-hubrepo-"), REPO);
   makeRepo(hubRepo);
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: hubRepo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: hubRepo }],
@@ -100,7 +100,7 @@ test("a worker turns its host row online and offline", async ({ page }) => {
 
   // The worker runs the command the screen printed, with its own temp dirs.
   const root = tmpDir("band-e2e-root-");
-  makeRepo(join(root, PROJECT));
+  makeRepo(join(root, REPO));
   worker = startWorker({
     env: {
       BAND_HUB_URL: env.BAND_HUB_URL,
@@ -119,29 +119,28 @@ test("a worker turns its host row online and offline", async ({ page }) => {
   await expect(row).toHaveAttribute("data-status", "offline", { timeout: 20_000 });
 });
 
-test("creates a workspace on the worker from the New Workspace dialog", async ({ page }) => {
+test("creates a worktree on the worker from the New Worktree dialog", async ({ page }) => {
   const { hostId, root, handle } = await joinWorker();
   worker = handle;
 
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(`${PROJECT}-main`);
-  await workspacePage.waitForReady();
-  await workspacePage.createWorkspaceOnHost({
-    project: PROJECT,
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(`${REPO}-main`);
+  await worktreePage.waitForReady();
+  await worktreePage.createWorktreeOnHost({
+    repo: REPO,
     hostId,
-    hostProjectPath: join(root, PROJECT),
+    hostRepoPath: join(root, REPO),
     branch: "on-worker",
   });
 
   await expect
     .poll(
       async () => {
-        const { projects } = await trpcQuery<{
-          projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
-        }>(server.url, TOKEN, "projects.list");
-        return projects
-          .find((p) => p.name === PROJECT)
-          ?.worktrees.find((w) => w.name === "on-worker")?.hostId;
+        const { repos } = await trpcQuery<{
+          repos: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+        }>(server.url, TOKEN, "repos.list");
+        return repos.find((p) => p.name === REPO)?.worktrees.find((w) => w.name === "on-worker")
+          ?.hostId;
       },
       { timeout: 20_000 },
     )
@@ -171,32 +170,32 @@ test("the Hosts screen shows what the worker offers and removes it once offline"
   await expect(settingsPage.hostRow(hostId)).toHaveCount(0);
 });
 
-test("the New Workspace dialog lists the worker's roots and explains a bad path", async ({
+test("the New Worktree dialog lists the worker's roots and explains a bad path", async ({
   page,
 }) => {
   const { hostId, root, handle } = await joinWorker();
   worker = handle;
 
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(`${PROJECT}-main`);
-  await workspacePage.waitForReady();
-  await workspacePage.fillNewWorkspaceOnHost({
-    project: PROJECT,
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(`${REPO}-main`);
+  await worktreePage.waitForReady();
+  await worktreePage.fillNewWorktreeOnHost({
+    repo: REPO,
     hostId,
-    hostProjectPath: "~/not-here",
+    hostRepoPath: "~/not-here",
     branch: "bad-path",
   });
-  await expect(workspacePage.newWorkspaceHostRoots).toContainText(root);
+  await expect(worktreePage.newWorktreeHostRoots).toContainText(root);
 
   // `~` is the worker's home, which is not under its root, so the error names the root.
-  await workspacePage.submitNewWorkspace();
-  await expect(workspacePage.newWorkspaceError).toContainText("not-here");
-  await expect(workspacePage.newWorkspaceError).toContainText(root);
+  await worktreePage.submitNewWorktree();
+  await expect(worktreePage.newWorktreeError).toContainText("not-here");
+  await expect(worktreePage.newWorktreeError).toContainText(root);
 
   // A relative path is refused with the instruction to use an absolute one.
-  await workspacePage.newWorkspaceHostPathInput.fill("proj");
-  await workspacePage.submitNewWorkspace();
-  await expect(workspacePage.newWorkspaceError).toContainText("absolute path");
+  await worktreePage.newWorktreeHostPathInput.fill("proj");
+  await worktreePage.submitNewWorktree();
+  await expect(worktreePage.newWorktreeError).toContainText("absolute path");
 });
 
 /** Issues a bootstrap token through the API and starts a worker with it. */
@@ -210,7 +209,7 @@ async function joinWorker() {
   const { result } = (await res.json()) as { result: { data: { token: string; hostId: string } } };
   const { token, hostId } = result.data;
   const root = tmpDir("band-e2e-root-");
-  makeRepo(join(root, PROJECT));
+  makeRepo(join(root, REPO));
   const handle = startWorker({
     env: { BAND_HUB_URL: server.url, BAND_BOOTSTRAP_TOKEN: token, BAND_WORKER_ID: hostId },
     root,

@@ -12,24 +12,24 @@ export interface ProvisioningRequest {
 const STATUS_TEXT: Record<ProvisioningRequest["status"], string> = {
   pending: "Waiting for a host",
   leased: "Starting a host",
-  fulfilled: "Setting up the workspace",
+  fulfilled: "Setting up the worktree",
   failed: "Failed",
   cancelled: "Cancelled",
 };
 
 /**
- * A workspace that has no host yet (plan step 3.3): spinning while the hub
+ * A worktree that has no host yet (plan step 3.3): spinning while the hub
  * waits for a runner, or red with the reason when it gave up. The button
  * cancels the wait, or dismisses the failure.
  */
-export function ProvisioningWorkspaceCard({ request }: { request: ProvisioningRequest }) {
+export function ProvisioningWorktreeCard({ request }: { request: ProvisioningRequest }) {
   const cancel = useCancelHostRequest();
   const failed = request.status === "failed";
   const labels = Object.entries(request.labels).map(([k, v]) => `${k}=${v}`);
   return (
     <div
       className="flex items-start gap-2 rounded-md px-3 py-2 text-[13px]"
-      data-testid="provisioning-workspace__card"
+      data-testid="provisioning-worktree__card"
       data-status={request.status}
       data-branch={request.branch}
     >
@@ -42,7 +42,7 @@ export function ProvisioningWorkspaceCard({ request }: { request: ProvisioningRe
         <div className="truncate font-medium">{request.branch}</div>
         <div
           className={failed ? "text-destructive" : "text-foreground/60"}
-          data-testid="provisioning-workspace__status"
+          data-testid="provisioning-worktree__status"
         >
           {STATUS_TEXT[request.status]}
           {labels.length > 0 && !failed ? ` (${labels.join(", ")})` : ""}
@@ -50,7 +50,7 @@ export function ProvisioningWorkspaceCard({ request }: { request: ProvisioningRe
         {failed && request.error && (
           <div
             className="break-words text-xs text-destructive"
-            data-testid="provisioning-workspace__error"
+            data-testid="provisioning-worktree__error"
           >
             {request.error}
           </div>
@@ -60,7 +60,7 @@ export function ProvisioningWorkspaceCard({ request }: { request: ProvisioningRe
         type="button"
         className="shrink-0 rounded p-1 text-foreground/60 hover:bg-primary/10 hover:text-foreground"
         aria-label={failed ? `Dismiss ${request.branch}` : `Cancel ${request.branch}`}
-        data-testid="provisioning-workspace__cancel"
+        data-testid="provisioning-worktree__cancel"
         disabled={cancel.isPending}
         onClick={() => cancel.mutate(request.id)}
       >

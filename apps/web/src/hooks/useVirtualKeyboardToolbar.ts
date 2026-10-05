@@ -29,7 +29,7 @@ export const TERMINAL_TOOLBAR_HEIGHT_PX = 49;
  *   reserve at the bottom so it isn't hidden beneath the floating toolbar.
  *   Equal to the toolbar height when `enabled`, else 0. The toolbar itself
  *   is `position: fixed`, so without this reservation a panel that reaches
- *   the bottom of the visual viewport (the common iOS layout — the workspace
+ *   the bottom of the visual viewport (the common iOS layout — the worktree
  *   already shrinks to `visualViewport.height`) would render its bottom rows
  *   underneath the bar, hiding the prompt/cursor while typing.
  *

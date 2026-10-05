@@ -72,9 +72,9 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.965 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  /* Project-list sidebar surface. On light theme it sits a touch DARKER than
-     the white --background so the project list reads as a distinct panel from
-     the workspace layout. */
+  /* Repo-list sidebar surface. On light theme it sits a touch DARKER than
+     the white --background so the repo list reads as a distinct panel from
+     the worktree layout. */
   --sidebar: oklch(0.962 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   /* Clickable text in code, e.g. a Cmd/Ctrl+hover go-to-definition link. */
@@ -116,9 +116,9 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.922 0 0);
-  /* Project-list sidebar surface. On dark theme it sits a touch LIGHTER than
-     the #1e1e1e --background so the project list reads as a distinct panel
-     from the workspace layout (mirrors the VS Code editor/sidebar contrast). */
+  /* Repo-list sidebar surface. On dark theme it sits a touch LIGHTER than
+     the #1e1e1e --background so the repo list reads as a distinct panel
+     from the worktree layout (mirrors the VS Code editor/sidebar contrast). */
   --sidebar: #252526;
   --destructive: oklch(0.704 0.191 22.216);
   --link: oklch(0.707 0.165 254.624);
@@ -358,10 +358,10 @@ html[data-translucent-sidebar] {
  * Paint retention for the CDP screencast experiment. Chromium stops painting
  * a <webview> guest inside a display:none, visibility:hidden or
  * content-visibility:hidden subtree, which is how inactive dockview tabs and
- * hidden workspaces are hidden, so a remote viewer of that tab gets no
+ * hidden worktrees are hidden, so a remote viewer of that tab gets no
  * frames. A hidden browser pane that must keep painting carries
  * `data-band-browser-paint-retained` (see `BrowserPanel.tsx`). Then:
- *   - its workspace entry keeps `visibility: hidden` but drops the
+ *   - its worktree entry keeps `visibility: hidden` but drops the
  *     `content-visibility` skip, which no descendant can override;
  *   - its dockview overlay is laid out again (dockview writes an inline
  *     `display: none`) but stays `visibility: hidden`;
@@ -369,7 +369,7 @@ html[data-translucent-sidebar] {
  *     without pointer events, so the page paints but nothing shows.
  * The pane root is `inert` while hidden, so its page can't take focus.
  */
-.band-workspace-entry:has([data-band-browser-paint-retained]) {
+.band-worktree-entry:has([data-band-browser-paint-retained]) {
   /* biome-ignore lint/complexity/noImportantStyles: must beat the entry's inline content-visibility. */
   content-visibility: visible !important;
 }

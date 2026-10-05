@@ -34,7 +34,7 @@ import {
   noteTypingLatencyOutput,
   registerTypingLatencyTerminal,
 } from "./terminal-typing-latency";
-import { isWorkspaceColdParked, subscribeWorkspaceColdPark } from "./workspace-cold-park";
+import { isWorktreeColdParked, subscribeWorktreeColdPark } from "./worktree-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 
 // ---------------------------------------------------------------------------
@@ -44,10 +44,10 @@ import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 // entry, `open()`ed into a persistent wrapper <div>. That wrapper is *moved*
 // between the visible panel container (`attach`) and a shared off-screen parking
 // container (`detach`, see `terminal-parking.ts`) — it is never disposed on a
-// workspace/tab switch and its React subtree owning it can mount/unmount freely.
+// worktree/tab switch and its React subtree owning it can mount/unmount freely.
 //
 // This replaces the old model where `TerminalPanel` owned the xterm and
-// `MultiWorkspacePanelHost` hid inactive terminals in place under
+// `MultiWorktreePanelHost` hid inactive terminals in place under
 // `content-visibility: hidden`, which dropped the WebGL backing store and
 // produced garbled frames on switch-back that only a manual resize fixed
 // (band-app/band#615). Parking keeps the surface in a normal-visibility,
@@ -173,8 +173,8 @@ const MAX_LAYOUT_FRAMES = 5;
 
 // A switched-away terminal is only PARKED (its wrapper moved off-screen, socket
 // + buffer intact) and is reused on return (band-app/band#617). Terminals are
-// disposed only when: the pane is closed, the workspace is deleted
-// (`reconcileTerminalWorkspaces`), or the renderer policy in
+// disposed only when: the pane is closed, the worktree is deleted
+// (`reconcileTerminalWorktrees`), or the renderer policy in
 // `terminal-park-policy.ts` cold-parks a terminal that has been hidden long
 // enough (see `runParkingPass`). A cold-parked terminal's PTY survives on the
 // server; revealing it creates a fresh entry that reconnects and replays.
@@ -182,8 +182,8 @@ const MAX_LAYOUT_FRAMES = 5;
 // WebGL contexts: Chromium caps live contexts per page (16 by default) and
 // drops the oldest when a new one is created. Each warm terminal keeps its
 // context while parked, and the policy's warm set is larger than 16: up to 6
-// hidden terminals in each of 4 warm hidden workspaces plus the active
-// workspace's, and more during the 30 s grace window. The desktop app raises
+// hidden terminals in each of 4 warm hidden worktrees plus the active
+// worktree's, and more during the 30 s grace window. The desktop app raises
 // the cap to 128 (`max-active-webgl-contexts` in `apps/desktop/src/main/
 // index.ts`); in a plain browser a large working set does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
 // parked terminal is only marked suspect and rebuilds on its next `attach`, and
@@ -199,7 +199,7 @@ export interface PaneMetadata {
 }
 
 export interface CreateOptions {
-  workspaceId: string;
+  worktreeId: string;
   paneMetadata?: PaneMetadata;
   /** WebGL renderer preference, snapshotted at create time. */
   useWebGL: boolean;
@@ -235,7 +235,7 @@ const INITIAL_STATE: TerminalUiState = {
 
 export interface TerminalCacheEntry {
   readonly terminalId: string;
-  readonly workspaceId: string;
+  readonly worktreeId: string;
   /** Live xterm instance, or null until the async addon load finishes. */
   readonly getTerminal: () => Terminal | null;
 
@@ -248,7 +248,7 @@ export interface TerminalCacheEntry {
    *  while attached. */
   getHiddenSince(): number | null;
   /** Monotonic attach counter; breaks hidden-time ties between terminals
-   *  hidden in the same pass (a workspace switch hides them all at once). */
+   *  hidden in the same pass (a worktree switch hides them all at once). */
   getActivatedSeq(): number;
   /** True while attached to a live (visible) container — never disposed by
    *  the parking policy. */
@@ -305,7 +305,7 @@ function getCache(): Map<string, TerminalCacheEntry> {
 // ---------------------------------------------------------------------------
 
 function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntry {
-  const { workspaceId, paneMetadata, useWebGL, autoFocus } = opts;
+  const { worktreeId, paneMetadata, useWebGL, autoFocus } = opts;
 
   // Persistent wrapper the xterm opens into. Created synchronously so `attach`
   // can move it into the DOM before the async addon load resolves. Fills its
@@ -317,7 +317,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   // surface whether it's attached to a live panel or parked off-screen (the
   // panel-host-scoped surface probes can't see a parked wrapper).
   wrapper.dataset.terminalId = terminalId;
-  wrapper.dataset.workspaceId = workspaceId;
+  wrapper.dataset.worktreeId = worktreeId;
   wrapper.style.position = "absolute";
   wrapper.style.inset = "0";
   wrapper.style.overflow = "hidden";
@@ -473,7 +473,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     const fileLinkProviderDisposable = term.registerLinkProvider(
       createTerminalFileLinkProvider(term, (filename) => {
         window.dispatchEvent(
-          new CustomEvent("band:open-file", { detail: { filename, workspaceId } }),
+          new CustomEvent("band:open-file", { detail: { filename, worktreeId } }),
         );
       }),
     );
@@ -534,7 +534,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Custom key bindings (sticky-Ctrl, Cmd+F, Shift+Enter, Alt+Arrow) ---
     term.attachCustomKeyEventHandler((e) => {
-      // Ctrl+Tab / Ctrl+Shift+Tab cycle center tabs (WorkspaceCenterDockview's
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle center tabs (WorktreeCenterDockview's
       // window handler). Never send them to the shell as a Tab.
       if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) return false;
       if (e.type === "keydown") {
@@ -672,7 +672,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     wrapper.addEventListener("touchcancel", onTapCancel, { passive: true });
 
     // --- WebSocket with reconnect + heartbeat ---
-    const wsUrl = `${hubWsUrl("/terminal")}?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`;
+    const wsUrl = `${hubWsUrl("/terminal")}?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${encodeURIComponent(terminalId)}`;
 
     let intentionalClose = false;
     // Shell exited (close 1000) or fatal server error (≥4000): the terminal is
@@ -813,7 +813,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         didConnectOnce = true;
 
         if (dims && autoFocusPending && !isReconnect) {
-          // Leave focus in an open dialog (Quick Open, the workspace picker)
+          // Leave focus in an open dialog (Quick Open, the worktree picker)
           // the user moved to while the socket connected. Its focus trap
           // would pull focus back with the query selected, and the next
           // keystroke would replace everything typed so far.
@@ -1168,7 +1168,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // stale/unchanged-dimension frame can't survive (mirrors superset).
     //
     // The fit is skipped when the live box has the same pixel size as at the
-    // last fit and the surface wasn't rebuilt, which is the common workspace
+    // last fit and the surface wasn't rebuilt, which is the common worktree
     // switch-back (orca's `pane-reveal-fit.ts`). A reattached WebGL surface's
     // cell metrics can briefly differ, so a fit there could propose a grid one
     // column off, reflow the buffer and snap back, and xterm's rewrap isn't a
@@ -1267,7 +1267,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   // -------------------------------------------------------------------------
   const publicApi: TerminalCacheEntry = {
     terminalId,
-    workspaceId,
+    worktreeId,
     getTerminal: () => terminal,
 
     attach(container, attachOpts) {
@@ -1451,17 +1451,17 @@ export function getOrCreateTerminal(terminalId: string, opts: CreateOptions): Te
 // Renderer parking policy (orca's hidden-view parking, see
 // `terminal-park-policy.ts`). Two levels, evaluated in one pass:
 //
-//  1. Per workspace: every terminal of a cold-parked workspace is disposed.
-//     The workspace-level decision (30 s delay, 4 most recently hidden warm for
+//  1. Per worktree: every terminal of a cold-parked worktree is disposed.
+//     The worktree-level decision (30 s delay, 4 most recently hidden warm for
 //     5 minutes, the most recently left warm indefinitely) is shared with the
-//     other heavy panes and lives in `workspace-cold-park.ts`.
-//  2. Per terminal tab, inside each workspace: a tab whose panes have all been
+//     other heavy panes and lives in `worktree-cold-park.ts`.
+//  2. Per terminal tab, inside each worktree: a tab whose panes have all been
 //     detached for 30 s becomes a candidate; the 6 most recently hidden tabs
 //     stay warm for 5 minutes, the most recently hidden one indefinitely. A
 //     split tab's panes are parked or kept together.
 //
 // An attached (visible) terminal is never disposed. The pass re-runs on every
-// attach/detach/create and whenever the cold workspace set changes, and
+// attach/detach/create and whenever the cold worktree set changes, and
 // otherwise sleeps until the next per-terminal deadline.
 // ---------------------------------------------------------------------------
 
@@ -1477,7 +1477,7 @@ function getParkState(): ParkState {
   const store = globalThis as unknown as { [PARK_STATE_KEY]?: ParkState };
   if (!store[PARK_STATE_KEY]) {
     store[PARK_STATE_KEY] = { activationSeq: 0, timer: null, passQueued: false };
-    subscribeWorkspaceColdPark(scheduleParkingPass);
+    subscribeWorktreeColdPark(scheduleParkingPass);
   }
   return store[PARK_STATE_KEY];
 }
@@ -1488,7 +1488,7 @@ function nextActivationSeq(): number {
   return state.activationSeq;
 }
 
-/** Run the pass in a microtask. A workspace switch detaches several terminals
+/** Run the pass in a microtask. A worktree switch detaches several terminals
  *  in one React commit; batching them keeps it to one pass. The pass must not
  *  run synchronously inside `detach` anyway: it can dispose entries, and
  *  `detach` is called from React effect cleanups. */
@@ -1510,21 +1510,21 @@ function runParkingPass(): void {
   }
   const nowMs = Date.now();
 
-  const byWorkspace = new Map<string, TerminalCacheEntry[]>();
+  const byWorktree = new Map<string, TerminalCacheEntry[]>();
   for (const entry of getCache().values()) {
-    const list = byWorkspace.get(entry.workspaceId);
+    const list = byWorktree.get(entry.worktreeId);
     if (list) list.push(entry);
-    else byWorkspace.set(entry.workspaceId, [entry]);
+    else byWorktree.set(entry.worktreeId, [entry]);
   }
 
   let nextDeadline = Number.POSITIVE_INFINITY;
-  for (const [workspaceId, entries] of byWorkspace) {
+  for (const [worktreeId, entries] of byWorktree) {
     let remaining = entries;
-    if (isWorkspaceColdParked(workspaceId)) {
-      // Dispose every detached terminal of a cold workspace, except entries
-      // that were never attached: revealing a cold workspace creates fresh
+    if (isWorktreeColdParked(worktreeId)) {
+      // Dispose every detached terminal of a cold worktree, except entries
+      // that were never attached: revealing a cold worktree creates fresh
       // entries a moment before their attach effect runs, and this pass can
-      // land in between while the workspace is still marked cold. Those fall
+      // land in between while the worktree is still marked cold. Those fall
       // through to the per-tab policy below instead.
       remaining = [];
       for (const entry of entries) {
@@ -1586,7 +1586,7 @@ function runParkingPass(): void {
 }
 
 /** Intentional close: dispose the xterm + socket + wrapper and drop the entry.
- *  Call on pane close / workspace deletion / cold park — NOT on a plain React
+ *  Call on pane close / worktree deletion / cold park — NOT on a plain React
  *  unmount. */
 export function disposeTerminal(terminalId: string): void {
   const cache = getCache();
@@ -1596,18 +1596,18 @@ export function disposeTerminal(terminalId: string): void {
   entry._destroy();
 }
 
-/** Dispose cached terminals whose workspace is no longer valid (deleted /
- *  worktree removed). Driven by the projects query in `MultiWorkspacePanelHost`,
- *  mirroring the mounted-set reconcile. Never disposes the active workspace's
- *  terminals (its id can transiently drop out of `validWorkspaceIds` while a
- *  delete of the active workspace propagates to the URL). */
-export function reconcileTerminalWorkspaces(
-  validWorkspaceIds: Set<string>,
-  activeWorkspaceId: string | null,
+/** Dispose cached terminals whose worktree is no longer valid (deleted /
+ *  worktree removed). Driven by the repos query in `MultiWorktreePanelHost`,
+ *  mirroring the mounted-set reconcile. Never disposes the active worktree's
+ *  terminals (its id can transiently drop out of `validWorktreeIds` while a
+ *  delete of the active worktree propagates to the URL). */
+export function reconcileTerminalWorktrees(
+  validWorktreeIds: Set<string>,
+  activeWorktreeId: string | null,
 ): void {
   const cache = getCache();
   for (const [id, entry] of cache) {
-    if (!validWorkspaceIds.has(entry.workspaceId) && entry.workspaceId !== activeWorkspaceId) {
+    if (!validWorktreeIds.has(entry.worktreeId) && entry.worktreeId !== activeWorktreeId) {
       cache.delete(id);
       entry._destroy();
     }

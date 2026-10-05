@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
 
 /**
- * Tracks the currently-selected project-list label filter and shares it across
- * every DashboardShell instance on the page. Multiple workspaces each render
+ * Tracks the currently-selected repo-list label filter and shares it across
+ * every DashboardShell instance on the page. Multiple worktrees each render
  * their own DashboardShell (inactive ones are display:none-hidden), so a plain
- * `useState` would give each one a separate filter — switching workspaces
+ * `useState` would give each one a separate filter — switching worktrees
  * would appear to "reset" the dropdown. Persisting through localStorage plus
  * a same-tab CustomEvent keeps every instance in sync and survives reloads.
  *
@@ -13,7 +13,7 @@ import { clientStorage } from "../../lib/client-state";
  */
 
 /** localStorage key for the active label filter. */
-export const LABEL_FILTER_KEY = "band.projects-list.label-filter";
+export const LABEL_FILTER_KEY = "band.repos-list.label-filter";
 
 /** Custom event used to broadcast same-tab updates. The native `storage`
  *  event only fires across tabs, so we dispatch this on every write. */

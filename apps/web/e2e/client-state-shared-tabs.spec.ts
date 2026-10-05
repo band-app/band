@@ -1,12 +1,12 @@
 /**
- * The phone and the desktop show the same center tabs for a workspace.
+ * The phone and the desktop show the same center tabs for a worktree.
  *
  * The tab list lives on the Band server (`clientState.*`, key
  * `band:center-tabs:<ws>`) instead of each browser's localStorage. Each test
  * opens two browser contexts against one real server: a desktop-width one
  * and a phone-width touch one, so they share nothing but the server. A tab
  * opened on one must appear on the other, both on a fresh load and live while
- * the other is already showing the workspace, and a tab closed on the phone
+ * the other is already showing the worktree, and a tab closed on the phone
  * must close on the desktop.
  *
  * No tRPC mocking: both pages drive the real server through Quick Open and
@@ -16,7 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, type BrowserContext, expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -28,10 +28,10 @@ import {
   startServer,
 } from "./helpers/server";
 import { CenterTabStrip } from "./pages/CenterTabStrip";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-client-state-shared-tabs-token";
-const PROJECT = "shared-tabs-repo";
+const REPO = "shared-tabs-repo";
 const BRANCH = "main";
 const FILES = ["shared-alpha.txt", "shared-beta.txt", "shared-gamma.txt"];
 // One worktree per test, so no test sees another's tabs on the server.
@@ -40,11 +40,11 @@ const TEST_BRANCHES = ["one", "two", "three"];
 let server: ServerHandle;
 let tmpHome: string;
 let repo: string;
-let nextWorkspace = 0;
+let nextWorktree = 0;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  repo = join(tmpHome, PROJECT);
+  repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   for (const file of FILES) writeFileSync(join(repo, file), `${file}\n`);
@@ -52,12 +52,12 @@ test.beforeAll(async () => {
   git(repo, ["commit", "-m", "initial"]);
   const worktrees = [{ branch: BRANCH, path: repo }];
   for (const name of TEST_BRANCHES) {
-    const path = join(tmpHome, `${PROJECT}-${name}`);
+    const path = join(tmpHome, `${REPO}-${name}`);
     git(repo, ["worktree", "add", "-b", name, path]);
     worktrees.push({ branch: name, path });
   }
   seedState(tmpHome, {
-    projects: [{ name: PROJECT, path: repo, defaultBranch: BRANCH, worktrees }],
+    repos: [{ name: REPO, path: repo, defaultBranch: BRANCH, worktrees }],
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
@@ -72,18 +72,18 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-/** A workspace no earlier test has touched. */
-function freshWorkspace(): string {
-  const branch = TEST_BRANCHES[nextWorkspace];
+/** A worktree no earlier test has touched. */
+function freshWorktree(): string {
+  const branch = TEST_BRANCHES[nextWorktree];
   if (!branch) throw new Error("add a branch to TEST_BRANCHES for the new test");
-  nextWorkspace += 1;
-  return toWorkspaceId(PROJECT, branch);
+  nextWorktree += 1;
+  return toWorktreeId(REPO, branch);
 }
 
 async function openDevices(browser: Browser): Promise<{
   contexts: BrowserContext[];
-  desktop: WorkspacePage;
-  phone: WorkspacePage;
+  desktop: WorktreePage;
+  phone: WorktreePage;
   phoneStrip: CenterTabStrip;
 }> {
   const desktopContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -95,25 +95,25 @@ async function openDevices(browser: Browser): Promise<{
   const phonePage = await phoneContext.newPage();
   return {
     contexts: [desktopContext, phoneContext],
-    desktop: new WorkspacePage(await desktopContext.newPage(), server.url, TOKEN),
-    phone: new WorkspacePage(phonePage, server.url, TOKEN),
+    desktop: new WorktreePage(await desktopContext.newPage(), server.url, TOKEN),
+    phone: new WorktreePage(phonePage, server.url, TOKEN),
     phoneStrip: new CenterTabStrip(phonePage),
   };
 }
 
 test.describe("center tabs shared between desktop and phone", () => {
   test("a file opened on the desktop is open and active on the phone", async ({ browser }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone } = await openDevices(browser);
     try {
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await desktop.openFileViaQuickOpen(FILES[0]);
       await desktop.openFileViaQuickOpen(FILES[1]);
       await expect(desktop.fileLeafLine(FILES[1])).toBeVisible();
-      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILES[1]}`);
+      await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe(`file:${FILES[1]}`);
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await expect(phone.fileTab(FILES[0])).toBeAttached();
       await expect(phone.fileTab(FILES[1])).toBeAttached();
@@ -124,25 +124,25 @@ test.describe("center tabs shared between desktop and phone", () => {
     }
   });
 
-  test("a file opened on the desktop appears live on a phone showing the workspace", async ({
+  test("a file opened on the desktop appears live on a phone showing the worktree", async ({
     browser,
   }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone } = await openDevices(browser);
     try {
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await desktop.openFileViaQuickOpen(FILES[0]);
-      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILES[0]}`);
+      await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe(`file:${FILES[0]}`);
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await expect(phone.fileLeafLine(FILES[0])).toBeVisible();
 
       await desktop.openFileViaQuickOpen(FILES[2]);
       await expect(phone.fileTab(FILES[2])).toBeAttached();
       // The desktop made the new tab active, and the server has that…
-      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILES[2]}`);
+      await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe(`file:${FILES[2]}`);
       // …but the phone user stays on the tab they were looking at.
       await expect(phone.fileLeafLine(FILES[0])).toBeVisible();
       await expect(phone.fileLeafLine(FILES[2])).toHaveCount(0);
@@ -152,16 +152,16 @@ test.describe("center tabs shared between desktop and phone", () => {
   });
 
   test("a file tab closed on the phone closes on the desktop", async ({ browser }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await desktop.openFileViaQuickOpen(FILES[0]);
       await desktop.openFileViaQuickOpen(FILES[1]);
-      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILES[1]}`);
+      await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe(`file:${FILES[1]}`);
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await expect(phone.fileTab(FILES[0])).toBeAttached();
       await phoneStrip.tap(phone.fileTab(FILES[0]));

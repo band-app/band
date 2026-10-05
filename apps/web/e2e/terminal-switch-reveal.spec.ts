@@ -1,11 +1,11 @@
 /**
- * What a terminal shows in the frames right after its workspace is switched
+ * What a terminal shows in the frames right after its worktree is switched
  * back to (`TerminalPanel.tsx`, `terminal-cache.ts` `attach`,
- * `MultiWorkspacePanelHost.tsx`, `terminal-output-queue.ts` `flush`).
+ * `MultiWorktreePanelHost.tsx`, `terminal-output-queue.ts` `flush`).
  *
- *  - The frame that reveals the workspace already paints the terminal: its
+ *  - The frame that reveals the worktree already paints the terminal: its
  *    wrapper is back in the live box with its content, at full opacity. The
- *    host used to fade the incoming workspace in from 0.6 opacity, so a
+ *    host used to fade the incoming worktree in from 0.6 opacity, so a
  *    switch blinked; that half fails on the old code. The attach now runs in
  *    a layout effect instead of a passive one, but a click-driven switch
  *    already ran the passive effect before the next frame, so the
@@ -19,7 +19,7 @@
  *    drain instead of writing it to xterm in one loop.
  *
  * DOM renderer so the rendered rows are readable. Real server, real PTYs,
- * driven through `WorkspacePage`. Not covered: the desktop app's
+ * driven through `WorktreePage`. Not covered: the desktop app's
  * `max-active-webgl-contexts` switch, which needs Electron.
  */
 
@@ -28,7 +28,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -40,23 +40,23 @@ import {
   startServer,
 } from "./helpers/server";
 import { trpcQuery } from "./helpers/trpc";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-switch-reveal-token";
 
-// One workspace per test holds the terminal under test (PTYs outlive a test,
+// One worktree per test holds the terminal under test (PTYs outlive a test,
 // so a reused one would carry the previous test's output); all switch away to
-// the same empty workspace.
-const PROJECT_FIRST_FRAME = "first-frame-reveal";
-const PROJECT_RESIZED = "resized-reveal";
-const PROJECT_ZOOMED = "zoomed-reveal";
-const PROJECT_BACKLOG = "backlog-reveal";
-const PROJECT_OTHER = "other-reveal";
-const WORKSPACE_FIRST_FRAME = toWorkspaceId(PROJECT_FIRST_FRAME, "main");
-const WORKSPACE_RESIZED = toWorkspaceId(PROJECT_RESIZED, "main");
-const WORKSPACE_ZOOMED = toWorkspaceId(PROJECT_ZOOMED, "main");
-const WORKSPACE_BACKLOG = toWorkspaceId(PROJECT_BACKLOG, "main");
-const WORKSPACE_OTHER = toWorkspaceId(PROJECT_OTHER, "main");
+// the same empty worktree.
+const REPO_FIRST_FRAME = "first-frame-reveal";
+const REPO_RESIZED = "resized-reveal";
+const REPO_ZOOMED = "zoomed-reveal";
+const REPO_BACKLOG = "backlog-reveal";
+const REPO_OTHER = "other-reveal";
+const WORKTREE_FIRST_FRAME = toWorktreeId(REPO_FIRST_FRAME, "main");
+const WORKTREE_RESIZED = toWorktreeId(REPO_RESIZED, "main");
+const WORKTREE_ZOOMED = toWorktreeId(REPO_ZOOMED, "main");
+const WORKTREE_BACKLOG = toWorktreeId(REPO_BACKLOG, "main");
+const WORKTREE_OTHER = toWorktreeId(REPO_OTHER, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -64,21 +64,21 @@ let server!: ServerHandle;
 let tmpHome!: string;
 const workdirs = new Map<string, string>();
 
-function makeGitWorkdir(project: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), `band-${project}-`)));
+function makeGitWorkdir(repo: string): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), `band-${repo}-`)));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env: gitEnv });
   execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env: gitEnv });
-  workdirs.set(project, dir);
+  workdirs.set(repo, dir);
   return dir;
 }
 
-/** The server-side scrollback of the workspace's only terminal. */
-async function serverOutput(workspaceId: string): Promise<string> {
+/** The server-side scrollback of the worktree's only terminal. */
+async function serverOutput(worktreeId: string): Promise<string> {
   const { terminals } = await trpcQuery<{ terminals: { terminalId: string }[] }>(
     server.url,
     TOKEN,
     "terminal.list",
-    { workspaceId },
+    { worktreeId },
   );
   if (terminals.length !== 1) return "";
   const { output } = await trpcQuery<{ output: string }>(server.url, TOKEN, "terminal.output", {
@@ -90,13 +90,7 @@ async function serverOutput(workspaceId: string): Promise<string> {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [
-      PROJECT_FIRST_FRAME,
-      PROJECT_RESIZED,
-      PROJECT_ZOOMED,
-      PROJECT_BACKLOG,
-      PROJECT_OTHER,
-    ].map((name) => {
+    repos: [REPO_FIRST_FRAME, REPO_RESIZED, REPO_ZOOMED, REPO_BACKLOG, REPO_OTHER].map((name) => {
       const path = makeGitWorkdir(name);
       return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
     }),
@@ -115,50 +109,47 @@ test.afterAll(async () => {
   }
 });
 
-/** Open a terminal in `workspaceId` and wait for its shell prompt to render. */
-async function openTerminal(workspacePage: WorkspacePage, workspaceId: string): Promise<void> {
-  await workspacePage.goto(workspaceId);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await expect(workspacePage.terminalTabVisibilityMarker(workspaceId, true)).toBeVisible({
+/** Open a terminal in `worktreeId` and wait for its shell prompt to render. */
+async function openTerminal(worktreePage: WorktreePage, worktreeId: string): Promise<void> {
+  await worktreePage.goto(worktreeId);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await expect(worktreePage.terminalTabVisibilityMarker(worktreeId, true)).toBeVisible({
     timeout: 20_000,
   });
-  await workspacePage.waitForTerminalReady(20_000);
-  await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
+  await worktreePage.waitForTerminalReady(20_000);
+  await worktreePage.waitForTerminalRenderedPrompt(worktreeId);
 }
 
-/** Switch to the other workspace and wait until `workspaceId`'s terminal is parked. */
-async function parkBySwitchingAway(
-  workspacePage: WorkspacePage,
-  workspaceId: string,
-): Promise<void> {
-  await workspacePage.switchWorkspace(WORKSPACE_OTHER);
+/** Switch to the other worktree and wait until `worktreeId`'s terminal is parked. */
+async function parkBySwitchingAway(worktreePage: WorktreePage, worktreeId: string): Promise<void> {
+  await worktreePage.switchWorktree(WORKTREE_OTHER);
   await expect
-    .poll(() => workspacePage.isTerminalParked(workspaceId), { timeout: 20_000 })
+    .poll(() => worktreePage.isTerminalParked(worktreeId), { timeout: 20_000 })
     .toBe(true);
 }
 
 test("switching back paints the terminal's content in the first frame, at full opacity", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await openTerminal(workspacePage, WORKSPACE_FIRST_FRAME);
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE_FIRST_FRAME,
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await openTerminal(worktreePage, WORKTREE_FIRST_FRAME);
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE_FIRST_FRAME,
     `echo FIRST_"FRAME"_MARK`,
     /FIRST_FRAME_MARK/,
   );
 
-  await parkBySwitchingAway(workspacePage, WORKSPACE_FIRST_FRAME);
+  await parkBySwitchingAway(worktreePage, WORKTREE_FIRST_FRAME);
 
-  await workspacePage.startRevealFrameProbe(WORKSPACE_FIRST_FRAME, "FIRST_FRAME_MARK");
-  await workspacePage.switchWorkspace(WORKSPACE_FIRST_FRAME);
+  await worktreePage.startRevealFrameProbe(WORKTREE_FIRST_FRAME, "FIRST_FRAME_MARK");
+  await worktreePage.switchWorktree(WORKTREE_FIRST_FRAME);
   await expect
-    .poll(async () => (await workspacePage.readRevealFrames()).length, { timeout: 20_000 })
+    .poll(async () => (await worktreePage.readRevealFrames()).length, { timeout: 20_000 })
     .toBe(20);
 
-  const frames = await workspacePage.readRevealFrames();
-  // The frame that made the workspace visible painted the terminal with its
+  const frames = await worktreePage.readRevealFrames();
+  // The frame that made the worktree visible painted the terminal with its
   // content, not an empty box filled in a frame later.
   expect(frames[0]).toMatchObject({ attached: true, hasMarker: true });
   // No frame of the reveal dims the terminal (the old 0.6 → 1 fade).
@@ -166,75 +157,75 @@ test("switching back paints the terminal's content in the first frame, at full o
 });
 
 test("a terminal whose box was resized while parked is refitted on reveal", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await openTerminal(workspacePage, WORKSPACE_RESIZED);
-  const wideCols = await workspacePage.terminalCols(WORKSPACE_RESIZED);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await openTerminal(worktreePage, WORKTREE_RESIZED);
+  const wideCols = await worktreePage.terminalCols(WORKTREE_RESIZED);
   expect(wideCols).toBeGreaterThan(0);
 
-  await parkBySwitchingAway(workspacePage, WORKSPACE_RESIZED);
-  await workspacePage.setViewport(1024, 800);
-  await workspacePage.switchWorkspace(WORKSPACE_RESIZED);
+  await parkBySwitchingAway(worktreePage, WORKTREE_RESIZED);
+  await worktreePage.setViewport(1024, 800);
+  await worktreePage.switchWorktree(WORKTREE_RESIZED);
 
   // The reveal skips the fit only when the box kept its pixel size; this one
   // shrank, so the grid follows it.
   await expect
-    .poll(() => workspacePage.terminalCols(WORKSPACE_RESIZED), { timeout: 20_000 })
+    .poll(() => worktreePage.terminalCols(WORKTREE_RESIZED), { timeout: 20_000 })
     .toBeLessThan(wideCols);
-  expect(await workspacePage.isTerminalParked(WORKSPACE_RESIZED)).toBe(false);
+  expect(await worktreePage.isTerminalParked(WORKTREE_RESIZED)).toBe(false);
 });
 
 test("a terminal zoomed while parked is refitted on reveal", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await openTerminal(workspacePage, WORKSPACE_ZOOMED);
-  const colsAt100 = await workspacePage.terminalCols(WORKSPACE_ZOOMED);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await openTerminal(worktreePage, WORKTREE_ZOOMED);
+  const colsAt100 = await worktreePage.terminalCols(WORKTREE_ZOOMED);
   expect(colsAt100).toBeGreaterThan(0);
 
-  await parkBySwitchingAway(workspacePage, WORKSPACE_ZOOMED);
+  await parkBySwitchingAway(worktreePage, WORKTREE_ZOOMED);
   // A parked terminal takes the new font size but defers the fit to its
   // next reveal, which must not take the skip-the-fit path.
-  await workspacePage.zoomInBy(2);
-  await workspacePage.switchWorkspace(WORKSPACE_ZOOMED);
+  await worktreePage.zoomInBy(2);
+  await worktreePage.switchWorktree(WORKTREE_ZOOMED);
 
   await expect
-    .poll(() => workspacePage.terminalCols(WORKSPACE_ZOOMED), { timeout: 20_000 })
+    .poll(() => worktreePage.terminalCols(WORKTREE_ZOOMED), { timeout: 20_000 })
     .toBeLessThan(colsAt100);
-  expect(await workspacePage.isTerminalParked(WORKSPACE_ZOOMED)).toBe(false);
+  expect(await worktreePage.isTerminalParked(WORKTREE_ZOOMED)).toBe(false);
 });
 
 test("output queued while parked all lands in order over the same socket on reveal", async ({
   page,
 }) => {
   test.setTimeout(90_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_BACKLOG);
-  await openTerminal(workspacePage, WORKSPACE_BACKLOG);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_BACKLOG);
+  await openTerminal(worktreePage, WORKTREE_BACKLOG);
   await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
   // ~1.1 MB with the PTY's \r\n, well past the visible drain's 128 KB in flight and under the
   // parked queue's 2 MB cap, printed only once the terminal is parked. The
   // quoted fragments and `$((40+2))` keep the typed command line from
   // matching the markers.
-  const gate = join(workdirs.get(PROJECT_BACKLOG) as string, "go");
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE_BACKLOG,
+  const gate = join(workdirs.get(REPO_BACKLOG) as string, "go");
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE_BACKLOG,
     `echo GATE_"ARMED"; while [ ! -e ${gate} ]; do sleep 0.1; done; seq 1 150000; echo BACKLOG_DONE_$((40+2))`,
     /GATE_ARMED/,
   );
 
-  await parkBySwitchingAway(workspacePage, WORKSPACE_BACKLOG);
+  await parkBySwitchingAway(worktreePage, WORKTREE_BACKLOG);
   writeFileSync(gate, "");
   await expect
-    .poll(async () => (await serverOutput(WORKSPACE_BACKLOG)).includes("BACKLOG_DONE_42"), {
+    .poll(async () => (await serverOutput(WORKTREE_BACKLOG)).includes("BACKLOG_DONE_42"), {
       timeout: 30_000,
       intervals: [100],
     })
     .toBe(true);
 
-  await workspacePage.switchWorkspace(WORKSPACE_BACKLOG);
+  await worktreePage.switchWorktree(WORKTREE_BACKLOG);
   await expect
     .poll(
       async () => {
-        const rows = (await workspacePage.readTerminalRenderedRows(WORKSPACE_BACKLOG)).map((r) =>
+        const rows = (await worktreePage.readTerminalRenderedRows(WORKTREE_BACKLOG)).map((r) =>
           r.trim(),
         );
         const done = rows.indexOf("BACKLOG_DONE_42");

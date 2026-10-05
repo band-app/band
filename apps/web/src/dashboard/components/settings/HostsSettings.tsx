@@ -43,7 +43,7 @@ function workerCommand(issued: IssuedWorker): string {
 
 /**
  * Rows for the Settings dialog's Hosts section: the machines Band can run
- * workspaces on, "Add worker" (a one-time bootstrap token and the command
+ * worktrees on, "Add worker" (a one-time bootstrap token and the command
  * that uses it) and the hub's tokens with a Revoke button. Changes apply
  * immediately; they are not part of the dialog's Save. A new token is shown
  * once, because the hub keeps only its hash.
@@ -140,7 +140,7 @@ export function HostsSettings() {
       <SettingsRow
         variant="stacked"
         label="Hosts"
-        description="Machines that run workspaces. Local is this hub's own machine. Workers connect to the hub and appear here."
+        description="Machines that run worktrees. Local is this hub's own machine. Workers connect to the hub and appear here."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {(hosts.data ?? []).map((host) => (

@@ -4,7 +4,7 @@ export type { FormatFileResult } from "@band-app/shared/format-file-result";
 export type {
   TerminalLayoutNode,
   TerminalPaneConfig,
-  WorkspaceTerminalConfig,
+  WorktreeTerminalConfig,
 } from "@band-app/shared/terminal-config";
 
 export type AgentStatusType = "working" | "needs_attention" | "waiting";
@@ -23,9 +23,9 @@ export interface TabAgentStatus {
   status: "working" | "needs_attention";
 }
 
-export interface WorkspaceStatus {
-  workspaceId: string;
-  project: string;
+export interface WorktreeStatus {
+  worktreeId: string;
+  repo: string;
   branch: string;
   worktreePath: string;
   agent?: AgentInfo;
@@ -34,15 +34,15 @@ export interface WorkspaceStatus {
 }
 
 /**
- * "git" projects use git worktrees for per-workspace isolation and have
- * branch/PR/CI features enabled. "plain" projects have a single implicit
- * workspace whose path equals the project path — no isolation, no branch,
- * git-specific UI hidden. Plain projects can be promoted to "git" via
- * `projects.promoteToGit`.
+ * "git" repos use git worktrees for per-worktree isolation and have
+ * branch/PR/CI features enabled. "plain" repos have a single implicit
+ * worktree whose path equals the repo path — no isolation, no branch,
+ * git-specific UI hidden. Plain repos can be promoted to "git" via
+ * `repos.promoteToGit`.
  */
-export type ProjectKind = "git" | "plain";
+export type RepoKind = "git" | "plain";
 
-export interface ProjectInfo {
+export interface RepoInfo {
   name: string;
   path: string;
   defaultBranch: string;
@@ -54,17 +54,17 @@ export interface ProjectInfo {
    * response that might omit it back to "git" at the response boundary.
    * UI consumers can therefore branch on `kind` without `?? "git"` guards.
    */
-  kind: ProjectKind;
+  kind: RepoKind;
   /**
-   * The GitHub owner's avatar when the project's `origin` is on GitHub,
-   * served from Band's cache (`/api/project-avatar/<name>`). `null` or
-   * absent for plain projects, non-GitHub remotes, no remote, and owners
+   * The GitHub owner's avatar when the repo's `origin` is on GitHub,
+   * served from Band's cache (`/api/repo-avatar/<name>`). `null` or
+   * absent for plain repos, non-GitHub remotes, no remote, and owners
    * GitHub has no avatar for; the UI then shows its folder icon.
    */
-  avatar?: ProjectAvatarInfo | null;
+  avatar?: RepoAvatarInfo | null;
 }
 
-export interface ProjectAvatarInfo {
+export interface RepoAvatarInfo {
   /** Same-origin image URL. */
   src: string;
   /** `owner/repo`, used as alt text. */
@@ -73,9 +73,9 @@ export interface ProjectAvatarInfo {
 
 export interface WorktreeInfo {
   /**
-   * Immutable workspace identity — the branch name captured at creation.
-   * The workspace id derives from this (`toWorkspaceId`) and it's shown as
-   * the workspace label, so both stay stable across git branch switches.
+   * Immutable worktree identity — the branch name captured at creation.
+   * The worktree id derives from this (`toWorktreeId`) and it's shown as
+   * the worktree label, so both stay stable across git branch switches.
    * Never changes once set; `branch` below tracks the live git branch.
    */
   name: string;
@@ -84,11 +84,11 @@ export interface WorktreeInfo {
   head?: string;
   hasSetup?: boolean;
   hasTeardown?: boolean;
-  /** True when the user has pinned this workspace to the top of the tree.
+  /** True when the user has pinned this worktree to the top of the tree.
    *  The DB column is `NOT NULL DEFAULT false`, so the value is always
-   *  defined when the worktree comes through `projects.list`. */
+   *  defined when the worktree comes through `repos.list`. */
   pinned: boolean;
-  /** Set while the workspace's ephemeral worker has exited (`sleeping`) or is being started again (`waking`). */
+  /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is being started again (`waking`). */
   lifecycle?: "sleeping" | "waking";
 }
 
@@ -111,7 +111,7 @@ export type CIState =
   | "cancelled"
   | "merged";
 
-/** A workspace branch's pull request, found by the branch-status poller. */
+/** A worktree branch's pull request, found by the branch-status poller. */
 export interface PullRequestSummary {
   number: number;
   title: string;
@@ -127,7 +127,7 @@ export interface CIStatus {
   pr?: PullRequestSummary | null;
 }
 
-export interface WorkspaceBranchStatus {
+export interface WorktreeBranchStatus {
   git: GitStatus;
   ci: CIStatus;
 }
@@ -214,7 +214,7 @@ export interface Settings {
   enableFilePreviewTabs?: boolean;
   theme?: Theme;
   /**
-   * Let the blurred desktop show through the project-list sidebar (macOS
+   * Let the blurred desktop show through the repo-list sidebar (macOS
    * vibrancy). Only takes effect in the macOS desktop app; the browser build
    * always paints the sidebar solid.
    * @default true
@@ -272,8 +272,8 @@ export type CliStatus =
   | "NotWritable";
 
 export interface DeleteDialogInfo {
-  projectName: string;
-  /** Workspace identity (immutable `name`), used both as the delete target
+  repoName: string;
+  /** Worktree identity (immutable `name`), used both as the delete target
    *  and as the label shown in the confirmation dialog. */
   name: string;
   isUnmerged: boolean;
@@ -316,7 +316,7 @@ export interface ChangeEntry {
 /** Why the `branch` section is empty when it isn't `ready`. */
 export type BranchCompareStatus = "ready" | "invalid-base" | "no-merge-base" | "unborn-head";
 
-export interface WorkspaceChanges {
+export interface WorktreeChanges {
   headBranch: string;
   defaultBranch: string;
   /** The branch the `branch` section compares against. */
@@ -333,10 +333,10 @@ export interface WorkspaceChanges {
 
 export type DiffMode = "uncommitted" | "branch";
 
-export interface ListWorkspaceBranchesResult {
+export interface ListWorktreeBranchesResult {
   /** Matching branch names, local (`feature/x`) and remote (`origin/feature/x`). */
   branches: string[];
-  /** The project's default branch (e.g. `main`). */
+  /** The repo's default branch (e.g. `main`). */
   defaultBranch: string;
   /** The worktree's current branch; `defaultBranch` when HEAD is detached or unborn. */
   headBranch: string;
@@ -344,12 +344,12 @@ export interface ListWorkspaceBranchesResult {
   truncated: boolean;
 }
 
-export interface WorkspaceDiff {
+export interface WorktreeDiff {
   diff: string;
   stats: { filesChanged: number; insertions: number; deletions: number };
   /** Branch the diff was computed against — user's pick, or defaults to `defaultBranch`. */
   compareBranch: string;
-  /** The project's default branch (e.g. `main`). Always present, regardless of `compareBranch`. */
+  /** The repo's default branch (e.g. `main`). Always present, regardless of `compareBranch`. */
   defaultBranch: string;
   headBranch: string;
   fileStatuses: Record<string, FileStatus>;

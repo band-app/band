@@ -27,24 +27,24 @@ export function useBrowserProfiles() {
   };
 }
 
-/** `projectName → profileId` for projects that don't use Default. */
-export function useProjectBrowserProfiles() {
+/** `repoName → profileId` for repos that don't use Default. */
+export function useRepoBrowserProfiles() {
   const adapter = useAdapter();
   const { data } = useQuery({
-    queryKey: queryKeys.projectBrowserProfiles,
+    queryKey: queryKeys.repoBrowserProfiles,
     queryFn: (): Promise<Record<string, string>> =>
-      adapter.listProjectBrowserProfiles?.() ?? Promise.resolve({}),
+      adapter.listRepoBrowserProfiles?.() ?? Promise.resolve({}),
   });
   return data ?? EMPTY_DEFAULTS;
 }
 
-export function useSetProjectBrowserProfile() {
+export function useSetRepoBrowserProfile() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectName, profileId }: { projectName: string; profileId: string | null }) =>
-      adapter.setProjectBrowserProfile?.(projectName, profileId) ?? Promise.resolve(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.projectBrowserProfiles }),
+    mutationFn: ({ repoName, profileId }: { repoName: string; profileId: string | null }) =>
+      adapter.setRepoBrowserProfile?.(repoName, profileId) ?? Promise.resolve(),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.repoBrowserProfiles }),
   });
 }
 
@@ -57,17 +57,17 @@ export function useRemoveBrowserProfile() {
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.browserProfiles }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.projectBrowserProfiles }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.repoBrowserProfiles }),
       ]),
   });
 }
 
-/** Refetch the profile list and project defaults after a change made elsewhere. */
+/** Refetch the profile list and repo defaults after a change made elsewhere. */
 export function useInvalidateBrowserProfiles() {
   const queryClient = useQueryClient();
   return () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.browserProfiles }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectBrowserProfiles }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.repoBrowserProfiles }),
     ]);
 }

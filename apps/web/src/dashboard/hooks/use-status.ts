@@ -22,12 +22,12 @@ export function useStatusWatcher() {
         previousStatuses.current.clear();
         for (const status of statuses) {
           if (status.agent?.status) {
-            previousStatuses.current.set(status.workspaceId, status.agent.status);
+            previousStatuses.current.set(status.worktreeId, status.agent.status);
           }
         }
       },
       (status) => {
-        const wsId = status.workspaceId;
+        const wsId = status.worktreeId;
         const newAgentStatus = status.agent?.status;
         const prevAgentStatus = previousStatuses.current.get(wsId);
 
@@ -47,16 +47,16 @@ export function useStatusWatcher() {
 
         updateStatus(status);
       },
-      (workspaceId) => {
-        previousStatuses.current.delete(workspaceId);
-        removeStatus(workspaceId);
+      (worktreeId) => {
+        previousStatuses.current.delete(worktreeId);
+        removeStatus(worktreeId);
         // A removal started elsewhere (the CLI, another window) would
-        // otherwise leave the card listed until the next projects poll.
+        // otherwise leave the card listed until the next repos poll.
         // Keep it marked as deleting until the refetch drops it.
-        setDeleting(workspaceId, true);
+        setDeleting(worktreeId, true);
         void queryClient
-          .invalidateQueries({ queryKey: queryKeys.projects })
-          .finally(() => setDeleting(workspaceId, false));
+          .invalidateQueries({ queryKey: queryKeys.repos })
+          .finally(() => setDeleting(worktreeId, false));
       },
     );
 
@@ -71,11 +71,11 @@ export function useBranchStatusWatcher() {
 
   useEffect(() => {
     const unsubscribe = adapter.subscribeBranchStatus(
-      (workspaceId, git) => {
-        updateGitStatus(workspaceId, git);
+      (worktreeId, git) => {
+        updateGitStatus(worktreeId, git);
       },
-      (workspaceId, ci) => {
-        updateCIStatus(workspaceId, ci);
+      (worktreeId, ci) => {
+        updateCIStatus(worktreeId, ci);
       },
     );
 
@@ -98,15 +98,15 @@ export function useSetupStatusWatcher() {
         return;
       }
 
-      if (data.kind !== "setup-status" || !data.workspaceId) return;
+      if (data.kind !== "setup-status" || !data.worktreeId) return;
 
       const script = data.script ?? "setup";
       if (data.setupState === "running") {
-        updateSetupStatus(data.workspaceId, { state: "running", script });
+        updateSetupStatus(data.worktreeId, { state: "running", script });
       } else if (data.setupState === "completed") {
-        removeSetupStatus(data.workspaceId);
+        removeSetupStatus(data.worktreeId);
       } else if (data.setupState === "failed") {
-        updateSetupStatus(data.workspaceId, {
+        updateSetupStatus(data.worktreeId, {
           state: "failed",
           script,
           error: data.setupError,

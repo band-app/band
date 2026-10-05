@@ -1,32 +1,32 @@
 /**
- * End-to-end coverage for the project-list scroll + focus behaviour around
- * workspace switching (issue #456 follow-up).
+ * End-to-end coverage for the repo-list scroll + focus behaviour around
+ * worktree switching (issue #456 follow-up).
  *
  * Regression guard for the bug we hit while refactoring to the single
  * shared dockview layout: navigating BACK to a previously-visited
- * workspace reset the project-list scroll to the top AND dropped DOM
+ * worktree reset the repo-list scroll to the top AND dropped DOM
  * focus to <body>, breaking keyboard nav. Root cause was an
- * unconditional `panel.api.setActive()` on the projects edge group in
+ * unconditional `panel.api.setActive()` on the repos edge group in
  * `SharedDockviewLayout`, which triggered dockview's focus dance even
  * when the panel was already active.
  *
  * Expected behaviour (verified here):
  *
- *  - **Direct URL navigation** to a workspace deep in the list centers
- *    the active card in the project list.
- *  - **Clicking a card in the list** leaves the project list scroll
+ *  - **Direct URL navigation** to a worktree deep in the list centers
+ *    the active card in the repo list.
+ *  - **Clicking a card in the list** leaves the repo list scroll
  *    position EXACTLY where the user left it (no auto-scroll — the
  *    card is already under their cursor).
- *  - **Browser back navigation** to a previously-active workspace also
+ *  - **Browser back navigation** to a previously-active worktree also
  *    centers its card, even when the list is scrolled elsewhere.
  *
  * The test mocks tRPC at the network layer (via `createTrpcMock`) so it
  * doesn't need real git repos — it only cares about the dashboard rendering
- * a long list of projects and the workspace card click → URL nav loop.
+ * a long list of repos and the worktree card click → URL nav loop.
  */
 
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -38,8 +38,8 @@ import {
 } from "./helpers/server";
 import { createTrpcMock } from "./helpers/trpc-mock";
 
-const TOKEN = "e2e-workspace-switch-token";
-const PROJECT_COUNT = 25;
+const TOKEN = "e2e-worktree-switch-token";
+const REPO_COUNT = 25;
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
@@ -48,44 +48,41 @@ test.use({ viewport: { width: 1280, height: 700 } });
 let server: ServerHandle;
 let tmpHome: string;
 
-// Generated fixture: 25 projects, each with a single "main" worktree. The
+// Generated fixture: 25 repos, each with a single "main" worktree. The
 // list is long enough to overflow the viewport so the scroll behaviour is
 // observable.
-function makeProjects(): {
+function makeRepos(): {
   name: string;
   path: string;
   defaultBranch: string;
   kind: "git";
   worktrees: { name: string; branch: string; path: string; pinned: boolean }[];
 }[] {
-  return Array.from({ length: PROJECT_COUNT }, (_, i) => ({
-    name: `project-${String(i).padStart(2, "0")}`,
-    path: `/tmp/fake/project-${i}`,
+  return Array.from({ length: REPO_COUNT }, (_, i) => ({
+    name: `repo-${String(i).padStart(2, "0")}`,
+    path: `/tmp/fake/repo-${i}`,
     defaultBranch: "main",
     kind: "git",
-    worktrees: [{ name: "main", branch: "main", path: `/tmp/fake/project-${i}`, pinned: false }],
+    worktrees: [{ name: "main", branch: "main", path: `/tmp/fake/repo-${i}`, pinned: false }],
   }));
 }
 
-const FIRST_WORKSPACE = toWorkspaceId("project-00", "main");
-const LAST_WORKSPACE = toWorkspaceId(
-  `project-${String(PROJECT_COUNT - 1).padStart(2, "0")}`,
-  "main",
-);
-// A workspace mid-list — far enough from either edge that
+const FIRST_WORKTREE = toWorktreeId("repo-00", "main");
+const LAST_WORKTREE = toWorktreeId(`repo-${String(REPO_COUNT - 1).padStart(2, "0")}`, "main");
+// A worktree mid-list — far enough from either edge that
 // `scrollIntoView({ block: "center" })` can actually center it without
 // hitting the scroll-bounds clamp.
-const MIDDLE_WORKSPACE = toWorkspaceId(
-  `project-${String(Math.floor(PROJECT_COUNT / 2)).padStart(2, "0")}`,
+const MIDDLE_WORKTREE = toWorktreeId(
+  `repo-${String(Math.floor(REPO_COUNT / 2)).padStart(2, "0")}`,
   "main",
 );
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   // The server's loadState reads from the SQLite DB; seedState ensures the
-  // settings/tokens path is set up. The actual project payload the page
+  // settings/tokens path is set up. The actual repo payload the page
   // sees comes from the tRPC mock below.
-  seedState(tmpHome, { projects: [] });
+  seedState(tmpHome, { repos: [] });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
@@ -100,7 +97,7 @@ test.afterAll(async () => {
 });
 
 /**
- * Read the active workspace card's vertical position and the project list
+ * Read the active worktree card's vertical position and the repo list
  * viewport's scroll state in one round-trip — keeps each assertion close to
  * what the user actually sees.
  */
@@ -122,7 +119,7 @@ async function readListState(page: Page): Promise<{
         url: location.pathname,
       };
     }
-    // The active card carries `data-active="true"` (set by WorkspaceCard's
+    // The active card carries `data-active="true"` (set by WorktreeCard's
     // `isActive` styling) — much more stable than keying off Tailwind class
     // strings, which can churn with design-token / dark-mode tweaks.
     const activeCard = vp.querySelector<HTMLElement>('[data-active="true"]');
@@ -141,23 +138,23 @@ async function readListState(page: Page): Promise<{
 async function setupMocks(page: Page): Promise<void> {
   const mock = createTrpcMock();
   mock.addDockviewMocks();
-  mock.query("projects.list", { projects: makeProjects() });
+  mock.query("repos.list", { repos: makeRepos() });
   await mock.install(page);
 }
 
-test("direct URL nav centers the active workspace card in the project list", async ({ page }) => {
+test("direct URL nav centers the active worktree card in the repo list", async ({ page }) => {
   await setupMocks(page);
 
-  // Land directly on a workspace from the MIDDLE of the list. We avoid the
-  // last workspace here because `scrollIntoView({ block: "center" })`
-  // clamps to the scroll bounds — a workspace near the bottom edge ends up
-  // at the bottom of the viewport, not the center. The middle workspace
+  // Land directly on a worktree from the MIDDLE of the list. We avoid the
+  // last worktree here because `scrollIntoView({ block: "center" })`
+  // clamps to the scroll bounds — a worktree near the bottom edge ends up
+  // at the bottom of the viewport, not the center. The middle worktree
   // can actually be centered without hitting the clamp.
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(MIDDLE_WORKSPACE)}?token=${TOKEN}`);
+  await page.goto(`${server.url}/worktree/${encodeURIComponent(MIDDLE_WORKTREE)}?token=${TOKEN}`);
 
   // Wait for the active card to be in the DOM. The styling kicks in once
-  // the projects query resolves AND the Zustand store sees the active
-  // workspace id from the route.
+  // the repos query resolves AND the Zustand store sees the active
+  // worktree id from the route.
   const activeCard = page.locator('[data-active="true"]');
   await expect(activeCard).toBeVisible({ timeout: 10_000 });
 
@@ -180,13 +177,13 @@ test("clicking a card in the list preserves the scroll position (no auto-scroll)
 }) => {
   await setupMocks(page);
 
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(LAST_WORKSPACE)}?token=${TOKEN}`);
+  await page.goto(`${server.url}/worktree/${encodeURIComponent(LAST_WORKTREE)}?token=${TOKEN}`);
 
-  // Wait for the list to settle on the last workspace.
+  // Wait for the list to settle on the last worktree.
   await expect(page.locator('[data-active="true"]')).toBeVisible({ timeout: 10_000 });
 
   // Manually scroll the list to the top — simulates a user who wants to
-  // explore other projects without losing their scroll context.
+  // explore other repos without losing their scroll context.
   await page.evaluate(() => {
     const vp = document.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
     if (vp) vp.scrollTop = 0;
@@ -194,21 +191,21 @@ test("clicking a card in the list preserves the scroll position (no auto-scroll)
   const beforeClick = await readListState(page);
   expect(beforeClick.scrollTop).toBe(0);
 
-  // Click the FIRST visible workspace card. Since the list is scrolled to
-  // the top, this is project-00's "main". Scroll the project-00 header into
+  // Click the FIRST visible worktree card. Since the list is scrolled to
+  // the top, this is repo-00's "main". Scroll the repo-00 header into
   // view first to make the click target stable across viewport sizes.
-  await page.getByText("project-00", { exact: false }).first().scrollIntoViewIfNeeded();
-  // Click on the branch row directly (the workspace card, not the project header).
-  // We target by accessible label: the WorkspaceCard renders a tabindex=0 div
+  await page.getByText("repo-00", { exact: false }).first().scrollIntoViewIfNeeded();
+  // Click on the branch row directly (the worktree card, not the repo header).
+  // We target by accessible label: the WorktreeCard renders a tabindex=0 div
   // with the branch text inside.
-  const firstWorkspaceCard = page
+  const firstWorktreeCard = page
     .locator('div.cursor-pointer.select-none[tabindex="0"]')
     .filter({ hasText: /^main$/ })
     .first();
-  await firstWorkspaceCard.click();
+  await firstWorktreeCard.click();
 
-  // URL switches to the clicked workspace.
-  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(FIRST_WORKSPACE)}`));
+  // URL switches to the clicked worktree.
+  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(FIRST_WORKTREE)}`));
 
   // Critical: scroll position is unchanged. The card the user just clicked
   // is already where their cursor was — auto-scrolling would feel like a
@@ -221,36 +218,36 @@ test("clicking a card in the list preserves the scroll position (no auto-scroll)
 test("browser back navigation re-centers the active card", async ({ page }) => {
   await setupMocks(page);
 
-  // Start at the LAST workspace — direct URL nav centers it.
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(LAST_WORKSPACE)}?token=${TOKEN}`);
+  // Start at the LAST worktree — direct URL nav centers it.
+  await page.goto(`${server.url}/worktree/${encodeURIComponent(LAST_WORKTREE)}?token=${TOKEN}`);
   await expect(page.locator('[data-active="true"]')).toBeVisible({ timeout: 10_000 });
   const initial = await readListState(page);
   const initialScrollTop = initial.scrollTop;
 
-  // Scroll to the top and click project-00's main — the in-list click
+  // Scroll to the top and click repo-00's main — the in-list click
   // path, so no auto-scroll.
   await page.evaluate(() => {
     const vp = document.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
     if (vp) vp.scrollTop = 0;
   });
-  const firstWorkspaceCard = page
+  const firstWorktreeCard = page
     .locator('div.cursor-pointer.select-none[tabindex="0"]')
     .filter({ hasText: /^main$/ })
     .first();
-  await firstWorkspaceCard.click();
-  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(FIRST_WORKSPACE)}`));
+  await firstWorktreeCard.click();
+  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(FIRST_WORKTREE)}`));
   await page.waitForTimeout(300);
   expect((await readListState(page)).scrollTop).toBe(0); // confirm no scroll
 
-  // Now press browser back — this returns to the LAST workspace via a
+  // Now press browser back — this returns to the LAST worktree via a
   // navigation that did NOT go through the in-list path, so the
   // recent-activation marker is NOT set and the auto-scroll-into-view
   // should fire.
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(LAST_WORKSPACE)}`));
+  await expect(page).toHaveURL(new RegExp(`${encodeURIComponent(LAST_WORKTREE)}`));
   // Wait for the post-navigation effect to settle. The card's
   // scrollIntoView({ block: "center" }) runs synchronously inside an effect
-  // after the activeWorkspaceId-driven re-render commits.
+  // after the activeWorktreeId-driven re-render commits.
   await page.waitForTimeout(200);
   const afterBack = await readListState(page);
   expect(afterBack.scrollTop).toBe(initialScrollTop);

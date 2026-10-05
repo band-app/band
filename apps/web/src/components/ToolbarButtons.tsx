@@ -38,7 +38,7 @@ const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>
  * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
  *
  * The dialogs are rendered as siblings to `children`, so they remain mounted even when
- * the parent overflow dropdown closes. The action buttons live in the project-list
+ * the parent overflow dropdown closes. The action buttons live in the repo-list
  * bottom action bar via <ToolbarActionBar /> and call the context handlers to open
  * the dialogs.
  */
@@ -149,7 +149,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Bottom action row cluster for the project list (right-hand side).
+ * Bottom action row cluster for the repo list (right-hand side).
  *
  * Surfaces Resources and Usage as standalone icon buttons and tucks the
  * remaining actions (Tasks, Cronjobs, tunnel) behind a 3-dot overflow menu.
@@ -174,7 +174,7 @@ export function ToolbarActionBar() {
                 variant="ghost"
                 className="text-muted-foreground"
                 aria-label="More actions"
-                data-testid="project-list__overflow-trigger"
+                data-testid="repo-list__overflow-trigger"
               >
                 <MoreVertical className="size-4" />
               </Button>
@@ -212,7 +212,7 @@ export function ToolbarActionBar() {
             variant="ghost"
             className="text-muted-foreground"
             aria-label="Resources"
-            data-testid="project-list__resources-button"
+            data-testid="repo-list__resources-button"
             onClick={ctx.openResources}
           >
             <Activity className="size-4" />
@@ -227,7 +227,7 @@ export function ToolbarActionBar() {
             variant="ghost"
             className="text-muted-foreground"
             aria-label="Usage"
-            data-testid="project-list__usage-button"
+            data-testid="repo-list__usage-button"
             onClick={ctx.openReports}
           >
             <BarChart3 className="size-4" />

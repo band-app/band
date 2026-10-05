@@ -29,7 +29,7 @@
 
 import { rmSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -46,14 +46,14 @@ import {
   writeInputProbe,
 } from "./helpers/terminal-input-probe";
 import { TerminalTouchSurface } from "./pages/TerminalTouchSurface";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-touch-scroll-token";
-// One project per test: the probe keeps the first terminal in raw mode.
-const MOUSE_PROJECT = "alpha-touch-mouse";
-const SHELL_PROJECT = "alpha-touch-shell";
-const MOUSE_WORKSPACE = toWorkspaceId(MOUSE_PROJECT, "main");
-const SHELL_WORKSPACE = toWorkspaceId(SHELL_PROJECT, "main");
+// One repo per test: the probe keeps the first terminal in raw mode.
+const MOUSE_REPO = "alpha-touch-mouse";
+const SHELL_REPO = "alpha-touch-shell";
+const MOUSE_WORKTREE = toWorktreeId(MOUSE_REPO, "main");
+const SHELL_WORKTREE = toWorktreeId(SHELL_REPO, "main");
 // The input log shows ESC as `^[`, so a failure prints readable input.
 const SGR_WHEEL_REPORT = /\^\[\[<(64|65);(\d+);(\d+)M/g;
 
@@ -69,15 +69,15 @@ test.beforeAll(async () => {
   mouseWorkdir = makeGitWorkdir("band-touch-mouse-", tmpHome);
   shellWorkdir = makeGitWorkdir("band-touch-shell-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: MOUSE_PROJECT,
+        name: MOUSE_REPO,
         path: mouseWorkdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: mouseWorkdir }],
       },
       {
-        name: SHELL_PROJECT,
+        name: SHELL_REPO,
         path: shellWorkdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: shellWorkdir }],
@@ -103,23 +103,19 @@ test.afterAll(async () => {
 test.describe("Terminal touch scrolling", () => {
   test("a swipe over a mouse-tracking program sends only valid wheel reports", async ({ page }) => {
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const terminal = new TerminalTouchSurface(page, MOUSE_WORKSPACE);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const terminal = new TerminalTouchSurface(page, MOUSE_WORKTREE);
 
     // Turns on wheel mouse tracking with SGR encoding and logs raw stdin.
     const probe = writeInputProbe(mouseWorkdir, "\x1b[?1000h\x1b[?1006h");
     const inputLog = probe.logPath;
 
-    await workspacePage.goto(MOUSE_WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(MOUSE_WORKSPACE);
-    await workspacePage.runInTerminalUntilRendered(
-      MOUSE_WORKSPACE,
-      probe.command,
-      INPUT_PROBE_READY,
-    );
+    await worktreePage.goto(MOUSE_WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(MOUSE_WORKTREE);
+    await worktreePage.runInTerminalUntilRendered(MOUSE_WORKTREE, probe.command, INPUT_PROBE_READY);
 
     await terminal.swipe(300);
     const afterSwipeUp = await waitForInputToSettle(inputLog);
@@ -147,16 +143,16 @@ test.describe("Terminal touch scrolling", () => {
     page,
   }) => {
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const terminal = new TerminalTouchSurface(page, SHELL_WORKSPACE);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const terminal = new TerminalTouchSurface(page, SHELL_WORKTREE);
 
-    await workspacePage.goto(SHELL_WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(SHELL_WORKSPACE);
-    await workspacePage.runInTerminalUntilRendered(
-      SHELL_WORKSPACE,
+    await worktreePage.goto(SHELL_WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(SHELL_WORKTREE);
+    await worktreePage.runInTerminalUntilRendered(
+      SHELL_WORKTREE,
       'for i in $(seq 1 300); do echo "scroll-line-$i"; done; echo SCROLL_"DONE"',
       /SCROLL_DONE/,
     );

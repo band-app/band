@@ -28,8 +28,8 @@ export interface CenterTabs {
 
 const KINDS = new Set<string>(["chat", "term", "browser", "file", "diff"]);
 
-export function centerTabsKey(workspaceId: string): string {
-  return `${CENTER_TABS_PREFIX}${workspaceId}`;
+export function centerTabsKey(worktreeId: string): string {
+  return `${CENTER_TABS_PREFIX}${worktreeId}`;
 }
 
 export function parseCenterTabs(value: unknown): CenterTabs | null {
@@ -45,8 +45,8 @@ export function parseCenterTabs(value: unknown): CenterTabs | null {
   return { tabs, active: typeof v.active === "string" ? v.active : null };
 }
 
-export function readCenterTabs(workspaceId: string): CenterTabs | null {
-  const raw = clientStorage.getItem(centerTabsKey(workspaceId));
+export function readCenterTabs(worktreeId: string): CenterTabs | null {
+  const raw = clientStorage.getItem(centerTabsKey(worktreeId));
   if (!raw) return null;
   try {
     return parseCenterTabs(JSON.parse(raw));
@@ -126,8 +126,8 @@ export function withLocalMembership(
   return { tabs, active };
 }
 
-export function writeCenterTabs(workspaceId: string, next: CenterTabs): void {
-  const key = centerTabsKey(workspaceId);
+export function writeCenterTabs(worktreeId: string, next: CenterTabs): void {
+  const key = centerTabsKey(worktreeId);
   const raw = JSON.stringify(next);
   if (clientStorage.getItem(key) === raw) return;
   clientStorage.setItem(key, raw);

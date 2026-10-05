@@ -4,12 +4,12 @@
  * Extracted from `__root.tsx` so it's testable in isolation. Given an
  * `open-file` event, decides which side-effecting handler to call:
  *
- *   in-workspace   →  onOpenFile
+ *   in-worktree   →  onOpenFile
  *   external       →  enqueue + onActivateFilesPanel
  *
  * Mobile / narrow web is handled by the caller — it short-circuits before
  * reaching the dispatcher (see `__root.tsx`). Rationale: post the route-
- * unification refactor (issue #467) the mobile workspace layout's active
+ * unification refactor (issue #467) the mobile worktree layout's active
  * tab and selected file live entirely in local React state, so an
  * open-file event has nowhere to land on mobile. `band open` is a
  * desktop developer affordance.
@@ -19,27 +19,27 @@ import { enqueueExternalOpen } from "./pending-external-open";
 
 export interface OpenFileDispatchHandlers {
   /**
-   * Dockview path for in-workspace files. Writes
-   * `currentFile`/`openFilePath` to the per-workspace state store AND
+   * Dockview path for in-worktree files. Writes
+   * `currentFile`/`openFilePath` to the per-worktree state store AND
    * activates the Files panel. `filePath` may carry a
    * `:line[:col]` / `:line-end` suffix; the handler is responsible for
    * parsing.
    */
-  onOpenFile: (workspaceId: string, filePath: string) => void;
+  onOpenFile: (worktreeId: string, filePath: string) => void;
   /**
    * Dockview path for external files. Activates the Files panel
    * without touching its current-file state (the actual file open is
    * driven by the pending-external-open queue, which the always-mounted
    * `CodeBrowserView` drains).
    */
-  onActivateFilesPanel: (workspaceId: string) => void;
+  onActivateFilesPanel: (worktreeId: string) => void;
 }
 
 export type OpenFileDispatchResult =
-  | { handled: true; kind: "in-workspace" | "external" }
+  | { handled: true; kind: "in-worktree" | "external" }
   | {
       handled: false;
-      reason: "not-open-file" | "missing-workspace-id" | "missing-file-path";
+      reason: "not-open-file" | "missing-worktree-id" | "missing-file-path";
     };
 
 /**
@@ -63,19 +63,19 @@ export function dispatchOpenFileEvent(
   handlers: OpenFileDispatchHandlers,
 ): OpenFileDispatchResult {
   if (event.kind !== "open-file") return { handled: false, reason: "not-open-file" };
-  const workspaceId = typeof event.workspaceId === "string" ? event.workspaceId : undefined;
-  if (!workspaceId) return { handled: false, reason: "missing-workspace-id" };
+  const worktreeId = typeof event.worktreeId === "string" ? event.worktreeId : undefined;
+  if (!worktreeId) return { handled: false, reason: "missing-worktree-id" };
   const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
   if (!filePath) return { handled: false, reason: "missing-file-path" };
 
   if (event.external === true) {
     // External files: queue first (so a freshly-mounting CodeBrowserView
     // catches it on mount), then surface the Files panel.
-    enqueueExternalOpen(workspaceId, filePath);
-    handlers.onActivateFilesPanel(workspaceId);
+    enqueueExternalOpen(worktreeId, filePath);
+    handlers.onActivateFilesPanel(worktreeId);
     return { handled: true, kind: "external" };
   }
 
-  handlers.onOpenFile(workspaceId, filePath);
-  return { handled: true, kind: "in-workspace" };
+  handlers.onOpenFile(worktreeId, filePath);
+  return { handled: true, kind: "in-worktree" };
 }

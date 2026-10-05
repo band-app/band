@@ -30,7 +30,7 @@ function labelText(labels: Record<string, string>): string {
 
 /**
  * Rows for the Settings dialog's Runners section: the runner hooks the hub runs
- * when a workspace waits for a host (plan step 3.4), what they are running,
+ * when a worktree waits for a host (plan step 3.4), what they are running,
  * and each run's log. Read-only: runners are set in `settings.json`
  * (`docs/runner-hooks.md`).
  */
@@ -58,7 +58,7 @@ export function RunnersSettings() {
     queryFn: async () => (await trpc.runners.machines.query()).machines,
     refetchInterval: 5000,
   });
-  // The machine whose destroy the hub refused because its workspaces are not stored, with why.
+  // The machine whose destroy the hub refused because its worktrees are not stored, with why.
   const [refused, setRefused] = useState<{ id: string; message: string } | null>(null);
   const [destroyError, setDestroyError] = useState<string | null>(null);
   const destroyMachine = async (machine: Machine, force: boolean) => {
@@ -88,7 +88,7 @@ export function RunnersSettings() {
       <SettingsRow
         variant="stacked"
         label="Runners"
-        description="Scripts the hub runs to start a worker when a workspace asks for a host that does not exist yet. Set them in settings.json under runners."
+        description="Scripts the hub runs to start a worker when a worktree asks for a host that does not exist yet. Set them in settings.json under runners."
       >
         {runners.length === 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="settings__runners-empty">
@@ -234,7 +234,7 @@ export function RunnersSettings() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 truncate">
-                    <span data-testid="settings__runner-run-workspace">{run.workspaceId}</span>
+                    <span data-testid="settings__runner-run-worktree">{run.worktreeId}</span>
                     <span className="text-xs text-muted-foreground">
                       {" · "}
                       {run.runnerId}
@@ -248,7 +248,7 @@ export function RunnersSettings() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    aria-label={`Show log of ${run.workspaceId}`}
+                    aria-label={`Show log of ${run.worktreeId}`}
                     data-testid="settings__runner-run-log-toggle"
                     onClick={() => setOpenLog(openLog === run.requestId ? null : run.requestId)}
                   >

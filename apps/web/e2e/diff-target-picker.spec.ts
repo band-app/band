@@ -2,14 +2,14 @@
  * End-to-end coverage for the Changes tab header and its branch picker:
  *
  *  - The header shows the worktree's current branch, and below it the branch
- *    the "Committed on Branch" section compares against (the project default
+ *    the "Committed on Branch" section compares against (the repo default
  *    until something is picked).
  *  - The picker searches branches on the server. With more branches than the
  *    picker lists, it shows the first page plus a "type to narrow" notice,
  *    and typing narrows the list to local AND remote-tracking matches.
  *  - Arrow keys + Enter pick a branch; the branch section then compares
- *    against it, and the pick survives a reload (persisted per workspace).
- *  - The "Default branch" button resets the target to the project default.
+ *    against it, and the pick survives a reload (persisted per worktree).
+ *  - The "Default branch" button resets the target to the repo default.
  *  - Escape closes the picker without changing the target.
  *  - The picker offers branches only: uncommitted work has its own sections
  *    and never shows up in the branch section, whatever the target.
@@ -22,7 +22,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -52,7 +52,7 @@ const EDITED_FILE = "file.txt";
 
 let server: ServerHandle;
 let tmpHome: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -77,7 +77,7 @@ test.beforeAll(async () => {
   writeFileSync(join(repoPath, EDITED_FILE), "first line\nsecond line\n");
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -88,7 +88,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, HEAD_BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, HEAD_BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -104,7 +104,7 @@ test("Header shows the current branch and compares against the default branch", 
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
 
   await expect(changes.headBranch).toHaveText(HEAD_BRANCH, { timeout: 15_000 });
   await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH);
@@ -118,7 +118,7 @@ test("Picker lists one page of branches and narrows to remote matches as you typ
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await changes.openDiffTargetDropdown();
 
   // 60 filler + main + origin/main + the remote branch match, but only the
@@ -143,7 +143,7 @@ test("Keyboard picks a branch, the branch section compares against it, and the p
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await changes.openDiffTargetDropdown();
 
   await changes.searchBranches("filler-0");
@@ -175,7 +175,7 @@ test("Default branch button resets the target, and Escape closes without a chang
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
 
   // Start from a non-default branch so the reset is observable.
   await changes.openDiffTargetDropdown();
@@ -204,7 +204,7 @@ test("The picker offers only branches, and uncommitted work stays out of the bra
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
 
   await changes.openDiffTargetDropdown();
   await expect(changes.firstDiffTargetOption).toHaveAttribute("data-testid", BRANCH_OPTION_TESTID);

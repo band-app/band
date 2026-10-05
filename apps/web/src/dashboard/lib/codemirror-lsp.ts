@@ -86,10 +86,10 @@ export function hasPendingNavigation(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Custom Workspace — extends DefaultWorkspace with cross-file navigation
+// Custom Worktree — extends DefaultWorkspace with cross-file navigation
 // ---------------------------------------------------------------------------
 
-interface InternalWorkspaceFile extends WorkspaceFile {
+interface InternalWorktreeFile extends WorkspaceFile {
   uri: string;
   languageId: string;
   version: number;
@@ -98,7 +98,7 @@ interface InternalWorkspaceFile extends WorkspaceFile {
   getView(): EditorView | null;
 }
 
-class BandWorkspaceFile implements InternalWorkspaceFile {
+class BandWorktreeFile implements InternalWorktreeFile {
   constructor(
     public uri: string,
     public languageId: string,
@@ -113,11 +113,11 @@ class BandWorkspaceFile implements InternalWorkspaceFile {
 }
 
 /**
- * Custom Workspace that supports cross-file navigation by dispatching
+ * Custom Worktree that supports cross-file navigation by dispatching
  * a CustomEvent when displayFile() is called for an unknown URI.
  */
-class BandWorkspace extends Workspace {
-  files: BandWorkspaceFile[] = [];
+class BandWorktree extends Workspace {
+  files: BandWorktreeFile[] = [];
   private fileVersions: Record<string, number> = Object.create(null);
   /**
    * Working-tree text shown by diff views, keyed by URI. A diff view has no
@@ -130,12 +130,12 @@ class BandWorkspace extends Workspace {
   /** URIs currently open on the server with a diff view's text. */
   private diffOpen = new Set<string>();
   private rootUri: string;
-  private workspaceId: string | undefined;
+  private worktreeId: string | undefined;
 
-  constructor(client: LSPClient, rootUri: string, workspaceId?: string) {
+  constructor(client: LSPClient, rootUri: string, worktreeId?: string) {
     super(client);
     this.rootUri = rootUri;
-    this.workspaceId = workspaceId;
+    this.worktreeId = worktreeId;
   }
 
   private nextFileVersion(uri: string): number {
@@ -171,7 +171,7 @@ class BandWorkspace extends Workspace {
     }
     // An editor takes the document over from a diff view.
     if (this.diffOpen.delete(uri)) this.client.didClose(uri);
-    const file = new BandWorkspaceFile(
+    const file = new BandWorktreeFile(
       uri,
       languageId,
       this.nextFileVersion(uri),
@@ -255,7 +255,7 @@ class BandWorkspace extends Workspace {
     }
 
     // Cross-file navigation: dispatch event and wait for the new view
-    const filePath = this.uriToWorkspacePath(uri);
+    const filePath = this.uriToWorktreePath(uri);
 
     return new Promise<EditorView | null>((resolve) => {
       // Cancel any previous pending navigation
@@ -276,26 +276,26 @@ class BandWorkspace extends Workspace {
 
       // Dispatch navigation event to CodeBrowserView.
       //
-      // Scope the event to the owning workspace. Multiple workspace subtrees
-      // stay mounted at once (MultiWorkspacePanelHost keeps every visited
-      // workspace alive, hidden with visibility:hidden), and each
+      // Scope the event to the owning worktree. Multiple worktree subtrees
+      // stay mounted at once (MultiWorktreePanelHost keeps every visited
+      // worktree alive, hidden with visibility:hidden), and each
       // one's CodeBrowserView listens for `band:lsp-navigate` on `window`.
-      // Without a workspace label, a go-to-definition in the active workspace
-      // A would also open the (A-relative) file in hidden workspaces B/C,
+      // Without a worktree label, a go-to-definition in the active worktree
+      // A would also open the (A-relative) file in hidden worktrees B/C,
       // whose FileViewer then stats it against B/C's own worktree root →
       // ENOENT, and poisons B/C's `band-open-tabs:` localStorage. The listener
       // filters on this id; a missing id falls through to the active
-      // workspace (forward-compat). Same shape as `band:open-file`, see
+      // worktree (forward-compat). Same shape as `band:open-file`, see
       // issue #539.
       window.dispatchEvent(
         new CustomEvent("band:lsp-navigate", {
-          detail: { filePath, workspaceId: this.workspaceId },
+          detail: { filePath, worktreeId: this.worktreeId },
         }),
       );
     });
   }
 
-  uriToWorkspacePath(encodedUri: string): string {
+  uriToWorktreePath(encodedUri: string): string {
     const uri = decodeUri(encodedUri);
     const root = this.rootUri.endsWith("/") ? this.rootUri : `${this.rootUri}/`;
     if (uri.startsWith(root)) {
@@ -361,7 +361,7 @@ function createWebSocketTransport(url: string): Promise<CloseableTransport> {
 }
 
 // ---------------------------------------------------------------------------
-// LSP Client cache (one client per WebSocket URL = per workspace+language)
+// LSP Client cache (one client per WebSocket URL = per worktree+language)
 // ---------------------------------------------------------------------------
 
 interface ConnectedClient {
@@ -380,13 +380,13 @@ const clientCache = new Map<string, CachedClient>();
 
 /**
  * Get or create an LSP client for the given WebSocket URL.
- * The client is cached per URL (effectively per workspace+language).
+ * The client is cached per URL (effectively per worktree+language).
  *
- * `workspaceId` is only consumed on the CREATE path — it's baked into the
- * `BandWorkspace` at construction. On a cache hit it's intentionally ignored:
- * `wsUrl` is built from the workspaceId (`buildLspWsUrl`), so the cache key
- * already partitions clients by workspace and a hit is guaranteed to carry the
- * same workspaceId the caller passed. (If that URL↔workspace coupling ever
+ * `worktreeId` is only consumed on the CREATE path — it's baked into the
+ * `BandWorktree` at construction. On a cache hit it's intentionally ignored:
+ * `wsUrl` is built from the worktreeId (`buildLspWsUrl`), so the cache key
+ * already partitions clients by worktree and a hit is guaranteed to carry the
+ * same worktreeId the caller passed. (If that URL↔worktree coupling ever
  * changes, this assumption must be revisited.)
  *
  * A rejected promise holds no reference, so callers release only after a
@@ -395,7 +395,7 @@ const clientCache = new Map<string, CachedClient>();
 async function getOrCreateClient(
   wsUrl: string,
   rootUri: string,
-  workspaceId?: string,
+  worktreeId?: string,
 ): Promise<LSPClient> {
   let cached = clientCache.get(wsUrl);
   if (cached) {
@@ -403,7 +403,7 @@ async function getOrCreateClient(
   } else {
     const client = new LSPClient({
       rootUri,
-      workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
+      workspace: (c) => new BandWorktree(c, rootUri, worktreeId),
       extensions: languageServerExtensions(),
       timeout: 10000,
     });
@@ -649,7 +649,7 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
             .catch(() => false)
             .then((ok) => {
               // Only a hit is cached: a miss may be a server still loading
-              // the project, so the next hover asks again.
+              // the repo, so the next hover asks again.
               if (!ok || this.view.state.doc !== doc) return;
               this.navigable.add(key);
               if (this.current === key) this.show(range, key);
@@ -709,12 +709,12 @@ function requestDefinition(
  * Returns a promise that resolves to the Extension once the WebSocket is
  * connected and the LSP client is ready.
  *
- * @param wsUrl - WebSocket URL (e.g., `ws://localhost:3000/lsp?workspaceId=X&lang=typescript`)
- * @param rootUri - Workspace root as file URI (e.g., `file:///path/to/workspace`)
- * @param documentUri - Current file as file URI (e.g., `file:///path/to/workspace/src/index.ts`)
+ * @param wsUrl - WebSocket URL (e.g., `ws://localhost:3000/lsp?worktreeId=X&lang=typescript`)
+ * @param rootUri - Worktree root as file URI (e.g., `file:///path/to/worktree`)
+ * @param documentUri - Current file as file URI (e.g., `file:///path/to/worktree/src/index.ts`)
  * @param languageId - LSP language ID (e.g., `typescript`, `typescriptreact`)
- * @param workspaceId - Owning workspace id, stamped onto `band:lsp-navigate`
- *   events so hidden sibling workspaces ignore this workspace's
+ * @param worktreeId - Owning worktree id, stamped onto `band:lsp-navigate`
+ *   events so hidden sibling worktrees ignore this worktree's
  *   cross-file navigations (see issue #539 pattern).
  */
 export async function createLspExtension(
@@ -722,9 +722,9 @@ export async function createLspExtension(
   rootUri: string,
   documentUri: string,
   languageId?: string,
-  workspaceId?: string,
+  worktreeId?: string,
 ): Promise<Extension> {
-  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
+  const client = await getOrCreateClient(wsUrl, rootUri, worktreeId);
   return [
     client.plugin(documentUri, languageId),
     // Cmd+Click (Mac) / Ctrl+Click (other) to jump to definition — the
@@ -747,7 +747,7 @@ export async function createLspExtension(
  *
  * The view gets no LSPPlugin (no completions, diagnostics or edits in a
  * read-only diff). Its text is opened on the server only while no editor has
- * the file open (see `BandWorkspace.diffDocs`). Before each request the
+ * the file open (see `BandWorktree.diffDocs`). Before each request the
  * clicked line is compared with the server's copy of that line; if they
  * differ (for example an editor holds unsaved edits above it), the symbol is
  * not treated as navigable, since the position would point somewhere else.
@@ -760,25 +760,25 @@ export async function createDiffLspNavigation(
   rootUri: string,
   documentUri: string,
   languageId: string,
-  workspaceId?: string,
+  worktreeId?: string,
 ): Promise<Extension> {
-  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
-  const workspace = client.workspace as BandWorkspace;
+  const client = await getOrCreateClient(wsUrl, rootUri, worktreeId);
+  const worktree = client.workspace as BandWorktree;
 
   const register = ViewPlugin.fromClass(
     class {
       constructor(readonly view: EditorView) {
-        workspace.openDiffDoc(documentUri, languageId, view.state.doc);
+        worktree.openDiffDoc(documentUri, languageId, view.state.doc);
       }
       destroy() {
-        workspace.closeDiffDoc(documentUri);
+        worktree.closeDiffDoc(documentUri);
       }
     },
   );
 
   const definitionAt = (view: EditorView, pos: number): Promise<DefinitionLocation | null> => {
     const line = view.state.doc.lineAt(pos);
-    const serverDoc = workspace.serverDoc(documentUri);
+    const serverDoc = worktree.serverDoc(documentUri);
     if (!serverDoc || line.number > serverDoc.lines) return Promise.resolve(null);
     if (serverDoc.line(line.number).text !== line.text) return Promise.resolve(null);
     return requestDefinition(client, documentUri, {
@@ -804,12 +804,12 @@ export async function createDiffLspNavigation(
           return;
         }
         // Same event the editor's cross-file jump uses (see
-        // `BandWorkspace.displayFile`), plus the position to land on.
+        // `BandWorktree.displayFile`), plus the position to land on.
         window.dispatchEvent(
           new CustomEvent("band:lsp-navigate", {
             detail: {
-              filePath: workspace.uriToWorkspacePath(loc.uri),
-              workspaceId,
+              filePath: worktree.uriToWorktreePath(loc.uri),
+              worktreeId,
               line: line + 1,
               column: character + 1,
             },
@@ -830,15 +830,15 @@ export async function createDiffLspNavigation(
 /**
  * Build the WebSocket URL for connecting to the LSP proxy.
  */
-export function buildLspWsUrl(workspaceId: string, lang: string): string {
-  return `${hubWsUrl("/lsp")}?workspaceId=${encodeURIComponent(workspaceId)}&lang=${encodeURIComponent(lang)}`;
+export function buildLspWsUrl(worktreeId: string, lang: string): string {
+  return `${hubWsUrl("/lsp")}?worktreeId=${encodeURIComponent(worktreeId)}&lang=${encodeURIComponent(lang)}`;
 }
 
 /**
- * Build a file URI from a workspace root path and a workspace-relative file path.
+ * Build a file URI from a worktree root path and a worktree-relative file path.
  */
-export function toFileUri(workspacePath: string, relativePath?: string): string {
-  const root = `file://${workspacePath}`;
+export function toFileUri(worktreePath: string, relativePath?: string): string {
+  const root = `file://${worktreePath}`;
   if (!relativePath) return root;
   return `${root}/${relativePath}`;
 }

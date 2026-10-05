@@ -5,14 +5,14 @@
  * another device's copy arrives instead of having its text replaced.
  *
  * Each test opens a desktop-width and a phone-width browser context against
- * one real server, in a workspace no other test uses; the contexts share
+ * one real server, in a worktree no other test uses; the contexts share
  * nothing but the server. No tRPC mocking.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, type BrowserContext, expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -24,21 +24,21 @@ import {
   startServer,
 } from "./helpers/server";
 import { CenterTabStrip } from "./pages/CenterTabStrip";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-client-state-unsaved-token";
-const PROJECT = "unsaved-repo";
+const REPO = "unsaved-repo";
 const FILE = "notes.txt";
 // One worktree per test, so no test sees another's unsaved text on the server.
 const TEST_BRANCHES = ["one", "two", "three", "four", "five"];
 
 let server: ServerHandle;
 let tmpHome: string;
-let nextWorkspace = 0;
+let nextWorktree = 0;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", "main"]);
   writeFileSync(join(repo, FILE), "first line\n");
@@ -46,12 +46,12 @@ test.beforeAll(async () => {
   git(repo, ["commit", "-m", "initial"]);
   const worktrees = [{ branch: "main", path: repo }];
   for (const name of TEST_BRANCHES) {
-    const path = join(tmpHome, `${PROJECT}-${name}`);
+    const path = join(tmpHome, `${REPO}-${name}`);
     git(repo, ["worktree", "add", "-b", name, path]);
     worktrees.push({ branch: name, path });
   }
   seedState(tmpHome, {
-    projects: [{ name: PROJECT, path: repo, defaultBranch: "main", worktrees }],
+    repos: [{ name: REPO, path: repo, defaultBranch: "main", worktrees }],
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
@@ -66,20 +66,20 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-/** A workspace no earlier test has touched. */
-function freshWorkspace(): string {
-  const branch = TEST_BRANCHES[nextWorkspace];
+/** A worktree no earlier test has touched. */
+function freshWorktree(): string {
+  const branch = TEST_BRANCHES[nextWorktree];
   if (!branch) throw new Error("add a branch to TEST_BRANCHES for the new test");
-  nextWorkspace += 1;
-  return toWorkspaceId(PROJECT, branch);
+  nextWorktree += 1;
+  return toWorktreeId(REPO, branch);
 }
 
-const unsavedKey = (workspace: string, path: string) => `band-unsaved:${workspace}:${path}`;
+const unsavedKey = (worktree: string, path: string) => `band-unsaved:${worktree}:${path}`;
 
 async function openDevices(browser: Browser): Promise<{
   contexts: BrowserContext[];
-  desktop: WorkspacePage;
-  phone: WorkspacePage;
+  desktop: WorktreePage;
+  phone: WorktreePage;
   phoneStrip: CenterTabStrip;
 }> {
   const desktopContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -91,8 +91,8 @@ async function openDevices(browser: Browser): Promise<{
   const phonePage = await phoneContext.newPage();
   return {
     contexts: [desktopContext, phoneContext],
-    desktop: new WorkspacePage(await desktopContext.newPage(), server.url, TOKEN),
-    phone: new WorkspacePage(phonePage, server.url, TOKEN),
+    desktop: new WorktreePage(await desktopContext.newPage(), server.url, TOKEN),
+    phone: new WorktreePage(phonePage, server.url, TOKEN),
     phoneStrip: new CenterTabStrip(phonePage),
   };
 }
@@ -101,23 +101,23 @@ async function openDevices(browser: Browser): Promise<{
  *  took that copy and then typed " and the desktop" (the last save), and the
  *  phone is asked what to do. */
 async function editOnBothDevices(
-  workspace: string,
-  desktop: WorkspacePage,
-  phone: WorkspacePage,
+  worktree: string,
+  desktop: WorktreePage,
+  phone: WorktreePage,
   phoneStrip: CenterTabStrip,
 ): Promise<void> {
-  const key = unsavedKey(workspace, FILE);
-  await desktop.goto(workspace);
+  const key = unsavedKey(worktree, FILE);
+  await desktop.goto(worktree);
   await desktop.waitForReady();
   await desktop.openFileViaQuickOpen(FILE);
-  await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILE}`);
+  await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe(`file:${FILE}`);
 
-  await phone.goto(workspace);
+  await phone.goto(worktree);
   await phone.waitForMobileReady();
   await phoneStrip.tap(phone.fileTab(FILE));
   await phone.appendToActiveFileEditor("typed on the phone");
   await expect
-    .poll(() => desktop.readServerClientState(workspace, key))
+    .poll(() => desktop.readServerClientState(worktree, key))
     .toBe("first line\ntyped on the phone");
 
   // The desktop hadn't typed, so it just shows the phone's text; the phone
@@ -129,7 +129,7 @@ async function editOnBothDevices(
 
   await desktop.appendToActiveFileEditor(" and the desktop");
   await expect
-    .poll(() => desktop.readServerClientState(workspace, key))
+    .poll(() => desktop.readServerClientState(worktree, key))
     .toBe("first line\ntyped on the phone and the desktop");
   // The phone has the final copy, keeps its own text on screen and asks.
   await expect
@@ -141,18 +141,18 @@ async function editOnBothDevices(
 
 test.describe("unsaved edits shared between desktop and phone", () => {
   test("an unsaved edit made on the desktop is in the phone's editor", async ({ browser }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await desktop.openFileViaQuickOpen(FILE);
       await desktop.appendToActiveFileEditor("typed on the desktop");
       await expect
-        .poll(() => desktop.readServerClientState(workspace, unsavedKey(workspace, FILE)))
+        .poll(() => desktop.readServerClientState(worktree, unsavedKey(worktree, FILE)))
         .toBe("first line\ntyped on the desktop");
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await phoneStrip.tap(phone.fileTab(FILE));
       await expect(phone.fileLeafLine("typed on the desktop")).toBeVisible();
@@ -162,24 +162,24 @@ test.describe("unsaved edits shared between desktop and phone", () => {
   });
 
   test("unsaved edits kept before the upgrade move to the server", async ({ browser }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
       // A browser that used Band before unsaved edits moved out of the tab state.
-      await desktop.seedFileLeaves(workspace, [FILE]);
+      await desktop.seedFileLeaves(worktree, [FILE]);
       await desktop.seedLocalStorageBeforeLoad({
-        [`band-tab-state:${workspace}`]: JSON.stringify({
+        [`band-tab-state:${worktree}`]: JSON.stringify({
           [FILE]: { editedContent: "first line\nedited before the upgrade" },
         }),
       });
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await expect(desktop.fileLeafLine("edited before the upgrade")).toBeVisible();
       await expect
-        .poll(() => desktop.readServerClientState(workspace, unsavedKey(workspace, FILE)))
+        .poll(() => desktop.readServerClientState(worktree, unsavedKey(worktree, FILE)))
         .toBe("first line\nedited before the upgrade");
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await phoneStrip.tap(phone.fileTab(FILE));
       await expect(phone.fileLeafLine("edited before the upgrade")).toBeVisible();
@@ -191,10 +191,10 @@ test.describe("unsaved edits shared between desktop and phone", () => {
   test("a device with its own edits is warned and can load the other device's copy", async ({
     browser,
   }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
-      await editOnBothDevices(workspace, desktop, phone, phoneStrip);
+      await editOnBothDevices(worktree, desktop, phone, phoneStrip);
       await phone.loadRemoteEdit();
       await expect(phone.fileLeafLine("typed on the phone and the desktop")).toBeVisible();
       await expect(phone.remoteEditBanner).toHaveCount(0);
@@ -204,15 +204,15 @@ test.describe("unsaved edits shared between desktop and phone", () => {
   });
 
   test("keeping this device's edits makes them the last save", async ({ browser }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
-      await editOnBothDevices(workspace, desktop, phone, phoneStrip);
+      await editOnBothDevices(worktree, desktop, phone, phoneStrip);
       await phone.keepOwnEdit();
       await expect(phone.remoteEditBanner).toHaveCount(0);
       await expect(phone.fileLeafLine("typed on the phone")).toBeVisible();
       await expect
-        .poll(() => phone.readServerClientState(workspace, unsavedKey(workspace, FILE)))
+        .poll(() => phone.readServerClientState(worktree, unsavedKey(worktree, FILE)))
         .toBe("first line\ntyped on the phone");
       // Now the desktop, which typed too, is the one asked.
       await expect(desktop.remoteEditBanner).toBeVisible();
@@ -224,20 +224,20 @@ test.describe("unsaved edits shared between desktop and phone", () => {
   test("an untitled buffer written on the desktop opens with its text on the phone", async ({
     browser,
   }) => {
-    const workspace = freshWorkspace();
+    const worktree = freshWorktree();
     const { contexts, desktop, phone, phoneStrip } = await openDevices(browser);
     try {
-      await desktop.goto(workspace);
+      await desktop.goto(worktree);
       await desktop.waitForReady();
       await desktop.openUntitledTab();
       await expect(desktop.fileTab("untitled:1")).toBeAttached();
       await desktop.appendToActiveFileEditor("scratch from the desktop");
       await expect
-        .poll(() => desktop.readServerClientState(workspace, unsavedKey(workspace, "untitled:1")))
+        .poll(() => desktop.readServerClientState(worktree, unsavedKey(worktree, "untitled:1")))
         .toBe("scratch from the desktop");
-      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe("file:untitled:1");
+      await expect.poll(() => desktop.readSharedActiveTab(worktree)).toBe("file:untitled:1");
 
-      await phone.goto(workspace);
+      await phone.goto(worktree);
       await phone.waitForMobileReady();
       await phoneStrip.tap(phone.fileTab("untitled:1"));
       await expect(phone.fileLeafLine("scratch from the desktop")).toBeVisible();
@@ -246,8 +246,8 @@ test.describe("unsaved edits shared between desktop and phone", () => {
       // of reusing 1 and sharing its text.
       const secondContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       contexts.push(secondContext);
-      const secondDesktop = new WorkspacePage(await secondContext.newPage(), server.url, TOKEN);
-      await secondDesktop.goto(workspace);
+      const secondDesktop = new WorktreePage(await secondContext.newPage(), server.url, TOKEN);
+      await secondDesktop.goto(worktree);
       await secondDesktop.waitForReady();
       await expect(secondDesktop.fileTab("untitled:1")).toBeAttached();
       await secondDesktop.openUntitledTab();

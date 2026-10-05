@@ -1,16 +1,16 @@
 import { clientStorage } from "../../lib/client-state";
 
-const STORAGE_KEY = "band-recent-workspaces";
+const STORAGE_KEY = "band-recent-worktrees";
 const MAX_ENTRIES = 50;
 
 /**
- * Record a workspace as most-recently-accessed.
+ * Record a worktree as most-recently-accessed.
  * Moves it to the front of the list (or inserts it if new).
  */
-export function recordWorkspaceAccess(workspaceId: string): void {
-  const list = getRecentWorkspaceOrder();
-  const filtered = list.filter((id) => id !== workspaceId);
-  filtered.unshift(workspaceId);
+export function recordWorktreeAccess(worktreeId: string): void {
+  const list = getRecentWorktreeOrder();
+  const filtered = list.filter((id) => id !== worktreeId);
+  filtered.unshift(worktreeId);
   if (filtered.length > MAX_ENTRIES) filtered.length = MAX_ENTRIES;
   try {
     clientStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
@@ -20,9 +20,9 @@ export function recordWorkspaceAccess(workspaceId: string): void {
 }
 
 /**
- * Returns workspace IDs ordered by most-recently-accessed first.
+ * Returns worktree IDs ordered by most-recently-accessed first.
  */
-export function getRecentWorkspaceOrder(): string[] {
+export function getRecentWorktreeOrder(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];

@@ -6,7 +6,7 @@ import { clientStorage } from "./client-state";
  * split-within-a-terminal-tab feature (issue #643 follow-up).
  *
  * A `term` leaf in the main center dockview
- * (`WorkspaceCenterDockview.tsx`) is no longer a single terminal: it hosts a
+ * (`WorktreeCenterDockview.tsx`) is no longer a single terminal: it hosts a
  * NESTED, headerless-per-pane `DockviewReact` (`TerminalSplitLeaf`) whose panels
  * are individual terminals (each its own bare-UUID id + PTY). This module is the
  * small amount of shared, module-level state that the nested dockview and the
@@ -25,7 +25,7 @@ import { clientStorage } from "./client-state";
  *      is inside it.
  *
  *   3. **Nested layout persistence** — the split geometry per leaf, in
- *      localStorage (`band:term-split:<workspaceId>:<leafId>`). This is
+ *      localStorage (`band:term-split:<worktreeId>:<leafId>`). This is
  *      deliberately client-only: the server-side `terminalLayout` router was
  *      retired in #643 and must not be reintroduced.
  *
@@ -154,14 +154,14 @@ export function terminalSplitApiForLeaf(leafId: string): DockviewApi | undefined
 
 const NESTED_LAYOUT_PREFIX = "band:term-split:";
 
-function nestedLayoutKey(workspaceId: string, leafId: string): string {
-  return `${NESTED_LAYOUT_PREFIX}${workspaceId}:${leafId}`;
+function nestedLayoutKey(worktreeId: string, leafId: string): string {
+  return `${NESTED_LAYOUT_PREFIX}${worktreeId}:${leafId}`;
 }
 
 /** Read a saved nested split layout, or `null` if absent/unparseable. */
-export function readNestedLayout(workspaceId: string, leafId: string): unknown | null {
+export function readNestedLayout(worktreeId: string, leafId: string): unknown | null {
   try {
-    const raw = localStorage.getItem(nestedLayoutKey(workspaceId, leafId));
+    const raw = localStorage.getItem(nestedLayoutKey(worktreeId, leafId));
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -170,22 +170,22 @@ export function readNestedLayout(workspaceId: string, leafId: string): unknown |
 }
 
 /** Persist a nested split layout (a dockview `toJSON()` blob). */
-export function writeNestedLayout(workspaceId: string, leafId: string, layout: unknown): void {
+export function writeNestedLayout(worktreeId: string, leafId: string, layout: unknown): void {
   try {
-    clientStorage.setItem(nestedLayoutKey(workspaceId, leafId), JSON.stringify(layout));
+    clientStorage.setItem(nestedLayoutKey(worktreeId, leafId), JSON.stringify(layout));
   } catch {}
 }
 
 /** Delete a leaf's saved nested layout (on outer leaf close). */
-export function deleteNestedLayout(workspaceId: string, leafId: string): void {
+export function deleteNestedLayout(worktreeId: string, leafId: string): void {
   try {
-    clientStorage.removeItem(nestedLayoutKey(workspaceId, leafId));
+    clientStorage.removeItem(nestedLayoutKey(worktreeId, leafId));
   } catch {}
 }
 
 /**
  * Pre-seed `terminalLeafOwner` from all persisted nested layouts for a
- * workspace, BEFORE the outer dockview reconciles. Each blob's `panels` keys are
+ * worktree, BEFORE the outer dockview reconciles. Each blob's `panels` keys are
  * the pane terminalIds; the leafId is in the storage key. Without this, the
  * outer reconcile (which runs as soon as the layout restores, before the
  * `TerminalSplitLeaf`s mount and register ownership) would see a pane terminalId
@@ -193,8 +193,8 @@ export function deleteNestedLayout(workspaceId: string, leafId: string): void {
  *
  * Returns the number of pane→leaf mappings seeded (for logging/tests).
  */
-export function seedOwnersFromStorage(workspaceId: string): number {
-  const prefix = `${NESTED_LAYOUT_PREFIX}${workspaceId}:`;
+export function seedOwnersFromStorage(worktreeId: string): number {
+  const prefix = `${NESTED_LAYOUT_PREFIX}${worktreeId}:`;
   let seeded = 0;
   try {
     for (let i = 0; i < localStorage.length; i++) {

@@ -60,69 +60,69 @@ export function cleanupTmpHome(tmpHome: string): void {
   rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
-interface SeedProject {
+interface SeedRepo {
   name: string;
   path: string;
   defaultBranch: string;
   label?: string;
-  // `name` is the immutable workspace identity — defaults to `branch` (the
-  // create-time invariant). Pass it explicitly to simulate a workspace
+  // `name` is the immutable worktree identity — defaults to `branch` (the
+  // create-time invariant). Pass it explicitly to simulate a worktree
   // whose git branch was switched after creation.
   worktrees: { name?: string; branch: string; path: string }[];
 }
 
-export function seedState(tmpHome: string, state: { projects: SeedProject[] }): void {
+export function seedState(tmpHome: string, state: { repos: SeedRepo[] }): void {
   // Write state.json for backwards compatibility
   writeFileSync(join(tmpHome, ".band", "state.json"), JSON.stringify(state));
 
-  // Also seed the SQLite DB so loadState() finds the projects
+  // Also seed the SQLite DB so loadState() finds the repos
   const dbPath = join(tmpHome, ".band", "band.db");
   const sqlite = new DatabaseSync(dbPath);
   sqlite.exec("PRAGMA journal_mode = WAL");
   const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 
-  for (let i = 0; i < state.projects.length; i++) {
-    const project = state.projects[i];
+  for (let i = 0; i < state.repos.length; i++) {
+    const repo = state.repos[i];
     sqlite
       .prepare(
-        `INSERT OR REPLACE INTO projects (name, path, default_branch, label, sort_order)
+        `INSERT OR REPLACE INTO repos (name, path, default_branch, label, sort_order)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(project.name, project.path, project.defaultBranch, project.label ?? null, i);
+      .run(repo.name, repo.path, repo.defaultBranch, repo.label ?? null, i);
 
-    for (const wt of project.worktrees) {
+    for (const wt of repo.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (project_name, name, branch, path)
+          `INSERT INTO worktrees (repo_name, name, branch, path)
            VALUES (?, ?, ?, ?)`,
         )
-        .run(project.name, wt.name ?? wt.branch, wt.branch, wt.path);
+        .run(repo.name, wt.name ?? wt.branch, wt.branch, wt.path);
     }
   }
   sqlite.close();
 }
 
 /**
- * Marks a seeded workspace as asleep (an ephemeral worker stored it and exited, plan step 3.5),
+ * Marks a seeded worktree as asleep (an ephemeral worker stored it and exited, plan step 3.5),
  * or waking when `waking` is set. The UI only reads the row, so no worker is involved.
  */
-export function seedSleepingWorkspace(
+export function seedSleepingWorktree(
   tmpHome: string,
-  row: { workspaceId: string; project: string; name: string; path: string; waking?: boolean },
+  row: { worktreeId: string; repo: string; name: string; path: string; waking?: boolean },
 ): void {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
   try {
     sqlite.exec("PRAGMA busy_timeout = 5000");
     sqlite
       .prepare(
-        `INSERT INTO workspace_sleep (workspace_id, host_id, project, name, branch, worktree_path,
+        `INSERT INTO worktree_sleep (worktree_id, host_id, repo, name, branch, worktree_path,
            base_sha, snapshot_sha, ref, store, session_ids, waking_since, created_at)
          VALUES (?, 'h-seeded', ?, ?, ?, ?, 'a', 'a', 'refs/heads/band/wip/x', 'remote', '[]', ?, ?)`,
       )
       .run(
-        row.workspaceId,
-        row.project,
+        row.worktreeId,
+        row.repo,
         row.name,
         row.name,
         row.path,
@@ -135,15 +135,15 @@ export function seedSleepingWorkspace(
 }
 
 /**
- * Delete a seeded project and its workspaces from the DB, the way removing
+ * Delete a seeded repo and its worktrees from the DB, the way removing
  * them while Band was closed leaves it. Call it while the server is stopped.
  */
-export function removeSeededProject(tmpHome: string, name: string): void {
+export function removeSeededRepo(tmpHome: string, name: string): void {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
   try {
     sqlite.exec("PRAGMA busy_timeout = 5000");
-    sqlite.prepare("DELETE FROM worktrees WHERE project_name = ?").run(name);
-    sqlite.prepare("DELETE FROM projects WHERE name = ?").run(name);
+    sqlite.prepare("DELETE FROM worktrees WHERE repo_name = ?").run(name);
+    sqlite.prepare("DELETE FROM repos WHERE name = ?").run(name);
   } finally {
     sqlite.close();
   }

@@ -14,7 +14,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -24,12 +24,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-pane-actions-bg-token";
 const BRANCH = "main";
-const PROJECT = "term-pane-actions-bg";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const REPO = "term-pane-actions-bg";
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 // Wide viewport so `useIsDesktop()` reports true and terminals can split.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -48,16 +48,16 @@ for (const { theme, background } of THEMES) {
 
     test.beforeAll(async () => {
       tmpHome = createTmpHome();
-      const repoPath = join(tmpHome, PROJECT);
+      const repoPath = join(tmpHome, REPO);
       mkdirSync(repoPath, { recursive: true });
       git(repoPath, ["init", "-b", BRANCH]);
       writeFileSync(join(repoPath, "README.md"), "# pane actions\n");
       git(repoPath, ["add", "."]);
       git(repoPath, ["commit", "-m", "initial"]);
       seedState(tmpHome, {
-        projects: [
+        repos: [
           {
-            name: PROJECT,
+            name: REPO,
             path: repoPath,
             defaultBranch: BRANCH,
             worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -74,19 +74,19 @@ for (const { theme, background } of THEMES) {
     });
 
     test("the split and close icons sit on the terminal's background", async ({ page }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
+      const worktreePage = new WorktreePage(page, server.url, TOKEN);
+      await worktreePage.goto(WORKTREE);
+      await worktreePage.waitForReady();
 
       // A lone pane hides its header, so split once to get the icon clusters.
-      await workspacePage.focusTerminal();
-      await workspacePage.splitTerminalRight();
-      await expect(workspacePage.terminalPanes()).toHaveCount(2);
+      await worktreePage.focusTerminal();
+      await worktreePage.splitTerminalRight();
+      await expect(worktreePage.terminalPanes()).toHaveCount(2);
 
       for (const index of [0, 1]) {
-        await expect(workspacePage.paneActions(index)).toBeAttached();
+        await expect(worktreePage.paneActions(index)).toBeAttached();
         await expect
-          .poll(() => workspacePage.paneActionsBackground(index))
+          .poll(() => worktreePage.paneActionsBackground(index))
           .toEqual({ actions: background, terminal: background });
       }
     });

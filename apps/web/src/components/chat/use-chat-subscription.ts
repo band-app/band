@@ -36,7 +36,7 @@ import {
 } from "./transcript";
 
 export interface UseChatSubscriptionOptions {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   /** Pass-through to `submitTask` server-side. */
   codingAgentId?: string;
@@ -99,7 +99,7 @@ async function fileToWirePart(file: File): Promise<ChatEventFile> {
 let localId = 0;
 
 export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSubscriptionResult {
-  const { workspaceId, chatId, codingAgentId, enabled = true } = opts;
+  const { worktreeId, chatId, codingAgentId, enabled = true } = opts;
 
   const [state, dispatch] = useReducer(transcriptReducer, INITIAL_TRANSCRIPT);
   const [isConnected, setIsConnected] = useState(false);
@@ -228,8 +228,8 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
   // Actions
   // ---------------------------------------------------------------------
 
-  const agentRef = useRef({ workspaceId, codingAgentId });
-  agentRef.current = { workspaceId, codingAgentId };
+  const agentRef = useRef({ worktreeId, codingAgentId });
+  agentRef.current = { worktreeId, codingAgentId };
   const busyRef = useRef(false);
   busyRef.current = state.taskRunning || state.queue.length > 0;
 
@@ -256,7 +256,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          workspaceId: agentRef.current.workspaceId,
+          worktreeId: agentRef.current.worktreeId,
           text,
           ...(wireFiles && { files: wireFiles }),
           ...(agentRef.current.codingAgentId && { codingAgentId: agentRef.current.codingAgentId }),
@@ -274,11 +274,11 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
 
   const cancel = useCallback(async (): Promise<void> => {
     try {
-      await trpc.tasks.abort.mutate({ workspaceId, chatId });
+      await trpc.tasks.abort.mutate({ worktreeId, chatId });
     } catch {
       // Nothing running; the stream already says so.
     }
-  }, [workspaceId, chatId]);
+  }, [worktreeId, chatId]);
 
   const answerPermission = useCallback(
     async (requestId: string, optionId: string | null) => {
@@ -310,11 +310,11 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         chatId,
         configId,
         value,
-        workspaceId,
+        worktreeId,
       });
       dispatch({ type: "session-state", state: next as SessionState, eventId: -1 });
     },
-    [chatId, workspaceId],
+    [chatId, worktreeId],
   );
 
   // Scroll-back pagination: fetch the turns before the oldest loaded event,

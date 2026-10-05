@@ -1,7 +1,7 @@
 /**
  * Page object for the dashboard's Settings dialog.
  *
- * Owns the locators for the Settings button in the project-list bottom
+ * Owns the locators for the Settings button in the repo-list bottom
  * action bar, the dialog itself, and every per-row control we exercise in
  * `e2e/settings-page.spec.ts`. Test bodies never call `page.goto()`,
  * `page.locator()`, `getByText`, or CSS-id selectors directly — they go
@@ -15,7 +15,7 @@
  * associated `<label htmlFor>` that contributes the accessible name, so
  * `getByRole(..., { name })` is the preferred shape here. The Settings
  * gear button in the bottom action bar is anchored via its `data-testid`
- * (`project-list__settings-button`, set in `DashboardShell.tsx`).
+ * (`repo-list__settings-button`, set in `DashboardShell.tsx`).
  *
  * CARVE-OUT (locator priority): a strict reading of the doctrine
  * bans `getByText`/`getByRole({ name })` against user-visible English copy
@@ -57,7 +57,7 @@ export class SettingsPage {
   readonly dialog: Locator;
   /** Save button in the dialog footer. Disabled until something is dirty. */
   readonly saveButton: Locator;
-  /** Settings gear icon button in the project-list bottom action bar.
+  /** Settings gear icon button in the repo-list bottom action bar.
    *  Anchored via `data-testid` (set in `DashboardShell.tsx`). Opens the
    *  Settings dialog directly — no intermediate dropdown. */
   readonly settingsButton: Locator;
@@ -71,7 +71,7 @@ export class SettingsPage {
     private readonly token: string,
   ) {
     this.dialog = page.getByRole("dialog", { name: "Settings" });
-    this.settingsButton = page.getByTestId("project-list__settings-button");
+    this.settingsButton = page.getByTestId("repo-list__settings-button");
     this.saveButton = this.dialog.getByRole("button", { name: "Save" });
     this.footer = page.getByTestId("settings-page__footer");
   }
@@ -80,7 +80,7 @@ export class SettingsPage {
   async goto(): Promise<void> {
     await test.step("Open dashboard", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
-      // The dashboard React app fetches projects via tRPC on mount, so the
+      // The dashboard React app fetches repos via tRPC on mount, so the
       // action bar's React click handlers may not be bound by the time `load`
       // fires. Wait for the network to settle before any subsequent step
       // tries to click the Settings button — without this, the first click on
@@ -91,7 +91,7 @@ export class SettingsPage {
   }
 
   /**
-   * Click the Settings button in the project-list bottom action bar and wait
+   * Click the Settings button in the repo-list bottom action bar and wait
    * for the dialog to render. The button opens the dialog directly, but a
    * hydration-swallowed first click (see `goto`) can drop the event, so
    * re-click until the dialog is actually visible.
@@ -222,10 +222,10 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "Play sound on needs attention" });
   }
 
-  /** The retired "Cached workspaces" number input. Kept as a locator only so
+  /** The retired "Cached worktrees" number input. Kept as a locator only so
    *  a test can prove the row no longer renders. */
-  cachedWorkspacesInput(): Locator {
-    return this.dialog.getByRole("spinbutton", { name: "Cached workspaces" });
+  cachedWorktreesInput(): Locator {
+    return this.dialog.getByRole("spinbutton", { name: "Cached worktrees" });
   }
 
   /** Web server port input — `type="number"` so its ARIA role is
@@ -642,11 +642,11 @@ export class SettingsPage {
     });
   }
 
-  /** Scopes the server to one project. */
-  async scopeMcpToProject(project: string): Promise<void> {
-    await test.step(`Scope the MCP server to ${project}`, async () => {
-      await this.dialog.getByRole("radio", { name: "Scope: Selected projects" }).check();
-      await this.dialog.getByRole("checkbox", { name: `Project ${project}` }).check();
+  /** Scopes the server to one repo. */
+  async scopeMcpToRepo(repo: string): Promise<void> {
+    await test.step(`Scope the MCP server to ${repo}`, async () => {
+      await this.dialog.getByRole("radio", { name: "Scope: Selected repos" }).check();
+      await this.dialog.getByRole("checkbox", { name: `Repo ${repo}` }).check();
     });
   }
 
@@ -694,25 +694,25 @@ export class SettingsPage {
     return runner.getByTestId("settings__runner-running");
   }
 
-  /** The row of a request a runner took, matched on its workspace id. */
-  runnerRun(workspaceId: string): Locator {
+  /** The row of a request a runner took, matched on its worktree id. */
+  runnerRun(worktreeId: string): Locator {
     return this.dialog.getByTestId("settings__runner-run").filter({
       has: this.page
-        .getByTestId("settings__runner-run-workspace")
-        .getByText(workspaceId, { exact: true }),
+        .getByTestId("settings__runner-run-worktree")
+        .getByText(worktreeId, { exact: true }),
     });
   }
 
   /** Opens or closes the log under a run. */
-  async toggleRunnerLog(workspaceId: string): Promise<void> {
-    await test.step(`Toggle the runner log of ${workspaceId}`, async () => {
-      await this.runnerRun(workspaceId).getByTestId("settings__runner-run-log-toggle").click();
+  async toggleRunnerLog(worktreeId: string): Promise<void> {
+    await test.step(`Toggle the runner log of ${worktreeId}`, async () => {
+      await this.runnerRun(worktreeId).getByTestId("settings__runner-run-log-toggle").click();
     });
   }
 
   /** The log text under an open run. */
-  runnerLog(workspaceId: string): Locator {
-    return this.runnerRun(workspaceId).getByTestId("settings__runner-log");
+  runnerLog(worktreeId: string): Locator {
+    return this.runnerRun(worktreeId).getByTestId("settings__runner-log");
   }
 
   /** The rows of the machines a runner started. `data-testid` set in `RunnersSettings.tsx`. */
@@ -813,44 +813,44 @@ export class SettingsPage {
     return this.dialog.getByRole("button", { name: `Delete browser profile ${profileName}` });
   }
 
-  /** Trigger of the "Project defaults" accordion in the Browser section,
+  /** Trigger of the "Repo defaults" accordion in the Browser section,
    *  collapsed by default. `data-testid` set in `BrowserProfilesSettings.tsx`. */
-  projectDefaultsTrigger(): Locator {
-    return this.dialog.getByTestId("settings__project-defaults-trigger");
+  repoDefaultsTrigger(): Locator {
+    return this.dialog.getByTestId("settings__repo-defaults-trigger");
   }
 
-  /** One row per project inside the "Project defaults" accordion.
+  /** One row per repo inside the "Repo defaults" accordion.
    *  `data-testid` set in `BrowserProfilesSettings.tsx`. */
-  projectBrowserProfileRows(): Locator {
-    return this.dialog.getByTestId("settings__project-browser-profile");
+  repoBrowserProfileRows(): Locator {
+    return this.dialog.getByTestId("settings__repo-browser-profile");
   }
 
-  /** Per-project default profile dropdown, inside the "Project defaults"
-   *  accordion. `aria-label="Browser profile for <project name>"` is set
+  /** Per-repo default profile dropdown, inside the "Repo defaults"
+   *  accordion. `aria-label="Browser profile for <repo name>"` is set
    *  explicitly in `BrowserProfilesSettings.tsx`. Tests assert its shown
    *  value by option name ("Default" or a seeded profile name), under the
    *  same carve-out as the theme names above: "Default" is the fixed name
    *  of the built-in profile, not product copy. */
-  projectBrowserProfileSelect(projectName: string): Locator {
-    return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectName}` });
+  repoBrowserProfileSelect(repoName: string): Locator {
+    return this.dialog.getByRole("combobox", { name: `Browser profile for ${repoName}` });
   }
 
-  /** Open the "Project defaults" accordion and wait for its rows to show. */
-  async expandProjectDefaults(): Promise<void> {
-    await test.step("Expand Project defaults", async () => {
-      const trigger = this.projectDefaultsTrigger();
+  /** Open the "Repo defaults" accordion and wait for its rows to show. */
+  async expandRepoDefaults(): Promise<void> {
+    await test.step("Expand Repo defaults", async () => {
+      const trigger = this.repoDefaultsTrigger();
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
       await expect(trigger).toHaveAttribute("aria-expanded", "true");
-      await expect(this.projectBrowserProfileRows().first()).toBeVisible();
+      await expect(this.repoBrowserProfileRows().first()).toBeVisible();
     });
   }
 
-  /** Pick a project's default browser profile. Applies immediately. The
-   *  "Project defaults" accordion must be expanded first. */
-  async selectProjectBrowserProfile(projectName: string, profileName: string): Promise<void> {
-    await test.step(`Set ${projectName}'s browser profile to "${profileName}"`, async () => {
-      const trigger = this.projectBrowserProfileSelect(projectName);
+  /** Pick a repo's default browser profile. Applies immediately. The
+   *  "Repo defaults" accordion must be expanded first. */
+  async selectRepoBrowserProfile(repoName: string, profileName: string): Promise<void> {
+    await test.step(`Set ${repoName}'s browser profile to "${profileName}"`, async () => {
+      const trigger = this.repoBrowserProfileSelect(repoName);
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
       await this.page.getByRole("option", { name: profileName }).click();
@@ -924,16 +924,16 @@ export class SettingsPage {
     });
   }
 
-  /** Trigger of a project's entry in the Environment section, collapsed by
+  /** Trigger of a repo's entry in the Environment section, collapsed by
    *  default. `data-testid` set in `EnvironmentSettings.tsx`. */
-  environmentTrigger(projectName: string): Locator {
-    return this.dialog.getByTestId(`settings__environment-trigger-${projectName}`);
+  environmentTrigger(repoName: string): Locator {
+    return this.dialog.getByTestId(`settings__environment-trigger-${repoName}`);
   }
 
-  /** Open a project's entry in the Environment section. */
-  async expandEnvironment(projectName: string): Promise<void> {
-    await test.step(`Expand ${projectName}'s environment`, async () => {
-      const trigger = this.environmentTrigger(projectName);
+  /** Open a repo's entry in the Environment section. */
+  async expandEnvironment(repoName: string): Promise<void> {
+    await test.step(`Expand ${repoName}'s environment`, async () => {
+      const trigger = this.environmentTrigger(repoName);
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
       await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -951,7 +951,7 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__environment-valid");
   }
 
-  /** Shown when the open project has no `.band/environment.json`. */
+  /** Shown when the open repo has no `.band/environment.json`. */
   environmentNone(): Locator {
     return this.dialog.getByTestId("settings__environment-none");
   }

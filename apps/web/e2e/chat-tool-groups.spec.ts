@@ -18,14 +18,14 @@
  *
  * Architecture: the REAL `dist/start-server.mjs` against a fresh temp home,
  * the ACP stub agent scripting the tool calls, and the UI driven through
- * `ChatPanePage`. The clipboard is read through `WorkspacePage`'s
+ * `ChatPanePage`. The clipboard is read through `WorktreePage`'s
  * `installClipboardCapture`, which records the copy fallback's payload.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -36,11 +36,11 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-tool-groups-token";
-const PROJECT = "toolgroups";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "toolgroups";
+const WORKTREE = toWorktreeId(REPO, "main");
 const REPLY = "Fixed the lint errors.";
 const STATUS_REPLY = "The tree is clean.";
 const README_REPLY = "The README is short.";
@@ -65,9 +65,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -230,7 +230,7 @@ test.describe("chat tool groups and message actions", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("fix the lint");
@@ -311,9 +311,9 @@ test.describe("chat tool groups and message actions", () => {
 
   test("a message shows when it was sent and copies its text on hover", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    await workspace.installClipboardCapture();
-    await chatPane.goto(WORKSPACE);
+    const worktree = new WorktreePage(page, server.url, TOKEN);
+    await worktree.installClipboardCapture();
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // The chat from the previous test replays from the event log.
@@ -335,12 +335,12 @@ test.describe("chat tool groups and message actions", () => {
     );
 
     await chatPane.copyMessage(reply);
-    await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe(REPLY);
+    await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe(REPLY);
 
     // The user's own message has the same row.
     const prompt = chatPane.userMessage("fix the lint");
     await chatPane.copyMessage(prompt);
-    await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("fix the lint");
+    await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe("fix the lint");
     await expect(chatPane.messageTime(prompt)).toHaveText(/^(just now|1 minute ago)$/);
 
     // The group's duration comes from the logged event times too.
@@ -350,7 +350,7 @@ test.describe("chat tool groups and message actions", () => {
 
   test("a lone shell command folds into a group of one", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await expect(chatPane.assistantMessage(REPLY)).toBeVisible();
 
@@ -374,7 +374,7 @@ test.describe("chat tool groups and message actions", () => {
 
   test("a lone read stays a row of its own", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await expect(chatPane.assistantMessage(STATUS_REPLY)).toBeVisible();
 

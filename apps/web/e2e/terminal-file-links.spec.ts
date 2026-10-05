@@ -4,15 +4,15 @@
  * Feature: a file-path reference printed in the terminal (e.g.
  * `zz/link-target.ts:7`) is a clickable link; clicking it opens that file in
  * the file browser. The mechanism mirrors chat file links — the xterm link
- * provider dispatches the same workspace-scoped `band:open-file` window
+ * provider dispatches the same worktree-scoped `band:open-file` window
  * event, which routes the path through Quick Open into the Files panel. When
- * the path resolves to a single workspace file, Quick Open opens it directly
+ * the path resolves to a single worktree file, Quick Open opens it directly
  * (no intermediate dialog). See `lib/terminal-file-links.ts` and
  * `ai-elements/file-link-components.tsx`.
  *
  * This boots the production server bundle against a tmp `~/.band/`, opens a
  * real terminal (real PTY), prints a path to a file that exists in the
- * workspace, clicks the rendered link, and asserts the file lands open in the
+ * worktree, clicks the rendered link, and asserts the file lands open in the
  * file browser (Files tab active + the file persisted into the open-tabs
  * localStorage entry).
  *
@@ -21,14 +21,14 @@
  * is renderer-agnostic (xterm's link layer hit-tests cell ranges the same way
  * under either backend), so we force the DOM renderer via
  * `seedSettings({ useWebGLTerminalRenderer: false })` purely so the printed
- * path exists as locatable DOM text — see `WorkspacePage.clickTerminalFileLink`.
+ * path exists as locatable DOM text — see `WorktreePage.clickTerminalFileLink`.
  */
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -37,13 +37,13 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-file-links-token";
-const PROJECT = "alpha-terminal-file-links";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-terminal-file-links";
+const WORKTREE = toWorktreeId(REPO, "main");
 
-// A workspace-relative path (slash + known extension → `isFilePath` links it)
+// A worktree-relative path (slash + known extension → `isFilePath` links it)
 // with a line indicator. The `zz` prefix keeps it from colliding with
 // anything a shell prompt might render on the same line. The file is created
 // on disk below so Quick Open resolves it to exactly one result and opens it
@@ -57,8 +57,8 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
-/** A real directory used as the project path — the PTY spawns with cwd =
- *  the project path and `terminal-pool` throws if it doesn't exist. */
+/** A real directory used as the repo path — the PTY spawns with cwd =
+ *  the repo path and `terminal-pool` throws if it doesn't exist. */
 let workdir: string;
 
 test.beforeAll(async () => {
@@ -69,9 +69,9 @@ test.beforeAll(async () => {
   mkdirSync(join(workdir, "zz"), { recursive: true });
   writeFileSync(join(workdir, REL_PATH), "export const target = 1;\n", "utf-8");
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -102,33 +102,33 @@ test.describe("Terminal file links", () => {
     // other terminal specs use under CI worker contention.
     test.setTimeout(120_000);
 
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(75_000);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(75_000);
 
     // Positive anchor: no file leaf is open before the click. Poll so we
     // assert against settled state, not a pre-hydration read.
     await expect
-      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .poll(async () => await worktreePage.readOpenTabPaths(WORKTREE), { timeout: 5_000 })
       .not.toContain(REL_PATH);
 
     // Print the path on its own line. `runInTerminal` types the command and
     // submits it; the shell echoes `LINK_PATH` as a bare output line at
     // column 0, which the link provider turns into a clickable link.
-    await workspacePage.runInTerminal(`echo ${LINK_PATH}`);
+    await worktreePage.runInTerminal(`echo ${LINK_PATH}`);
 
-    await workspacePage.clickTerminalFileLink(LINK_PATH);
+    await worktreePage.clickTerminalFileLink(LINK_PATH);
 
     // Observable outcome: the click routed the path through the open-file event
     // into a per-path `file` leaf (line suffix stripped) — the same open-file
     // surface a chat file-link click drives.
-    await expect(workspacePage.fileTab(REL_PATH)).toBeAttached({
+    await expect(worktreePage.fileTab(REL_PATH)).toBeAttached({
       timeout: 15_000,
     });
     await expect
-      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 15_000 })
+      .poll(async () => await worktreePage.readOpenTabPaths(WORKTREE), { timeout: 15_000 })
       .toContain(REL_PATH);
   });
 });

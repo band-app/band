@@ -1,12 +1,12 @@
 /**
  * Tests for `pathInside` — the segment-aware containment helper used
  * by the untitled save flow to decide whether a chosen save path
- * lives inside the workspace or should be treated as external.
+ * lives inside the worktree or should be treated as external.
  *
  * Security-adjacent: a wrong answer routes the save through the
- * wrong adapter (workspace vs external) AND strips the workspace
+ * wrong adapter (worktree vs external) AND strips the worktree
  * prefix off a path that isn't actually inside it, producing an
- * invalid workspace-relative filename. The `/a/band` vs `/a/band-fork`
+ * invalid worktree-relative filename. The `/a/band` vs `/a/band-fork`
  * case is the canonical regression to guard against; the rest are
  * boundary conditions a future change to the helper could plausibly
  * break.
@@ -42,7 +42,7 @@ describe("pathInside", () => {
 
   it("normalises trailing slashes on the parent path", () => {
     // The OS save dialog may or may not return a directory with a
-    // trailing slash, and workspace registry paths historically have
+    // trailing slash, and worktree registry paths historically have
     // varied. The helper must normalise so the prefix check fires
     // consistently regardless of trailing-slash state.
     expect(pathInside("/a/band/", "/a/band/src/main.ts")).toBe("src/main.ts");
@@ -61,7 +61,7 @@ describe("pathInside", () => {
   });
 
   it("returns null when the parent is empty", () => {
-    // Defensive: an empty workspace root should never resolve any
+    // Defensive: an empty worktree root should never resolve any
     // child as "inside" it.
     expect(pathInside("", "/anything")).toBeNull();
   });

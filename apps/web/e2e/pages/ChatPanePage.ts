@@ -1,5 +1,5 @@
 /**
- * Page object for the chat pane inside a workspace.
+ * Page object for the chat pane inside a worktree.
  *
  * Owns the locators for the prompt textarea, the conversation's message
  * bubbles, the thinking indicator, and the session-history Clock menu.
@@ -266,15 +266,15 @@ export class ChatPanePage {
     });
   }
 
-  /** Navigate to the workspace's chat view. The only place URLs are
+  /** Navigate to the worktree's chat view. The only place URLs are
    *  constructed in this page object. */
-  async goto(workspaceId: string): Promise<void> {
-    const path = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}`;
+  async goto(worktreeId: string): Promise<void> {
+    const path = `${this.baseUrl}/worktree/${encodeURIComponent(worktreeId)}`;
     // A cross-origin UI reads the hub URL and token from the URL fragment, which no server sees.
     const url = this.hubUrl
       ? `${path}#hub=${encodeURIComponent(this.hubUrl)}${this.token ? `&token=${this.token}` : ""}`
       : `${path}?token=${this.token}`;
-    await test.step(`Navigate to workspace ${workspaceId}`, async () => {
+    await test.step(`Navigate to worktree ${worktreeId}`, async () => {
       // A fragment-only change is not a page load, so leave the page first, as a link opened fresh would.
       if (this.hubUrl) await this.page.goto("about:blank");
       await this.page.goto(url);
@@ -299,7 +299,7 @@ export class ChatPanePage {
   async waitForReady(): Promise<void> {
     // The dockview is ready once its "+" new-tab button renders.
     const addBtn = this.page
-      .getByTestId("workspace-center__new-tab-button")
+      .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true })
       .first();
     await addBtn.waitFor({ state: "visible", timeout: 15_000 });
@@ -334,7 +334,7 @@ export class ChatPanePage {
    *  after its exit animation, so once it is gone focus has been returned and
    *  nothing moves it again. */
   private async focusPromptAfterMenuCloses(): Promise<void> {
-    await expect(this.page.getByTestId("workspace-center__new-tab-menu")).toHaveCount(0);
+    await expect(this.page.getByTestId("worktree-center__new-tab-menu")).toHaveCount(0);
     await this.promptInput.waitFor({ state: "visible", timeout: 15_000 });
     await this.promptInput.focus();
     await expect(this.promptInput).toBeFocused();
@@ -344,14 +344,14 @@ export class ChatPanePage {
   async openNewTabMenu(): Promise<void> {
     await test.step("Open the new-tab menu", async () => {
       const addBtn = this.page
-        .getByTestId("workspace-center__new-tab-button")
+        .getByTestId("worktree-center__new-tab-button")
         .filter({ visible: true })
         .first();
       await addBtn.waitFor({ state: "visible", timeout: 15_000 });
       await addBtn.focus();
       await this.page.keyboard.press("Enter");
       await this.page
-        .getByTestId("workspace-center__new-tab-menu")
+        .getByTestId("worktree-center__new-tab-menu")
         .filter({ visible: true })
         .first()
         .waitFor({ state: "visible" });
@@ -361,16 +361,16 @@ export class ChatPanePage {
   /** The agent rows in the open "New agent" submenu, top to bottom. */
   get newChatAgentItems(): Locator {
     return this.page
-      .getByTestId("workspace-center__new-agent-menu")
+      .getByTestId("worktree-center__new-agent-menu")
       .filter({ visible: true })
-      .getByTestId(/^workspace-center__new-agent(--.+)?$/);
+      .getByTestId(/^worktree-center__new-agent(--.+)?$/);
   }
 
   /** Open the "New agent" submenu of the open new-tab menu (issue #682). */
   async openNewChatAgentMenu(): Promise<void> {
     await test.step("Open the New agent submenu", async () => {
       await this.page
-        .getByTestId("workspace-center__new-tab--agent")
+        .getByTestId("worktree-center__new-tab--agent")
         .filter({ visible: true })
         .first()
         .click();
@@ -379,13 +379,13 @@ export class ChatPanePage {
   }
 
   /** Start a new chat with the given coding agent from the open agent
-   *  submenu, then show its tab and wait for its prompt. The workspace must
+   *  submenu, then show its tab and wait for its prompt. The worktree must
    *  have no other chat tab, and this browser's agent mode must be unset or
    *  `gui`. The leaf opens once the server has created the chat. */
   async startChatWithAgent(agentId: string): Promise<void> {
     await test.step(`Start a new chat with ${agentId}`, async () => {
       await this.newChatAgentItems
-        .and(this.page.getByTestId(`workspace-center__new-agent--${agentId}`))
+        .and(this.page.getByTestId(`worktree-center__new-agent--${agentId}`))
         .click();
       const chatTab = this.page
         .getByTestId(/^center-chat-tab--/)
@@ -591,20 +591,20 @@ export class ChatPanePage {
     return await this.promptInput.inputValue();
   }
 
-  /** All prompt textareas currently mounted for the active workspace — one per
+  /** All prompt textareas currently mounted for the active worktree — one per
    *  open chat pane. Used by the last-focused-routing test, where a split
    *  produces two panes and the reference must land in exactly one of them. */
   get promptInputs(): Locator {
     return this.page.getByPlaceholder("Type a message...");
   }
 
-  /** Number of open chat panes (prompt textareas) in the active workspace. */
+  /** Number of open chat panes (prompt textareas) in the active worktree. */
   async promptCount(): Promise<number> {
     return await this.promptInputs.count();
   }
 
   /** Click into the Nth chat pane's prompt so it becomes the focused (active)
-   *  pane — this is what the container reports to the server as the workspace's
+   *  pane — this is what the container reports to the server as the worktree's
    *  last-focused chat. Click (not `focus()`) so dockview's focusin tracking
    *  fires and the active panel actually switches. */
   async focusPromptAt(index: number): Promise<void> {
@@ -658,7 +658,7 @@ export class ChatPanePage {
 
   /** Attach a file to the prompt through the composer's file input, the
    *  input the paperclip button opens. Scoped to the visible composer, since
-   *  other visited workspaces keep their chats mounted. */
+   *  other visited worktrees keep their chats mounted. */
   async attachFile(file: { name: string; mimeType: string; buffer: Buffer }): Promise<void> {
     await test.step(`Attach ${file.name}`, async () => {
       await this.page

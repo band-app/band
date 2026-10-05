@@ -1,7 +1,7 @@
 /**
- * A workspace whose ephemeral worker exited shows as sleeping in the project
+ * A worktree whose ephemeral worker exited shows as sleeping in the repo
  * list, and as waking while a new worker starts (plan step 3.5). The hub marks
- * both states in `projects.list`; the rows are seeded because the worker's
+ * both states in `repos.list`; the rows are seeded because the worker's
  * exit and restart are covered by `apps/hub/tests/ephemeral-lifecycle.test.ts`.
  */
 
@@ -12,17 +12,17 @@ import {
   resetClientState,
   type ServerHandle,
   seedSettings,
-  seedSleepingWorkspace,
+  seedSleepingWorktree,
   seedState,
   startServer,
 } from "./helpers/server";
-import { SleepingWorkspacePage } from "./pages/SleepingWorkspacePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { SleepingWorktreePage } from "./pages/SleepingWorktreePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const TOKEN = "e2e-sleeping-token";
-const PROJECT = "sleep-project";
+const REPO = "sleep-repo";
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -32,22 +32,22 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   const worktrees = ["main", "napping", "stirring", "awake"].map((branch) => ({
     branch,
-    path: `/tmp/fake/${PROJECT}/${branch}`,
+    path: `/tmp/fake/${REPO}/${branch}`,
   }));
   seedState(tmpHome, {
-    projects: [{ name: PROJECT, path: `/tmp/fake/${PROJECT}`, defaultBranch: "main", worktrees }],
+    repos: [{ name: REPO, path: `/tmp/fake/${REPO}`, defaultBranch: "main", worktrees }],
   });
-  seedSleepingWorkspace(tmpHome, {
-    workspaceId: `${PROJECT}-napping`,
-    project: PROJECT,
+  seedSleepingWorktree(tmpHome, {
+    worktreeId: `${REPO}-napping`,
+    repo: REPO,
     name: "napping",
-    path: `/tmp/fake/${PROJECT}/napping`,
+    path: `/tmp/fake/${REPO}/napping`,
   });
-  seedSleepingWorkspace(tmpHome, {
-    workspaceId: `${PROJECT}-stirring`,
-    project: PROJECT,
+  seedSleepingWorktree(tmpHome, {
+    worktreeId: `${REPO}-stirring`,
+    repo: REPO,
     name: "stirring",
-    path: `/tmp/fake/${PROJECT}/stirring`,
+    path: `/tmp/fake/${REPO}/stirring`,
     waking: true,
   });
   server = await startServer({ tmpHome });
@@ -60,15 +60,15 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("workspaces on a worker that exited show as sleeping or waking", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const sleeping = new SleepingWorkspacePage(page);
-  await workspacePage.goto(`${PROJECT}-main`);
-  await workspacePage.waitForReady();
+test("worktrees on a worker that exited show as sleeping or waking", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const sleeping = new SleepingWorktreePage(page);
+  await worktreePage.goto(`${REPO}-main`);
+  await worktreePage.waitForReady();
 
-  await expect(sleeping.badge(`${PROJECT}-napping`)).toHaveAttribute("data-lifecycle", "sleeping");
-  await expect(sleeping.badge(`${PROJECT}-stirring`)).toHaveAttribute("data-lifecycle", "waking");
-  // A workspace with a running worker has no badge.
-  await expect(sleeping.card(`${PROJECT}-awake`)).toBeVisible();
-  await expect(sleeping.badge(`${PROJECT}-awake`)).toHaveCount(0);
+  await expect(sleeping.badge(`${REPO}-napping`)).toHaveAttribute("data-lifecycle", "sleeping");
+  await expect(sleeping.badge(`${REPO}-stirring`)).toHaveAttribute("data-lifecycle", "waking");
+  // A worktree with a running worker has no badge.
+  await expect(sleeping.card(`${REPO}-awake`)).toBeVisible();
+  await expect(sleeping.badge(`${REPO}-awake`)).toHaveCount(0);
 });

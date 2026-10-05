@@ -12,8 +12,8 @@
  *  - A collapsed section stays collapsed across a reload.
  *  - An unmerged file is listed under Conflicts and can be marked resolved.
  *
- * Every workspace is a real on-disk repo read and changed through the real
- * `workspace.getChanges` / `getFileDiff` / `stageFiles` / `unstageFiles` /
+ * Every worktree is a real on-disk repo read and changed through the real
+ * `worktree.getChanges` / `getFileDiff` / `stageFiles` / `unstageFiles` /
  * `discardChanges` procedures. No tRPC mocking, no `page.route`. Locators
  * live in `pages/ChangesPanelPage.ts`.
  */
@@ -21,7 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git, gitCommit } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -43,7 +43,7 @@ const TOKEN = "e2e-changes-sections-token";
 let server: ServerHandle;
 let tmpHome: string;
 const repos: Record<string, string> = {};
-const workspaces: Record<string, string> = {};
+const worktrees: Record<string, string> = {};
 
 /** A repo with `files` committed on `main`, then checked out on `branch`. */
 function createRepo(name: string, files: Record<string, string>, branch = "work"): string {
@@ -54,7 +54,7 @@ function createRepo(name: string, files: Record<string, string>, branch = "work"
   gitCommit(path, "initial");
   if (branch !== "main") git(path, ["checkout", "-b", branch]);
   repos[name] = path;
-  workspaces[name] = toWorkspaceId(name, branch);
+  worktrees[name] = toWorktreeId(name, branch);
   return path;
 }
 
@@ -102,10 +102,10 @@ test.beforeAll(async () => {
   gitCommit(conflict, "main edit");
   git(conflict, ["checkout", "work"]);
   expect(() => git(conflict, ["merge", "main"])).toThrow();
-  workspaces.conflict = toWorkspaceId("conflict", "work");
+  worktrees.conflict = toWorktreeId("conflict", "work");
 
   seedState(tmpHome, {
-    projects: Object.entries(repos).map(([name, path]) => ({
+    repos: Object.entries(repos).map(([name, path]) => ({
       name,
       path,
       defaultBranch: "main",
@@ -129,7 +129,7 @@ test("Each kind of change gets its own section, and uncommitted work stays out o
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.view);
+  await changes.goto(worktrees.view);
 
   await expect(changes.sectionRow("branch", "committed.txt")).toBeVisible({ timeout: 15_000 });
   await expect
@@ -159,7 +159,7 @@ test("A row opens that section's diff, and View all stacks the section's files i
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.view);
+  await changes.goto(worktrees.view);
 
   await changes.openSectionFile("unstaged", "keep.txt");
   await expect(changes.diffLine("unstaged line")).toBeVisible({ timeout: 15_000 });
@@ -180,7 +180,7 @@ test("A file in Staged Changes and Changes shows each section's diff in one tab"
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.view);
+  await changes.goto(worktrees.view);
 
   await changes.openSectionFile("staged", "both.txt");
   await expect(changes.diffLine("staged edit")).toBeVisible({ timeout: 15_000 });
@@ -193,7 +193,7 @@ test("A file in Staged Changes and Changes shows each section's diff in one tab"
 
 test("Reverting an unstaged diff from its tab restores the file", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.revert);
+  await changes.goto(worktrees.revert);
 
   await changes.openSectionFile("unstaged", "r.txt");
   await expect(changes.diffLine("reverted line")).toBeVisible({ timeout: 15_000 });
@@ -207,7 +207,7 @@ test("Stage and unstage move files between Changes, Staged Changes and Untracked
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.staging);
+  await changes.goto(worktrees.staging);
   await expect(changes.sectionRow("unstaged", "a.txt")).toBeVisible({ timeout: 15_000 });
 
   await changes.runRowAction("unstaged", "a.txt", "stage");
@@ -229,7 +229,7 @@ test("Discard restores an edit and Delete all removes untracked files, each afte
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.discard);
+  await changes.goto(worktrees.discard);
   await expect(changes.sectionRow("unstaged", "b.txt")).toBeVisible({ timeout: 15_000 });
 
   await changes.runRowAction("unstaged", "b.txt", "discard");
@@ -246,7 +246,7 @@ test("Discard restores an edit and Delete all removes untracked files, each afte
 
 test("A collapsed section stays collapsed across a reload", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.view);
+  await changes.goto(worktrees.view);
   await expect(changes.sectionRow("branch", "committed.txt")).toBeVisible({ timeout: 15_000 });
 
   await changes.toggleSection("branch");
@@ -264,7 +264,7 @@ test("A collapsed section stays collapsed across a reload", async ({ page }) => 
 
 test("An unmerged file is listed under Conflicts until it is marked resolved", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.goto(workspaces.conflict);
+  await changes.goto(worktrees.conflict);
 
   await expect(changes.conflictBadge("c.txt")).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => changes.visibleSections().then((s) => s[0])).toBe("conflicts");

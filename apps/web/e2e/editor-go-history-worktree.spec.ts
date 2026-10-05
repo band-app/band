@@ -1,31 +1,31 @@
 /**
- * Regression coverage for the cross-workspace editor-history leak —
+ * Regression coverage for the cross-worktree editor-history leak —
  * `band:editor-go-back` / `band:editor-go-forward` events (dispatched by the
  * command palette's "Go Back" / "Go Forward" commands) must be scoped to the
- * workspace whose editor owns the history, so a Go Back invoked for workspace
- * A cannot also step the (different) active workspace B's independent history
+ * worktree whose editor owns the history, so a Go Back invoked for worktree
+ * A cannot also step the (different) active worktree B's independent history
  * stack.
  *
  * This is the milder sibling of the `band:lsp-navigate` leak covered by
- * `lsp-navigate-workspace.spec.ts`: pre-fix, both editor-history events were
- * dispatched on `window` with NO workspace id, and every mounted
- * `CodeBrowserView` (`MultiWorkspacePanelHost` keeps every visited
- * workspace's subtree alive, hidden with `visibility:hidden`)
+ * `lsp-navigate-worktree.spec.ts`: pre-fix, both editor-history events were
+ * dispatched on `window` with NO worktree id, and every mounted
+ * `CodeBrowserView` (`MultiWorktreePanelHost` keeps every visited
+ * worktree's subtree alive, hidden with `visibility:hidden`)
  * handled them with no guard. So a Go Back in A also ran the handler in hidden
- * workspace B, walking B's own history stack behind the user's back. Unlike
- * the LSP leak there's no ENOENT (each workspace's stack only holds its own
- * files), but the active workspace's viewer still silently jumps to a
+ * worktree B, walking B's own history stack behind the user's back. Unlike
+ * the LSP leak there's no ENOENT (each worktree's stack only holds its own
+ * files), but the active worktree's viewer still silently jumps to a
  * different file.
  *
  * The fix mirrors issue #539: the command palette stamps the active
- * `workspaceId` onto the event detail, and each `CodeBrowserView` listener
- * early-returns unless the event is addressed to its own workspace (a missing
- * id falls through to the active workspace for forward-compat).
+ * `worktreeId` onto the event detail, and each `CodeBrowserView` listener
+ * early-returns unless the event is addressed to its own worktree (a missing
+ * id falls through to the active worktree for forward-compat).
  *
  * Test architecture:
  *
  *   - Boots the real production server against a fresh tmp home.
- *   - Two real git worktrees. Workspace B gets two files so it has a real
+ *   - Two real git worktrees. Worktree B gets two files so it has a real
  *     back-navigable history stack; the bug would surface as B's viewer
  *     stepping back when a Go Back addressed to A is dispatched.
  *   - No tRPC mocking, no MSW, no `page.route()` on own routes. The spec
@@ -36,7 +36,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -48,31 +48,31 @@ import {
 } from "./helpers/server";
 import { FileTreesPage } from "./pages/FileTreesPage";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-editor-go-history-workspace-token";
+const TOKEN = "e2e-editor-go-history-worktree-token";
 
-const PROJECT = "editor-history-repo";
+const REPO = "editor-history-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-a";
 const BRANCH_B = "feature-b";
 
-const WORKSPACE_A = toWorkspaceId(PROJECT, BRANCH_A);
-const WORKSPACE_B = toWorkspaceId(PROJECT, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
 
-// A file unique to A (so A is a real, mounted sibling workspace). Its name
+// A file unique to A (so A is a real, mounted sibling worktree). Its name
 // can't collide with B's file-tree rows.
 const ONLY_IN_A = "only-in-a.ts";
 // Two files unique to B, opened in order to build B's back-navigable history
 // stack. Distinct content so the viewer assertions can tell them apart.
 const B_ONE = "b-one.ts";
 const B_TWO = "b-two.ts";
-const B_ONE_TEXT = "workspace B file one";
-const B_TWO_TEXT = "workspace B file two";
+const B_ONE_TEXT = "worktree B file one";
+const B_TWO_TEXT = "worktree B file two";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout, where multiple
-// workspaces are alive at once under `MultiWorkspacePanelHost`.
+// worktrees are alive at once under `MultiWorktreePanelHost`.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server!: ServerHandle;
@@ -81,26 +81,26 @@ let tmpHome: string | undefined;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Editor history test\n");
   git(repoPath, ["add", "."], tmpHome);
   git(repoPath, ["commit", "-m", "initial commit"], tmpHome);
 
-  const worktreeAPath = join(tmpHome, `${PROJECT}-${BRANCH_A}`);
-  const worktreeBPath = join(tmpHome, `${PROJECT}-${BRANCH_B}`);
+  const worktreeAPath = join(tmpHome, `${REPO}-${BRANCH_A}`);
+  const worktreeBPath = join(tmpHome, `${REPO}-${BRANCH_B}`);
   git(repoPath, ["worktree", "add", "-b", BRANCH_A, worktreeAPath], tmpHome);
   git(repoPath, ["worktree", "add", "-b", BRANCH_B, worktreeBPath], tmpHome);
 
-  writeFileSync(join(worktreeAPath, ONLY_IN_A), "// only in workspace A\n");
+  writeFileSync(join(worktreeAPath, ONLY_IN_A), "// only in worktree A\n");
   writeFileSync(join(worktreeBPath, B_ONE), `// ${B_ONE_TEXT}\n`);
   writeFileSync(join(worktreeBPath, B_TWO), `// ${B_TWO_TEXT}\n`);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [
@@ -111,8 +111,8 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // The bug only manifests when BOTH workspace trees are alive at once, which
-  // `MultiWorkspacePanelHost` guarantees for every visited workspace.
+  // The bug only manifests when BOTH worktree trees are alive at once, which
+  // `MultiWorktreePanelHost` guarantees for every visited worktree.
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
@@ -124,32 +124,32 @@ test.afterAll(async () => {
 
 // TODO(#643 Phase 5): file explorer moved to right sidepanel — the bare
 // per-path `file` leaf that replaced the desktop CodeBrowserView has NO editor
-// back/forward history wired in, so this cross-workspace Go-Back scoping
+// back/forward history wired in, so this cross-worktree Go-Back scoping
 // scenario has no affordance to drive. Re-enable when editor history is wired
 // into the new file leaf.
-test.describe("Editor-history workspace scoping (cross-workspace history leak)", () => {
-  test("a Go Back addressed to workspace A does NOT step active workspace B's history", async ({
+test.describe("Editor-history worktree scoping (cross-worktree history leak)", () => {
+  test("a Go Back addressed to worktree A does NOT step active worktree B's history", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const fileTrees = new FileTreesPage(page, workspacePage);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const fileTrees = new FileTreesPage(page, worktreePage);
     // Scope the viewer to B's subtree: A stays mounted (hidden), so an unscoped `file-viewer__root` could resolve to more than one.
-    const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
+    const fileViewer = new FileViewerPage(page, worktreePage.cachedPanelEntries(WORKTREE_B));
 
     // Land on A and activate its Files tab so A's CodeBrowserView mounts and
-    // its editor-history listener is live — a genuine cross-workspace sibling.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
+    // its editor-history listener is live — a genuine cross-worktree sibling.
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
     await fileTrees.openFilesTab(ONLY_IN_A);
 
     // Switch to B via the sidebar (client-side nav) so A stays mounted +
     // cached while B becomes active.
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    await workspacePage.waitForReady();
+    await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeVisible();
+    await worktreePage.switchWorktree(WORKTREE_B);
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
+    await worktreePage.waitForReady();
     await expect
-      .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
+      .poll(async () => worktreePage.cachedPanelEntries(WORKTREE_A).count(), { timeout: 5000 })
       .toBeGreaterThan(0);
 
     // NOTE(#643 Phase 5): this used to activate B's Files tab so B's
@@ -157,7 +157,7 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
     // listeners). That desktop view — and its editor history — were removed in
     // Phase 2, which is why this whole describe is skipped. The sidepanel reveal
     // is the closest surviving surface; the body is never reached at runtime.
-    await workspacePage.revealRightPanel();
+    await worktreePage.revealRightPanel();
 
     // Build B's back-navigable history by driving two cross-file navigations
     // into B — the same `band:lsp-navigate` path go-to-definition uses, which
@@ -166,9 +166,9 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
     // setup deterministic: the second tree click is unreliable because opening
     // the first file re-lays B's file tree. After both, B shows b-two and a
     // Go Back lands on b-one.
-    await workspacePage.dispatchLspNavigateEvent({ filePath: B_ONE, workspaceId: WORKSPACE_B });
+    await worktreePage.dispatchLspNavigateEvent({ filePath: B_ONE, worktreeId: WORKTREE_B });
     await fileViewer.expectContent(B_ONE_TEXT);
-    await workspacePage.dispatchLspNavigateEvent({ filePath: B_TWO, workspaceId: WORKSPACE_B });
+    await worktreePage.dispatchLspNavigateEvent({ filePath: B_TWO, worktreeId: WORKTREE_B });
     await fileViewer.expectContent(B_TWO_TEXT);
 
     // Guard under test: a Go Back addressed to A must be ignored by B — B's
@@ -176,9 +176,9 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
     // (a plain `expectNotContent` would pass trivially at t=0) and assert it
     // never came. On bug code B's unguarded handler steps its own stack back
     // to b-one, which this poll catches.
-    await workspacePage.dispatchEditorHistoryEvent({
+    await worktreePage.dispatchEditorHistoryEvent({
       direction: "back",
-      workspaceId: WORKSPACE_A,
+      worktreeId: WORKTREE_A,
     });
     let leaked = false;
     try {
@@ -194,9 +194,9 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
     // Positive control: a Go Back addressed to B itself DOES step B's history
     // — proving the event mechanism is live, so the negative above is
     // meaningful rather than a dead event.
-    await workspacePage.dispatchEditorHistoryEvent({
+    await worktreePage.dispatchEditorHistoryEvent({
       direction: "back",
-      workspaceId: WORKSPACE_B,
+      worktreeId: WORKTREE_B,
     });
     await fileViewer.expectContent(B_ONE_TEXT);
   });

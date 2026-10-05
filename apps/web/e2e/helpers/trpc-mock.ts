@@ -10,7 +10,7 @@ type RouterOutputs = inferRouterOutputs<AppRouter>;
 type RouterInputs = inferRouterInputs<AppRouter>;
 
 /**
- * Union of all dot-notation procedure paths, e.g. "sessions.list" | "projects.list" | ...
+ * Union of all dot-notation procedure paths, e.g. "sessions.list" | "repos.list" | ...
  */
 type ProcedurePath = {
   [K in keyof RouterOutputs]: keyof RouterOutputs[K] extends string
@@ -154,12 +154,12 @@ export function createTrpcMock() {
       (() => ({ ok: true })) as Handler<ProcedurePath>,
     );
 
-    // DashboardShell sidebar: project list
-    query("projects.list" as ProcedurePath, (() => ({ projects: [] })) as Handler<ProcedurePath>);
+    // DashboardShell sidebar: repo list
+    query("repos.list" as ProcedurePath, (() => ({ repos: [] })) as Handler<ProcedurePath>);
 
     // Changes tab badge
     query(
-      "workspace.getChanges" as ProcedurePath,
+      "worktree.getChanges" as ProcedurePath,
       (() => ({
         headBranch: "main",
         defaultBranch: "main",
@@ -197,7 +197,7 @@ export function createTrpcMock() {
       (() => ({
         chat: {
           id: "default-chat",
-          workspaceId: "test-workspace",
+          worktreeId: "test-worktree",
           name: "Chat",
           agent: "claude-code",
           status: "idle",

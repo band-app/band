@@ -101,12 +101,12 @@
 /* Splitview's `visible` state class also matches Tailwind's `.visible`
  * utility (`visibility: visible`), which Tailwind generates because the word
  * appears in scanned source. That turned visibility back on inside a hidden
- * workspace entry (`visibility: hidden` in MultiWorkspacePanelHost), so its
+ * worktree entry (`visibility: hidden` in MultiWorktreePanelHost), so its
  * panes only stayed hidden while `content-visibility: hidden` skipped them.
- * A workspace holding a paint-retained browser pane drops that skip
+ * A worktree holding a paint-retained browser pane drops that skip
  * (globals.css), and its whole tab strip then painted over the visible
- * workspace's tabs, and in the desktop app its empty strip space dragged
- * the window. `inherit` leaves a pane as visible as its workspace. */
+ * worktree's tabs, and in the desktop app its empty strip space dragged
+ * the window. `inherit` leaves a pane as visible as its worktree. */
 .dv-view.visible {
   visibility: inherit;
 }
@@ -536,7 +536,7 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Mobile layout (`dockview-center-mobile`, WorkspaceCenterDockview's theme on
+ * Mobile layout (`dockview-center-mobile`, WorktreeCenterDockview's theme on
  * a phone): each tab and the strip's "+" and "Tab actions" buttons are 44px
  * tall, iOS's minimum tap target. The strip is 53px: 44px of tab, its 4px
  * inset above and below, and the strip's 1px bottom border. `zoom` scales a
@@ -566,7 +566,7 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Desktop layout (`dockview-center-desktop`, WorkspaceCenterDockview's theme
+ * Desktop layout (`dockview-center-desktop`, WorktreeCenterDockview's theme
  * when not mobile): there is no title bar over the center column, so the tab
  * strip is the window's top row. It matches the 38px height of the sidebar's
  * title bar and the right sidepanel's header, and the empty strip space of the
@@ -577,7 +577,7 @@
 .dockview-theme-band.dockview-center-desktop {
   --dv-tabs-and-actions-container-height: 38px;
 }
-.band-workspace-entry:not([inert])
+.band-worktree-entry:not([inert])
   .dockview-center-desktop
   [data-band-top-row]
   > .dv-tabs-and-actions-container
@@ -597,8 +597,8 @@
  * drag the window where nothing shows. It recomputes after layout, on scroll,
  * and at paint after a visibility or z-index change, but not after a
  * transform-only change. Electron hit-tests every mouse-down against the
- * result before the page sees it. Hidden workspaces stay mounted and laid out
- * at the same place as the shown one, so only the shown workspace sets any
- * app-region: the rule above matches only a non-`inert` workspace entry, and
+ * result before the page sees it. Hidden worktrees stay mounted and laid out
+ * at the same place as the shown one, so only the shown worktree sets any
+ * app-region: the rule above matches only a non-`inert` worktree entry, and
  * the sidebar gutter and center drag bar read `WindowDragContext`
  * (`DesktopTitleBar.tsx`), which is false inside a hidden entry. */

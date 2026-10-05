@@ -42,7 +42,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -51,11 +51,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-reconnect-token";
-const PROJECT = "alpha-terminal-reconnect";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-terminal-reconnect";
+const WORKTREE = toWorktreeId(REPO, "main");
 const MARKER = "band-reconnect-marker-7f3c";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
@@ -64,8 +64,8 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
-/** A real directory used as the project path — the PTY spawns with cwd =
- *  the project path and `terminal-pool` throws if it doesn't exist, so a
+/** A real directory used as the repo path — the PTY spawns with cwd =
+ *  the repo path and `terminal-pool` throws if it doesn't exist, so a
  *  fake `/tmp/...` path (fine for layout-only tests) won't work here. */
 let workdir: string;
 
@@ -73,9 +73,9 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = realpathSync(mkdtempSync(join(tmpdir(), "band-term-workdir-")));
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -103,16 +103,16 @@ test.describe("Terminal reconnect across a network drop (machine sleep)", () => 
   test("the shell session survives a disconnect and the client reconnects to it", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const terminalSocketOpens = workspacePage.trackTerminalSocketOpens();
-    await workspacePage.installTerminalSocketInstrumentation();
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const terminalSocketOpens = worktreePage.trackTerminalSocketOpens();
+    await worktreePage.installTerminalSocketInstrumentation();
     const beforeFile = join(workdir, "before.txt");
     const afterFile = join(workdir, "after.txt");
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady();
 
     // The first socket is open.
     await expect.poll(() => terminalSocketOpens(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
@@ -121,13 +121,13 @@ test.describe("Terminal reconnect across a network drop (machine sleep)", () => 
     // process does: a variable unique to this PTY. No quotes / spaces around
     // the redirect so a keystroke dropped mid-reconnect can't wedge the
     // shell at a continuation prompt.
-    await workspacePage.runInTerminal(`MARKER=${MARKER}`);
+    await worktreePage.runInTerminal(`MARKER=${MARKER}`);
 
     // Positive anchor: the variable is set and input is routed to a live PTY.
     await expect
       .poll(
         async () => {
-          await workspacePage.runInTerminal(`echo $MARKER>${beforeFile}`);
+          await worktreePage.runInTerminal(`echo $MARKER>${beforeFile}`);
           return readMarker(beforeFile);
         },
         { timeout: 15_000 },
@@ -135,7 +135,7 @@ test.describe("Terminal reconnect across a network drop (machine sleep)", () => 
       .toBe(MARKER);
 
     // Drop the connection mid-session, simulating the socket dying on sleep.
-    await workspacePage.dropLatestTerminalSocket();
+    await worktreePage.dropLatestTerminalSocket();
 
     // Protocol-level proof of reconnect: a second terminal WebSocket opens.
     await expect.poll(() => terminalSocketOpens(), { timeout: 20_000 }).toBeGreaterThanOrEqual(2);
@@ -149,7 +149,7 @@ test.describe("Terminal reconnect across a network drop (machine sleep)", () => 
     await expect
       .poll(
         async () => {
-          await workspacePage.runInTerminal(`echo $MARKER>${afterFile}`);
+          await worktreePage.runInTerminal(`echo $MARKER>${afterFile}`);
           return readMarker(afterFile);
         },
         { timeout: 20_000 },

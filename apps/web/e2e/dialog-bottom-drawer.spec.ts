@@ -1,7 +1,7 @@
 /**
  * Mobile bottom-drawer dialog coverage.
  *
- * On a narrow viewport the app's modal dialogs (Settings, workspace picker)
+ * On a narrow viewport the app's modal dialogs (Settings, worktree picker)
  * open as bottom sheets that slide up from the bottom edge. Two observable
  * contracts:
  *
@@ -24,7 +24,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
@@ -36,13 +36,13 @@ import {
   startServer,
 } from "./helpers/server";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
-import { WorkspacePicker } from "./pages/WorkspacePicker";
+import { WorktreePage } from "./pages/WorktreePage";
+import { WorktreePicker } from "./pages/WorktreePicker";
 
 const TOKEN = "e2e-bottom-drawer-token";
-const PROJECT = "bottom-drawer-repo";
+const REPO = "bottom-drawer-repo";
 const DEFAULT_BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {
@@ -67,7 +67,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Bottom drawer test\n");
@@ -75,9 +75,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "init"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -115,13 +115,13 @@ test.describe("Mobile bottom drawers", () => {
     expect(Math.round(box.height)).toBe(VIEWPORT.height);
   });
 
-  test("the workspace picker opens as a command-palette bottom drawer", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const picker = new WorkspacePicker(page);
+  test("the worktree picker opens as a command-palette bottom drawer", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await workspacePage.openSwitcherFromHeader();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await worktreePage.openSwitcherFromHeader();
     await picker.waitVisible();
 
     // The command-palette variant is a bottom drawer on mobile (input pinned
@@ -138,41 +138,38 @@ test.describe("Mobile bottom drawers", () => {
   });
 
   test("Quick Open opens as a command-palette bottom drawer", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
     // Same event the file-tree toolbar's "Quick Open" action fires.
-    await workspacePage.dispatchOpenQuickOpen();
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
-    await expect(workspacePage.quickOpenDialog()).toHaveAttribute(
-      "data-variant",
-      "command-palette",
-    );
-    await expectNoKeyboardSuggestions(workspacePage.quickOpenInput);
+    await worktreePage.dispatchOpenQuickOpen();
+    await expect(worktreePage.quickOpenDialog()).toBeVisible();
+    await expect(worktreePage.quickOpenDialog()).toHaveAttribute("data-variant", "command-palette");
+    await expectNoKeyboardSuggestions(worktreePage.quickOpenInput);
 
-    const box = await workspacePage.settledBoxOf(workspacePage.quickOpenDialog());
+    const box = await worktreePage.settledBoxOf(worktreePage.quickOpenDialog());
     expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);
     expect(box.width).toBeGreaterThanOrEqual(VIEWPORT.width - 4);
     expect(box.y).toBeGreaterThan(8);
   });
 
   test("Search in Files opens as a command-palette bottom drawer", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
     // Same event the file-tree toolbar's "Search in Files" action fires.
-    await workspacePage.dispatchOpenSearchFiles();
-    await expect(workspacePage.searchFilesDialog()).toBeVisible();
-    await expect(workspacePage.searchFilesDialog()).toHaveAttribute(
+    await worktreePage.dispatchOpenSearchFiles();
+    await expect(worktreePage.searchFilesDialog()).toBeVisible();
+    await expect(worktreePage.searchFilesDialog()).toHaveAttribute(
       "data-variant",
       "command-palette",
     );
 
-    const box = await workspacePage.settledBoxOf(workspacePage.searchFilesDialog());
+    const box = await worktreePage.settledBoxOf(worktreePage.searchFilesDialog());
     expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);
     expect(box.width).toBeGreaterThanOrEqual(VIEWPORT.width - 4);
     expect(box.y).toBeGreaterThan(8);

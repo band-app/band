@@ -26,7 +26,7 @@ export interface TerminalGrid {
  * objects. xterm state is read through its public API on the module-level
  * terminal cache (`globalThis.__bandTerminalCache__`). Each read repeats the
  * cache lookup because Playwright serializes `page.evaluate` callbacks, so
- * they can't share a helper. The reads assume one terminal in the workspace.
+ * they can't share a helper. The reads assume one terminal in the worktree.
  */
 export class TerminalSurface {
   /** The persistent wrapper the xterm opens into (`terminal-cache.ts`). */
@@ -36,9 +36,9 @@ export class TerminalSurface {
 
   constructor(
     protected readonly page: Page,
-    protected readonly workspaceId: string,
+    protected readonly worktreeId: string,
   ) {
-    // Only the shown workspace has a visible terminal pane; parked wrappers
+    // Only the shown worktree has a visible terminal pane; parked wrappers
     // sit outside any pane.
     this.wrapper = page
       .getByTestId(/^term-pane__/)
@@ -54,15 +54,15 @@ export class TerminalSurface {
       type Term = { buffer: { active: { viewportY: number; baseY: number } } };
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as Term | null;
       if (!term) return null;
       const { viewportY, baseY } = term.buffer.active;
       return { viewportY, baseY };
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** The terminal's size in cells; null until xterm has loaded. */
@@ -70,13 +70,13 @@ export class TerminalSurface {
     return await this.page.evaluate((id) => {
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as { cols: number; rows: number } | null;
       return term ? { cols: term.cols, rows: term.rows } : null;
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** Where the terminal's cells are on the page. */
@@ -85,10 +85,10 @@ export class TerminalSurface {
       type Term = { cols: number; rows: number; element?: HTMLElement };
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as Term | null;
       const screen = term?.element?.querySelector(".xterm-screen");
       if (!term || !screen) return null;
@@ -102,7 +102,7 @@ export class TerminalSurface {
         height: rect.height,
         cellHeight: rect.height / term.rows,
       };
-    }, this.workspaceId);
+    }, this.worktreeId);
     if (!grid) throw new Error("terminal not loaded");
     return grid;
   }
@@ -121,10 +121,10 @@ export class TerminalSurface {
       };
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as Term | null;
       if (!term) return "";
       const lines: string[] = [];
@@ -135,7 +135,7 @@ export class TerminalSurface {
         );
       }
       return lines.join("\n");
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** Type a line into the terminal, as a user would. */
@@ -150,12 +150,12 @@ export class TerminalSurface {
     return await this.page.evaluate((id) => {
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as { hasSelection(): boolean } | null;
       return term?.hasSelection() ?? false;
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 }

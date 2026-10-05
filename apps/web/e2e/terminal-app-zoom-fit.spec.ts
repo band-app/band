@@ -28,7 +28,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { makeGitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -38,11 +38,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-app-zoom-fit-token";
-const PROJECT = "alpha-app-zoom-fit";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-app-zoom-fit";
+const WORKTREE = toWorktreeId(REPO, "main");
 const MARKER = "ZOOMFIT-LAST-ROW";
 // Sub-pixel rounding of the overlay's inline sizes, in visual px.
 const TOLERANCE_PX = 2;
@@ -65,9 +65,9 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = makeGitWorkdir("band-app-zoom-fit-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -89,13 +89,13 @@ test.describe("Terminal under app zoom", () => {
     page,
   }) => {
     test.setTimeout(90_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
 
     // A minimal TUI: alt screen, marker on the last row, redrawn on resize.
     // Staged in a file so only the short `bash <path>` line is typed.
@@ -112,22 +112,22 @@ test.describe("Terminal under app zoom", () => {
       ].join("\n"),
       "utf-8",
     );
-    await workspacePage.runInTerminalUntilRendered(
-      WORKSPACE,
+    await worktreePage.runInTerminalUntilRendered(
+      WORKTREE,
       `bash ${tuiScript}`,
       new RegExp(MARKER),
     );
 
-    const baseline = await workspacePage.readTerminalGeometry(WORKSPACE, MARKER);
+    const baseline = await worktreePage.readTerminalGeometry(WORKTREE, MARKER);
     expect(baseline.markerRow).not.toBeNull();
 
     const expectFitted = async (zoom: number) => {
       // Positive anchor: the shortcut really moved the app to this zoom level.
-      await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(zoom, 2);
+      await expect.poll(() => worktreePage.readAppZoom()).toBeCloseTo(zoom, 2);
       await expect
         .poll(
           async () => {
-            const g = await workspacePage.readTerminalGeometry(WORKSPACE, MARKER);
+            const g = await worktreePage.readTerminalGeometry(WORKTREE, MARKER);
             const row = g.markerRow;
             return {
               leafBottomUnchanged: Math.abs(g.leafBottom - baseline.leafBottom) <= TOLERANCE_PX,
@@ -149,13 +149,13 @@ test.describe("Terminal under app zoom", () => {
     };
 
     // 100% → 110% → 120%: the overlay used to grow past the window.
-    await workspacePage.zoomInViaShortcut();
+    await worktreePage.zoomInViaShortcut();
     await expectFitted(1.1);
-    await workspacePage.zoomInViaShortcut();
+    await worktreePage.zoomInViaShortcut();
     await expectFitted(1.2);
 
     // 120% → 80%: the overlay used to stop short of the pane's bottom.
-    for (let i = 0; i < 4; i++) await workspacePage.zoomOutViaShortcut();
+    for (let i = 0; i < 4; i++) await worktreePage.zoomOutViaShortcut();
     await expectFitted(0.8);
   });
 });

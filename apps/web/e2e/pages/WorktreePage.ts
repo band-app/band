@@ -1,5 +1,5 @@
 /**
- * Page object for the workspace dockview route (`/workspace/:id`).
+ * Page object for the worktree dockview route (`/worktree/:id`).
  *
  * Owns the locators for the shared dockview's header buttons (Maximize /
  * Restore) and provides high-level actions (`maximizePanel`,
@@ -13,15 +13,15 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY } from "@/dashboard";
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 import { FindWidget } from "./FindWidget";
 
 /** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
  *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
- *  The unified `WorkspaceCenterDockview` (#643 Phase 1) removed it: active
+ *  The unified `WorktreeCenterDockview` (#643 Phase 1) removed it: active
  *  tab/group state now lives inside the serialized dockview blob under
- *  `band:dockview-layout-v8:<workspaceId>`, with no separate active-state
+ *  `band:dockview-layout-v8:<worktreeId>`, with no separate active-state
  *  object and no `maximizedGroup` field. Retained only so the (skipped)
  *  maximize/persistence specs that still reference the active-state helpers
  *  keep typechecking — see #643 Phase 5. */
@@ -33,7 +33,7 @@ export interface SavedActiveState {
   maximizedGroup?: string;
 }
 
-export class WorkspacePage {
+export class WorktreePage {
   /** All "Maximize" buttons in the dockview. Multiple groups expose
    *  their own button; tests use `.first()` / `.nth()` when they need a
    *  specific group. */
@@ -47,14 +47,14 @@ export class WorkspacePage {
   readonly terminalInput: Locator;
   /** "Files changed" heading inside the Changes panel — visible when
    *  the Changes tab is active in its group. Counterpart of
-   *  `terminalInput` for the "wrong tab leaked across workspaces"
+   *  `terminalInput` for the "wrong tab leaked across worktrees"
    *  regression assertion. */
   readonly changesHeading: Locator;
-  /** "Delete workspace" menu item inside the WorkspaceCard's context
+  /** "Delete worktree" menu item inside the WorktreeCard's context
    *  menu (right-click). Only present for non-default branches of git
-   *  projects. Used by the cache-eviction regression test (issue #508). */
-  readonly deleteWorkspaceMenuItem: Locator;
-  /** "Git pull" menu item inside the WorkspaceCard's context menu. */
+   *  repos. Used by the cache-eviction regression test (issue #508). */
+  readonly deleteWorktreeMenuItem: Locator;
+  /** "Git pull" menu item inside the WorktreeCard's context menu. */
   readonly gitPullMenuItem: Locator;
 
   constructor(
@@ -66,66 +66,66 @@ export class WorkspacePage {
     this.restoreButton = page.getByRole("button", { name: "Restore" });
     this.terminalInput = page.getByRole("textbox", { name: "Terminal input" });
     this.changesHeading = page.getByRole("heading", { name: "Files changed" });
-    this.deleteWorkspaceMenuItem = page.getByRole("menuitem", { name: "Delete workspace" });
+    this.deleteWorktreeMenuItem = page.getByRole("menuitem", { name: "Delete worktree" });
     this.gitPullMenuItem = page.getByRole("menuitem", { name: "Git pull" });
   }
 
-  /** Locate a workspace card in the project-list sidebar by its canonical
-   *  workspaceId. The `data-testid` is set by `WorkspaceCard` (see issue
+  /** Locate a worktree card in the repo-list sidebar by its canonical
+   *  worktreeId. The `data-testid` is set by `WorktreeCard` (see issue
    *  #508 for the rationale) so a test can drive the per-card context
-   *  menu without depending on visible text that may differ by project. */
-  workspaceCard(workspaceId: string): Locator {
-    return this.page.getByTestId(`project-list__workspace-card--${workspaceId}`);
+   *  menu without depending on visible text that may differ by repo. */
+  worktreeCard(worktreeId: string): Locator {
+    return this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
   }
 
-  /** The "Deleting…" marker a workspace card shows while the workspace is
+  /** The "Deleting…" marker a worktree card shows while the worktree is
    *  being removed (its teardown running). `data-testid` set in
-   *  `WorkspaceCard`. Scoped to the card. */
-  workspaceDeletingMarker(workspaceId: string): Locator {
-    return this.workspaceCard(workspaceId).getByTestId("workspace-card__deleting");
+   *  `WorktreeCard`. Scoped to the card. */
+  worktreeDeletingMarker(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__deleting");
   }
 
-  /** The root (default-branch) workspace card's house icon — the identity
+  /** The root (default-branch) worktree card's house icon — the identity
    *  marker `AgentStatusIndicator` renders as its idle fallback for the root
-   *  card. `data-testid` set on the lucide `Home` glyph in `WorkspaceCard`.
-   *  Scoped to the card so it never matches another project's root. Present
+   *  card. `data-testid` set on the lucide `Home` glyph in `WorktreeCard`.
+   *  Scoped to the card so it never matches another repo's root. Present
    *  only while the root agent is idle; a live status replaces it with the
    *  status dot — mirroring how the branch glyph is replaced on non-root
    *  cards. */
-  rootWorkspaceHomeIcon(workspaceId: string): Locator {
-    return this.workspaceCard(workspaceId).getByTestId("workspace-card__home-icon");
+  rootWorktreeHomeIcon(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__home-icon");
   }
 
-  /** The "uncommitted changes" mark of a workspace card's git status
+  /** The "uncommitted changes" mark of a worktree card's git status
    *  (`GitStatusIndicator`). Scoped to the card. */
-  gitDirtyMark(workspaceId: string): Locator {
-    return this.workspaceCard(workspaceId).getByTestId("workspace-card__git-dirty");
+  gitDirtyMark(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__git-dirty");
   }
 
-  /** The agent status dot inside a workspace card. `data-testid` set on the
+  /** The agent status dot inside a worktree card. `data-testid` set on the
    *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
    *  is "working" / "needs_attention". Scoped to the card. */
-  agentStatusDot(workspaceId: string): Locator {
-    return this.workspaceCard(workspaceId).getByTestId("workspace-card__agent-status");
+  agentStatusDot(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
   }
 
-  /** Set a workspace's agent status via the real `statuses.update` tRPC
+  /** Set a worktree's agent status via the real `statuses.update` tRPC
    *  mutation (the same procedure the dashboard uses), which emits an SSE
    *  update the mounted status watcher consumes — so the card re-renders
    *  live, the way it would in production. Auth via the `band_token` cookie,
    *  matching the other tRPC HTTP helpers. */
-  async setAgentStatus(workspaceId: string, status: string): Promise<void> {
-    await test.step(`Set agent status of ${workspaceId} to ${status}`, async () => {
+  async setAgentStatus(worktreeId: string, status: string): Promise<void> {
+    await test.step(`Set agent status of ${worktreeId} to ${status}`, async () => {
       const res = await this.page.request.post(`${this.baseUrl}/trpc/statuses.update`, {
         headers: {
           "Content-Type": "application/json",
           Cookie: `band_token=${this.token}`,
         },
-        data: { workspaceId, agent: { status } },
+        data: { worktreeId, agent: { status } },
       });
       if (!res.ok()) {
         throw new Error(
-          `setAgentStatus(${workspaceId}, ${status}) failed: ${res.status()} ${await res.text()}`,
+          `setAgentStatus(${worktreeId}, ${status}) failed: ${res.status()} ${await res.text()}`,
         );
       }
     });
@@ -133,16 +133,16 @@ export class WorkspacePage {
 
   /** A value the server keeps for the dashboard (`clientState.list`): the
    *  entry for `key` visible to `deviceType`, or null when nothing is stored.
-   *  `workspaceId` is null for a global key. Lets a test wait until one
+   *  `worktreeId` is null for a global key. Lets a test wait until one
    *  device's write reached the server before another device loads. */
   async readServerClientState(
-    workspaceId: string | null,
+    worktreeId: string | null,
     key: string,
     deviceType: "desktop" | "mobile" = "desktop",
   ): Promise<unknown> {
     const res = await this.page.request.get(
       `${this.baseUrl}/trpc/clientState.list?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId, deviceType }),
+        JSON.stringify({ worktreeId, deviceType }),
       )}`,
       { headers: { Cookie: `band_token=${this.token}` } },
     );
@@ -155,10 +155,10 @@ export class WorkspacePage {
 
   /** The active tab id of the center tab list the server shares between
    *  devices (`band:center-tabs:<ws>`), or null when nothing is stored yet. */
-  async readSharedActiveTab(workspaceId: string): Promise<string | null> {
+  async readSharedActiveTab(worktreeId: string): Promise<string | null> {
     const value = (await this.readServerClientState(
-      workspaceId,
-      `band:center-tabs:${workspaceId}`,
+      worktreeId,
+      `band:center-tabs:${worktreeId}`,
     )) as { active?: string } | null;
     return value?.active ?? null;
   }
@@ -177,41 +177,41 @@ export class WorkspacePage {
     return await this.page.evaluate((k) => localStorage.getItem(k), key);
   }
 
-  /** Locate the mounted entry div for the given workspaceId (issue #508).
-   *  The single `MultiWorkspacePanelHost` renders exactly one of these per
-   *  mounted workspace; tests assert on their presence / absence to verify
+  /** Locate the mounted entry div for the given worktreeId (issue #508).
+   *  The single `MultiWorktreePanelHost` renders exactly one of these per
+   *  mounted worktree; tests assert on their presence / absence to verify
    *  the mounted set's contents through a public DOM surface, without
-   *  exporting internals. `markMountedWorkspace` and friends call
-   *  `.evaluate()` on it, which relies on that one-entry-per-workspace
+   *  exporting internals. `markMountedWorktree` and friends call
+   *  `.evaluate()` on it, which relies on that one-entry-per-worktree
    *  shape. */
-  cachedPanelEntries(workspaceId: string): Locator {
-    return this.page.getByTestId(`workspace-panel-host__cached-entry--${workspaceId}`);
+  cachedPanelEntries(worktreeId: string): Locator {
+    return this.page.getByTestId(`worktree-panel-host__cached-entry--${worktreeId}`);
   }
 
-  /** Mark a workspace's mounted entry element. A remount replaces the element,
-   *  so the mark surviving a round trip proves the workspace stayed mounted. */
-  async markMountedWorkspace(workspaceId: string): Promise<void> {
-    await this.cachedPanelEntries(workspaceId).evaluate((el) => {
+  /** Mark a worktree's mounted entry element. A remount replaces the element,
+   *  so the mark surviving a round trip proves the worktree stayed mounted. */
+  async markMountedWorktree(worktreeId: string): Promise<void> {
+    await this.cachedPanelEntries(worktreeId).evaluate((el) => {
       (el as HTMLElement).dataset.bandProbe = "marked";
     });
   }
 
-  /** Whether the workspace's mounted entry still carries the mark set by
-   *  `markMountedWorkspace`. */
-  async isMountedWorkspaceMarked(workspaceId: string): Promise<boolean> {
-    return await this.cachedPanelEntries(workspaceId).evaluate(
+  /** Whether the worktree's mounted entry still carries the mark set by
+   *  `markMountedWorktree`. */
+  async isMountedWorktreeMarked(worktreeId: string): Promise<boolean> {
+    return await this.cachedPanelEntries(worktreeId).evaluate(
       (el) => (el as HTMLElement).dataset.bandProbe === "marked",
     );
   }
 
-  /** The computed `visibility` of each tab in a workspace's center tab
+  /** The computed `visibility` of each tab in a worktree's center tab
    *  strip, in strip order. Tabs of a strip nested inside a panel (a
    *  terminal's split panes) don't count. A hidden entry's tabs must inherit
    *  its `visibility: hidden`: when its `content-visibility` skip is dropped
    *  (a paint-retained browser pane), visibility is all that keeps its tab
-   *  strip from painting over the shown workspace's. */
-  async centerTabVisibilitiesIn(workspaceId: string): Promise<string[]> {
-    return await this.cachedPanelEntries(workspaceId).evaluate((entry) =>
+   *  strip from painting over the shown worktree's. */
+  async centerTabVisibilitiesIn(worktreeId: string): Promise<string[]> {
+    return await this.cachedPanelEntries(worktreeId).evaluate((entry) =>
       Array.from(
         entry.querySelectorAll('.dv-tab:has([data-testid^="center-"][data-testid*="-tab--"])'),
         (tab) => getComputedStyle(tab).visibility,
@@ -220,83 +220,83 @@ export class WorkspacePage {
   }
 
   /** Locator for the chat tab panel's visibility marker inside a specific
-   *  workspace's cached panel host (issue #469). The marker testid is set
+   *  worktree's cached panel host (issue #469). The marker testid is set
    *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
    *  visibility signal the shared `PanelVisibilityContext` propagated
    *  into the tab — so the test can observe context plumbing directly,
    *  independent of dockview's outer detach behaviour.
    *
-   *  Scoping the locator to the workspace's cached entry lets a test
-   *  query workspace A's marker and workspace B's marker independently
+   *  Scoping the locator to the worktree's cached entry lets a test
+   *  query worktree A's marker and worktree B's marker independently
    *  even when both are mounted (active + cached) at once. */
-  chatTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
-    return this.cachedPanelEntries(workspaceId).getByTestId(
+  chatTabVisibilityMarker(worktreeId: string, visible: boolean): Locator {
+    return this.cachedPanelEntries(worktreeId).getByTestId(
       `center-chat-leaf__visible-${visible ? "true" : "false"}`,
     );
   }
 
   /** Locator for the terminal tab panel's visibility marker inside a
-   *  specific workspace's cached panel host (issue #469). Counterpart of
+   *  specific worktree's cached panel host (issue #469). Counterpart of
    *  `chatTabVisibilityMarker` for the terminal container — see that
    *  method's doc comment for the rationale. The unified center dockview's
    *  terminal leaf tags its wrapper `center-term-leaf__visible-*`. */
-  terminalTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
-    return this.cachedPanelEntries(workspaceId).getByTestId(
+  terminalTabVisibilityMarker(worktreeId: string, visible: boolean): Locator {
+    return this.cachedPanelEntries(worktreeId).getByTestId(
       `center-term-leaf__visible-${visible ? "true" : "false"}`,
     );
   }
 
-  /** The center drag bar inside a workspace's cached entry, hidden or shown.
-   *  Lets a test confirm a hidden workspace still renders one. */
-  centerDragBarIn(workspaceId: string): Locator {
-    return this.cachedPanelEntries(workspaceId).getByTestId("workspace-center__drag-bar");
+  /** The center drag bar inside a worktree's cached entry, hidden or shown.
+   *  Lets a test confirm a hidden worktree still renders one. */
+  centerDragBarIn(worktreeId: string): Locator {
+    return this.cachedPanelEntries(worktreeId).getByTestId("worktree-center__drag-bar");
   }
 
-  /** The sidebar gutter inside a workspace's cached entry, hidden or shown. */
-  sidebarGutterIn(workspaceId: string): Locator {
-    return this.cachedPanelEntries(workspaceId).getByTestId("workspace-center__sidebar-gutter");
+  /** The sidebar gutter inside a worktree's cached entry, hidden or shown. */
+  sidebarGutterIn(worktreeId: string): Locator {
+    return this.cachedPanelEntries(worktreeId).getByTestId("worktree-center__sidebar-gutter");
   }
 
-  /** Right-click the workspace card to open its context menu, then click
-   *  "Delete workspace". The deletion goes through the real
-   *  `useRemoveWorkspace` mutation — same path the user takes — so the
-   *  reconcile-against-projects effect this test guards must actually
+  /** Right-click the worktree card to open its context menu, then click
+   *  "Delete worktree". The deletion goes through the real
+   *  `useRemoveWorktree` mutation — same path the user takes — so the
+   *  reconcile-against-repos effect this test guards must actually
    *  fire end-to-end. */
-  /** Click a workspace card even when it is disabled (`aria-disabled`),
+  /** Click a worktree card even when it is disabled (`aria-disabled`),
    *  to check that the click does nothing. `force` skips Playwright's
    *  actionability wait, which a disabled card never passes. */
-  async clickDisabledWorkspaceCard(workspaceId: string): Promise<void> {
-    await test.step(`Click disabled workspace card ${workspaceId}`, async () => {
-      await this.workspaceCard(workspaceId).click({ force: true });
+  async clickDisabledWorktreeCard(worktreeId: string): Promise<void> {
+    await test.step(`Click disabled worktree card ${worktreeId}`, async () => {
+      await this.worktreeCard(worktreeId).click({ force: true });
     });
   }
 
-  /** Right-click the workspace card and click "Git pull", the sidebar's
-   *  pull (`workspaces.gitPull`). */
-  async pullWorkspaceFromSidebar(workspaceId: string): Promise<void> {
-    await test.step(`Git pull ${workspaceId} via sidebar context menu`, async () => {
-      await this.workspaceCard(workspaceId).click({ button: "right" });
+  /** Right-click the worktree card and click "Git pull", the sidebar's
+   *  pull (`worktrees.gitPull`). */
+  async pullWorktreeFromSidebar(worktreeId: string): Promise<void> {
+    await test.step(`Git pull ${worktreeId} via sidebar context menu`, async () => {
+      await this.worktreeCard(worktreeId).click({ button: "right" });
       await this.gitPullMenuItem.click();
     });
   }
 
-  async deleteWorkspaceFromSidebar(workspaceId: string): Promise<void> {
-    await test.step(`Delete workspace ${workspaceId} via sidebar context menu`, async () => {
-      await this.workspaceCard(workspaceId).click({ button: "right" });
-      await this.deleteWorkspaceMenuItem.click();
+  async deleteWorktreeFromSidebar(worktreeId: string): Promise<void> {
+    await test.step(`Delete worktree ${worktreeId} via sidebar context menu`, async () => {
+      await this.worktreeCard(worktreeId).click({ button: "right" });
+      await this.deleteWorktreeMenuItem.click();
     });
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Project-list context menu (zoom regression — context menu disappears /
+  // Repo-list context menu (zoom regression — context menu disappears /
   // mispositions under app zoom). Locators + actions so the spec body never
   // touches raw `page.*`.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** A project header row in the sidebar. `data-testid` is set by the
-   *  `SortableProject` component that renders each project header. */
-  projectHeader(projectName: string): Locator {
-    return this.page.getByTestId(`project-list__project-header--${projectName}`);
+  /** A repo header row in the sidebar. `data-testid` is set by the
+   *  `SortableRepo` component that renders each repo header. */
+  repoHeader(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-header--${repoName}`);
   }
 
   /** The currently-open context menu (Radix `role="menu"`). */
@@ -304,134 +304,132 @@ export class WorkspacePage {
     return this.page.getByRole("menu");
   }
 
-  /** The "Add workspace" item — the first action in a git project's menu,
+  /** The "Add worktree" item — the first action in a git repo's menu,
    *  shared by the right-click context menu and the "⋮" dropdown. Located by
    *  `data-testid` rather than its localisable visible text. */
-  get addWorkspaceMenuItem(): Locator {
-    return this.page.getByTestId("project-list__action--add-workspace");
+  get addWorktreeMenuItem(): Locator {
+    return this.page.getByTestId("repo-list__action--add-worktree");
   }
 
-  /** The New Workspace dialog opened by the "Add workspace" action — the
+  /** The New Worktree dialog opened by the "Add worktree" action — the
    *  observable side effect used to prove whether the action fired. */
-  get newWorkspaceDialog(): Locator {
-    return this.page.getByTestId("new-workspace-form__dialog");
+  get newWorktreeDialog(): Locator {
+    return this.page.getByTestId("new-worktree-form__dialog");
   }
 
-  /** The host picker in the New Workspace dialog. It appears once a worker is online.
-   *  `data-testid` set in `NewWorkspaceForm.tsx`. */
-  get newWorkspaceHostSelect(): Locator {
-    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host");
+  /** The host picker in the New Worktree dialog. It appears once a worker is online.
+   *  `data-testid` set in `NewWorktreeForm.tsx`. */
+  get newWorktreeHostSelect(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__host");
   }
 
   /** The host ids the picker offers, in order. */
-  async newWorkspaceHostOptionValues(): Promise<string[]> {
-    return this.newWorkspaceHostSelect
+  async newWorktreeHostOptionValues(): Promise<string[]> {
+    return this.newWorktreeHostSelect
       .locator("option")
       .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
   }
 
-  /** Opens the New Workspace dialog from the project's context menu. */
-  async openNewWorkspaceDialog(project: string): Promise<void> {
-    await test.step(`Open the New Workspace dialog for ${project}`, async () => {
-      await this.openProjectContextMenu(project);
-      await this.addWorkspaceMenuItem.click();
-      await expect(this.newWorkspaceDialog).toBeVisible();
+  /** Opens the New Worktree dialog from the repo's context menu. */
+  async openNewWorktreeDialog(repo: string): Promise<void> {
+    await test.step(`Open the New Worktree dialog for ${repo}`, async () => {
+      await this.openRepoContextMenu(repo);
+      await this.addWorktreeMenuItem.click();
+      await expect(this.newWorktreeDialog).toBeVisible();
     });
   }
 
-  /** Repository path on the chosen remote host, asked the first time a project is used there. */
-  get newWorkspaceHostPathInput(): Locator {
-    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-path");
+  /** Repository path on the chosen remote host, asked the first time a repo is used there. */
+  get newWorktreeHostPathInput(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__host-path");
   }
 
   /** The roots of the chosen remote host, listed under the path field. */
-  get newWorkspaceHostRoots(): Locator {
-    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-roots");
+  get newWorktreeHostRoots(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__host-roots");
   }
 
-  /** The error the dialog shows when creating the workspace is refused. */
-  get newWorkspaceError(): Locator {
-    return this.newWorkspaceDialog.getByTestId("new-workspace-form__error");
+  /** The error the dialog shows when creating the worktree is refused. */
+  get newWorktreeError(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__error");
   }
 
-  /** Opens the New Workspace dialog, picks a remote host and fills the path and branch, without submitting. */
-  async fillNewWorkspaceOnHost(opts: {
-    project: string;
+  /** Opens the New Worktree dialog, picks a remote host and fills the path and branch, without submitting. */
+  async fillNewWorktreeOnHost(opts: {
+    repo: string;
     hostId: string;
-    hostProjectPath: string;
+    hostRepoPath: string;
     branch: string;
   }): Promise<void> {
-    await test.step(`Fill the New Workspace dialog for host ${opts.hostId}`, async () => {
-      await this.openProjectContextMenu(opts.project);
-      await this.addWorkspaceMenuItem.click();
-      await expect(this.newWorkspaceDialog).toBeVisible();
-      await this.newWorkspaceHostSelect.selectOption(opts.hostId);
-      await this.newWorkspaceHostPathInput.fill(opts.hostProjectPath);
-      await this.newWorkspaceDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+    await test.step(`Fill the New Worktree dialog for host ${opts.hostId}`, async () => {
+      await this.openRepoContextMenu(opts.repo);
+      await this.addWorktreeMenuItem.click();
+      await expect(this.newWorktreeDialog).toBeVisible();
+      await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
+      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
     });
   }
 
-  /** Clicks Create in the New Workspace dialog. */
-  async submitNewWorkspace(): Promise<void> {
-    await this.newWorkspaceDialog.getByRole("button", { name: "Create" }).click();
+  /** Clicks Create in the New Worktree dialog. */
+  async submitNewWorktree(): Promise<void> {
+    await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
   }
 
-  /** Opens the New Workspace dialog from the project's context menu, picks a host and creates the workspace. */
-  async createWorkspaceOnHost(opts: {
-    project: string;
+  /** Opens the New Worktree dialog from the repo's context menu, picks a host and creates the worktree. */
+  async createWorktreeOnHost(opts: {
+    repo: string;
     hostId: string;
-    hostProjectPath: string;
+    hostRepoPath: string;
     branch: string;
   }): Promise<void> {
-    await test.step(`Create workspace ${opts.branch} on host ${opts.hostId}`, async () => {
-      await this.openProjectContextMenu(opts.project);
-      await this.addWorkspaceMenuItem.click();
-      await expect(this.newWorkspaceDialog).toBeVisible();
-      await this.newWorkspaceHostSelect.selectOption(opts.hostId);
-      await this.newWorkspaceHostPathInput.fill(opts.hostProjectPath);
-      await this.newWorkspaceDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
-      await this.newWorkspaceDialog.getByRole("button", { name: "Create" }).click();
-      await expect(this.newWorkspaceDialog).toBeHidden();
+    await test.step(`Create worktree ${opts.branch} on host ${opts.hostId}`, async () => {
+      await this.openRepoContextMenu(opts.repo);
+      await this.addWorktreeMenuItem.click();
+      await expect(this.newWorktreeDialog).toBeVisible();
+      await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
+      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+      await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
+      await expect(this.newWorktreeDialog).toBeHidden();
     });
   }
 
-  /** The header's "⋮" project-actions button (revealed on hover / focus). */
-  projectMenuTrigger(projectName: string): Locator {
-    return this.page.getByTestId(`project-list__project-menu-trigger--${projectName}`);
+  /** The header's "⋮" repo-actions button (revealed on hover / focus). */
+  repoMenuTrigger(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-menu-trigger--${repoName}`);
   }
 
-  /** The GitHub owner avatar in a project header. Present in the DOM (hidden)
+  /** The GitHub owner avatar in a repo header. Present in the DOM (hidden)
    *  while it loads, visible once it has, removed if it fails to load. */
-  projectAvatar(projectName: string): Locator {
-    return this.page.getByTestId(`project-list__project-avatar--${projectName}`);
+  repoAvatar(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-avatar--${repoName}`);
   }
 
-  /** The folder icon a git project header shows when it has no avatar. */
-  projectFolderIcon(projectName: string): Locator {
-    return this.page.getByTestId(`project-list__project-folder--${projectName}`);
+  /** The folder icon a git repo header shows when it has no avatar. */
+  repoFolderIcon(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-folder--${repoName}`);
   }
 
-  /** Decoded width of a project's avatar image; 0 when it did not decode. */
-  async readProjectAvatarNaturalWidth(projectName: string): Promise<number> {
-    return await this.projectAvatar(projectName).evaluate(
-      (el) => (el as HTMLImageElement).naturalWidth,
-    );
+  /** Decoded width of a repo's avatar image; 0 when it did not decode. */
+  async readRepoAvatarNaturalWidth(repoName: string): Promise<number> {
+    return await this.repoAvatar(repoName).evaluate((el) => (el as HTMLImageElement).naturalWidth);
   }
 
-  /** Right-click a project header to open its context menu. */
-  async openProjectContextMenu(projectName: string): Promise<void> {
-    await test.step(`Open context menu for project ${projectName}`, async () => {
-      await this.projectHeader(projectName).click({ button: "right" });
+  /** Right-click a repo header to open its context menu. */
+  async openRepoContextMenu(repoName: string): Promise<void> {
+    await test.step(`Open context menu for repo ${repoName}`, async () => {
+      await this.repoHeader(repoName).click({ button: "right" });
     });
   }
 
-  /** Open a project's action menu via the header "⋮" button: hover the row to
+  /** Open a repo's action menu via the header "⋮" button: hover the row to
    *  reveal the button, then left-click it. Distinct from the right-click
-   *  `openProjectContextMenu`. */
-  async openProjectMenuViaKebab(projectName: string): Promise<void> {
-    await test.step(`Open project menu via kebab for ${projectName}`, async () => {
-      await this.projectHeader(projectName).hover();
-      await this.projectMenuTrigger(projectName).click();
+   *  `openRepoContextMenu`. */
+  async openRepoMenuViaKebab(repoName: string): Promise<void> {
+    await test.step(`Open repo menu via kebab for ${repoName}`, async () => {
+      await this.repoHeader(repoName).hover();
+      await this.repoMenuTrigger(repoName).click();
     });
   }
 
@@ -467,15 +465,15 @@ export class WorkspacePage {
    *  the subscriber path — the one that touches even hidden background
    *  terminals.
    *
-   *  Routes the keypress through the project-list root (focusable, non-
-   *  editable) — the same stable anchor the workspace-picker shortcuts
+   *  Routes the keypress through the repo-list root (focusable, non-
+   *  editable) — the same stable anchor the worktree-picker shortcuts
    *  use — so an editable focus target (chat
    *  textarea / terminal) can't swallow the key. Uses the "Equal" physical key
    *  so `e.key` resolves to "=" (the literal the handler matches),
    *  unambiguously separated from the modifier. */
   async zoomInViaShortcut(): Promise<void> {
     await test.step("Zoom in via Ctrl+= keyboard shortcut", async () => {
-      const root = this.projectListRoot();
+      const root = this.repoListRoot();
       await root.waitFor({ state: "visible" });
       await root.press("Control+Equal");
     });
@@ -492,28 +490,28 @@ export class WorkspacePage {
    *  of `zoomInViaShortcut`; "Minus" so `e.key` resolves to "-". */
   async zoomOutViaShortcut(): Promise<void> {
     await test.step("Zoom out via Ctrl+- keyboard shortcut", async () => {
-      const root = this.projectListRoot();
+      const root = this.repoListRoot();
       await root.waitFor({ state: "visible" });
       await root.press("Control+Minus");
     });
   }
 
-  /** Left-click the first action ("Add workspace") in the open menu. */
-  async clickAddWorkspaceMenuItem(): Promise<void> {
-    await test.step("Click the Add workspace menu item", async () => {
-      await this.addWorkspaceMenuItem.click();
+  /** Left-click the first action ("Add worktree") in the open menu. */
+  async clickAddWorktreeMenuItem(): Promise<void> {
+    await test.step("Click the Add worktree menu item", async () => {
+      await this.addWorktreeMenuItem.click();
     });
   }
 
   /** Dispatch the bug-triggering synthetic right-button pointer sequence
-   *  directly on the first menu item ("Add workspace"): a `pointermove`
+   *  directly on the first menu item ("Add worktree"): a `pointermove`
    *  (cursor over the item) followed by a `button=2` `pointerup` with no
    *  matching `pointerdown` — the exact pattern Radix's `MenuItem` heuristic
    *  mistakes for a click. `bubbles: true` is required so the event reaches
    *  React's root listener. */
-  async dispatchRightButtonPointerUpOnAddWorkspaceItem(): Promise<void> {
-    await test.step("Dispatch right-button pointerup on the Add workspace item", async () => {
-      await this.addWorkspaceMenuItem.evaluate((el) => {
+  async dispatchRightButtonPointerUpOnAddWorktreeItem(): Promise<void> {
+    await test.step("Dispatch right-button pointerup on the Add worktree item", async () => {
+      await this.addWorktreeMenuItem.evaluate((el) => {
         el.dispatchEvent(
           new PointerEvent("pointermove", {
             bubbles: true,
@@ -534,16 +532,16 @@ export class WorkspacePage {
     });
   }
 
-  /** Right-click the project header while capturing the `contextmenu`
+  /** Right-click the repo header while capturing the `contextmenu`
    *  event's client coordinates, then return both the captured cursor point
    *  and the opened menu's top-left — so a test can assert the menu anchors
    *  at the cursor under zoom. Waits for the menu to be visible (the
    *  positive anchor) before measuring. */
-  async openProjectContextMenuAndMeasureAnchor(projectName: string): Promise<{
+  async openRepoContextMenuAndMeasureAnchor(repoName: string): Promise<{
     cursor: { x: number; y: number };
     menu: { left: number; top: number };
   }> {
-    return await test.step(`Measure context-menu anchor for ${projectName}`, async () => {
+    return await test.step(`Measure context-menu anchor for ${repoName}`, async () => {
       await this.page.evaluate(() => {
         (window as unknown as { __ctxCursor?: unknown }).__ctxCursor = undefined;
         window.addEventListener(
@@ -557,7 +555,7 @@ export class WorkspacePage {
           { once: true },
         );
       });
-      await this.projectHeader(projectName).click({ button: "right" });
+      await this.repoHeader(repoName).click({ button: "right" });
       await expect(this.contextMenu).toBeVisible();
       const cursor = await this.page.evaluate(
         () => (window as unknown as { __ctxCursor?: { x: number; y: number } }).__ctxCursor ?? null,
@@ -575,14 +573,14 @@ export class WorkspacePage {
     });
   }
 
-  /** The "Set label" row in an open project menu (opens a submenu). */
+  /** The "Set label" row in an open repo menu (opens a submenu). */
   get setLabelMenuItem(): Locator {
-    return this.page.getByTestId("project-list__action--set-label");
+    return this.page.getByTestId("repo-list__action--set-label");
   }
 
   /** The open "Set label" submenu, listing "None" and every label. */
   get labelSubmenu(): Locator {
-    return this.page.getByTestId("project-list__label-submenu");
+    return this.page.getByTestId("repo-list__label-submenu");
   }
 
   /** A row in the open "Set label" submenu, by label name (test data). */
@@ -590,7 +588,7 @@ export class WorkspacePage {
     return this.labelSubmenu.getByRole("menuitem", { name, exact: true });
   }
 
-  /** Open the "Set label" submenu of the open project menu. */
+  /** Open the "Set label" submenu of the open repo menu. */
   async openSetLabelSubmenu(): Promise<void> {
     await test.step("Open the Set label submenu", async () => {
       await this.setLabelMenuItem.click();
@@ -624,15 +622,15 @@ export class WorkspacePage {
     });
   }
 
-  /** Click a workspace card to switch to that workspace via the dashboard
+  /** Click a worktree card to switch to that worktree via the dashboard
    *  sidebar's client-side navigation. Unlike `goto()`, which does a full
    *  browser navigation that resets React state (including the
-   *  `MultiWorkspacePanelHost` mounted set), this uses TanStack Router's
-   *  in-app navigation — the previously-active workspace's panels stay
+   *  `MultiWorktreePanelHost` mounted set), this uses TanStack Router's
+   *  in-app navigation — the previously-active worktree's panels stay
    *  mounted, which is what keeps a return switch instant. */
-  async switchWorkspace(workspaceId: string): Promise<void> {
-    await test.step(`Switch workspace to ${workspaceId} via sidebar click`, async () => {
-      await this.workspaceCard(workspaceId).click();
+  async switchWorktree(worktreeId: string): Promise<void> {
+    await test.step(`Switch worktree to ${worktreeId} via sidebar click`, async () => {
+      await this.worktreeCard(worktreeId).click();
     });
   }
 
@@ -652,7 +650,7 @@ export class WorkspacePage {
 
   /** Open the label-filter dropdown and click the item for `labelId`.
    *  `null` selects the "All" item. Mirrors what `setLabelFilter` would
-   *  produce — including the per-label "last workspace" restore added in
+   *  produce — including the per-label "last worktree" restore added in
    *  issue #505 — so this is the right path for tests that need the
    *  full click→restore behaviour.
    *
@@ -683,7 +681,7 @@ export class WorkspacePage {
   }
 
   /** Reset both label-related localStorage entries (active filter +
-   *  per-label "last workspace" map) and navigate to `workspaceId`, so
+   *  per-label "last worktree" map) and navigate to `worktreeId`, so
    *  tests start from a known-clean slate. Two-step: navigate first to
    *  land on the origin (localStorage isn't accessible until a same-
    *  origin page is loaded), then evaluate the clear. Keeps the raw
@@ -698,15 +696,15 @@ export class WorkspacePage {
    *  behaviour, so the React tree re-reads the now-clean storage on
    *  remount. All in-tree callers already do — every test body opens
    *  with its own `goto(...)`. */
-  async resetLabelStateAndGoto(workspaceId: string): Promise<void> {
-    await test.step(`Reset label state, navigate to ${workspaceId}`, async () => {
-      await this.goto(workspaceId);
+  async resetLabelStateAndGoto(worktreeId: string): Promise<void> {
+    await test.step(`Reset label state, navigate to ${worktreeId}`, async () => {
+      await this.goto(worktreeId);
       await this.page.evaluate(
         ([filterKey, mapKey]) => {
           localStorage.removeItem(filterKey);
           localStorage.removeItem(mapKey);
         },
-        [LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY] as const,
+        [LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY] as const,
       );
     });
   }
@@ -717,10 +715,10 @@ export class WorkspacePage {
     return await this.page.evaluate((key) => localStorage.getItem(key), LABEL_FILTER_KEY);
   }
 
-  /** Read the persisted per-label "last workspace" map from
+  /** Read the persisted per-label "last worktree" map from
    *  localStorage. Returns an empty object when nothing has been
    *  recorded yet. */
-  async readLabelLastWorkspaces(): Promise<Record<string, string>> {
+  async readLabelLastWorktrees(): Promise<Record<string, string>> {
     return await this.page.evaluate((key) => {
       const raw = localStorage.getItem(key);
       if (!raw) return {};
@@ -733,26 +731,26 @@ export class WorkspacePage {
         // Corrupted entry — treat as empty.
       }
       return {};
-    }, LABEL_LAST_WORKSPACE_KEY);
+    }, LABEL_LAST_WORKTREE_KEY);
   }
 
-  /** Sidebar project-list root — the keyboard nav anchor in
-   *  `ProjectList.tsx` (a `tabindex=-1` div). Shortcuts that skip an
+  /** Sidebar repo-list root — the keyboard nav anchor in
+   *  `RepoList.tsx` (a `tabindex=-1` div). Shortcuts that skip an
    *  editable target (Ctrl+= zoom, for example) route the keystroke
    *  through it: it's both keyboard-focusable and intentionally not
    *  editable. */
-  projectListRoot(): Locator {
-    return this.page.getByTestId("project-list__root");
+  repoListRoot(): Locator {
+    return this.page.getByTestId("repo-list__root");
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Project-list sidebar (lives left of the dockview, outside it) + its
+  // Repo-list sidebar (lives left of the dockview, outside it) + its
   // header toggle button. The sidebar is a collapsible resizable-panel:
   // collapsing shrinks its width to ~0 rather than unmounting, so the
   // user-observable signal for hidden/shown is its rendered width.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The project-list sidebar wrapper. `data-testid` set in `__root.tsx`
+  /** The repo-list sidebar wrapper. `data-testid` set in `__root.tsx`
    *  (`AppShell`). */
   get sidebar(): Locator {
     return this.page.getByTestId("app-shell__sidebar");
@@ -783,27 +781,27 @@ export class WorkspacePage {
   }
 
   /** The old collapsed-sidebar hamburger menu trigger. The hamburger was
-   *  removed — the overflow actions live solely in the project-list bottom
+   *  removed — the overflow actions live solely in the repo-list bottom
    *  action bar now — so this button no longer renders in any state. Retained
    *  as a locator so specs can assert its absence. */
   get menuTrigger(): Locator {
     return this.page.getByRole("button", { name: "Menu" });
   }
 
-  /** The project-list bottom action bar (Settings + Resources/Usage/overflow),
+  /** The repo-list bottom action bar (Settings + Resources/Usage/overflow),
    *  scoped to the sidebar column. Present whenever the list is visible. */
   get actionBarWithinSidebar(): Locator {
-    return this.sidebar.getByTestId("project-list__action-bar");
+    return this.sidebar.getByTestId("repo-list__action-bar");
   }
 
-  /** The workspace-history back arrow (⌘[). Part of the stationary-overlay
+  /** The worktree-history back arrow (⌘[). Part of the stationary-overlay
    *  `NavControls` cluster. Targeted by testid: the "Back"/"Forward" ARIA
    *  names aren't unique app-wide (ScreencastPanel's address bar reuses them). */
   get backButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__back");
   }
 
-  /** The workspace-history forward arrow (⌘]). Part of the stationary-overlay
+  /** The worktree-history forward arrow (⌘]). Part of the stationary-overlay
    *  `NavControls` cluster. Targeted by testid for the same uniqueness reason
    *  as `backButton`. */
   get forwardButton(): Locator {
@@ -831,7 +829,7 @@ export class WorkspacePage {
   async navOverlayFollowsDragSurfaces(): Promise<boolean> {
     return await this.navOverlay.evaluate((overlay) => {
       const bars = document.querySelectorAll(
-        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="workspace-center__toolbar"], [data-testid="workspace-center__sidebar-gutter"], [data-testid="workspace-center__drag-bar"]',
+        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="worktree-center__toolbar"], [data-testid="worktree-center__sidebar-gutter"], [data-testid="worktree-center__drag-bar"]',
       );
       if (bars.length === 0) {
         throw new Error("no top-row drag surfaces found — testids renamed?");
@@ -850,7 +848,7 @@ export class WorkspacePage {
    *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
    *  z-index, `inert` and `pointer-events` irrelevant. Unlike Chromium it
    *  also counts rects whose `visibility` is `hidden`, on purpose: a hidden
-   *  but still laid-out workspace's strip must stay out of the region by
+   *  but still laid-out worktree's strip must stay out of the region by
    *  setting no app-region at all, not only through its visibility.
    *  Only Electron hit-tests that region, so this is the DOM-level
    *  projection of it; each control is sampled on a 3px grid. Returns a
@@ -916,16 +914,16 @@ export class WorkspacePage {
     });
   }
 
-  /** Elements inside a hidden (`inert`) workspace entry whose computed
+  /** Elements inside a hidden (`inert`) worktree entry whose computed
    *  app-region is `drag` or `no-drag`, as a label each (testid, class or tag).
-   *  Only the shown workspace may set an app-region, so this should be empty.
+   *  Only the shown worktree may set an app-region, so this should be empty.
    *  Throws when no hidden entry is mounted, so it can't pass vacuously. */
-  async appRegionsInHiddenWorkspaces(): Promise<string[]> {
+  async appRegionsInHiddenWorktrees(): Promise<string[]> {
     return await this.page.evaluate(() => {
       const entries = document.querySelectorAll(
-        '[data-testid^="workspace-panel-host__cached-entry--"][inert]',
+        '[data-testid^="worktree-panel-host__cached-entry--"][inert]',
       );
-      if (entries.length === 0) throw new Error("no hidden workspace entry is mounted");
+      if (entries.length === 0) throw new Error("no hidden worktree entry is mounted");
       const found: string[] = [];
       for (const entry of entries) {
         for (const el of [entry, ...entry.querySelectorAll("*")]) {
@@ -1022,13 +1020,13 @@ export class WorkspacePage {
     return await this.page.evaluate(() => localStorage.getItem("band:sidebar-collapsed") === "1");
   }
 
-  /** Trigger the ⌃0 "Focus Projects" shortcut, which reveals the sidebar
-   *  (`band:show-sidebar`) and focuses the list (`band:focus-projects`). The
+  /** Trigger the ⌃0 "Focus Repos" shortcut, which reveals the sidebar
+   *  (`band:show-sidebar`) and focuses the list (`band:focus-repos`). The
    *  keydown is caught by the window listener in `SharedDockviewLayout.tsx`.
    *  Anchored on the always-present toggle button so the key press has a
    *  stable focus target even when the sidebar (and its list) is collapsed. */
-  async focusProjectsViaShortcut(): Promise<void> {
-    await test.step("Trigger ⌃0 (Focus Projects)", async () => {
+  async focusReposViaShortcut(): Promise<void> {
+    await test.step("Trigger ⌃0 (Focus Repos)", async () => {
       await this.sidebarToggle.focus();
       await this.page.keyboard.press("Control+0");
     });
@@ -1037,7 +1035,7 @@ export class WorkspacePage {
   /** Press the ⌘0..9 label shortcut as a real user keypress, wherever focus
    *  is. `DashboardShell`'s window listener takes ⌘+digit from any element,
    *  the terminal input included, so no focus has to be set up first: a
-   *  workspace switch moves focus into the new workspace's tab a frame or
+   *  worktree switch moves focus into the new worktree's tab a frame or
    *  more later, and a focus set here could be taken before the key.
    *  Waits for the label filter trigger first: it renders once the labels
    *  have loaded, and the listener ignores a digit with no label behind it.
@@ -1052,10 +1050,10 @@ export class WorkspacePage {
     });
   }
 
-  /** Press ⌘0..9 (or Ctrl+0..9) with focus in `workspaceId`'s terminal,
-   *  where a workspace switch leaves it. `index` as in `pressLabelShortcut`. */
+  /** Press ⌘0..9 (or Ctrl+0..9) with focus in `worktreeId`'s terminal,
+   *  where a worktree switch leaves it. `index` as in `pressLabelShortcut`. */
   async pressLabelShortcutInTerminal(
-    workspaceId: string,
+    worktreeId: string,
     index: number,
     modifier: "Meta" | "Control" = "Meta",
   ): Promise<void> {
@@ -1063,28 +1061,28 @@ export class WorkspacePage {
       throw new Error(`pressLabelShortcutInTerminal: index must be 0..9, got ${index}`);
     }
     await test.step(`Press ${modifier}+${index} (label shortcut) in the terminal`, async () => {
-      await this.cachedPanelEntries(workspaceId)
+      await this.cachedPanelEntries(worktreeId)
         .getByRole("textbox", { name: "Terminal input" })
         .first()
         .press(`${modifier}+${index}`);
     });
   }
 
-  /** Press Ctrl+0..9 with focus on the project list, a non-editable target
+  /** Press Ctrl+0..9 with focus on the repo list, a non-editable target
    *  (Ctrl+digit is skipped in an editable one). Focus and key are two
-   *  steps, so the caller must know no workspace switch is still moving
+   *  steps, so the caller must know no worktree switch is still moving
    *  focus into its tab. `index` as in `pressLabelShortcut`. */
-  async pressLabelShortcutFromProjectList(index: number): Promise<void> {
+  async pressLabelShortcutFromRepoList(index: number): Promise<void> {
     if (index < 0 || index > 9) {
-      throw new Error(`pressLabelShortcutFromProjectList: index must be 0..9, got ${index}`);
+      throw new Error(`pressLabelShortcutFromRepoList: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Control+${index} (label shortcut) on the project list`, async () => {
-      await this.projectListRoot().press(`Control+${index}`);
+    await test.step(`Press Control+${index} (label shortcut) on the repo list`, async () => {
+      await this.repoListRoot().press(`Control+${index}`);
     });
   }
 
   /** Testid PREFIX that identifies a tab of the given leaf kind in the unified
-   *  center dockview (`WorkspaceCenterDockview.tsx`). Every leaf kind carries an
+   *  center dockview (`WorktreeCenterDockview.tsx`). Every leaf kind carries an
    *  instance-suffixed id (`center-chat-tab--<id>` / `center-term-tab--<id>` /
    *  `center-browser-tab--<id>`), so callers that mean "the first tab of that
    *  kind" match the prefix with a regex + `.first()`.
@@ -1108,14 +1106,14 @@ export class WorkspacePage {
   /** Locate a tab in the center dockview's tab strip by leaf kind. The
    *  per-instance kinds (chat / terminal / browser) have no single stable id, so
    *  this matches the `center-<kind>-tab--` testid PREFIX and takes `.first()`
-   *  to mean "the first tab of that kind" — the workspaces these tests seed have
+   *  to mean "the first tab of that kind" — the worktrees these tests seed have
    *  one tab per kind. `data-testid` values are set in
-   *  `WorkspaceCenterDockview.tsx`. */
+   *  `WorktreeCenterDockview.tsx`. */
   tab(panelComponent: "chat" | "terminal" | "browser"): Locator {
     // Anchor the regex to the start so `center-term-tab--` can't match
     // `center-term-tab__context-menu` etc. Filter to VISIBLE so a multi-
-    // workspace test resolves the ACTIVE workspace's tab — cached (hidden)
-    // workspaces keep their tab headers in the DOM under `visibility:hidden`.
+    // worktree test resolves the ACTIVE worktree's tab — cached (hidden)
+    // worktrees keep their tab headers in the DOM under `visibility:hidden`.
     return this.page
       .getByTestId(new RegExp(`^${this.centerTabTestidPrefix(panelComponent)}`))
       .filter({ visible: true })
@@ -1179,7 +1177,7 @@ export class WorkspacePage {
   }
 
   /** Locate the per-path `file` leaf tab opened from the sidepanel Explorer
-   *  (`center-file-tab--<path>`, set in `WorkspaceCenterDockview.tsx`). */
+   *  (`center-file-tab--<path>`, set in `WorktreeCenterDockview.tsx`). */
   fileTab(path: string): Locator {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
@@ -1191,7 +1189,7 @@ export class WorkspacePage {
 
   /** The active file leaf's "View changes" button in the group header
    *  (`center-file-leaf__view-diff`). It only renders while that file has
-   *  changes against the workspace's diff target. */
+   *  changes against the worktree's diff target. */
   get fileLeafViewChangesButton(): Locator {
     return this.page.getByTestId("center-file-leaf__view-diff");
   }
@@ -1232,9 +1230,9 @@ export class WorkspacePage {
   }
 
   /** The `file` leaf body's visibility marker (`center-file-leaf__visible-*`),
-   *  optionally scoped to a workspace's cached panel host. */
-  fileLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
-    const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
+   *  optionally scoped to a worktree's cached panel host. */
+  fileLeafVisibilityMarker(visible: boolean, worktreeId?: string): Locator {
+    const scope = worktreeId ? this.cachedPanelEntries(worktreeId) : this.page;
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
   }
 
@@ -1255,8 +1253,8 @@ export class WorkspacePage {
   }
 
   /** The `diff` leaf body's visibility marker (`center-diff-leaf__visible-*`). */
-  diffLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
-    const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
+  diffLeafVisibilityMarker(visible: boolean, worktreeId?: string): Locator {
+    const scope = worktreeId ? this.cachedPanelEntries(worktreeId) : this.page;
     return scope.getByTestId(`center-diff-leaf__visible-${visible ? "true" : "false"}`);
   }
 
@@ -1289,9 +1287,9 @@ export class WorkspacePage {
 
   /** Open a file into a center `file` leaf via the real `band:open-file` event
    *  and wait until its body reports visible. */
-  async openFileLeaf(filename: string, workspaceId?: string): Promise<void> {
-    await this.dispatchOpenFileEvent({ filename, workspaceId });
-    await this.fileLeafVisibilityMarker(true, workspaceId)
+  async openFileLeaf(filename: string, worktreeId?: string): Promise<void> {
+    await this.dispatchOpenFileEvent({ filename, worktreeId });
+    await this.fileLeafVisibilityMarker(true, worktreeId)
       .first()
       .waitFor({ state: "visible", timeout: 20_000 });
   }
@@ -1353,7 +1351,7 @@ export class WorkspacePage {
 
   /** Open a new untitled scratch buffer through `band:new-untitled-tab`, the
    *  event ⌘N and the command palette fire. Not the key itself: a fresh
-   *  workspace focuses its terminal, and off macOS a focused terminal keeps
+   *  worktree focuses its terminal, and off macOS a focused terminal keeps
    *  Ctrl chords for the shell, so Ctrl+N on the Linux CI runner would go to
    *  the shell instead. */
   async openUntitledTab(): Promise<void> {
@@ -1481,10 +1479,10 @@ export class WorkspacePage {
     });
   }
 
-  /** Step workspace history back / forward: ⌥⌘← / ⌥⌘→ on macOS, Ctrl+Alt+← /
+  /** Step worktree history back / forward: ⌥⌘← / ⌥⌘→ on macOS, Ctrl+Alt+← /
    *  → elsewhere (caught by AppShell in `routes/__root.tsx`). */
-  async pressWorkspaceHistory(direction: "back" | "forward"): Promise<void> {
-    await test.step(`Workspace history ${direction} (⌥⌘←/→)`, async () => {
+  async pressWorktreeHistory(direction: "back" | "forward"): Promise<void> {
+    await test.step(`Worktree history ${direction} (⌥⌘←/→)`, async () => {
       const arrow = direction === "back" ? "ArrowLeft" : "ArrowRight";
       await this.page.keyboard.press(`${this.modifier}+Alt+${arrow}`);
     });
@@ -1881,36 +1879,36 @@ export class WorkspacePage {
   // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
   // close (×).
   //
-  // The unified `WorkspaceCenterDockview` no longer has per-container inner
+  // The unified `WorktreeCenterDockview` no longer has per-container inner
   // dockviews with their own split/+ toolbars. Every grid group's right
-  // header renders a single `+` menu button (`workspace-center__new-tab-button`)
-  // that opens a dropdown (`workspace-center__new-tab-menu`) with
+  // header renders a single `+` menu button (`worktree-center__new-tab-button`)
+  // that opens a dropdown (`worktree-center__new-tab-menu`) with
   // `--term` / `--chat` / `--browser` items. Split is keyboard-only now
   // (Cmd/Ctrl+D / Shift+D) — there is NO split button.
   //
-  // Add-tab / split helpers below are scoped to a workspace's cached panel
-  // host so they target the active workspace's toolbar, not another mounted
-  // workspace's. `.filter({ visible: true })` picks the visible grid group's
+  // Add-tab / split helpers below are scoped to a worktree's cached panel
+  // host so they target the active worktree's toolbar, not another mounted
+  // worktree's. `.filter({ visible: true })` picks the visible grid group's
   // toolbar.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The visible "+" new-tab menu button for a workspace's center dockview. */
-  private newTabButton(workspaceId: string): Locator {
-    return this.cachedPanelEntries(workspaceId)
-      .getByTestId("workspace-center__new-tab-button")
+  /** The visible "+" new-tab menu button for a worktree's center dockview. */
+  private newTabButton(worktreeId: string): Locator {
+    return this.cachedPanelEntries(worktreeId)
+      .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true });
   }
 
   /** Open the "+" new-tab menu and click the item for `kind`. The menu content
-   *  (`workspace-center__new-tab-menu`) is portalled to the body, so the item
+   *  (`worktree-center__new-tab-menu`) is portalled to the body, so the item
    *  is located on the page rather than under the cached host. */
   private async addLeafViaMenu(
-    workspaceId: string,
+    worktreeId: string,
     kind: "term" | "chat" | "browser",
   ): Promise<void> {
     // A chat is an agent started from the "New agent" submenu (issue #682).
     if (kind === "chat") {
-      await this.startAgentViaMenu(workspaceId);
+      await this.startAgentViaMenu(worktreeId);
       return;
     }
     // Open the Radix menu via keyboard (focus + Enter) rather than a mouse
@@ -1919,11 +1917,11 @@ export class WorkspacePage {
     // (a real user click on the button body still works). Enter on the focused
     // trigger opens the menu with no hit-test.
     //
-    // The menu is portalled to <body>, and with several workspaces cached each
+    // The menu is portalled to <body>, and with several worktrees cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
     const item = this.page
-      .getByTestId(`workspace-center__new-tab--${kind}`)
+      .getByTestId(`worktree-center__new-tab--${kind}`)
       .filter({ visible: true })
       .first();
     // A new terminal grabs focus when its socket first connects. On a slow
@@ -1932,7 +1930,7 @@ export class WorkspacePage {
     // whenever it isn't open instead of waiting on an item that never shows.
     await expect(async () => {
       if (!(await item.isVisible())) {
-        await this.newTabButton(workspaceId).first().focus();
+        await this.newTabButton(worktreeId).first().focus();
         await this.page.keyboard.press("Enter");
       }
       await item.click({ timeout: 2_000 });
@@ -1942,22 +1940,22 @@ export class WorkspacePage {
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
    *  given agent, or the first one listed (the default). It opens in this
    *  browser's agent mode (issue #682). */
-  async startAgentViaMenu(workspaceId: string, agentId?: string): Promise<void> {
+  async startAgentViaMenu(worktreeId: string, agentId?: string): Promise<void> {
     await test.step(`Start agent ${agentId ?? "(default)"} via "+" menu`, async () => {
       // Keyboard open, for the same sash-overlap reason as `addLeafViaMenu`.
-      await this.newTabButton(workspaceId).first().focus();
+      await this.newTabButton(worktreeId).first().focus();
       await this.page.keyboard.press("Enter");
       await this.page
-        .getByTestId("workspace-center__new-tab--agent")
+        .getByTestId("worktree-center__new-tab--agent")
         .filter({ visible: true })
         .first()
         .click();
-      const menu = this.page.getByTestId("workspace-center__new-agent-menu").filter({
+      const menu = this.page.getByTestId("worktree-center__new-agent-menu").filter({
         visible: true,
       });
       const item = agentId
-        ? menu.getByTestId(`workspace-center__new-agent--${agentId}`)
-        : menu.getByTestId(/^workspace-center__new-agent(--.+)?$/).first();
+        ? menu.getByTestId(`worktree-center__new-agent--${agentId}`)
+        : menu.getByTestId(/^worktree-center__new-agent(--.+)?$/).first();
       await item.click();
     });
   }
@@ -1975,32 +1973,32 @@ export class WorkspacePage {
     return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
   }
 
-  /** The visible "+" new-tab menu button for a workspace's chat host.
+  /** The visible "+" new-tab menu button for a worktree's chat host.
    *  Retained for `expect(...).toBeVisible()` anchors; the add flow goes
    *  through `clickChatAddTab`. */
-  chatAddTabButton(workspaceId: string): Locator {
-    return this.newTabButton(workspaceId);
+  chatAddTabButton(worktreeId: string): Locator {
+    return this.newTabButton(worktreeId);
   }
 
-  /** The visible "+" new-tab menu button for a workspace's terminal host. */
-  terminalAddTabButton(workspaceId: string): Locator {
-    return this.newTabButton(workspaceId);
+  /** The visible "+" new-tab menu button for a worktree's terminal host. */
+  terminalAddTabButton(worktreeId: string): Locator {
+    return this.newTabButton(worktreeId);
   }
 
-  /** Add a new chat leaf via the "+" menu in the given workspace's dockview. */
-  async clickChatAddTab(workspaceId: string): Promise<void> {
-    await test.step(`Add a chat via "+" menu in workspace ${workspaceId}`, async () => {
-      await this.addLeafViaMenu(workspaceId, "chat");
+  /** Add a new chat leaf via the "+" menu in the given worktree's dockview. */
+  async clickChatAddTab(worktreeId: string): Promise<void> {
+    await test.step(`Add a chat via "+" menu in worktree ${worktreeId}`, async () => {
+      await this.addLeafViaMenu(worktreeId, "chat");
     });
   }
 
   /** Create a chat leaf AND make it the active/shown tab. The default center
    *  layout is a single terminal, so tests that need a chat create one; a fresh
    *  chat can sit behind the active terminal tab, so activate it too. */
-  async openChat(workspaceId: string): Promise<void> {
-    await test.step(`Open + activate a chat in workspace ${workspaceId}`, async () => {
-      await this.clickChatAddTab(workspaceId);
-      const chatTab = this.cachedPanelEntries(workspaceId)
+  async openChat(worktreeId: string): Promise<void> {
+    await test.step(`Open + activate a chat in worktree ${worktreeId}`, async () => {
+      await this.clickChatAddTab(worktreeId);
+      const chatTab = this.cachedPanelEntries(worktreeId)
         .getByTestId(/^center-chat-tab--/)
         .filter({ visible: true })
         .first();
@@ -2013,16 +2011,16 @@ export class WorkspacePage {
    *  `center-chat-tab--<chatId>`, so the id is read from the DOM rather than
    *  sniffed from network traffic (a freshly created chat need not fetch
    *  itself). For specs that address the chat server-side, e.g. `queue.push`. */
-  async openChatAndGetId(workspaceId: string): Promise<string> {
-    const chatTabs = this.cachedPanelEntries(workspaceId).getByTestId(/^center-chat-tab--/);
+  async openChatAndGetId(worktreeId: string): Promise<string> {
+    const chatTabs = this.cachedPanelEntries(worktreeId).getByTestId(/^center-chat-tab--/);
     const idsOf = async (): Promise<string[]> =>
       (await chatTabs.evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? "")))
         .map((t) => t.slice("center-chat-tab--".length))
         .filter(Boolean);
     const before = new Set(await idsOf());
-    await this.openChat(workspaceId);
+    await this.openChat(worktreeId);
     // The id that wasn't there before is the chat this call created, even when
-    // the workspace already held other chats.
+    // the worktree already held other chats.
     let created: string | undefined;
     await expect
       .poll(
@@ -2036,48 +2034,48 @@ export class WorkspacePage {
     return created as string;
   }
 
-  /** Add a new terminal leaf via the "+" menu in the given workspace's dockview. */
-  async clickTerminalAddTab(workspaceId: string): Promise<void> {
-    await test.step(`Add a terminal via "+" menu in workspace ${workspaceId}`, async () => {
-      await this.addLeafViaMenu(workspaceId, "term");
+  /** Add a new terminal leaf via the "+" menu in the given worktree's dockview. */
+  async clickTerminalAddTab(worktreeId: string): Promise<void> {
+    await test.step(`Add a terminal via "+" menu in worktree ${worktreeId}`, async () => {
+      await this.addLeafViaMenu(worktreeId, "term");
     });
   }
 
   // Split in the unified center dockview has no toolbar button — it's the
   // Cmd+D shortcut (split the active leaf to the right) handled in
-  // `WorkspaceCenterDockview`. To split a specific kind in a specific
-  // workspace we activate that kind's tab in the workspace's cached host
-  // (which also makes the workspace visible/active, so its keydown handler is
+  // `WorktreeCenterDockview`. To split a specific kind in a specific
+  // worktree we activate that kind's tab in the worktree's cached host
+  // (which also makes the worktree visible/active, so its keydown handler is
   // the one that responds) and then press Cmd+D.
 
-  /** Activate the given kind's first tab in a workspace's center dockview and
+  /** Activate the given kind's first tab in a worktree's center dockview and
    *  split it to the right via Cmd+D. */
   private async splitLeafRight(
     kind: "chat" | "terminal" | "browser",
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<void> {
     const prefix = this.centerTabTestidPrefix(kind);
-    await this.cachedPanelEntries(workspaceId)
+    await this.cachedPanelEntries(worktreeId)
       .getByTestId(new RegExp(`^${prefix}`))
       .first()
       .click();
     await this.page.keyboard.press(this.splitChord("right"));
   }
 
-  /** Split the active chat leaf to the right (Cmd+D) in the given workspace. */
-  async clickChatSplitRight(workspaceId: string): Promise<void> {
-    await test.step(`Split the chat leaf right (Cmd+D) in workspace ${workspaceId}`, async () => {
-      await this.splitLeafRight("chat", workspaceId);
+  /** Split the active chat leaf to the right (Cmd+D) in the given worktree. */
+  async clickChatSplitRight(worktreeId: string): Promise<void> {
+    await test.step(`Split the chat leaf right (Cmd+D) in worktree ${worktreeId}`, async () => {
+      await this.splitLeafRight("chat", worktreeId);
     });
   }
 
   /** Split the focused terminal into a nested PANE to the right (Cmd+D) in the
-   *  given workspace. A terminal split now happens INSIDE the terminal leaf's
+   *  given worktree. A terminal split now happens INSIDE the terminal leaf's
    *  nested dockview, so the keystroke must originate from focus inside that
-   *  workspace's xterm — activate its terminal tab, focus the xterm, then ⌘D. */
-  async clickTerminalSplitRight(workspaceId: string): Promise<void> {
-    await test.step(`Split the terminal pane right (Cmd+D) in workspace ${workspaceId}`, async () => {
-      const host = this.cachedPanelEntries(workspaceId);
+   *  worktree's xterm — activate its terminal tab, focus the xterm, then ⌘D. */
+  async clickTerminalSplitRight(worktreeId: string): Promise<void> {
+    await test.step(`Split the terminal pane right (Cmd+D) in worktree ${worktreeId}`, async () => {
+      const host = this.cachedPanelEntries(worktreeId);
       await host
         .getByTestId(new RegExp(`^${this.centerTabTestidPrefix("terminal")}`))
         .first()
@@ -2088,54 +2086,54 @@ export class WorkspacePage {
   }
 
   /** Close the active terminal tab via its per-tab "Close terminal" (×) button
-   *  in the given workspace's center dockview. Each `TerminalTab` renders the
-   *  button with `title="Close terminal"`; scoped to the workspace's cached
-   *  entry so it never targets another mounted workspace's terminal. */
-  async closeTerminalTab(workspaceId: string): Promise<void> {
-    await test.step(`Close a terminal tab in workspace ${workspaceId}`, async () => {
-      await this.cachedPanelEntries(workspaceId)
+   *  in the given worktree's center dockview. Each `TerminalTab` renders the
+   *  button with `title="Close terminal"`; scoped to the worktree's cached
+   *  entry so it never targets another mounted worktree's terminal. */
+  async closeTerminalTab(worktreeId: string): Promise<void> {
+    await test.step(`Close a terminal tab in worktree ${worktreeId}`, async () => {
+      await this.cachedPanelEntries(worktreeId)
         .getByRole("button", { name: "Close terminal" })
         .first()
         .click();
     });
   }
 
-  /** Count the leaves of the given kind in a workspace's unified center
+  /** Count the leaves of the given kind in a worktree's unified center
    *  dockview by counting its rendered tab headers
    *  (`center-<kind>-tab--<id>`). dockview always renders every leaf's tab
    *  header (it only detaches inactive *content*), so this reflects the true
-   *  leaf count regardless of which tab is active. Scoped to the workspace's
-   *  cached panel host so it targets the right (visible) workspace — the crux
-   *  of the wrong-workspace regression — not another cached-but-hidden one.
+   *  leaf count regardless of which tab is active. Scoped to the worktree's
+   *  cached panel host so it targets the right (visible) worktree — the crux
+   *  of the wrong-worktree regression — not another cached-but-hidden one.
    *
    *  (Replaces the old server-side `readInnerLayout` read: #643 retired the
    *  per-app inner layouts; the center dockview persists only to localStorage.) */
   async countInnerPanels(
     container: "chat" | "terminal" | "browser",
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<number> {
     const prefix = this.centerTabTestidPrefix(container);
-    return await this.cachedPanelEntries(workspaceId)
+    return await this.cachedPanelEntries(worktreeId)
       .getByTestId(new RegExp(`^${prefix}`))
       .count();
   }
 
-  /** Convenience: panel count for a workspace's persisted chat layout. */
-  async countChatPanels(workspaceId: string): Promise<number> {
-    return this.countInnerPanels("chat", workspaceId);
+  /** Convenience: panel count for a worktree's persisted chat layout. */
+  async countChatPanels(worktreeId: string): Promise<number> {
+    return this.countInnerPanels("chat", worktreeId);
   }
 
-  /** Convenience: panel count for a workspace's persisted terminal layout. */
-  async countTerminalPanels(workspaceId: string): Promise<number> {
-    return this.countInnerPanels("terminal", workspaceId);
+  /** Convenience: panel count for a worktree's persisted terminal layout. */
+  async countTerminalPanels(worktreeId: string): Promise<number> {
+    return this.countInnerPanels("terminal", worktreeId);
   }
 
-  /** Navigate to the given workspace. The workspace URL no longer carries a
+  /** Navigate to the given worktree. The worktree URL no longer carries a
    *  sub-path for the active tab — see issue #467 for the route unification
-   *  that folded `/changes`, `/code`, `/terminal` into `/workspace/:id`. */
-  async goto(workspaceId: string): Promise<void> {
-    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
-    await test.step(`Navigate to workspace ${workspaceId}`, async () => {
+   *  that folded `/changes`, `/code`, `/terminal` into `/worktree/:id`. */
+  async goto(worktreeId: string): Promise<void> {
+    const url = `${this.baseUrl}/worktree/${encodeURIComponent(worktreeId)}?token=${this.token}`;
+    await test.step(`Navigate to worktree ${worktreeId}`, async () => {
       await this.page.goto(url);
     });
   }
@@ -2217,23 +2215,23 @@ export class WorkspacePage {
     });
   }
 
-  /** The sidebar's title bar (a pure drag surface over the project list,
+  /** The sidebar's title bar (a pure drag surface over the repo list,
    *  `SidebarTitleBar` in `DesktopTitleBar.tsx`). */
   get sidebarTitleBar(): Locator {
     return this.page.getByTestId("desktop-title-bar__sidebar-surface");
   }
 
-  /** The action slot at the right end of the active workspace's center tab
-   *  strip (`RightHeaderActions` in `WorkspaceCenterDockview.tsx`). The seeded
-   *  workspaces have a single dockview group, so this is the top-right group,
+  /** The action slot at the right end of the active worktree's center tab
+   *  strip (`RightHeaderActions` in `WorktreeCenterDockview.tsx`). The seeded
+   *  worktrees have a single dockview group, so this is the top-right group,
    *  and on desktop the tab strip is the window's top row. */
   get centerToolbar(): Locator {
-    return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true }).first();
+    return this.page.getByTestId("worktree-center__toolbar").filter({ visible: true }).first();
   }
 
   /** Every visible center-toolbar action slot, one per top-level tab group. */
   get centerToolbars(): Locator {
-    return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true });
+    return this.page.getByTestId("worktree-center__toolbar").filter({ visible: true });
   }
 
   /** Every right-sidepanel expand button hosted in a center tab strip. */
@@ -2244,14 +2242,14 @@ export class WorkspacePage {
   /** The draggable space the top-left tab group reserves under the nav-cluster
    *  overlay while the sidebar is collapsed (`SidebarGutter`). */
   get sidebarGutter(): Locator {
-    return this.page.getByTestId("workspace-center__sidebar-gutter").filter({ visible: true });
+    return this.page.getByTestId("worktree-center__sidebar-gutter").filter({ visible: true });
   }
 
   /** The draggable top row the center column shows in place of the tab strip
-   *  when there is none: no active workspace, or every tab closed
+   *  when there is none: no active worktree, or every tab closed
    *  (`CenterDragBar`). */
   get centerDragBar(): Locator {
-    return this.page.getByTestId("workspace-center__drag-bar").filter({ visible: true });
+    return this.page.getByTestId("worktree-center__drag-bar").filter({ visible: true });
   }
 
   /** The right-sidepanel expand button hosted in `centerDragBar`. */
@@ -2306,13 +2304,13 @@ export class WorkspacePage {
    *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
    *  callers that assert on the Changes section MUST select it first — the
    *  panel defaults to Explorer. */
-  /** Navigate to a workspace and wait until the server has listed its
+  /** Navigate to a worktree and wait until the server has listed its
    *  plugins, after which the right sidepanel's plugin tabs are final. */
-  async gotoAndWaitForPlugins(workspaceId: string): Promise<void> {
+  async gotoAndWaitForPlugins(worktreeId: string): Promise<void> {
     const listed = this.page.waitForResponse(
       (res) => res.url().includes("plugins.list") && res.ok(),
     );
-    await this.goto(workspaceId);
+    await this.goto(worktreeId);
     await listed;
   }
 
@@ -2326,70 +2324,70 @@ export class WorkspacePage {
     });
   }
 
-  /** Wait until `workspaceId` is the shown workspace: its mounted entry is no
+  /** Wait until `worktreeId` is the shown worktree: its mounted entry is no
    *  longer `inert` and its "+" new-tab button is visible. `waitForReady`
-   *  alone can pass on the previous workspace's toolbar right after a switch. */
-  async waitForWorkspaceReady(workspaceId: string): Promise<void> {
-    await expect(this.cachedPanelEntries(workspaceId)).not.toHaveAttribute("inert", {
+   *  alone can pass on the previous worktree's toolbar right after a switch. */
+  async waitForWorktreeReady(worktreeId: string): Promise<void> {
+    await expect(this.cachedPanelEntries(worktreeId)).not.toHaveAttribute("inert", {
       timeout: 15_000,
     });
-    await expect(this.newTabButton(workspaceId).first()).toBeVisible({ timeout: 15_000 });
+    await expect(this.newTabButton(worktreeId).first()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Wait for the shared dockview to render its header. The app boot is
-   *  multi-stage (settings query → workspaces fetch → dockview mount) and any
+   *  multi-stage (settings query → worktrees fetch → dockview mount) and any
    *  test that interacts with the header must wait for it to be in the DOM.
    *  Anchors on the header toolbar container rather than the Maximize button
-   *  specifically — a workspace restored in a maximized state shows only a
+   *  specifically — a worktree restored in a maximized state shows only a
    *  "Restore" button, so keying off "Maximize" would hang. */
   async waitForReady(): Promise<void> {
     await this.page
-      .getByTestId("workspace-center__toolbar")
+      .getByTestId("worktree-center__toolbar")
       .filter({ visible: true })
       .first()
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
-  /** Wait for the mobile workspace layout to be interactive. The mobile
-   *  layout (`MobileWorkspaceShell`) doesn't render the dockview's header
+  /** Wait for the mobile worktree layout to be interactive. The mobile
+   *  layout (`MobileWorktreeShell`) doesn't render the dockview's header
    *  Maximize buttons, so `waitForReady` won't work. Instead we anchor on the
-   *  mobile header's panel menu button (`mobile-workspace__header-menu`) and
+   *  mobile header's panel menu button (`mobile-worktree__header-menu`) and
    *  on the shown dockview's "+" new-tab button. The header renders before
    *  the dockview has loaded its layout, and a file opened into a dockview
    *  that isn't ready yet is dropped. */
   async waitForMobileReady(): Promise<void> {
     await this.page
-      .getByTestId("mobile-workspace__header-menu")
+      .getByTestId("mobile-worktree__header-menu")
       .waitFor({ state: "visible", timeout: 15_000 });
     await this.page
-      .getByTestId("workspace-center__new-tab-button")
+      .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true })
       .first()
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Mobile workspace tabs + mobile terminal (tabs-only) surface.
+  // Mobile worktree tabs + mobile terminal (tabs-only) surface.
   //
-  // On a mobile viewport the workspace renders `MobileWorkspaceLayout`
-  // (`workspace.$workspaceId.tsx`): a top-level `WorkspaceTabNav`
+  // On a mobile viewport the worktree renders `MobileWorktreeLayout`
+  // (`worktree.$worktreeId.tsx`): a top-level `WorktreeTabNav`
   // (Chat / Changes / Files / Terminal) whose buttons carry the tab label as
   // their system-controlled `aria-label`. The Terminal tab mounts the inner
-  // `DockviewTerminalContainer` DIRECTLY (not inside `MultiWorkspacePanelHost`),
+  // `DockviewTerminalContainer` DIRECTLY (not inside `MultiWorktreePanelHost`),
   // so its toolbar / tab markers are located globally on the page rather than
   // scoped to a `cachedPanelEntries(...)` host.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** A mobile `WorkspaceTabNav` button by its label (system-controlled
-   *  aria-label set in `WorkspaceTabNav.tsx`). */
-  mobileWorkspaceTab(label: "Chat" | "Changes" | "Files" | "Terminal"): Locator {
+  /** A mobile `WorktreeTabNav` button by its label (system-controlled
+   *  aria-label set in `WorktreeTabNav.tsx`). */
+  mobileWorktreeTab(label: "Chat" | "Changes" | "Files" | "Terminal"): Locator {
     return this.page.getByRole("button", { name: label });
   }
 
-  /** Activate a mobile workspace tab. */
+  /** Activate a mobile worktree tab. */
   async openMobileTab(label: "Chat" | "Changes" | "Files" | "Terminal"): Promise<void> {
     await test.step(`Open mobile ${label} tab`, async () => {
-      await this.mobileWorkspaceTab(label).click();
+      await this.mobileWorktreeTab(label).click();
     });
   }
 
@@ -2438,11 +2436,11 @@ export class WorkspacePage {
   /** Create a terminal (spawns a real PTY + registers it in the saved layout)
    *  via the real `terminal.create` tRPC mutation. Auth via the `band_token`
    *  cookie, matching the other tRPC HTTP helpers. */
-  async createTerminal(workspaceId: string, id: string): Promise<void> {
-    await test.step(`Create terminal ${id} in ${workspaceId}`, async () => {
+  async createTerminal(worktreeId: string, id: string): Promise<void> {
+    await test.step(`Create terminal ${id} in ${worktreeId}`, async () => {
       const res = await this.page.request.post(`${this.baseUrl}/trpc/terminal.create`, {
         headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
-        data: { workspaceId, id },
+        data: { worktreeId, id },
       });
       if (!res.ok()) {
         throw new Error(`createTerminal(${id}) failed: ${res.status()} ${await res.text()}`);
@@ -2450,18 +2448,18 @@ export class WorkspacePage {
     });
   }
 
-  /** Overwrite a workspace's persisted terminal layout via the real
+  /** Overwrite a worktree's persisted terminal layout via the real
    *  `terminalLayout.save` mutation. Used to seed a "desktop split" layout the
    *  mobile visit must not clobber. */
-  async saveTerminalLayout(workspaceId: string, tree: unknown): Promise<void> {
-    await test.step(`Save terminal layout for ${workspaceId}`, async () => {
+  async saveTerminalLayout(worktreeId: string, tree: unknown): Promise<void> {
+    await test.step(`Save terminal layout for ${worktreeId}`, async () => {
       const res = await this.page.request.post(`${this.baseUrl}/trpc/terminalLayout.save`, {
         headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
-        data: { workspaceId, tree },
+        data: { worktreeId, tree },
       });
       if (!res.ok()) {
         throw new Error(
-          `saveTerminalLayout(${workspaceId}) failed: ${res.status()} ${await res.text()}`,
+          `saveTerminalLayout(${worktreeId}) failed: ${res.status()} ${await res.text()}`,
         );
       }
     });
@@ -2501,11 +2499,11 @@ export class WorkspacePage {
 
   /** Create a chat via the real `chats.create` tRPC mutation. Auth via the
    *  `band_token` cookie, matching the other tRPC HTTP helpers. */
-  async createChat(workspaceId: string, id: string): Promise<void> {
-    await test.step(`Create chat ${id} in ${workspaceId}`, async () => {
+  async createChat(worktreeId: string, id: string): Promise<void> {
+    await test.step(`Create chat ${id} in ${worktreeId}`, async () => {
       const res = await this.page.request.post(`${this.baseUrl}/trpc/chats.create`, {
         headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
-        data: { workspaceId, id },
+        data: { worktreeId, id },
       });
       if (!res.ok()) {
         throw new Error(`createChat(${id}) failed: ${res.status()} ${await res.text()}`);
@@ -2513,76 +2511,74 @@ export class WorkspacePage {
     });
   }
 
-  /** The mobile workspace header's title button. Its aria-label
-   *  ("Switch workspace") is system-controlled (set in
-   *  `MobileWorkspaceShell.tsx`), so
+  /** The mobile worktree header's title button. Its aria-label
+   *  ("Switch worktree") is system-controlled (set in
+   *  `MobileWorktreeShell.tsx`), so
    *  `getByRole({ name })` is the preferred locator. Tapping it opens the
-   *  WorkspacePickerDialog. */
-  get switchWorkspaceButton(): Locator {
-    return this.page.getByRole("button", { name: "Switch workspace" });
+   *  WorktreePickerDialog. */
+  get switchWorktreeButton(): Locator {
+    return this.page.getByRole("button", { name: "Switch worktree" });
   }
 
-  /** The mobile header's hamburger button — opens the project-list fly-out
-   *  drawer *over* the current workspace (no route change). aria-label set in
-   *  `MobileWorkspaceShell.tsx`. */
-  get projectListTrigger(): Locator {
-    return this.page.getByTestId("mobile-workspace__project-list-trigger");
+  /** The mobile header's hamburger button — opens the repo-list fly-out
+   *  drawer *over* the current worktree (no route change). aria-label set in
+   *  `MobileWorktreeShell.tsx`. */
+  get repoListTrigger(): Locator {
+    return this.page.getByTestId("mobile-worktree__repo-list-trigger");
   }
 
-  /** The left project-list fly-out drawer (a `Sheet side="left"` wrapping the
-   *  DashboardShell). data-testid set in `MobileWorkspaceShell.tsx`. */
-  get projectListFlyout(): Locator {
-    return this.page.getByTestId("project-list-flyout");
+  /** The left repo-list fly-out drawer (a `Sheet side="left"` wrapping the
+   *  DashboardShell). data-testid set in `MobileWorktreeShell.tsx`. */
+  get repoListFlyout(): Locator {
+    return this.page.getByTestId("repo-list-flyout");
   }
 
-  /** The active workspace card *scoped to the project-list fly-out* — proves
+  /** The active worktree card *scoped to the repo-list fly-out* — proves
    *  the card rendered inside the drawer (not elsewhere on the page) and
    *  carries the `data-active` marker. Same `[data-active]` state-filter
-   *  rationale as `activeWorkspaceCard`. */
-  activeWorkspaceCardInFlyout(workspaceId: string): Locator {
-    return this.projectListFlyout
-      .getByTestId(`project-list__workspace-card--${workspaceId}`)
+   *  rationale as `activeWorktreeCard`. */
+  activeWorktreeCardInFlyout(worktreeId: string): Locator {
+    return this.repoListFlyout
+      .getByTestId(`repo-list__worktree-card--${worktreeId}`)
       .and(this.page.locator("[data-active]"));
   }
 
-  /** Open the workspace switcher from the mobile header title. */
+  /** Open the worktree switcher from the mobile header title. */
   async openSwitcherFromHeader(): Promise<void> {
-    await test.step("Tap the mobile header title to open the workspace switcher", async () => {
-      await this.switchWorkspaceButton.click();
+    await test.step("Tap the mobile header title to open the worktree switcher", async () => {
+      await this.switchWorktreeButton.click();
     });
   }
 
-  /** Tap the hamburger to open the project-list fly-out over this workspace.
-   *  Opening it must not change the route — the workspace stays mounted
+  /** Tap the hamburger to open the repo-list fly-out over this worktree.
+   *  Opening it must not change the route — the worktree stays mounted
    *  underneath. */
-  async openProjectListFlyout(): Promise<void> {
-    await test.step("Open the project-list fly-out", async () => {
-      await this.projectListTrigger.click();
-      await this.projectListFlyout.waitFor({ state: "visible", timeout: 15_000 });
+  async openRepoListFlyout(): Promise<void> {
+    await test.step("Open the repo-list fly-out", async () => {
+      await this.repoListTrigger.click();
+      await this.repoListFlyout.waitFor({ state: "visible", timeout: 15_000 });
     });
   }
 
-  /** Switch workspace on mobile the way a user does: open the project-list
-   *  fly-out and tap the workspace's card in it. An in-app navigation, so
-   *  the mounted set of `MobileWorkspaceShell` survives it. */
-  async switchWorkspaceFromFlyout(workspaceId: string): Promise<void> {
-    await test.step(`Switch workspace to ${workspaceId} from the project-list fly-out`, async () => {
-      await this.openProjectListFlyout();
-      await this.projectListFlyout
-        .getByTestId(`project-list__workspace-card--${workspaceId}`)
-        .click();
-      await expect(this.projectListFlyout).toBeHidden();
+  /** Switch worktree on mobile the way a user does: open the repo-list
+   *  fly-out and tap the worktree's card in it. An in-app navigation, so
+   *  the mounted set of `MobileWorktreeShell` survives it. */
+  async switchWorktreeFromFlyout(worktreeId: string): Promise<void> {
+    await test.step(`Switch worktree to ${worktreeId} from the repo-list fly-out`, async () => {
+      await this.openRepoListFlyout();
+      await this.repoListFlyout.getByTestId(`repo-list__worktree-card--${worktreeId}`).click();
+      await expect(this.repoListFlyout).toBeHidden();
     });
   }
 
-  /** Tap the PR badge of a workspace's card in the project-list fly-out,
-   *  which shows that workspace's Checks tab. */
-  async tapPrBadgeInFlyout(workspaceId: string): Promise<void> {
-    await test.step(`Tap the PR badge of ${workspaceId} in the project-list fly-out`, async () => {
-      await this.openProjectListFlyout();
-      await this.projectListFlyout
-        .getByTestId(`project-list__workspace-card--${workspaceId}`)
-        .getByTestId("workspace-card__pr-badge")
+  /** Tap the PR badge of a worktree's card in the repo-list fly-out,
+   *  which shows that worktree's Checks tab. */
+  async tapPrBadgeInFlyout(worktreeId: string): Promise<void> {
+    await test.step(`Tap the PR badge of ${worktreeId} in the repo-list fly-out`, async () => {
+      await this.openRepoListFlyout();
+      await this.repoListFlyout
+        .getByTestId(`repo-list__worktree-card--${worktreeId}`)
+        .getByTestId("worktree-card__pr-badge")
         .click();
     });
   }
@@ -2590,8 +2586,8 @@ export class WorkspacePage {
   /** Dismiss the fly-out by clicking the backdrop overlay (tap-outside). The
    *  overlay sits behind the drawer, so we click near the right edge of the
    *  viewport where only the overlay is present. */
-  async dismissProjectListFlyoutViaBackdrop(): Promise<void> {
-    await test.step("Dismiss the project-list fly-out via the backdrop", async () => {
+  async dismissRepoListFlyoutViaBackdrop(): Promise<void> {
+    await test.step("Dismiss the repo-list fly-out via the backdrop", async () => {
       // The Radix overlay covers the full viewport; the drawer is on the left
       // (max-w-sm). Click far right so the click lands on the overlay, not the
       // drawer content.
@@ -2602,54 +2598,54 @@ export class WorkspacePage {
     });
   }
 
-  /** Open the workspace picker on desktop via its ⌘K shortcut. The handler
+  /** Open the worktree picker on desktop via its ⌘K shortcut. The handler
    *  lives on a window keydown listener in `SharedDockviewLayout.tsx`.
    *  Because ⌘ is a meta key the shortcut fires regardless of focus
    *  (including from inside a focused terminal), but we still route the
-   *  keypress through the project list root (focusable, non-editable) —
+   *  keypress through the repo list root (focusable, non-editable) —
    *  the same stable anchor the label shortcut test uses. */
-  async openWorkspacePickerViaShortcut(): Promise<void> {
-    await test.step("Open workspace picker (⌘K)", async () => {
-      const root = this.projectListRoot();
+  async openWorktreePickerViaShortcut(): Promise<void> {
+    await test.step("Open worktree picker (⌘K)", async () => {
+      const root = this.repoListRoot();
       await root.waitFor({ state: "visible" });
       await root.press("Meta+k");
     });
   }
 
-  /** Open the workspace picker via the non-macOS Ctrl+K shortcut. Distinct
+  /** Open the worktree picker via the non-macOS Ctrl+K shortcut. Distinct
    *  from the ⌘K branch: Ctrl+K bails when a terminal is focused (it's
    *  kill-to-end-of-line in most shells), so we route the keypress through
-   *  the project-list root — a focusable, non-terminal element — to exercise
+   *  the repo-list root — a focusable, non-terminal element — to exercise
    *  the non-terminal path. */
-  async openWorkspacePickerViaCtrlShortcut(): Promise<void> {
-    await test.step("Open workspace picker (Ctrl+K)", async () => {
-      const root = this.projectListRoot();
+  async openWorktreePickerViaCtrlShortcut(): Promise<void> {
+    await test.step("Open worktree picker (Ctrl+K)", async () => {
+      const root = this.repoListRoot();
       await root.waitFor({ state: "visible" });
       await root.press("Control+k");
     });
   }
 
-  /** The workspace-name button the desktop title bar used to show (testid
-   *  `desktop-title-bar__workspace-name`). The desktop layout no longer has a
+  /** The worktree-name button the desktop title bar used to show (testid
+   *  `desktop-title-bar__worktree-name`). The desktop layout no longer has a
    *  title bar over the center column, so this should never render; retained
    *  so specs can assert its absence. */
-  get desktopTitleWorkspaceNameButton(): Locator {
-    return this.page.getByTestId("desktop-title-bar__workspace-name");
+  get desktopTitleWorktreeNameButton(): Locator {
+    return this.page.getByTestId("desktop-title-bar__worktree-name");
   }
 
-  /** The active workspace card, identified by the `data-active` attribute
-   *  `WorkspaceCard` sets when its workspaceId matches the store's
-   *  `activeWorkspaceId`. Scoped to a specific workspaceId so the test can
+  /** The active worktree card, identified by the `data-active` attribute
+   *  `WorktreeCard` sets when its worktreeId matches the store's
+   *  `activeWorktreeId`. Scoped to a specific worktreeId so the test can
    *  assert the right card carries the active marker.
    *
    *  The `[data-active]` presence filter is intentional rather than a CSS
    *  selector smell: `data-active` is a binary *state* marker (present ⇔
    *  active), so the card's identity still comes from its `getByTestId`-based
-   *  `workspaceCard(...)` locator — this only narrows it to the active state.
+   *  `worktreeCard(...)` locator — this only narrows it to the active state.
    *  A separate testid per state would duplicate the marker the component
    *  already owns. */
-  activeWorkspaceCard(workspaceId: string): Locator {
-    return this.workspaceCard(workspaceId).and(this.page.locator("[data-active]"));
+  activeWorktreeCard(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).and(this.page.locator("[data-active]"));
   }
 
   /** Activate the first Terminal leaf tab in the center dockview so its
@@ -2669,15 +2665,15 @@ export class WorkspacePage {
     });
   }
 
-  /** Read the server's recorded last-focused panel ids for a workspace via the
+  /** Read the server's recorded last-focused panel ids for a worktree via the
    *  `panelFocus.get` tRPC query. Used as a synchronisation barrier: focus is
    *  reported fire-and-forget, so a test polls this until the pane it just
    *  focused is recorded before triggering an "Add to …" action that reads it.
    *  Auth is the `band_token` cookie, matching the tRPC HTTP helpers. */
   async readServerPanelFocus(
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<{ chat?: string; terminal?: string; browser?: string }> {
-    const input = encodeURIComponent(JSON.stringify({ workspaceId }));
+    const input = encodeURIComponent(JSON.stringify({ worktreeId }));
     const res = await this.page.request.get(`${this.baseUrl}/trpc/panelFocus.get?input=${input}`, {
       headers: { Cookie: `band_token=${this.token}` },
     });
@@ -2693,9 +2689,9 @@ export class WorkspacePage {
    *  `timeoutMs` defaults to 15 s, which is the right budget for tests
    *  that boot xterm from a freshly-mounted dockview without parallel
    *  CI contention. Tests running under high parallel load (or chained
-   *  with workspace switches that re-mount the panel host) can pass a
-   *  longer budget — see `workspace-maximize-state.spec.ts:346` and
-   *  `workspace-create-via-terminal.spec.ts:179`, both at 75 s. */
+   *  with worktree switches that re-mount the panel host) can pass a
+   *  longer budget — see `worktree-maximize-state.spec.ts:346` and
+   *  `worktree-create-via-terminal.spec.ts:179`, both at 75 s. */
   async waitForTerminalReady(timeoutMs = 15_000): Promise<void> {
     await this.terminalInput.first().waitFor({ state: "attached", timeout: timeoutMs });
   }
@@ -2704,20 +2700,20 @@ export class WorkspacePage {
   // Parking-model surface probes (band-app/band#617).
   //
   // Each cached terminal keeps ONE xterm opened into a persistent wrapper
-  // (`[data-testid="terminal-wrapper"]`, tagged with `data-workspace-id` /
+  // (`[data-testid="terminal-wrapper"]`, tagged with `data-worktree-id` /
   // `data-terminal-id`). The wrapper is *moved* between its live panel and the
   // shared off-screen parking container (`[data-testid="terminal-parking"]`),
   // never disposed on a switch. Unlike the panel-host-scoped probes above,
-  // these locate a terminal by its wrapper's `data-workspace-id`, so they see
+  // these locate a terminal by its wrapper's `data-worktree-id`, so they see
   // the surface whether it's attached (live) or parked.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** Track the `workspace.fileChanges` subscriptions a workspace holds open,
+  /** Track the `worktree.fileChanges` subscriptions a worktree holds open,
    *  by reading the tRPC WebSocket frames the page sends (`subscription` opens
    *  one, `subscription.stop` closes it; frames may be batched arrays). Each
-   *  open subscription pins the server's file watcher for that workspace.
+   *  open subscription pins the server's file watcher for that worktree.
    *  Returns a getter for the current open count. Call BEFORE `goto`. */
-  trackFileChangeSubscriptions(workspaceId: string): () => number {
+  trackFileChangeSubscriptions(worktreeId: string): () => number {
     const open = new Set<number>();
     this.page.on("websocket", (ws) => {
       if (!ws.url().includes("/trpc")) return;
@@ -2738,8 +2734,8 @@ export class WorkspacePage {
           if (typeof m.id !== "number") continue;
           if (
             m.method === "subscription" &&
-            m.params?.path === "workspace.fileChanges" &&
-            JSON.stringify(m.params.input ?? null).includes(workspaceId)
+            m.params?.path === "worktree.fileChanges" &&
+            JSON.stringify(m.params.input ?? null).includes(worktreeId)
           ) {
             open.add(m.id);
           } else if (m.method === "subscription.stop") {
@@ -2753,7 +2749,7 @@ export class WorkspacePage {
 
   /** Take over the page's timers and `Date` (Playwright's fake clock) so a test
    *  can cross the parking thresholds (30 s / 5 min, for terminals and for
-   *  workspace cold park) without waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
+   *  worktree cold park) without waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
    *  `goto`. */
   async installClock(): Promise<void> {
     await this.page.clock.install();
@@ -2771,12 +2767,12 @@ export class WorkspacePage {
     });
   }
 
-  /** Start counting terminal WebSocket opens for a SPECIFIC workspace (matched
-   *  on the `workspaceId=` query param). Returns a getter for the running count.
-   *  Call BEFORE `goto`. Lets a test prove a given workspace's terminal did NOT
-   *  reconnect across a switch, independent of other workspaces' sockets. */
-  trackTerminalSocketOpensFor(workspaceId: string): () => number {
-    const needle = `workspaceId=${encodeURIComponent(workspaceId)}`;
+  /** Start counting terminal WebSocket opens for a SPECIFIC worktree (matched
+   *  on the `worktreeId=` query param). Returns a getter for the running count.
+   *  Call BEFORE `goto`. Lets a test prove a given worktree's terminal did NOT
+   *  reconnect across a switch, independent of other worktrees' sockets. */
+  trackTerminalSocketOpensFor(worktreeId: string): () => number {
+    const needle = `worktreeId=${encodeURIComponent(worktreeId)}`;
     let count = 0;
     this.page.on("websocket", (ws) => {
       if (ws.url().includes("/terminal?") && ws.url().includes(needle)) count += 1;
@@ -2788,7 +2784,7 @@ export class WorkspacePage {
    *  `terminalId=` query param). Returns a getter taking the terminal id, so
    *  the ids can be learned after the terminals open. Call BEFORE `goto`.
    *  Unlike `trackTerminalSocketOpensFor`, other terminals of the same
-   *  workspace reconnecting (a heartbeat timeout after `advanceClock`) don't
+   *  worktree reconnecting (a heartbeat timeout after `advanceClock`) don't
    *  count. */
   trackTerminalSocketOpensByTerminal(): (terminalId: string) => number {
     const urls: string[] = [];
@@ -2861,14 +2857,14 @@ export class WorkspacePage {
     );
   }
 
-  /** Start recording, once per animation frame, what a workspace's terminal
+  /** Start recording, once per animation frame, what a worktree's terminal
    *  looks like from the frame its cached entry turns visible (a switch to
    *  it). rAF callbacks run right before paint, so each record is what that
    *  frame painted: whether the terminal wrapper sits in the live box (not the
    *  parking container), whether its rendered rows contain `marker` (DOM
    *  renderer), and the combined opacity of the wrapper and its ancestors.
    *  Stops after `frames` visible frames. Read with `readRevealFrames`. */
-  async startRevealFrameProbe(workspaceId: string, marker: string, frames = 20): Promise<void> {
+  async startRevealFrameProbe(worktreeId: string, marker: string, frames = 20): Promise<void> {
     await this.page.evaluate(
       ([id, text, limit]) => {
         type Frame = { attached: boolean; hasMarker: boolean; opacity: number };
@@ -2877,10 +2873,10 @@ export class WorkspacePage {
         w.__bandRevealFrames = recorded;
         const tick = () => {
           const entry = document.querySelector<HTMLElement>(
-            `[data-testid="workspace-panel-host__cached-entry--${id}"]`,
+            `[data-testid="worktree-panel-host__cached-entry--${id}"]`,
           );
           if (entry?.style.visibility === "visible") {
-            const wrapper = document.querySelector<HTMLElement>(`[data-workspace-id="${id}"]`);
+            const wrapper = document.querySelector<HTMLElement>(`[data-worktree-id="${id}"]`);
             const attached = !!wrapper && entry.contains(wrapper);
             let opacity = 1;
             for (let el: Element | null = attached ? wrapper : entry; el; el = el.parentElement) {
@@ -2896,7 +2892,7 @@ export class WorkspacePage {
         };
         requestAnimationFrame(tick);
       },
-      [workspaceId, marker, frames] as const,
+      [worktreeId, marker, frames] as const,
     );
   }
 
@@ -2916,17 +2912,17 @@ export class WorkspacePage {
     );
   }
 
-  /** Force a genuine WebGL context loss on the workspace's terminal canvas via
+  /** Force a genuine WebGL context loss on the worktree's terminal canvas via
    *  the `WEBGL_lose_context` extension. This fires the real `webglcontextlost`
    *  event that xterm's WebglAddon listens for, driving the ONE client repair
    *  path that legitimately rebuilds the surface (`onContextLoss`). Lets a test
    *  prove genuine loss still rebuilds even though ordinary focus/switch no
    *  longer do. Throws if no live WebGL canvas/context is found so the test
    *  fails loudly rather than passing vacuously. */
-  async loseTerminalWebglContext(workspaceId: string): Promise<void> {
-    await test.step(`Force WebGL context loss on ${workspaceId} terminal`, async () => {
+  async loseTerminalWebglContext(worktreeId: string): Promise<void> {
+    await test.step(`Force WebGL context loss on ${worktreeId} terminal`, async () => {
       await this.page.evaluate((id) => {
-        const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+        const wrapper = document.querySelector(`[data-worktree-id="${id}"]`);
         const canvases = wrapper
           ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
           : [];
@@ -2943,17 +2939,17 @@ export class WorkspacePage {
             return;
           }
         }
-        throw new Error(`no WebGL terminal canvas for workspace ${id}`);
-      }, workspaceId);
+        throw new Error(`no WebGL terminal canvas for worktree ${id}`);
+      }, worktreeId);
     });
   }
 
   /** Wait up to `timeoutMs` for the page to open a NEW terminal WebSocket for the
-   *  given workspace; resolves `true` if one opens, `false` on timeout. Used to
+   *  given worktree; resolves `true` if one opens, `false` on timeout. Used to
    *  assert a reconnect did (or, for a terminated terminal, did NOT) happen —
    *  event-driven, so the negative case fails fast rather than fixed-sleeping. */
-  async waitForTerminalSocket(workspaceId: string, timeoutMs: number): Promise<boolean> {
-    const needle = `workspaceId=${encodeURIComponent(workspaceId)}`;
+  async waitForTerminalSocket(worktreeId: string, timeoutMs: number): Promise<boolean> {
+    const needle = `worktreeId=${encodeURIComponent(worktreeId)}`;
     try {
       await this.page.waitForEvent("websocket", {
         timeout: timeoutMs,
@@ -2973,33 +2969,33 @@ export class WorkspacePage {
     });
   }
 
-  /** terminalIds of a workspace's terminals whose wrapper is attached to a live
+  /** terminalIds of a worktree's terminals whose wrapper is attached to a live
    *  panel, i.e. NOT inside the off-screen parking container. */
-  async liveTerminalIds(workspaceId: string): Promise<string[]> {
+  async liveTerminalIds(worktreeId: string): Promise<string[]> {
     return await this.page.evaluate(
       (id) =>
-        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`))
+        Array.from(document.querySelectorAll(`[data-worktree-id="${id}"]`))
           .filter((el) => !el.closest('[data-testid="terminal-parking"]'))
           .map((el) => (el as HTMLElement).dataset.terminalId ?? "")
           .filter(Boolean),
-      workspaceId,
+      worktreeId,
     );
   }
 
-  /** How many of a workspace's terminal wrappers sit in the parking container. */
-  async parkedTerminalCount(workspaceId: string): Promise<number> {
+  /** How many of a worktree's terminal wrappers sit in the parking container. */
+  async parkedTerminalCount(worktreeId: string): Promise<number> {
     return await this.page.evaluate(
       (id) =>
-        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`)).filter((el) =>
+        Array.from(document.querySelectorAll(`[data-worktree-id="${id}"]`)).filter((el) =>
           el.closest('[data-testid="terminal-parking"]'),
         ).length,
-      workspaceId,
+      worktreeId,
     );
   }
 
-  /** Write one file's entry in a workspace's per-tab state blob
+  /** Write one file's entry in a worktree's per-tab state blob
    *  (`band-tab-state:<ws>`), as an earlier build would have left it. */
-  async writeTabStateEntry(workspaceId: string, path: string, entry: unknown): Promise<void> {
+  async writeTabStateEntry(worktreeId: string, path: string, entry: unknown): Promise<void> {
     await this.page.evaluate(
       ([ws, p, e]) => {
         const key = `band-tab-state:${ws}`;
@@ -3007,60 +3003,60 @@ export class WorkspacePage {
         states[p as string] = e;
         localStorage.setItem(key, JSON.stringify(states));
       },
-      [workspaceId, path, entry] as const,
+      [worktreeId, path, entry] as const,
     );
   }
 
-  /** Read one file's entry from a workspace's per-tab state blob. */
-  async readTabStateEntry(workspaceId: string, path: string): Promise<unknown> {
+  /** Read one file's entry from a worktree's per-tab state blob. */
+  async readTabStateEntry(worktreeId: string, path: string): Promise<unknown> {
     return await this.page.evaluate(
       ([ws, p]) => JSON.parse(localStorage.getItem(`band-tab-state:${ws}`) ?? "{}")[p as string],
-      [workspaceId, path] as const,
+      [worktreeId, path] as const,
     );
   }
 
-  /** Whether the given workspace's terminal wrapper currently lives inside the
+  /** Whether the given worktree's terminal wrapper currently lives inside the
    *  off-screen parking container (i.e. the terminal is detached/inactive). */
-  async isTerminalParked(workspaceId: string): Promise<boolean> {
+  async isTerminalParked(worktreeId: string): Promise<boolean> {
     return await this.page.evaluate((id) => {
-      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      const wrapper = document.querySelector(`[data-worktree-id="${id}"]`);
       return !!wrapper?.closest('[data-testid="terminal-parking"]');
-    }, workspaceId);
+    }, worktreeId);
   }
 
-  /** Read the set of terminalIds currently mounted for a workspace (from each
+  /** Read the set of terminalIds currently mounted for a worktree (from each
    *  wrapper's `data-terminal-id`). Lets a test assert a terminal was REUSED
    *  (same id) vs re-created (new id) across a navigation. */
-  async terminalIds(workspaceId: string): Promise<string[]> {
+  async terminalIds(worktreeId: string): Promise<string[]> {
     return await this.page.evaluate(
       (id) =>
-        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`))
+        Array.from(document.querySelectorAll(`[data-worktree-id="${id}"]`))
           .map((el) => (el as HTMLElement).dataset.terminalId ?? "")
           .filter(Boolean),
-      workspaceId,
+      worktreeId,
     );
   }
 
-  /** Count the cached terminal wrappers for a workspace (one per terminal
-   *  session). Drops to 0 once the workspace's terminals are disposed. */
-  async terminalWrapperCount(workspaceId: string): Promise<number> {
+  /** Count the cached terminal wrappers for a worktree (one per terminal
+   *  session). Drops to 0 once the worktree's terminals are disposed. */
+  async terminalWrapperCount(worktreeId: string): Promise<number> {
     return await this.page.evaluate(
-      (id) => document.querySelectorAll(`[data-workspace-id="${id}"]`).length,
-      workspaceId,
+      (id) => document.querySelectorAll(`[data-worktree-id="${id}"]`).length,
+      worktreeId,
     );
   }
 
-  /** Mark a workspace's terminal wrappers so a later read can tell whether the
+  /** Mark a worktree's terminal wrappers so a later read can tell whether the
    *  SAME live xterm survived (mark still present) or the terminal was disposed
    *  and re-created (fresh wrapper, no mark). Returns how many were marked. */
-  async markTerminalWrappers(workspaceId: string): Promise<number> {
+  async markTerminalWrappers(worktreeId: string): Promise<number> {
     return await this.page.evaluate((id) => {
       const wrappers = Array.from(
-        document.querySelectorAll<HTMLElement>(`[data-workspace-id="${id}"]`),
+        document.querySelectorAll<HTMLElement>(`[data-worktree-id="${id}"]`),
       );
       for (const w of wrappers) w.dataset.bandProbe = "marked";
       return wrappers.length;
-    }, workspaceId);
+    }, worktreeId);
   }
 
   /** Mark one terminal's wrapper, by terminal id (see `markTerminalWrappers`). */
@@ -3082,24 +3078,24 @@ export class WorkspacePage {
     }, terminalId);
   }
 
-  /** Count a workspace's terminal wrappers that still carry the mark set by
+  /** Count a worktree's terminal wrappers that still carry the mark set by
    *  `markTerminalWrappers`. */
-  async markedTerminalWrapperCount(workspaceId: string): Promise<number> {
+  async markedTerminalWrapperCount(worktreeId: string): Promise<number> {
     return await this.page.evaluate(
       (id) =>
-        document.querySelectorAll(`[data-workspace-id="${id}"][data-band-probe="marked"]`).length,
-      workspaceId,
+        document.querySelectorAll(`[data-worktree-id="${id}"][data-band-probe="marked"]`).length,
+      worktreeId,
     );
   }
 
-  /** Tag every canvas inside a workspace's terminal wrapper (parked or live) so
+  /** Tag every canvas inside a worktree's terminal wrapper (parked or live) so
    *  a later read can tell whether the renderer surface was left untouched
    *  (tags survive) or rebuilt with a fresh WebGL addon (tags gone — what the
    *  corruption-repair paths guarantee on re-attach / foreground return).
    *  Returns the number of canvases tagged. */
-  async tagTerminalCanvasesByWorkspace(workspaceId: string): Promise<number> {
+  async tagTerminalCanvasesByWorktree(worktreeId: string): Promise<number> {
     return await this.page.evaluate((id) => {
-      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      const wrapper = document.querySelector(`[data-worktree-id="${id}"]`);
       const canvases = wrapper
         ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
         : [];
@@ -3107,13 +3103,13 @@ export class WorkspacePage {
         c.dataset.bandProbe = `tagged-${i}`;
       });
       return canvases.length;
-    }, workspaceId);
+    }, worktreeId);
   }
 
-  /** Read a workspace's terminal render surface by wrapper (parked or live):
+  /** Read a worktree's terminal render surface by wrapper (parked or live):
    *  canvas count, surviving tags, `.xterm-screen` CSS size, per-canvas backing
    *  store size, and dpr. */
-  async readTerminalSurfaceByWorkspace(workspaceId: string): Promise<{
+  async readTerminalSurfaceByWorktree(worktreeId: string): Promise<{
     canvasCount: number;
     survivingTags: number;
     screen: { w: number; h: number };
@@ -3121,7 +3117,7 @@ export class WorkspacePage {
     dpr: number;
   }> {
     return await this.page.evaluate((id) => {
-      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      const wrapper = document.querySelector(`[data-worktree-id="${id}"]`);
       const screenEl = wrapper?.querySelector(".xterm-screen") as HTMLElement | null;
       const canvases = wrapper
         ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
@@ -3134,22 +3130,22 @@ export class WorkspacePage {
         backing: canvases.map((c) => ({ w: c.width, h: c.height })),
         dpr: window.devicePixelRatio,
       };
-    }, workspaceId);
+    }, worktreeId);
   }
 
-  /** Read the rendered text of a workspace's terminal from xterm's DOM-renderer
+  /** Read the rendered text of a worktree's terminal from xterm's DOM-renderer
    *  rows (`.xterm-rows`). Only populated under the DOM renderer (no WebGL flags
    *  in the test's launch options), which is exactly the case that lets a test
-   *  read the actual glyphs. Joins across all of the workspace's wrappers. */
-  async readTerminalRenderedText(workspaceId: string): Promise<string> {
+   *  read the actual glyphs. Joins across all of the worktree's wrappers. */
+  async readTerminalRenderedText(worktreeId: string): Promise<string> {
     return await this.page.evaluate((id) => {
-      const wrappers = Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`));
+      const wrappers = Array.from(document.querySelectorAll(`[data-worktree-id="${id}"]`));
       // `textContent` (not `innerText`) so it works for a parked wrapper that
       // is rendered off-screen — `innerText` can collapse for non-viewport nodes.
       return wrappers
         .map((w) => (w.querySelector(".xterm-rows") as HTMLElement | null)?.textContent ?? "")
         .join("\n");
-    }, workspaceId);
+    }, worktreeId);
   }
 
   /** The app zoom factor currently applied, read from the `--app-zoom` custom
@@ -3164,26 +3160,26 @@ export class WorkspacePage {
   }
 
   /** Visual geometry (getBoundingClientRect, so zoom-scaled viewport px) of a
-   *  workspace's visible terminal leaf and of the rendered xterm row holding
+   *  worktree's visible terminal leaf and of the rendered xterm row holding
    *  `marker`, plus the window height. A terminal that is laid out correctly
    *  under app zoom keeps its leaf's bottom edge inside the window and the
    *  marker row inside the leaf. `markerRow` is null until a row containing
    *  `marker` renders (needs the DOM renderer). */
   async readTerminalGeometry(
-    workspaceId: string,
+    worktreeId: string,
     marker: string,
   ): Promise<{
     leafBottom: number;
     markerRow: { bottom: number; height: number } | null;
     viewportHeight: number;
   }> {
-    const leafBottom = await this.terminalTabVisibilityMarker(workspaceId, true).evaluate(
+    const leafBottom = await this.terminalTabVisibilityMarker(worktreeId, true).evaluate(
       (el) => el.getBoundingClientRect().bottom,
     );
     const { markerRow, viewportHeight } = await this.page.evaluate(
       ([id, text]) => {
         const rows = Array.from(
-          document.querySelectorAll(`[data-workspace-id="${id}"] .xterm-rows > *`),
+          document.querySelectorAll(`[data-worktree-id="${id}"] .xterm-rows > *`),
         );
         const row = rows.find((r) => (r.textContent ?? "").includes(text));
         const rect = row?.getBoundingClientRect();
@@ -3192,48 +3188,48 @@ export class WorkspacePage {
           viewportHeight: window.innerHeight,
         };
       },
-      [workspaceId, marker] as const,
+      [worktreeId, marker] as const,
     );
     return { leafBottom, markerRow, viewportHeight };
   }
 
-  /** Read the live xterm column count for a workspace's terminal from the
+  /** Read the live xterm column count for a worktree's terminal from the
    *  module-level terminal cache (`globalThis.__bandTerminalCache__`). Lets a
    *  width-sensitive test calibrate against the ACTUAL fitted width instead of
    *  guessing cols from the viewport (which varies with font metrics across
    *  platforms). Returns 0 when the terminal isn't cached / not yet loaded.
    *
-   *  Assumes ONE terminal per workspace: it returns the first cache entry
-   *  matching `workspaceId`, so with multiple terminal tabs the result is
+   *  Assumes ONE terminal per worktree: it returns the first cache entry
+   *  matching `worktreeId`, so with multiple terminal tabs the result is
    *  whichever the Map iterator yields first. Current callers seed a single
    *  terminal; add a `terminalId` param if that ever changes. */
-  async terminalCols(workspaceId: string): Promise<number> {
+  async terminalCols(worktreeId: string): Promise<number> {
     return await this.page.evaluate((id) => {
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
       if (!cache) return 0;
       for (const entry of cache.values()) {
-        if (entry.workspaceId === id) {
+        if (entry.worktreeId === id) {
           const term = entry.getTerminal() as { cols?: number } | null;
           if (term && typeof term.cols === "number") return term.cols;
         }
       }
       return 0;
-    }, workspaceId);
+    }, worktreeId);
   }
 
-  /** Read the first `cols` cells of the top `rows` rows of a workspace
+  /** Read the first `cols` cells of the top `rows` rows of a worktree
    *  terminal's active xterm buffer, plus the cursor position. Each entry is
    *  the cell's chars; the right half of a wide character (and an unwritten
    *  cell) is the empty string. This is xterm's own column layout, so a test
    *  can assert where text lands after a wide emoji regardless of renderer.
-   *  Same one-terminal-per-workspace assumption as `terminalCols`. Returns
+   *  Same one-terminal-per-worktree assumption as `terminalCols`. Returns
    *  null when the terminal isn't loaded yet. */
   async readTerminalBufferCells(
-    workspaceId: string,
+    worktreeId: string,
     rows: number,
     cols: number,
   ): Promise<{ rows: string[][]; cursor: { x: number; y: number } } | null> {
@@ -3249,12 +3245,12 @@ export class WorkspacePage {
         };
         const cache = (
           globalThis as unknown as {
-            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+            __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
           }
         ).__bandTerminalCache__;
         if (!cache) return null;
         for (const entry of cache.values()) {
-          if (entry.workspaceId !== id) continue;
+          if (entry.worktreeId !== id) continue;
           const term = entry.getTerminal() as { buffer: { active: Buffer } } | null;
           if (!term) return null;
           const buffer = term.buffer.active;
@@ -3270,7 +3266,7 @@ export class WorkspacePage {
         }
         return null;
       },
-      [workspaceId, rows, cols] as const,
+      [worktreeId, rows, cols] as const,
     );
   }
 
@@ -3278,18 +3274,18 @@ export class WorkspacePage {
    *  regex source, first capture group) in the top row the DOM renderer drew,
    *  into `window.__renderedTopRowMatches`. Shows which of a series of redraws
    *  of that row reached the screen, rather than being skipped. Needs the DOM
-   *  renderer. Same one-terminal-per-workspace assumption as `terminalCols`. */
-  async recordRenderedTopRow(workspaceId: string, pattern: string): Promise<void> {
-    await test.step(`Record rendered top-row matches of /${pattern}/ in ${workspaceId}`, async () => {
+   *  renderer. Same one-terminal-per-worktree assumption as `terminalCols`. */
+  async recordRenderedTopRow(worktreeId: string, pattern: string): Promise<void> {
+    await test.step(`Record rendered top-row matches of /${pattern}/ in ${worktreeId}`, async () => {
       const installed = await this.page.evaluate(
         ([id, source]) => {
           type Term = { element?: HTMLElement; onRender(listener: () => void): unknown };
           const cache = (
             globalThis as unknown as {
-              __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+              __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
             }
           ).__bandTerminalCache__;
-          const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+          const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
           const term = entry?.getTerminal() as Term | null;
           const rows = term?.element?.querySelector(".xterm-rows");
           if (!term || !rows) return false;
@@ -3304,7 +3300,7 @@ export class WorkspacePage {
           });
           return true;
         },
-        [workspaceId, pattern] as const,
+        [worktreeId, pattern] as const,
       );
       if (!installed) throw new Error("terminal not loaded");
     });
@@ -3318,16 +3314,16 @@ export class WorkspacePage {
     ]);
   }
 
-  /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
+  /** Read a worktree terminal's rendered text ROW BY ROW from the DOM
    *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
    *  `readTerminalRenderedText` (which joins everything into one string), this
    *  preserves the per-row layout so a test can assert WHERE a token landed —
    *  the observable that reflow-scatter corrupts. Only meaningful under the DOM
-   *  renderer (`useWebGLTerminalRenderer: false`); joins across the workspace's
+   *  renderer (`useWebGLTerminalRenderer: false`); joins across the worktree's
    *  wrappers, first wrapper first. */
-  async readTerminalRenderedRows(workspaceId: string): Promise<string[]> {
+  async readTerminalRenderedRows(worktreeId: string): Promise<string[]> {
     return await this.page.evaluate((id) => {
-      const wrappers = Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`));
+      const wrappers = Array.from(document.querySelectorAll(`[data-worktree-id="${id}"]`));
       const rows: string[] = [];
       for (const w of wrappers) {
         const rowsEl = w.querySelector(".xterm-rows");
@@ -3337,7 +3333,7 @@ export class WorkspacePage {
         }
       }
       return rows;
-    }, workspaceId);
+    }, worktreeId);
   }
 
   /** Navigate to a blank page, fully tearing down the mounted client (its
@@ -3391,7 +3387,7 @@ export class WorkspacePage {
     });
   }
 
-  /** Wait until the workspace's terminal has rendered ANY text into xterm's
+  /** Wait until the worktree's terminal has rendered ANY text into xterm's
    *  DOM-renderer rows — i.e. the shell prompt has been drawn. Two failure
    *  modes collapse into "rendered text is empty forever" without this
    *  barrier, and it splits them apart: rows that never fill mean the DOM
@@ -3399,10 +3395,10 @@ export class WorkspacePage {
    *  rows that fill but never show a later marker mean the keystrokes were
    *  lost. Call it after `waitForTerminalReady` and before the first
    *  `runInTerminal*` a rendered-text assertion depends on. */
-  async waitForTerminalRenderedPrompt(workspaceId: string, timeoutMs = 20_000): Promise<void> {
-    await test.step(`Wait for rendered shell prompt in ${workspaceId}`, async () => {
+  async waitForTerminalRenderedPrompt(worktreeId: string, timeoutMs = 20_000): Promise<void> {
+    await test.step(`Wait for rendered shell prompt in ${worktreeId}`, async () => {
       await expect
-        .poll(async () => (await this.readTerminalRenderedText(workspaceId)).trim().length, {
+        .poll(async () => (await this.readTerminalRenderedText(worktreeId)).trim().length, {
           timeout: timeoutMs,
         })
         .toBeGreaterThan(0);
@@ -3410,7 +3406,7 @@ export class WorkspacePage {
   }
 
   /** `runInTerminal`, made self-verifying: type `line`, then wait until
-   *  `marker` shows up in the workspace's rendered rows; if it doesn't within
+   *  `marker` shows up in the worktree's rendered rows; if it doesn't within
    *  `renderTimeoutMs`, retype (up to `attempts` total). Keystrokes typed into
    *  xterm's hidden textarea can be dropped wholesale under parallel CI load
    *  (a focus steal or a socket hiccup mid-`keyboard.type`), and a plain
@@ -3425,7 +3421,7 @@ export class WorkspacePage {
    *  e.g. `echo C_OWN_"MARKER"`, so only executed output can match) —
    *  otherwise a dropped trailing Enter passes verification. */
   async runInTerminalUntilRendered(
-    workspaceId: string,
+    worktreeId: string,
     line: string,
     marker: RegExp,
     { attempts = 3, renderTimeoutMs = 8_000 }: { attempts?: number; renderTimeoutMs?: number } = {},
@@ -3439,7 +3435,7 @@ export class WorkspacePage {
         await this.runInTerminal(line);
         try {
           await expect
-            .poll(async () => marker.test(await this.readTerminalRenderedText(workspaceId)), {
+            .poll(async () => marker.test(await this.readTerminalRenderedText(worktreeId)), {
               timeout: renderTimeoutMs,
             })
             .toBe(true);
@@ -3531,10 +3527,10 @@ export class WorkspacePage {
   /** The outer dockview group shell (`.dv-groupview`) that currently hosts the
    *  named outer tab. dockview owns this markup — we don't render it — so, as
    *  with `tabContainer`'s `.dv-tab` wrapper, anchoring on our own
-   *  `workspace__tab--*` testid and walking up to the library's shell via
+   *  `worktree__tab--*` testid and walking up to the library's shell via
    *  `:has(...)` is the only way to address a specific group. Nested (inner)
    *  dockviews render their own `.dv-groupview`s but never carry
-   *  `workspace__tab--*` testids, so this stays scoped to the outer layout. */
+   *  `worktree__tab--*` testids, so this stays scoped to the outer layout. */
   groupContaining(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
     return this.page.locator(`.dv-groupview:has([data-testid^="${prefix}"])`);
@@ -3543,7 +3539,7 @@ export class WorkspacePage {
   /** Maximize the center group that hosts the named tab (rather than the Nth
    *  group, which depends on the default layout's ordering). Each grid group
    *  renders exactly one Maximize/Restore toggle in its right header actions
-   *  (`RightHeaderActions` in `WorkspaceCenterDockview.tsx`). */
+   *  (`RightHeaderActions` in `WorktreeCenterDockview.tsx`). */
   async maximizeGroupContaining(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
     await test.step(`Maximize the group hosting the ${panelComponent} tab`, async () => {
       await this.groupContaining(panelComponent)
@@ -3568,10 +3564,10 @@ export class WorkspacePage {
     });
   }
 
-  /** Read the persisted active-state blob for a workspace out of
+  /** Read the persisted active-state blob for a worktree out of
    *  `localStorage`. Returns `undefined` when no entry exists for that
-   *  workspace. */
-  async readActiveState(workspaceId: string): Promise<SavedActiveState | undefined> {
+   *  worktree. */
+  async readActiveState(worktreeId: string): Promise<SavedActiveState | undefined> {
     return await this.page.evaluate(
       ([prefix, id]) => {
         const raw = localStorage.getItem(`${prefix}${id}`);
@@ -3582,15 +3578,15 @@ export class WorkspacePage {
           return undefined;
         }
       },
-      [ACTIVE_STATE_KEY_PREFIX, workspaceId] as const,
+      [ACTIVE_STATE_KEY_PREFIX, worktreeId] as const,
     );
   }
 
   /** Read the persisted maximized-group id from the center-dockview layout blob
-   *  (`band:dockview-layout-v9:<ws>`). `WorkspaceCenterDockview.writeLayout`
+   *  (`band:dockview-layout-v9:<ws>`). `WorktreeCenterDockview.writeLayout`
    *  records the maximized group id there (dockview's own toJSON omits it);
    *  `undefined` when nothing is maximized. */
-  async readMaximizedGroup(workspaceId: string): Promise<string | undefined> {
+  async readMaximizedGroup(worktreeId: string): Promise<string | undefined> {
     return await this.page.evaluate((key) => {
       const raw = localStorage.getItem(key);
       if (!raw) return undefined;
@@ -3600,19 +3596,19 @@ export class WorkspacePage {
       } catch {
         return undefined;
       }
-    }, `band:dockview-layout-v9:${workspaceId}`);
+    }, `band:dockview-layout-v9:${worktreeId}`);
   }
 
-  /** Replace the persisted active-state for a workspace. Used to seed
+  /** Replace the persisted active-state for a worktree. Used to seed
    *  specific group/tab state before navigating, for scenarios that
    *  need to start from a non-default position (e.g. asserting that a
-   *  saved active-view in a hidden group survives a workspace switch). */
-  async writeActiveState(workspaceId: string, state: SavedActiveState): Promise<void> {
+   *  saved active-view in a hidden group survives a worktree switch). */
+  async writeActiveState(worktreeId: string, state: SavedActiveState): Promise<void> {
     await this.page.evaluate(
       ([prefix, id, value]) => {
         localStorage.setItem(`${prefix}${id}`, value);
       },
-      [ACTIVE_STATE_KEY_PREFIX, workspaceId, JSON.stringify(state)] as const,
+      [ACTIVE_STATE_KEY_PREFIX, worktreeId, JSON.stringify(state)] as const,
     );
   }
 
@@ -3630,16 +3626,16 @@ export class WorkspacePage {
    *  the gap is roughly half the grid (the blank ghost region). Returns
    *  `null` while the toolbar has no box yet (callers poll). */
   async readToolbarRightGap(
-    workspaceId: string,
+    worktreeId: string,
     _container: "terminal" | "browser",
   ): Promise<number | null> {
     // The unified center dockview has a single grid-group toolbar
-    // (`workspace-center__toolbar`) rather than per-container inner toolbars.
-    // Scoped to the workspace's cached host + filtered to visible so it
-    // resolves the active workspace's grid group. Only referenced by the
+    // (`worktree-center__toolbar`) rather than per-container inner toolbars.
+    // Scoped to the worktree's cached host + filtered to visible so it
+    // resolves the active worktree's grid group. Only referenced by the
     // (skipped) ghost-panel spec — see #643 Phase 5.
-    const box = await this.cachedPanelEntries(workspaceId)
-      .getByTestId("workspace-center__toolbar")
+    const box = await this.cachedPanelEntries(worktreeId)
+      .getByTestId("worktree-center__toolbar")
       .filter({ visible: true })
       .first()
       .boundingBox();
@@ -3650,23 +3646,23 @@ export class WorkspacePage {
 
   /** Read the active view id for a specific group from the persisted
    *  state. Asserts the test's expectation that a hidden group's
-   *  saved-view is preserved across workspace switches. */
-  async readActiveViewForGroup(workspaceId: string, groupId: string): Promise<string | undefined> {
-    const state = await this.readActiveState(workspaceId);
+   *  saved-view is preserved across worktree switches. */
+  async readActiveViewForGroup(worktreeId: string, groupId: string): Promise<string | undefined> {
+    const state = await this.readActiveState(worktreeId);
     return state?.groups[groupId];
   }
 
-  /** Seed a workspace's persisted center-dockview layout
-   *  (`band:dockview-layout-v9:<workspaceId>`) before the app mounts. Uses
+  /** Seed a worktree's persisted center-dockview layout
+   *  (`band:dockview-layout-v9:<worktreeId>`) before the app mounts. Uses
    *  `addInitScript`, so it MUST run BEFORE the first `goto` — the value is
    *  applied to `localStorage` ahead of the page script. Pass a raw dockview
    *  `toJSON()`-shaped blob. */
-  async seedGlobalLayout(workspaceId: string, layout: unknown): Promise<void> {
+  async seedGlobalLayout(worktreeId: string, layout: unknown): Promise<void> {
     await this.page.addInitScript(
       ({ key, serialized }) => {
         localStorage.setItem(key, serialized as string);
       },
-      { key: `band:dockview-layout-v9:${workspaceId}`, serialized: JSON.stringify(layout) },
+      { key: `band:dockview-layout-v9:${worktreeId}`, serialized: JSON.stringify(layout) },
     );
   }
 
@@ -3676,7 +3672,7 @@ export class WorkspacePage {
    *  ids are `file:<path>`, matching what the app persists. `activePath`
    *  defaults to the first file. Must run BEFORE `goto`. */
   async seedFileLeaves(
-    workspaceId: string,
+    worktreeId: string,
     filePaths: string[],
     activePath = filePaths[0],
   ): Promise<void> {
@@ -3715,7 +3711,7 @@ export class WorkspacePage {
       panels,
       activeGroup: "1",
     };
-    await this.seedGlobalLayout(workspaceId, layout);
+    await this.seedGlobalLayout(worktreeId, layout);
   }
 
   /** Every dockview edge group (the left / right / bottom docked areas that
@@ -3727,8 +3723,8 @@ export class WorkspacePage {
     return this.page.getByTestId(/^dv-edge-group-/);
   }
 
-  /** Reset the per-workspace shared-dockview state entry in
-   *  `localStorage` and (re-)navigate to the workspace so the next
+  /** Reset the per-worktree shared-dockview state entry in
+   *  `localStorage` and (re-)navigate to the worktree so the next
    *  mount runs against a clean slate. Two-step (matches
    *  `resetLabelStateAndGoto`): navigate first to land on the origin
    *  (localStorage isn't accessible until a same-origin page has
@@ -3741,41 +3737,41 @@ export class WorkspacePage {
    *  in storage at mount time. Tests that need a fully clean React
    *  state should follow up with another `goto(...)` (or `reload()`)
    *  before exercising layout behaviour. */
-  async resetDockviewActiveStateAndGoto(workspaceId: string): Promise<void> {
-    await test.step(`Reset dockview active state, navigate to ${workspaceId}`, async () => {
-      await this.goto(workspaceId);
+  async resetDockviewActiveStateAndGoto(worktreeId: string): Promise<void> {
+    await test.step(`Reset dockview active state, navigate to ${worktreeId}`, async () => {
+      await this.goto(worktreeId);
       await this.page.evaluate(
         ([prefix, id]) => {
           localStorage.removeItem(`${prefix}${id}`);
         },
-        [ACTIVE_STATE_KEY_PREFIX, workspaceId] as const,
+        [ACTIVE_STATE_KEY_PREFIX, worktreeId] as const,
       );
     });
   }
 
-  /** Fire the `workspaces.create` mutation over HTTP with `via:
+  /** Fire the `worktrees.create` mutation over HTTP with `via:
    *  "terminal"` — the same wire shape the Rust CLI sends after
-   *  resolving the `--via` precedence chain (`cmd_workspaces_create`).
+   *  resolving the `--via` precedence chain (`cmd_worktrees_create`).
    *  Keeps the raw `page.request.post` out of test bodies (issue #551).
    *  Authenticates via the `band_token` cookie, mirroring how the
    *  dashboard's tRPC client reaches the server. Returns the unwrapped
    *  create payload so the test can assert on `via` / `terminalId` /
    *  `path`. */
-  async createWorkspaceViaTerminal(
-    project: string,
+  async createWorktreeViaTerminal(
+    repo: string,
     branch: string,
     prompt: string,
   ): Promise<{ path: string; via?: string; terminalId?: string }> {
-    const res = await this.page.request.post(`${this.baseUrl}/trpc/workspaces.create`, {
+    const res = await this.page.request.post(`${this.baseUrl}/trpc/worktrees.create`, {
       headers: {
         "Content-Type": "application/json",
         Cookie: `band_token=${this.token}`,
       },
-      data: { project, branch, prompt, via: "terminal" },
+      data: { repo, branch, prompt, via: "terminal" },
     });
     if (!res.ok()) {
       throw new Error(
-        `createWorkspaceViaTerminal(${project}, ${branch}) failed: ${res.status()} ${await res.text()}`,
+        `createWorktreeViaTerminal(${repo}, ${branch}) failed: ${res.status()} ${await res.text()}`,
       );
     }
     const body = (await res.json()) as {
@@ -3793,7 +3789,7 @@ export class WorkspacePage {
    *
    *  Used by tests that need to observe whether the dialog is mounted
    *  in response to a `band:open-file` event, particularly when proving
-   *  cross-workspace event filtering (issue #539). */
+   *  cross-worktree event filtering (issue #539). */
   quickOpenDialog(): Locator {
     return this.page.getByTestId("quick-open__root");
   }
@@ -3808,7 +3804,7 @@ export class WorkspacePage {
   /** Dispatch the `band:open-quick-open` window event — the same event the
    *  file-tree toolbar's "Quick Open" action fires (see `CodeBrowserView.tsx`).
    *  On desktop `SharedDockviewLayout` listens for it; on mobile
-   *  `MobileWorkspaceLayout` does. Either way it opens the QuickOpenDialog with
+   *  `MobileWorktreeLayout` does. Either way it opens the QuickOpenDialog with
    *  an empty query (unlike `band:open-file`, which pre-fills a query and can
    *  auto-open a single match without ever showing the dialog). */
   async dispatchOpenQuickOpen(): Promise<void> {
@@ -3822,7 +3818,7 @@ export class WorkspacePage {
   /** Dispatch the `band:open-search-files` window event — the same event the
    *  file-tree toolbar's "Search in Files" action fires (see
    *  `CodeBrowserView.tsx`). On desktop `SharedDockviewLayout` listens for it;
-   *  on mobile `MobileWorkspaceLayout` does. Either way it opens the
+   *  on mobile `MobileWorktreeLayout` does. Either way it opens the
    *  SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
   async dispatchOpenSearchFiles(): Promise<void> {
     await test.step("Dispatch band:open-search-files", async () => {
@@ -3868,7 +3864,7 @@ export class WorkspacePage {
   // `data-slot` attributes set by the `@band-app/ui` command wrappers plus the
   // `aria-selected` / `data-value` attributes cmdk owns. All locators below are
   // scoped to the QuickOpenDialog root so they never collide with the other
-  // command palettes (workspace picker, command palette) mounted in the tree.
+  // command palettes (worktree picker, command palette) mounted in the tree.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The Quick Open search input. ARIA role is system-controlled (cmdk sets
@@ -4184,18 +4180,18 @@ export class WorkspacePage {
   }
 
   /** Dispatch a synthetic `band:open-file` window event into the page
-   *  context. Captures the cross-workspace routing contract under test:
-   *  events addressed to a specific workspace must reach only THAT
-   *  workspace's listener, while events with no `workspaceId` fall
-   *  through to the currently-active workspace (backwards-compat for
+   *  context. Captures the cross-worktree routing contract under test:
+   *  events addressed to a specific worktree must reach only THAT
+   *  worktree's listener, while events with no `worktreeId` fall
+   *  through to the currently-active worktree (backwards-compat for
    *  legacy / non-chat dispatchers). */
-  async dispatchOpenFileEvent(opts: { filename: string; workspaceId?: string }): Promise<void> {
-    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+  async dispatchOpenFileEvent(opts: { filename: string; worktreeId?: string }): Promise<void> {
+    const target = opts.worktreeId ? ` for worktree ${opts.worktreeId}` : "";
     await test.step(`Dispatch band:open-file for "${opts.filename}"${target}`, async () => {
-      await this.page.evaluate(({ filename, workspaceId }) => {
+      await this.page.evaluate(({ filename, worktreeId }) => {
         window.dispatchEvent(
           new CustomEvent("band:open-file", {
-            detail: { filename, workspaceId },
+            detail: { filename, worktreeId },
           }),
         );
       }, opts);
@@ -4204,20 +4200,20 @@ export class WorkspacePage {
 
   /** Dispatch a synthetic `band:lsp-navigate` window event — the same event
    *  the CodeMirror LSP client fires on go-to-definition (see
-   *  `codemirror-lsp.ts`). Captures the cross-workspace routing contract under
-   *  test: an LSP navigation belongs to the workspace that owns the editor, so
-   *  a navigate addressed to workspace A must NOT drive the (different) active
-   *  workspace B's CodeBrowserView to open A's relative path against B's root
+   *  `codemirror-lsp.ts`). Captures the cross-worktree routing contract under
+   *  test: an LSP navigation belongs to the worktree that owns the editor, so
+   *  a navigate addressed to worktree A must NOT drive the (different) active
+   *  worktree B's CodeBrowserView to open A's relative path against B's root
    *  (ENOENT + poisoned `band-open-tabs:<B>`). Mirrors `dispatchOpenFileEvent`;
-   *  an event with no `workspaceId` falls through to the active workspace
+   *  an event with no `worktreeId` falls through to the active worktree
    *  (forward-compat). See the issue #539 pattern. */
-  async dispatchLspNavigateEvent(opts: { filePath: string; workspaceId?: string }): Promise<void> {
-    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+  async dispatchLspNavigateEvent(opts: { filePath: string; worktreeId?: string }): Promise<void> {
+    const target = opts.worktreeId ? ` for worktree ${opts.worktreeId}` : "";
     await test.step(`Dispatch band:lsp-navigate for "${opts.filePath}"${target}`, async () => {
-      await this.page.evaluate(({ filePath, workspaceId }) => {
+      await this.page.evaluate(({ filePath, worktreeId }) => {
         window.dispatchEvent(
           new CustomEvent("band:lsp-navigate", {
-            detail: { filePath, workspaceId },
+            detail: { filePath, worktreeId },
           }),
         );
       }, opts);
@@ -4227,56 +4223,56 @@ export class WorkspacePage {
   /** Dispatch a synthetic `band:editor-go-back` / `band:editor-go-forward`
    *  window event — the same events the command palette fires for the editor
    *  history "Go Back" / "Go Forward" commands (see `command-registry.ts` +
-   *  `SharedDockviewLayout.tsx`). Captures the cross-workspace routing contract
-   *  under test: an editor-history step belongs to the workspace that owns the
-   *  editor, so a step addressed to workspace A must NOT also walk the (hidden)
-   *  active workspace B's independent history stack. Mirrors
-   *  `dispatchLspNavigateEvent`; a missing `workspaceId` falls through to the
-   *  active workspace (forward-compat). See the issue #539 pattern. */
+   *  `SharedDockviewLayout.tsx`). Captures the cross-worktree routing contract
+   *  under test: an editor-history step belongs to the worktree that owns the
+   *  editor, so a step addressed to worktree A must NOT also walk the (hidden)
+   *  active worktree B's independent history stack. Mirrors
+   *  `dispatchLspNavigateEvent`; a missing `worktreeId` falls through to the
+   *  active worktree (forward-compat). See the issue #539 pattern. */
   async dispatchEditorHistoryEvent(opts: {
     direction: "back" | "forward";
-    workspaceId?: string;
+    worktreeId?: string;
   }): Promise<void> {
     const eventName = opts.direction === "back" ? "band:editor-go-back" : "band:editor-go-forward";
-    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+    const target = opts.worktreeId ? ` for worktree ${opts.worktreeId}` : "";
     await test.step(`Dispatch ${eventName}${target}`, async () => {
       await this.page.evaluate(
-        ({ name, workspaceId }) => {
-          window.dispatchEvent(new CustomEvent(name, { detail: { workspaceId } }));
+        ({ name, worktreeId }) => {
+          window.dispatchEvent(new CustomEvent(name, { detail: { worktreeId } }));
         },
-        { name: eventName, workspaceId: opts.workspaceId },
+        { name: eventName, worktreeId: opts.worktreeId },
       );
     });
   }
 
-  /** Write the persisted open-tabs state for a workspace directly into
-   *  localStorage under the key `band-open-tabs:<workspaceId>`. Used
-   *  by tests that need to seed a "this workspace has a stale tab
+  /** Write the persisted open-tabs state for a worktree directly into
+   *  localStorage under the key `band-open-tabs:<worktreeId>`. Used
+   *  by tests that need to seed a "this worktree has a stale tab
    *  restored from a prior session" baseline, e.g. the self-heal
    *  regression for issue #539: a tab pointing at a path that doesn't
    *  exist on disk must be silently dropped on the next mount. */
   async writeOpenTabsState(
-    workspaceId: string,
+    worktreeId: string,
     state: { tabs: string[]; active: string | null },
   ): Promise<void> {
-    await test.step(`Seed band-open-tabs:${workspaceId}`, async () => {
+    await test.step(`Seed band-open-tabs:${worktreeId}`, async () => {
       await this.page.evaluate(
         ({ key, value }) => {
           localStorage.setItem(key, value);
         },
-        { key: `band-open-tabs:${workspaceId}`, value: JSON.stringify(state) },
+        { key: `band-open-tabs:${worktreeId}`, value: JSON.stringify(state) },
       );
     });
   }
 
-  /** Read the persisted open *file* tabs for a workspace out of the unified
-   *  center-dockview layout blob (`band:dockview-layout-v9:<workspaceId>`).
+  /** Read the persisted open *file* tabs for a worktree out of the unified
+   *  center-dockview layout blob (`band:dockview-layout-v9:<worktreeId>`).
    *
    *  In the flattened layout (#643) there is no separate `band-open-tabs`
    *  store — file editors are ordinary dockview leaves whose panel id is
    *  `file:<path>`, serialized by `api.toJSON()` into `layout.panels`, with the
    *  globally-active panel recorded as the top-level `layout.activePanel`
-   *  string. This reader projects that blob back to the old `{ tabs, active }`
+   *  string. This reader repos that blob back to the old `{ tabs, active }`
    *  shape the file-tab specs assert on: `tabs` = every `file:` panel's path,
    *  `active` = the active panel's path when it is a file leaf (else `null`).
    *
@@ -4286,7 +4282,7 @@ export class WorkspacePage {
    *  active group's `activeView`; we walk the grid tree to resolve it.
    *  Returns `null` when the blob is missing or malformed. */
   async readOpenTabsState(
-    workspaceId: string,
+    worktreeId: string,
   ): Promise<{ tabs: string[]; active: string | null } | null> {
     return await this.page.evaluate((key) => {
       const raw = localStorage.getItem(key);
@@ -4328,7 +4324,7 @@ export class WorkspacePage {
       } catch {
         return null;
       }
-    }, `band:dockview-layout-v9:${workspaceId}`);
+    }, `band:dockview-layout-v9:${worktreeId}`);
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -4336,13 +4332,13 @@ export class WorkspacePage {
   // In the unified center dockview each `ChatTab` header is a
   // `.dv-default-tab` tagged `center-chat-tab--<chatId>`. chatIds are
   // client-generated, so the locator matches the testid PREFIX and the
-  // single-chat workspaces these tests use resolve to `.first()`.
+  // single-chat worktrees these tests use resolve to `.first()`.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The chat tab header (right-click target). The `data-testid` is
    *  `center-chat-tab--<chatId>` where the chatId suffix is generated at
    *  runtime, so we match the stable testid PREFIX with a regex (testid-first
-   *  locator priority) and take `.first()` — the workspaces these tests seed
+   *  locator priority) and take `.first()` — the worktrees these tests seed
    *  have a single chat tab. Anchored to the start so it can't match the
    *  `center-chat-tab__context-menu*` testids. */
   chatTabTrigger(): Locator {
@@ -4376,7 +4372,7 @@ export class WorkspacePage {
   // chat-tab surface above: in the unified center dockview each `TerminalTab`
   // header carries a `center-term-tab--<terminalId>` testid whose suffix is
   // generated at runtime, so we match the stable PREFIX with a regex and take
-  // `.first()` — the workspaces these tests seed have a single terminal tab.
+  // `.first()` — the worktrees these tests seed have a single terminal tab.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The terminal tab header (right-click target). Anchored to the start so
@@ -4396,16 +4392,16 @@ export class WorkspacePage {
   }
 
   /** Read the terminal id the app assigned to the (single) terminal in the
-   *  given workspace, straight from the persistent terminal wrapper's
+   *  given worktree, straight from the persistent terminal wrapper's
    *  `data-terminal-id`. Lets a test assert the copied value equals the id
    *  the app actually rendered, rather than one the test guessed. */
-  async readActiveTerminalId(workspaceId: string): Promise<string> {
+  async readActiveTerminalId(worktreeId: string): Promise<string> {
     return await this.page.evaluate((id) => {
-      const wrapper = document.querySelector(`[data-workspace-id="${id}"][data-terminal-id]`);
+      const wrapper = document.querySelector(`[data-worktree-id="${id}"][data-terminal-id]`);
       const terminalId = wrapper?.getAttribute("data-terminal-id");
-      if (!terminalId) throw new Error(`no terminal wrapper found for workspace ${id}`);
+      if (!terminalId) throw new Error(`no terminal wrapper found for worktree ${id}`);
       return terminalId;
-    }, workspaceId);
+    }, worktreeId);
   }
 
   /** Right-click the terminal tab header to open its context menu. */
@@ -4564,7 +4560,7 @@ export class WorkspacePage {
 
   /** Click into the Nth terminal pane's render surface so it becomes the active
    *  (focused) terminal — what the container reports to the server as the
-   *  workspace's last-focused terminal. `.xterm-screen` is xterm-owned DOM (no
+   *  worktree's last-focused terminal. `.xterm-screen` is xterm-owned DOM (no
    *  testid to hook; same FRAGILITY carve-out as the other xterm probes here),
    *  and clicking it routes focus through xterm → dockview's focusin tracking. */
   async focusTerminalPane(index: number): Promise<void> {
@@ -4577,14 +4573,14 @@ export class WorkspacePage {
   // Terminal file links → file browser
   // ──────────────────────────────────────────────────────────────────────
 
-  /** Read the workspace-relative paths of the file tabs the file browser
-   *  has open, from the `band-open-tabs:<workspaceId>` localStorage entry
+  /** Read the worktree-relative paths of the file tabs the file browser
+   *  has open, from the `band-open-tabs:<worktreeId>` localStorage entry
    *  `useFileTabs` persists. Returns `[]` when nothing is open yet. Used to
    *  prove a clicked terminal link actually opened its file in the browser.
    *  Delegates to `readOpenTabsState` so the persisted-tab parse lives in one
    *  place. */
-  async readOpenTabPaths(workspaceId: string): Promise<string[]> {
-    return (await this.readOpenTabsState(workspaceId))?.tabs ?? [];
+  async readOpenTabPaths(worktreeId: string): Promise<string[]> {
+    return (await this.readOpenTabsState(worktreeId))?.tabs ?? [];
   }
 
   /** Click a file-path link rendered in the terminal output.

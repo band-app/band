@@ -1,10 +1,10 @@
 /**
  * End-to-end coverage for the dispatcher-side half of issue #539:
- * the click → `useContext(FileLinkWorkspaceContext)` → `dispatchOpenFile`
+ * the click → `useContext(FileLinkWorktreeContext)` → `dispatchOpenFile`
  * chain inside `FileLinkedAnchor`.
  *
  * The other specs in this PR
- * (`chat-file-link-workspace.spec.ts`, `chat-file-link-mobile.spec.ts`)
+ * (`chat-file-link-worktree.spec.ts`, `chat-file-link-mobile.spec.ts`)
  * drive `band:open-file` via `window.dispatchEvent` from the page
  * context, which validates the LISTENER half but bypasses the
  * dispatcher entirely. This spec exercises the full chain a real
@@ -13,23 +13,23 @@
  *   1. Real chat session contains an assistant message with a path
  *      that the remark plugin auto-links to `band-file:src/main.rs:42`.
  *   2. User clicks the rendered `<a>` element.
- *   3. `FileLinkedAnchor`'s click handler reads workspaceId from
- *      `FileLinkWorkspaceContext` (which `ChatView` provides) and
- *      calls `dispatchOpenFile(filename, workspaceId)`.
+ *   3. `FileLinkedAnchor`'s click handler reads worktreeId from
+ *      `FileLinkWorktreeContext` (which `ChatView` provides) and
+ *      calls `dispatchOpenFile(filename, worktreeId)`.
  *   4. A test-side window listener captures the dispatched event's
- *      detail and asserts the workspaceId matches the chat pane's
- *      owning workspace.
+ *      detail and asserts the worktreeId matches the chat pane's
+ *      owning worktree.
  *
  * Without the fix, the dispatcher carries only `{ filename }` and
- * the test sees `detail.workspaceId === undefined`. With the fix,
- * `detail.workspaceId` equals the workspace the chat lives in.
+ * the test sees `detail.worktreeId === undefined`. With the fix,
+ * `detail.worktreeId` equals the worktree the chat lives in.
  */
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -40,16 +40,16 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-file-link-dispatch-token";
-const PROJECT = "chat-file-link-dispatch-repo";
+const REPO = "chat-file-link-dispatch-repo";
 const DEFAULT_BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 // Wide viewport so `useIsDesktop()` returns true and the shared
 // dockview renders — the chat pane lives in the dockview, and
-// `FileLinkWorkspaceProvider` wraps the chat tree at the
+// `FileLinkWorktreeProvider` wraps the chat tree at the
 // dockview level.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -80,7 +80,7 @@ test.beforeAll(async () => {
   // file-shaped (extension + line indicator), but no actual file
   // read happens during the click; the path is just a string the
   // dispatcher carries to the listener.
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# dispatch test\n");
@@ -88,9 +88,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial commit"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -134,10 +134,10 @@ test.afterAll(async () => {
 });
 
 test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)", () => {
-  test("clicking a band-file link in chat dispatches band:open-file scoped to the chat's owning workspace", async ({
+  test("clicking a band-file link in chat dispatches band:open-file scoped to the chat's owning worktree", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
 
     // Install the window event capture BEFORE any chat-message
@@ -146,8 +146,8 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
     // body doesn't reach for `page.addInitScript` directly.
     await chatPane.installOpenFileCapture();
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
     await chatPane.waitForReady();
 
     // Send a message to wake up the stub agent. The agent replies
@@ -173,18 +173,18 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
 
     // Click the rendered link. The onClick handler calls
     // `e.preventDefault() + e.stopPropagation()` to suppress the
-    // browser's native navigation, reads `workspaceId` from the
-    // surrounding `FileLinkWorkspaceContext`, and dispatches the
+    // browser's native navigation, reads `worktreeId` from the
+    // surrounding `FileLinkWorktreeContext`, and dispatches the
     // band:open-file event.
     await chatPane.clickFileLinkAnchor(/src\/main\.rs:42/);
 
     // The dispatched event MUST carry both `filename` and
-    // `workspaceId`. Without the issue #539 fix, the detail would
-    // be `{ filename: "src/main.rs:42" }` only — no workspaceId.
-    // With the fix, the chat's owning workspace flows through
+    // `worktreeId`. Without the issue #539 fix, the detail would
+    // be `{ filename: "src/main.rs:42" }` only — no worktreeId.
+    // With the fix, the chat's owning worktree flows through
     // the context to the dispatch.
     await expect
       .poll(() => chatPane.capturedOpenFileEvents())
-      .toEqual([{ filename: "src/main.rs:42", workspaceId: WORKSPACE }]);
+      .toEqual([{ filename: "src/main.rs:42", worktreeId: WORKTREE }]);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Workspace-scoped browser history viewer.
+ * Worktree-scoped browser history viewer.
  *
  * Anchored to the History button in the browser pane chrome. The user
  * can:
@@ -32,7 +32,7 @@ import type { HistoryEntry } from "../lib/browser-history-types";
 import { trpc } from "../lib/trpc-client";
 
 export interface HistoryPopoverProps {
-  workspaceId: string;
+  worktreeId: string;
   onNavigate: (url: string) => void;
 }
 
@@ -100,7 +100,7 @@ function timeFor(ts: number): string {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps) {
+export function HistoryPopover({ worktreeId, onNavigate }: HistoryPopoverProps) {
   // `useId` gives this instance a stable, unique id — important
   // because in split-pane layouts multiple `HistoryPopover`
   // instances coexist, and a hardcoded id would cause
@@ -139,8 +139,8 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
     const trimmed = query.trim();
     const fire = () => {
       const promise = trimmed
-        ? trpc.history.search.query({ workspaceId, query: trimmed, limit: 50 })
-        : trpc.history.list.query({ workspaceId, limit: LIST_LIMIT });
+        ? trpc.history.search.query({ worktreeId, query: trimmed, limit: 50 })
+        : trpc.history.list.query({ worktreeId, limit: LIST_LIMIT });
       promise
         .then((result) => {
           if (cancelled) return;
@@ -161,7 +161,7 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [open, query, workspaceId, reloadKey]);
+  }, [open, query, worktreeId, reloadKey]);
 
   const groups = useMemo(() => groupByDay(entries), [entries]);
 
@@ -182,18 +182,18 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
       // could leave the UI inconsistent if the server returned an
       // error: the row would be locally hidden until the refetch
       // restored it.
-      await trpc.history.delete.mutate({ id, workspaceId }).catch(() => {});
+      await trpc.history.delete.mutate({ id, worktreeId }).catch(() => {});
       refresh();
     },
-    [refresh, workspaceId],
+    [refresh, worktreeId],
   );
 
   const handleClear = useCallback(
     async (range: "hour" | "day" | "week" | "all") => {
-      await trpc.history.clear.mutate({ workspaceId, range }).catch(() => {});
+      await trpc.history.clear.mutate({ worktreeId, range }).catch(() => {});
       refresh();
     },
-    [refresh, workspaceId],
+    [refresh, worktreeId],
   );
 
   return (

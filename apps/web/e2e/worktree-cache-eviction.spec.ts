@@ -1,8 +1,8 @@
 /**
  * Regression coverage for issue #508 —
- * `MultiWorkspacePanelHost` unmounts a workspace as soon as that
- * workspace disappears from the projects query. Deletion is the only way a
- * visited workspace leaves the mounted set.
+ * `MultiWorktreePanelHost` unmounts a worktree as soon as that
+ * worktree disappears from the repos query. Deletion is the only way a
+ * visited worktree leaves the mounted set.
  *
  * Test architecture:
  *
@@ -10,19 +10,19 @@
  *     against a fresh tmp `~/.band/`. Migrations apply to the throwaway
  *     SQLite DB on boot.
  *   - The deletion is driven through the dashboard sidebar's
- *     `WorkspaceCard` context menu — the same flow the user takes — so
- *     the real `useRemoveWorkspace` mutation runs, the real projects
- *     query invalidates, and the real reconcile-against-projects effect
- *     inside `MultiWorkspacePanelHost` fires.
+ *     `WorktreeCard` context menu — the same flow the user takes — so
+ *     the real `useRemoveWorktree` mutation runs, the real repos
+ *     query invalidates, and the real reconcile-against-repos effect
+ *     inside `MultiWorktreePanelHost` fires.
  *   - No tRPC mocking, no `page.route()` on our own routes, no MSW.
  *
  * The cache itself is internal React state — the test asserts on its
- * SHAPE through a public DOM surface: `MultiWorkspacePanelHost` renders
- * one `<div data-testid="workspace-panel-host__cached-entry--<id>">`
- * per workspace it currently caches (multiple, one per panel host,
+ * SHAPE through a public DOM surface: `MultiWorktreePanelHost` renders
+ * one `<div data-testid="worktree-panel-host__cached-entry--<id>">`
+ * per worktree it currently caches (multiple, one per panel host,
  * because the layout mounts five hosts: chat / changes / files /
  * terminal / browser). The test counts entries with `count() === 0`
- * to confirm the deleted workspace was fully evicted across every
+ * to confirm the deleted worktree was fully evicted across every
  * panel host.
  */
 
@@ -30,7 +30,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -39,25 +39,25 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-workspace-cache-eviction-token";
+const TOKEN = "e2e-worktree-cache-eviction-token";
 
-const PROJECT = "cache-eviction-repo";
+const REPO = "cache-eviction-repo";
 const DEFAULT_BRANCH = "main";
 // Two non-default branches so both are deletable via the context menu
-// (the "Delete workspace" item is hidden when `branch === defaultBranch`,
-// see `WorkspaceCard.tsx`).
+// (the "Delete worktree" item is hidden when `branch === defaultBranch`,
+// see `WorktreeCard.tsx`).
 const BRANCH_A = "feature-cache-a";
 const BRANCH_B = "feature-cache-b";
 
-const WORKSPACE_A = toWorkspaceId(PROJECT, BRANCH_A);
-const WORKSPACE_B = toWorkspaceId(PROJECT, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders (matches >= 1024px in `apps/web/src/hooks/useIsDesktop.ts`).
-// Without the dockview the project-list sidebar — and therefore the
-// per-workspace context menu — is not visible.
+// Without the dockview the repo-list sidebar — and therefore the
+// per-worktree context menu — is not visible.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 // Hermetic git environment: explicit allowlist, no `process.env` spread.
@@ -101,10 +101,10 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
   // Real git repo on disk — required because the server's
-  // `workspaces.remove` mutation calls `git worktree list --porcelain`
-  // against the project path. Without a real repo the mutation throws
-  // and the deletion never propagates back to the projects query.
-  repoPath = join(tmpHome, PROJECT);
+  // `worktrees.remove` mutation calls `git worktree list --porcelain`
+  // against the repo path. Without a real repo the mutation throws
+  // and the deletion never propagates back to the repos query.
+  repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Cache eviction test\n");
@@ -117,15 +117,15 @@ test.beforeAll(async () => {
   // with the worktrees themselves, so no explicit `git worktree remove`
   // is needed. If a future refactor moves worktrees outside `tmpHome`
   // this teardown will leak.
-  worktreeAPath = join(tmpHome, `${PROJECT}-${BRANCH_A}`);
-  worktreeBPath = join(tmpHome, `${PROJECT}-${BRANCH_B}`);
+  worktreeAPath = join(tmpHome, `${REPO}-${BRANCH_A}`);
+  worktreeBPath = join(tmpHome, `${REPO}-${BRANCH_B}`);
   git(repoPath, ["worktree", "add", "-b", BRANCH_A, worktreeAPath], tmpHome);
   git(repoPath, ["worktree", "add", "-b", BRANCH_B, worktreeBPath], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [
@@ -145,63 +145,63 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("MultiWorkspacePanelHost cache eviction (issue #508)", () => {
-  test("unmounts a deleted workspace after deletion via the sidebar", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+test.describe("MultiWorktreePanelHost cache eviction (issue #508)", () => {
+  test("unmounts a deleted worktree after deletion via the sidebar", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    // Land on workspace A via a real navigation, then switch to B via a
+    // Land on worktree A via a real navigation, then switch to B via a
     // CLIENT-SIDE click on B's sidebar card. The distinction matters:
     // `goto()` triggers a full browser navigation that wipes React
-    // state, including `MultiWorkspacePanelHost`'s mounted set. The
-    // bug we're guarding is "deleted workspace stays cached", which
-    // only manifests when the cache survives a workspace switch — so
+    // state, including `MultiWorktreePanelHost`'s mounted set. The
+    // bug we're guarding is "deleted worktree stays cached", which
+    // only manifests when the cache survives a worktree switch — so
     // the test must use the SAME in-app switch path the user takes
-    // (TanStack Router via the workspace card's onClick), not a full
-    // page navigation. Visited workspaces are never evicted by age or
+    // (TanStack Router via the worktree card's onClick), not a full
+    // page navigation. Visited worktrees are never evicted by age or
     // count, so any later unmount is unambiguously attributable to the
-    // reconcile-against-projects effect being tested.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    // Wait for the projects-query to land so the workspace cards exist
+    // reconcile-against-repos effect being tested.
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    // Wait for the repos-query to land so the worktree cards exist
     // before we try to click one. Without this the click resolves
-    // against the still-empty project list and silently no-ops.
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_A).first()).toBeVisible();
+    // against the still-empty repo list and silently no-ops.
+    await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeVisible();
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_A).first()).toBeVisible();
 
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    await worktreePage.switchWorktree(WORKTREE_B);
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
 
-    // Positive anchor: BOTH workspaces are cached at this point.
-    // `MultiWorkspacePanelHost` is mounted once per outer dockview panel
+    // Positive anchor: BOTH worktrees are cached at this point.
+    // `MultiWorktreePanelHost` is mounted once per outer dockview panel
     // (chat, changes, files, terminal, browser = 5 hosts), so every
-    // cached workspaceId produces multiple matching elements — assert
+    // cached worktreeId produces multiple matching elements — assert
     // ">= 1" to stay robust to layout-config changes.
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
+    expect(await worktreePage.cachedPanelEntries(WORKTREE_A).count()).toBeGreaterThan(0);
+    expect(await worktreePage.cachedPanelEntries(WORKTREE_B).count()).toBeGreaterThan(0);
 
     // Drive the deletion via the same path the user takes: right-click
-    // the workspace card in the dashboard sidebar (visible while B is
-    // active), then click "Delete workspace". This fires the real
-    // `useRemoveWorkspace` mutation, which invalidates the projects
-    // query, which triggers `useProjects()` to refetch, which produces
-    // a new `projects` reference, which fires the reconcile effect in
-    // `MultiWorkspacePanelHost`.
-    await workspacePage.deleteWorkspaceFromSidebar(WORKSPACE_A);
+    // the worktree card in the dashboard sidebar (visible while B is
+    // active), then click "Delete worktree". This fires the real
+    // `useRemoveWorktree` mutation, which invalidates the repos
+    // query, which triggers `useRepos()` to refetch, which produces
+    // a new `repos` reference, which fires the reconcile effect in
+    // `MultiWorktreePanelHost`.
+    await worktreePage.deleteWorktreeFromSidebar(WORKTREE_A);
 
     // The reconcile effect must drop A's cache entries from every panel
     // host. `expect(...).toHaveCount(0)` auto-retries up to the
     // expect-timeout, so we don't need to predict how long the
     // mutation → invalidate → refetch → effect chain takes.
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_A)).toHaveCount(0);
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_A)).toHaveCount(0);
 
-    // Workspace B (the still-active one) must remain cached — eviction
-    // is for *disappeared* workspaces only. Without this counter-anchor
+    // Worktree B (the still-active one) must remain cached — eviction
+    // is for *disappeared* worktrees only. Without this counter-anchor
     // a buggy implementation that wipes the entire cache would also
     // pass the negative assertion above. Uses `toBeVisible()` (which
     // auto-retries) rather than a synchronous `.count()` snapshot so
     // it doesn't race the asynchronous reconcile effect; the test
     // only needs to prove *some* cached entry for B survives, not a
     // particular count.
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
   });
 });

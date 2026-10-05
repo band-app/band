@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Synthetic prefix used as the `filePath` of an untitled tab. The suffix
- * is a per-workspace monotonic counter — `untitled:1`, `untitled:2`, …
+ * is a per-worktree monotonic counter — `untitled:1`, `untitled:2`, …
  * Two reasons we encode untitled-ness into the path itself rather than
  * keying tabs by an opaque id:
  *
@@ -46,7 +46,7 @@ export function isUntitledPath(filePath: string): boolean {
 
 export interface FileTab {
   /**
-   * For workspace files this is the workspace-relative path
+   * For worktree files this is the worktree-relative path
    * (`src/main.ts`). For external files this is the absolute
    * filesystem path returned by the OS file picker
    * (`/Users/alice/notes/scratch.md`). For untitled tabs it is the
@@ -59,18 +59,18 @@ export interface FileTab {
   isPreview?: boolean;
   /**
    * True when `filePath` is an absolute path to a file outside the
-   * current workspace root, opened via the "Open File…" action. The
+   * current worktree root, opened via the "Open File…" action. The
    * editor uses the host file IO surface (`host.readFile` /
-   * `host.saveFile`) instead of the workspace one, and the tab is
+   * `host.saveFile`) instead of the worktree one, and the tab is
    * rendered with an "external" marker so the user can tell at a
-   * glance that edits write to an out-of-workspace path.
+   * glance that edits write to an out-of-worktree path.
    */
   isExternal?: boolean;
   /**
    * True when `filePath` is a synthetic `untitled:N` key (see
    * `UNTITLED_PREFIX`). Untitled tabs live entirely in-renderer until
    * the user picks a destination via the OS save dialog; on save the
-   * tab transitions to a regular file-backed tab (workspace or
+   * tab transitions to a regular file-backed tab (worktree or
    * external) and this flag is cleared.
    */
   isUntitled?: boolean;
@@ -91,7 +91,7 @@ export interface UseFileTabsReturn {
    */
   openTab: (filePath: string) => void;
   /**
-   * Open a file outside the workspace root as a pinned, external tab.
+   * Open a file outside the worktree root as a pinned, external tab.
    * The path is absolute (returned by the OS file picker). If a tab
    * for this path already exists it is activated; no second tab is
    * created.
@@ -103,7 +103,7 @@ export interface UseFileTabsReturn {
    * (initial content, language) under the same key the tab uses
    * everywhere else.
    *
-   * The counter is monotonic per workspace and never reused, so two
+   * The counter is monotonic per worktree and never reused, so two
    * "Untitled-1" tabs cannot coexist even if the first is closed —
    * matching VS Code's behaviour. **The counter survives reloads** via
    * `initialUntitledCounter`, which scans the persisted tab list for
@@ -123,7 +123,7 @@ export interface UseFileTabsReturn {
    * `untitled:N` entry and inserts a new tab at the same position so
    * the tab order doesn't shuffle on save. `isExternal` controls
    * whether the resulting tab is rendered with the external-file
-   * marker (chosen path lives outside the workspace root).
+   * marker (chosen path lives outside the worktree root).
    */
   renameUntitledToFile: (untitledPath: string, newPath: string, isExternal: boolean) => void;
   /**
@@ -182,8 +182,8 @@ interface PersistedTabState {
   active: string | null;
 }
 
-function storageKey(workspaceId: string): string {
-  return `band-open-tabs:${workspaceId}`;
+function storageKey(worktreeId: string): string {
+  return `band-open-tabs:${worktreeId}`;
 }
 
 /**
@@ -203,14 +203,14 @@ export function parseTabState(
     // Don't trust the cast — older builds (or hand-edited localStorage) may
     // have written a different shape, e.g. an array of `{ filePath }` objects
     // instead of bare strings. Filter to strings so downstream code that
-    // calls `.split("/")` on a tab path can't crash the whole workspace.
+    // calls `.split("/")` on a tab path can't crash the whole worktree.
     const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
     if (!Array.isArray(parsed.tabs)) return null;
     // Accept either a bare string (legacy / pinned tab) or a
     // `{ filePath: string, isPreview?: boolean, isExternal?: boolean,
     // isUntitled?: boolean, untitledLabel?: string }` object. Anything
     // else is dropped — `.split("/")` on a non-string path would crash
-    // the whole workspace.
+    // the whole worktree.
     const tabs: FileTab[] = [];
     for (const t of parsed.tabs) {
       if (typeof t === "string") {
@@ -254,9 +254,9 @@ export function parseTabState(
   }
 }
 
-function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | null } | null {
+function loadTabState(worktreeId: string): { tabs: FileTab[]; active: string | null } | null {
   try {
-    return parseTabState(localStorage.getItem(storageKey(workspaceId)));
+    return parseTabState(localStorage.getItem(storageKey(worktreeId)));
   } catch {
     // localStorage unavailable (private mode, SSR, etc.)
     return null;
@@ -275,7 +275,7 @@ export function serializeTabState(tabs: FileTab[], active: string | null): strin
   const state: PersistedTabState = {
     tabs: tabs.map((t) => {
       // Bare-string serialization is the legacy/compact form for plain
-      // pinned workspace tabs. Anything carrying extra flags (preview,
+      // pinned worktree tabs. Anything carrying extra flags (preview,
       // external, untitled) is written as an object so the loader can
       // re-hydrate the flag set.
       if (!t.isPreview && !t.isExternal && !t.isUntitled) return t.filePath;
@@ -293,16 +293,16 @@ export function serializeTabState(tabs: FileTab[], active: string | null): strin
   return JSON.stringify(state);
 }
 
-function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
+function saveTabState(worktreeId: string, tabs: FileTab[], active: string | null): void {
   try {
-    localStorage.setItem(storageKey(workspaceId), serializeTabState(tabs, active));
+    localStorage.setItem(storageKey(worktreeId), serializeTabState(tabs, active));
   } catch {
     // storage unavailable
   }
 }
 
 /**
- * Initial value for the per-workspace untitled-tab counter. Reads the
+ * Initial value for the per-worktree untitled-tab counter. Reads the
  * highest `N` from any persisted `untitled:N` tab so a reload doesn't
  * collide with already-open scratch tabs — without this, creating a
  * new untitled tab after a reload would reuse `untitled:1` even if a
@@ -327,14 +327,14 @@ export function initialUntitledCounter(tabs: FileTab[]): number {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useFileTabs(workspaceId: string): UseFileTabsReturn {
+export function useFileTabs(worktreeId: string): UseFileTabsReturn {
   const [openTabs, setOpenTabs] = useState<FileTab[]>(() => {
-    const saved = loadTabState(workspaceId);
+    const saved = loadTabState(worktreeId);
     return saved?.tabs ?? [];
   });
 
   const [activeTabPath, setActiveTabPathState] = useState<string | null>(() => {
-    const saved = loadTabState(workspaceId);
+    const saved = loadTabState(worktreeId);
     return saved?.active ?? null;
   });
 
@@ -359,21 +359,21 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       skipFirstPersist.current = false;
       return;
     }
-    saveTabState(workspaceId, openTabs, activeTabPath);
-  }, [workspaceId, openTabs, activeTabPath]);
+    saveTabState(worktreeId, openTabs, activeTabPath);
+  }, [worktreeId, openTabs, activeTabPath]);
 
-  // Reset state when workspace changes
-  const prevWorkspaceRef = useRef(workspaceId);
+  // Reset state when worktree changes
+  const prevWorktreeRef = useRef(worktreeId);
   useEffect(() => {
-    if (prevWorkspaceRef.current !== workspaceId) {
-      prevWorkspaceRef.current = workspaceId;
+    if (prevWorktreeRef.current !== worktreeId) {
+      prevWorktreeRef.current = worktreeId;
       skipFirstPersist.current = true;
-      const saved = loadTabState(workspaceId);
+      const saved = loadTabState(worktreeId);
       if (saved) {
         setOpenTabs(saved.tabs);
         setActiveTabPathState(saved.active);
-        // Reseed the untitled counter from the new workspace's saved
-        // tabs so a new untitled tab in this workspace doesn't collide
+        // Reseed the untitled counter from the new worktree's saved
+        // tabs so a new untitled tab in this worktree doesn't collide
         // with an already-restored Untitled-1.
         untitledCounterRef.current = initialUntitledCounter(saved.tabs);
       } else {
@@ -382,7 +382,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
         untitledCounterRef.current = 0;
       }
     }
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   const openTab = useCallback((filePath: string) => {
     setOpenTabs((prev) => {
@@ -406,7 +406,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     setActiveTabPathState(filePath);
   }, []);
 
-  // Monotonic counter for "Untitled-N" labels. Per-workspace,
+  // Monotonic counter for "Untitled-N" labels. Per-worktree,
   // intentionally never reused: closing Untitled-1 and creating a new
   // untitled tab yields Untitled-2 (matching VS Code). Initialised from
   // the highest `N` in any persisted untitled tab so a new tab after a

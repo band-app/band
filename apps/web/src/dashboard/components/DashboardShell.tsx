@@ -1,4 +1,4 @@
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Button,
   cn,
@@ -21,14 +21,14 @@ import {
   LABELS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
-  PROJECTS_COLLAPSE_KEY,
+  REPOS_COLLAPSE_KEY,
   UNLABELED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useLabelFilter } from "../hooks/use-label-filter";
-import { useLabelLastWorkspace } from "../hooks/use-label-last-workspace";
-import { useProjects } from "../hooks/use-projects";
+import { useLabelLastWorktree } from "../hooks/use-label-last-worktree";
+import { useRepos } from "../hooks/use-repos";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useBranchStatusWatcher,
@@ -36,9 +36,9 @@ import {
   useStatusWatcher,
 } from "../hooks/use-status";
 import { useDashboardStore } from "../stores/index";
-import type { ProjectInfo } from "../types";
-import { AddProjectDialog } from "./AddProjectDialog";
-import { ProjectList } from "./ProjectList";
+import type { RepoInfo } from "../types";
+import { AddRepoDialog } from "./AddRepoDialog";
+import { RepoList } from "./RepoList";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
@@ -50,12 +50,12 @@ interface DashboardShellProps {
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
   /** Pad the home-indicator inset below the action bar even with
-   *  `hideTitleBar`. Set by the mobile project-list fly-out, which reaches the
+   *  `hideTitleBar`. Set by the mobile repo-list fly-out, which reaches the
    *  bottom screen edge with no AppShell below it to pad the inset. */
   padBottomInset?: boolean;
-  /** Make the top row (label filter, collapse all, add project) as tall as
-   *  the mobile workspace header, so the two line up. Set by the mobile
-   *  project-list fly-out. */
+  /** Make the top row (label filter, collapse all, add repo) as tall as
+   *  the mobile worktree header, so the two line up. Set by the mobile
+   *  repo-list fly-out. */
   matchMobileHeader?: boolean;
 }
 
@@ -86,16 +86,16 @@ export function DashboardShell({
   padBottomInset,
   matchMobileHeader,
 }: DashboardShellProps) {
-  const { projects, isLoading: loading } = useProjects();
+  const { repos, isLoading: loading } = useRepos();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
-  const { getLastWorkspace, setLastWorkspace } = useLabelLastWorkspace();
+  const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
   const capabilities = useCapabilities();
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
@@ -114,102 +114,100 @@ export function DashboardShell({
 
   const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
 
-  // Collapse-all toolbar action: write every project name into the
-  // collapsed-projects set and every label id (plus the unlabeled sentinel)
+  // Collapse-all toolbar action: write every repo name into the
+  // collapsed-repos set and every label id (plus the unlabeled sentinel)
   // into the collapsed-labels set. The custom event dispatched by `setAll`
   // pings every useCollapseState consumer so the list re-renders instantly.
-  // The Pinned section header lives outside the labels/projects tree, so
+  // The Pinned section header lives outside the labels/repos tree, so
   // we also fold it into the collapsed state explicitly — "Collapse all"
   // is meant to collapse everything visible, including the pinned group.
-  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const collapseAll = useCallback(() => {
-    projectCollapse.setAll(projects.map((p) => p.name));
+    repoCollapse.setAll(repos.map((p) => p.name));
     labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
     pinnedCollapse.setAll([PINNED_SECTION_ID]);
-  }, [projectCollapse, labelCollapse, pinnedCollapse, projects, labels]);
+  }, [repoCollapse, labelCollapse, pinnedCollapse, repos, labels]);
 
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
     [labelFilter, labels],
   );
 
-  // Find the project that owns `workspaceId` in the current project list, or
-  // `undefined` when the workspace no longer exists (deleted / renamed). Kept
-  // as a helper rather than a Map<workspaceId, ProjectInfo> because the
-  // project list churns rarely and the per-call O(projects × worktrees) walk
+  // Find the repo that owns `worktreeId` in the current repo list, or
+  // `undefined` when the worktree no longer exists (deleted / renamed). Kept
+  // as a helper rather than a Map<worktreeId, RepoInfo> because the
+  // repo list churns rarely and the per-call O(repos × worktrees) walk
   // is dominated by render cost anyway.
-  const findProjectForWorkspace = useCallback(
-    (workspaceId: string): ProjectInfo | undefined =>
-      projects.find((p) =>
-        p.worktrees.some((wt) => toWorkspaceId(p.name, wt.name) === workspaceId),
-      ),
-    [projects],
+  const findRepoForWorktree = useCallback(
+    (worktreeId: string): RepoInfo | undefined =>
+      repos.find((p) => p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId)),
+    [repos],
   );
 
-  // Per-label "last workspace" for issue #505. Two write sites cooperate:
-  // `useRecordLabelLastWorkspace`, run by the app shell, records each
-  // workspace opened under a label (the app shell also sees a pick on the
+  // Per-label "last worktree" for issue #505. Two write sites cooperate:
+  // `useRecordLabelLastWorktree`, run by the app shell, records each
+  // worktree opened under a label (the app shell also sees a pick on the
   // phone's full-screen dashboard, which unmounts this shell), and
-  // `setLabelFilter` below saves the outgoing label's workspace on a label
-  // switch, so a workspace reached by direct URL, the ⌘K picker or a reload
+  // `setLabelFilter` below saves the outgoing label's worktree on a label
+  // switch, so a worktree reached by direct URL, the ⌘K picker or a reload
   // is captured too. `setLabelFilter` also restores the incoming label's
-  // workspace.
+  // worktree.
   //
   // Invariants enforced by the caller:
   //   1. Saves only happen when the outgoing label is non-null (ALL has no
-  //      per-label memory) AND the active workspace's project is actually
+  //      per-label memory) AND the active worktree's repo is actually
   //      labelled with the outgoing label. If the user navigated to a
-  //      workspace under a different label via the ⌘K picker, we don't
-  //      want to record that workspace as Personal's "last" just because
+  //      worktree under a different label via the ⌘K picker, we don't
+  //      want to record that worktree as Personal's "last" just because
   //      the filter happened to be Personal at the time.
-  //   2. Restores only happen when the saved workspace still exists AND its
-  //      project is still labelled with the target label (labels can be
+  //   2. Restores only happen when the saved worktree still exists AND its
+  //      repo is still labelled with the target label (labels can be
   //      reassigned at any time). If validation fails we fall through to
   //      the "no history" branch — current behaviour, i.e. keep the
-  //      previous active workspace, leaving the user to pick one.
+  //      previous active worktree, leaving the user to pick one.
   const setLabelFilter = useCallback(
     (newLabel: string | null) => {
       if (newLabel === labelFilter) return;
 
-      // Save the outgoing label's active workspace before mutating state.
+      // Save the outgoing label's active worktree before mutating state.
       // Doing this synchronously (rather than via an effect on
-      // labelFilter/activeWorkspaceId) avoids a race where the effect would
+      // labelFilter/activeWorktreeId) avoids a race where the effect would
       // fire after the label changed but before the restore-driven
-      // navigation propagated activeWorkspaceId, briefly re-stamping the
-      // incoming label with the outgoing label's workspace.
-      if (labelFilter && activeWorkspaceId) {
-        const project = findProjectForWorkspace(activeWorkspaceId);
-        if (project && project.label === labelFilter) {
-          setLastWorkspace(labelFilter, activeWorkspaceId);
+      // navigation propagated activeWorktreeId, briefly re-stamping the
+      // incoming label with the outgoing label's worktree.
+      if (labelFilter && activeWorktreeId) {
+        const repo = findRepoForWorktree(activeWorktreeId);
+        if (repo && repo.label === labelFilter) {
+          setLastWorktree(labelFilter, activeWorktreeId);
         }
       }
 
       persistLabelFilter(newLabel);
 
       // ALL is the explicit no-op case (per the issue): keep the user on
-      // whatever workspace they were last viewing. Restoration only applies
+      // whatever worktree they were last viewing. Restoration only applies
       // when switching to a *specific* label.
       if (!newLabel) return;
 
-      const target = getLastWorkspace(newLabel);
-      if (!target || target === activeWorkspaceId) return;
-      const targetProject = findProjectForWorkspace(target);
-      if (!targetProject || targetProject.label !== newLabel) return;
+      const target = getLastWorktree(newLabel);
+      if (!target || target === activeWorktreeId) return;
+      const targetRepo = findRepoForWorktree(target);
+      if (!targetRepo || targetRepo.label !== newLabel) return;
 
-      const href = capabilities.getWorkspaceHref?.(target);
+      const href = capabilities.getWorktreeHref?.(target);
       if (href && capabilities.navigate) {
         capabilities.navigate(href);
       }
     },
     [
       labelFilter,
-      activeWorkspaceId,
+      activeWorktreeId,
       persistLabelFilter,
-      setLastWorkspace,
-      getLastWorkspace,
-      findProjectForWorkspace,
+      setLastWorktree,
+      getLastWorktree,
+      findRepoForWorktree,
       capabilities,
     ],
   );
@@ -221,11 +219,11 @@ export function DashboardShell({
   // even though only the desktop menu invokes it today.
   //
   // Multiple `DashboardShell` instances can be alive concurrently —
-  // `MultiWorkspacePanelHost` keeps every visited workspace mounted. They all
+  // `MultiWorktreePanelHost` keeps every visited worktree mounted. They all
   // race to own the same window global: each mount overwrites the
   // previous registration. The cleanup must only delete the key if
-  // we still own it; otherwise a stale unmount (workspace deletion or
-  // workspace switch) wipes a newer instance's registration and
+  // we still own it; otherwise a stale unmount (worktree deletion or
+  // worktree switch) wipes a newer instance's registration and
   // leaves the macOS Settings… menu silently broken until full reload.
   useEffect(() => {
     const globalKey = "__bandOpenSettings";
@@ -239,12 +237,12 @@ export function DashboardShell({
     };
   }, []);
 
-  // Listen for ⌃0 (Focus Side Bar) — the keyboard handler in the workspace
-  // layout reveals the project sidebar and dispatches this event; we move
-  // keyboard focus into the project list so arrow keys can navigate it.
-  // Multi-workspace note: every DashboardShell instance receives the
+  // Listen for ⌃0 (Focus Side Bar) — the keyboard handler in the worktree
+  // layout reveals the repo sidebar and dispatches this event; we move
+  // keyboard focus into the repo list so arrow keys can navigate it.
+  // Multi-worktree note: every DashboardShell instance receives the
   // event, but each focuses only its own subtree via rootRef. Inactive
-  // workspaces are display:none-hidden upstream, so focus() on their
+  // worktrees are display:none-hidden upstream, so focus() on their
   // internal element is a no-op — only the visible instance wins.
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -252,12 +250,12 @@ export function DashboardShell({
       const list = rootRef.current?.querySelector<HTMLElement>('[tabindex="-1"]');
       list?.focus({ preventScroll: true });
     };
-    window.addEventListener("band:focus-projects", handler);
-    return () => window.removeEventListener("band:focus-projects", handler);
+    window.addEventListener("band:focus-repos", handler);
+    return () => window.removeEventListener("band:focus-repos", handler);
   }, []);
 
-  // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
-  // ⌘ works from anywhere, like ⌘K: a workspace switch moves focus into the
+  // Keyboard shortcuts: Cmd+0 → all repos, Cmd+1..9 → nth label.
+  // ⌘ works from anywhere, like ⌘K: a worktree switch moves focus into the
   // terminal or editor (lib/leaf-focus.ts), and ⌘+digit types nothing there.
   // Ctrl skips editable elements, since a terminal sends Ctrl+3..8 to the
   // shell as control characters.
@@ -290,11 +288,11 @@ export function DashboardShell({
     return () => window.removeEventListener("keydown", handler);
   }, [labels, setLabelFilter]);
 
-  // The command palette's "Show All Projects" (the ⌘0 entry above).
+  // The command palette's "Show All Repos" (the ⌘0 entry above).
   useEffect(() => {
     const handler = () => setLabelFilter(null);
-    window.addEventListener("band:show-all-projects", handler);
-    return () => window.removeEventListener("band:show-all-projects", handler);
+    window.addEventListener("band:show-all-repos", handler);
+    return () => window.removeEventListener("band:show-all-repos", handler);
   }, [setLabelFilter]);
 
   return (
@@ -302,9 +300,9 @@ export function DashboardShell({
       ref={rootRef}
       className={cn(
         "w-full overflow-hidden flex flex-col text-foreground p-0",
-        // Embedded as the project-list sidebar (hideTitleBar): paint the
+        // Embedded as the repo-list sidebar (hideTitleBar): paint the
         // `--sidebar` surface so the list reads as a panel distinct from the
-        // workspace layout. Under the translucent sidebar (macOS desktop) the
+        // worktree layout. Under the translucent sidebar (macOS desktop) the
         // AppShell column already paints the tint, so stay transparent rather
         // than stack a second layer. Standalone (mobile / narrow web): plain
         // background.
@@ -355,9 +353,9 @@ export function DashboardShell({
         </div>
       )}
 
-      {/* sync-with: the `h-12` of `mobile-workspace__header` in MobileWorkspaceShell. */}
+      {/* sync-with: the `h-12` of `mobile-worktree__header` in MobileWorktreeShell. */}
       <div
-        data-testid="project-list__top-bar"
+        data-testid="repo-list__top-bar"
         className={cn(
           "flex shrink-0 items-center justify-between border-b border-border",
           matchMobileHeader ? "h-12" : "h-9",
@@ -427,7 +425,7 @@ export function DashboardShell({
           </div>
         </div>
         <div className="flex items-center gap-1 pr-2">
-          {projects.length > 0 && (
+          {repos.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -454,7 +452,7 @@ export function DashboardShell({
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Add project</TooltipContent>
+            <TooltipContent side="bottom">Add repo</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -470,7 +468,7 @@ export function DashboardShell({
           list?.focus({ preventScroll: true });
         }}
       >
-        {/* No overflow-hidden here: when the project list grows past the
+        {/* No overflow-hidden here: when the repo list grows past the
             viewport, clipping main makes Radix's ScrollArea miss the
             overflowing content and stop scroll-max early. The list still
             keeps horizontal text truncation via min-w-0 + truncate on its
@@ -480,22 +478,20 @@ export function DashboardShell({
             <div className="flex items-center justify-center py-12">
               <Spinner className="size-5 text-muted-foreground" />
             </div>
-          ) : projects.length === 0 ? (
+          ) : repos.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
               <FolderPlus className="size-8 text-muted-foreground/50" />
               <div>
-                <p className="text-sm font-medium text-muted-foreground">No projects yet</p>
-                <p className="text-xs text-muted-foreground/70 mt-1">
-                  Add a project to get started
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Add a repo to get started</p>
               </div>
               <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
                 <Plus className="size-3 mr-1" />
-                Add project
+                Add repo
               </Button>
             </div>
           ) : (
-            <ProjectList labelFilter={labelFilter} />
+            <RepoList labelFilter={labelFilter} />
           )}
         </main>
       </ScrollArea>
@@ -532,13 +528,13 @@ export function DashboardShell({
       <div
         ref={actionBarObstructionRef}
         className="shrink-0 flex h-9 items-center justify-between gap-1 border-t border-border px-2"
-        data-testid="project-list__action-bar"
+        data-testid="repo-list__action-bar"
       >
         <Button
           size="sm"
           variant="ghost"
           className="text-muted-foreground"
-          data-testid="project-list__settings-button"
+          data-testid="repo-list__settings-button"
           onClick={handleSettingsClick}
         >
           <Settings className="size-4" />
@@ -547,7 +543,7 @@ export function DashboardShell({
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
 
-      <AddProjectDialog
+      <AddRepoDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
         defaultLabel={labelFilter}

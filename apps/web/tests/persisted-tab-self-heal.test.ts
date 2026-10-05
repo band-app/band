@@ -51,7 +51,7 @@ describe("shouldDropPersistedTab — four-branch contract (issue #539)", () => {
   // Branch 2 — restored tab exists but a DIFFERENT tab failed → never drop
   // ---------------------------------------------------------------------
   it("returns false when the failing path is not the restored tab (path mismatch)", () => {
-    // The user-driven counter-anchor: workspace mounted with a real
+    // The user-driven counter-anchor: worktree mounted with a real
     // persisted tab, the user navigated to a second tab, the second
     // tab failed with ENOENT. The second tab is NOT the
     // initial-restored one, so the self-heal must not fire — that

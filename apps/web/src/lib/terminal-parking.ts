@@ -4,11 +4,11 @@
 // Band keeps one live xterm per terminal in a module-level cache
 // (`terminal-cache.ts`). Each terminal is `open()`ed into a persistent wrapper
 // <div> that is *moved* between the visible panel container and this hidden
-// parking container — never disposed on a workspace/tab switch. Parking (rather
+// parking container — never disposed on a worktree/tab switch. Parking (rather
 // than hiding the wrapper in place under `content-visibility: hidden`, the old
-// MultiWorkspacePanelHost model) is what fixes the garbled-render-on-switch bug
+// MultiWorktreePanelHost model) is what fixes the garbled-render-on-switch bug
 // (band-app/band#615): a parked terminal lives in a normal-visibility subtree
-// off to the side, so a workspace switch alone doesn't drop its WebGL backing
+// off to the side, so a worktree switch alone doesn't drop its WebGL backing
 // store — re-attach reuses the same surface with a cheap fit + refresh, no
 // rebuild. (Genuine off-screen GPU loss — sleep/unlock — is caught by the
 // desktop `system-resumed` wake, and a real context drop by `onContextLoss`;
@@ -51,7 +51,7 @@ export function getParkingContainer(): HTMLElement {
   const container = document.createElement("div");
   container.dataset.testid = "terminal-parking";
   // Rendered but off-screen. `visibility` stays `visible` (unlike the old
-  // MultiWorkspacePanelHost hidden entries) so the browser keeps painting the
+  // MultiWorktreePanelHost hidden entries) so the browser keeps painting the
   // parked surface — that's the whole point of the parking model.
   Object.assign(container.style, {
     position: "fixed",

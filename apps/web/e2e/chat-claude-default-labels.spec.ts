@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -33,7 +33,7 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-claude-default-labels-token";
-const PROJECTS = ["claudedefaults", "codexdefaults"] as const;
+const REPOS = ["claudedefaults", "codexdefaults"] as const;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -46,8 +46,8 @@ function repoPath(name: string): string {
 
 /** A Claude Code transcript whose last assistant record ran `model` at
  *  `effort`. */
-function writeTranscript(project: string, sessionId: string, model: string, effort: string) {
-  const dir = join(tmpHome, ".claude", "projects", repoPath(project).replace(/[^a-zA-Z0-9]/g, "-"));
+function writeTranscript(repo: string, sessionId: string, model: string, effort: string) {
+  const dir = join(tmpHome, ".claude", "projects", repoPath(repo).replace(/[^a-zA-Z0-9]/g, "-"));
   mkdirSync(dir, { recursive: true });
   const record = {
     type: "assistant",
@@ -68,7 +68,7 @@ function lastPromptSessionId(): string {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: PROJECTS.map((name) => {
+    repos: REPOS.map((name) => {
       mkdirSync(repoPath(name), { recursive: true });
       return {
         name,
@@ -145,7 +145,7 @@ test.describe("Claude Code default model and effort labels", () => {
       "the host has managed Claude Code settings",
     );
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("claudedefaults", "main"));
+    await chatPane.goto(toWorktreeId("claudedefaults", "main"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -183,7 +183,7 @@ test.describe("Claude Code default model and effort labels", () => {
 
   test("other agents keep the labels their agent sends", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorkspaceId("codexdefaults", "main"));
+    await chatPane.goto(toWorktreeId("codexdefaults", "main"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("codex");

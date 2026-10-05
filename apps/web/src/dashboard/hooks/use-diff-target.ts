@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
 
-// Workspace-scoped so the Changes sidepanel, the diff leaves and the
+// Worktree-scoped so the Changes sidepanel, the diff leaves and the
 // Changes-tab badge always read the same target — see issue #396 ("Changes
 // tab — out of sync").
 const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
 
 // The Changes view used to switch between an "uncommitted" and a "branch"
-// diff mode, stored under this per-workspace key. It now shows both at once
+// diff mode, stored under this per-worktree key. It now shows both at once
 // in separate sections, so the key is dead and is removed on mount.
 const LEGACY_DIFF_MODE_KEY_PREFIX = "band:diff-mode:";
 
@@ -20,7 +20,7 @@ const LEGACY_DIFF_MODE_KEY_PREFIX = "band:diff-mode:";
 const CHANGE_EVENT = "band:diff-target-changed";
 
 export interface DiffTargetChangeDetail {
-  workspaceId: string;
+  worktreeId: string;
   compareBranch: string | null;
   /**
    * Per-instance identifier of the subscriber that dispatched the event.
@@ -31,20 +31,20 @@ export interface DiffTargetChangeDetail {
   source?: string;
 }
 
-function readStoredCompareBranch(workspaceId: string): string | null {
+function readStoredCompareBranch(worktreeId: string): string | null {
   try {
-    return localStorage.getItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
+    return localStorage.getItem(COMPARE_BRANCH_KEY_PREFIX + worktreeId);
   } catch {
     return null;
   }
 }
 
-function writeCompareBranch(workspaceId: string, branch: string | null) {
+function writeCompareBranch(worktreeId: string, branch: string | null) {
   try {
     if (branch) {
-      clientStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId, branch);
+      clientStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + worktreeId, branch);
     } else {
-      clientStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
+      clientStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + worktreeId);
     }
   } catch {}
 }
@@ -56,36 +56,36 @@ function dispatchChange(detail: DiffTargetChangeDetail) {
 
 export interface UseDiffTargetReturn {
   /** The branch the "Committed on branch" section compares against; null
-   *  means the project's default branch. */
+   *  means the repo's default branch. */
   compareBranch: string | null;
   setCompareBranch: (branch: string | null) => void;
 }
 
 /**
- * React hook for reading and updating the compare branch of a workspace's
+ * React hook for reading and updating the compare branch of a worktree's
  * Changes view. State is mirrored to localStorage so it survives reloads,
  * and any subscriber in the same window receives a synthetic event when
  * another subscriber changes it — this is what keeps the Changes-tab badge
  * and diff leaves in sync with the sidepanel's branch picker.
  */
-export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
+export function useDiffTarget(worktreeId: string): UseDiffTargetReturn {
   const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
-    readStoredCompareBranch(workspaceId),
+    readStoredCompareBranch(worktreeId),
   );
 
   // Per-instance identifier for skipping the echo-back when this instance is
   // the dispatcher of the event.
   const instanceId = useId();
 
-  // Re-read the stored value when the workspace changes — every workspace
+  // Re-read the stored value when the worktree changes — every worktree
   // has its own entry, and we want to honor a previously stored selection
-  // rather than carry over the previous workspace's pick.
+  // rather than carry over the previous worktree's pick.
   useEffect(() => {
-    setCompareBranchState(readStoredCompareBranch(workspaceId));
+    setCompareBranchState(readStoredCompareBranch(worktreeId));
     try {
-      localStorage.removeItem(LEGACY_DIFF_MODE_KEY_PREFIX + workspaceId);
+      localStorage.removeItem(LEGACY_DIFF_MODE_KEY_PREFIX + worktreeId);
     } catch {}
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   // Same-window broadcast: when another subscriber changes the target, mirror
   // it locally so React re-renders. The `storage` event carries a pick made on
@@ -94,12 +94,12 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<DiffTargetChangeDetail>).detail;
-      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!detail || detail.worktreeId !== worktreeId) return;
       if (detail.source && detail.source === instanceId) return;
       setCompareBranchState(detail.compareBranch);
     };
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== COMPARE_BRANCH_KEY_PREFIX + workspaceId) return;
+      if (e.key !== COMPARE_BRANCH_KEY_PREFIX + worktreeId) return;
       setCompareBranchState(e.newValue);
     };
     window.addEventListener(CHANGE_EVENT, handler);
@@ -108,15 +108,15 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
       window.removeEventListener(CHANGE_EVENT, handler);
       window.removeEventListener("storage", onStorage);
     };
-  }, [workspaceId, instanceId]);
+  }, [worktreeId, instanceId]);
 
   const setCompareBranch = useCallback(
     (branch: string | null) => {
-      writeCompareBranch(workspaceId, branch);
+      writeCompareBranch(worktreeId, branch);
       setCompareBranchState(branch);
-      dispatchChange({ workspaceId, compareBranch: branch, source: instanceId });
+      dispatchChange({ worktreeId, compareBranch: branch, source: instanceId });
     },
-    [workspaceId, instanceId],
+    [worktreeId, instanceId],
   );
 
   return { compareBranch, setCompareBranch };

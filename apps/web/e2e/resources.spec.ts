@@ -42,7 +42,7 @@ import { ResourcesPage } from "./pages/ResourcesPage";
 
 const TOKEN = "e2e-resources-page-token";
 
-const PROJECT = "resources-fixture";
+const REPO = "resources-fixture";
 const BRANCH = "main";
 // 1 MiB of zero bytes — well above the page's `formatBytes` rounding
 // boundary, so the rendered "Total size" cell unambiguously reports
@@ -60,7 +60,7 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // (reading 'close')` would mask the real boot failure.
 let server!: ServerHandle;
 let tmpHome: string;
-let projectPath: string;
+let repoPath: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -69,34 +69,34 @@ test.beforeAll(async () => {
   // pointing at the seeded path. The page walks this directory and
   // sums file sizes — the 1 MiB seed file is the lower bound the
   // assertion below uses.
-  projectPath = join(tmpHome, PROJECT);
-  mkdirSync(projectPath, { recursive: true });
+  repoPath = join(tmpHome, REPO);
+  mkdirSync(repoPath, { recursive: true });
   execFileSync("git", ["init", "-q", "--initial-branch", BRANCH], {
-    cwd: projectPath,
+    cwd: repoPath,
     stdio: "ignore",
   });
   execFileSync("git", ["config", "user.email", "e2e@example.com"], {
-    cwd: projectPath,
+    cwd: repoPath,
     stdio: "ignore",
   });
   execFileSync("git", ["config", "user.name", "E2E"], {
-    cwd: projectPath,
+    cwd: repoPath,
     stdio: "ignore",
   });
-  writeFileSync(join(projectPath, "seed.bin"), Buffer.alloc(SEED_FILE_BYTES));
-  execFileSync("git", ["add", "."], { cwd: projectPath, stdio: "ignore" });
+  writeFileSync(join(repoPath, "seed.bin"), Buffer.alloc(SEED_FILE_BYTES));
+  execFileSync("git", ["add", "."], { cwd: repoPath, stdio: "ignore" });
   execFileSync("git", ["commit", "-q", "-m", "seed"], {
-    cwd: projectPath,
+    cwd: repoPath,
     stdio: "ignore",
   });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: projectPath,
+        name: REPO,
+        path: repoPath,
         defaultBranch: BRANCH,
-        worktrees: [{ branch: BRANCH, path: projectPath }],
+        worktrees: [{ branch: BRANCH, path: repoPath }],
       },
     ],
   });
@@ -118,12 +118,12 @@ test.describe("Resources dialog (issue #506)", () => {
 
     // Cards start collapsed. Prove the collapsed-state UI rendered
     // first — each card shows its headline total next to the title —
-    // then assert the expanded-state body content (server PID, project
+    // then assert the expanded-state body content (server PID, repo
     // table) is not mounted.
     await expect(resources.serverTotal).toBeVisible();
     await expect(resources.worktreesTotal).toBeVisible();
     await expect(resources.serverPid).not.toBeVisible();
-    await expect(resources.projectsTable).not.toBeVisible();
+    await expect(resources.reposTable).not.toBeVisible();
 
     // The Electron card is desktop-only (self-gates on isDesktop) and
     // never renders in this web-build harness — see the scope note at
@@ -136,27 +136,27 @@ test.describe("Resources dialog (issue #506)", () => {
     expect(Number.isFinite(pid)).toBe(true);
     expect(pid).toBeGreaterThan(0);
 
-    // Worktrees card: expand it, then the project row appears (no
-    // Refresh click needed). The per-project size cell starts as a
+    // Worktrees card: expand it, then the repo row appears (no
+    // Refresh click needed). The per-repo size cell starts as a
     // "measuring…" spinner and resolves to MB-class output when the
     // server's `du` finishes.
     await resources.expandWorktrees();
-    const projectRow = resources.getProjectRow(PROJECT);
-    await expect(projectRow).toBeVisible({ timeout: 15_000 });
-    const sizeCell = resources.getProjectSize(PROJECT);
+    const repoRow = resources.getRepoRow(REPO);
+    await expect(repoRow).toBeVisible({ timeout: 15_000 });
+    const sizeCell = resources.getRepoSize(REPO);
     await expect(sizeCell).toContainText(/MB/, { timeout: 15_000 });
-    await expect(resources.projectsTotal).toContainText(/MB/);
+    await expect(resources.reposTotal).toContainText(/MB/);
 
-    // Per-worktree breakdown is hidden behind a click on the project
+    // Per-worktree breakdown is hidden behind a click on the repo
     // row. Positive anchor first: confirm the table itself has
     // rendered (so a missing testid distinguishes "row hidden" from
     // "page never loaded"). Then assert the worktree row is NOT
-    // in the DOM, expand the project, and assert it appears with
+    // in the DOM, expand the repo, and assert it appears with
     // its branch + size.
-    await expect(resources.projectsTable).toBeVisible();
-    const worktreeRow = resources.getWorktreeRow(PROJECT, BRANCH);
+    await expect(resources.reposTable).toBeVisible();
+    const worktreeRow = resources.getWorktreeRow(REPO, BRANCH);
     await expect(worktreeRow).not.toBeVisible();
-    await resources.expandProject(PROJECT);
+    await resources.expandRepo(REPO);
     await expect(worktreeRow).toBeVisible();
     await expect(worktreeRow).toContainText(/MB/);
   });

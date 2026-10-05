@@ -1,6 +1,6 @@
 /**
- * A workspace created with placement criteria that no host meets shows as
- * provisioning in the project list, can be cancelled, and shows a reason when
+ * A worktree created with placement criteria that no host meets shows as
+ * provisioning in the repo list, can be cancelled, and shows a reason when
  * the hub gives up (plan step 3.3, S4). Real hub, temp BAND_HOME, no worker.
  */
 
@@ -16,19 +16,19 @@ import {
 } from "./helpers/server";
 import { trpcMutate } from "./helpers/trpc";
 import { ProvisioningPage } from "./pages/ProvisioningPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const TOKEN = "e2e-provisioning-token";
-const PROJECT = "prov-project";
+const REPO = "prov-repo";
 
 let server: ServerHandle;
 let tmpHome: string;
 
 const createWaiting = (branch: string) =>
-  trpcMutate(server.url, TOKEN, "workspaces.create", {
-    project: PROJECT,
+  trpcMutate(server.url, TOKEN, "worktrees.create", {
+    repo: REPO,
     branch,
     placement: { labels: { zone: "moon" } },
   });
@@ -37,12 +37,12 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        name: REPO,
+        path: `/tmp/fake/${REPO}`,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT}` }],
+        worktrees: [{ branch: "main", path: `/tmp/fake/${REPO}` }],
       },
     ],
   });
@@ -56,11 +56,11 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("a waiting workspace shows as provisioning and can be cancelled", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+test("a waiting worktree shows as provisioning and can be cancelled", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const provisioning = new ProvisioningPage(page);
-  await workspacePage.goto(`${PROJECT}-main`);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(`${REPO}-main`);
+  await worktreePage.waitForReady();
 
   await createWaiting("waiting-for-moon");
   await expect(provisioning.card("waiting-for-moon")).toHaveAttribute("data-status", "pending");
@@ -69,13 +69,13 @@ test("a waiting workspace shows as provisioning and can be cancelled", async ({ 
   await expect(provisioning.card("waiting-for-moon")).toHaveCount(0);
 });
 
-test("a workspace nobody could host shows why it failed, and the card can be dismissed", async ({
+test("a worktree nobody could host shows why it failed, and the card can be dismissed", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const provisioning = new ProvisioningPage(page);
-  await workspacePage.goto(`${PROJECT}-main`);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(`${REPO}-main`);
+  await worktreePage.waitForReady();
 
   await createWaiting("timed-out");
   await expect(provisioning.card("timed-out")).toHaveAttribute("data-status", "failed", {

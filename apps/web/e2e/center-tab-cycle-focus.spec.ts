@@ -16,7 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git } from "./helpers/git";
 import {
@@ -30,24 +30,24 @@ import {
 } from "./helpers/server";
 import { CenterTabFocus, type FocusedSurface } from "./pages/CenterTabFocus";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-tab-cycle-focus-token";
 const BRANCH = "main";
-// One project per test: the server keeps terminals and chats alive across the
+// One repo per test: the server keeps terminals and chats alive across the
 // tests in a file.
-const PROJECT_ALL = "tab-cycle-all-kinds";
-const PROJECT_SPLIT = "tab-cycle-split";
-const PROJECT_CLICK = "tab-cycle-click";
-const PROJECT_SWITCH = "tab-cycle-switch";
-const PROJECT_SWITCH_TARGET = "tab-cycle-switch-target";
-const PROJECT_GROUPS = "tab-cycle-groups";
-const WORKSPACE_ALL = toWorkspaceId(PROJECT_ALL, BRANCH);
-const WORKSPACE_SPLIT = toWorkspaceId(PROJECT_SPLIT, BRANCH);
-const WORKSPACE_CLICK = toWorkspaceId(PROJECT_CLICK, BRANCH);
-const WORKSPACE_SWITCH = toWorkspaceId(PROJECT_SWITCH, BRANCH);
-const WORKSPACE_SWITCH_TARGET = toWorkspaceId(PROJECT_SWITCH_TARGET, BRANCH);
-const WORKSPACE_GROUPS = toWorkspaceId(PROJECT_GROUPS, BRANCH);
+const REPO_ALL = "tab-cycle-all-kinds";
+const REPO_SPLIT = "tab-cycle-split";
+const REPO_CLICK = "tab-cycle-click";
+const REPO_SWITCH = "tab-cycle-switch";
+const REPO_SWITCH_TARGET = "tab-cycle-switch-target";
+const REPO_GROUPS = "tab-cycle-groups";
+const WORKTREE_ALL = toWorktreeId(REPO_ALL, BRANCH);
+const WORKTREE_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH);
+const WORKTREE_CLICK = toWorktreeId(REPO_CLICK, BRANCH);
+const WORKTREE_SWITCH = toWorktreeId(REPO_SWITCH, BRANCH);
+const WORKTREE_SWITCH_TARGET = toWorktreeId(REPO_SWITCH_TARGET, BRANCH);
+const WORKTREE_GROUPS = toWorktreeId(REPO_GROUPS, BRANCH);
 
 const CODE_FILE = "code.ts";
 const MARKDOWN_FILE = "notes.md";
@@ -84,14 +84,9 @@ test.beforeAll(async () => {
     };
   };
   seedState(tmpHome, {
-    projects: [
-      PROJECT_ALL,
-      PROJECT_SPLIT,
-      PROJECT_CLICK,
-      PROJECT_SWITCH,
-      PROJECT_SWITCH_TARGET,
-      PROJECT_GROUPS,
-    ].map(makeRepo),
+    repos: [REPO_ALL, REPO_SPLIT, REPO_CLICK, REPO_SWITCH, REPO_SWITCH_TARGET, REPO_GROUPS].map(
+      makeRepo,
+    ),
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -111,30 +106,30 @@ test.afterAll(async () => {
 test("Ctrl+Tab and Ctrl+Shift+Tab focus every kind of tab and can leave each one", async ({
   page,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
-  const viewer = new FileViewerPage(page, workspacePage.fileLeafVisibilityMarker(true));
-  await workspacePage.goto(WORKSPACE_ALL);
-  await workspacePage.waitForReady();
+  const viewer = new FileViewerPage(page, worktreePage.fileLeafVisibilityMarker(true));
+  await worktreePage.goto(WORKTREE_ALL);
+  await worktreePage.waitForReady();
 
   // The default layout is one terminal. Each tab opened below lands after the
   // active one, so the strip reads in the order they're opened.
-  await workspacePage.openChat(WORKSPACE_ALL);
-  await workspacePage.openFileViaQuickOpen(CODE_FILE);
-  await workspacePage.openFileViaQuickOpen(MARKDOWN_FILE);
-  await workspacePage.openFileViaQuickOpen(CHANGED_FILE);
-  await workspacePage.openChangesOfActiveFile(CHANGED_FILE);
+  await worktreePage.openChat(WORKTREE_ALL);
+  await worktreePage.openFileViaQuickOpen(CODE_FILE);
+  await worktreePage.openFileViaQuickOpen(MARKDOWN_FILE);
+  await worktreePage.openFileViaQuickOpen(CHANGED_FILE);
+  await worktreePage.openChangesOfActiveFile(CHANGED_FILE);
 
   const cycle: { tab: Locator; surface: FocusedSurface }[] = [
-    { tab: workspacePage.tabContainer("terminal"), surface: "terminal" },
-    { tab: workspacePage.tabContainer("chat"), surface: "chat-composer" },
-    { tab: workspacePage.fileTabContainer(CODE_FILE), surface: "editor" },
+    { tab: worktreePage.tabContainer("terminal"), surface: "terminal" },
+    { tab: worktreePage.tabContainer("chat"), surface: "chat-composer" },
+    { tab: worktreePage.fileTabContainer(CODE_FILE), surface: "editor" },
     {
-      tab: workspacePage.fileTabContainer(MARKDOWN_FILE),
+      tab: worktreePage.fileTabContainer(MARKDOWN_FILE),
       surface: "markdown-preview",
     },
-    { tab: workspacePage.fileTabContainer(CHANGED_FILE), surface: "editor" },
-    { tab: workspacePage.diffTabContainer(CHANGED_FILE), surface: "diff" },
+    { tab: worktreePage.fileTabContainer(CHANGED_FILE), surface: "editor" },
+    { tab: worktreePage.diffTabContainer(CHANGED_FILE), surface: "diff" },
   ];
   const expectShown = async (index: number) => {
     const { tab, surface } = cycle[index];
@@ -170,71 +165,71 @@ test("Ctrl+Tab and Ctrl+Shift+Tab focus every kind of tab and can leave each one
 });
 
 test("clicking a tab focuses its content", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
-  await workspacePage.goto(WORKSPACE_CLICK);
-  await workspacePage.waitForReady();
-  await workspacePage.openChat(WORKSPACE_CLICK);
-  await workspacePage.openFileViaQuickOpen(CODE_FILE);
+  await worktreePage.goto(WORKTREE_CLICK);
+  await worktreePage.waitForReady();
+  await worktreePage.openChat(WORKTREE_CLICK);
+  await worktreePage.openFileViaQuickOpen(CODE_FILE);
 
-  await workspacePage.tab("chat").click();
+  await worktreePage.tab("chat").click();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("chat-composer");
 
-  await workspacePage.fileTab(CODE_FILE).click();
+  await worktreePage.fileTab(CODE_FILE).click();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 
-  await workspacePage.tab("terminal").click();
+  await worktreePage.tab("terminal").click();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 });
 
 test("a split terminal gets focus back in the pane that had it", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
-  await workspacePage.goto(WORKSPACE_SPLIT);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(WORKTREE_SPLIT);
+  await worktreePage.waitForReady();
 
-  await workspacePage.focusTerminal();
-  await workspacePage.splitTerminalRight();
-  await expect(workspacePage.terminalPanes()).toHaveCount(2);
+  await worktreePage.focusTerminal();
+  await worktreePage.splitTerminalRight();
+  await expect(worktreePage.terminalPanes()).toHaveCount(2);
   // The new pane focuses itself once its shell connects; let that happen
   // before moving focus back to the first pane.
-  await workspacePage.waitForPanePrompt(1);
-  await workspacePage.focusPane(0);
-  await expect.poll(() => workspacePage.focusedPaneIndex()).toBe(0);
+  await worktreePage.waitForPanePrompt(1);
+  await worktreePage.focusPane(0);
+  await expect.poll(() => worktreePage.focusedPaneIndex()).toBe(0);
 
-  await workspacePage.openFileViaQuickOpen(CODE_FILE);
+  await worktreePage.openFileViaQuickOpen(CODE_FILE);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 
   await focus.pressPreviousTab();
-  await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
-  await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
+  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect.poll(() => worktreePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
 
   // The same with the second pane, which is also the split's active pane and
   // not the first xterm in the leaf.
   await focus.pressNextTab();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
   await focus.pressPreviousTab();
-  await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
-  await workspacePage.focusPane(1);
-  await expect.poll(() => workspacePage.focusedPaneIndex()).toBe(1);
+  await expect.poll(() => worktreePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
+  await worktreePage.focusPane(1);
+  await expect.poll(() => worktreePage.focusedPaneIndex()).toBe(1);
   await focus.pressNextTab();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
   await focus.pressPreviousTab();
-  await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(1);
+  await expect.poll(() => worktreePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(1);
 });
 
 test("⌘[ moves focus into the other group's tab", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
-  await workspacePage.goto(WORKSPACE_GROUPS);
-  await workspacePage.waitForReady();
+  await worktreePage.goto(WORKTREE_GROUPS);
+  await worktreePage.waitForReady();
 
   // Left group: the terminal (shown) and a chat. Right group: a second chat.
-  await workspacePage.openChat(WORKSPACE_GROUPS);
-  await workspacePage.clickChatSplitRight(WORKSPACE_GROUPS);
-  await expect(workspacePage.chatTabs()).toHaveCount(2);
-  await workspacePage.focusTerminal();
-  await workspacePage.chatTabs().nth(1).click();
+  await worktreePage.openChat(WORKTREE_GROUPS);
+  await worktreePage.clickChatSplitRight(WORKTREE_GROUPS);
+  await expect(worktreePage.chatTabs()).toHaveCount(2);
+  await worktreePage.focusTerminal();
+  await worktreePage.chatTabs().nth(1).click();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("chat-composer");
 
   // The chat stays visible in its group, and focus must still leave it. (A
@@ -243,18 +238,18 @@ test("⌘[ moves focus into the other group's tab", async ({ page }) => {
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 });
 
-test("switching workspace focuses the active tab of the one shown", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+test("switching worktree focuses the active tab of the one shown", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
-  await workspacePage.goto(WORKSPACE_SWITCH);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileViaQuickOpen(CODE_FILE);
+  await worktreePage.goto(WORKTREE_SWITCH);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileViaQuickOpen(CODE_FILE);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 
-  await workspacePage.switchWorkspace(WORKSPACE_SWITCH_TARGET);
+  await worktreePage.switchWorktree(WORKTREE_SWITCH_TARGET);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 
-  await workspacePage.switchWorkspace(WORKSPACE_SWITCH);
+  await worktreePage.switchWorktree(WORKTREE_SWITCH);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
   await focus.pressPreviousTab();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");

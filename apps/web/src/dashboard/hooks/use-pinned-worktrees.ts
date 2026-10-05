@@ -1,68 +1,68 @@
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useAdapter } from "../context";
 import { queryKeys } from "../query-client";
 import { useDashboardStore } from "../stores/index";
-import type { ProjectInfo, WorktreeInfo } from "../types";
-import { useProjects } from "./use-projects";
+import type { RepoInfo, WorktreeInfo } from "../types";
+import { useRepos } from "./use-repos";
 
 export interface PinnedEntry {
-  project: ProjectInfo;
+  repo: RepoInfo;
   worktree: WorktreeInfo;
-  workspaceId: string;
+  worktreeId: string;
 }
 
 /**
- * Reads the set of pinned workspaces from the existing `useProjects()` data
- * and exposes mutations to pin/unpin a workspace. Mutations apply optimistic
- * updates to the `projects` query cache and invalidate it on settle so the
+ * Reads the set of pinned worktrees from the existing `useRepos()` data
+ * and exposes mutations to pin/unpin a worktree. Mutations apply optimistic
+ * updates to the `repos` query cache and invalidate it on settle so the
  * UI reflects the change immediately.
  *
  * Pinned state itself lives on the `worktrees.pinned` column in the SQLite
  * database — this hook is a thin client-side facade over that storage.
  */
-export function usePinnedWorkspaces() {
+export function usePinnedWorktrees() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
   const setError = useDashboardStore((s) => s.setError);
-  const { projects } = useProjects();
+  const { repos } = useRepos();
 
   const pinned = useMemo<PinnedEntry[]>(() => {
     const list: PinnedEntry[] = [];
-    for (const project of projects) {
-      for (const wt of project.worktrees) {
+    for (const repo of repos) {
+      for (const wt of repo.worktrees) {
         if (wt.pinned) {
           list.push({
-            project,
+            repo,
             worktree: wt,
-            workspaceId: toWorkspaceId(project.name, wt.name),
+            worktreeId: toWorktreeId(repo.name, wt.name),
           });
         }
       }
     }
     return list;
-  }, [projects]);
+  }, [repos]);
 
-  const pinnedSet = useMemo(() => new Set(pinned.map((p) => p.workspaceId)), [pinned]);
+  const pinnedSet = useMemo(() => new Set(pinned.map((p) => p.worktreeId)), [pinned]);
   const isPinned = useCallback((id: string) => pinnedSet.has(id), [pinnedSet]);
 
   const mutation = useMutation({
     mutationFn: ({
-      project,
+      repo,
       name,
       pinned: nextPinned,
     }: {
-      project: string;
+      repo: string;
       name: string;
       pinned: boolean;
-    }) => adapter.setWorkspacePinned(project, name, nextPinned),
-    onMutate: async ({ project, name, pinned: nextPinned }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
-      const previous = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
+    }) => adapter.setWorktreePinned(repo, name, nextPinned),
+    onMutate: async ({ repo, name, pinned: nextPinned }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.repos });
+      const previous = queryClient.getQueryData<RepoInfo[]>(queryKeys.repos);
       if (previous) {
         const next = previous.map((p) =>
-          p.name === project
+          p.name === repo
             ? {
                 ...p,
                 worktrees: p.worktrees.map((w) =>
@@ -71,18 +71,18 @@ export function usePinnedWorkspaces() {
               }
             : p,
         );
-        queryClient.setQueryData(queryKeys.projects, next);
+        queryClient.setQueryData(queryKeys.repos, next);
       }
       return { previous };
     },
     onError: (err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(queryKeys.projects, context.previous);
+        queryClient.setQueryData(queryKeys.repos, context.previous);
       }
       setError(err);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      queryClient.invalidateQueries({ queryKey: queryKeys.repos });
     },
   });
 
@@ -90,8 +90,8 @@ export function usePinnedWorkspaces() {
   // `mutation` object itself, which `useMutation` re-creates every render
   // and would defeat the memoisation here.
   const toggle = useCallback(
-    (project: string, name: string, currentlyPinned: boolean) =>
-      mutation.mutate({ project, name, pinned: !currentlyPinned }),
+    (repo: string, name: string, currentlyPinned: boolean) =>
+      mutation.mutate({ repo, name, pinned: !currentlyPinned }),
     [mutation.mutate],
   );
 

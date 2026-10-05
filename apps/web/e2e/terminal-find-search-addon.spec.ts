@@ -19,7 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -29,12 +29,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-find-long-line-token";
-const PROJECT = "find-long-line-repo";
+const REPO = "find-long-line-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 /** Screen rows the one logical line fills. Under the 10,000-row scrollback so
  *  no row is trimmed, and deep enough to overflow the old recursive rewind. */
@@ -60,14 +60,14 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", BRANCH]);
   git(repoPath, ["commit", "--allow-empty", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -88,18 +88,18 @@ test("find counts every match inside one line that wraps across 8,000 rows", asy
   // Printing ~1 MB through the PTY and scanning it takes longer than the
   // default 30 s budget on a slow runner.
   test.setTimeout(90_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.focusTerminal();
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
-  await workspacePage.runInTerminalUntilRendered(WORKSPACE, PRINT_LONG_LINE, /LONG_DONE/, {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.focusTerminal();
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
+  await worktreePage.runInTerminalUntilRendered(WORKTREE, PRINT_LONG_LINE, /LONG_DONE/, {
     attempts: 1,
     renderTimeoutMs: 30_000,
   });
 
-  await workspacePage.pressFindShortcut();
-  const find = workspacePage.terminalPaneFindWidget();
+  await worktreePage.pressFindShortcut();
+  const find = worktreePage.terminalPaneFindWidget();
   await expect(find.input).toBeFocused();
   await find.type("needle");
   await expect(find.count).toHaveText(`1/${MATCHES}`);
@@ -110,21 +110,21 @@ test("find counts every match inside one line that wraps across 8,000 rows", asy
 });
 
 test("whole-word find matches a word after a rejected hit on the same line", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.focusTerminal();
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.focusTerminal();
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
   // The quotes keep the typed command's echo from holding a whole-word
   // `needle`; only the executed output `needleX needle` does.
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     "echo needleX' 'nee''dle",
     /needleX needle/,
   );
 
-  await workspacePage.pressFindShortcut();
-  const find = workspacePage.terminalPaneFindWidget();
+  await worktreePage.pressFindShortcut();
+  const find = worktreePage.terminalPaneFindWidget();
   await expect(find.input).toBeFocused();
   await find.wholeWordToggle.click();
   await find.type("needle");

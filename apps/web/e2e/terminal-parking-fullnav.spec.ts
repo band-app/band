@@ -1,7 +1,7 @@
 /**
- * band-app/band#617 — parking model: full-page navigation between workspaces.
+ * band-app/band#617 — parking model: full-page navigation between worktrees.
  *
- * Navigating by opening workspace URLs directly (full-page loads), A → B → A,
+ * Navigating by opening worktree URLs directly (full-page loads), A → B → A,
  * wipes the per-renderer xterm cache each time. The terminal must therefore be
  * restored from the persisted dockview layout (SAME terminalId) and reconnect to
  * the server-kept PTY, replaying scrollback (#613) — it must NOT seed a fresh
@@ -14,7 +14,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -24,14 +24,14 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-parking-fullnav-token";
 
-const PROJECT_A = "alpha-fullnav";
-const PROJECT_B = "bravo-fullnav";
-const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
-const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
+const REPO_A = "alpha-fullnav";
+const REPO_B = "bravo-fullnav";
+const WORKTREE_A = toWorktreeId(REPO_A, "main");
+const WORKTREE_B = toWorktreeId(REPO_B, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -66,15 +66,15 @@ test.beforeAll(async () => {
   workdirA = makeGitWorkdir("band-fullnav-a-", tmpHome);
   workdirB = makeGitWorkdir("band-fullnav-b-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT_A,
+        name: REPO_A,
         path: workdirA,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirA }],
       },
       {
-        name: PROJECT_B,
+        name: REPO_B,
         path: workdirB,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
@@ -105,44 +105,44 @@ test.describe("Terminal parking: full-page navigation", () => {
   test("A → B → A via direct URL loads reuses A's terminal id and replays its output", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.runInTerminal("echo REPRO_MARKER_A");
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.runInTerminal("echo REPRO_MARKER_A");
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("REPRO_MARKER_A"),
+          (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("REPRO_MARKER_A"),
         { timeout: 20_000 },
       )
       .toBe(true);
-    const idsBefore = await workspacePage.terminalIds(WORKSPACE_A);
+    const idsBefore = await worktreePage.terminalIds(WORKTREE_A);
     expect(idsBefore.length).toBe(1);
 
     // Full-page navigate to B (fresh renderer, cache wiped).
-    await workspacePage.goto(WORKSPACE_B);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.goto(WORKTREE_B);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
 
     // Full-page navigate back to A.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
 
     // Same terminalId restored from the persisted layout (not a new terminal).
     await expect
-      .poll(() => workspacePage.terminalIds(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.terminalIds(WORKTREE_A), { timeout: 20_000 })
       .toEqual(idsBefore);
     // And the server-kept PTY's scrollback replayed the earlier output.
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("REPRO_MARKER_A"),
+          (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("REPRO_MARKER_A"),
         { timeout: 20_000 },
       )
       .toBe(true);
@@ -151,53 +151,49 @@ test.describe("Terminal parking: full-page navigation", () => {
   test("adding a 2nd terminal, typing, then reloading preserves the active terminal's output", async ({
     page,
   }) => {
-    // Repro of a reported flow: open a workspace, add a 2nd terminal via the "+"
+    // Repro of a reported flow: open a worktree, add a 2nd terminal via the "+"
     // tab button, run a command, then reload. The persisted layout has BOTH
     // terminals, and the last-active one reconnects to its kept-alive PTY and
     // replays its output on reload — it must not come back as a fresh shell.
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
 
     // Add a 2nd terminal (becomes the active tab) and run a command in it.
-    await workspacePage.clickTerminalAddTab(WORKSPACE_A);
+    await worktreePage.clickTerminalAddTab(WORKTREE_A);
     await expect
-      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.countTerminalPanels(WORKTREE_A), { timeout: 20_000 })
       .toBe(2);
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.runInTerminal("echo SECOND_TERM_MARKER");
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.runInTerminal("echo SECOND_TERM_MARKER");
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes(
-            "SECOND_TERM_MARKER",
-          ),
+          (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("SECOND_TERM_MARKER"),
         { timeout: 20_000 },
       )
       .toBe(true);
 
     // Full page reload — the per-renderer cache is wiped; the layout (2 panels)
     // is restored from the server and the active terminal reconnects + replays.
-    await workspacePage.reload();
-    await workspacePage.waitForReady();
+    await worktreePage.reload();
+    await worktreePage.waitForReady();
     // No `openTerminalTab()` here: each terminal is its own tab now, and that
     // helper clicks the FIRST one, which would switch away from the restored
     // active tab (the 2nd terminal, holding the marker) that this test is about.
-    await workspacePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalReady(20_000);
 
     // Both terminals restored, and the active one still shows its output.
     await expect
-      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.countTerminalPanels(WORKTREE_A), { timeout: 20_000 })
       .toBe(2);
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes(
-            "SECOND_TERM_MARKER",
-          ),
+          (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("SECOND_TERM_MARKER"),
         { timeout: 20_000 },
       )
       .toBe(true);

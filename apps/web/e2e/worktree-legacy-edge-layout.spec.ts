@@ -16,15 +16,15 @@
  *
  * Architecture (matches the repo's integration doctrine):
  *   - The real production server runs against a fresh tmp `~/.band/`.
- *   - No tRPC mocking. One project with a real directory holding the seeded
+ *   - No tRPC mocking. One repo with a real directory holding the seeded
  *     files, so the file leaves open real files.
- *   - All UI is driven through `WorkspacePage`.
+ *   - All UI is driven through `WorktreePage`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -34,11 +34,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-workspace-legacy-edge-layout-token";
-const PROJECT = "alpha-legacy-edge";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const TOKEN = "e2e-worktree-legacy-edge-layout-token";
+const REPO = "alpha-legacy-edge";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 const GRID_FILE = "README.md";
 const BOTTOM_EDGE_FILE = "notes.md";
@@ -145,18 +145,18 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projectPath = join(tmpHome, PROJECT);
-  mkdirSync(projectPath, { recursive: true });
+  const repoPath = join(tmpHome, REPO);
+  mkdirSync(repoPath, { recursive: true });
   for (const file of [GRID_FILE, BOTTOM_EDGE_FILE, LEFT_EDGE_FILE]) {
-    writeFileSync(join(projectPath, file), `# ${file}\n`);
+    writeFileSync(join(repoPath, file), `# ${file}\n`);
   }
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: projectPath,
+        name: REPO,
+        path: repoPath,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: projectPath }],
+        worktrees: [{ branch: "main", path: repoPath }],
       },
     ],
   });
@@ -176,11 +176,11 @@ test.afterAll(async () => {
 test("a saved layout with edge groups loads with the edge panels as tabs in the grid", async ({
   page,
 }) => {
-  const wp = new WorkspacePage(page, server.url, TOKEN);
+  const wp = new WorktreePage(page, server.url, TOKEN);
   // Seed BEFORE navigating: `addInitScript` writes localStorage ahead of the
   // page script, so the dockview restores this layout on its first onReady.
-  await wp.seedGlobalLayout(WORKSPACE, LAYOUT_WITH_EDGE_GROUPS);
-  await wp.goto(WORKSPACE);
+  await wp.seedGlobalLayout(WORKTREE, LAYOUT_WITH_EDGE_GROUPS);
+  await wp.goto(WORKTREE);
   await wp.waitForReady();
 
   // Every panel survives, including the two that were docked at the edges.
@@ -205,9 +205,9 @@ test("a saved layout with edge groups loads with the edge panels as tabs in the 
 test("a saved layout whose panels were all in edge groups loads them into a new grid group", async ({
   page,
 }) => {
-  const wp = new WorkspacePage(page, server.url, TOKEN);
-  await wp.seedGlobalLayout(WORKSPACE, LAYOUT_WITH_ONLY_EDGE_GROUPS);
-  await wp.goto(WORKSPACE);
+  const wp = new WorktreePage(page, server.url, TOKEN);
+  await wp.seedGlobalLayout(WORKTREE, LAYOUT_WITH_ONLY_EDGE_GROUPS);
+  await wp.goto(WORKTREE);
   await wp.waitForReady();
 
   await expect(wp.fileTab(BOTTOM_EDGE_FILE)).toBeVisible();

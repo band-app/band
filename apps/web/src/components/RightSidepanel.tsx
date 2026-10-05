@@ -16,26 +16,26 @@ import {
   FileBrowser,
   type FileBrowserHandle,
   useDiffTarget,
-  useWorkspacePath,
+  useWorktreePath,
 } from "@/dashboard";
-import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
+import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { clientStorage } from "../lib/client-state";
-import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
-import { useWorkspaceSideTabs } from "../plugins/use-plugin-slot";
+import { useWorktreeSideTabs } from "../plugins/use-plugin-slot";
 import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { DiffTargetHeader } from "./DiffTargetHeader";
-import { usePerWorkspaceState } from "./per-workspace-state-store";
-import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
+import { usePerWorktreeState } from "./per-worktree-state-store";
+import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
 
 // ---------------------------------------------------------------------------
 // Active-tab persistence (Explorer | Changes | plugin tabs, one at a time)
 // ---------------------------------------------------------------------------
 
-/** A plugin tab is `plugin:<pluginId>.<tabId>` (see `useWorkspaceSideTabs`). */
+/** A plugin tab is `plugin:<pluginId>.<tabId>` (see `useWorktreeSideTabs`). */
 type RightTab = "explorer" | "changes" | `plugin:${string}`;
 const TAB_KEY = "band:right-sidepanel-tab";
 
@@ -184,7 +184,7 @@ function ExplorerHeader({
 
 // ---------------------------------------------------------------------------
 // Header row (tabs + actions). Sits in the title-bar row, level with the
-// workspace title bar, so it is a window drag surface in the desktop app.
+// worktree title bar, so it is a window drag surface in the desktop app.
 // ---------------------------------------------------------------------------
 
 function SidepanelHeader({
@@ -225,11 +225,11 @@ export function RightSidepanel({
   headerActions?: React.ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const workspaceId = parseWorkspaceFromPath(pathname);
+  const worktreeId = parseWorktreeFromPath(pathname);
 
   // Save a tab picked through `band:right-sidepanel-set-tab` here as well as
   // in the inner panel: the sidebar's PR badge picks the Checks tab and then
-  // navigates, and the next workspace's panel (or the first one, when none
+  // navigates, and the next worktree's panel (or the first one, when none
   // is shown yet) mounts with the saved tab.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -240,26 +240,26 @@ export function RightSidepanel({
     return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
   }, []);
 
-  if (!workspaceId) {
+  if (!worktreeId) {
     return (
       <div className="flex h-full flex-col" data-testid="right-sidepanel">
         <SidepanelHeader actions={headerActions} />
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
           <div className="flex flex-col items-center gap-2">
             <FolderOpen className="size-6 text-muted-foreground/30" />
-            <p className="text-xs text-muted-foreground">No workspace selected</p>
+            <p className="text-xs text-muted-foreground">No worktree selected</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Keyed by workspaceId so the panel's per-workspace tree state resets cleanly
-  // on a workspace switch instead of leaking across workspaces.
+  // Keyed by worktreeId so the panel's per-worktree tree state resets cleanly
+  // on a worktree switch instead of leaking across worktrees.
   return (
     <RightSidepanelInner
-      key={workspaceId}
-      workspaceId={workspaceId}
+      key={worktreeId}
+      worktreeId={worktreeId}
       visible={visible}
       headerActions={headerActions}
     />
@@ -267,16 +267,16 @@ export function RightSidepanel({
 }
 
 function RightSidepanelInner({
-  workspaceId,
+  worktreeId,
   visible,
   headerActions,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   visible: boolean;
   headerActions?: React.ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<RightTab>(() => loadActiveTab());
-  const pluginTabs = useWorkspaceSideTabs();
+  const pluginTabs = useWorktreeSideTabs();
   const activePluginTab = pluginTabs.find((t) => `plugin:${t.key}` === activeTab);
   // A saved plugin tab whose plugin is disabled, or not listed yet, shows Explorer.
   const shownTab = activeTab.startsWith("plugin:") && !activePluginTab ? "explorer" : activeTab;
@@ -295,25 +295,25 @@ function RightSidepanelInner({
     return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
   }, []);
 
-  const workspacePath = useWorkspacePath(workspaceId);
+  const worktreePath = useWorktreePath(worktreeId);
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
   // The worktree folder's name, as VS Code titles its Explorer.
   const folderName =
-    workspacePath
+    worktreePath
       ?.replace(/[/\\]+$/, "")
       .split(/[/\\]/)
       .pop() || "Explorer";
-  const { compareBranch, setCompareBranch } = useDiffTarget(workspaceId);
+  const { compareBranch, setCompareBranch } = useDiffTarget(worktreeId);
 
   // The active file/diff leaf publishes its path here (see
-  // WorkspaceCenterDockview's `useActiveFileTracking`); use it to highlight the
+  // WorktreeCenterDockview's `useActiveFileTracking`); use it to highlight the
   // open file in the Explorer tree and the open diff in the Changes tree.
-  const { currentFile } = usePerWorkspaceState(workspaceId);
+  const { currentFile } = usePerWorktreeState(worktreeId);
 
   // Fetch the Changes sections for both the Changes tab badge and the lists.
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
-  const changesQuery = useWorkspaceChanges(workspaceId, {
+  const changesQuery = useWorktreeChanges(worktreeId, {
     enabled: visible,
     refetchInterval: visible ? 15_000 : false,
   });
@@ -322,7 +322,7 @@ function RightSidepanelInner({
   // changes the query key, and without this the current branch
   // would blank out until the new summary arrives.
   const [knownBranches, setKnownBranches] = useState<{
-    workspaceId: string;
+    worktreeId: string;
     headBranch: string;
     defaultBranch: string;
   } | null>(null);
@@ -330,43 +330,43 @@ function RightSidepanelInner({
     const data = changesQuery.data;
     if (data) {
       setKnownBranches({
-        workspaceId,
+        worktreeId,
         headBranch: data.headBranch,
         defaultBranch: data.defaultBranch,
       });
     }
-  }, [changesQuery.data, workspaceId]);
+  }, [changesQuery.data, worktreeId]);
   const branchInfo =
-    changesQuery.data ?? (knownBranches?.workspaceId === workspaceId ? knownBranches : undefined);
+    changesQuery.data ?? (knownBranches?.worktreeId === worktreeId ? knownBranches : undefined);
 
   const changeCount = countChangedPaths(changesQuery.data);
 
   // Single-click opens a preview (italic, reused) leaf; double-click pins it.
   const openFile = useCallback(
     (path: string, pinned: boolean) =>
-      getWorkspaceLeafActions(workspaceId)?.openFile(path, { preview: !pinned }),
-    [workspaceId],
+      getWorktreeLeafActions(worktreeId)?.openFile(path, { preview: !pinned }),
+    [worktreeId],
   );
   const openDiff = useCallback(
     (section: ChangeSection, entry: ChangeEntry, pinned: boolean) =>
-      getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+      getWorktreeLeafActions(worktreeId)?.openDiff(entry.path, {
         preview: !pinned,
         section,
         oldPath: entry.oldPath,
       }),
-    [workspaceId],
+    [worktreeId],
   );
   const openSectionDiffs = useCallback(
-    (section: ChangeSection) => getWorkspaceLeafActions(workspaceId)?.openSectionDiffs(section),
-    [workspaceId],
+    (section: ChangeSection) => getWorktreeLeafActions(worktreeId)?.openSectionDiffs(section),
+    [worktreeId],
   );
 
   // A file under an expanded commit in the Commits panel opens that file's
   // diff for the commit.
   const openCommitDiff = useCallback(
     (sha: string, path: string, pinned: boolean) =>
-      getWorkspaceLeafActions(workspaceId)?.openCommitDiff(sha, path, { preview: !pinned }),
-    [workspaceId],
+      getWorktreeLeafActions(worktreeId)?.openCommitDiff(sha, path, { preview: !pinned }),
+    [worktreeId],
   );
 
   return (
@@ -407,7 +407,7 @@ function RightSidepanelInner({
           >
             <PluginErrorBoundary pluginId={activePluginTab.pluginId}>
               <ClientPluginHostProvider value={clientPluginHost}>
-                <activePluginTab.tab.component workspaceId={workspaceId} visible={visible} />
+                <activePluginTab.tab.component worktreeId={worktreeId} visible={visible} />
               </ClientPluginHostProvider>
             </PluginErrorBoundary>
           </div>
@@ -417,17 +417,17 @@ function RightSidepanelInner({
             <div className="min-h-0 flex-1">
               <FileBrowser
                 ref={fileBrowserRef}
-                workspaceId={workspaceId}
-                workspacePath={workspacePath}
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
                 onOpenFile={(p) => openFile(p, false)}
                 onOpenFilePinned={(p) => openFile(p, true)}
                 selectedFile={currentFile}
                 // Keep open editor tabs pointed at renamed / moved paths, and
                 // close the tabs of deleted ones.
                 onPathRenamed={(oldPath, newPath) =>
-                  getWorkspaceLeafActions(workspaceId)?.onPathMoved(oldPath, newPath)
+                  getWorktreeLeafActions(worktreeId)?.onPathMoved(oldPath, newPath)
                 }
-                onPathDeleted={(path) => getWorkspaceLeafActions(workspaceId)?.onPathRemoved(path)}
+                onPathDeleted={(path) => getWorktreeLeafActions(worktreeId)?.onPathRemoved(path)}
                 // Match the ChangesFileTree row size (text-[13px] / h-28) so the
                 // Explorer and Changes trees read identically in the sidepanel.
                 compact
@@ -443,7 +443,7 @@ function RightSidepanelInner({
                 shared diff target; the changes query above is keyed on
                 compareBranch, so it refetches automatically. */}
             <DiffTargetHeader
-              workspaceId={workspaceId}
+              worktreeId={worktreeId}
               headBranch={branchInfo?.headBranch}
               defaultBranch={branchInfo?.defaultBranch}
               compareBranch={compareBranch}
@@ -451,16 +451,16 @@ function RightSidepanelInner({
             />
             <div className="min-h-0 flex-1 overflow-auto">
               <ChangesSections
-                workspaceId={workspaceId}
+                worktreeId={worktreeId}
                 changes={changesQuery.data}
                 onOpen={openDiff}
                 onViewAll={openSectionDiffs}
                 editable
-                workspacePath={workspacePath}
+                worktreePath={worktreePath}
                 activeFile={currentFile}
               />
             </div>
-            <CommitsPanel workspaceId={workspaceId} visible={visible} onOpenFile={openCommitDiff} />
+            <CommitsPanel worktreeId={worktreeId} visible={visible} onOpenFile={openCommitDiff} />
           </div>
         )}
       </div>

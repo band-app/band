@@ -1,8 +1,8 @@
 /**
- * The PR badge in a sidebar workspace row: the PR number as an outlined tag
+ * The PR badge in a sidebar worktree row: the PR number as an outlined tag
  * colored by CI state, which leaves the row's height unchanged, the popover it opens on hover and on keyboard focus (number, title,
  * status, "Open on GitHub", "Copy link"), and clicking it to show that
- * workspace's Checks tab.
+ * worktree's Checks tab.
  *
  * Real server, a real repo with a github.com `origin`. `gh` is the fake in
  * `tests/fixtures/gh-stub-bin.mjs`, selected through `BAND_GH_BIN` and
@@ -16,7 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   branchRepository,
   prNode,
@@ -48,7 +48,7 @@ import { PullRequestBadgePage } from "./pages/PullRequestBadgePage";
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-pr-badge-token";
-const PROJECT = "widgets";
+const REPO = "widgets";
 const FAILING = "feat/failing";
 const DRAFT = "feat/draft";
 const PASSING = "feat/passing";
@@ -58,7 +58,7 @@ const CLOSED = "feat/closed";
 const NO_PR = "feat/no-pr";
 const FAILING_TITLE = "fix(web): stop terminal input stalls";
 
-const wsId = (branch: string) => toWorkspaceId(PROJECT, branch);
+const wsId = (branch: string) => toWorktreeId(REPO, branch);
 
 let server: ServerHandle;
 let stub: GhStub;
@@ -66,7 +66,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", "main"]);
   writeFileSync(join(repo, "README.md"), "hello\n");
@@ -83,9 +83,9 @@ test.beforeAll(async () => {
     return { name: branch, branch, path };
   });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: "main",
         worktrees: [{ name: "main", branch: "main", path: repo }, ...worktrees],
@@ -145,7 +145,7 @@ test.beforeEach(() => {
   resetClientState(tmpHome);
 });
 
-test("a workspace with a PR shows its number, colored by CI state", async ({ page }) => {
+test("a worktree with a PR shows its number, colored by CI state", async ({ page }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
   await badges.goto(wsId("main"));
 
@@ -237,7 +237,7 @@ test("the popover opens on keyboard focus and its copy action copies the PR link
   page,
 }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
-  await badges.workspace.installClipboardCapture();
+  await badges.worktree.installClipboardCapture();
   await badges.goto(wsId("main"));
 
   await badges.focusBadgeWithKeyboard(wsId(FAILING));
@@ -250,7 +250,7 @@ test("the popover opens on keyboard focus and its copy action copies the PR link
   await badges.pressKey("Tab");
   await expect(badges.copyButton).toBeFocused();
   await badges.pressKey("Enter");
-  await expect.poll(() => badges.workspace.readCopied()).toEqual([prUrl(705)]);
+  await expect.poll(() => badges.worktree.readCopied()).toEqual([prUrl(705)]);
   await expect(badges.copyButton).toHaveAttribute("data-copied", "true");
 
   // Escape closes the popover and returns focus to the badge.
@@ -270,20 +270,17 @@ test("Open on GitHub opens the PR's page", async ({ page }) => {
   await expect(badges.popover).toHaveCount(0);
 });
 
-test("clicking the badge opens that workspace's Checks tab", async ({ page }) => {
+test("clicking the badge opens that worktree's Checks tab", async ({ page }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
   const checks = new PrChecksPanelPage(page, server.url, TOKEN);
   await badges.goto(wsId("main"));
-  await expect(badges.workspace.rightPanelTab("explorer")).toHaveAttribute("aria-selected", "true");
+  await expect(badges.worktree.rightPanelTab("explorer")).toHaveAttribute("aria-selected", "true");
 
   await badges.clickBadge(wsId(FAILING));
 
-  await expect(badges.workspace.workspaceCard(wsId(FAILING))).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
-  await expect(badges.workspace.rightPanel).toHaveAttribute("data-visible", "true");
-  await expect(badges.workspace.rightPanelTab("github-pull-request")).toHaveAttribute(
+  await expect(badges.worktree.worktreeCard(wsId(FAILING))).toHaveAttribute("aria-current", "page");
+  await expect(badges.worktree.rightPanel).toHaveAttribute("data-visible", "true");
+  await expect(badges.worktree.rightPanelTab("github-pull-request")).toHaveAttribute(
     "aria-selected",
     "true",
   );

@@ -19,7 +19,7 @@ interface Props {
   hasUnpushedCommits: boolean;
 }
 
-export function DeleteWorkspaceDialog({
+export function DeleteWorktreeDialog({
   open,
   onOpenChange,
   onConfirm,
@@ -32,7 +32,7 @@ export function DeleteWorkspaceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]" onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
-          <DialogTitle>Delete workspace</DialogTitle>
+          <DialogTitle>Delete worktree</DialogTitle>
           <DialogDescription>
             Are you sure you want to delete <strong>{branchName}</strong>?
           </DialogDescription>

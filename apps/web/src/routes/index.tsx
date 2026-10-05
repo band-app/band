@@ -14,8 +14,8 @@ function DashboardPage() {
   const useDesktopLayout = isWideScreen || isDesktop;
 
   // Desktop: the SharedDockviewLayout mounted in __root.tsx already covers
-  // this route. Each per-workspace panel host renders its NoWorkspaceMessage
-  // empty state because the URL has no $workspaceId. There is nothing else
+  // this route. Each per-worktree panel host renders its NoWorktreeMessage
+  // empty state because the URL has no $worktreeId. There is nothing else
   // to render here — the AppShell's <Outlet /> sits BEHIND
   // <SharedDockviewLayout />, so anything we return would be hidden.
   if (useDesktopLayout) {

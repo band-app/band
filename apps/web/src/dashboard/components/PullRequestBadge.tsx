@@ -72,12 +72,12 @@ const CLOSE_DELAY_MS = 200;
 interface Props {
   pr: PullRequestSummary;
   ciState: CIState;
-  /** Show the workspace's Checks tab. */
+  /** Show the worktree's Checks tab. */
   onOpenChecks: () => void;
 }
 
 /**
- * The PR number in a workspace row, as a tag colored by CI state. Hovering it, or
+ * The PR number in a worktree row, as a tag colored by CI state. Hovering it, or
  * focusing it from the keyboard, opens a popover with the PR's title and
  * status and actions to open it on GitHub or copy its link; ArrowDown moves
  * focus into the popover. Clicking it shows the Checks tab.
@@ -132,7 +132,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           aria-label={label}
           aria-haspopup="dialog"
           aria-expanded={open}
-          data-testid="workspace-card__pr-badge"
+          data-testid="worktree-card__pr-badge"
           data-tone={tone}
           className={`shrink-0 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${NUMBER_CLASS} ${TONE_CLASS[tone]}`}
           onPointerEnter={(e) => {
@@ -166,7 +166,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
               e.preventDefault();
               contentRef.current?.querySelector<HTMLElement>("button")?.focus();
             }
-            // The row and the project list handle Enter, Space and the arrows.
+            // The row and the repo list handle Enter, Space and the arrows.
             if (e.key === "Enter" || e.key === " " || e.key.startsWith("Arrow")) {
               e.stopPropagation();
             }
@@ -199,7 +199,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
         onBlur={(e) => {
           if (!isInside(e.relatedTarget)) setOpen(false);
         }}
-        // React events bubble out of the portal to the workspace row, which
+        // React events bubble out of the portal to the worktree row, which
         // would navigate, open its context menu, or move the list selection.
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}

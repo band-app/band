@@ -1,10 +1,10 @@
 /**
  * End-to-end coverage for the Commits section of the Changes tab: the
- * workspace's HEAD history with its graph, ref pills, expandable commits
+ * worktree's HEAD history with its graph, ref pills, expandable commits
  * whose files open a per-commit diff, paging, and reloading when HEAD moves.
  *
- * Both workspaces are real on-disk repos read through the real
- * `workspace.getCommitHistory` / `getCommitDetails` / `getCommitFileDiff`
+ * Both worktrees are real on-disk repos read through the real
+ * `worktree.getCommitHistory` / `getCommitDetails` / `getCommitFileDiff`
  * procedures. No tRPC mocking, no `page.route`. Locators live in
  * `pages/ChangesPanelPage.ts`.
  */
@@ -12,7 +12,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git, gitCommit } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -42,8 +42,8 @@ const NOTES = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
 let server: ServerHandle;
 let tmpHome: string;
 let graphRepo: string;
-let graphWorkspace: string;
-let longWorkspace: string;
+let graphWorktree: string;
+let longWorktree: string;
 const sha: Record<string, string> = {};
 
 test.beforeAll(async () => {
@@ -90,7 +90,7 @@ test.beforeAll(async () => {
   }
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: GRAPH_REPO,
         path: graphRepo,
@@ -107,8 +107,8 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  graphWorkspace = toWorkspaceId(GRAPH_REPO, BRANCH);
-  longWorkspace = toWorkspaceId(LONG_REPO, BRANCH);
+  graphWorktree = toWorktreeId(GRAPH_REPO, BRANCH);
+  longWorktree = toWorktreeId(LONG_REPO, BRANCH);
 });
 
 // UI state lives on the server now: start each test from none, like the
@@ -123,7 +123,7 @@ test.afterAll(async () => {
 test.describe("Changes tab Commits panel", () => {
   test("shows HEAD's history with HEAD marked and ref pills", async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(graphWorkspace);
+    await changes.goto(graphWorktree);
 
     await expect(changes.commitRow(sha.merge)).toBeVisible({ timeout: 15_000 });
     await expect(changes.commitRow(sha.merge)).toHaveAttribute("data-head", "true");
@@ -149,7 +149,7 @@ test.describe("Changes tab Commits panel", () => {
     page,
   }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(graphWorkspace);
+    await changes.goto(graphWorktree);
 
     await changes.expandCommit(sha.edit);
     await expect(changes.commitFile(sha.edit, "notes.txt")).toBeVisible();
@@ -171,7 +171,7 @@ test.describe("Changes tab Commits panel", () => {
 
   test("the collapsed state survives a reload", async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(graphWorkspace);
+    await changes.goto(graphWorktree);
     await expect(changes.commitRow(sha.merge)).toBeVisible({ timeout: 15_000 });
 
     await changes.toggleCommits();
@@ -188,7 +188,7 @@ test.describe("Changes tab Commits panel", () => {
 
   test("scrolling to the end loads the next page, also after re-expanding", async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(longWorkspace);
+    await changes.goto(longWorktree);
 
     await expect(changes.commitsCount).toHaveText("50+", { timeout: 15_000 });
     await expect(changes.commitRow(sha.longOldest)).toHaveCount(0);
@@ -206,7 +206,7 @@ test.describe("Changes tab Commits panel", () => {
 
   test("a new commit appears without a manual refresh", async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
-    await changes.goto(graphWorkspace);
+    await changes.goto(graphWorktree);
     await expect(changes.commitRow(sha.merge)).toHaveAttribute("data-head", "true", {
       timeout: 15_000,
     });

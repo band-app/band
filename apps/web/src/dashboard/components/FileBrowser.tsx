@@ -41,17 +41,17 @@ import { writeClipboardText } from "../../lib/clipboard";
 import { useAdapter, useCapabilities } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
-import { joinWorkspacePath } from "../lib/workspace-path";
+import { joinWorktreePath } from "../lib/worktree-path";
 import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
-  workspaceId: string;
+  worktreeId: string;
   /**
-   * Absolute filesystem path of the workspace root. When provided, each row's
+   * Absolute filesystem path of the worktree root. When provided, each row's
    * right-click menu offers "Copy absolute path"; when omitted (e.g. still
    * loading) that item is hidden but "Copy relative path" remains.
    */
-  workspacePath?: string;
+  worktreePath?: string;
   /**
    * Called on single-click on a file. The caller decides whether this
    * opens as a preview or pinned tab (this component just emits the
@@ -69,7 +69,7 @@ interface FileBrowserProps {
   selectedFile?: string;
   /**
    * Called after a path is renamed via the file browser context menu.
-   * `oldPath` and `newPath` are workspace-relative. For directory
+   * `oldPath` and `newPath` are worktree-relative. For directory
    * renames the caller should also rewrite any descendant tabs whose
    * paths sit inside `oldPath + "/"`.
    */
@@ -84,7 +84,7 @@ interface FileBrowserProps {
 /**
  * Imperative handle exposed via `ref` so external toolbars (e.g. the file
  * tree toolbar in CodeBrowserView) can trigger an inline "new file" or
- * "new folder" input at the workspace root.
+ * "new folder" input at the worktree root.
  */
 export interface FileBrowserHandle {
   /** Begin creating a new file at the given parent (defaults to root). */
@@ -142,7 +142,7 @@ interface TreeDnd {
 
 // ---------------------------------------------------------------------------
 // Module-level caches — survive re-mounts so tree state is preserved when
-// the user switches between workspaces.
+// the user switches between worktrees.
 // ---------------------------------------------------------------------------
 const expandedStateCache = new Map<string, Set<string>>();
 const dirContentsCache = new Map<string, Map<string, FileEntry[]>>();
@@ -361,8 +361,8 @@ interface TreeNodeProps {
   canCut: boolean;
   canCopy: boolean;
   canPaste: boolean;
-  /** Absolute workspace root path, used to build the "Copy absolute path" value. */
-  workspacePath?: string;
+  /** Absolute worktree root path, used to build the "Copy absolute path" value. */
+  worktreePath?: string;
   compact?: boolean;
   /** Single source of truth for the currently-highlighted tree row. */
   treeSelection: { path: string; kind: "file" | "directory" } | null;
@@ -408,7 +408,7 @@ function TreeNode({
   canCut,
   canCopy,
   canPaste,
-  workspacePath,
+  worktreePath,
   compact,
   treeSelection,
   clipboard,
@@ -468,7 +468,7 @@ function TreeNode({
     <button
       ref={isSelected ? selectedRef : undefined}
       type="button"
-      // data-band-active marks this button so the workspace-level
+      // data-band-active marks this button so the worktree-level
       // ⇧⌘E "focus Files" handler can target it from outside the
       // FileBrowser without depending on the brittle Tailwind class
       // pair below.
@@ -646,7 +646,7 @@ function TreeNode({
           </ContextMenuItem>
         )}
         {/* Copy-path actions are always available (relative path is derivable
-            from the row alone; absolute path needs the workspace root). Only
+            from the row alone; absolute path needs the worktree root). Only
             add a leading separator when there are Cut/Copy/Paste items
             directly above — a directory's New File/New Folder block already
             renders its own trailing separator, so gating on `isDir` here would
@@ -659,11 +659,11 @@ function TreeNode({
           <ClipboardCopy className="size-4" />
           Copy relative path
         </ContextMenuItem>
-        {workspacePath && (
+        {worktreePath && (
           <ContextMenuItem
             data-testid="file-tree__copy-absolute-path"
             onSelect={() =>
-              menu.queue(() => void writeClipboardText(joinWorkspacePath(workspacePath, entryPath)))
+              menu.queue(() => void writeClipboardText(joinWorktreePath(worktreePath, entryPath)))
             }
           >
             <ClipboardCopy className="size-4" />
@@ -740,7 +740,7 @@ function TreeNode({
               canCut={canCut}
               canCopy={canCopy}
               canPaste={canPaste}
-              workspacePath={workspacePath}
+              worktreePath={worktreePath}
               compact={compact}
               treeSelection={treeSelection}
               clipboard={clipboard}
@@ -810,8 +810,8 @@ function TreeNode({
 // ---------------------------------------------------------------------------
 export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser(
   {
-    workspaceId,
-    workspacePath,
+    worktreeId,
+    worktreePath,
     onOpenFile,
     onOpenFilePinned,
     compact,
@@ -826,10 +826,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
 
   // React state mirroring the module-level caches so changes trigger renders
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
-    () => new Set(getCachedExpanded(workspaceId)),
+    () => new Set(getCachedExpanded(worktreeId)),
   );
   const [dirContents, setDirContents] = useState<Map<string, FileEntry[]>>(
-    () => new Map(getCachedContents(workspaceId)),
+    () => new Map(getCachedContents(worktreeId)),
   );
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
 
@@ -883,17 +883,17 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   // Ref for scrolling the selected file into view
   const selectedRef = useRef<HTMLButtonElement>(null);
 
-  // Track workspace switches — restore cached state
-  const prevWorkspaceRef = useRef(workspaceId);
+  // Track worktree switches — restore cached state
+  const prevWorktreeRef = useRef(worktreeId);
   useEffect(() => {
-    if (prevWorkspaceRef.current !== workspaceId) {
-      prevWorkspaceRef.current = workspaceId;
-      setExpandedPaths(new Set(getCachedExpanded(workspaceId)));
-      setDirContents(new Map(getCachedContents(workspaceId)));
+    if (prevWorktreeRef.current !== worktreeId) {
+      prevWorktreeRef.current = worktreeId;
+      setExpandedPaths(new Set(getCachedExpanded(worktreeId)));
+      setDirContents(new Map(getCachedContents(worktreeId)));
       setLoadingPaths(new Set());
       setNewEntry(null);
       // The selectedFile-sync effect below will re-seed treeSelection
-      // when the parent passes a new open file for the next workspace.
+      // when the parent passes a new open file for the next worktree.
       setTreeSelection(null);
       setPendingDelete(null);
       setDeleteError(null);
@@ -902,7 +902,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       setClipboard(null);
       setOperationError(null);
     }
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   // Mirror the parent-owned `selectedFile` into the tree selection
   // whenever it changes (e.g. user opened a file from QuickOpen or the
@@ -925,9 +925,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   // ------- Fetch helpers -------
   const fetchDir = useCallback(
     async (dirPath: string, opts?: { force?: boolean }): Promise<void> => {
-      if (!adapter.listWorkspaceFiles) return;
+      if (!adapter.listWorktreeFiles) return;
 
-      const cache = getCachedContents(workspaceId);
+      const cache = getCachedContents(worktreeId);
       if (!opts?.force && cache.has(dirPath)) {
         // Already fetched — make sure React state includes it
         setDirContents((prev) => (prev.has(dirPath) ? prev : new Map(cache)));
@@ -937,7 +937,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       setLoadingPaths((prev) => new Set(prev).add(dirPath));
 
       try {
-        const result = await adapter.listWorkspaceFiles(workspaceId, dirPath);
+        const result = await adapter.listWorktreeFiles(worktreeId, dirPath);
         cache.set(dirPath, result.entries);
         setDirContents(new Map(cache));
       } catch {
@@ -951,17 +951,17 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         });
       }
     },
-    [adapter, workspaceId],
+    [adapter, worktreeId],
   );
 
-  // Load root on mount / workspace change
+  // Load root on mount / worktree change
   useEffect(() => {
     fetchDir("");
   }, [fetchDir]);
 
   // ------- External file-change invalidation -------
   //
-  // The server watches each workspace's worktree and emits a `file-change`
+  // The server watches each worktree's worktree and emits a `file-change`
   // event with the parent directory of any touched path. We invalidate
   // only directories the user has already visited (i.e. live in the cache):
   //  * If the directory is expanded, a force-refetch updates the tree in
@@ -972,20 +972,20 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   //    on first expand — no invalidation needed.
   useEffect(() => {
     if (!adapter.subscribeFileChanges) return;
-    const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedPath) => {
+    const unsubscribe = adapter.subscribeFileChanges(worktreeId, (changedPath) => {
       // `getCachedContents` is a stable module-level helper (defined at
       // the top of this file), so it doesn't need to be in the effect's
       // dependency array.
-      const cache = getCachedContents(workspaceId);
+      const cache = getCachedContents(worktreeId);
       if (!cache.has(changedPath)) return;
       void fetchDir(changedPath, { force: true });
     });
     return unsubscribe;
     // `fetchDir` is wrapped in `useCallback` above with `[adapter,
-    // workspaceId]`, so it's stable across renders of this component —
-    // the effect only tears the subscription down on workspace switch,
+    // worktreeId]`, so it's stable across renders of this component —
+    // the effect only tears the subscription down on worktree switch,
     // not on every render.
-  }, [adapter, workspaceId, fetchDir]);
+  }, [adapter, worktreeId, fetchDir]);
 
   // ------- Auto-expand to selected file -------
   const prevSelectedRef = useRef<string | undefined>(undefined);
@@ -1004,7 +1004,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       dirsToExpand.push(parts.slice(0, i + 1).join("/"));
     }
 
-    const cached = getCachedExpanded(workspaceId);
+    const cached = getCachedExpanded(worktreeId);
     let changed = false;
     for (const dir of dirsToExpand) {
       if (!cached.has(dir)) {
@@ -1014,7 +1014,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     }
 
     if (changed) {
-      expandedStateCache.set(workspaceId, new Set(cached));
+      expandedStateCache.set(worktreeId, new Set(cached));
       setExpandedPaths(new Set(cached));
     }
 
@@ -1022,7 +1022,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     for (const dir of dirsToExpand) {
       fetchDir(dir);
     }
-  }, [selectedFile, workspaceId, fetchDir]);
+  }, [selectedFile, worktreeId, fetchDir]);
 
   // Scroll to selected file after tree updates
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll after tree settles for new selection
@@ -1046,14 +1046,14 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         } else {
           next.add(dirPath);
         }
-        expandedStateCache.set(workspaceId, new Set(next));
+        expandedStateCache.set(worktreeId, new Set(next));
         return next;
       });
 
       // Fetch if not yet loaded
       fetchDir(dirPath);
     },
-    [workspaceId, fetchDir],
+    [worktreeId, fetchDir],
   );
 
   // ------- New file / folder flow -------
@@ -1061,15 +1061,15 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     async (dirPath: string) => {
       // Make sure the directory is expanded and its contents are loaded
       // before we show the inline input inside it.
-      const cached = getCachedExpanded(workspaceId);
+      const cached = getCachedExpanded(worktreeId);
       if (!cached.has(dirPath)) {
         cached.add(dirPath);
-        expandedStateCache.set(workspaceId, new Set(cached));
+        expandedStateCache.set(worktreeId, new Set(cached));
         setExpandedPaths(new Set(cached));
       }
       await fetchDir(dirPath);
     },
-    [workspaceId, fetchDir],
+    [worktreeId, fetchDir],
   );
 
   const requestNewEntry = useCallback(
@@ -1090,15 +1090,15 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       const fullPath = newEntry.parentPath ? `${newEntry.parentPath}/${name}` : name;
 
       if (newEntry.kind === "file") {
-        if (!adapter.createWorkspaceFile) {
+        if (!adapter.createWorktreeFile) {
           throw new Error("Creating files is not supported");
         }
-        await adapter.createWorkspaceFile(workspaceId, fullPath);
+        await adapter.createWorktreeFile(worktreeId, fullPath);
       } else {
-        if (!adapter.createWorkspaceDirectory) {
+        if (!adapter.createWorktreeDirectory) {
           throw new Error("Creating folders is not supported");
         }
-        await adapter.createWorkspaceDirectory(workspaceId, fullPath);
+        await adapter.createWorktreeDirectory(worktreeId, fullPath);
       }
 
       // Refresh the parent directory so the new entry shows up. Force
@@ -1115,20 +1115,20 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         setTreeSelection({ path: fullPath, kind: "file" });
         onOpenFile(fullPath);
       } else {
-        const cached = getCachedExpanded(workspaceId);
+        const cached = getCachedExpanded(worktreeId);
         if (!cached.has(fullPath)) {
           cached.add(fullPath);
-          expandedStateCache.set(workspaceId, new Set(cached));
+          expandedStateCache.set(worktreeId, new Set(cached));
           setExpandedPaths(new Set(cached));
         }
         setTreeSelection({ path: fullPath, kind: "directory" });
       }
     },
-    [adapter, newEntry, fetchDir, onOpenFile, workspaceId],
+    [adapter, newEntry, fetchDir, onOpenFile, worktreeId],
   );
 
   // ------- Delete flow -------
-  const canDelete = Boolean(adapter.deleteWorkspacePath);
+  const canDelete = Boolean(adapter.deleteWorktreePath);
 
   const requestDelete = useCallback((path: string, kind: "file" | "directory") => {
     setDeleteError(null);
@@ -1142,16 +1142,16 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   }, [deleteSubmitting]);
 
   const confirmDelete = useCallback(async () => {
-    if (!pendingDelete || !adapter.deleteWorkspacePath) return;
+    if (!pendingDelete || !adapter.deleteWorktreePath) return;
     setDeleteSubmitting(true);
     setDeleteError(null);
     try {
-      await adapter.deleteWorkspacePath(workspaceId, pendingDelete.path);
+      await adapter.deleteWorktreePath(worktreeId, pendingDelete.path);
 
       // Drop cached contents for the deleted path (if it was a directory)
       // and any descendants, so they aren't resurrected when the user
       // re-expands a parent.
-      const cache = getCachedContents(workspaceId);
+      const cache = getCachedContents(worktreeId);
       const prefix = `${pendingDelete.path}/`;
       cache.delete(pendingDelete.path);
       for (const key of Array.from(cache.keys())) {
@@ -1159,12 +1159,12 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       }
 
       // Collapse and drop the expanded-state for any descendants
-      const cachedExpanded = getCachedExpanded(workspaceId);
+      const cachedExpanded = getCachedExpanded(worktreeId);
       cachedExpanded.delete(pendingDelete.path);
       for (const key of Array.from(cachedExpanded)) {
         if (key.startsWith(prefix)) cachedExpanded.delete(key);
       }
-      expandedStateCache.set(workspaceId, new Set(cachedExpanded));
+      expandedStateCache.set(worktreeId, new Set(cachedExpanded));
       setExpandedPaths(new Set(cachedExpanded));
 
       // If the deleted entry (or one of its descendants) was the
@@ -1203,10 +1203,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     } finally {
       setDeleteSubmitting(false);
     }
-  }, [adapter, pendingDelete, fetchDir, workspaceId, onPathDeleted]);
+  }, [adapter, pendingDelete, fetchDir, worktreeId, onPathDeleted]);
 
   // ------- Rename flow -------
-  const canRename = Boolean(adapter.renameWorkspacePath);
+  const canRename = Boolean(adapter.renameWorktreePath);
 
   /**
    * Rewrite path-keyed tree state after `from` moved to `to` (rename, cut +
@@ -1217,7 +1217,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
    */
   const remapCachesAfterMove = useCallback(
     (from: string, to: string) => {
-      const cache = getCachedContents(workspaceId);
+      const cache = getCachedContents(worktreeId);
       const remapped = new Map<string, FileEntry[]>();
       for (const [key, value] of cache.entries()) {
         remapped.set(remapPath(key, from, to) ?? key, value);
@@ -1227,10 +1227,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       setDirContents(new Map(cache));
 
       const expanded = new Set<string>();
-      for (const key of getCachedExpanded(workspaceId)) {
+      for (const key of getCachedExpanded(worktreeId)) {
         expanded.add(remapPath(key, from, to) ?? key);
       }
-      expandedStateCache.set(workspaceId, expanded);
+      expandedStateCache.set(worktreeId, expanded);
       setExpandedPaths(new Set(expanded));
 
       setTreeSelection((prev) => {
@@ -1240,7 +1240,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       });
       setNewEntry((prev) => (prev && remapPath(prev.parentPath, from, to) != null ? null : prev));
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const requestRename = useCallback((path: string) => {
@@ -1253,13 +1253,13 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
 
   const submitRename = useCallback(
     async (newName: string) => {
-      if (renamingPath == null || !adapter.renameWorkspacePath) return;
+      if (renamingPath == null || !adapter.renameWorktreePath) return;
       const oldPath = renamingPath;
       const slashIdx = oldPath.lastIndexOf("/");
       const parent = slashIdx === -1 ? "" : oldPath.slice(0, slashIdx);
       const newPath = parent ? `${parent}/${newName}` : newName;
 
-      const result = await adapter.renameWorkspacePath(workspaceId, oldPath, newPath);
+      const result = await adapter.renameWorktreePath(worktreeId, oldPath, newPath);
       remapCachesAfterMove(oldPath, newPath);
 
       // Refresh the parent directory listing so the row reflects the new name.
@@ -1270,13 +1270,13 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       // Tell the host to update open tabs / editor state for the rename.
       onPathRenamed?.(oldPath, newPath, result.kind);
     },
-    [adapter, renamingPath, fetchDir, onPathRenamed, remapCachesAfterMove, workspaceId],
+    [adapter, renamingPath, fetchDir, onPathRenamed, remapCachesAfterMove, worktreeId],
   );
 
   // Derive the implicit target for "New File" / "New Folder" actions
   // initiated from the parent toolbar (i.e. callers that don't pass an
   // explicit parent). Priority: selected folder → selected file's parent
-  // directory → workspace root. The right-click-on-empty-area flow
+  // directory → worktree root. The right-click-on-empty-area flow
   // clears `treeSelection`, which intentionally falls through to root.
   const resolveDefaultTarget = useCallback((): string => {
     if (treeSelection?.kind === "directory") return treeSelection.path;
@@ -1288,12 +1288,12 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   }, [treeSelection]);
 
   // ------- Cut / Copy / Paste -------
-  const canCutCopy = Boolean(adapter.renameWorkspacePath);
-  const canCopyOp = Boolean(adapter.copyWorkspacePath);
+  const canCutCopy = Boolean(adapter.renameWorktreePath);
+  const canCopyOp = Boolean(adapter.copyWorktreePath);
   const canPaste = Boolean(
     clipboard &&
-      ((clipboard.op === "copy" && adapter.copyWorkspacePath) ||
-        (clipboard.op === "cut" && adapter.renameWorkspacePath)),
+      ((clipboard.op === "copy" && adapter.copyWorktreePath) ||
+        (clipboard.op === "cut" && adapter.renameWorktreePath)),
   );
 
   const cutPath = useCallback((path: string, kind: EntryKind) => {
@@ -1310,7 +1310,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const uniqueCopyName = useCallback(
     (baseName: string, destFolder: string, kind: EntryKind): string => {
       const siblings = new Set(
-        (getCachedContents(workspaceId).get(destFolder) ?? []).map((e) => e.name),
+        (getCachedContents(worktreeId).get(destFolder) ?? []).map((e) => e.name),
       );
       if (!siblings.has(baseName)) return baseName;
 
@@ -1326,7 +1326,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         n += 1;
       }
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   /** Whether `source` may be copied (`op: "copy"`) or moved into `destFolder`. */
@@ -1347,7 +1347,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   );
 
   /**
-   * Copy or move `source` into `destFolder` (workspace root if empty
+   * Copy or move `source` into `destFolder` (worktree root if empty
    * string). A copy is auto-suffixed with "copy" if it would collide; a
    * move surfaces a collision as an error, matching rename semantics.
    * Shared by Paste and drag-and-drop. Resolves `false` when the target is
@@ -1363,9 +1363,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       const baseName = baseNameOf(source.path);
 
       if (op === "copy") {
-        if (!adapter.copyWorkspacePath) return false;
+        if (!adapter.copyWorktreePath) return false;
         const destPath = joinChild(destFolder, uniqueCopyName(baseName, destFolder, source.kind));
-        await adapter.copyWorkspacePath(workspaceId, source.path, destPath);
+        await adapter.copyWorktreePath(worktreeId, source.path, destPath);
         await fetchDir(destFolder, { force: true });
         // Open the destination so the new row is visible, as in VS Code.
         if (destFolder) await ensureDirExpanded(destFolder);
@@ -1373,9 +1373,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         return true;
       }
 
-      if (!adapter.renameWorkspacePath) return false;
+      if (!adapter.renameWorktreePath) return false;
       const destPath = joinChild(destFolder, baseName);
-      const result = await adapter.renameWorkspacePath(workspaceId, source.path, destPath);
+      const result = await adapter.renameWorktreePath(worktreeId, source.path, destPath);
       remapCachesAfterMove(source.path, destPath);
       if (destFolder) await ensureDirExpanded(destFolder);
 
@@ -1400,7 +1400,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       onPathRenamed,
       remapCachesAfterMove,
       uniqueCopyName,
-      workspaceId,
+      worktreeId,
     ],
   );
 
@@ -1481,7 +1481,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         // drag can reach entries nested several levels down.
         if (expandTimerRef.current?.folder === folder) return;
         clearExpandTimer();
-        if (folder && !getCachedExpanded(workspaceId).has(folder)) {
+        if (folder && !getCachedExpanded(worktreeId).has(folder)) {
           expandTimerRef.current = {
             folder,
             timer: setTimeout(() => {
@@ -1510,14 +1510,14 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       ensureDirExpanded,
       runOperation,
       transferInto,
-      workspaceId,
+      worktreeId,
     ],
   );
 
   // ------- Refresh / collapse all -------
   const refreshTree = useCallback(async () => {
-    const cache = getCachedContents(workspaceId);
-    const expanded = getCachedExpanded(workspaceId);
+    const cache = getCachedContents(worktreeId);
+    const expanded = getCachedExpanded(worktreeId);
     // Collapsed folders drop out of the cache so their next expand reads
     // disk; expanded ones re-fetch now.
     for (const key of Array.from(cache.keys())) {
@@ -1525,22 +1525,22 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     }
     setDirContents(new Map(cache));
     await Promise.all(Array.from(expanded, (dir) => fetchDir(dir, { force: true })));
-  }, [fetchDir, workspaceId]);
+  }, [fetchDir, worktreeId]);
 
   const collapseAll = useCallback(() => {
     const root = new Set([""]);
-    expandedStateCache.set(workspaceId, root);
+    expandedStateCache.set(worktreeId, root);
     setExpandedPaths(new Set(root));
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   // ------- Reveal in Finder (desktop shell only) -------
   const revealInFinder = capabilities.revealInFinder;
   const onRevealInFinder = useMemo(
     () =>
-      revealInFinder && workspacePath
-        ? (path: string) => void revealInFinder(joinWorkspacePath(workspacePath, path))
+      revealInFinder && worktreePath
+        ? (path: string) => void revealInFinder(joinWorktreePath(worktreePath, path))
         : undefined,
-    [revealInFinder, workspacePath],
+    [revealInFinder, worktreePath],
   );
 
   // ------- Imperative handle for parent toolbars -------
@@ -1566,7 +1566,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const rootMenu = useDeferredMenuAction();
 
   // ------- Render -------
-  if (!adapter.listWorkspaceFiles) {
+  if (!adapter.listWorktreeFiles) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
         File browsing not supported
@@ -1648,7 +1648,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       if (!canPaste) return;
       e.preventDefault();
       // Paste into the folder under the cursor (selected folder), the
-      // parent of the selected file, or the workspace root — same
+      // parent of the selected file, or the worktree root — same
       // priority order resolveDefaultTarget uses for "New File…".
       void pasteInto(resolveDefaultTarget());
     }
@@ -1662,7 +1662,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       <ContextMenu
         // Right-clicking the empty tree area clears any active row
         // selection so the user can see that the new entry will land at
-        // the workspace root. Radix's nested ContextMenu triggers stop
+        // the worktree root. Radix's nested ContextMenu triggers stop
         // propagation, so right-clicks on individual row buttons fire
         // the per-row menu only and never reach this outer onOpenChange.
         onOpenChange={(open) => {
@@ -1744,7 +1744,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                   canCut={canCutCopy}
                   canCopy={canCopyOp}
                   canPaste={canPaste}
-                  workspacePath={workspacePath}
+                  worktreePath={worktreePath}
                   compact={compact}
                   treeSelection={treeSelection}
                   clipboard={clipboard}

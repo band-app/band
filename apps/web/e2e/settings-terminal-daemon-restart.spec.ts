@@ -16,7 +16,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -26,11 +26,11 @@ import {
   startServer,
 } from "./helpers/server";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-daemon-restart-token";
-const PROJECT = "alpha-terminal-daemon-restart";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "alpha-terminal-daemon-restart";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // (which hosts both the terminal container and the persistent bottom action
@@ -45,9 +45,9 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = realpathSync(mkdtempSync(join(tmpdir(), "band-term-daemon-restart-")));
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: workdir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdir }],
@@ -67,16 +67,16 @@ test.afterAll(async () => {
 });
 
 test("restarting the terminal service from Settings ends the open terminal", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
 
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await workspacePage.waitForTerminalReady();
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE,
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await worktreePage.waitForTerminalReady();
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE);
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE,
     'echo BEFORE_"RESTART"',
     /BEFORE_RESTART/,
   );
@@ -87,6 +87,6 @@ test("restarting the terminal service from Settings ends the open terminal", asy
 
   // Same close code (1000) and on-screen marker as any other PTY exit.
   await expect
-    .poll(() => workspacePage.readTerminalRenderedText(WORKSPACE), { timeout: 15_000 })
+    .poll(() => worktreePage.readTerminalRenderedText(WORKTREE), { timeout: 15_000 })
     .toMatch(/Process completed/);
 });

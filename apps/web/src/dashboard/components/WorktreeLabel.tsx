@@ -1,42 +1,37 @@
 import { cn } from "@band-app/ui";
 
 /**
- * Two-row workspace label: the workspace name on the first line with the
- * project name stacked beneath it. Shared by the Pinned section cards
- * (`WorkspaceCard` with `showProjectName`), the mobile workspace header
- * (`MobileWorkspaceShell`) and the ⌘K workspace picker
- * (`WorkspacePickerDialog`) so both render the same compact, scannable block
- * instead of a long, mid-truncated `project/name` string on one line.
+ * Two-row worktree label: the worktree name on the first line with the
+ * repo name stacked beneath it. Shared by the Pinned section cards
+ * (`WorktreeCard` with `showRepoName`), the mobile worktree header
+ * (`MobileWorktreeShell`) and the ⌘K worktree picker
+ * (`WorktreePickerDialog`) so both render the same compact, scannable block
+ * instead of a long, mid-truncated `repo/name` string on one line.
  *
- * `isActive` bolds the name + brightens the project line to mark the
- * currently-open workspace, matching the card's active styling.
+ * `isActive` bolds the name + brightens the repo line to mark the
+ * currently-open worktree, matching the card's active styling.
  *
  * `tone` adapts the text colour to the surface:
  *  - "sidebar" (default): compact 13px/11px text at reduced foreground opacity,
- *    matching the surrounding cards in the dense project tree.
+ *    matching the surrounding cards in the dense repo tree.
  *  - "switcher": full-size, brighter text for the command-palette overlay.
  */
-interface WorkspaceLabelProps {
-  /** Stable workspace identity/label (see `WorktreeInfo.name`). */
+interface WorktreeLabelProps {
+  /** Stable worktree identity/label (see `WorktreeInfo.name`). */
   name: string;
-  projectName: string;
+  repoName: string;
   isActive?: boolean;
   tone?: "sidebar" | "switcher";
 }
 
-export function WorkspaceLabel({
-  name,
-  projectName,
-  isActive,
-  tone = "sidebar",
-}: WorkspaceLabelProps) {
+export function WorktreeLabel({ name, repoName, isActive, tone = "sidebar" }: WorktreeLabelProps) {
   const nameClass =
     tone === "switcher"
       ? `text-foreground ${isActive ? "font-semibold" : "font-medium"}`
       : isActive
         ? "font-bold text-foreground"
         : "font-medium text-foreground/75";
-  const projectClass =
+  const repoClass =
     tone === "switcher"
       ? "text-foreground/70"
       : isActive
@@ -45,18 +40,18 @@ export function WorkspaceLabel({
   const isSidebar = tone === "sidebar";
 
   return (
-    <div data-testid="workspace-label" className="flex flex-col min-w-0 leading-tight">
+    <div data-testid="worktree-label" className="flex flex-col min-w-0 leading-tight">
       <span
-        data-testid="workspace-label__name"
+        data-testid="worktree-label__name"
         className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}
       >
         {name}
       </span>
       <span
-        data-testid="workspace-label__project"
-        className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", projectClass)}
+        data-testid="worktree-label__repo"
+        className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", repoClass)}
       >
-        {projectName}
+        {repoName}
       </span>
     </div>
   );

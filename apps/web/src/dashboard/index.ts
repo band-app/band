@@ -5,11 +5,11 @@ export {
   formatFileLocation,
   parseFileLocation,
 } from "@band-app/shared/file-location";
-export { toWorkspaceId } from "@band-app/shared/workspace-id";
+export { toWorktreeId } from "@band-app/shared/worktree-id";
 // Adapter
 export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
 // Components
-export { AddProjectDialog } from "./components/AddProjectDialog";
+export { AddRepoDialog } from "./components/AddRepoDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
@@ -33,11 +33,11 @@ export {
   AUTO_DETECT_LANGUAGE_ID,
   LanguagePickerDialog,
 } from "./components/LanguagePickerDialog";
-export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
+export { NewWorktreeDialog } from "./components/NewWorktreeForm";
 export { PdfPreview } from "./components/PdfPreview";
-export { ProjectAvatar } from "./components/ProjectAvatar";
-export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
+export { RepoAvatar } from "./components/RepoAvatar";
+export { RepoList } from "./components/RepoList";
 export {
   SearchBar,
   type SearchBarHandle,
@@ -49,18 +49,18 @@ export { TerminalSelectionContextMenu } from "./components/SelectionContextMenu"
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { SettingsRow, SettingsSection } from "./components/settings";
-export { WorkspaceCard } from "./components/WorkspaceCard";
-export { WorkspaceLabel } from "./components/WorkspaceLabel";
-export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
-export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
+export { WorktreeCard } from "./components/WorktreeCard";
+export { WorktreeLabel } from "./components/WorktreeLabel";
+export { WorktreePickerDialog } from "./components/WorktreePickerDialog";
+export { type WorktreeTab, WorktreeTabNav } from "./components/WorktreeTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export {
   useBrowserProfiles,
   useInvalidateBrowserProfiles,
-  useProjectBrowserProfiles,
   useRemoveBrowserProfile,
-  useSetProjectBrowserProfile,
+  useRepoBrowserProfiles,
+  useSetRepoBrowserProfile,
 } from "./hooks/use-browser-profiles";
 export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
 export {
@@ -72,19 +72,19 @@ export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
 export { LABEL_FILTER_KEY, useLabelFilter } from "./hooks/use-label-filter";
 export {
-  LABEL_LAST_WORKSPACE_KEY,
-  useLabelLastWorkspace,
-  useRecordLabelLastWorkspace,
-} from "./hooks/use-label-last-workspace";
+  LABEL_LAST_WORKTREE_KEY,
+  useLabelLastWorktree,
+  useRecordLabelLastWorktree,
+} from "./hooks/use-label-last-worktree";
 export {
-  useAddProject,
-  useCreateWorkspace,
-  useRemoveProject,
-  useRemoveWorkspace,
-  useReorderProjects,
-  useUpdateProjectLabel,
-} from "./hooks/use-project-mutations";
-export { useProjects } from "./hooks/use-projects";
+  useAddRepo,
+  useCreateWorktree,
+  useRemoveRepo,
+  useRemoveWorktree,
+  useReorderRepos,
+  useUpdateRepoLabel,
+} from "./hooks/use-repo-mutations";
+export { useRepos } from "./hooks/use-repos";
 export { type UseSearchReturn, useSearch } from "./hooks/use-search";
 export { useUpdateSettings } from "./hooks/use-settings-mutations";
 export { useSettingsQuery } from "./hooks/use-settings-query";
@@ -94,7 +94,7 @@ export {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
-export { useWorkspacePath } from "./hooks/use-workspace-path";
+export { useWorktreePath } from "./hooks/use-worktree-path";
 export { AGENT_MODE_KEY, readAgentMode, useAgentMode } from "./lib/agent-mode";
 export {
   buildLspWsUrl,
@@ -134,7 +134,7 @@ export type {
   RenderedBlockKind,
   RenderMarkdownBlock,
 } from "./lib/markdown-live-preview";
-export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
+export { getRecentWorktreeOrder, recordWorktreeAccess } from "./lib/recent-worktrees";
 export {
   type AddToChatDetail,
   type AddToTerminalDetail,
@@ -180,21 +180,21 @@ export type {
   GitSyncState,
   HooksStatus,
   LabelDefinition,
-  ListWorkspaceBranchesResult,
+  ListWorktreeBranchesResult,
   NotificationSettings,
-  ProjectAvatarInfo,
-  ProjectInfo,
-  ProjectKind,
+  RepoAvatarInfo,
+  RepoInfo,
+  RepoKind,
   Settings,
   SetupState,
   SetupStatus,
   TabAgentStatus,
   TerminalLayoutNode,
   TerminalPaneConfig,
-  WorkspaceBranchStatus,
-  WorkspaceChanges,
-  WorkspaceDiff,
-  WorkspaceStatus,
-  WorkspaceTerminalConfig,
+  WorktreeBranchStatus,
+  WorktreeChanges,
+  WorktreeDiff,
   WorktreeInfo,
+  WorktreeStatus,
+  WorktreeTerminalConfig,
 } from "./types";

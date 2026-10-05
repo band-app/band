@@ -12,34 +12,34 @@ import {
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
-  toWorkspaceId,
-  useProjects,
-  useWorkspacePath,
-  WorkspaceLabel,
-  WorkspacePickerDialog,
+  toWorktreeId,
+  useRepos,
+  useWorktreePath,
+  WorktreeLabel,
+  WorktreePickerDialog,
 } from "@/dashboard";
-import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
+import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { isDesktop } from "../lib/is-desktop";
-import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
-import { useWorkspaceSideTabs } from "../plugins/use-plugin-slot";
+import { useWorktreeSideTabs } from "../plugins/use-plugin-slot";
 import { ChangesSections } from "./ChangesSections";
 import { DesktopDragRegion } from "./DesktopTitleBar";
-import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
+import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "./ToolbarButtons";
-import { getWorkspaceLeafActions, WorkspaceCenterDockview } from "./WorkspaceCenterDockview";
+import { getWorktreeLeafActions, WorktreeCenterDockview } from "./WorktreeCenterDockview";
 
 // ---------------------------------------------------------------------------
-// The mobile workspace layout (narrow viewport, not the desktop app). Mounted
+// The mobile worktree layout (narrow viewport, not the desktop app). Mounted
 // once by AppShell, like the desktop `SharedDockviewLayout`, so it outlives
 // route changes:
-//   - the center dockview of every visited workspace stays mounted in a
-//     `MultiWorkspacePanelHost`, so switching back to a workspace doesn't
+//   - the center dockview of every visited worktree stays mounted in a
+//     `MultiWorktreePanelHost`, so switching back to a worktree doesn't
 //     replay its chats, restore its layout or refetch anything;
 //   - the header, the Explorer / Changes / plugin sheets and the dialogs exist
-//     once, for the workspace on screen, and reset on each switch (keyed by
-//     workspace, like the desktop `RightSidepanel`).
+//     once, for the worktree on screen, and reset on each switch (keyed by
+//     worktree, like the desktop `RightSidepanel`).
 // ---------------------------------------------------------------------------
 
 /** How much shorter than the layout viewport the visual viewport must be
@@ -100,31 +100,31 @@ function useAppHeight() {
 /** Live Changes sections for the mobile Changes sheet and the count on the
  *  menu's Changes row. Tracks the same compare branch the user picked,
  *  mirroring the desktop RightSidepanel query so the count matches the lists. */
-function useChangesSummary(workspaceId: string) {
-  const changesQuery = useWorkspaceChanges(workspaceId, { refetchInterval: 15_000 });
+function useChangesSummary(worktreeId: string) {
+  const changesQuery = useWorktreeChanges(worktreeId, { refetchInterval: 15_000 });
   return { changes: changesQuery.data, changeCount: countChangedPaths(changesQuery.data) };
 }
 
-/** The worktree and project names of a workspace, for the header label. Falls
- *  back to the workspace id until the projects query has answered. */
-function useWorkspaceNames(workspaceId: string): { name: string; projectName: string } {
-  const { projects } = useProjects();
+/** The worktree and repo names of a worktree, for the header label. Falls
+ *  back to the worktree id until the repos query has answered. */
+function useWorktreeNames(worktreeId: string): { name: string; repoName: string } {
+  const { repos } = useRepos();
   return useMemo(() => {
-    for (const project of projects) {
-      for (const worktree of project.worktrees) {
-        if (toWorkspaceId(project.name, worktree.name) === workspaceId) {
-          return { name: worktree.name, projectName: project.name };
+    for (const repo of repos) {
+      for (const worktree of repo.worktrees) {
+        if (toWorktreeId(repo.name, worktree.name) === worktreeId) {
+          return { name: worktree.name, repoName: repo.name };
         }
       }
     }
-    return { name: workspaceId, projectName: "" };
-  }, [projects, workspaceId]);
+    return { name: worktreeId, repoName: "" };
+  }, [repos, worktreeId]);
 }
 
 // Which mobile view is showing. "editor" is the dockview; the others open a
 // bottom sheet over it: "menu" lists the panels below, "explorer" / "changes"
 // hold a tree and return to "editor" on select or dismiss, and
-// `plugin:<pluginId>.<tabId>` holds a plugin's `workspace.sideTabs` tab (named
+// `plugin:<pluginId>.<tabId>` holds a plugin's `worktree.sideTabs` tab (named
 // as in `RightSidepanel`).
 type MobileView = "editor" | "menu" | "explorer" | "changes" | `plugin:${string}`;
 
@@ -137,24 +137,24 @@ function isMobileView(value: unknown): value is MobileView {
 }
 
 /** A sheet asked for through `band:right-sidepanel-set-tab` (the PR badge's
- *  `showChecksTab`), waiting for its workspace to be on screen. */
+ *  `showChecksTab`), waiting for its worktree to be on screen. */
 interface SheetRequest {
-  workspaceId: string;
+  worktreeId: string;
   view: MobileView;
 }
 
-// Hoisted so the root div gets a reference-equal style while no workspace is
+// Hoisted so the root div gets a reference-equal style while no worktree is
 // shown. It stays mounted and laid out (so hidden dockviews keep their size)
 // under the route's own page, but never paints or takes a tap.
-const NO_WORKSPACE_STYLE: React.CSSProperties = {
+const NO_WORKTREE_STYLE: React.CSSProperties = {
   height: "100dvh",
   visibility: "hidden",
   pointerEvents: "none",
 };
 
-export function MobileWorkspaceShell() {
+export function MobileWorktreeShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
   const { height: appHeight, offsetTop: appOffsetTop, keyboardOpen } = useAppHeight();
 
   // Render nothing on the server: the SSR pass can't know the viewport, and
@@ -165,26 +165,26 @@ export function MobileWorkspaceShell() {
   }, []);
 
   // The PR badge asks for the Checks sheet and then navigates to the badge's
-  // workspace, whose header may not be mounted yet. Hold the request here,
-  // where it survives the switch, until that workspace's header takes it.
-  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
-  activeWorkspaceIdRef.current = activeWorkspaceId;
+  // worktree, whose header may not be mounted yet. Hold the request here,
+  // where it survives the switch, until that worktree's header takes it.
+  const activeWorktreeIdRef = useRef(activeWorktreeId);
+  activeWorktreeIdRef.current = activeWorktreeId;
   const [sheetRequest, setSheetRequest] = useState<SheetRequest | null>(null);
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ tab?: unknown; workspaceId?: string }>).detail;
-      const workspaceId = detail?.workspaceId ?? activeWorkspaceIdRef.current;
-      if (!workspaceId || !isMobileView(detail?.tab)) return;
-      setSheetRequest({ workspaceId, view: detail.tab });
+      const detail = (e as CustomEvent<{ tab?: unknown; worktreeId?: string }>).detail;
+      const worktreeId = detail?.worktreeId ?? activeWorktreeIdRef.current;
+      if (!worktreeId || !isMobileView(detail?.tab)) return;
+      setSheetRequest({ worktreeId, view: detail.tab });
     };
     window.addEventListener("band:right-sidepanel-set-tab", handler);
     return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
   }, []);
-  // A request for a workspace the user didn't go to is dropped, so it can't
+  // A request for a worktree the user didn't go to is dropped, so it can't
   // pop a sheet open on a later visit.
   useEffect(() => {
-    setSheetRequest((r) => (r && r.workspaceId !== activeWorkspaceId ? null : r));
-  }, [activeWorkspaceId]);
+    setSheetRequest((r) => (r && r.worktreeId !== activeWorktreeId ? null : r));
+  }, [activeWorktreeId]);
   const clearSheetRequest = useCallback(() => setSheetRequest(null), []);
 
   if (!hydrated) return null;
@@ -193,51 +193,51 @@ export function MobileWorkspaceShell() {
     // Fixed, so a document scroll iOS makes to reveal the focused input can't
     // move it; `offsetTop` then follows the visual viewport as it pans.
     <div
-      data-testid="mobile-workspace"
+      data-testid="mobile-worktree"
       className="fixed inset-x-0 top-0 flex flex-col overflow-hidden"
       style={
-        activeWorkspaceId
+        activeWorktreeId
           ? {
               height: appHeight ? `${appHeight}px` : "100dvh",
               transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
             }
-          : NO_WORKSPACE_STYLE
+          : NO_WORKTREE_STYLE
       }
-      inert={!activeWorkspaceId}
+      inert={!activeWorktreeId}
     >
       {isDesktop && <DesktopDragRegion />}
-      {activeWorkspaceId && (
-        <MobileWorkspaceChrome
-          key={activeWorkspaceId}
-          workspaceId={activeWorkspaceId}
-          requestedView={sheetRequest?.workspaceId === activeWorkspaceId ? sheetRequest.view : null}
+      {activeWorktreeId && (
+        <MobileWorktreeChrome
+          key={activeWorktreeId}
+          worktreeId={activeWorktreeId}
+          requestedView={sheetRequest?.worktreeId === activeWorktreeId ? sheetRequest.view : null}
           onRequestedViewShown={clearSheetRequest}
         />
       )}
       {/* The unified center dockview is the ONLY editor surface on mobile —
        *  chat / terminal / browser leaves plus per-path file / diff leaves,
        *  all as tabs (mobile mode disables drag→split and the maximize
-       *  toggle). One per visited workspace, the shown one visible and the
+       *  toggle). One per visited worktree, the shown one visible and the
        *  rest hidden and inert. The sheets float over it and open leaves into
        *  it. It reaches the bottom screen edge, so it pads the home-indicator
        *  inset, except while the keyboard covers that edge: then the chat
        *  composer sits right on the keyboard. */}
       <main
-        data-testid="mobile-workspace__main"
+        data-testid="mobile-worktree__main"
         className={`flex min-h-0 flex-1 flex-col ${
           keyboardOpen ? "" : "pb-[env(safe-area-inset-bottom)]"
         }`}
       >
-        <MultiWorkspacePanelHost emptyState={null}>
-          {(workspaceId, wsActive) => (
-            <WorkspaceCenterDockview
-              workspaceId={workspaceId}
+        <MultiWorktreePanelHost emptyState={null}>
+          {(worktreeId, wsActive) => (
+            <WorktreeCenterDockview
+              worktreeId={worktreeId}
               visible={wsActive}
               wsActive={wsActive}
               mobile
             />
           )}
-        </MultiWorkspacePanelHost>
+        </MultiWorktreePanelHost>
       </main>
     </div>
   );
@@ -255,7 +255,7 @@ function CountBadge({ count, testid }: { count: number; testid: string }) {
   );
 }
 
-/** One of the workspace panels the header menu lists: Explorer, Changes and
+/** One of the worktree panels the header menu lists: Explorer, Changes and
  *  each plugin tab. */
 interface PanelItem {
   view: MobileView;
@@ -320,21 +320,21 @@ function MobileSheet({
   );
 }
 
-/** The header, sheets and dialogs of the workspace on screen. Keyed by
- *  workspace, so none of their state carries over to the next one. */
-function MobileWorkspaceChrome({
-  workspaceId,
+/** The header, sheets and dialogs of the worktree on screen. Keyed by
+ *  worktree, so none of their state carries over to the next one. */
+function MobileWorktreeChrome({
+  worktreeId,
   requestedView,
   onRequestedViewShown,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   requestedView: MobileView | null;
   onRequestedViewShown: () => void;
 }) {
-  const workspacePath = useWorkspacePath(workspaceId);
-  const { changes, changeCount } = useChangesSummary(workspaceId);
-  const { name, projectName } = useWorkspaceNames(workspaceId);
-  const pluginTabs = useWorkspaceSideTabs();
+  const worktreePath = useWorktreePath(worktreeId);
+  const { changes, changeCount } = useChangesSummary(worktreeId);
+  const { name, repoName } = useWorktreeNames(worktreeId);
+  const pluginTabs = useWorktreeSideTabs();
 
   // The dockview is always the main editor surface. The header menu opens
   // Explorer / Changes / plugin tabs as a bottom sheet; closing it returns to
@@ -348,21 +348,21 @@ function MobileWorkspaceChrome({
       view: "explorer",
       label: "Explorer",
       icon: FolderOpen,
-      testid: "mobile-workspace__menu-explorer",
+      testid: "mobile-worktree__menu-explorer",
     },
     {
       view: "changes",
       label: "Changes",
       icon: GitCompare,
       badge: changeCount,
-      testid: "mobile-workspace__menu-changes",
+      testid: "mobile-worktree__menu-changes",
     },
     ...pluginTabs.map(
       ({ key, slug, tab }): PanelItem => ({
         view: `plugin:${key}`,
         label: tab.label,
         icon: tab.icon,
-        testid: `mobile-workspace__menu-${slug}`,
+        testid: `mobile-worktree__menu-${slug}`,
       }),
     ),
   ];
@@ -371,43 +371,43 @@ function MobileWorkspaceChrome({
   // Used by the Explorer sheet + the file-link / Quick Open flows.
   const openFileLeaf = useCallback(
     (filePath: string, opts?: { line?: number; column?: number }) => {
-      getWorkspaceLeafActions(workspaceId)?.openFile(filePath, opts);
+      getWorktreeLeafActions(worktreeId)?.openFile(filePath, opts);
       setView("editor");
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   // Open a diff leaf in the center dockview, then close the tree sheet.
   const openDiffLeaf = useCallback(
     (section: ChangeSection, entry: ChangeEntry) => {
-      getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+      getWorktreeLeafActions(worktreeId)?.openDiff(entry.path, {
         section,
         oldPath: entry.oldPath,
       });
       setView("editor");
     },
-    [workspaceId],
+    [worktreeId],
   );
 
-  // Workspace switcher (recent / previous workspaces). Tapping the header
+  // Worktree switcher (recent / previous worktrees). Tapping the header
   // title opens it so the user can jump to another worktree without first
-  // navigating back to the full project list — and can dismiss it (backdrop /
-  // Esc) to stay on the current workspace if they change their mind.
+  // navigating back to the full repo list — and can dismiss it (backdrop /
+  // Esc) to stay on the current worktree if they change their mind.
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Project-list fly-out. The hamburger opens the full project list as a
-  // left-edge drawer *over* the current workspace. This is pure local state:
-  // opening or closing it never changes the route. Selecting a workspace
+  // Repo-list fly-out. The hamburger opens the full repo list as a
+  // left-edge drawer *over* the current worktree. This is pure local state:
+  // opening or closing it never changes the route. Selecting a worktree
   // inside the drawer navigates, which remounts this keyed component and so
   // closes the drawer.
-  const [projectListOpen, setProjectListOpen] = useState(false);
+  const [repoListOpen, setRepoListOpen] = useState(false);
 
-  // Show a sheet the PR badge asked for (see `MobileWorkspaceShell`). The
-  // badge may sit in this workspace's own fly-out, so close that too.
+  // Show a sheet the PR badge asked for (see `MobileWorktreeShell`). The
+  // badge may sit in this worktree's own fly-out, so close that too.
   useEffect(() => {
     if (!requestedView) return;
     setView(requestedView);
-    setProjectListOpen(false);
+    setRepoListOpen(false);
     setPickerOpen(false);
     onRequestedViewShown();
   }, [requestedView, onRequestedViewShown]);
@@ -431,22 +431,22 @@ function MobileWorkspaceChrome({
 
   // Listen for file link clicks from chat messages → open Quick Open with query.
   //
-  // Filter by `detail.workspaceId` so a click whose owning chat lives in
-  // a different workspace (a hidden one stays mounted) doesn't open against
+  // Filter by `detail.worktreeId` so a click whose owning chat lives in
+  // a different worktree (a hidden one stays mounted) doesn't open against
   // this one. A missing detail (legacy dispatcher / non-chat caller) falls
-  // through to this workspace so unrelated dispatchers keep working. See
+  // through to this worktree so unrelated dispatchers keep working. See
   // `dispatchOpenFile` in `file-link-components.tsx` and issue #539.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filename?: string; workspaceId?: string }>).detail;
+      const detail = (e as CustomEvent<{ filename?: string; worktreeId?: string }>).detail;
       if (!detail?.filename) return;
-      if (detail.workspaceId && detail.workspaceId !== workspaceId) return;
+      if (detail.worktreeId && detail.worktreeId !== worktreeId) return;
       setQuickOpenQuery(detail.filename);
       setQuickOpenOpen(true);
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
-  }, [workspaceId]);
+  }, [worktreeId]);
 
   // Window-event triggers for the Quick Open / Search in Files dialogs. We use
   // a window event (rather than threading the setters through a React Context)
@@ -468,53 +468,53 @@ function MobileWorkspaceChrome({
   return (
     <>
       {/* sync-with: the `h-12` top row of DashboardShell's `matchMobileHeader`,
-          so the project-list fly-out lines up with this header. */}
+          so the repo-list fly-out lines up with this header. */}
       <header
-        data-testid="mobile-workspace__header"
+        data-testid="mobile-worktree__header"
         className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b border-border/50 px-2 pt-[env(safe-area-inset-top)]"
       >
-        {/* Hamburger — opens the project list as a left fly-out drawer over
-            this workspace. Purely local state; the route never changes. */}
+        {/* Hamburger — opens the repo list as a left fly-out drawer over
+            this worktree. Purely local state; the route never changes. */}
         <button
           type="button"
-          onClick={() => setProjectListOpen(true)}
-          aria-label="Open project list"
+          onClick={() => setRepoListOpen(true)}
+          aria-label="Open repo list"
           aria-haspopup="dialog"
-          data-testid="mobile-workspace__project-list-trigger"
+          data-testid="mobile-worktree__repo-list-trigger"
           className="inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-accent"
         >
           <Menu className="size-4" />
         </button>
-        {/* Tapping the title opens the workspace switcher — the fast path
+        {/* Tapping the title opens the worktree switcher — the fast path
             to jump to a recent/previous worktree without going back to the
-            full project list. The chevron signals it's interactive. The
+            full repo list. The chevron signals it's interactive. The
             label is the Pinned section's two-row block, worktree over
-            project, centered in the header. */}
+            repo, centered in the header. */}
         <button
           type="button"
           onClick={() => setPickerOpen(true)}
           aria-haspopup="dialog"
-          aria-label="Switch workspace"
-          data-testid="mobile-workspace__switcher"
+          aria-label="Switch worktree"
+          data-testid="mobile-worktree__switcher"
           className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-center hover:bg-accent active:bg-accent"
         >
           {/* As wide as the chevron, so the label sits in the header's
               center. The hamburger and the menu button are the same width,
               which centers this button. */}
           <span aria-hidden className="size-3.5 shrink-0" />
-          <WorkspaceLabel name={name} projectName={projectName} isActive />
+          <WorktreeLabel name={name} repoName={repoName} isActive />
           <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
-        {/* The vertical 3-dot menu lists the workspace panels (Explorer,
+        {/* The vertical 3-dot menu lists the worktree panels (Explorer,
             Changes, plugin tabs) in a bottom drawer. Picking one opens its
             sheet over the editor; picking a file or closing the sheet
             returns to it. */}
         <button
           type="button"
           onClick={() => setView("menu")}
-          aria-label="Workspace panels"
+          aria-label="Worktree panels"
           aria-haspopup="dialog"
-          data-testid="mobile-workspace__header-menu"
+          data-testid="mobile-worktree__header-menu"
           className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent active:bg-accent"
         >
           <MoreVertical className="size-[18px]" />
@@ -525,9 +525,9 @@ function MobileWorkspaceChrome({
       <MobileSheet
         open={view === "menu"}
         onOpenChange={sheetOpenChange("menu")}
-        title="Workspace"
-        description="Open a workspace panel"
-        testid="mobile-workspace__menu"
+        title="Worktree"
+        description="Open a worktree panel"
+        testid="mobile-worktree__menu"
         className="h-auto"
       >
         <ul>
@@ -545,12 +545,12 @@ function MobileWorkspaceChrome({
         open={view === "explorer"}
         onOpenChange={sheetOpenChange("explorer")}
         title="Explorer"
-        description="Browse workspace files and open one in the editor"
-        testid="mobile-workspace__explorer"
+        description="Browse worktree files and open one in the editor"
+        testid="mobile-worktree__explorer"
       >
         <FileBrowser
-          workspaceId={workspaceId}
-          workspacePath={workspacePath}
+          worktreeId={worktreeId}
+          worktreePath={worktreePath}
           onOpenFile={(p) => openFileLeaf(p)}
           onOpenFilePinned={(p) => openFileLeaf(p)}
           compact
@@ -563,17 +563,17 @@ function MobileWorkspaceChrome({
         onOpenChange={sheetOpenChange("changes")}
         title="Changes"
         description="Browse changed files and open one as a diff"
-        testid="mobile-workspace__changes"
+        testid="mobile-worktree__changes"
       >
         <ChangesSections
-          workspaceId={workspaceId}
+          worktreeId={worktreeId}
           changes={changes}
           onOpen={openDiffLeaf}
-          workspacePath={workspacePath}
+          worktreePath={worktreePath}
         />
       </MobileSheet>
       {/* One sheet per plugin tab (the desktop right sidepanel's
-       *  `workspace.sideTabs` slot), each inside `PluginErrorBoundary`. */}
+       *  `worktree.sideTabs` slot), each inside `PluginErrorBoundary`. */}
       {pluginTabs.map(({ key, slug, pluginId, tab }) => {
         const open = view === `plugin:${key}`;
         return (
@@ -582,13 +582,13 @@ function MobileWorkspaceChrome({
             open={open}
             onOpenChange={sheetOpenChange(`plugin:${key}`)}
             title={tab.label}
-            description={`The ${tab.label} tab of this workspace`}
-            testid={`mobile-workspace__plugin--${slug}`}
+            description={`The ${tab.label} tab of this worktree`}
+            testid={`mobile-worktree__plugin--${slug}`}
           >
             <div className="flex h-full flex-col overflow-hidden">
               <PluginErrorBoundary pluginId={pluginId}>
                 <ClientPluginHostProvider value={clientPluginHost}>
-                  <tab.component workspaceId={workspaceId} visible={open} />
+                  <tab.component worktreeId={worktreeId} visible={open} />
                 </ClientPluginHostProvider>
               </PluginErrorBoundary>
             </div>
@@ -596,7 +596,7 @@ function MobileWorkspaceChrome({
         );
       })}
       <QuickOpenDialog
-        workspaceId={workspaceId}
+        worktreeId={worktreeId}
         open={quickOpenOpen}
         onOpenChange={(open) => {
           setQuickOpenOpen(open);
@@ -607,22 +607,22 @@ function MobileWorkspaceChrome({
         autoOpen={quickOpenQuery != null}
       />
       <SearchFilesDialog
-        workspaceId={workspaceId}
+        worktreeId={worktreeId}
         open={searchFilesOpen}
         onOpenChange={setSearchFilesOpen}
         onOpenFile={handleOpenFile}
       />
-      <WorkspacePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
-      <Sheet open={projectListOpen} onOpenChange={setProjectListOpen}>
-        {/* The project list fly-out reuses the exact same DashboardShell
-            the `/` home route renders, so labels, add-project, settings
-            and the full workspace tree are all available from here. */}
+      <WorktreePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
+      <Sheet open={repoListOpen} onOpenChange={setRepoListOpen}>
+        {/* The repo list fly-out reuses the exact same DashboardShell
+            the `/` home route renders, so labels, add-repo, settings
+            and the full worktree tree are all available from here. */}
         <SheetContent
           side="left"
           showCloseButton={false}
-          data-testid="project-list-flyout"
+          data-testid="repo-list-flyout"
           // Focus the drawer itself on open, not its first button. That
-          // button ("Add project") has a tooltip that opens on focus, and an
+          // button ("Add repo") has a tooltip that opens on focus, and an
           // open tooltip takes the first Escape, so Escape didn't close the
           // drawer whenever it was pressed after the auto-focus landed.
           onOpenAutoFocus={(e) => {
@@ -630,10 +630,8 @@ function MobileWorkspaceChrome({
             (e.currentTarget as HTMLElement | null)?.focus();
           }}
         >
-          <SheetTitle className="sr-only">Projects</SheetTitle>
-          <SheetDescription className="sr-only">
-            Browse projects and open a workspace
-          </SheetDescription>
+          <SheetTitle className="sr-only">Repos</SheetTitle>
+          <SheetDescription className="sr-only">Browse repos and open a worktree</SheetDescription>
           <ToolbarOverflowProvider>
             <DashboardShell
               bottomActions={<ToolbarActionBar />}

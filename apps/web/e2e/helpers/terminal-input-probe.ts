@@ -21,7 +21,7 @@ export interface InputProbe {
   logPath: string;
 }
 
-/** A temp dir holding a git repo with one empty commit, for a project root. */
+/** A temp dir holding a git repo with one empty commit, for a repo root. */
 export function makeGitWorkdir(prefix: string, home: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const env: NodeJS.ProcessEnv = {

@@ -36,7 +36,7 @@ describe("findTerminalFileLinks – paths that should link", () => {
   });
 
   it("links an absolute path", () => {
-    expect(paths("/Users/me/project/src/main.rs:42")).toEqual(["/Users/me/project/src/main.rs:42"]);
+    expect(paths("/Users/me/repo/src/main.rs:42")).toEqual(["/Users/me/repo/src/main.rs:42"]);
   });
 
   it("links a well-known extensionless filename on its own", () => {

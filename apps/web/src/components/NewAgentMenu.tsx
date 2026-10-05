@@ -44,7 +44,7 @@ function AgentItems({
 }) {
   if (agents.length === 0) {
     return (
-      <DropdownMenuItem onClick={() => onPick(undefined)} data-testid="workspace-center__new-agent">
+      <DropdownMenuItem onClick={() => onPick(undefined)} data-testid="worktree-center__new-agent">
         <Bot className="size-4" />
         Default agent
       </DropdownMenuItem>
@@ -56,7 +56,7 @@ function AgentItems({
       // The default agent goes as "no pick", so it follows the default-agent
       // path (e.g. a chat pane still opens if its launch fails).
       onClick={() => onPick(agent.id === defaultAgentId ? undefined : agent.id)}
-      data-testid={`workspace-center__new-agent--${agent.id}`}
+      data-testid={`worktree-center__new-agent--${agent.id}`}
     >
       <AgentIcon type={agent.type} className="size-4" />
       {agent.label}
@@ -72,12 +72,12 @@ export function NewAgentSubmenu({ onPick }: { onPick: PickAgent }) {
   const { agents, defaultAgentId } = useSortedCodingAgents();
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger data-testid="workspace-center__new-tab--agent">
+      <DropdownMenuSubTrigger data-testid="worktree-center__new-tab--agent">
         <Bot className="size-4" />
         New agent
       </DropdownMenuSubTrigger>
       <DropdownMenuPortal>
-        <DropdownMenuSubContent data-testid="workspace-center__new-agent-menu">
+        <DropdownMenuSubContent data-testid="worktree-center__new-agent-menu">
           <AgentItems agents={agents} defaultAgentId={defaultAgentId} onPick={onPick} />
         </DropdownMenuSubContent>
       </DropdownMenuPortal>
@@ -91,12 +91,12 @@ export function NewAgentButton({ className, onPick }: { className: string; onPic
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={className} data-testid="workspace-center__empty-new-agent">
+        <button type="button" className={className} data-testid="worktree-center__empty-new-agent">
           <Bot className="size-4" />
           New agent
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" data-testid="workspace-center__new-agent-menu">
+      <DropdownMenuContent align="start" data-testid="worktree-center__new-agent-menu">
         <AgentItems agents={agents} defaultAgentId={defaultAgentId} onPick={onPick} />
       </DropdownMenuContent>
     </DropdownMenu>

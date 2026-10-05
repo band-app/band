@@ -39,7 +39,7 @@ import {
   ConversationScrollButton,
 } from "./ai-elements/conversation";
 import { ElicitationForm } from "./ai-elements/elicitation-form";
-import { FileLinkWorkspaceProvider } from "./ai-elements/file-link-components";
+import { FileLinkWorktreeProvider } from "./ai-elements/file-link-components";
 import { FileMentionSuggestions } from "./ai-elements/file-mention-suggestions";
 import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
 import { PermissionRequest } from "./ai-elements/permission-request";
@@ -201,9 +201,9 @@ function isFastModeOption(option: SelectOption): boolean {
 }
 
 interface ChatViewProps {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
-  workspaceName: string;
+  worktreeName: string;
   initialSessionId?: string;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
@@ -223,14 +223,14 @@ interface ChatViewProps {
   agentType?: string;
   codingAgentId?: string;
   visible?: boolean;
-  /** Workspace is active (even if the chat tab isn't the focused tab). */
+  /** Worktree is active (even if the chat tab isn't the focused tab). */
   wsActive?: boolean;
 }
 
 export function ChatView({
-  workspaceId,
+  worktreeId,
   chatId,
-  workspaceName,
+  worktreeName,
   initialSessionId,
   onShowSessionListChange,
   onStreamingChange,
@@ -295,7 +295,7 @@ export function ChatView({
   }, [visible]);
 
   const subscription = useChatSubscription({
-    workspaceId,
+    worktreeId,
     chatId,
     codingAgentId,
     // Release the connection while the pane isn't the active tab.
@@ -360,7 +360,7 @@ export function ChatView({
     [handleConfig, pickers.modeConfigId],
   );
 
-  // Shift+Tab cycles modes (dispatched from the workspace layout too).
+  // Shift+Tab cycles modes (dispatched from the worktree layout too).
   useEffect(() => {
     const handler = () => {
       const { modes, mode } = pickers;
@@ -415,19 +415,19 @@ export function ChatView({
   const handleSelectSession = useCallback(
     async (nextSessionId: string, summary?: string) => {
       // Queued messages belong to the session they were queued against.
-      trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
+      trpc.queue.clear.mutate({ worktreeId, chatId }).catch(() => {});
       onShowSessionListChange(false);
       await onSwitchSession?.(nextSessionId, summary);
     },
-    [onSwitchSession, onShowSessionListChange, workspaceId, chatId],
+    [onSwitchSession, onShowSessionListChange, worktreeId, chatId],
   );
 
   const handleNewSession = useCallback(() => {
     setInitialSessionCleared(true);
-    trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
+    trpc.queue.clear.mutate({ worktreeId, chatId }).catch(() => {});
     onShowSessionListChange(false);
     void onSwitchSession?.(undefined);
-  }, [onSwitchSession, onShowSessionListChange, workspaceId, chatId]);
+  }, [onSwitchSession, onShowSessionListChange, worktreeId, chatId]);
 
   useEffect(() => {
     if (onNewSessionRef) onNewSessionRef.current = handleNewSession;
@@ -460,9 +460,9 @@ export function ChatView({
   const handleCancelQueued = useCallback(
     (id: string) => {
       setOptimisticQueue((current) => (current ?? queue).filter((m) => m.id !== id));
-      trpc.queue.remove.mutate({ workspaceId, chatId, id }).catch(() => {});
+      trpc.queue.remove.mutate({ worktreeId, chatId, id }).catch(() => {});
     },
-    [queue, workspaceId, chatId],
+    [queue, worktreeId, chatId],
   );
 
   const handleEditQueued = useCallback(
@@ -470,9 +470,9 @@ export function ChatView({
       setOptimisticQueue((current) =>
         (current ?? queue).map((m) => (m.id === id ? { ...m, text } : m)),
       );
-      trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
+      trpc.queue.update.mutate({ worktreeId, chatId, id, text }).catch(() => {});
     },
-    [queue, workspaceId, chatId],
+    [queue, worktreeId, chatId],
   );
 
   const handleReorderQueued = useCallback(
@@ -487,7 +487,7 @@ export function ChatView({
       setOptimisticQueue(reordered);
       trpc.queue.set
         .mutate({
-          workspaceId,
+          worktreeId,
           chatId,
           messages: reordered.map((m) => ({
             id: m.id,
@@ -497,7 +497,7 @@ export function ChatView({
         })
         .catch(() => {});
     },
-    [optimisticQueue, queue, workspaceId, chatId],
+    [optimisticQueue, queue, worktreeId, chatId],
   );
 
   const listRef = useRef<VirtualizedMessageListHandle>(null);
@@ -698,8 +698,8 @@ export function ChatView({
 
   return (
     // Scope every `band-file:` link clicked inside this chat to *this*
-    // workspace (issue #539).
-    <FileLinkWorkspaceProvider workspaceId={workspaceId}>
+    // worktree (issue #539).
+    <FileLinkWorktreeProvider worktreeId={worktreeId}>
       {/* Focusable so Cmd/Ctrl+F reaches the find bar after a click in the
           conversation, not only from the composer. */}
       <div
@@ -762,7 +762,7 @@ export function ChatView({
                     <Bot className="size-8" />
                   )
                 }
-                title={workspaceName}
+                title={worktreeName}
                 description="Send a message to start coding"
               />
             )}
@@ -802,17 +802,17 @@ export function ChatView({
           data-testid="chat-pane__composer"
           className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-2 lg:pb-4"
         >
-          <TaskListWidget plan={plan} workspaceId={workspaceId} />
+          <TaskListWidget plan={plan} worktreeId={worktreeId} />
           <PromptInput
             onSubmit={handleSubmit}
-            draftKey={workspaceId}
+            draftKey={worktreeId}
             visible={visible}
             wsActive={wsActive}
-            workspaceId={workspaceId}
+            worktreeId={worktreeId}
             chatId={chatId}
           >
             <SlashCommandSuggestions skills={skills} />
-            <FileMentionSuggestions workspaceId={workspaceId} />
+            <FileMentionSuggestions worktreeId={worktreeId} />
             <PromptInputBody>
               <PromptInputTextarea
                 placeholder={
@@ -839,7 +839,7 @@ export function ChatView({
               <div className="flex min-w-0 items-center gap-0.5">
                 <PromptInputAttach />
                 <SessionHistoryMenu
-                  workspaceId={workspaceId}
+                  worktreeId={worktreeId}
                   chatId={chatId}
                   activeSessionId={currentSessionId}
                   onSelectSession={handleSelectSession}
@@ -878,7 +878,7 @@ export function ChatView({
           </PromptInput>
         </div>
       </div>
-    </FileLinkWorkspaceProvider>
+    </FileLinkWorktreeProvider>
   );
 }
 
@@ -1385,13 +1385,13 @@ interface SessionHistoryItem {
 }
 
 function SessionHistoryMenu({
-  workspaceId,
+  worktreeId,
   chatId,
   activeSessionId,
   onSelectSession,
   onNewSession,
 }: {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   activeSessionId?: string;
   onSelectSession: (sessionId: string, summary: string) => void;
@@ -1405,11 +1405,11 @@ function SessionHistoryMenu({
     if (!open) return;
     setLoading(true);
     trpc.sessions.list
-      .query({ workspaceId, chatId })
+      .query({ worktreeId, chatId })
       .then((data) => setSessions(data.sessions as SessionHistoryItem[]))
       .catch(() => setSessions([]))
       .finally(() => setLoading(false));
-  }, [open, workspaceId, chatId]);
+  }, [open, worktreeId, chatId]);
 
   // Composing Tooltip + DropdownMenu trigger:
   //

@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -19,12 +19,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileTreesPage } from "./pages/FileTreesPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-preview-tab-italic-token";
-const PROJECT = "preview-tab-italic-repo";
+const REPO = "preview-tab-italic-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -33,7 +33,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(join(repo, "src"), { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   writeFileSync(join(repo, "src/aaa.ts"), "export const a = 1;\n");
@@ -41,9 +41,9 @@ test.beforeAll(async () => {
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -60,10 +60,10 @@ test.afterAll(async () => {
 });
 
 test("single-click tree open is a preview (italic tab)", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const trees = new FileTreesPage(page, workspacePage);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const trees = new FileTreesPage(page, worktreePage);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   await trees.openFilesTab("src");
   await trees.expandFileTreeFolder("src", "src/aaa.ts");

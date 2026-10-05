@@ -2,14 +2,14 @@
  * band-app/band#617 — persistent xterm cache with a DOM "parking" model.
  *
  * This spec proves the core switch behaviour the parking model guarantees:
- * switching a workspace away and back does NOT recreate the terminal. The one
+ * switching a worktree away and back does NOT recreate the terminal. The one
  * xterm instance is kept alive (same terminal id, same wrapper, NO new terminal
  * socket), its surface *moved* to an off-screen parking container while
  * inactive and moved back on return.
  *
  * The WebGL *renderer* inside that surface is REUSED across the round-trip too.
  * Because the wrapper is parked off-screen but still PAINTED (see
- * terminal-parking.ts), the GPU backing store survives a plain workspace switch
+ * terminal-parking.ts), the GPU backing store survives a plain worktree switch
  * / foreground return / click, so those paths do a cheap fit + refresh and keep
  * the same <canvas> — no rebuild, no blank-then-repaint flicker (the fallout of
  * the #631/#634/#637 repair machinery this relaxes). The addon is rebuilt ONLY
@@ -18,11 +18,11 @@
  * reused, surface reused on switch/foreground/click, surface rebuilt on real
  * context loss.
  *
- * Doctrine: real production server, real PTYs (git-init'd dirs → "git" projects
+ * Doctrine: real production server, real PTYs (git-init'd dirs → "git" repos
  * with clickable sidebar cards + a real cwd), no tRPC mocking, no `page.route`
  * on our own routes. WebGL is forced on via SwiftShader launch flags so xterm
  * attaches a real <canvas> (otherwise the reuse/rebuild assertions are vacuous).
- * Driven entirely through `WorkspacePage`.
+ * Driven entirely through `WorktreePage`.
  *
  * Not covered here: the `system-resumed` rebuild path is a desktop (Electron)
  * IPC event — `isDesktop` is false in this browser harness, so that listener
@@ -35,7 +35,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -45,14 +45,14 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-parking-switch-token";
 
-const PROJECT_A = "alpha-parking-switch";
-const PROJECT_B = "bravo-parking-switch";
-const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
-const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
+const REPO_A = "alpha-parking-switch";
+const REPO_B = "bravo-parking-switch";
+const WORKTREE_A = toWorktreeId(REPO_A, "main");
+const WORKTREE_B = toWorktreeId(REPO_B, "main");
 
 test.use({
   viewport: { width: 1280, height: 800 },
@@ -98,15 +98,15 @@ test.beforeAll(async () => {
   workdirA = makeGitWorkdir("band-parking-switch-a-", tmpHome);
   workdirB = makeGitWorkdir("band-parking-switch-b-", tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT_A,
+        name: REPO_A,
         path: workdirA,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirA }],
       },
       {
-        name: PROJECT_B,
+        name: REPO_B,
         path: workdirB,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
@@ -128,19 +128,19 @@ test.afterAll(async () => {
   if (workdirB) rmSync(workdirB, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-test.describe("Terminal parking: workspace switch reuses the cached xterm", () => {
-  test("switching back to a cached workspace reuses the terminal (no new socket) and its WebGL surface (no rebuild)", async ({
+test.describe("Terminal parking: worktree switch reuses the cached xterm", () => {
+  test("switching back to a cached worktree reuses the terminal (no new socket) and its WebGL surface (no rebuild)", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    // Count terminal sockets for workspace A specifically (B's socket must not
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    // Count terminal sockets for worktree A specifically (B's socket must not
     // be conflated) from before the first navigation.
-    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+    const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
 
@@ -149,7 +149,7 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // poll would fail loudly rather than pass vacuously.
     await expect
       .poll(
-        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        async () => (await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A)).canvasCount,
         {
           timeout: 20_000,
         },
@@ -163,27 +163,27 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // Remember A's terminal identity so we can prove the terminal itself is
     // REUSED across the round-trip (same session, not a recreated one), and
     // tag A's canvases so we can prove the WebGL renderer is REBUILT.
-    const idsBefore = await workspacePage.terminalIds(WORKSPACE_A);
+    const idsBefore = await worktreePage.terminalIds(WORKTREE_A);
     expect(idsBefore.length).toBeGreaterThan(0);
-    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    const tagged = await worktreePage.tagTerminalCanvasesByWorktree(WORKTREE_A);
     expect(tagged).toBeGreaterThan(0);
 
     // Switch to B (in-app sidebar nav keeps A cached). A parks off-screen.
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
+    await worktreePage.switchWorktree(WORKTREE_B);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_B, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_A), { timeout: 20_000 })
       .toBe(true);
 
     // Switch back to A — the parking model moves the wrapper back and re-fits.
-    await workspacePage.switchWorkspace(WORKSPACE_A);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.switchWorktree(WORKTREE_A);
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => worktreePage.isTerminalParked(WORKTREE_A), { timeout: 20_000 })
       .toBe(false);
 
     // Wait for re-attach to SETTLE: the backing store gets sized to the
@@ -194,7 +194,7 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     await expect
       .poll(
         async () => {
-          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          const s = await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A);
           return (
             s.canvasCount > 0 &&
             s.backing.length > 0 &&
@@ -214,11 +214,11 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // parked surface stayed painted off-screen, so re-attach reused the same
     // WebGL <canvas> (cheap fit + refresh, no rebuild, no switch-back flicker).
     // On the pre-relaxation code re-attach rebuilt the addon and this was 0.
-    const settled = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+    const settled = await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A);
     expect(settled.survivingTags).toBeGreaterThan(0);
 
     // The terminal SESSION was reused: same terminal id backs the same wrapper.
-    expect(await workspacePage.terminalIds(WORKSPACE_A)).toEqual(idsBefore);
+    expect(await worktreePage.terminalIds(WORKTREE_A)).toEqual(idsBefore);
 
     // No new terminal socket opened across the round-trip: the in-session
     // switch reused the live connection (no reconnect/replay). This is the
@@ -230,31 +230,31 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
   test("returning to the foreground repaints the terminal without rebuilding its WebGL surface or reconnecting", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
       .poll(
-        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        async () => (await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A)).canvasCount,
         { timeout: 20_000 },
       )
       .toBeGreaterThan(0);
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
-    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    const tagged = await worktreePage.tagTerminalCanvasesByWorktree(WORKTREE_A);
     expect(tagged).toBeGreaterThan(0);
 
     // A foreground return (window `focus`, also fired by visibility un-hide)
     // does a CHEAP repaint only — fit + refresh — and must NOT rebuild the WebGL
     // addon. Rebuilding on ordinary focus raced the compositor and flickered;
     // an off-screen parked surface stays painted, so the GPU context is intact.
-    await workspacePage.simulateWindowForeground();
+    await worktreePage.simulateWindowForeground();
     // Let the rAF-debounced repair actually run — a rebuild (pre-relaxation
     // behavior) lands on the FIRST rAF after the event, so a fixed frame COUNT
     // (independent of CI wall-clock speed) deterministically waits past the
@@ -262,7 +262,7 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // non-vacuous. (Unlike the switch-back test, `sized` is already true here —
     // the terminal was never parked — so polling on `sized` first would NOT
     // gate on the repaint and would read a pre-repair frame.)
-    await workspacePage.settleAnimationFrames(6);
+    await worktreePage.settleAnimationFrames(6);
 
     // The tagged canvas SURVIVES (same surface, reused) and stays correctly
     // sized. Wrapped in a short poll so any residual async settle can't race a
@@ -271,7 +271,7 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     await expect
       .poll(
         async () => {
-          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          const s = await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A);
           return (
             s.survivingTags > 0 &&
             s.canvasCount > 0 &&
@@ -293,24 +293,24 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
   test("focus entering the terminal does not rebuild its WebGL surface or reconnect", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
       .poll(
-        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        async () => (await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A)).canvasCount,
         { timeout: 20_000 },
       )
       .toBeGreaterThan(0);
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
-    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    const tagged = await worktreePage.tagTerminalCanvasesByWorktree(WORKTREE_A);
     expect(tagged).toBeGreaterThan(0);
 
     // Clicking into the terminal (blur + refocus → `focusin`) now does a cheap
@@ -320,8 +320,8 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // addon build, so the throttle doesn't suppress the cheap repaint path we
     // want to exercise), settling frames after each so a would-be rebuild lands.
     for (let i = 0; i < 3; i++) {
-      await workspacePage.refocusTerminal();
-      await workspacePage.settleAnimationFrames(4);
+      await worktreePage.refocusTerminal();
+      await worktreePage.settleAnimationFrames(4);
     }
 
     // The tagged canvas SURVIVES throughout — no click ever rebuilt it. Wrapped
@@ -331,7 +331,7 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     await expect
       .poll(
         async () => {
-          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          const s = await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A);
           return s.survivingTags > 0 && s.canvasCount > 0;
         },
         { timeout: 10_000 },
@@ -345,36 +345,36 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
   test("a genuine WebGL context loss rebuilds the surface without reconnecting", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
       .poll(
-        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        async () => (await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A)).canvasCount,
         { timeout: 20_000 },
       )
       .toBeGreaterThan(0);
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
-    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    const tagged = await worktreePage.tagTerminalCanvasesByWorktree(WORKTREE_A);
     expect(tagged).toBeGreaterThan(0);
 
     // Force a REAL `webglcontextlost` — the one signal that legitimately
     // rebuilds the surface (xterm's WebglAddon.onContextLoss disposes and
     // reattaches). This is the genuine-loss counterpart to the reuse tests
     // above: the tagged canvas is replaced by a fresh, correctly-sized one.
-    await workspacePage.loseTerminalWebglContext(WORKSPACE_A);
+    await worktreePage.loseTerminalWebglContext(WORKTREE_A);
 
     await expect
       .poll(
         async () => {
-          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          const s = await worktreePage.readTerminalSurfaceByWorktree(WORKTREE_A);
           const rebuilt = s.canvasCount > 0 && s.survivingTags === 0;
           const sized =
             s.backing.length > 0 &&

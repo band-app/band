@@ -18,11 +18,11 @@ export const NO_DRAG_STYLE: React.CSSProperties = {
 } as React.CSSProperties;
 
 /** Whether drag surfaces under this provider may set an app-region. False
- *  inside a hidden workspace: its entry stays mounted and laid out at the
+ *  inside a hidden worktree: its entry stays mounted and laid out at the
  *  same place as the shown one, so any `drag` or `no-drag` box in it would
  *  still count in the window's drag region and cover or cut into the shown
- *  workspace's top row. Only the shown workspace sets app-regions; everything
- *  outside a workspace (sidebar, right sidepanel) keeps the default. */
+ *  worktree's top row. Only the shown worktree sets app-regions; everything
+ *  outside a worktree (sidebar, right sidepanel) keeps the default. */
 export const WindowDragContext = createContext(true);
 
 function useWindowDrag(): boolean {
@@ -46,15 +46,15 @@ export interface PanelItem {
  *  the panels slide beneath it. The overflow actions always live in
  *  DashboardShell's bottom action bar, so the cluster carries no menu. */
 export interface NavControlsProps {
-  /** Toggle the project-list sidebar's visibility (⌘B). When undefined, the
+  /** Toggle the repo-list sidebar's visibility (⌘B). When undefined, the
    *  sidebar toggle button is not rendered. */
   onToggleSidebar?: () => void;
   /** Whether the sidebar is currently visible — drives the toggle button's
    *  pressed state. */
   sidebarVisible?: boolean;
-  /** Navigate to the previous workspace in the history stack (⌥⌘←). */
+  /** Navigate to the previous worktree in the history stack (⌥⌘←). */
   onGoBack?: () => void;
-  /** Navigate to the next workspace in the history stack (⌥⌘→). */
+  /** Navigate to the next worktree in the history stack (⌥⌘→). */
   onGoForward?: () => void;
   /** Whether back navigation is currently available (enables/disables the button). */
   canGoBack?: boolean;
@@ -67,22 +67,22 @@ export interface NavControlsProps {
  *  the top row, so its top-left group leaves room for the nav cluster while the
  *  sidebar is collapsed, and its top-right group hosts the right sidepanel's
  *  expand button while that panel is collapsed. `null` outside the desktop
- *  layout (the mobile workspace route), where none of this renders. */
-export interface WorkspaceChrome {
-  /** Whether the project-list sidebar is visible. */
+ *  layout (the mobile worktree route), where none of this renders. */
+export interface WorktreeChrome {
+  /** Whether the repo-list sidebar is visible. */
   sidebarVisible: boolean;
   /** Rendered width of `AppShell`'s nav-cluster overlay, in CSS px. */
   navOverlayWidth: number;
   /** Whether the right sidepanel (Explorer / Changes) is visible. */
   rightPanelVisible: boolean;
-  /** Toggle the right sidepanel. Undefined when no workspace is active. */
+  /** Toggle the right sidepanel. Undefined when no worktree is active. */
   onToggleRightPanel?: () => void;
 }
 
-export const WorkspaceChromeContext = createContext<WorkspaceChrome | null>(null);
+export const WorktreeChromeContext = createContext<WorktreeChrome | null>(null);
 
-export function useWorkspaceChrome(): WorkspaceChrome | null {
-  return useContext(WorkspaceChromeContext);
+export function useWorktreeChrome(): WorktreeChrome | null {
+  return useContext(WorktreeChromeContext);
 }
 
 /** Toggle for the right sidepanel. Rendered by the sidepanel header while the
@@ -123,9 +123,9 @@ export function RightPanelToggle({
 }
 
 interface RightPanelHeaderActionsProps {
-  /** The workspace path for open-in / copy-path actions. */
-  workspacePath?: string;
-  /** Callback to copy the workspace path to clipboard. */
+  /** The worktree path for open-in / copy-path actions. */
+  worktreePath?: string;
+  /** Callback to copy the worktree path to clipboard. */
   onCopyPath?: () => void;
   /** Collapse the right sidepanel. When undefined, no toggle renders. */
   onToggleRightPanel?: () => void;
@@ -134,13 +134,13 @@ interface RightPanelHeaderActionsProps {
 /** Open-in-editor picker + collapse button, shown at the right edge of the
  *  right sidepanel's header row (beside the Explorer / Changes tabs). */
 export function RightPanelHeaderActions({
-  workspacePath,
+  worktreePath,
   onCopyPath,
   onToggleRightPanel,
 }: RightPanelHeaderActionsProps) {
   // EditorPicker invokes native IPC (open in VS Code/Finder/etc.) — keep it
   // desktop-only so it doesn't render a non-functional button in the web app.
-  const hasEditorPicker = isDesktop && !!workspacePath;
+  const hasEditorPicker = isDesktop && !!worktreePath;
   if (!hasEditorPicker && !onToggleRightPanel) return null;
   return (
     <div
@@ -148,7 +148,7 @@ export function RightPanelHeaderActions({
       style={NO_DRAG_STYLE}
       data-testid="right-sidepanel__header-actions"
     >
-      {hasEditorPicker && <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />}
+      {hasEditorPicker && <EditorPicker worktreePath={worktreePath} onCopyPath={onCopyPath} />}
       {onToggleRightPanel && <RightPanelToggle onToggle={onToggleRightPanel} visible />}
     </div>
   );
@@ -240,7 +240,7 @@ export function NavControls({
   );
 }
 
-/** Draggable title bar over the project-list sidebar. A pure drag surface:
+/** Draggable title bar over the repo-list sidebar. A pure drag surface:
  *  the navigation cluster that used to live here is now hosted in
  *  `AppShell`'s stationary overlay (see NavControlsProps), which sits on top of
  *  this bar while the list is visible. Unpainted: the sidebar column around it
@@ -262,12 +262,12 @@ export function SidebarTitleBar() {
  *  nothing while the sidebar is visible (the overlay then sits over the
  *  sidebar's own title bar). */
 export function SidebarGutter() {
-  const chrome = useWorkspaceChrome();
+  const chrome = useWorktreeChrome();
   const drag = useWindowDrag();
   if (!chrome || chrome.sidebarVisible) return null;
   return (
     <div
-      data-testid="workspace-center__sidebar-gutter"
+      data-testid="worktree-center__sidebar-gutter"
       className="h-full shrink-0"
       style={{ ...(drag ? DRAG_STYLE : undefined), width: chrome.navOverlayWidth }}
     />
@@ -275,16 +275,16 @@ export function SidebarGutter() {
 }
 
 /** Draggable top row for the center column when it has no tab strip: no
- *  workspace is active, or the active one has every tab closed. Carries the
+ *  worktree is active, or the active one has every tab closed. Carries the
  *  same controls the tab strip would (the sidebar gutter, and the right
  *  sidepanel's expand button while it is collapsed) and no title. */
 export function CenterDragBar({ className = "" }: { className?: string }) {
-  const chrome = useWorkspaceChrome();
+  const chrome = useWorktreeChrome();
   const onToggleRightPanel = chrome?.onToggleRightPanel;
   const drag = useWindowDrag();
   return (
     <div
-      data-testid="workspace-center__drag-bar"
+      data-testid="worktree-center__drag-bar"
       className={`flex h-[38px] shrink-0 items-center border-b border-border bg-background pr-2 ${className}`}
       style={drag ? DRAG_STYLE : undefined}
     >

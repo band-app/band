@@ -6,7 +6,7 @@ import { terminalSplitApiForLeaf } from "./terminal-split-registry";
  * Keyboard focus for the center dockview's leaves.
  *
  * When a leaf becomes the active one (Ctrl+Tab, ⌘⇧[ / ⌘⇧], the palette's
- * Next / Previous Tab, a tab click, closing the tab before it, a workspace
+ * Next / Previous Tab, a tab click, closing the tab before it, a worktree
  * switch), focus has to move into it. Otherwise it stays on the tab strip or
  * falls to `<body>` when the old leaf's content is hidden, and the next
  * Ctrl+Tab is lost.
@@ -96,10 +96,10 @@ export interface FocusLeafOptions {
    *  moved. */
   container: HTMLElement;
   /** Take focus from anywhere outside a dialog or menu, not only from the
-   *  container or `<body>`. For a workspace switch, where focus is in the
-   *  sidebar or the workspace picker. */
+   *  container or `<body>`. For a worktree switch, where focus is in the
+   *  sidebar or the worktree picker. */
   force?: boolean;
-  /** Checked every frame; stop once it's false (the workspace was hidden). */
+  /** Checked every frame; stop once it's false (the worktree was hidden). */
   isCurrent: () => boolean;
 }
 

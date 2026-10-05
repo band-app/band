@@ -1,21 +1,21 @@
 import { FolderOpen, GitCompare, MessageSquare, TerminalSquare } from "lucide-react";
 
-export type WorkspaceTab = "chat" | "diff" | "code" | "terminal";
+export type WorktreeTab = "chat" | "diff" | "code" | "terminal";
 
-interface WorkspaceTabNavProps {
-  activeTab: WorkspaceTab;
-  onTabChange: (tab: WorkspaceTab) => void;
+interface WorktreeTabNavProps {
+  activeTab: WorktreeTab;
+  onTabChange: (tab: WorktreeTab) => void;
   diffFileCount?: number;
 }
 
-const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = [
+const tabs: { id: WorktreeTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "diff", label: "Changes", icon: GitCompare },
   { id: "code", label: "Files", icon: FolderOpen },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
 ];
 
-export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: WorkspaceTabNavProps) {
+export function WorktreeTabNav({ activeTab, onTabChange, diffFileCount }: WorktreeTabNavProps) {
   return (
     <div className="flex shrink-0 border-b border-border">
       {tabs.map((tab) => {

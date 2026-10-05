@@ -1,5 +1,5 @@
 /**
- * Page object for the workspace file viewer/editor (`FileViewer` →
+ * Page object for the worktree file viewer/editor (`FileViewer` →
  * `CodeMirrorEditor`).
  *
  * The viewer's root carries a `data-testid="file-viewer__root"` (set on
@@ -35,18 +35,18 @@ export class FileViewerPage {
   /**
    * @param page  The Playwright page.
    * @param scope Optional locator to scope the viewer lookup to a single
-   *   workspace's subtree. Several workspace subtrees stay mounted at once
-   *   (`MultiWorkspacePanelHost`), so `file-viewer__root` can
-   *   resolve to more than one element — pass a per-workspace scope (e.g.
-   *   `workspacePage.cachedPanelEntries(id)`) to disambiguate. Defaults to the
-   *   whole page for the common single-workspace case.
+   *   worktree's subtree. Several worktree subtrees stay mounted at once
+   *   (`MultiWorktreePanelHost`), so `file-viewer__root` can
+   *   resolve to more than one element — pass a per-worktree scope (e.g.
+   *   `worktreePage.cachedPanelEntries(id)`) to disambiguate. Defaults to the
+   *   whole page for the common single-worktree case.
    */
   constructor(
     private readonly page: Page,
     private readonly scope?: Locator,
   ) {}
 
-  /** The file viewer root, optionally scoped to a single workspace. */
+  /** The file viewer root, optionally scoped to a single worktree. */
   private get root(): Locator {
     return (this.scope ?? this.page).getByTestId(FILE_VIEWER_ROOT_TESTID);
   }
@@ -77,15 +77,15 @@ export class FileViewerPage {
    *  read fails (e.g. an `ENOENT: no such file or directory, stat '<root>/<path>'`
    *  from the server's `stat`). `data-testid` set on the banner element in
    *  `FileViewer.tsx` so the assertion doesn't tie to the server error copy.
-   *  Used by the cross-workspace-leak regression to prove a stray file from a
-   *  DIFFERENT workspace never made this viewer attempt a stat that fails. */
+   *  Used by the cross-worktree-leak regression to prove a stray file from a
+   *  DIFFERENT worktree never made this viewer attempt a stat that fails. */
   get errorBanner(): Locator {
     return this.root.getByTestId("file-viewer__error");
   }
 
   /** Read the editor's currently-rendered text. CodeMirror only renders the
    *  visible viewport, so this is reliable for the small single-line fixtures
-   *  the workspace-scoping specs use. Returns "" when no viewer is mounted.
+   *  the worktree-scoping specs use. Returns "" when no viewer is mounted.
    *  Used for poll-for-appearance assertions (poll for a specific file's text
    *  arriving within a bounded window, then assert it never did). */
   async readText(): Promise<string> {

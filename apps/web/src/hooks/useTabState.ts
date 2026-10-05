@@ -54,13 +54,13 @@ export interface TabFileState {
   language?: string;
 }
 
-function storageKey(workspaceId: string): string {
-  return `band-tab-state:${workspaceId}`;
+function storageKey(worktreeId: string): string {
+  return `band-tab-state:${worktreeId}`;
 }
 
-function loadState(workspaceId: string): Record<string, TabFileState> {
+function loadState(worktreeId: string): Record<string, TabFileState> {
   try {
-    const raw = localStorage.getItem(storageKey(workspaceId));
+    const raw = localStorage.getItem(storageKey(worktreeId));
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
@@ -70,9 +70,9 @@ function loadState(workspaceId: string): Record<string, TabFileState> {
   }
 }
 
-function saveState(workspaceId: string, state: Record<string, TabFileState>): void {
+function saveState(worktreeId: string, state: Record<string, TabFileState>): void {
   try {
-    localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
+    localStorage.setItem(storageKey(worktreeId), JSON.stringify(state));
   } catch {
     // storage unavailable
   }
@@ -108,16 +108,16 @@ export interface UseTabStateReturn {
   removePath: (path: string) => void;
 }
 
-export function useTabState(workspaceId: string): UseTabStateReturn {
+export function useTabState(worktreeId: string): UseTabStateReturn {
   // Keep state in a ref so reads/writes are always synchronous and
   // don't trigger re-renders (this is a side-channel, not render state).
-  const stateRef = useRef<Record<string, TabFileState>>(loadState(workspaceId));
+  const stateRef = useRef<Record<string, TabFileState>>(loadState(worktreeId));
 
-  // Track workspace changes so we reload from localStorage when it switches
-  const workspaceRef = useRef(workspaceId);
-  if (workspaceRef.current !== workspaceId) {
-    workspaceRef.current = workspaceId;
-    stateRef.current = loadState(workspaceId);
+  // Track worktree changes so we reload from localStorage when it switches
+  const worktreeRef = useRef(worktreeId);
+  if (worktreeRef.current !== worktreeId) {
+    worktreeRef.current = worktreeId;
+    stateRef.current = loadState(worktreeId);
   }
 
   const get = useCallback((filePath: string): TabFileState | undefined => {
@@ -128,9 +128,9 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     (filePath: string, patch: Partial<TabFileState>) => {
       const entry = stateRef.current[filePath] ?? {};
       stateRef.current[filePath] = { ...entry, ...patch };
-      saveState(workspaceId, stateRef.current);
+      saveState(worktreeId, stateRef.current);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const getViewMode = useCallback((filePath: string): "preview" | "source" | undefined => {
@@ -141,9 +141,9 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     (filePath: string, mode: "preview" | "source") => {
       const entry = stateRef.current[filePath] ?? {};
       stateRef.current[filePath] = { ...entry, viewMode: mode };
-      saveState(workspaceId, stateRef.current);
+      saveState(worktreeId, stateRef.current);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const getLanguage = useCallback((filePath: string): string | undefined => {
@@ -154,9 +154,9 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     (filePath: string, language: string) => {
       const entry = stateRef.current[filePath] ?? {};
       stateRef.current[filePath] = { ...entry, language };
-      saveState(workspaceId, stateRef.current);
+      saveState(worktreeId, stateRef.current);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const isDirty = useCallback((filePath: string): boolean => {
@@ -166,9 +166,9 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
   const removeFile = useCallback(
     (filePath: string) => {
       delete stateRef.current[filePath];
-      saveState(workspaceId, stateRef.current);
+      saveState(worktreeId, stateRef.current);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const renameFile = useCallback(
@@ -190,10 +190,10 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
       }
       if (changed) {
         stateRef.current = next;
-        saveState(workspaceId, stateRef.current);
+        saveState(worktreeId, stateRef.current);
       }
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   const removePath = useCallback(
@@ -206,16 +206,16 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
           changed = true;
         }
       }
-      if (changed) saveState(workspaceId, stateRef.current);
+      if (changed) saveState(worktreeId, stateRef.current);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   // Memoise the returned shape so callers that include the hook
   // result in a useCallback / useEffect dependency array see a stable
   // reference. Each method is already wrapped in `useCallback`, so the
   // `useMemo` deps form a transitively-stable set — the returned
-  // object's identity only changes when the workspace switches (which
+  // object's identity only changes when the worktree switches (which
   // is exactly when downstream callbacks should re-bind). Without
   // this, every render produced a fresh object literal, causing every
   // CodeBrowserView callback that depended on `tabState` to churn

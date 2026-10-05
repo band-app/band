@@ -1,4 +1,4 @@
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,60 +26,60 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
-import { useRemoveWorkspace } from "../hooks/use-project-mutations";
+import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
-import { isWorkspaceDeleting } from "../stores/dashboard-store";
+import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
-  ProjectKind,
+  RepoKind,
   SetupStatus,
-  WorkspaceBranchStatus,
-  WorkspaceStatus,
+  WorktreeBranchStatus,
   WorktreeInfo,
+  WorktreeStatus,
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
-import { WorkspaceLabel } from "./WorkspaceLabel";
+import { WorktreeLabel } from "./WorktreeLabel";
 
 // ---------------------------------------------------------------------------
 // Recent-user-activation marker (used to suppress auto-scroll on in-list nav)
 // ---------------------------------------------------------------------------
 //
 // The active card auto-scrolls into view ONLY when the navigation came from
-// OUTSIDE the project list — direct URL navigation, browser back/forward,
-// or the ⌘K workspace picker. When the user clicked a card or pressed
+// OUTSIDE the repo list — direct URL navigation, browser back/forward,
+// or the ⌘K worktree picker. When the user clicked a card or pressed
 // Enter on a focused card inside the list, the card is already where their
 // cursor / keyboard focus is, so the scroll is unwanted.
 //
-// The two in-list entry points (`WorkspaceCard.handleClick` and
-// `ProjectList.selectWorkspace`) mark the workspaceId before navigating.
+// The two in-list entry points (`WorktreeCard.handleClick` and
+// `RepoList.selectWorktree`) mark the worktreeId before navigating.
 // The post-navigation `scrollIntoView` effect consumes the marker and bails
 // out instead of scrolling. The marker auto-expires after a short window
 // so a stale value can't accidentally suppress a legitimate scroll on a
-// later URL navigation to the same workspace.
+// later URL navigation to the same worktree.
 // ---------------------------------------------------------------------------
 
 const RECENT_ACTIVATION_WINDOW_MS = 300;
 
-let recentlyActivatedWorkspaceId: string | null = null;
+let recentlyActivatedWorktreeId: string | null = null;
 let recentlyActivatedTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function markRecentActivation(workspaceId: string): void {
-  recentlyActivatedWorkspaceId = workspaceId;
+export function markRecentActivation(worktreeId: string): void {
+  recentlyActivatedWorktreeId = worktreeId;
   if (recentlyActivatedTimer) clearTimeout(recentlyActivatedTimer);
   recentlyActivatedTimer = setTimeout(() => {
-    recentlyActivatedWorkspaceId = null;
+    recentlyActivatedWorktreeId = null;
     recentlyActivatedTimer = null;
   }, RECENT_ACTIVATION_WINDOW_MS);
 }
 
-function consumeRecentActivation(workspaceId: string): boolean {
-  if (recentlyActivatedWorkspaceId !== workspaceId) return false;
-  recentlyActivatedWorkspaceId = null;
+function consumeRecentActivation(worktreeId: string): boolean {
+  if (recentlyActivatedWorktreeId !== worktreeId) return false;
+  recentlyActivatedWorktreeId = null;
   if (recentlyActivatedTimer) {
     clearTimeout(recentlyActivatedTimer);
     recentlyActivatedTimer = null;
@@ -89,101 +89,101 @@ function consumeRecentActivation(workspaceId: string): boolean {
 
 interface Props {
   worktree: WorktreeInfo;
-  projectName: string;
+  repoName: string;
   defaultBranch: string;
   /**
-   * Project kind. Defaults to "git" when undefined so older adapters /
-   * fixtures keep their current behavior. Plain projects suppress git
-   * status indicators, the delete-workspace action, and git pull/push
+   * Repo kind. Defaults to "git" when undefined so older adapters /
+   * fixtures keep their current behavior. Plain repos suppress git
+   * status indicators, the delete-worktree action, and git pull/push
    * context-menu items — see #427.
    */
-  projectKind?: ProjectKind;
-  status?: WorkspaceStatus;
-  branchStatus?: WorkspaceBranchStatus;
+  repoKind?: RepoKind;
+  status?: WorktreeStatus;
+  branchStatus?: WorktreeBranchStatus;
   setupStatus?: SetupStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   /**
    * When true (e.g. inside the Pinned section), render the branch label as
-   * `{project}/{branch}` instead of just `{branch}` so the user can tell
-   * cards apart when they're mixed across projects.
+   * `{repo}/{branch}` instead of just `{branch}` so the user can tell
+   * cards apart when they're mixed across repos.
    */
-  showProjectName?: boolean;
+  showRepoName?: boolean;
   /**
-   * Toggle the pinned state for this card's workspace. Passed as a prop
-   * (rather than reading from `usePinnedWorkspaces()` inside the card) so
-   * each card stays inert to changes in the projects-query cache —
-   * otherwise every pin/unpin re-renders every WorkspaceCard on the page.
+   * Toggle the pinned state for this card's worktree. Passed as a prop
+   * (rather than reading from `usePinnedWorktrees()` inside the card) so
+   * each card stays inert to changes in the repos-query cache —
+   * otherwise every pin/unpin re-renders every WorktreeCard on the page.
    */
-  onTogglePinned: (project: string, name: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
 }
 
-export const WorkspaceCard = memo(function WorkspaceCard({
+export const WorktreeCard = memo(function WorktreeCard({
   worktree,
-  projectName,
+  repoName,
   defaultBranch,
-  projectKind,
+  repoKind,
   status,
   branchStatus,
   setupStatus,
   isFocused,
   onShowDeleteDialog,
-  showProjectName,
+  showRepoName,
   onTogglePinned,
 }: Props) {
-  const isPlain = projectKind === "plain";
+  const isPlain = repoKind === "plain";
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
 
-  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const openWorktree = useDashboardStore((s) => s.openWorktree);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   const runScript = useDashboardStore((s) => s.runScript);
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
-  const removeWorkspaceMutation = useRemoveWorkspace();
+  const removeWorktreeMutation = useRemoveWorktree();
   const isPinned = worktree.pinned;
-  // The default-branch worktree is a git project's main checkout — its path is
+  // The default-branch worktree is a git repo's main checkout — its path is
   // the repository root (git's "main worktree"). A home icon marks it apart
-  // from the added feature worktrees below it. Plain projects have no root
-  // worktree distinction (the project header IS the workspace).
+  // from the added feature worktrees below it. Plain repos have no root
+  // worktree distinction (the repo header IS the worktree).
   const isRoot = !isPlain && worktree.name === defaultBranch;
 
-  const workspaceId = toWorkspaceId(projectName, worktree.name);
-  const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
-  // The card stays listed, disabled, until the workspace is gone.
-  const isDeleting = useDashboardStore((s) => isWorkspaceDeleting(s, workspaceId));
-  const href = capabilities.getWorkspaceHref?.(workspaceId);
+  const worktreeId = toWorktreeId(repoName, worktree.name);
+  const isActive = useDashboardStore((s) => s.activeWorktreeId === worktreeId);
+  // The card stays listed, disabled, until the worktree is gone.
+  const isDeleting = useDashboardStore((s) => isWorktreeDeleting(s, worktreeId));
+  const href = capabilities.getWorktreeHref?.(worktreeId);
 
-  // Scroll this card into view when it becomes the active workspace via
+  // Scroll this card into view when it becomes the active worktree via
   // OUTSIDE-the-list navigation (direct URL, browser back/forward, ⌘K
-  // workspace picker). The in-list paths (click or keyboard Enter) mark
-  // the workspaceId via `markRecentActivation` before they navigate, and
+  // worktree picker). The in-list paths (click or keyboard Enter) mark
+  // the worktreeId via `markRecentActivation` before they navigate, and
   // we consume that marker here to bail out — the card is already where
   // the user's cursor / keyboard focus is, so the scroll would be a jolt.
   //
   // Tied to `isActive` (URL-derived) rather than `isFocused` (keyboard
   // navigation ring) so arrow-key navigation in the list doesn't trigger
-  // scroll, only an actual workspace change does.
+  // scroll, only an actual worktree change does.
   useEffect(() => {
     if (!isActive) return;
-    if (consumeRecentActivation(workspaceId)) return;
+    if (consumeRecentActivation(worktreeId)) return;
     cardRef.current?.scrollIntoView({ block: "center" });
-  }, [isActive, workspaceId]);
+  }, [isActive, worktreeId]);
 
   const handleClick = () => {
     if (isDeleting) return;
-    clearNeedsAttention(workspaceId);
-    markRecentActivation(workspaceId);
+    clearNeedsAttention(worktreeId);
+    markRecentActivation(worktreeId);
     if (href && capabilities.navigate) {
       capabilities.navigate(href);
     } else if (!href) {
-      openWorkspace(workspaceId);
+      openWorktree(worktreeId);
     }
   };
 
   const handleOpenChecks = () => {
     if (isDeleting) return;
-    showChecksTab(workspaceId);
+    showChecksTab(worktreeId);
     if (!isActive) handleClick();
   };
 
@@ -205,11 +205,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     // "currently-active link in a list of related links".
     "data-active": isActive || undefined,
     "aria-current": isActive ? ("page" as const) : undefined,
-    // Stable test hook keyed by workspaceId so integration tests can right-
+    // Stable test hook keyed by worktreeId so integration tests can right-
     // click the specific card (issue #508). Branches with `/` in them are
-    // collapsed to `-` by `toWorkspaceId` so the attribute value matches
-    // the canonical workspace id used everywhere else in the UI.
-    "data-testid": `project-list__workspace-card--${workspaceId}`,
+    // collapsed to `-` by `toWorktreeId` so the attribute value matches
+    // the canonical worktree id used everywhere else in the UI.
+    "data-testid": `repo-list__worktree-card--${worktreeId}`,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       handleClick();
@@ -229,10 +229,10 @@ export const WorkspaceCard = memo(function WorkspaceCard({
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
-      removeWorkspaceMutation.mutate({ project: projectName, name: worktree.name });
+      removeWorktreeMutation.mutate({ repo: repoName, name: worktree.name });
     } else {
       onShowDeleteDialog({
-        projectName,
+        repoName,
         name: worktree.name,
         isUnmerged: hasUnmergedPR,
         isDirty,
@@ -263,7 +263,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                     isActive={isActive}
                     fallback={
                       <Home
-                        data-testid="workspace-card__home-icon"
+                        data-testid="worktree-card__home-icon"
                         className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
                       />
                     }
@@ -271,17 +271,13 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 ) : (
                   <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
                 )}
-                {showProjectName ? (
-                  // Pinned section: stack the branch name over the project name
+                {showRepoName ? (
+                  // Pinned section: stack the branch name over the repo name
                   // as a compact two-line block so a mixed list of pinned cards
                   // stays scannable without a long, mid-truncated
-                  // `project/branch` string on one line. Shared with the ⌘K
-                  // workspace picker via `WorkspaceLabel`.
-                  <WorkspaceLabel
-                    name={worktree.name}
-                    projectName={projectName}
-                    isActive={isActive}
-                  />
+                  // `repo/branch` string on one line. Shared with the ⌘K
+                  // worktree picker via `WorktreeLabel`.
+                  <WorktreeLabel name={worktree.name} repoName={repoName} isActive={isActive} />
                 ) : (
                   <span
                     className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
@@ -291,8 +287,8 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 )}
               </div>
             </TooltipTrigger>
-            {/* Always show the full `project/name` identity in the
-                tooltip (the stable workspace name, matching the visible
+            {/* Always show the full `repo/name` identity in the
+                tooltip (the stable worktree name, matching the visible
                 label — not the live git branch). The visible label is
                 `truncate`-ellipsised when the sidebar is narrow, so
                 spelling out the full thing on hover is the one thing a
@@ -300,24 +296,24 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 path was clutter (and it exposed `$HOME` paths that the
                 user doesn't typically care about while scanning the list).
                 Anchored to the right of the card (was top) so a long
-                project/name string doesn't cover the next card down
+                repo/name string doesn't cover the next card down
                 — fans out into open viewport space instead of
                 overlapping siblings. */}
-            <TooltipContent side="right">{`${projectName}/${worktree.name}`}</TooltipContent>
+            <TooltipContent side="right">{`${repoName}/${worktree.name}`}</TooltipContent>
           </Tooltip>
           {isDeleting && (
             <span
-              data-testid="workspace-card__deleting"
+              data-testid="worktree-card__deleting"
               className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
             >
               <Loader className="size-3.5 animate-spin" />
               Deleting…
             </span>
           )}
-          {/* The workspace's ephemeral worker exited (sleeping) or is coming back (waking). */}
+          {/* The worktree's ephemeral worker exited (sleeping) or is coming back (waking). */}
           {worktree.lifecycle && !isDeleting && (
             <span
-              data-testid="workspace-card__lifecycle"
+              data-testid="worktree-card__lifecycle"
               data-lifecycle={worktree.lifecycle}
               className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
             >
@@ -333,7 +329,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
           >
             <SetupStatusIndicator setup={setupStatus} />
-            {/* Plain (non-git) projects have no branch state to surface —
+            {/* Plain (non-git) repos have no branch state to surface —
                 no dirty/ahead/behind, no CI, no PR — so skip the indicators
                 entirely rather than render perpetually-empty badges. */}
             {!isPlain && branchStatus && <GitStatusIndicator git={branchStatus.git} />}
@@ -353,10 +349,10 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuLabel>Workspace</ContextMenuLabel>
-        <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.name, isPinned)}>
+        <ContextMenuLabel>Worktree</ContextMenuLabel>
+        <ContextMenuItem onClick={() => onTogglePinned(repoName, worktree.name, isPinned)}>
           {isPinned ? <PinOff /> : <Pin />}
-          {isPinned ? "Unpin workspace" : "Pin workspace"}
+          {isPinned ? "Unpin worktree" : "Pin worktree"}
         </ContextMenuItem>
         <ContextMenuSeparator />
         {capabilities.copyPath && (
@@ -384,24 +380,24 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPull(projectName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPull(repoName, worktree.name)}>
             <ArrowDownToLine />
             Git pull
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPush(projectName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPush(repoName, worktree.name)}>
             <ArrowUpFromLine />
             Git push
           </ContextMenuItem>
         )}
-        {/* Plain projects have a single implicit workspace; removing it
-            would orphan the project, so the user is steered toward
-            removing the project itself instead. */}
+        {/* Plain repos have a single implicit worktree; removing it
+            would orphan the repo, so the user is steered toward
+            removing the repo itself instead. */}
         {!isPlain && worktree.name !== defaultBranch && (
           <ContextMenuItem variant="destructive" onClick={handleDelete}>
             <Trash2 />
-            Delete workspace
+            Delete worktree
           </ContextMenuItem>
         )}
       </ContextMenuContent>

@@ -6,18 +6,18 @@ import { useCallback, useEffect, useState } from "react";
 
 const MAX_RECENT = 50;
 
-/** workspaceId → ordered list of file paths (most-recent-first) */
+/** worktreeId → ordered list of file paths (most-recent-first) */
 const recentFilesMap = new Map<string, string[]>();
 
-function getRecent(workspaceId: string): string[] {
-  return recentFilesMap.get(workspaceId) ?? [];
+function getRecent(worktreeId: string): string[] {
+  return recentFilesMap.get(worktreeId) ?? [];
 }
 
-function addRecent(workspaceId: string, filePath: string): string[] {
-  const list = getRecent(workspaceId).filter((f) => f !== filePath);
+function addRecent(worktreeId: string, filePath: string): string[] {
+  const list = getRecent(worktreeId).filter((f) => f !== filePath);
   list.unshift(filePath);
   if (list.length > MAX_RECENT) list.length = MAX_RECENT;
-  recentFilesMap.set(workspaceId, list);
+  recentFilesMap.set(worktreeId, list);
   return list;
 }
 
@@ -30,21 +30,21 @@ export interface UseRecentFilesReturn {
   trackFile: (filePath: string) => void;
 }
 
-export function useRecentFiles(workspaceId: string): UseRecentFilesReturn {
-  const [recentFiles, setRecentFiles] = useState<string[]>(() => getRecent(workspaceId));
+export function useRecentFiles(worktreeId: string): UseRecentFilesReturn {
+  const [recentFiles, setRecentFiles] = useState<string[]>(() => getRecent(worktreeId));
 
-  // Re-sync when workspace changes
+  // Re-sync when worktree changes
   useEffect(() => {
-    setRecentFiles(getRecent(workspaceId));
-  }, [workspaceId]);
+    setRecentFiles(getRecent(worktreeId));
+  }, [worktreeId]);
 
   const trackFile = useCallback(
     (filePath: string) => {
       if (!filePath) return;
-      const updated = addRecent(workspaceId, filePath);
+      const updated = addRecent(worktreeId, filePath);
       setRecentFiles(updated);
     },
-    [workspaceId],
+    [worktreeId],
   );
 
   return { recentFiles, trackFile };

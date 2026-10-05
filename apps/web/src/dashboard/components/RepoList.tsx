@@ -1,4 +1,4 @@
-import { toWorkspaceId } from "@band-app/shared/workspace-id";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Button,
   ContextMenu,
@@ -69,38 +69,38 @@ import {
   LABELS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
-  PROJECTS_COLLAPSE_KEY,
+  REPOS_COLLAPSE_KEY,
   UNLABELED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
 import { useHostRequests } from "../hooks/use-host-requests";
-import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
+import { usePinnedWorktrees } from "../hooks/use-pinned-worktrees";
 import {
-  usePromoteProjectToGit,
-  useRemoveProject,
-  useRemoveWorkspace,
-  useReorderProjects,
-  useUpdateProjectLabel,
-} from "../hooks/use-project-mutations";
-import { useProjects } from "../hooks/use-projects";
+  usePromoteRepoToGit,
+  useRemoveRepo,
+  useRemoveWorktree,
+  useReorderRepos,
+  useUpdateRepoLabel,
+} from "../hooks/use-repo-mutations";
+import { useRepos } from "../hooks/use-repos";
 import { useSettingsQuery } from "../hooks/use-settings-query";
-import { isWorkspaceDeleting } from "../stores/dashboard-store";
+import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
   LabelDefinition,
-  ProjectInfo,
+  RepoInfo,
   SetupStatus,
-  WorkspaceBranchStatus,
-  WorkspaceStatus,
+  WorktreeBranchStatus,
+  WorktreeStatus,
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
-import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
-import { NewWorkspaceDialog } from "./NewWorkspaceForm";
-import { ProjectAvatar } from "./ProjectAvatar";
+import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
+import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
-import { ProvisioningWorkspaceCard } from "./ProvisioningWorkspaceCard";
-import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
+import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
+import { RepoAvatar } from "./RepoAvatar";
+import { markRecentActivation, WorktreeCard } from "./WorktreeCard";
 
 /**
  * Wraps a collapsible section's body so expand/collapse animates smoothly.
@@ -114,8 +114,8 @@ import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
  * present at both ends to animate (unmounting the content on collapse would
  * make expand "pop" open with no starting height to animate from). `inert`
  * takes the hidden subtree out of the tab order and blocks pointer/focus so a
- * collapsed section behaves as if it weren't there (keyboard workspace nav
- * already excludes collapsed rows via `allWorkspaceIds`). Keeping a sidebar's
+ * collapsed section behaves as if it weren't there (keyboard worktree nav
+ * already excludes collapsed rows via `allWorktreeIds`). Keeping a sidebar's
  * bounded set of cards mounted is cheap — they're memoized and only re-render
  * when their own store slice changes.
  */
@@ -141,61 +141,61 @@ function CollapsibleSection({
   );
 }
 
-interface SortableProjectProps {
-  project: ProjectInfo;
-  statuses: Map<string, WorkspaceStatus>;
-  branchStatuses: Map<string, WorkspaceBranchStatus>;
+interface SortableRepoProps {
+  repo: RepoInfo;
+  statuses: Map<string, WorktreeStatus>;
+  branchStatuses: Map<string, WorktreeBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
-  removeProject: (name: string) => void;
-  updateProjectLabel: (name: string, label: string | null) => void;
-  /** Opens the promote-to-git confirmation dialog for the given project. */
+  removeRepo: (name: string) => void;
+  updateRepoLabel: (name: string, label: string | null) => void;
+  /** Opens the promote-to-git confirmation dialog for the given repo. */
   onPromoteToGit: (name: string) => void;
   labels: LabelDefinition[];
-  setWorkspaceDialog: (name: string | null) => void;
+  setWorktreeDialog: (name: string | null) => void;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   focusedIndex: number;
-  workspaceIndexStart: number;
+  worktreeIndexStart: number;
   collapsed: boolean;
   onToggleCollapse: (name: string) => void;
   /**
-   * True when the project had at least one worktree before pinned ones were
-   * filtered out. Used to suppress the misleading "No workspaces yet" message
+   * True when the repo had at least one worktree before pinned ones were
+   * filtered out. Used to suppress the misleading "No worktrees yet" message
    * when all worktrees are pinned and shown in the Pinned section instead.
    */
   hasPinnedSiblings?: boolean;
-  onTogglePinned: (project: string, name: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
 }
 
-function SortableProject({
-  project,
+function SortableRepo({
+  repo,
   statuses,
   branchStatuses,
   setupStatuses,
-  removeProject,
-  updateProjectLabel,
+  removeRepo,
+  updateRepoLabel,
   onPromoteToGit,
   labels,
-  setWorkspaceDialog,
+  setWorktreeDialog,
   onShowDeleteDialog,
   focusedIndex,
-  workspaceIndexStart,
+  worktreeIndexStart,
   collapsed,
   onToggleCollapse,
   hasPinnedSiblings,
   onTogglePinned,
-}: SortableProjectProps) {
-  const isPlain = project.kind === "plain";
+}: SortableRepoProps) {
+  const isPlain = repo.kind === "plain";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: project.name,
+    id: repo.name,
   });
   const capabilities = useCapabilities();
-  // `adapter.promoteProjectToGit` is optional on the DashboardAdapter
+  // `adapter.promoteRepoToGit` is optional on the DashboardAdapter
   // interface — only the web adapter implements it today. Hide the menu
   // item when the active adapter lacks the method so the user can't click
-  // through to a runtime error (`use-project-mutations` rejects with a
+  // through to a runtime error (`use-repo-mutations` rejects with a
   // friendly message, but hiding the affordance is cleaner).
   const adapter = useAdapter();
-  const canPromoteToGit = typeof adapter.promoteProjectToGit === "function";
+  const canPromoteToGit = typeof adapter.promoteRepoToGit === "function";
   // `active` is the currently-dragged item (or null when nothing is being
   // dragged). We only honour dnd-kit's `transition` while a drag is in
   // progress: that keeps the smooth slide-out-of-the-way animation while
@@ -210,67 +210,65 @@ function SortableProject({
     opacity: isDragging ? 0.5 : undefined,
   };
 
-  // Plain projects flatten: the project header IS the implicit workspace's
+  // Plain repos flatten: the repo header IS the implicit worktree's
   // card. There's no nested "main" row, no collapse chevron, no "+" Add
-  // workspace button, and crucially no pinning (the workspace is already
-  // at the project level — there's nothing to "pull up to the top"). See
+  // worktree button, and crucially no pinning (the worktree is already
+  // at the repo level — there's nothing to "pull up to the top"). See
   // #427.
-  const provisioning = useHostRequests().filter((r) => r.project === project.name);
-  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const provisioning = useHostRequests().filter((r) => r.repo === repo.name);
+  const openWorktree = useDashboardStore((s) => s.openWorktree);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
-  // Plain projects are guaranteed to have exactly one worktree (the
-  // implicit `main` synthesized by projects.add and re-synthesized by
-  // `reconcileKindForProject` on any git → plain flip). Read
+  // Plain repos are guaranteed to have exactly one worktree (the
+  // implicit `main` synthesized by repos.add and re-synthesized by
+  // `reconcileKindForRepo` on any git → plain flip). Read
   // `worktrees[0].name` directly rather than `?.name ?? "main"`;
   // the optional chain would mask a real state-corruption bug.
-  const plainName = isPlain ? project.worktrees[0].name : "";
-  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainName) : "";
-  const plainIsActive = useDashboardStore(
-    (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
-  );
-  const plainHref = isPlain ? capabilities.getWorkspaceHref?.(plainWorkspaceId) : undefined;
-  const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
-  const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
+  const plainName = isPlain ? repo.worktrees[0].name : "";
+  const plainWorktreeId = isPlain ? toWorktreeId(repo.name, plainName) : "";
+  const plainIsActive = useDashboardStore((s) => isPlain && s.activeWorktreeId === plainWorktreeId);
+  const plainHref = isPlain ? capabilities.getWorktreeHref?.(plainWorktreeId) : undefined;
+  const plainAgent = isPlain ? statuses.get(plainWorktreeId)?.agent : undefined;
+  const plainIsFocused = isPlain && worktreeIndexStart === focusedIndex;
 
-  // For git projects: is the currently-active workspace one of this project's
-  // branches? Plain projects already surface this via `plainIsActive`. Git
-  // headers had no active treatment, so the user couldn't tell which project
-  // the open workspace belonged to once scrolled away from its card — this
+  // For git repos: is the currently-active worktree one of this repo's
+  // branches? Plain repos already surface this via `plainIsActive`. Git
+  // headers had no active treatment, so the user couldn't tell which repo
+  // the open worktree belonged to once scrolled away from its card — this
   // tints the header (and its folder icon) to close that gap.
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
   // Memoized: every Zustand update re-renders this row, and the `.some(...)`
   // walk is O(worktrees) — recompute only when the inputs actually change.
   const gitHeaderIsActive = useMemo(
     () =>
       !isPlain &&
-      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId),
-    [isPlain, project.worktrees, project.name, activeWorkspaceId],
+      repo.worktrees.some((wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId),
+    [isPlain, repo.worktrees, repo.name, activeWorktreeId],
   );
 
-  // Single onClick / onKeyDown for the plain-project header (mirrors the
-  // navigate-or-open dance WorkspaceCard does). For git projects the
+  // Single onClick / onKeyDown for the plain-repo header (mirrors the
+  // navigate-or-open dance WorktreeCard does). For git repos the
   // header onClick toggles collapse — branched at the call site.
   const handlePlainOpen = () => {
-    clearNeedsAttention(plainWorkspaceId);
+    clearNeedsAttention(plainWorktreeId);
     if (plainHref && capabilities.navigate) {
       capabilities.navigate(plainHref);
     } else if (!plainHref) {
-      openWorkspace(plainWorkspaceId);
+      openWorktree(plainWorktreeId);
     }
   };
 
-  let workspaceIndex = workspaceIndexStart;
+  let worktreeIndex = worktreeIndexStart;
 
-  // Header className. Both kinds keep the project-level indent (`pl-1`)
-  // so plain projects read as standalone projects, not as nested
-  // workspaces under the project above them. Plain projects also gain
-  // the WorkspaceCard hover/active/focus treatment because the header
-  // itself is clickable — but the inner text styling stays project-bold
+  // Header className. Both kinds keep the repo-level indent (`pl-1`)
+  // so plain repos read as standalone repos, not as nested
+  // worktrees under the repo above them. Plain repos also gain
+  // the WorktreeCard hover/active/focus treatment because the header
+  // itself is clickable — but the inner text styling stays repo-bold
   // (see the `<h2>` block below). `py-1.5` gives a taller hit target
-  // than a workspace card (`py-1`) so the row reads as a project, not
-  // a nested workspace.
+  // than a worktree card (`py-1`) so the row reads as a repo, not
+  // a nested worktree.
   // On touch devices (`pointer: coarse`) the row grows to a 44px-tall hit
-  // target (iOS HIG minimum) so projects are easy to tap in the list; with a
+  // target (iOS HIG minimum) so repos are easy to tap in the list; with a
   // mouse the row stays compact. `touch-pan-y` (not `touch-manipulation`) is
   // kept because dnd-kit needs vertical panning to scroll the list mid-drag.
   const headerClassName = isPlain
@@ -279,7 +277,7 @@ function SortableProject({
       }`
     : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11`;
 
-  // The project action list is rendered in two places — the right-click
+  // The repo action list is rendered in two places — the right-click
   // context menu and the header's "⋮" dropdown — so it's defined once here and
   // parameterised by the menu primitive set (Context* or Dropdown*), which
   // share the same Item/Sub/SubTrigger/SubContent/Portal shape. Keeps the two
@@ -294,37 +292,37 @@ function SortableProject({
     const { Item, Sub, SubTrigger, SubContent, Portal } = menu;
     return (
       <>
-        {/* Git projects only: `git worktree add`. Mirrors the header's
+        {/* Git repos only: `git worktree add`. Mirrors the header's
             hover-revealed "+" button, kept first as the primary action. */}
         {!isPlain && (
           <Item
-            data-testid="project-list__action--add-workspace"
-            onClick={() => setWorkspaceDialog(project.name)}
+            data-testid="repo-list__action--add-worktree"
+            onClick={() => setWorktreeDialog(repo.name)}
           >
             <Plus />
-            Add workspace
+            Add worktree
           </Item>
         )}
         {labels.length > 0 && (
           <Sub>
-            <SubTrigger data-testid="project-list__action--set-label">
+            <SubTrigger data-testid="repo-list__action--set-label">
               <Tag />
               Set label
             </SubTrigger>
             <Portal>
-              <SubContent data-testid="project-list__label-submenu">
-                <Item onClick={() => updateProjectLabel(project.name, null)}>
+              <SubContent data-testid="repo-list__label-submenu">
+                <Item onClick={() => updateRepoLabel(repo.name, null)}>
                   <span className="flex-1">None</span>
-                  {!project.label && <Check className="size-3" />}
+                  {!repo.label && <Check className="size-3" />}
                 </Item>
                 {labels.map((lbl) => (
-                  <Item key={lbl.id} onClick={() => updateProjectLabel(project.name, lbl.id)}>
+                  <Item key={lbl.id} onClick={() => updateRepoLabel(repo.name, lbl.id)}>
                     <span
                       className="size-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: lbl.color }}
                     />
                     <span className="flex-1">{lbl.name}</span>
-                    {project.label === lbl.id && <Check className="size-3" />}
+                    {repo.label === lbl.id && <Check className="size-3" />}
                   </Item>
                 ))}
               </SubContent>
@@ -332,24 +330,24 @@ function SortableProject({
           </Sub>
         )}
         {isPlain && canPromoteToGit && (
-          <Item onClick={() => onPromoteToGit(project.name)}>
+          <Item onClick={() => onPromoteToGit(repo.name)}>
             <GitBranch />
             Promote to git…
           </Item>
         )}
         {capabilities.copyPath && (
-          <Item onClick={() => navigator.clipboard.writeText(project.path)}>
+          <Item onClick={() => navigator.clipboard.writeText(repo.path)}>
             <Clipboard />
             Copy path
           </Item>
         )}
         {capabilities.revealInFinder && (
-          <Item onClick={() => capabilities.revealInFinder!(project.path)}>
+          <Item onClick={() => capabilities.revealInFinder!(repo.path)}>
             <FolderOpen />
             Open in Finder
           </Item>
         )}
-        <Item onClick={() => removeProject(project.name)}>
+        <Item onClick={() => removeRepo(repo.name)}>
           <ListMinus />
           Remove from list
         </Item>
@@ -362,18 +360,18 @@ function SortableProject({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           {/* The header is a click/tap target on both desktop and mobile.
-              For git projects it toggles collapse; for plain projects it
-              opens the implicit workspace (the project IS the workspace).
-              Keyboard nav lives at the workspace-card level for git
-              projects; for plain projects the same role moves up here. */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the ProjectList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
+              For git repos it toggles collapse; for plain repos it
+              opens the implicit worktree (the repo IS the worktree).
+              Keyboard nav lives at the worktree-card level for git
+              repos; for plain repos the same role moves up here. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the RepoList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
           <div
             className={headerClassName}
-            data-testid={`project-list__project-header--${project.name}`}
-            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(project.name))}
+            data-testid={`repo-list__repo-header--${repo.name}`}
+            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(repo.name))}
           >
-            {/* Drag listeners live on the title (folder icon + project name)
-                so the project name itself is the drag handle. The 8px
+            {/* Drag listeners live on the title (folder icon + repo name)
+                so the repo name itself is the drag handle. The 8px
                 MouseSensor / 250ms TouchSensor thresholds mean a still
                 click/tap bubbles up to the outer onClick without starting
                 a drag. */}
@@ -383,13 +381,13 @@ function SortableProject({
               {...listeners}
             >
               {isPlain ? (
-                // Plain project: agent-status dot when the agent is
-                // working / needs attention, otherwise a project-sized
+                // Plain repo: agent-status dot when the agent is
+                // working / needs attention, otherwise a repo-sized
                 // (size-4) Folder icon. Inlined rather than routing
                 // through AgentStatusIndicator's fallback so the idle
-                // icon can match a git project's folder size — using the
+                // icon can match a git repo's folder size — using the
                 // indicator's size-3 fallback would make plain headers
-                // read as nested workspace cards (see #427 review).
+                // read as nested worktree cards (see #427 review).
                 plainAgent &&
                 (plainAgent.status === "working" || plainAgent.status === "needs_attention") ? (
                   <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
@@ -397,21 +395,21 @@ function SortableProject({
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
               ) : (
-                // Git project: the GitHub owner's avatar when `origin` is
+                // Git repo: the GitHub owner's avatar when `origin` is
                 // on GitHub, else the open/closed folder.
-                <ProjectAvatar
-                  avatar={project.avatar}
+                <RepoAvatar
+                  avatar={repo.avatar}
                   className="size-4"
-                  testId={`project-list__project-avatar--${project.name}`}
+                  testId={`repo-list__repo-avatar--${repo.name}`}
                   fallback={
                     collapsed ? (
                       <Folder
-                        data-testid={`project-list__project-folder--${project.name}`}
+                        data-testid={`repo-list__repo-folder--${repo.name}`}
                         className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
                       />
                     ) : (
                       <FolderOpen
-                        data-testid={`project-list__project-folder--${project.name}`}
+                        data-testid={`repo-list__repo-folder--${repo.name}`}
                         className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
                       />
                     )
@@ -420,11 +418,11 @@ function SortableProject({
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  {/* Same project-bold treatment regardless of kind so a
-                      plain project reads as a top-level project rather
-                      than a nested branch row. Active plain projects
+                  {/* Same repo-bold treatment regardless of kind so a
+                      plain repo reads as a top-level repo rather
+                      than a nested branch row. Active plain repos
                       bump to full-foreground for the same emphasis a
-                      WorkspaceCard would get. */}
+                      WorktreeCard would get. */}
                   <h2
                     className={`text-[13px] truncate ${
                       (isPlain && plainIsActive) || gitHeaderIsActive
@@ -432,13 +430,13 @@ function SortableProject({
                         : "font-semibold text-foreground/90"
                     }`}
                   >
-                    {project.name}
+                    {repo.name}
                   </h2>
                 </TooltipTrigger>
-                {/* Anchored to the right so a long project name doesn't
+                {/* Anchored to the right so a long repo name doesn't
                     cover the row above — matches the `side="right"`
-                    treatment on `WorkspaceCard`'s label tooltip. */}
-                <TooltipContent side="right">{project.name}</TooltipContent>
+                    treatment on `WorktreeCard`'s label tooltip. */}
+                <TooltipContent side="right">{repo.name}</TooltipContent>
               </Tooltip>
             </div>
             {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
@@ -460,8 +458,8 @@ function SortableProject({
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          aria-label="Project actions"
-                          data-testid={`project-list__project-menu-trigger--${project.name}`}
+                          aria-label="Repo actions"
+                          data-testid={`repo-list__repo-menu-trigger--${repo.name}`}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -482,10 +480,10 @@ function SortableProject({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              {/* Plain (non-git) projects have a single implicit workspace
+              {/* Plain (non-git) repos have a single implicit worktree
                   and don't support `git worktree add`, so the "+" Add
-                  workspace button is hidden — see #427. The server also
-                  rejects `workspaces.create` as a backstop. */}
+                  worktree button is hidden — see #427. The server also
+                  rejects `worktrees.create` as a backstop. */}
               {!isPlain && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -495,13 +493,13 @@ function SortableProject({
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setWorkspaceDialog(project.name);
+                        setWorktreeDialog(repo.name);
                       }}
                     >
                       <Plus />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Add workspace</TooltipContent>
+                  <TooltipContent>Add worktree</TooltipContent>
                 </Tooltip>
               )}
             </div>
@@ -518,31 +516,31 @@ function SortableProject({
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Nested workspaces section — only meaningful for git projects.
-          Plain projects are flat: the header above IS the workspace.
-          `ml-3` indents the branch list so the workspaces read as children of
-          the project header above, not as sibling rows. The indentation alone
+      {/* Nested worktrees section — only meaningful for git repos.
+          Plain repos are flat: the header above IS the worktree.
+          `ml-3` indents the branch list so the worktrees read as children of
+          the repo header above, not as sibling rows. The indentation alone
           (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
       {!isPlain && (
         <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
           {provisioning.map((request) => (
-            <ProvisioningWorkspaceCard key={request.id} request={request} />
+            <ProvisioningWorktreeCard key={request.id} request={request} />
           ))}
-          {project.worktrees.length === 0 ? (
+          {repo.worktrees.length === 0 ? (
             hasPinnedSiblings || provisioning.length > 0 ? null : (
-              <p className="text-[13px] text-foreground/60 px-4 py-2">No workspaces yet</p>
+              <p className="text-[13px] text-foreground/60 px-4 py-2">No worktrees yet</p>
             )
           ) : (
-            project.worktrees.map((wt) => {
-              const wsId = toWorkspaceId(project.name, wt.name);
-              const currentIndex = workspaceIndex++;
+            repo.worktrees.map((wt) => {
+              const wsId = toWorktreeId(repo.name, wt.name);
+              const currentIndex = worktreeIndex++;
               return (
-                <WorkspaceCard
+                <WorktreeCard
                   key={wt.name}
                   worktree={wt}
-                  projectName={project.name}
-                  defaultBranch={project.defaultBranch}
-                  projectKind={project.kind}
+                  repoName={repo.name}
+                  defaultBranch={repo.defaultBranch}
+                  repoKind={repo.kind}
                   status={statuses.get(wsId)}
                   branchStatus={branchStatuses.get(wsId)}
                   setupStatus={setupStatuses.get(wsId)}
@@ -619,29 +617,29 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
   );
 }
 
-interface ProjectListProps {
+interface RepoListProps {
   labelFilter: string | null;
 }
 
-export function ProjectList({ labelFilter }: ProjectListProps) {
-  const { projects } = useProjects();
+export function RepoList({ labelFilter }: RepoListProps) {
+  const { repos } = useRepos();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
   const setupStatuses = useDashboardStore((s) => s.setupStatuses);
-  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  const openWorktree = useDashboardStore((s) => s.openWorktree);
+  const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
 
-  const removeProjectMutation = useRemoveProject();
-  const reorderProjectsMutation = useReorderProjects();
-  const updateProjectLabelMutation = useUpdateProjectLabel();
-  const promoteProjectToGitMutation = usePromoteProjectToGit();
-  const removeWorkspaceMutation = useRemoveWorkspace();
+  const removeRepoMutation = useRemoveRepo();
+  const reorderReposMutation = useReorderRepos();
+  const updateRepoLabelMutation = useUpdateRepoLabel();
+  const promoteRepoToGitMutation = usePromoteRepoToGit();
+  const removeWorktreeMutation = useRemoveWorktree();
 
-  const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
+  const [worktreeDialog, setWorktreeDialog] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
-  /** Project name whose "Promote to git" confirmation dialog is open. */
+  /** Repo name whose "Promote to git" confirmation dialog is open. */
   const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const rawStore = useRawDashboardStore();
@@ -649,22 +647,22 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const keyboardNavRef = useRef(false);
 
-  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
-  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorkspaces();
-  // Plain (non-git) projects have no separate workspace card to pull up
-  // to a Pinned section — they're already flat at the project level. Drop
+  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorktrees();
+  // Plain (non-git) repos have no separate worktree card to pull up
+  // to a Pinned section — they're already flat at the repo level. Drop
   // them from the pinned list so a stale `pinned=true` row doesn't show
   // a confusing duplicate entry at the top of the tree.
   const pinnedEntries = useMemo(
-    () => pinnedEntriesRaw.filter((e) => e.project.kind !== "plain"),
+    () => pinnedEntriesRaw.filter((e) => e.repo.kind !== "plain"),
     [pinnedEntriesRaw],
   );
 
   // Two sensors so reorder works without an explicit "edit" toggle:
   //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
-  //    threshold avoids hijacking ordinary clicks on the project header.
+  //    threshold avoids hijacking ordinary clicks on the repo header.
   //  • TouchSensor — touch devices require a long-press (250ms) before drag
   //    activates so taps and scrolling still work normally on mobile.
   const sensors = useSensors(
@@ -672,28 +670,28 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 
-  // Each pinned workspace is rendered exclusively in the Pinned section, so
-  // we strip pinned worktrees out of the regular tree. Track which projects
-  // had any pinned worktrees so SortableProject can hide the misleading
-  // "No workspaces yet" copy when the only reason a project looks empty is
+  // Each pinned worktree is rendered exclusively in the Pinned section, so
+  // we strip pinned worktrees out of the regular tree. Track which repos
+  // had any pinned worktrees so SortableRepo can hide the misleading
+  // "No worktrees yet" copy when the only reason a repo looks empty is
   // that everything got pinned.
   //
-  // Plain (non-git) projects are flat — the project header IS the implicit
-  // workspace, with no nested card to pull up to a separate "Pinned"
+  // Plain (non-git) repos are flat — the repo header IS the implicit
+  // worktree, with no nested card to pull up to a separate "Pinned"
   // section. Skip the filter for them so a stray `pinned=true` row (e.g.
-  // pinned before the feature was disabled for plain projects) doesn't
-  // strand SortableProject with an empty `worktrees: []` and crash on
+  // pinned before the feature was disabled for plain repos) doesn't
+  // strand SortableRepo with an empty `worktrees: []` and crash on
   // `worktrees[0].branch`.
-  const { displayProjects, projectsWithPinned } = useMemo(() => {
+  const { displayRepos, reposWithPinned } = useMemo(() => {
     const withPinned = new Set<string>();
-    const display = projects.map((p) => {
+    const display = repos.map((p) => {
       if (p.kind === "plain") return p;
       const filtered = p.worktrees.filter((w) => !w.pinned);
       if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
       return { ...p, worktrees: filtered };
     });
-    return { displayProjects: display, projectsWithPinned: withPinned };
-  }, [projects]);
+    return { displayRepos: display, reposWithPinned: withPinned };
+  }, [repos]);
 
   const pinnedSectionCollapsed = pinnedCollapse.isCollapsed(PINNED_SECTION_ID);
   const showPinnedSection = pinnedEntries.length > 0;
@@ -705,12 +703,12 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         {
           labelId: null as string | null,
           label: null as LabelDefinition | null,
-          projects: displayProjects,
+          repos: displayRepos,
         },
       ];
 
-    const byLabel = new Map<string | null, ProjectInfo[]>();
-    for (const p of displayProjects) {
+    const byLabel = new Map<string | null, RepoInfo[]>();
+    for (const p of displayRepos) {
       const key = p.label ?? null;
       if (!byLabel.has(key)) byLabel.set(key, []);
       byLabel.get(key)!.push(p);
@@ -719,40 +717,40 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     const result: {
       labelId: string | null;
       label: LabelDefinition | null;
-      projects: ProjectInfo[];
+      repos: RepoInfo[];
     }[] = [];
     for (const lbl of labels) {
       const grouped = byLabel.get(lbl.id);
       if (grouped) {
-        result.push({ labelId: lbl.id, label: lbl, projects: grouped });
+        result.push({ labelId: lbl.id, label: lbl, repos: grouped });
       }
     }
     const unlabeled = byLabel.get(null);
     if (unlabeled) {
-      result.push({ labelId: null, label: null, projects: unlabeled });
+      result.push({ labelId: null, label: null, repos: unlabeled });
     }
     return result;
-  }, [displayProjects, labels]);
+  }, [displayRepos, labels]);
 
   const visibleGroups = useMemo(() => {
     if (!labelFilter) return groups;
     return groups.filter((g) => g.labelId === labelFilter);
   }, [groups, labelFilter]);
 
-  // Only count workspaces that are actually rendered — collapsed
-  // projects/labels hide their workspaces entirely, and keyboard arrow
+  // Only count worktrees that are actually rendered — collapsed
+  // repos/labels hide their worktrees entirely, and keyboard arrow
   // navigation must skip over them so focus never lands on something the
-  // user can't see. Pinned workspaces are always at the top of the list
+  // user can't see. Pinned worktrees are always at the top of the list
   // (independent of label filter), then the regular tree follows.
-  const allWorkspaceIds = useMemo(() => {
+  const allWorktreeIds = useMemo(() => {
     const headerVisible = labels.length > 0 && !labelFilter;
-    const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.workspaceId) : [];
+    const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.worktreeId) : [];
     const rest = visibleGroups.flatMap((g) => {
       const groupKey = g.labelId ?? UNLABELED_KEY;
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
-      return g.projects.flatMap((p) => {
-        if (projectCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.name));
+      return g.repos.flatMap((p) => {
+        if (repoCollapse.isCollapsed(p.name)) return [];
+        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name));
       });
     });
     return [...pinnedPart, ...rest];
@@ -761,93 +759,93 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     labels.length,
     labelFilter,
     labelCollapse,
-    projectCollapse,
+    repoCollapse,
     pinnedEntries,
     pinnedNavCount,
   ]);
 
-  const workspaceIndexMap = useMemo(() => {
+  const worktreeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    // Reserve slots [0..pinnedNavCount) for pinned workspaces so per-project
-    // workspaceIndexStart values align with allWorkspaceIds.
+    // Reserve slots [0..pinnedNavCount) for pinned worktrees so per-repo
+    // worktreeIndexStart values align with allWorktreeIds.
     let index = pinnedNavCount;
     const headerVisible = labels.length > 0 && !labelFilter;
     for (const group of visibleGroups) {
       const groupKey = group.labelId ?? UNLABELED_KEY;
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) continue;
-      for (const project of group.projects) {
-        map.set(project.name, index);
-        if (!projectCollapse.isCollapsed(project.name)) {
-          index += project.worktrees.length;
+      for (const repo of group.repos) {
+        map.set(repo.name, index);
+        if (!repoCollapse.isCollapsed(repo.name)) {
+          index += repo.worktrees.length;
         }
       }
     }
     return map;
-  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse, pinnedNavCount]);
+  }, [visibleGroups, labels.length, labelFilter, labelCollapse, repoCollapse, pinnedNavCount]);
 
   useEffect(() => {
     if (keyboardNavRef.current) return;
-    if (activeWorkspaceId) {
-      const idx = allWorkspaceIds.indexOf(activeWorkspaceId);
+    if (activeWorktreeId) {
+      const idx = allWorktreeIds.indexOf(activeWorktreeId);
       setFocusedIndex(idx);
     } else {
       setFocusedIndex(-1);
     }
-  }, [activeWorkspaceId, allWorkspaceIds]);
+  }, [activeWorktreeId, allWorktreeIds]);
 
-  // Reveal the active workspace in the tree by auto-expanding the project
+  // Reveal the active worktree in the tree by auto-expanding the repo
   // and label group it belongs to. This should run ONLY when
-  // activeWorkspaceId changes — i.e. when the user switches workspaces via
+  // activeWorktreeId changes — i.e. when the user switches worktrees via
   // the ⌘K picker, URL nav, notifications, etc. After the initial
   // reveal we deliberately leave the collapse state alone so the user can
-  // collapse the ancestors of the active workspace (via the "Collapse all"
+  // collapse the ancestors of the active worktree (via the "Collapse all"
   // toolbar button or by clicking a header) without this effect fighting
   // back on the very next render.
   //
-  // The naive implementation would include only `activeWorkspaceId` in the
-  // deps, but we also reference `labelCollapse`/`projectCollapse` inside
+  // The naive implementation would include only `activeWorktreeId` in the
+  // deps, but we also reference `labelCollapse`/`repoCollapse` inside
   // (their references change on every state update), `groups` (which we
-  // walk), and `pinnedEntries` (for the pinned-workspace early-exit).
+  // walk), and `pinnedEntries` (for the pinned-worktree early-exit).
   // Including all of those in the deps makes the effect re-fire on every
   // collapse-state change and undo the user's collapse. To preserve the
-  // "once per activeWorkspaceId" semantics while keeping the deps list
+  // "once per activeWorktreeId" semantics while keeping the deps list
   // exhaustive, we gate the body behind a ref that remembers the last
-  // revealed id — subsequent runs no-op until activeWorkspaceId actually
+  // revealed id — subsequent runs no-op until activeWorktreeId actually
   // changes.
   //
   // We also clear keyboardNavRef so the focusedIndex effect above can
-  // re-run and move the highlight ring to the freshly-revealed workspace.
+  // re-run and move the highlight ring to the freshly-revealed worktree.
   // Without that reset, arrow-key navigation followed by a ⌘K switch
   // would leave the highlight stuck on the old position.
   //
-  // Pinned workspaces are rendered exclusively in the Pinned section at
+  // Pinned worktrees are rendered exclusively in the Pinned section at
   // the top of the tree (and are filtered out of `groups` via
-  // `displayProjects`). They have no presence inside their project's
-  // worktree list, so for a pinned active workspace we reveal it by
-  // expanding the Pinned section header — not the project or label group
+  // `displayRepos`). They have no presence inside their repo's
+  // worktree list, so for a pinned active worktree we reveal it by
+  // expanding the Pinned section header — not the repo or label group
   // that contains its (now hidden) original entry.
   // Two refs so we run the reveal logic again when the *pinned-ness* of
-  // the active workspace changes, not only when activeWorkspaceId itself
+  // the active worktree changes, not only when activeWorktreeId itself
   // changes. Without the pinned-tracking ref, pinning or unpinning the
-  // currently-active workspace early-returns here before
-  // `pinnedCollapse.expand` (or the regular project/label expand) gets
+  // currently-active worktree early-returns here before
+  // `pinnedCollapse.expand` (or the regular repo/label expand) gets
   // a chance to run.
-  const revealedWorkspaceRef = useRef<string | null>(null);
+  const revealedWorktreeRef = useRef<string | null>(null);
   const revealedAsPinnedRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!activeWorkspaceId) {
-      revealedWorkspaceRef.current = null;
+    if (!activeWorktreeId) {
+      revealedWorktreeRef.current = null;
       revealedAsPinnedRef.current = false;
       return;
     }
-    const isActivePinned = pinnedEntries.some((e) => e.workspaceId === activeWorkspaceId);
+    const isActivePinned = pinnedEntries.some((e) => e.worktreeId === activeWorktreeId);
     if (
-      revealedWorkspaceRef.current === activeWorkspaceId &&
+      revealedWorktreeRef.current === activeWorktreeId &&
       revealedAsPinnedRef.current === isActivePinned
     ) {
       return;
     }
-    revealedWorkspaceRef.current = activeWorkspaceId;
+    revealedWorktreeRef.current = activeWorktreeId;
     revealedAsPinnedRef.current = isActivePinned;
     if (isActivePinned) {
       pinnedCollapse.expand(PINNED_SECTION_ID);
@@ -855,9 +853,9 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       return;
     }
     for (const group of groups) {
-      for (const project of group.projects) {
-        const containsActive = project.worktrees.some(
-          (wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId,
+      for (const repo of group.repos) {
+        const containsActive = repo.worktrees.some(
+          (wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId,
         );
         if (!containsActive) continue;
         if (labelFilter && group.labelId !== labelFilter) return;
@@ -865,45 +863,45 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         if (headerVisible) {
           labelCollapse.expand(group.labelId ?? UNLABELED_KEY);
         }
-        projectCollapse.expand(project.name);
+        repoCollapse.expand(repo.name);
         keyboardNavRef.current = false;
         return;
       }
     }
   }, [
-    activeWorkspaceId,
+    activeWorktreeId,
     groups,
     labelFilter,
     labels.length,
     labelCollapse,
-    projectCollapse,
+    repoCollapse,
     pinnedCollapse,
     pinnedEntries,
   ]);
 
   // Focus the container so keyboard navigation works immediately.
-  // Depends on hasProjects because the container div only renders when
-  // projects.length > 0 (see the early return below). On first mount with no
-  // projects, containerRef.current is null; re-running when hasProjects flips
+  // Depends on hasRepos because the container div only renders when
+  // repos.length > 0 (see the early return below). On first mount with no
+  // repos, containerRef.current is null; re-running when hasRepos flips
   // to true ensures we focus the container once it exists in the DOM.
-  const hasProjects = projects.length > 0;
+  const hasRepos = repos.length > 0;
   useEffect(() => {
-    if (hasProjects) {
+    if (hasRepos) {
       containerRef.current?.focus({ preventScroll: true });
     }
-  }, [hasProjects]);
+  }, [hasRepos]);
 
   const capabilities = useCapabilities();
 
   // ──────────────────────────────────────────────────────────────────────────
   // KEYBOARD NAVIGATION — READ BEFORE MODIFYING
   //
-  // This handler is the backbone of keyboard workspace switching. It has
+  // This handler is the backbone of keyboard worktree switching. It has
   // regressed multiple times because the interaction between this container-
-  // level handler and the card-level onKeyDown (in WorkspaceCard) is subtle:
+  // level handler and the card-level onKeyDown (in WorktreeCard) is subtle:
   //
   //  • Arrow keys update `focusedIndex` which controls the visual highlight
-  //    ring on WorkspaceCards. However, arrow events may originate on a *child*
+  //    ring on WorktreeCards. However, arrow events may originate on a *child*
   //    card that has DOM focus (e.g. after the user clicked a card or tabbed
   //    into the list). They bubble up here because cards don't handle arrows.
   //
@@ -913,34 +911,34 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   //
   //  • To fix this, arrow handlers explicitly re-focus the container via
   //    containerRef.current?.focus(). This guarantees the next Enter fires
-  //    HERE, where we use the correct focusedIndex to open the right workspace.
+  //    HERE, where we use the correct focusedIndex to open the right worktree.
   //
   // DO NOT remove the containerRef.current?.focus() calls. Without them,
-  // pressing Enter after arrow-key navigation opens the wrong workspace (or
-  // no workspace at all, depending on the platform).
+  // pressing Enter after arrow-key navigation opens the wrong worktree (or
+  // no worktree at all, depending on the platform).
   // ──────────────────────────────────────────────────────────────────────────
-  const selectWorkspace = useCallback(
+  const selectWorktree = useCallback(
     (wsId: string) => {
-      // Mark as in-list activation so WorkspaceCard's scrollIntoView effect
+      // Mark as in-list activation so WorktreeCard's scrollIntoView effect
       // bails out — keyboard focus is already on the chosen card.
       markRecentActivation(wsId);
-      const href = capabilities.getWorkspaceHref?.(wsId);
+      const href = capabilities.getWorktreeHref?.(wsId);
       if (href && capabilities.navigate) {
         capabilities.navigate(href);
       } else {
-        openWorkspace(wsId);
+        openWorktree(wsId);
       }
     },
-    [capabilities, openWorkspace],
+    [capabilities, openWorktree],
   );
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (allWorkspaceIds.length === 0) return;
+    if (allWorktreeIds.length === 0) return;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
       keyboardNavRef.current = true;
-      setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
+      setFocusedIndex((prev) => (prev < allWorktreeIds.length - 1 ? prev + 1 : prev));
       // Keep DOM focus on the container so Enter fires here, not on a child card.
       // See block comment above — removing this breaks keyboard Enter navigation.
       containerRef.current?.focus({ preventScroll: true });
@@ -952,16 +950,16 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       containerRef.current?.focus({ preventScroll: true });
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const wsId = allWorkspaceIds[focusedIndex];
-      if (wsId !== undefined && !isWorkspaceDeleting(rawStore.getState(), wsId)) {
+      const wsId = allWorktreeIds[focusedIndex];
+      if (wsId !== undefined && !isWorktreeDeleting(rawStore.getState(), wsId)) {
         keyboardNavRef.current = false;
-        selectWorkspace(wsId);
+        selectWorktree(wsId);
       }
     }
   }
 
-  const allProjectNames = useMemo(
-    () => visibleGroups.flatMap((g) => g.projects.map((p) => p.name)),
+  const allRepoNames = useMemo(
+    () => visibleGroups.flatMap((g) => g.repos.map((p) => p.name)),
     [visibleGroups],
   );
 
@@ -979,29 +977,29 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
 
     if (overId.startsWith("group:")) {
       const targetLabelId = overId === "group:__unlabeled" ? null : overId.slice("group:".length);
-      updateProjectLabelMutation.mutate({ name: activeId, label: targetLabelId });
+      updateRepoLabelMutation.mutate({ name: activeId, label: targetLabelId });
       return;
     }
 
-    const activeGroup = groups.find((g) => g.projects.some((p) => p.name === activeId));
-    const overGroup = groups.find((g) => g.projects.some((p) => p.name === overId));
+    const activeGroup = groups.find((g) => g.repos.some((p) => p.name === activeId));
+    const overGroup = groups.find((g) => g.repos.some((p) => p.name === overId));
 
     if (!activeGroup || !overGroup) return;
 
     if (activeGroup.labelId === overGroup.labelId) {
-      const allNames = projects.map((p) => p.name);
+      const allNames = repos.map((p) => p.name);
       const oldIndex = allNames.indexOf(activeId);
       const newIndex = allNames.indexOf(overId);
-      reorderProjectsMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
+      reorderReposMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
     } else {
-      updateProjectLabelMutation.mutate({ name: activeId, label: overGroup.labelId });
+      updateRepoLabelMutation.mutate({ name: activeId, label: overGroup.labelId });
     }
   }
 
-  if (projects.length === 0) {
+  if (repos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <p className="text-lg mb-2">No projects registered</p>
+        <p className="text-lg mb-2">No repos registered</p>
         <p className="text-sm">Click the + button to register a folder</p>
       </div>
     );
@@ -1012,7 +1010,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       <div
         ref={containerRef}
         tabIndex={-1}
-        data-testid="project-list__root"
+        data-testid="repo-list__root"
         onKeyDown={handleKeyDown}
         onPointerDown={() => {
           keyboardNavRef.current = false;
@@ -1020,9 +1018,9 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         className="flex flex-col gap-0.5 outline-none min-w-0"
       >
         {/* Pinned section — rendered outside DndContext/SortableContext so
-            pinned workspaces cannot be touched by project drag-and-drop. It
+            pinned worktrees cannot be touched by repo drag-and-drop. It
             also ignores the label filter (pinned ws should always be
-            visible) and is the *only* place pinned workspaces render. */}
+            visible) and is the *only* place pinned worktrees render. */}
         {showPinnedSection && (
           <div key="__pinned">
             <button
@@ -1043,19 +1041,19 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               collapsed={pinnedSectionCollapsed}
               className="flex flex-col gap-0.5 px-2"
             >
-              {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
-                <WorkspaceCard
-                  key={workspaceId}
+              {pinnedEntries.map(({ repo, worktree, worktreeId }, i) => (
+                <WorktreeCard
+                  key={worktreeId}
                   worktree={worktree}
-                  projectName={project.name}
-                  defaultBranch={project.defaultBranch}
-                  projectKind={project.kind}
-                  status={statuses.get(workspaceId)}
-                  branchStatus={branchStatuses.get(workspaceId)}
-                  setupStatus={setupStatuses.get(workspaceId)}
+                  repoName={repo.name}
+                  defaultBranch={repo.defaultBranch}
+                  repoKind={repo.kind}
+                  status={statuses.get(worktreeId)}
+                  branchStatus={branchStatuses.get(worktreeId)}
+                  setupStatus={setupStatuses.get(worktreeId)}
                   isFocused={!pinnedSectionCollapsed && i === focusedIndex}
                   onShowDeleteDialog={setDeleteDialog}
-                  showProjectName
+                  showRepoName
                   onTogglePinned={togglePinned}
                 />
               ))}
@@ -1069,7 +1067,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
+          <SortableContext items={allRepoNames} strategy={verticalListSortingStrategy}>
             {visibleGroups.map((group) => {
               const groupKey = group.labelId ?? UNLABELED_KEY;
               // When a label filter is active we render a single group without
@@ -1095,29 +1093,29 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                       />
                     ))}
                   <CollapsibleSection collapsed={groupCollapsed}>
-                    {group.projects.map((project) => (
-                      // Consecutive projects in a label group are separated by
+                    {group.repos.map((repo) => (
+                      // Consecutive repos in a label group are separated by
                       // spacing alone (no divider line); the first row sits
                       // flush under the label header.
-                      <div key={project.name} className="pt-1 first:pt-0">
-                        <SortableProject
-                          project={project}
+                      <div key={repo.name} className="pt-1 first:pt-0">
+                        <SortableRepo
+                          repo={repo}
                           statuses={statuses}
                           branchStatuses={branchStatuses}
                           setupStatuses={setupStatuses}
-                          removeProject={(name) => removeProjectMutation.mutate(name)}
-                          updateProjectLabel={(name, label) =>
-                            updateProjectLabelMutation.mutate({ name, label })
+                          removeRepo={(name) => removeRepoMutation.mutate(name)}
+                          updateRepoLabel={(name, label) =>
+                            updateRepoLabelMutation.mutate({ name, label })
                           }
                           onPromoteToGit={setPromoteDialog}
                           labels={labels}
-                          setWorkspaceDialog={setWorkspaceDialog}
+                          setWorktreeDialog={setWorktreeDialog}
                           onShowDeleteDialog={setDeleteDialog}
                           focusedIndex={focusedIndex}
-                          workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
-                          collapsed={projectCollapse.isCollapsed(project.name)}
-                          onToggleCollapse={projectCollapse.toggle}
-                          hasPinnedSiblings={projectsWithPinned.has(project.name)}
+                          worktreeIndexStart={worktreeIndexMap.get(repo.name) ?? 0}
+                          collapsed={repoCollapse.isCollapsed(repo.name)}
+                          onToggleCollapse={repoCollapse.toggle}
+                          hasPinnedSiblings={reposWithPinned.has(repo.name)}
                           onTogglePinned={togglePinned}
                         />
                       </div>
@@ -1135,8 +1133,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           <DragOverlay dropAnimation={null}>
             {activeDragId ? (
               <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
-                <ProjectAvatar
-                  avatar={projects.find((p) => p.name === activeDragId)?.avatar}
+                <RepoAvatar
+                  avatar={repos.find((p) => p.name === activeDragId)?.avatar}
                   className="size-3.5"
                   fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
                 />
@@ -1147,21 +1145,21 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         </DndContext>
       </div>
 
-      <NewWorkspaceDialog
-        projectName={workspaceDialog ?? ""}
-        open={workspaceDialog !== null}
-        onOpenChange={(open) => setWorkspaceDialog(open ? workspaceDialog : null)}
+      <NewWorktreeDialog
+        repoName={worktreeDialog ?? ""}
+        open={worktreeDialog !== null}
+        onOpenChange={(open) => setWorktreeDialog(open ? worktreeDialog : null)}
       />
 
-      <DeleteWorkspaceDialog
+      <DeleteWorktreeDialog
         open={deleteDialog !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteDialog(null);
         }}
         onConfirm={() => {
           if (deleteDialog) {
-            removeWorkspaceMutation.mutate({
-              project: deleteDialog.projectName,
+            removeWorktreeMutation.mutate({
+              repo: deleteDialog.repoName,
               name: deleteDialog.name,
             });
             setDeleteDialog(null);
@@ -1182,15 +1180,15 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           if (!promoteDialog) return;
           // Wait for the mutation to settle before dismissing the
           // dialog. If the server errors (path deleted, already a git
-          // project, etc.) we want the dialog to stay open so the
+          // repo, etc.) we want the dialog to stay open so the
           // user can see the error toast in context; closing
           // synchronously hides the trigger before the failure is
           // visible.
-          promoteProjectToGitMutation.mutate(promoteDialog, {
+          promoteRepoToGitMutation.mutate(promoteDialog, {
             onSettled: () => setPromoteDialog(null),
           });
         }}
-        projectName={promoteDialog ?? ""}
+        repoName={promoteDialog ?? ""}
       />
     </>
   );

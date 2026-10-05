@@ -13,11 +13,11 @@ import {
 import { Trash2 } from "lucide-react";
 import {
   useBrowserProfiles,
-  useProjectBrowserProfiles,
   useRemoveBrowserProfile,
-  useSetProjectBrowserProfile,
+  useRepoBrowserProfiles,
+  useSetRepoBrowserProfile,
 } from "../../hooks/use-browser-profiles";
-import { useProjects } from "../../hooks/use-projects";
+import { useRepos } from "../../hooks/use-repos";
 import { SettingsRow } from "./SettingsRow";
 
 /** Radix `Select` can't use `""` as a value, so Default gets a sentinel. */
@@ -29,16 +29,16 @@ function sourceLabel(source: string | null): string {
 
 /**
  * Rows for the Settings dialog's Browser section: the browser profiles,
- * then a collapsed "Project defaults" accordion with the profile each
- * project's new browser tabs open with. Changes apply immediately; they
+ * then a collapsed "Repo defaults" accordion with the profile each
+ * repo's new browser tabs open with. Changes apply immediately; they
  * are not part of the dialog's Save.
  */
 export function BrowserProfilesSettings() {
   const { profiles } = useBrowserProfiles();
-  const projectDefaults = useProjectBrowserProfiles();
-  const { projects } = useProjects();
+  const repoDefaults = useRepoBrowserProfiles();
+  const { repos } = useRepos();
   const removeProfile = useRemoveBrowserProfile();
-  const setProjectProfile = useSetProjectBrowserProfile();
+  const setRepoProfile = useSetRepoBrowserProfile();
 
   return (
     <>
@@ -77,43 +77,43 @@ export function BrowserProfilesSettings() {
         </ul>
       </SettingsRow>
 
-      {projects.length > 0 && (
+      {repos.length > 0 && (
         <Accordion type="single" collapsible>
-          <AccordionItem value="project-defaults" className="border-b-0">
+          <AccordionItem value="repo-defaults" className="border-b-0">
             <AccordionTrigger
               className="px-4 py-3 hover:no-underline"
-              data-testid="settings__project-defaults-trigger"
+              data-testid="settings__repo-defaults-trigger"
             >
               <div className="min-w-0 space-y-1">
                 <div className="text-sm font-medium leading-tight text-foreground">
-                  Project defaults
+                  Repo defaults
                 </div>
                 <p className="text-xs font-normal leading-snug text-muted-foreground">
-                  New browser tabs in any workspace of a project open with its profile.
+                  New browser tabs in any worktree of a repo open with its profile.
                 </p>
               </div>
             </AccordionTrigger>
             <AccordionContent className="pb-0">
               <ul className="divide-y divide-border border-t border-border">
-                {projects.map((project) => (
+                {repos.map((repo) => (
                   <li
-                    key={project.name}
+                    key={repo.name}
                     className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4"
-                    data-testid="settings__project-browser-profile"
+                    data-testid="settings__repo-browser-profile"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm">{project.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm">{repo.name}</span>
                     <Select
-                      value={projectDefaults[project.name] ?? DEFAULT_VALUE}
+                      value={repoDefaults[repo.name] ?? DEFAULT_VALUE}
                       onValueChange={(value: string) =>
-                        setProjectProfile.mutate({
-                          projectName: project.name,
+                        setRepoProfile.mutate({
+                          repoName: repo.name,
                           profileId: value === DEFAULT_VALUE ? null : value,
                         })
                       }
                     >
                       <SelectTrigger
                         className="h-8 w-full text-sm sm:w-48"
-                        aria-label={`Browser profile for ${project.name}`}
+                        aria-label={`Browser profile for ${repo.name}`}
                       >
                         <SelectValue />
                       </SelectTrigger>

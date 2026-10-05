@@ -9,7 +9,7 @@
  *     `command-registry.ts`)
  *   - `command-palette__shortcut--<id>`     — that row's shortcut hint
  *
- * A component object like `WorkspacePicker`: the dialog has no URL of its own,
+ * A component object like `WorktreePicker`: the dialog has no URL of its own,
  * so it takes only `page`.
  */
 

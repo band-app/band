@@ -13,7 +13,7 @@
 
 export interface HistoryEntry {
   id: number;
-  workspaceId: string;
+  worktreeId: string;
   url: string;
   title: string | null;
   faviconUrl: string | null;

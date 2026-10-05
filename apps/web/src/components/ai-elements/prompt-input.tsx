@@ -48,17 +48,17 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
   /** When set, the unsent input text is persisted to sessionStorage under this key so it survives unmounts (e.g. tab switches). */
   draftKey?: string;
   /** Whether the prompt input is currently visible/active. Used to gate global
-   *  event handlers so hidden workspaces' textareas aren't modified. */
+   *  event handlers so hidden worktrees' textareas aren't modified. */
   visible?: boolean;
-  /** Whether the workspace is active (even if the chat tab isn't focused).
+  /** Whether the worktree is active (even if the chat tab isn't focused).
    *  Used to accept "Add to Chat" events from sibling panels (Changes, Files)
    *  when the Chat tab isn't in front. Falls back to `visible` if not set. */
   wsActive?: boolean;
-  /** The workspace this chat pane belongs to. Used to scope `band:chat-insert`
-   *  delivery so a reference never leaks into another workspace's chat. */
-  workspaceId?: string;
+  /** The worktree this chat pane belongs to. Used to scope `band:chat-insert`
+   *  delivery so a reference never leaks into another worktree's chat. */
+  worktreeId?: string;
   /** The chat pane this input belongs to. When a `band:chat-insert` names a
-   *  specific `chatId` (the workspace's last-focused chat), only the matching
+   *  specific `chatId` (the worktree's last-focused chat), only the matching
    *  input appends the reference — fixing the old behavior where every open
    *  chat pane received it. */
   chatId?: string;
@@ -90,7 +90,7 @@ export const PromptInput = ({
   draftKey,
   visible,
   wsActive,
-  workspaceId,
+  worktreeId,
   chatId,
   children,
   ...props
@@ -138,19 +138,19 @@ export const PromptInput = ({
     });
   }, [visible]);
 
-  // Ref for gating global event handlers — hidden workspaces must not
+  // Ref for gating global event handlers — hidden worktrees must not
   // process events that would modify their textarea.
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  // wsActive gates the "Add to Chat" handler: true when the workspace is active
+  // wsActive gates the "Add to Chat" handler: true when the worktree is active
   // even if the chat tab isn't the focused tab, so events from sibling panels
   // (Changes, Files) are still processed.
   const wsActiveRef = useRef(wsActive ?? visible);
   wsActiveRef.current = wsActive ?? visible;
-  // Mirror workspace/chat identity for the stable `band:chat-insert` handler
+  // Mirror worktree/chat identity for the stable `band:chat-insert` handler
   // (registered once with `[]` deps) so it always matches against current props.
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
 
@@ -247,19 +247,19 @@ export const PromptInput = ({
   }, []);
 
   // Deliver an "Add to Chat" reference from the selection context menu.
-  // SharedDockviewLayout owns the workspace-agnostic `band:add-to-chat` intent:
-  // it resolves the active workspace's last-focused chat and re-dispatches the
+  // SharedDockviewLayout owns the worktree-agnostic `band:add-to-chat` intent:
+  // it resolves the active worktree's last-focused chat and re-dispatches the
   // scoped `band:chat-insert` handled here. Many PromptInput instances are
-  // mounted at once (one per chat pane × one per cached workspace), so we only
+  // mounted at once (one per chat pane × one per cached worktree), so we only
   // append when the delivery targets this pane:
-  //   - workspace must match (skip cached background workspaces), and
+  //   - worktree must match (skip cached background worktrees), and
   //   - when the delivery names a chatId, it must be *this* chat; when it
   //     doesn't (no focus recorded yet), only the visible pane accepts.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<ChatInsertDetail>).detail;
       if (!detail) return;
-      if (workspaceIdRef.current && detail.workspaceId !== workspaceIdRef.current) return;
+      if (worktreeIdRef.current && detail.worktreeId !== worktreeIdRef.current) return;
       if (detail.chatId) {
         if (detail.chatId !== chatIdRef.current) return;
       } else if (wsActiveRef.current === false || visibleRef.current === false) {
@@ -579,9 +579,9 @@ export const PromptInputTextarea = ({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [inputValue, textareaRef]);
 
-  // Listen for the workspace-level ⌃⌘I "focus Chat" event. Multiple
+  // Listen for the worktree-level ⌃⌘I "focus Chat" event. Multiple
   // PromptInputTextarea instances may be mounted (one per chat session
-  // across one or more workspaces) — only the visible one's
+  // across one or more worktrees) — only the visible one's
   // offsetParent is non-null, so only that instance's focus() call has
   // any visible effect. The others are no-ops.
   useEffect(() => {

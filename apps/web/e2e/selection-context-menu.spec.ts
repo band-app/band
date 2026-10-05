@@ -13,7 +13,7 @@
  *
  * The REAL `dist/start-server.mjs` runs against a tmp `$HOME` with an on-disk
  * git repo per test, so chat drafts and tab layouts can't leak between tests.
- * Clipboard writes are captured by `WorkspacePage.installClipboardCapture`
+ * Clipboard writes are captured by `WorktreePage.installClipboardCapture`
  * (the `execCommand("copy")` fallback), and terminal input by
  * `installTerminalSendCapture` (the string frames sent on `/terminal?`).
  *
@@ -25,7 +25,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git } from "./helpers/git";
 import {
@@ -41,7 +41,7 @@ import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 import { ChatPanePage } from "./pages/ChatPanePage";
 import { SelectionMenu } from "./pages/SelectionMenu";
 import { TerminalInputSurface } from "./pages/TerminalInputSurface";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 // Wide viewport so `useIsDesktop()` reports true and the diff leaf can split.
 test.use({ viewport: { width: 2400, height: 900 } });
@@ -69,7 +69,7 @@ test.beforeAll(async () => {
     writeFileSync(join(repoPath, FILE_PATH), "alpha\ngamma\nbeta\n");
   }
   seedState(tmpHome, {
-    projects: REPOS.map((name) => {
+    repos: REPOS.map((name) => {
       const path = join(tmpHome, name);
       return { name, path, defaultBranch: BRANCH, worktrees: [{ branch: BRANCH, path }] };
     }),
@@ -95,17 +95,17 @@ test.afterAll(async () => {
 test("file editor: a selection shows no popup, and right-click offers the file actions", async ({
   page,
 }) => {
-  const workspaceId = toWorkspaceId("sel-menu-editor", BRANCH);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const worktreeId = toWorktreeId("sel-menu-editor", BRANCH);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
-  await workspace.installClipboardCapture();
+  await worktree.installClipboardCapture();
 
   // The default layout has no chat; open one for Add to Chat to deliver into.
-  await chat.goto(workspaceId);
+  await chat.goto(worktreeId);
   await chat.waitForReady();
-  await workspace.openFileLeaf(FILE_PATH, workspaceId);
-  const editor = workspace.fileLeafVisibilityMarker(true).first();
+  await worktree.openFileLeaf(FILE_PATH, worktreeId);
+  const editor = worktree.fileLeafVisibilityMarker(true).first();
 
   await menu.selectWordInEditor(editor, "gamma");
   await expect.poll(() => menu.readEditorSelection(editor)).toBe("gamma");
@@ -128,29 +128,29 @@ test("file editor: a selection shows no popup, and right-click offers the file a
 
   // The right-click kept the selection: Copy copies the word.
   await menu.choose("copy");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("gamma");
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe("gamma");
 
   await menu.openOnEditorWord(editor, "gamma");
   await menu.choose("copy-reference");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe(`${FILE_PATH}:2`);
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe(`${FILE_PATH}:2`);
 
   await menu.openOnEditorWord(editor, "gamma");
   await menu.choose("add-to-chat");
   await expect.poll(async () => await chat.promptValue()).toBe(`\`${FILE_PATH}:2\` `);
 
   // Add to Chat showed the chat, so bring the file back.
-  await workspace.focusFileEditor(FILE_PATH);
+  await worktree.focusFileEditor(FILE_PATH);
   await menu.selectWordInEditor(editor, "gamma");
   await menu.openOnEditorWord(editor, "gamma");
   await menu.choose("cut");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("gamma");
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe("gamma");
   await expect.poll(() => menu.readEditorSelection(editor)).toBe("");
 
   await menu.openOnEditorWord(editor, "alpha");
   await menu.choose("select-all");
   await menu.openOnEditorWord(editor, "alpha");
   await menu.choose("copy");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("alpha\n\nbeta\n");
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe("alpha\n\nbeta\n");
 
   // Nothing selected: only the general items.
   await menu.openOnEditorBlank(editor, "alpha");
@@ -162,20 +162,20 @@ test("file editor: a selection shows no popup, and right-click offers the file a
 });
 
 test("split diff: each side's reference uses that side's line numbers", async ({ page }) => {
-  const workspaceId = toWorkspaceId("sel-menu-split", BRANCH);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const worktreeId = toWorktreeId("sel-menu-split", BRANCH);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
-  await workspace.installClipboardCapture();
-  await workspace.installTerminalSendCapture();
+  await worktree.installClipboardCapture();
+  await worktree.installTerminalSendCapture();
 
   // Boot the terminal first so Add to Terminal has a live PTY to type into.
-  await workspace.goto(workspaceId);
-  await workspace.waitForReady();
-  await workspace.openTerminalTab();
-  await workspace.waitForTerminalReady();
+  await worktree.goto(worktreeId);
+  await worktree.waitForReady();
+  await worktree.openTerminalTab();
+  await worktree.waitForTerminalReady();
 
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await changes.openDiff(FILE_PATH, "split");
 
   const oldSide = changes.diffEditor("old");
@@ -188,24 +188,24 @@ test("split diff: each side's reference uses that side's line numbers", async ({
   await expect(menu.item("cut")).toHaveCount(0);
   await expect(menu.item("paste")).toHaveCount(0);
   await menu.choose("copy-reference");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe(`${FILE_PATH}:2`);
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe(`${FILE_PATH}:2`);
 
   const newSide = changes.diffEditor("new");
   await menu.selectWordInEditor(newSide, "beta");
   await menu.openOnEditorWord(newSide, "beta");
   await menu.choose("add-to-terminal");
-  await expect.poll(async () => await workspace.readTerminalSent()).toContain(`${FILE_PATH}:3 `);
+  await expect.poll(async () => await worktree.readTerminalSent()).toContain(`${FILE_PATH}:3 `);
 });
 
 test("unified diff: Add to Chat appends the reference to the chat input", async ({ page }) => {
-  const workspaceId = toWorkspaceId("sel-menu-unified", BRANCH);
+  const worktreeId = toWorktreeId("sel-menu-unified", BRANCH);
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
 
-  await chat.goto(workspaceId);
+  await chat.goto(worktreeId);
   await chat.waitForReady();
-  await changes.goto(workspaceId);
+  await changes.goto(worktreeId);
   await changes.openDiff(FILE_PATH, "unified");
   const editor = changes.diffEditor("new");
 
@@ -220,20 +220,20 @@ test("unified diff: Add to Chat appends the reference to the chat input", async 
 });
 
 test("terminal: right-click offers Add to Chat, Copy, Paste and Select All", async ({ page }) => {
-  const workspaceId = toWorkspaceId("sel-menu-terminal", BRANCH);
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
-  const terminal = new TerminalInputSurface(page, workspaceId);
+  const worktreeId = toWorktreeId("sel-menu-terminal", BRANCH);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const terminal = new TerminalInputSurface(page, worktreeId);
   const chat = new ChatPanePage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
-  await workspace.installClipboardCapture();
+  await worktree.installClipboardCapture();
 
-  await chat.goto(workspaceId);
+  await chat.goto(worktreeId);
   await chat.waitForReady();
-  await workspace.openTerminalTab();
-  await workspace.waitForTerminalReady();
+  await worktree.openTerminalTab();
+  await worktree.waitForTerminalReady();
   // The shell prints `selmark42`; the command line itself shows the
   // unexpanded `$((40+2))`, so only the output row has the word.
-  await workspace.runInTerminalUntilRendered(workspaceId, "echo selmark$((40+2))", /selmark42/);
+  await worktree.runInTerminalUntilRendered(worktreeId, "echo selmark$((40+2))", /selmark42/);
 
   await terminal.selectWord("selmark42");
   await expect.poll(() => terminal.readSelection()).toBe("selmark42");
@@ -248,7 +248,7 @@ test("terminal: right-click offers Add to Chat, Copy, Paste and Select All", asy
   await expect(menu.item("copy-reference")).toHaveCount(0);
   await expect(menu.item("add-to-terminal")).toHaveCount(0);
   await menu.choose("copy");
-  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("selmark42");
+  await expect.poll(async () => (await worktree.readCopied()).at(-1)).toBe("selmark42");
 
   // Nothing selected: Paste and Select All only.
   await terminal.rightClickBlankRow();

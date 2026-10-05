@@ -43,7 +43,7 @@ const TerminalPanel = lazy(() =>
 // ---------------------------------------------------------------------------
 
 interface PaneParams {
-  workspaceId: string;
+  worktreeId: string;
   terminalId: string;
   command?: string;
   cwd?: string;
@@ -78,7 +78,7 @@ function TerminalPanePanel({ params, api }: IDockviewPanelProps<PaneParams>) {
   const { visible } = usePanelVisibility();
   const onTitleChange = useCallback((title: string) => api.setTitle(title), [api]);
 
-  if (!params.workspaceId || !params.terminalId) return null;
+  if (!params.worktreeId || !params.terminalId) return null;
 
   const paneMetadata =
     params.command || params.cwd || params.env
@@ -92,7 +92,7 @@ function TerminalPanePanel({ params, api }: IDockviewPanelProps<PaneParams>) {
     >
       <Suspense fallback={null}>
         <TerminalPanel
-          workspaceId={params.workspaceId}
+          worktreeId={params.worktreeId}
           terminalId={params.terminalId}
           visible={visible}
           paneMetadata={paneMetadata}
@@ -190,11 +190,11 @@ function stripParams(layout: unknown): unknown {
   return clone;
 }
 
-function reinjectParams(layout: unknown, workspaceId: string): unknown {
+function reinjectParams(layout: unknown, worktreeId: string): unknown {
   const clone = JSON.parse(JSON.stringify(layout));
   const panels = clone?.panels as Record<string, { params?: unknown }> | undefined;
   if (panels) {
-    for (const id of Object.keys(panels)) panels[id].params = { workspaceId, terminalId: id };
+    for (const id of Object.keys(panels)) panels[id].params = { worktreeId, terminalId: id };
   }
   return clone;
 }
@@ -204,14 +204,14 @@ function reinjectParams(layout: unknown, workspaceId: string): unknown {
 // ---------------------------------------------------------------------------
 
 interface TerminalSplitLeafProps {
-  workspaceId: string;
+  worktreeId: string;
   /** The OUTER leaf id (=== the primary/first pane's terminalId). */
   leafId: string;
   /** The primary pane's terminalId — its PTY was already spawned by the outer
    *  dockview when the terminal tab was created, so the nested dockview only
    *  RENDERS it (no `terminal.create`). */
   primaryTerminalId: string;
-  /** Metadata for the primary pane (from workspace terminal config). */
+  /** Metadata for the primary pane (from worktree terminal config). */
   command?: string;
   cwd?: string;
   env?: Record<string, string>;
@@ -250,7 +250,7 @@ function addPane(
 }
 
 export function TerminalSplitLeaf({
-  workspaceId,
+  worktreeId,
   leafId,
   primaryTerminalId,
   command,
@@ -290,8 +290,8 @@ export function TerminalSplitLeaf({
     }
     const api = apiRef.current;
     if (!api) return;
-    writeNestedLayout(workspaceId, leafId, stripParams(api.toJSON()));
-  }, [workspaceId, leafId, mobile]);
+    writeNestedLayout(worktreeId, leafId, stripParams(api.toJSON()));
+  }, [worktreeId, leafId, mobile]);
 
   const schedulePersist = useCallback(() => {
     if (mobile) return;
@@ -323,7 +323,7 @@ export function TerminalSplitLeaf({
     const api = apiRef.current;
     if (!api) return;
     // Closing the LONE pane closes the whole terminal leaf via the outer tab
-    // (which drops the workspace to its empty state). Both the pane × button and
+    // (which drops the worktree to its empty state). Both the pane × button and
     // ⌘W route here, so this delegation is the real close path, not just a guard.
     if (api.panels.length <= 1) {
       onCloseLeafRef.current();
@@ -358,10 +358,10 @@ export function TerminalSplitLeaf({
       // Register ownership BEFORE creating the PTY so the `terminal-created`
       // echo doesn't spawn a stray OUTER tab for this pane.
       registerPaneOwner(id, leafId);
-      addPane(api, { workspaceId, terminalId: id, autoFocus: true }, { referenceGroup, direction });
-      trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
+      addPane(api, { worktreeId, terminalId: id, autoFocus: true }, { referenceGroup, direction });
+      trpc.terminal.create.mutate({ worktreeId, id }).catch(() => {});
     },
-    [workspaceId, leafId, mobile],
+    [worktreeId, leafId, mobile],
   );
   const splitPaneRef = useRef(splitPane);
   splitPaneRef.current = splitPane;
@@ -414,12 +414,12 @@ export function TerminalSplitLeaf({
       });
 
       isRestoringRef.current = true;
-      const saved = mobile ? null : readNestedLayout(workspaceId, leafId);
+      const saved = mobile ? null : readNestedLayout(worktreeId, leafId);
       let restored = false;
       if (saved && isNestedLayout(saved)) {
         try {
           // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON typing
-          api.fromJSON(reinjectParams(saved, workspaceId) as any);
+          api.fromJSON(reinjectParams(saved, worktreeId) as any);
           restored = api.panels.length > 0;
         } catch {
           api.clear();
@@ -430,13 +430,13 @@ export function TerminalSplitLeaf({
       // `setActive()`: an active `addPanel` calls `focusContent()`, moving DOM
       // focus into the nested dockview — that focusin bubbles so the OUTER
       // dockview activates the terminal panel, stealing default-active from the
-      // chat leaf on a fresh workspace. The inactive-add + `setActive` shows the
+      // chat leaf on a fresh worktree. The inactive-add + `setActive` shows the
       // pane's content without the DOM focus grab. When the leaf was created with
       // an explicit autoFocus (⌘T new terminal), keep the focus.
       if (api.panels.length === 0) {
         addPane(
           api,
-          { workspaceId, terminalId: primaryTerminalId, command, cwd, env, autoFocus },
+          { worktreeId, terminalId: primaryTerminalId, command, cwd, env, autoFocus },
           undefined,
           !autoFocus,
         );
@@ -449,12 +449,12 @@ export function TerminalSplitLeaf({
       // tab was closed (e.g. a server restart), then re-seed the primary if that
       // emptied the leaf. Skipped for a fresh seed — the primary terminal was
       // just created (its `terminal.create` may still be in flight, and won't
-      // exist at all for a not-yet-spawnable workspace), so pruning against
+      // exist at all for a not-yet-spawnable worktree), so pruning against
       // `terminal.list` would wrongly drop the pane we just added.
       if (restored) {
         void (async () => {
           try {
-            const { terminals } = await trpc.terminal.list.query({ workspaceId });
+            const { terminals } = await trpc.terminal.list.query({ worktreeId });
             const live = new Set(terminals.map((t: { terminalId: string }) => t.terminalId));
             for (const panel of [...api.panels]) {
               if (!live.has(panel.id)) {
@@ -465,9 +465,9 @@ export function TerminalSplitLeaf({
             }
             if (api.panels.length === 0) {
               registerPaneOwner(primaryTerminalId, leafId);
-              addPane(api, { workspaceId, terminalId: primaryTerminalId }, undefined, true);
+              addPane(api, { worktreeId, terminalId: primaryTerminalId }, undefined, true);
               api.getPanel(primaryTerminalId)?.api.setActive();
-              trpc.terminal.create.mutate({ workspaceId, id: primaryTerminalId }).catch(() => {});
+              trpc.terminal.create.mutate({ worktreeId, id: primaryTerminalId }).catch(() => {});
             }
           } catch {
             // offline / list failed — keep restored panes as-is
@@ -524,7 +524,7 @@ export function TerminalSplitLeaf({
       }
     },
     [
-      workspaceId,
+      worktreeId,
       leafId,
       primaryTerminalId,
       command,
@@ -628,7 +628,7 @@ export function TerminalSplitLeaf({
       splitDisposerRef.current = null;
       activeTitleDisposerRef.current?.dispose();
       // Flush a pending debounced save rather than dropping it — otherwise the
-      // last pane-resize geometry is lost on a workspace switch / unmount.
+      // last pane-resize geometry is lost on a worktree switch / unmount.
       // (`flushPersist` clears the timer itself.) Mirrors the outer dockview.
       if (persistTimerRef.current) flushPersistRef.current();
     };

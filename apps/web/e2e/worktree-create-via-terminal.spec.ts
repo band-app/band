@@ -1,18 +1,18 @@
 /**
  * End-to-end coverage for issue #551 — the dashboard surfaces a real
- * terminal pane after a CLI-initiated `workspaces.create --via terminal`.
+ * terminal pane after a CLI-initiated `worktrees.create --via terminal`.
  *
  * The test boots the production server bundle against a tmp `~/.band/`,
  * fires the same tRPC mutation the Rust CLI fires (no CLI binary
  * involved — the wire shape is what we're pinning), then drives the
- * dashboard via `WorkspacePage` to observe the rendered DOM. No tRPC
+ * dashboard via `WorktreePage` to observe the rendered DOM. No tRPC
  * mocking, no in-process React.
  *
  * What's pinned:
  *
- *   1. `workspaces.create` with `via: "terminal"` returns a `terminalId`
+ *   1. `worktrees.create` with `via: "terminal"` returns a `terminalId`
  *      and `via: "terminal"` in the JSON payload (acceptance criterion).
- *   2. Navigating to the new workspace and clicking the outer terminal
+ *   2. Navigating to the new worktree and clicking the outer terminal
  *      tab renders the xterm.js textbox — i.e. the layout actually picked
  *      up the spawned PTY, not just a tab that opens an empty panel
  *      (acceptance criterion: "dashboard shows a terminal pane").
@@ -21,7 +21,7 @@
  * test doesn't depend on a real `claude` install. The terminal pool
  * writes the assembled command line to the spawned shell and the stub
  * echoes its argv; we don't assert on that output here (the backend
- * vitest at `tests/workspace-create-via.test.ts` already pins it). This
+ * vitest at `tests/worktree-create-via.test.ts` already pins it). This
  * spec's job is the rendered-DOM half of the acceptance criteria.
  */
 
@@ -29,7 +29,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -38,10 +38,10 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-workspace-create-via-terminal-token";
-const PROJECT = "viaproj";
+const TOKEN = "e2e-worktree-create-via-terminal-token";
+const REPO = "viaproj";
 const BRANCH = "main";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared
@@ -70,10 +70,10 @@ function git(cwd: string, args: string[]): string {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  // Real git repo so the workspace resolves cleanly. `workspaces.create`
+  // Real git repo so the worktree resolves cleanly. `worktrees.create`
   // needs a `git worktree add` target — without a real repo it would
   // fail before we ever reach the terminal-spawn branch.
-  repoPath = join(tmpHome, PROJECT);
+  repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", BRANCH]);
   writeFileSync(join(repoPath, "README.md"), "# via terminal\n");
@@ -93,9 +93,9 @@ test.beforeAll(async () => {
   chmodSync(stubBin, 0o755);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repoPath }],
@@ -127,7 +127,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("workspaces.create --via terminal (issue #551)", () => {
+test.describe("worktrees.create --via terminal (issue #551)", () => {
   test("dashboard shows a terminal pane after a CLI-initiated --via terminal create", async ({
     page,
   }) => {
@@ -135,23 +135,23 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
     // comment there); pair it with a 120 s test-level timeout so the
     // assertion budget plus the create + navigation steps still fit
     // inside one test under CI worker contention. Mirrors
-    // `workspace-maximize-state.spec.ts`, which waits on the same
+    // `worktree-maximize-state.spec.ts`, which waits on the same
     // xterm-boot path with the same 75 s / 120 s pairing.
     test.setTimeout(120_000);
 
     // Phase 1: fire the same mutation the Rust CLI fires. The wire shape
-    // is identical to `cmd_workspaces_create` after precedence resolution
+    // is identical to `cmd_worktrees_create` after precedence resolution
     // (`apps/cli/src/main.rs`) — we don't invoke the CLI binary here
     // because the dashboard test only cares about the *server response*
     // and the *rendered DOM*, not the CLI flag/env plumbing (the Rust
     // integration tests cover that side). The raw `page.request.post`
-    // lives on the `WorkspacePage` POM so the test body stays free of
+    // lives on the `WorktreePage` POM so the test body stays free of
     // request plumbing.
     const branch = "feat/via-e2e";
-    const targetWorkspaceId = toWorkspaceId(PROJECT, branch);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const created = await workspacePage.createWorkspaceViaTerminal(
-      PROJECT,
+    const targetWorktreeId = toWorktreeId(REPO, branch);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const created = await worktreePage.createWorktreeViaTerminal(
+      REPO,
       branch,
       "implement feature E2E",
     );
@@ -161,7 +161,7 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
     // `?? ""` fallback masking a `null`.
     expect(created.terminalId).toMatch(/^.+$/);
 
-    // Phase 2: drive the dashboard to the newly-created workspace and
+    // Phase 2: drive the dashboard to the newly-created worktree and
     // assert the terminal pane mounts. The outer shared dockview lays
     // out a `terminal` tab unconditionally; we click it to make sure
     // the terminal container becomes the active view, then anchor on
@@ -169,15 +169,15 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
     // once a PTY session is attached to its inner-dockview panel — so
     // its presence is the DOM-level proof that the spawned terminal
     // landed in the layout, not just an empty tab.
-    await workspacePage.goto(targetWorkspaceId);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(targetWorktreeId);
+    await worktreePage.waitForReady();
 
     // xterm.js mounts on first visibility — `openTerminalTab` clicks
     // the outer terminal tab and triggers the layout activate → React
     // render → xterm init handshake. The 75 s budget passed to
-    // `waitForTerminalReady` mirrors `workspace-maximize-state.spec.ts:346`
+    // `waitForTerminalReady` mirrors `worktree-maximize-state.spec.ts:346`
     // for CI parity; locally the element attaches in < 2 s.
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(75_000);
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(75_000);
   });
 });

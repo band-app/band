@@ -46,7 +46,7 @@ export function BrowserHostBridge() {
     const ensureSub = trpc.browserHost.ensureView.subscribe(undefined, {
       onData(event: {
         bandTabId: string;
-        workspaceId: string;
+        worktreeId: string;
         url: string;
         profileId?: string | null;
       }) {

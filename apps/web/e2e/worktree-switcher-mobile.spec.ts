@@ -1,22 +1,22 @@
 /**
- * Mobile workspace switcher coverage (PR #553).
+ * Mobile worktree switcher coverage (PR #553).
  *
  * Two behaviours, both mobile-only:
  *
- *  1. The workspace header title is a button ("Switch workspace") that opens
- *     the WorkspacePickerDialog, and the dialog can be dismissed (Escape) to
- *     stay on the current workspace — the user is never forced to make a
+ *  1. The worktree header title is a button ("Switch worktree") that opens
+ *     the WorktreePickerDialog, and the dialog can be dismissed (Escape) to
+ *     stay on the current worktree — the user is never forced to make a
  *     selection to get out of it.
  *
- *  2. The active workspace stays marked active inside the project-list
- *     fly-out. The hamburger opens the project list as a drawer *over* the
- *     still-mounted workspace (no route change / no unmount), so the store
- *     retains `activeWorkspaceId` and the card inside the drawer keeps its
+ *  2. The active worktree stays marked active inside the repo-list
+ *     fly-out. The hamburger opens the repo list as a drawer *over* the
+ *     still-mounted worktree (no route change / no unmount), so the store
+ *     retains `activeWorktreeId` and the card inside the drawer keeps its
  *     `data-active` marker — the affordance the user relies on to see which
- *     workspace they're currently in.
+ *     worktree they're currently in.
  *
- * A real git repo backs the project so it reconciles to kind "git" and its
- * branch renders as a WorkspaceCard (whose `data-active` attribute is the
+ * A real git repo backs the repo so it reconciles to kind "git" and its
+ * branch renders as a WorktreeCard (whose `data-active` attribute is the
  * observable active marker) — fake paths reconcile to "plain" and render only
  * a flat header. Real production binary, no tRPC mocks, page objects only.
  */
@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -35,19 +35,19 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
-import { WorkspacePicker } from "./pages/WorkspacePicker";
+import { WorktreePage } from "./pages/WorktreePage";
+import { WorktreePicker } from "./pages/WorktreePicker";
 
-const TOKEN = "e2e-workspace-switcher-mobile-token";
-const PROJECT = "switcher-mobile-repo";
+const TOKEN = "e2e-worktree-switcher-mobile-token";
+const REPO = "switcher-mobile-repo";
 const DEFAULT_BRANCH = "main";
 
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 // Narrow viewport — `useIsDesktop()` reports false (threshold 1024 px), so the
-// mobile branch of `workspace.$workspaceId.tsx` mounts: a header with the
-// title "Switch workspace" button and the hamburger that opens the
-// project-list fly-out.
+// mobile branch of `worktree.$worktreeId.tsx` mounts: a header with the
+// title "Switch worktree" button and the hamburger that opens the
+// repo-list fly-out.
 test.use({ viewport: { width: 800, height: 900 } });
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
@@ -73,7 +73,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Switcher mobile test\n");
@@ -81,9 +81,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "init"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -103,43 +103,43 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Mobile workspace switcher", () => {
+test.describe("Mobile worktree switcher", () => {
   test("the header title opens the picker, which can be dismissed without selecting", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const picker = new WorkspacePicker(page);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
-    await workspacePage.openSwitcherFromHeader();
+    await worktreePage.openSwitcherFromHeader();
     await picker.waitVisible();
 
     await picker.dismiss();
 
     // Establish the positive anchor first: the mobile layout is interactive
-    // again and we're still on the same workspace (dismissing did not
+    // again and we're still on the same worktree (dismissing did not
     // navigate). Only then assert the dialog is gone, so the negative
     // assertion has live state to anchor against.
-    await workspacePage.waitForMobileReady();
-    await expect(page).toHaveURL(new RegExp(WORKSPACE));
+    await worktreePage.waitForMobileReady();
+    await expect(page).toHaveURL(new RegExp(WORKTREE));
     await expect(picker.dialog).toBeHidden();
   });
 
-  test("the current workspace is marked active in the project-list fly-out", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  test("the current worktree is marked active in the repo-list fly-out", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
-    // Open the project-list fly-out over the workspace (no route change).
-    await workspacePage.openProjectListFlyout();
+    // Open the repo-list fly-out over the worktree (no route change).
+    await worktreePage.openRepoListFlyout();
 
-    // Inside the fly-out the workspace we're viewing is still marked active
-    // (data-active) — the store retained `activeWorkspaceId`. The locator is
+    // Inside the fly-out the worktree we're viewing is still marked active
+    // (data-active) — the store retained `activeWorktreeId`. The locator is
     // scoped to the drawer, so it proves both that the card rendered *inside
     // the fly-out* and that it carries the active marker.
-    await expect(workspacePage.activeWorkspaceCardInFlyout(WORKSPACE)).toBeVisible();
+    await expect(worktreePage.activeWorktreeCardInFlyout(WORKTREE)).toBeVisible();
   });
 });

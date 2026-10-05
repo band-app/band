@@ -1,22 +1,22 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { toWorkspaceId, useProjects } from "@/dashboard";
-import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { reconcileTerminalWorkspaces } from "../lib/terminal-cache";
-import { forgetMissingWorkspaces } from "../lib/workspace-cold-park";
-import { clearPerWorkspaceState } from "./per-workspace-state-store";
+import { toWorktreeId, useRepos } from "@/dashboard";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import { reconcileTerminalWorktrees } from "../lib/terminal-cache";
+import { forgetMissingWorktrees } from "../lib/worktree-cold-park";
+import { clearPerWorktreeState } from "./per-worktree-state-store";
 
 // ---------------------------------------------------------------------------
-// Keeps every visited workspace's center dockview mounted, so switching back to
+// Keeps every visited worktree's center dockview mounted, so switching back to
 // any of them is instant: no remount, no chat replay, no layout restore, no
 // refetch. Used by both layouts: `SharedDockviewLayout` (desktop) and
-// `MobileWorkspaceShell` (mobile). Mirrors
-// orca's `mountedWorktreeIdsRef` (use-terminal-workspace-foundation.ts): a
-// workspace joins the set on first activation and leaves it only when it stops
+// `MobileWorktreeShell` (mobile). Mirrors
+// orca's `mountedWorktreeIdsRef` (use-terminal-worktree-foundation.ts): a
+// worktree joins the set on first activation and leaves it only when it stops
 // existing (deleted, worktree removed). There is no LRU and no cap. Memory is
-// bounded by parking the heavy resources of hidden workspaces instead:
-// terminals, LSP clients and file watchers of a cold workspace
-// (`workspace-cold-park.ts`), and browser pages beyond a hidden-workspace
+// bounded by parking the heavy resources of hidden worktrees instead:
+// terminals, LSP clients and file watchers of a cold worktree
+// (`worktree-cold-park.ts`), and browser pages beyond a hidden-worktree
 // budget (`browser-guest-retention.ts`).
 // ---------------------------------------------------------------------------
 
@@ -34,26 +34,26 @@ const HIDDEN_ENTRY_STYLE: React.CSSProperties = {
   pointerEvents: "none",
 };
 
-interface MultiWorkspacePanelHostProps {
+interface MultiWorktreePanelHostProps {
   /**
-   * Rendered when no workspace is selected (index route). Each panel gets a
-   * Lucide-icon empty state — see `NoWorkspaceMessage` in SharedDockviewLayout.
+   * Rendered when no worktree is selected (index route). Each panel gets a
+   * Lucide-icon empty state — see `NoWorktreeMessage` in SharedDockviewLayout.
    */
   emptyState: React.ReactNode;
   /**
-   * Per-workspace render callback. Invoked once per mounted workspace; the
-   * resulting subtree stays mounted until the workspace is deleted.
-   * `wsActive` is `true` only for the currently-active workspace.
+   * Per-worktree render callback. Invoked once per mounted worktree; the
+   * resulting subtree stays mounted until the worktree is deleted.
+   * `wsActive` is `true` only for the currently-active worktree.
    */
-  children: (workspaceId: string, wsActive: boolean) => React.ReactNode;
+  children: (worktreeId: string, wsActive: boolean) => React.ReactNode;
 }
 
 /**
- * Keeps the per-workspace center dockview of every visited workspace mounted.
+ * Keeps the per-worktree center dockview of every visited worktree mounted.
  *
- * Active workspace is derived synchronously from the URL (no useEffect lag)
+ * Active worktree is derived synchronously from the URL (no useEffect lag)
  * so the correct content is visible from the first paint after a route
- * change — no flash of the previous workspace.
+ * change — no flash of the previous worktree.
  *
  * Each mounted entry renders inside an absolutely-positioned div that is shown
  * or hidden. The inactive entries keep their React subtrees (chat
@@ -63,88 +63,88 @@ interface MultiWorkspacePanelHostProps {
  * The swap is a hard cut on purpose. An opacity fade on the incoming entry
  * made every terminal in it blink on each switch.
  */
-export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspacePanelHostProps) {
-  // Insertion-ordered set of mounted workspace ids. Order only keeps the
+export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePanelHostProps) {
+  // Insertion-ordered set of mounted worktree ids. Order only keeps the
   // rendered siblings stable; nothing is evicted by age or count.
   const [mounted, setMounted] = useState<ReadonlySet<string>>(() => new Set());
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  // Derive active workspace synchronously from pathname — no useEffect delay.
+  // Derive active worktree synchronously from pathname — no useEffect delay.
   // This ensures the visibility swap happens in the same render as the URL
-  // change, eliminating the one-frame flash of the previous workspace.
-  const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+  // change, eliminating the one-frame flash of the previous worktree.
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
 
-  // Synchronously mount the active workspace so it renders on the very first
+  // Synchronously mount the active worktree so it renders on the very first
   // paint. Calling setState during render (in response to a derived-value
   // change) is the React 18+ equivalent of getDerivedStateFromProps — React
   // discards the in-progress render and immediately re-renders with the
   // updated state.
-  if (activeWorkspaceId && !mounted.has(activeWorkspaceId)) {
+  if (activeWorktreeId && !mounted.has(activeWorktreeId)) {
     setMounted((prev) => {
       // Double-check inside updater in case of concurrent renders
-      if (prev.has(activeWorkspaceId)) return prev;
-      return new Set(prev).add(activeWorkspaceId);
+      if (prev.has(activeWorktreeId)) return prev;
+      return new Set(prev).add(activeWorktreeId);
     });
   }
 
-  // Reconcile the mounted set against the projects query (issue #508). This is
-  // the only way a workspace leaves the set. Without it a deleted workspace's
+  // Reconcile the mounted set against the repos query (issue #508). This is
+  // the only way a worktree leaves the set. Without it a deleted worktree's
   // chat/file/terminal/browser subtrees stay mounted forever, keeping their
   // tRPC subscriptions, event listeners, stuck "in-progress" tool-call
-  // animations, and React state alive against a workspaceId the server no
+  // animations, and React state alive against a worktreeId the server no
   // longer recognises (renderer observed at 1.68 GB heap, 167k listeners, 656
   // stuck animate-pulse spans after ~2 days of use).
   //
-  // Using the projects query as the source of truth self-heals for ANY
+  // Using the repos query as the source of truth self-heals for ANY
   // disappearance path — dashboard delete button, manual worktree rm, external
-  // git operation — not just `useRemoveWorkspace`.
+  // git operation — not just `useRemoveWorktree`.
   //
-  // The `id !== activeWorkspaceId` guard is structural, not a UX nicety.
-  // `activeWorkspaceId` is URL-derived (`parseWorkspaceFromPath(pathname)`),
-  // so it stays pointing at a deleted workspace until the user navigates
-  // away — `useRemoveWorkspace.onSuccess` only updates the Zustand store's
-  // `activeWorkspaceId`, not the URL, so the two diverge during the
-  // delete-the-active-workspace window. Without the guard:
-  //   1. Effect notices the active workspace isn't in `validIds`, unmounts it.
-  //   2. The synchronous "mount the active workspace" branch above re-adds it
+  // The `id !== activeWorktreeId` guard is structural, not a UX nicety.
+  // `activeWorktreeId` is URL-derived (`parseWorktreeFromPath(pathname)`),
+  // so it stays pointing at a deleted worktree until the user navigates
+  // away — `useRemoveWorktree.onSuccess` only updates the Zustand store's
+  // `activeWorktreeId`, not the URL, so the two diverge during the
+  // delete-the-active-worktree window. Without the guard:
+  //   1. Effect notices the active worktree isn't in `validIds`, unmounts it.
+  //   2. The synchronous "mount the active worktree" branch above re-adds it
   //      on the next render.
   //   3. Effect runs again, unmounts again. Infinite render loop.
-  // Consequence: deleting the *currently-active* workspace leaves it mounted
+  // Consequence: deleting the *currently-active* worktree leaves it mounted
   // until the user navigates somewhere else (clicking any other card in the
   // sidebar unmounts it on the next render).
   //
   // The `isLoading` guard distinguishes "query hasn't resolved yet" from
-  // "query resolved to an empty list". `useProjects()` returns the empty
+  // "query resolved to an empty list". `useRepos()` returns the empty
   // array fallback in both cases, so without this guard the initial render
-  // before the query resolves would unmount every workspace.
+  // before the query resolves would unmount every worktree.
   //
   // The `error` guard covers the same shape but for the FAILURE path:
   // `isLoading: false` + `data: undefined` (e.g. network blip, server
-  // not yet ready) also collapses to `projects: EMPTY_PROJECTS`, which
-  // would otherwise unmount every workspace on a transient hiccup.
+  // not yet ready) also collapses to `repos: EMPTY_REPOS`, which
+  // would otherwise unmount every worktree on a transient hiccup.
   // We keep the set as-is until the next successful fetch heals it.
-  const { projects, isLoading, error } = useProjects();
+  const { repos, isLoading, error } = useRepos();
   useEffect(() => {
     if (isLoading || error) return;
     const validIds = new Set<string>();
-    for (const project of projects) {
-      for (const worktree of project.worktrees) {
-        validIds.add(toWorkspaceId(project.name, worktree.name));
+    for (const repo of repos) {
+      for (const worktree of repo.worktrees) {
+        validIds.add(toWorktreeId(repo.name, worktree.name));
       }
     }
-    // Dispose cached terminals for workspaces that no longer exist (deleted /
+    // Dispose cached terminals for worktrees that no longer exist (deleted /
     // worktree removed), mirroring the mounted-set reconcile below. The active
-    // workspace is never disposed even if mid-delete (see the guard inside).
-    reconcileTerminalWorkspaces(validIds, activeWorkspaceId);
-    forgetMissingWorkspaces(validIds);
+    // worktree is never disposed even if mid-delete (see the guard inside).
+    reconcileTerminalWorktrees(validIds, activeWorktreeId);
+    forgetMissingWorktrees(validIds);
     setMounted((prev) => {
-      // Steady-state fast-path: the projects query refetches every 30 s,
+      // Steady-state fast-path: the repos query refetches every 30 s,
       // so this effect fires repeatedly with nothing to remove. Scan once to
       // detect a stale id before allocating the new Set.
       let hasStale = false;
       for (const id of prev) {
-        if (!validIds.has(id) && id !== activeWorkspaceId) {
+        if (!validIds.has(id) && id !== activeWorktreeId) {
           hasStale = true;
           break;
         }
@@ -152,20 +152,20 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
       if (!hasStale) return prev;
       const next = new Set<string>();
       for (const id of prev) {
-        if (validIds.has(id) || id === activeWorkspaceId) next.add(id);
+        if (validIds.has(id) || id === activeWorktreeId) next.add(id);
       }
       return next;
     });
-  }, [projects, isLoading, error, activeWorkspaceId]);
+  }, [repos, isLoading, error, activeWorktreeId]);
 
   // Detect unmounts by diffing the set across commits and clear the dropped
-  // workspaces' cross-panel state. Lives in an effect (not the setState
+  // worktrees' cross-panel state. Lives in an effect (not the setState
   // updater) so React-driven double-invocations don't repeatedly call
-  // `clearPerWorkspaceState` for the same workspaceId.
+  // `clearPerWorktreeState` for the same worktreeId.
   const lastMountedRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
     for (const prev of lastMountedRef.current) {
-      if (!mounted.has(prev)) clearPerWorkspaceState(prev);
+      if (!mounted.has(prev)) clearPerWorktreeState(prev);
     }
     lastMountedRef.current = mounted;
   }, [mounted]);
@@ -177,28 +177,28 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   // (typically the AppShell) and stack on top of each other at the top-left
   // of the layout, on top of the tab strip.
   //
-  // With no workspace selected (index route) every mounted entry stays in the
+  // With no worktree selected (index route) every mounted entry stays in the
   // tree, hidden, under the empty state, so navigating back to one remains
   // instant.
   return (
     <div className="relative h-full w-full">
-      {!activeWorkspaceId && emptyState}
-      {Array.from(mounted, (workspaceId) => {
-        const isActive = workspaceId === activeWorkspaceId;
+      {!activeWorktreeId && emptyState}
+      {Array.from(mounted, (worktreeId) => {
+        const isActive = worktreeId === activeWorktreeId;
         return (
           <div
-            key={workspaceId}
+            key={worktreeId}
             // The testid exposes the mounted set to integration tests (see
-            // `apps/web/e2e/workspace-cache-eviction.spec.ts` and
-            // `workspace-switch-no-remount.spec.ts`): one entry per mounted
-            // workspace makes "is this workspace still mounted?" observable
+            // `apps/web/e2e/worktree-cache-eviction.spec.ts` and
+            // `worktree-switch-no-remount.spec.ts`): one entry per mounted
+            // worktree makes "is this worktree still mounted?" observable
             // through the DOM without exporting internals. Embedding the
-            // workspaceId in the attribute lets a test target a specific
-            // entry directly. No `data-active` here — `WorkspaceCard` already
+            // worktreeId in the attribute lets a test target a specific
+            // entry directly. No `data-active` here — `WorktreeCard` already
             // exposes that attribute on the sidebar card, and adding it to
             // these divs would multiply-match the existing
             // `locator('[data-active="true"]')` queries other specs use.
-            data-testid={`workspace-panel-host__cached-entry--${workspaceId}`}
+            data-testid={`worktree-panel-host__cached-entry--${worktreeId}`}
             // Hide inactive entries with `visibility: hidden` (universal
             // browser support) for the visual effect, AND
             // `content-visibility: hidden` on top as a progressive perf
@@ -217,19 +217,19 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             //     browser to skip layout + paint work for the subtree
             //     entirely. Where it isn't supported it's a harmless no-op.
             //
-            // `inert` keeps a hidden workspace from taking focus: without it
+            // `inert` keeps a hidden worktree from taking focus: without it
             // a focus() call or Tab key could land in a background editor or
             // chat composer. `pointer-events: none` stays as
             // belt-and-suspenders in case a descendant re-asserts visibility.
-            // `band-workspace-entry` is the hook for the browser paint
+            // `band-worktree-entry` is the hook for the browser paint
             // retention rule in `globals.css`: a hidden entry holding a
             // browser tab that must keep painting (CDP screencast) drops
             // its `content-visibility` skip.
-            className="band-workspace-entry absolute inset-0"
+            className="band-worktree-entry absolute inset-0"
             style={isActive ? ACTIVE_ENTRY_STYLE : HIDDEN_ENTRY_STYLE}
             inert={!isActive}
           >
-            {children(workspaceId, isActive)}
+            {children(worktreeId, isActive)}
           </div>
         );
       })}

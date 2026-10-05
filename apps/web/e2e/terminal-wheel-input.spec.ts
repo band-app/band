@@ -30,7 +30,7 @@
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -47,11 +47,11 @@ import {
   writeInputProbe,
 } from "./helpers/terminal-input-probe";
 import { TerminalInputSurface } from "./pages/TerminalInputSurface";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-wheel-input-token";
-// One project per test: each probe keeps its terminal in raw mode.
-const PROJECTS = {
+// One repo per test: each probe keeps its terminal in raw mode.
+const REPOS = {
   trackpad: "wheel-trackpad",
   notches: "wheel-notches",
   pixels: "wheel-sgr-pixels",
@@ -61,7 +61,7 @@ const PROJECTS = {
   burst: "input-burst",
   latency: "input-latency",
 } as const;
-type ProbeName = keyof typeof PROJECTS;
+type ProbeName = keyof typeof REPOS;
 // The input log shows ESC as `^[`, so a failure prints readable input.
 const SGR_WHEEL_REPORT = /\^\[\[<(\d+);(\d+);(\d+)M/g;
 
@@ -80,30 +80,30 @@ function wheelReports(log: string): { code: number; col: number; row: number }[]
 }
 
 /**
- * Start a probe in the workspace's terminal: it writes `setup` to the
+ * Start a probe in the worktree's terminal: it writes `setup` to the
  * terminal, prints a ready marker, and appends raw stdin to a log. Returns
  * the log's path.
  */
 async function startProbe(
-  workspacePage: WorkspacePage,
+  worktreePage: WorktreePage,
   name: ProbeName,
   setup: string,
 ): Promise<string> {
-  const workspaceId = toWorkspaceId(PROJECTS[name], "main");
+  const worktreeId = toWorktreeId(REPOS[name], "main");
   const probe = writeInputProbe(workdirs[name], setup);
-  await workspacePage.goto(workspaceId);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await workspacePage.waitForTerminalReady(20_000);
-  await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
-  await workspacePage.runInTerminalUntilRendered(workspaceId, probe.command, INPUT_PROBE_READY);
+  await worktreePage.goto(worktreeId);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await worktreePage.waitForTerminalReady(20_000);
+  await worktreePage.waitForTerminalRenderedPrompt(worktreeId);
+  await worktreePage.runInTerminalUntilRendered(worktreeId, probe.command, INPUT_PROBE_READY);
   return probe.logPath;
 }
 
 function openSurface(page: Page, name: ProbeName) {
   return {
-    workspacePage: new WorkspacePage(page, server.url, TOKEN),
-    terminal: new TerminalInputSurface(page, toWorkspaceId(PROJECTS[name], "main")),
+    worktreePage: new WorktreePage(page, server.url, TOKEN),
+    terminal: new TerminalInputSurface(page, toWorktreeId(REPOS[name], "main")),
   };
 }
 
@@ -111,17 +111,17 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   // Keep zsh from running its new-user wizard in the temp home.
   writeFileSync(join(tmpHome, ".zshrc"), "PROMPT='$ '\n");
-  const projects = [];
-  for (const [name, project] of Object.entries(PROJECTS) as [ProbeName, string][]) {
-    workdirs[name] = makeGitWorkdir(`band-${project}-`, tmpHome);
-    projects.push({
-      name: project,
+  const repos = [];
+  for (const [name, repo] of Object.entries(REPOS) as [ProbeName, string][]) {
+    workdirs[name] = makeGitWorkdir(`band-${repo}-`, tmpHome);
+    repos.push({
+      name: repo,
       path: workdirs[name],
       defaultBranch: "main",
       worktrees: [{ branch: "main", path: workdirs[name] }],
     });
   }
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, { tokenSecret: TOKEN, useWebGLTerminalRenderer: false });
   server = await startServer({ tmpHome });
 });
@@ -137,9 +137,9 @@ test.afterAll(async () => {
 test.describe("Terminal wheel over mouse-tracking programs", () => {
   test("trackpad deltas send one report per row at the pointer's cell", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "trackpad");
+    const { worktreePage, terminal } = openSurface(page, "trackpad");
     // Wheel mouse tracking (DECSET 1000) with SGR encoding (1006).
-    const inputLog = await startProbe(workspacePage, "trackpad", "\x1b[?1000h\x1b[?1006h");
+    const inputLog = await startProbe(worktreePage, "trackpad", "\x1b[?1000h\x1b[?1006h");
 
     const { cellHeight } = await terminal.readGrid();
     // 3.5 rows of travel in small steps: exactly 3 reports. xterm's own
@@ -166,8 +166,8 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
   test("mouse wheel notches send 1 to 9 reports each", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "notches");
-    const inputLog = await startProbe(workspacePage, "notches", "\x1b[?1000h\x1b[?1006h");
+    const { worktreePage, terminal } = openSurface(page, "notches");
+    const inputLog = await startProbe(worktreePage, "notches", "\x1b[?1000h\x1b[?1006h");
 
     await terminal.hoverCell(4, 2);
     const notches = 8;
@@ -184,9 +184,9 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
   test("SGR pixel mode reports the pointer's pixel inside the screen", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "pixels");
+    const { worktreePage, terminal } = openSurface(page, "pixels");
     // SGR pixel encoding (DECSET 1016).
-    const inputLog = await startProbe(workspacePage, "pixels", "\x1b[?1000h\x1b[?1016h");
+    const inputLog = await startProbe(worktreePage, "pixels", "\x1b[?1000h\x1b[?1016h");
 
     const grid = await terminal.readGrid();
     await terminal.hoverCell(10, 4);
@@ -207,9 +207,9 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
   test("X10 encoding carries the cell and the Ctrl bit", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "x10");
+    const { worktreePage, terminal } = openSurface(page, "x10");
     // Wheel tracking with no encoding mode: X10 bytes.
-    const inputLog = await startProbe(workspacePage, "x10", "\x1b[?1000h");
+    const inputLog = await startProbe(worktreePage, "x10", "\x1b[?1000h");
 
     await terminal.hoverCell(4, 2);
     await terminal.wheel(100, 1, { modifier: "Control" });
@@ -221,9 +221,9 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
   test("the alternate screen without mouse tracking still gets arrow keys", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "altScreen");
+    const { worktreePage, terminal } = openSurface(page, "altScreen");
     // Alternate screen (DECSET 1049), no mouse tracking.
-    const inputLog = await startProbe(workspacePage, "altScreen", "\x1b[?1049h");
+    const inputLog = await startProbe(worktreePage, "altScreen", "\x1b[?1049h");
 
     await terminal.hoverCell(5, 5);
     await terminal.wheel(100, 3);
@@ -236,15 +236,15 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
   test("the wheel scrolls a shell's scrollback", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "shell");
-    const workspaceId = toWorkspaceId(PROJECTS.shell, "main");
-    await workspacePage.goto(workspaceId);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
-    await workspacePage.runInTerminalUntilRendered(
-      workspaceId,
+    const { worktreePage, terminal } = openSurface(page, "shell");
+    const worktreeId = toWorktreeId(REPOS.shell, "main");
+    await worktreePage.goto(worktreeId);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.waitForTerminalRenderedPrompt(worktreeId);
+    await worktreePage.runInTerminalUntilRendered(
+      worktreeId,
       'for i in $(seq 1 300); do echo "scroll-line-$i"; done; echo SCROLL_"DONE"',
       /SCROLL_DONE/,
     );
@@ -265,9 +265,9 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 test.describe("Terminal input coalescing", () => {
   test("keys queued behind a busy page share messages; a lone key is its own", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage, terminal } = openSurface(page, "burst");
+    const { worktreePage, terminal } = openSurface(page, "burst");
     const inputMessages = terminal.trackInputMessages();
-    const inputLog = await startProbe(workspacePage, "burst", "");
+    const inputLog = await startProbe(worktreePage, "burst", "");
 
     // A lone keystroke is one message of its own. (That it goes out without
     // waiting a turn isn't observable at the WebSocket; the latency test below
@@ -292,14 +292,14 @@ test.describe("Terminal input coalescing", () => {
 
   test("the typing-latency probe still stamps every echoed key", async ({ page }) => {
     test.setTimeout(90_000);
-    const { workspacePage } = openSurface(page, "latency");
-    const workspaceId = toWorkspaceId(PROJECTS.latency, "main");
-    await workspacePage.goto(workspaceId);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.focusPane(0);
-    await workspacePage.waitForTypingEcho();
+    const { worktreePage } = openSurface(page, "latency");
+    const worktreeId = toWorktreeId(REPOS.latency, "main");
+    await worktreePage.goto(worktreeId);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.focusPane(0);
+    await worktreePage.waitForTypingEcho();
 
     // On a loaded machine a key's echo can come back after the next key is
     // typed, or in the same frame as the next key's echo. Pairing each key
@@ -307,10 +307,10 @@ test.describe("Terminal input coalescing", () => {
     // frame, so pair each key with the frame that carries its character (the
     // 20 keys are distinct letters). The last echo can also land after typing
     // ends, so wait for every key before stopping the probe.
-    await workspacePage.startTypingLatencyProbe({ matchEcho: true });
-    await workspacePage.typeKeysPaced(20, 60);
-    await expect.poll(() => workspacePage.typingLatencySamples()).toBe(20);
-    const report = await workspacePage.stopTypingLatencyProbe();
+    await worktreePage.startTypingLatencyProbe({ matchEcho: true });
+    await worktreePage.typeKeysPaced(20, 60);
+    await expect.poll(() => worktreePage.typingLatencySamples()).toBe(20);
+    const report = await worktreePage.stopTypingLatencyProbe();
     expect(report.unmatched).toBe(0);
     // No multi-frame stall between keydown and the socket. A coalescing turn
     // is well under a millisecond, so this can't tell one from none.

@@ -22,7 +22,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -34,13 +34,13 @@ import {
 } from "./helpers/server";
 import { type ScrollReport, TerminalScrollProbe } from "./pages/TerminalScrollProbe";
 import { TerminalSurface } from "./pages/TerminalSurface";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.skip(process.env.BAND_SCROLL_BENCH !== "1", "benchmark; set BAND_SCROLL_BENCH=1");
 
 const TOKEN = "e2e-scroll-bench-token";
-const PROJECT = "scroll-bench";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "scroll-bench";
+const WORKTREE = toWorktreeId(REPO, "main");
 const DURATION_MS = Number(process.env.BENCH_DURATION_MS ?? 4_000);
 
 /**
@@ -106,13 +106,13 @@ test.beforeAll(async () => {
   writeFileSync(join(tmpHome, ".zshrc"), "PROMPT='$ '\n");
   tuiPath = join(tmpHome, "scroll-tui.pl");
   writeFileSync(tuiPath, TUI);
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   gitInHome(tmpHome, ["init", "-q", "-b", "main", repoPath], tmpHome);
   gitInHome(repoPath, ["commit", "-q", "--allow-empty", "-m", "init"], tmpHome);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoPath }],
@@ -192,23 +192,23 @@ test.describe("Terminal scroll smoothness (benchmark)", () => {
   for (const scenario of SCENARIOS) {
     test(scenario.name, async ({ page }) => {
       test.setTimeout(120_000);
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const probe = new TerminalScrollProbe(page, WORKSPACE);
+      const worktreePage = new WorktreePage(page, server.url, TOKEN);
+      const probe = new TerminalScrollProbe(page, WORKTREE);
       await probe.install();
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-      await workspacePage.openTerminalTab();
-      await workspacePage.waitForTerminalReady(20_000);
-      await workspacePage.focusPane(0);
-      await workspacePage.waitForTypingEcho();
-      await workspacePage.typeInPane(0, `clear; perl ${tuiPath} ${scenario.frame}`);
+      await worktreePage.goto(WORKTREE);
+      await worktreePage.waitForReady();
+      await worktreePage.openTerminalTab();
+      await worktreePage.waitForTerminalReady(20_000);
+      await worktreePage.focusPane(0);
+      await worktreePage.waitForTypingEcho();
+      await worktreePage.typeInPane(0, `clear; perl ${tuiPath} ${scenario.frame}`);
       await expect.poll(() => probe.readTopOffset(), { timeout: 10_000 }).toBe(0);
 
-      const grid = await new TerminalSurface(page, WORKSPACE).readGrid();
+      const grid = await new TerminalSurface(page, WORKTREE).readGrid();
       const stopProfile =
-        process.env.BENCH_PROFILE === "1" ? await workspacePage.profileMainThread() : null;
+        process.env.BENCH_PROFILE === "1" ? await worktreePage.profileMainThread() : null;
       await probe.start();
-      await workspacePage.wheelPaced(
+      await worktreePage.wheelPaced(
         grid.left + grid.width / 2,
         grid.top + grid.height / 2,
         scenario.deltaY,
@@ -219,7 +219,7 @@ test.describe("Terminal scroll smoothness (benchmark)", () => {
       const reportsSent = await probe.readReportsSent();
       await expect.poll(() => probe.readTopOffset(), { timeout: 10_000 }).toBe(reportsSent);
       const report = await probe.stop(0);
-      await workspacePage.pressKeyInPane(0, "q");
+      await worktreePage.pressKeyInPane(0, "q");
       const profile = await stopProfile?.();
       print(scenario.name, report, profile ?? undefined);
       expect(report.painted).toBeGreaterThan(0);
@@ -230,7 +230,7 @@ test.describe("Terminal scroll smoothness (benchmark)", () => {
 /**
  * The real thing: resume a Claude Code session (forked, so the original
  * transcript is left alone) and wheel up through its transcript. Opt in with
- * `BENCH_CLAUDE_SESSION=<id> BENCH_CLAUDE_CWD=<project dir>`; the shell runs it
+ * `BENCH_CLAUDE_SESSION=<id> BENCH_CLAUDE_CWD=<repo dir>`; the shell runs it
  * with your real HOME, so it uses your settings (set `"tui": "fullscreen"`)
  * and login. Panes set `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`; `BENCH_CLAUDE_ENV`
  * adds env vars, e.g. `CLAUDE_CODE_FORCE_SYNC_OUTPUT=` to measure Claude's
@@ -243,17 +243,17 @@ test.describe("Claude Code scroll smoothness (benchmark)", () => {
 
   test("claude trackpad", async ({ page }) => {
     test.setTimeout(180_000);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const probe = new TerminalScrollProbe(page, WORKSPACE);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const probe = new TerminalScrollProbe(page, WORKTREE);
     await probe.install();
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
-    await workspacePage.waitForTerminalReady(20_000);
-    await workspacePage.focusPane(0);
-    await workspacePage.waitForTypingEcho();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.openTerminalTab();
+    await worktreePage.waitForTerminalReady(20_000);
+    await worktreePage.focusPane(0);
+    await worktreePage.waitForTypingEcho();
     const debugFile = join(tmpHome, "claude-debug.txt");
-    await workspacePage.typeInPane(
+    await worktreePage.typeInPane(
       0,
       `clear; cd '${cwd}' && HOME='${process.env.HOME}' ${process.env.BENCH_CLAUDE_ENV ?? ""} ` +
         `claude --resume ${session} --fork-session --debug-file '${debugFile}'`,
@@ -277,11 +277,11 @@ test.describe("Claude Code scroll smoothness (benchmark)", () => {
       )
       .toBe(true);
 
-    const grid = await new TerminalSurface(page, WORKSPACE).readGrid();
+    const grid = await new TerminalSurface(page, WORKTREE).readGrid();
     const stopProfile =
-      process.env.BENCH_PROFILE === "1" ? await workspacePage.profileMainThread() : null;
+      process.env.BENCH_PROFILE === "1" ? await worktreePage.profileMainThread() : null;
     await probe.start();
-    await workspacePage.wheelPaced(
+    await worktreePage.wheelPaced(
       grid.left + grid.width / 2,
       grid.top + grid.height / 2,
       -24,
@@ -312,8 +312,8 @@ test.describe("Claude Code scroll smoothness (benchmark)", () => {
       .filter((l) => /Terminal capabilities|DECSTBM/.test(l))
       .slice(-2);
     console.log(debug.map((l) => `  ${l.slice(0, 400)}`).join("\n"));
-    await workspacePage.pressKeyInPane(0, "Control+c");
-    await workspacePage.pressKeyInPane(0, "Control+c");
+    await worktreePage.pressKeyInPane(0, "Control+c");
+    await worktreePage.pressKeyInPane(0, "Control+c");
     expect(report.screenChanges).toBeGreaterThan(0);
   });
 });

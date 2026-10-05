@@ -16,7 +16,7 @@ import { diffLines } from "./diff-lines";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
-/** Relative to the workspace when the path is inside it. */
+/** Relative to the worktree when the path is inside it. */
 function shortPath(path: string, cwd: string | undefined): string {
   return cwd && path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
 }

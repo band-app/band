@@ -1,17 +1,17 @@
 /**
- * Header of the Changes tab: the workspace's current branch, and below it
+ * Header of the Changes tab: the worktree's current branch, and below it
  * the branch the "Committed on Branch" section compares against. Clicking
  * the target opens a branch picker. Uncommitted work has its own sections
  * (Changes, Staged Changes, Untracked Files), so it isn't a target here.
  *
  * Repos can have thousands of branches, so the picker never loads them all.
- * It sends the typed query to `workspace.listBranches`, which filters and
+ * It sends the typed query to `worktree.listBranches`, which filters and
  * ranks local and remote branches on the server and returns the top
  * `BRANCH_LIMIT`. The "Default branch" button resets the target to the
- * project's default branch in one click.
+ * repo's default branch in one click.
  *
  * Picking a branch only changes the compare base (`useDiffTarget`, persisted
- * per workspace). Nothing is checked out.
+ * per worktree). Nothing is checked out.
  */
 
 import {
@@ -34,10 +34,10 @@ const BRANCH_LIMIT = 50;
 const SEARCH_DEBOUNCE_MS = 150;
 
 export interface DiffTargetHeaderProps {
-  workspaceId: string;
+  worktreeId: string;
   /** Current branch of the worktree; undefined until the first summary loads. */
   headBranch: string | undefined;
-  /** The project's default branch; undefined until the first summary loads. */
+  /** The repo's default branch; undefined until the first summary loads. */
   defaultBranch: string | undefined;
   /** The picked compare branch; null means the default branch. */
   compareBranch: string | null;
@@ -45,7 +45,7 @@ export interface DiffTargetHeaderProps {
 }
 
 export function DiffTargetHeader({
-  workspaceId,
+  worktreeId,
   headBranch,
   defaultBranch,
   compareBranch,
@@ -72,13 +72,13 @@ export function DiffTargetHeader({
   }, [open]);
 
   const branchesQuery = useQuery({
-    queryKey: ["diffTargetBranches", workspaceId, debouncedQuery],
+    queryKey: ["diffTargetBranches", worktreeId, debouncedQuery],
     queryFn: () =>
-      adapter.listWorkspaceBranches?.(workspaceId, {
+      adapter.listWorktreeBranches?.(worktreeId, {
         query: debouncedQuery || undefined,
         limit: BRANCH_LIMIT,
       }) ?? null,
-    enabled: open && !!adapter.listWorkspaceBranches,
+    enabled: open && !!adapter.listWorktreeBranches,
     // Keep the previous matches on screen while the next query runs, so the
     // list doesn't blank out on every keystroke.
     placeholderData: keepPreviousData,

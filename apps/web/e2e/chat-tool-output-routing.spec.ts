@@ -27,7 +27,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -40,8 +40,8 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-tool-output-routing-token";
-const PROJECT = "toolrouting";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "toolrouting";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -55,9 +55,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -122,7 +122,7 @@ test.beforeAll(async () => {
               toolUpdate: {
                 toolCallId: "tc-read-1",
                 status: "completed",
-                content: [{ type: "content", content: { type: "text", text: "# Project" } }],
+                content: [{ type: "content", content: { type: "text", text: "# Repo" } }],
               },
             },
             { say: "Read it." },
@@ -143,7 +143,7 @@ test.describe("chat tool-output routing — issue #509 regression", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("run the tools");

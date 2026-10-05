@@ -56,12 +56,12 @@ export interface ChatPaneState {
  *
  * Caching strategy: `chats.get` is the only query on the first-paint hot
  * path. The server persists `activeSessionId` AND the cached
- * `activeSessionSummary` on the chat row, so a workspace switch is a pure
+ * `activeSessionSummary` on the chat row, so a worktree switch is a pure
  * SQLite read with zero filesystem access. `sessions.list` is no longer
  * eagerly called here — it fires only when the user opens the history
  * dropdown (see `SessionHistoryMenu` in ChatView).
  */
-export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneState {
+export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneState {
   // Check once at mount whether this is a freshly-split pane.
   const isFreshRef = useRef(consumeChatFresh(chatId));
   // One-shot guards. These prevent background refetches from clobbering
@@ -217,7 +217,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
       setActiveSessionSummary(summary);
       try {
         await trpc.chats.setActiveSession.mutate({
-          workspaceId,
+          worktreeId,
           chatId,
           sessionId: sessionId ?? undefined,
           summary,
@@ -233,7 +233,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
       sessionInitRef.current = true;
       setPaneKey((k) => k + 1);
     },
-    [workspaceId, chatId, queryClient],
+    [worktreeId, chatId, queryClient],
   );
 
   return {
@@ -261,21 +261,21 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
 // ---------------------------------------------------------------------------
 
 interface ChatPaneProps {
-  workspaceId: string;
+  worktreeId: string;
   chatId: string;
   visible?: boolean;
   wsActive?: boolean;
   state: ChatPaneState;
 }
 
-export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: ChatPaneProps) {
+export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatPaneProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ChatView
         key={state.paneKey}
-        workspaceId={workspaceId}
+        worktreeId={worktreeId}
         chatId={chatId}
-        workspaceName={workspaceId}
+        worktreeName={worktreeId}
         initialSessionId={state.initialSessionId}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}

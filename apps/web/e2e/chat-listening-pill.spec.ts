@@ -15,7 +15,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -30,8 +30,8 @@ import { trpcMutate, trpcQuery } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-listening-pill-token";
-const PROJECT = "listeningproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "listeningproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 const CHAT_ID = "chat-listening-pill";
 
 interface SubscriptionRow {
@@ -56,9 +56,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -73,7 +73,7 @@ test.beforeAll(async () => {
   server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 
   await trpcMutate(server.url, TOKEN, "chats.create", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     id: CHAT_ID,
     agent: "claude-code",
   });
@@ -91,7 +91,7 @@ test.describe("Chat Listening pill", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // No subscriptions yet: no pill. The prompt is visible once the chat view

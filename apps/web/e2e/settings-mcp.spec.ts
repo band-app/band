@@ -1,6 +1,6 @@
 /**
  * Settings > MCP (plan step 4.5): add an HTTP server with a vault API key, test the connection,
- * restrict it to two tools, scope it to one project, and read the audit log of a call made through
+ * restrict it to two tools, scope it to one repo, and read the audit log of a call made through
  * the proxy. The upstream is a real MCP server (`apps/hub/tests/fixtures/mcp-stub.ts`) and the
  * hub is the production bundle with a temp BAND_HOME. An agent is stood in for by a plain HTTP
  * client holding a session token from `mcp.issueSessionToken`, which is the call the agent
@@ -66,7 +66,7 @@ test.beforeAll(async () => {
   const alpha = join(tmpHome, "alpha");
   mkdirSync(alpha, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: "alpha",
         path: alpha,
@@ -90,7 +90,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("adds a server with a vault key, limits it to two tools, scopes it to a project and audits a call", async ({
+test("adds a server with a vault key, limits it to two tools, scopes it to a repo and audits a call", async ({
   page,
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
@@ -106,23 +106,23 @@ test("adds a server with a vault key, limits it to two tools, scopes it to a pro
 
   await settingsPage.allowOnlyMcpTools(["echo", "add"]);
   await expect(settingsPage.mcpMissionsScope()).toBeDisabled();
-  await settingsPage.scopeMcpToProject("alpha");
+  await settingsPage.scopeMcpToRepo("alpha");
   await settingsPage.saveMcpServer();
 
   const row = settingsPage.mcpServerRow("notes");
   await settingsPage.expectRowVisible(row);
-  await expect(row).toContainText("Projects: alpha");
+  await expect(row).toContainText("Repos: alpha");
   await expect(row).toContainText("2 tools allowed");
   await expect(row.getByTestId("settings__mcp-status")).toHaveAttribute("data-state", "ok");
   // The upstream key is in the vault, not in the server row or the page.
   await expect(settingsPage.dialog).not.toContainText(API_KEY);
 
   const { servers } = await trpc<{
-    servers: Array<{ name: string; allowTools: string[] | null; scopeProjects: string[] | null }>;
+    servers: Array<{ name: string; allowTools: string[] | null; scopeRepos: string[] | null }>;
   }>("mcp.list", undefined, false);
   const saved = servers.find((s) => s.name === "notes");
   expect(saved?.allowTools?.sort()).toEqual(["add", "echo"]);
-  expect(saved?.scopeProjects).toEqual(["alpha"]);
+  expect(saved?.scopeRepos).toEqual(["alpha"]);
 
   // A session sees only the two tools through the proxy, and the call is audited.
   const issued = await trpc<{ token: string }>("mcp.issueSessionToken", {

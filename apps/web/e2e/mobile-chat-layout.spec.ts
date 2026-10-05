@@ -4,7 +4,7 @@
  * Safe-area insets: an iOS home-screen app (display-mode: standalone,
  * `viewport-fit=cover`) reports non-zero `env(safe-area-inset-*)` values for
  * the status bar and the home indicator. Each inset must be padded once, by
- * the element that touches that screen edge. On a mobile workspace the header
+ * the element that touches that screen edge. On a mobile worktree the header
  * pads the top inset and the editor area pads the bottom one; there is no
  * bottom tab bar (Explorer / Changes are header buttons), so the chat
  * composer sits directly on the home-indicator inset. The dashboard action bar clears
@@ -35,7 +35,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, chromium, expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
 import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
@@ -51,11 +51,11 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 import { MobileLayoutPage } from "./pages/MobileLayoutPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-mobile-chat-layout-token";
-const PROJECT = "mobilelayout";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "mobilelayout";
+const WORKTREE = toWorktreeId(REPO, "main");
 // In an app-mode window `window.innerHeight` is the full screen height, so an
 // element that clears the home indicator ends at `innerHeight - SAFE_AREA_BOTTOM`.
 const SAFE_AREA_BOTTOM = 34;
@@ -66,9 +66,9 @@ const NARROW_SCREENS = [
   { width: 375, height: 812 },
   { width: 390, height: 844 },
 ];
-/** One project per narrow screen, so each test's chat starts empty and the
+/** One repo per narrow screen, so each test's chat starts empty and the
  *  plan it measures is its own. */
-const narrowProject = (width: number) => `narrow${width}`;
+const narrowRepo = (width: number) => `narrow${width}`;
 // `pb-2 lg:pb-4` on the composer wrapper in ChatView: a small gap on a phone,
 // where the composer rests on the inset, the original 16 px on a wide screen.
 const PHONE_COMPOSER_PADDING_BOTTOM = 8;
@@ -87,7 +87,7 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const projects = [PROJECT, ...NARROW_SCREENS.map((v) => narrowProject(v.width))].map((name) => {
+  const repos = [REPO, ...NARROW_SCREENS.map((v) => narrowRepo(v.width))].map((name) => {
     const repoDir = join(tmpHome, name);
     mkdirSync(repoDir, { recursive: true });
     return {
@@ -97,13 +97,13 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
-  // One uncommitted file in the main project, for the Changes badge.
-  const mainRepo = join(tmpHome, PROJECT);
+  // One uncommitted file in the main repo, for the Changes badge.
+  const mainRepo = join(tmpHome, REPO);
   git(mainRepo, ["init", "-b", "main"]);
   writeFileSync(join(mainRepo, "README.md"), "# Mobile layout\n");
   gitCommit(mainRepo, "initial commit");
   writeFileSync(join(mainRepo, "notes.md"), "draft\n");
-  seedState(tmpHome, { projects });
+  seedState(tmpHome, { repos });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
@@ -204,7 +204,7 @@ test.describe("safe-area insets in a home-screen app", () => {
   test("the header clears the status bar and the chat composer rests on the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     const viewport = await layout.readViewport();
@@ -217,7 +217,7 @@ test.describe("safe-area insets in a home-screen app", () => {
     const header = await layout.readLayout(layout.header);
     expect(header.top).toBe(0);
     expect(header.paddingTop).toBe(SAFE_AREA_TOP);
-    const title = await layout.readLayout(layout.workspaceSwitcher);
+    const title = await layout.readLayout(layout.worktreeSwitcher);
     expect(title.top).toBeGreaterThanOrEqual(SAFE_AREA_TOP);
 
     // No bottom tab bar: the editor area reaches the bottom edge and pads
@@ -243,12 +243,12 @@ test.describe("safe-area insets in a home-screen app", () => {
     expect(actionBar.bottom).toBe(viewport.height - SAFE_AREA_BOTTOM);
   });
 
-  test("the project-list fly-out action bar clears the home indicator", async () => {
+  test("the repo-list fly-out action bar clears the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForMobileReady();
-    await workspace.openProjectListFlyout();
+    const worktree = new WorktreePage(page, server.url, TOKEN);
+    await worktree.goto(WORKTREE);
+    await worktree.waitForMobileReady();
+    await worktree.openRepoListFlyout();
 
     const viewport = await layout.readViewport();
     const actionBar = await layout.readLayout(layout.flyoutActionBar);
@@ -257,9 +257,9 @@ test.describe("safe-area insets in a home-screen app", () => {
 
   test("the Explorer and Changes sheets pad the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForMobileReady();
+    const worktree = new WorktreePage(page, server.url, TOKEN);
+    await worktree.goto(WORKTREE);
+    await worktree.waitForMobileReady();
 
     await layout.openSheet("explorer");
     const explorer = await layout.readLayout(layout.explorerSheetBody);
@@ -274,7 +274,7 @@ test.describe("safe-area insets in a home-screen app", () => {
   test("the full-screen file preview pads the home indicator", async () => {
     const chat = new ChatPanePage(page, server.url, TOKEN);
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
     await chat.attachFile({ name: "pixel.png", mimeType: "image/png", buffer: PIXEL_PNG });
     await chat.typeMessage("Look at this picture");
@@ -316,7 +316,7 @@ test.describe("safe-area insets in a wide home-screen app", () => {
   test("the app shell pads the home indicator once for the sidebar and the chat", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     const viewport = await layout.readViewport();
@@ -373,7 +373,7 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
     ({ context, page } = await launchStandalone(PHONE, { ios: true }));
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     await expect(layout.reinstallNotice).toBeVisible();
@@ -399,7 +399,7 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
     await expect(chat.promptInput).toBeVisible();
     await expect(layout.reinstallNotice).toHaveCount(0);
 
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
     await expect(layout.reinstallNotice).toHaveCount(0);
   });
@@ -408,7 +408,7 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
     ({ context, page } = await launchStandalone(PHONE, { ios: true, insetTop: 0 }));
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     const header = await layout.readLayout(layout.header);
@@ -425,12 +425,12 @@ test.describe("in a phone browser tab", () => {
   }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     await expect(layout.legacyBottomBar).toHaveCount(0);
     const header = await layout.readLayout(layout.header);
-    const title = await layout.readLayout(layout.workspaceSwitcher);
+    const title = await layout.readLayout(layout.worktreeSwitcher);
     const menu = await layout.readLayout(layout.menuButton);
     expect(menu.top).toBeGreaterThanOrEqual(header.top);
     expect(menu.bottom).toBeLessThanOrEqual(header.bottom);
@@ -464,7 +464,7 @@ test.describe("in a phone browser tab", () => {
   }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
-    await chat.goto(WORKSPACE);
+    await chat.goto(WORKTREE);
     await chat.waitForReady();
 
     const viewport = await layout.readViewport();
@@ -495,7 +495,7 @@ for (const viewport of NARROW_SCREENS) {
     test("composer controls and plan entries stay inside the screen", async ({ page }) => {
       const layout = new MobileLayoutPage(page, server.url, TOKEN);
       const chat = new ChatPanePage(page, server.url, TOKEN);
-      await chat.goto(toWorkspaceId(narrowProject(viewport.width), "main"));
+      await chat.goto(toWorktreeId(narrowRepo(viewport.width), "main"));
       await chat.waitForReady();
       await chat.typeMessage("Plan the work");
       await chat.submit();

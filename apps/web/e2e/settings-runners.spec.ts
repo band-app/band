@@ -23,7 +23,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const TOKEN = "e2e-runners-token";
-const PROJECT = "runner-project";
+const REPO = "runner-repo";
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -72,12 +72,12 @@ test.beforeAll(async () => {
     ],
   });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        name: REPO,
+        path: `/tmp/fake/${REPO}`,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT}` }],
+        worktrees: [{ branch: "main", path: `/tmp/fake/${REPO}` }],
       },
     ],
   });
@@ -92,8 +92,8 @@ test.afterAll(async () => {
 });
 
 test("lists the runner and shows the log of a run that failed", async ({ page }) => {
-  await trpcMutate(server.url, TOKEN, "workspaces.create", {
-    project: PROJECT,
+  await trpcMutate(server.url, TOKEN, "worktrees.create", {
+    repo: REPO,
     branch: "needs-moon",
     placement: { labels: { zone: "moon" } },
   });
@@ -107,10 +107,10 @@ test("lists the runner and shows the log of a run that failed", async ({ page })
   await expect(runner).toContainText("zone=moon");
   await expect(settingsPage.runnerRunning(runner)).toHaveAttribute("data-max", "2");
 
-  const run = settingsPage.runnerRun(`${PROJECT}-needs-moon`);
+  const run = settingsPage.runnerRun(`${REPO}-needs-moon`);
   await expect(run).toHaveAttribute("data-status", "failed", { timeout: 30_000 });
-  await settingsPage.toggleRunnerLog(`${PROJECT}-needs-moon`);
-  const log = settingsPage.runnerLog(`${PROJECT}-needs-moon`);
+  await settingsPage.toggleRunnerLog(`${REPO}-needs-moon`);
+  const log = settingsPage.runnerLog(`${REPO}-needs-moon`);
   await expect(log).toContainText("no capacity in the moon pool");
   // The bootstrap token the hook echoed is not shown.
   await expect(log).toContainText("token [redacted]");
@@ -118,8 +118,8 @@ test("lists the runner and shows the log of a run that failed", async ({ page })
 });
 
 test("lists a machine the runner started, and an admin destroys it", async ({ page }) => {
-  await trpcMutate(server.url, TOKEN, "workspaces.create", {
-    project: PROJECT,
+  await trpcMutate(server.url, TOKEN, "worktrees.create", {
+    repo: REPO,
     branch: "needs-ghost",
     placement: { labels: { zone: "ghost" } },
   });

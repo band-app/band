@@ -4,7 +4,7 @@ import {
   type ChangeEntry,
   type ChangeSection,
   useDiffTarget,
-  type WorkspaceChanges,
+  type WorktreeChanges,
 } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 
@@ -28,7 +28,7 @@ export const SECTION_LABELS: Record<ChangeSection, string> = {
 };
 
 /**
- * The workspace's Changes sections (conflicts, unstaged, staged, untracked,
+ * The worktree's Changes sections (conflicts, unstaged, staged, untracked,
  * committed on the branch) against its compare branch. Every consumer — the
  * Changes panel, the mobile Changes sheet, diff leaves and file leaves —
  * shares one query key, so they read one cached result. Each caller still
@@ -40,19 +40,19 @@ export const SECTION_LABELS: Record<ChangeSection, string> = {
  * twice per interval. Each caller's tick here skips when the cached result is
  * younger than most of its interval, so a refresh by any caller counts for all.
  */
-export function useWorkspaceChanges(
-  workspaceId: string,
+export function useWorktreeChanges(
+  worktreeId: string,
   options: { enabled?: boolean; refetchInterval?: number | false } = {},
 ) {
-  const { compareBranch } = useDiffTarget(workspaceId);
+  const { compareBranch } = useDiffTarget(worktreeId);
   const queryClient = useQueryClient();
-  const enabled = !!workspaceId && (options.enabled ?? true);
+  const enabled = !!worktreeId && (options.enabled ?? true);
   const interval = options.refetchInterval ?? false;
   const query = useQuery({
-    queryKey: ["workspaceChanges", workspaceId, compareBranch],
-    queryFn: (): Promise<WorkspaceChanges> =>
-      trpc.workspace.getChanges.query({
-        workspaceId,
+    queryKey: ["worktreeChanges", worktreeId, compareBranch],
+    queryFn: (): Promise<WorktreeChanges> =>
+      trpc.worktree.getChanges.query({
+        worktreeId,
         compareBranch: compareBranch ?? undefined,
       }),
     enabled,
@@ -60,7 +60,7 @@ export function useWorkspaceChanges(
 
   useEffect(() => {
     if (!enabled || !interval) return;
-    const queryKey = ["workspaceChanges", workspaceId, compareBranch];
+    const queryKey = ["worktreeChanges", worktreeId, compareBranch];
     const id = setInterval(() => {
       const state = queryClient.getQueryState(queryKey);
       if (state?.fetchStatus === "fetching") return;
@@ -70,22 +70,22 @@ export function useWorkspaceChanges(
       void queryClient.refetchQueries({ queryKey, exact: true });
     }, interval);
     return () => clearInterval(id);
-  }, [queryClient, enabled, interval, workspaceId, compareBranch]);
+  }, [queryClient, enabled, interval, worktreeId, compareBranch]);
 
   return query;
 }
 
-/** Refetch every workspace's Changes query after a stage / unstage / discard. */
-export function invalidateWorkspaceChanges(
+/** Refetch every worktree's Changes query after a stage / unstage / discard. */
+export function invalidateWorktreeChanges(
   queryClient: ReturnType<typeof useQueryClient>,
-  workspaceId: string,
+  worktreeId: string,
 ) {
-  return queryClient.invalidateQueries({ queryKey: ["workspaceChanges", workspaceId] });
+  return queryClient.invalidateQueries({ queryKey: ["worktreeChanges", worktreeId] });
 }
 
 /** The first section (in render order) that lists `path`, with its entry. */
 export function findChange(
-  changes: WorkspaceChanges | undefined,
+  changes: WorktreeChanges | undefined,
   path: string,
 ): { section: ChangeSection; entry: ChangeEntry } | null {
   if (!changes) return null;
@@ -97,7 +97,7 @@ export function findChange(
 }
 
 /** Number of distinct paths across every section — the Changes badge. */
-export function countChangedPaths(changes: WorkspaceChanges | undefined): number {
+export function countChangedPaths(changes: WorktreeChanges | undefined): number {
   if (!changes) return 0;
   const paths = new Set<string>();
   for (const section of CHANGE_SECTIONS) for (const e of changes[section]) paths.add(e.path);

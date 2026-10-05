@@ -30,7 +30,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -45,8 +45,8 @@ import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-pagination-token";
-const PROJECT = "pageproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "pageproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 const CHAT_ID = "page-chat-deterministic-id";
 const SESSION_ID = "22222222-3333-4444-5555-666666666666";
 
@@ -69,9 +69,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -94,12 +94,12 @@ test.beforeAll(async () => {
   server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 
   await trpcMutate(server.url, TOKEN, "chats.create", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     id: CHAT_ID,
     agent: "claude-code",
   });
   await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     chatId: CHAT_ID,
     sessionId: SESSION_ID,
   });
@@ -119,7 +119,7 @@ test.describe("Chat scroll-back pagination", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await chatPane.waitForVirtualList(15_000);
 
@@ -161,7 +161,7 @@ test.describe("Chat scroll-back pagination", () => {
 
   test("prepending an older page does not jump the scroll position", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await chatPane.waitForVirtualList(15_000);
     await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
@@ -227,7 +227,7 @@ test.describe("Chat scroll-back pagination", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await chatPane.waitForVirtualList(15_000);
     await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
@@ -265,7 +265,7 @@ test.describe("Chat scroll-back pagination — mobile viewport", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
     await chatPane.waitForVirtualList(15_000);
 

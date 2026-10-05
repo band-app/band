@@ -13,7 +13,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { readSettledBox } from "./helpers/geometry";
 import { git } from "./helpers/git";
 import {
@@ -26,12 +26,12 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-markdown-table-editing-token";
-const PROJECT = "md-table-repo";
+const REPO = "md-table-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 // Uneven padding and a centred column, so a re-serialiser would show up in
 // the saved bytes.
@@ -67,7 +67,7 @@ let repo: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  repo = join(tmpHome, PROJECT);
+  repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   for (const name of FILES) writeFileSync(join(repo, name), FILE(TABLE));
@@ -78,9 +78,9 @@ test.beforeAll(async () => {
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -102,11 +102,11 @@ test.afterAll(async () => {
 
 /** Open a fixture file in the preview; every fixture has a "Team" heading. */
 async function openFile(page: Page, file: string) {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf(file);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf(file);
   await expect(viewer.previewHeading(1, "Team")).toBeVisible({ timeout: 20_000 });
   return { viewer };
 }
@@ -431,9 +431,9 @@ test("frontmatter is a Key / Value grid edited in place, keeping quoting and com
 
 test("under app zoom a table menu opens just below the button that opened it", async ({ page }) => {
   const { table } = await openTable(page, "ZOOM.md");
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
   // 130%: the widget places its menu in CSS pixels, which the zoom scales.
-  await workspacePage.zoomInBy(3);
+  await worktreePage.zoomInBy(3);
 
   // A grip menu starts at its grip's left edge.
   await table.openColumnMenu(1);

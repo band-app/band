@@ -7,9 +7,9 @@ import { queryKeys } from "../query-client";
 export const HOST_REQUESTS_KEY = ["hostRequests.list"] as const;
 
 /**
- * Workspaces waiting for a host (`hostRequests.list`). The list follows the
- * hub's status stream; a request that turns into a workspace also refreshes
- * the project list.
+ * Worktrees waiting for a host (`hostRequests.list`). The list follows the
+ * hub's status stream; a request that turns into a worktree also refreshes
+ * the repo list.
  */
 export function useHostRequests() {
   const adapter = useAdapter();
@@ -17,14 +17,14 @@ export function useHostRequests() {
   useEffect(
     () =>
       adapter.subscribeStatusEvents((event) => {
-        // A worker that exits or comes back changes whether its workspaces sleep.
+        // A worker that exits or comes back changes whether its worktrees sleep.
         if (event.kind === "host-status-changed") {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repos });
           return;
         }
         if (event.kind !== "host-request-changed") return;
         void queryClient.invalidateQueries({ queryKey: HOST_REQUESTS_KEY });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.repos });
       }),
     [adapter, queryClient],
   );

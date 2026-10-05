@@ -1,9 +1,9 @@
 import { type ReactNode, useState } from "react";
 import { hubAssetUrl } from "../../lib/hub-config";
-import type { ProjectAvatarInfo } from "../types";
+import type { RepoAvatarInfo } from "../types";
 
-interface ProjectAvatarProps {
-  avatar: ProjectAvatarInfo | null | undefined;
+interface RepoAvatarProps {
+  avatar: RepoAvatarInfo | null | undefined;
   /** Rendered until the image has loaded, and instead of it when there is
    *  no avatar or it fails to load (offline with an empty cache). */
   fallback: ReactNode;
@@ -13,16 +13,16 @@ interface ProjectAvatarProps {
 }
 
 /**
- * A project's GitHub owner avatar, with the existing icon as fallback.
+ * A repo's GitHub owner avatar, with the existing icon as fallback.
  *
  * The fallback stays on screen while the image loads so the row never
  * flashes empty or shows a broken-image glyph. The browser still fetches
  * an image hidden with the `hidden` attribute, so `onLoad` fires and swaps
  * it in.
  */
-export function ProjectAvatar({ avatar, fallback, className, testId }: ProjectAvatarProps) {
+export function RepoAvatar({ avatar, fallback, className, testId }: RepoAvatarProps) {
   // Keyed by `src` so a new version (refreshed cache) or a different
-  // project starts over instead of reusing the previous load state.
+  // repo starts over instead of reusing the previous load state.
   const [loaded, setLoaded] = useState<{ src: string; ok: boolean } | null>(null);
   if (!avatar) return <>{fallback}</>;
 

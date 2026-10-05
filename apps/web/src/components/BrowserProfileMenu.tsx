@@ -1,7 +1,7 @@
 /**
  * Toolbar menu in a browser tab: shows which profile the tab uses, lets the
  * user switch it, and opens the browser import dialog. Picking a profile
- * here also makes it the default for new tabs in the tab's project.
+ * here also makes it the default for new tabs in the tab's repo.
  */
 
 import {
@@ -28,8 +28,8 @@ export interface BrowserProfileMenuProps {
   /** The tab's current profile. `null` is Default. */
   profileId: string | null;
   onSelect: (profileId: string | null) => void;
-  /** The tab's workspace, which receives imported browsing history. */
-  workspaceId: string | null;
+  /** The tab's worktree, which receives imported browsing history. */
+  worktreeId: string | null;
   /** Called after a Chrome import created a new profile. */
   onImported: (profileId: string) => void;
 }
@@ -38,7 +38,7 @@ export function BrowserProfileMenu({
   profiles,
   profileId,
   onSelect,
-  workspaceId,
+  worktreeId,
   onImported,
 }: BrowserProfileMenuProps) {
   const [importOpen, setImportOpen] = useState(false);
@@ -86,7 +86,7 @@ export function BrowserProfileMenu({
         <ChromeImportDialog
           open={importOpen}
           onOpenChange={setImportOpen}
-          workspaceId={workspaceId}
+          worktreeId={worktreeId}
           onImported={onImported}
         />
       ) : null}

@@ -15,7 +15,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
@@ -28,9 +28,9 @@ import {
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
 import { MobileLayoutPage } from "./pages/MobileLayoutPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-// Force the mobile layout (viewport < 1024 px) so the workspace route's
+// Force the mobile layout (viewport < 1024 px) so the worktree route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
 // tree rather than going through the dockview panel manager. The find
 // bar's behaviour is identical in either layout — but the mobile path
@@ -64,14 +64,14 @@ const MARKDOWN_CONTENT = [
 
 let server: ServerHandle;
 let tmpHome: string;
-let workspaceId: string;
+let worktreeId: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, REPO_NAME);
   mkdirSync(repoPath, { recursive: true });
 
-  // A bare metadata seed isn't enough — `workspace.getFile` reads the
+  // A bare metadata seed isn't enough — `worktree.getFile` reads the
   // file off disk, so we need a real worktree with the markdown file
   // committed. One commit is enough; the find bar doesn't care about
   // branch state.
@@ -81,7 +81,7 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "initial"]);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
         name: REPO_NAME,
         path: repoPath,
@@ -92,7 +92,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
 });
 
 test.afterAll(async () => {
@@ -101,17 +101,17 @@ test.afterAll(async () => {
 });
 
 /**
- * Navigate to the workspace, switch to the Files tab, then click the
- * markdown file in the tree. Post-#467 (route unification), the workspace
+ * Navigate to the worktree, switch to the Files tab, then click the
+ * markdown file in the tree. Post-#467 (route unification), the worktree
  * URL no longer carries a sub-path for the active tab OR the selected file
- * — both live in `MobileWorkspaceLayout`'s local state — so this drives
+ * — both live in `MobileWorktreeLayout`'s local state — so this drives
  * the same UI flow a real mobile user would take.
  */
 async function openMarkdownPreview(page: Page): Promise<void> {
-  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
-  await workspace.goto(workspaceId);
-  await workspace.waitForMobileReady();
+  await worktree.goto(worktreeId);
+  await worktree.waitForMobileReady();
 
   // Open the Explorer sheet and tap the markdown file — it opens as a `file`
   // leaf in the center dockview (markdown files default to the rendered preview).
@@ -141,7 +141,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // Explorer sheet leaves focus on the tree row, outside the leaf.)
   await viewer.clickIntoPreview("Test Document");
 
-  // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
+  // Cmd+F goes through `DockviewWorktreeLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
   // SearchBar, which searches the preview's editor view.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";

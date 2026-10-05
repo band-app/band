@@ -23,7 +23,7 @@ export function CIStatusIndicator({ ci }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <GitMerge
-            data-testid="workspace-card__ci-icon"
+            data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
             className={`size-3.5 shrink-0 text-violet-600 dark:text-violet-400 ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
@@ -39,7 +39,7 @@ export function CIStatusIndicator({ ci }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <CircleCheck
-            data-testid="workspace-card__ci-icon"
+            data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
             className={`size-3.5 shrink-0 text-green-600 dark:text-green-400 ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
@@ -55,7 +55,7 @@ export function CIStatusIndicator({ ci }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <CircleAlert
-            data-testid="workspace-card__ci-icon"
+            data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
             className={`size-3.5 shrink-0 text-red-600 dark:text-red-400 ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
@@ -71,7 +71,7 @@ export function CIStatusIndicator({ ci }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Loader
-            data-testid="workspace-card__ci-icon"
+            data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
             className={`size-3.5 shrink-0 text-yellow-600 dark:text-yellow-400 animate-spin ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
@@ -87,7 +87,7 @@ export function CIStatusIndicator({ ci }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Ban
-            data-testid="workspace-card__ci-icon"
+            data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
             className={`size-3.5 shrink-0 text-gray-600 dark:text-gray-400 ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}

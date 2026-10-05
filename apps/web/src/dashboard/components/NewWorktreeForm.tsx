@@ -14,31 +14,31 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
-import { useCreateWorkspace } from "../hooks/use-project-mutations";
-import { useProjects } from "../hooks/use-projects";
+import { useCreateWorktree } from "../hooks/use-repo-mutations";
+import { useRepos } from "../hooks/use-repos";
 
 interface Props {
-  projectName: string;
+  repoName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 const LOCAL_HOST_ID = "local";
 
-export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
+export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
   const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
-  const [hostProjectPath, setHostProjectPath] = useState("");
+  const [hostRepoPath, setHostRepoPath] = useState("");
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
-  const createWorkspaceMutation = useCreateWorkspace();
-  const { projects } = useProjects();
+  const createWorktreeMutation = useCreateWorktree();
+  const { repos } = useRepos();
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
     enabled: open,
   });
-  // Only machines that are connected can take a new workspace. Local is there unless the hub turned it off.
+  // Only machines that are connected can take a new worktree. Local is there unless the hub turned it off.
   const hostChoices = (hosts.data ?? []).filter(
     (h) => h.usable && (h.id === LOCAL_HOST_ID || h.status === "online"),
   );
@@ -54,9 +54,9 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const slugError: string | null = (() => {
     if (branch && !slug) return "Branch name contains no valid characters.";
     if (slug) {
-      const project = projects.find((p) => p.name === projectName);
-      if (project?.worktrees.some((wt) => wt.branch === slug)) {
-        return `A workspace named "${slug}" already exists.`;
+      const repo = repos.find((p) => p.name === repoName);
+      if (repo?.worktrees.some((wt) => wt.branch === slug)) {
+        return `A worktree named "${slug}" already exists.`;
       }
     }
     return null;
@@ -66,12 +66,12 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
     e.preventDefault();
     if (!slug || slugError) return;
     try {
-      await createWorkspaceMutation.mutateAsync({
-        project: projectName,
+      await createWorktreeMutation.mutateAsync({
+        repo: repoName,
         branch: slug,
         base: base.trim() || undefined,
         prompt: prompt.trim() || undefined,
-        host: remote ? { hostId, hostProjectPath: hostProjectPath.trim() || undefined } : undefined,
+        host: remote ? { hostId, hostRepoPath: hostRepoPath.trim() || undefined } : undefined,
       });
     } catch {
       // The error shows in the dialog, which stays open.
@@ -85,19 +85,19 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]" data-testid="new-workspace-form__dialog">
+      <DialogContent className="sm:max-w-[425px]" data-testid="new-worktree-form__dialog">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Add Workspace</DialogTitle>
-            <DialogDescription>Create a new worktree branch for {projectName}.</DialogDescription>
+            <DialogTitle>Add Worktree</DialogTitle>
+            <DialogDescription>Create a new worktree branch for {repoName}.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-4">
             {hostChoices.length > 1 && (
               <>
-                <Label htmlFor="workspace-host">Host</Label>
+                <Label htmlFor="worktree-host">Host</Label>
                 <select
-                  id="workspace-host"
-                  data-testid="new-workspace-form__host"
+                  id="worktree-host"
+                  data-testid="new-worktree-form__host"
                   value={hostId}
                   onChange={(e) => setHostId(e.target.value)}
                   className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
@@ -112,16 +112,16 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
             )}
             {remote && (
               <>
-                <Label htmlFor="host-project-path">
+                <Label htmlFor="host-repo-path">
                   Repository path on {hostChoices.find((h) => h.id === hostId)?.name ?? hostId}
                 </Label>
                 <Input
-                  id="host-project-path"
-                  data-testid="new-workspace-form__host-path"
+                  id="host-repo-path"
+                  data-testid="new-worktree-form__host-path"
                   placeholder="Needed the first time. Remembered after that."
-                  value={hostProjectPath}
+                  value={hostRepoPath}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setHostProjectPath(e.target.value)
+                    setHostRepoPath(e.target.value)
                   }
                   autoCapitalize="off"
                   autoCorrect="off"
@@ -130,7 +130,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
                 {hostRoots.length > 0 && (
                   <p
                     className="text-xs text-muted-foreground"
-                    data-testid="new-workspace-form__host-roots"
+                    data-testid="new-worktree-form__host-roots"
                   >
                     Must be inside: {hostRoots.join(", ")}. Use an absolute path; ~ means the host's
                     home directory.
@@ -155,13 +155,13 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               </p>
             )}
             {slugError && <p className="text-xs text-destructive">{slugError}</p>}
-            {createWorkspaceMutation.error && (
+            {createWorktreeMutation.error && (
               <p
                 role="alert"
                 className="text-xs text-destructive"
-                data-testid="new-workspace-form__error"
+                data-testid="new-worktree-form__error"
               >
-                {createWorkspaceMutation.error.message}
+                {createWorktreeMutation.error.message}
               </p>
             )}
             <Label htmlFor="base-branch">Base branch (optional)</Label>
@@ -189,7 +189,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
             </Button>
             <Button
               type="submit"
-              disabled={!slug || !!slugError || createWorkspaceMutation.isPending}
+              disabled={!slug || !!slugError || createWorktreeMutation.isPending}
             >
               Create
             </Button>

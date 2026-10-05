@@ -12,7 +12,7 @@ export class TerminalInputSurface extends TerminalSurface {
   /**
    * Record every input message the page sends on a terminal WebSocket: text
    * frames that aren't JSON control messages (`{"type": ...}`). Call before
-   * `WorkspacePage.goto` so the listener sees the socket open. Returns a
+   * `WorktreePage.goto` so the listener sees the socket open. Returns a
    * getter for the messages so far.
    */
   trackInputMessages(): () => string[] {
@@ -48,10 +48,10 @@ export class TerminalInputSurface extends TerminalSurface {
         };
         const cache = (
           globalThis as unknown as {
-            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+            __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
           }
         ).__bandTerminalCache__;
-        const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+        const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
         const term = entry?.getTerminal() as Term | null;
         if (!term) return null;
         const { viewportY } = term.buffer.active;
@@ -62,7 +62,7 @@ export class TerminalInputSurface extends TerminalSurface {
         }
         return null;
       },
-      [this.workspaceId, text] as const,
+      [this.worktreeId, text] as const,
     );
     if (!cell) throw new Error(`"${text}" is not on the terminal screen`);
     return cell;
@@ -102,13 +102,13 @@ export class TerminalInputSurface extends TerminalSurface {
     return await this.page.evaluate((id) => {
       const cache = (
         globalThis as unknown as {
-          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
         }
       ).__bandTerminalCache__;
-      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
       const term = entry?.getTerminal() as { getSelection(): string } | null;
       return term?.getSelection() ?? "";
-    }, this.workspaceId);
+    }, this.worktreeId);
   }
 
   /** Move the pointer to the middle of the 1-based cell (`col`, `row`). */

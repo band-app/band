@@ -2,19 +2,19 @@
  * Relaunching Band lands where the user was.
  *
  * The desktop shell loads `/` on every launch (quit and reopen, auto-update
- * restart), so before this the app always came back with no workspace open.
- * Each device type now records the workspace on screen (`band:last-workspace`
+ * restart), so before this the app always came back with no worktree open.
+ * Each device type now records the worktree on screen (`band:last-worktree`
  * in the client-state store) and a load on `/` reopens it before the shell
- * renders (`lib/last-workspace.ts`, `ClientStateGate` in `__root.tsx`).
+ * renders (`lib/last-worktree.ts`, `ClientStateGate` in `__root.tsx`).
  *
  * Each test restarts the real server on the same HOME and port, then opens
  * `/` the way the desktop shell does:
- *   - the workspace, the selected label, the active center tab, the right
+ *   - the worktree, the selected label, the active center tab, the right
  *     sidepanel tab and the sidebar width all come back, in the same browser and in a new one with
  *     empty localStorage (the values come from the server);
- *   - a workspace deleted while Band was closed leaves the app on `/`;
+ *   - a worktree deleted while Band was closed leaves the app on `/`;
  *   - when another device picked a different label, the label and the
- *     workspace still agree: the label's last workspace opens.
+ *     worktree still agree: the label's last worktree opens.
  *
  * The desktop window's size, position and maximized state are restored by
  * the Electron main process (`apps/desktop/src/main/window.ts`), which this
@@ -25,26 +25,26 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
-  removeSeededProject,
+  removeSeededRepo,
   resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-restore-session-token";
 const LABEL_ALPHA = "lbl_alpha";
 const LABEL_BETA = "lbl_beta";
-const WS_ALPHA = toWorkspaceId("alpha", "main");
-const WS_BETA = toWorkspaceId("beta", "main");
-const WS_GAMMA = toWorkspaceId("gamma", "main");
+const WS_ALPHA = toWorktreeId("alpha", "main");
+const WS_BETA = toWorktreeId("beta", "main");
+const WS_GAMMA = toWorktreeId("gamma", "main");
 const FILE = "readme.md";
 const DESKTOP = { viewport: { width: 1280, height: 800 } };
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
@@ -68,7 +68,7 @@ function createRepo(name: string): string {
   return dir;
 }
 
-function project(name: string, label?: string) {
+function repo(name: string, label?: string) {
   const path = createRepo(name);
   return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
 }
@@ -76,7 +76,7 @@ function project(name: string, label?: string) {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [project("alpha", LABEL_ALPHA), project("beta", LABEL_BETA), project("gamma")],
+    repos: [repo("alpha", LABEL_ALPHA), repo("beta", LABEL_BETA), repo("gamma")],
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -96,50 +96,50 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("a restart reopens the workspace, label, active tab and right sidepanel tab", async ({
+test("a restart reopens the worktree, label, active tab and right sidepanel tab", async ({
   page,
   browser,
 }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WS_ALPHA);
-  await workspacePage.waitForReady();
-  await workspacePage.selectLabelFilter(LABEL_BETA);
-  await workspacePage.switchWorkspace(WS_BETA);
-  await expect(page).toHaveURL(new RegExp(`/workspace/${encodeURIComponent(WS_BETA)}`));
-  await workspacePage.waitForReady();
-  await workspacePage.openFileLeaf(FILE, WS_BETA);
-  await workspacePage.selectRightSidepanelTab("changes");
-  const sidebarBefore = await workspacePage.sidebarWidth();
-  await workspacePage.dragSidebarEdgeBy(120);
-  await expect.poll(() => workspacePage.sidebarWidth()).toBeGreaterThan(sidebarBefore + 60);
-  const sidebarWidth = await workspacePage.sidebarWidth();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WS_ALPHA);
+  await worktreePage.waitForReady();
+  await worktreePage.selectLabelFilter(LABEL_BETA);
+  await worktreePage.switchWorktree(WS_BETA);
+  await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf(FILE, WS_BETA);
+  await worktreePage.selectRightSidepanelTab("changes");
+  const sidebarBefore = await worktreePage.sidebarWidth();
+  await worktreePage.dragSidebarEdgeBy(120);
+  await expect.poll(() => worktreePage.sidebarWidth()).toBeGreaterThan(sidebarBefore + 60);
+  const sidebarWidth = await worktreePage.sidebarWidth();
 
   // Everything reached the server before it stops.
   await expect
-    .poll(() => workspacePage.readServerClientState(null, "band:last-workspace"))
+    .poll(() => worktreePage.readServerClientState(null, "band:last-worktree"))
     .toBe(WS_BETA);
   await expect
-    .poll(() => workspacePage.readServerClientState(null, "band:right-sidepanel-tab"))
+    .poll(() => worktreePage.readServerClientState(null, "band:right-sidepanel-tab"))
     .toBe("changes");
-  await expect.poll(() => workspacePage.readSharedActiveTab(WS_BETA)).toBe(`file:${FILE}`);
+  await expect.poll(() => worktreePage.readSharedActiveTab(WS_BETA)).toBe(`file:${FILE}`);
   await expect
-    .poll(() => workspacePage.readServerClientState(null, "band:sidebar-width"))
+    .poll(() => worktreePage.readServerClientState(null, "band:sidebar-width"))
     .not.toBeNull();
 
   server = await server.restart();
 
-  await workspacePage.launch();
-  await expect(page).toHaveURL(new RegExp(`/workspace/${encodeURIComponent(WS_BETA)}`));
-  await workspacePage.waitForReady();
-  await expect(workspacePage.labelFilterTrigger()).toHaveText("Beta");
-  await expect(workspacePage.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
-  await expect(workspacePage.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => workspacePage.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
+  await worktreePage.launch();
+  await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
+  await worktreePage.waitForReady();
+  await expect(worktreePage.labelFilterTrigger()).toHaveText("Beta");
+  await expect(worktreePage.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
+  await expect(worktreePage.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => worktreePage.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
 
   // A browser with nothing in localStorage gets the same from the server.
   const context = await browser.newContext(DESKTOP);
   try {
-    const fresh = new WorkspacePage(await context.newPage(), server.url, TOKEN);
+    const fresh = new WorktreePage(await context.newPage(), server.url, TOKEN);
     await fresh.launch();
     await fresh.waitForReady();
     await expect(fresh.labelFilterTrigger()).toHaveText("Beta");
@@ -151,72 +151,68 @@ test("a restart reopens the workspace, label, active tab and right sidepanel tab
   }
 });
 
-test("a workspace deleted while Band was closed leaves the app on /", async ({ page }) => {
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WS_GAMMA);
-  await workspacePage.waitForReady();
+test("a worktree deleted while Band was closed leaves the app on /", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WS_GAMMA);
+  await worktreePage.waitForReady();
   await expect
-    .poll(() => workspacePage.readServerClientState(null, "band:last-workspace"))
+    .poll(() => worktreePage.readServerClientState(null, "band:last-worktree"))
     .toBe(WS_GAMMA);
 
   const port = Number(new URL(server.url).port);
   await server.close();
-  removeSeededProject(tmpHome, "gamma");
+  removeSeededRepo(tmpHome, "gamma");
   server = await startServer({ tmpHome, port });
 
-  await workspacePage.launch();
-  // The shell rendered, with no workspace in the center column.
-  await expect(workspacePage.centerDragBar).toBeVisible();
-  await expect(workspacePage.workspaceCard(WS_ALPHA)).toBeVisible();
+  await worktreePage.launch();
+  // The shell rendered, with no worktree in the center column.
+  await expect(worktreePage.centerDragBar).toBeVisible();
+  await expect(worktreePage.worktreeCard(WS_ALPHA)).toBeVisible();
   await expect(page).toHaveURL(`${server.url}/?token=${TOKEN}`);
   await expect
-    .poll(() => workspacePage.readServerClientState(null, "band:last-workspace"))
+    .poll(() => worktreePage.readServerClientState(null, "band:last-worktree"))
     .toBeNull();
 });
 
-test("a label another device picked opens that label's last workspace", async ({
+test("a label another device picked opens that label's last worktree", async ({
   page,
   browser,
 }) => {
-  const desktop = new WorkspacePage(page, server.url, TOKEN);
+  const desktop = new WorktreePage(page, server.url, TOKEN);
   await desktop.goto(WS_ALPHA);
   await desktop.waitForReady();
   await desktop.selectLabelFilter(LABEL_ALPHA);
-  await expect
-    .poll(() => desktop.readServerClientState(null, "band:last-workspace"))
-    .toBe(WS_ALPHA);
+  await expect.poll(() => desktop.readServerClientState(null, "band:last-worktree")).toBe(WS_ALPHA);
   // Otherwise the desktop's write could land after the phone's and win.
   await expect
-    .poll(() => desktop.readServerClientState(null, "band.projects-list.label-filter"))
+    .poll(() => desktop.readServerClientState(null, "band.repos-list.label-filter"))
     .toBe(LABEL_ALPHA);
 
   // The phone switches the shared label filter to Beta and opens a Beta
-  // workspace, which becomes Beta's last workspace.
+  // worktree, which becomes Beta's last worktree.
   const context = await browser.newContext(PHONE);
   try {
-    const phone = new WorkspacePage(await context.newPage(), server.url, TOKEN);
+    const phone = new WorktreePage(await context.newPage(), server.url, TOKEN);
     await phone.launch();
     await phone.selectLabelFilter(LABEL_BETA);
-    await phone.switchWorkspace(WS_BETA);
+    await phone.switchWorktree(WS_BETA);
     await expect
-      .poll(() => phone.readServerClientState(null, "band.projects-list.label-last-workspace"))
+      .poll(() => phone.readServerClientState(null, "band.repos-list.label-last-worktree"))
       .toEqual({ [LABEL_BETA]: WS_BETA });
     await expect
-      .poll(() => phone.readServerClientState(null, "band.projects-list.label-filter"))
+      .poll(() => phone.readServerClientState(null, "band.repos-list.label-filter"))
       .toBe(LABEL_BETA);
   } finally {
     await context.close();
   }
 
   // The desktop itself is still on Alpha: only the label says Beta.
-  await expect
-    .poll(() => desktop.readServerClientState(null, "band:last-workspace"))
-    .toBe(WS_ALPHA);
+  await expect.poll(() => desktop.readServerClientState(null, "band:last-worktree")).toBe(WS_ALPHA);
 
   server = await server.restart();
 
   await desktop.launch();
-  await expect(page).toHaveURL(new RegExp(`/workspace/${encodeURIComponent(WS_BETA)}`));
+  await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
   await desktop.waitForReady();
   await expect(desktop.labelFilterTrigger()).toHaveText("Beta");
 });

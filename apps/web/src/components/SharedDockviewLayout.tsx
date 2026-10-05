@@ -10,51 +10,51 @@ import {
   isMacPlatform,
   parseFileLocation,
   QuickOpenDialog,
-  recordWorkspaceAccess,
+  recordWorktreeAccess,
   SearchFilesDialog,
   useCapabilities,
-  WorkspacePickerDialog,
+  WorktreePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
-import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
-import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
-import { getPerWorkspaceState, subscribePerWorkspaceState } from "./per-workspace-state-store";
+import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
+import { getPerWorktreeState, subscribePerWorktreeState } from "./per-worktree-state-store";
 import {
   firstLeafOfKind,
-  getWorkspaceDockviewApi,
-  getWorkspaceLeafActions,
+  getWorktreeDockviewApi,
+  getWorktreeLeafActions,
   type LeafKind,
   nextUntitledPath,
-  WorkspaceCenterDockview,
-} from "./WorkspaceCenterDockview";
+  WorktreeCenterDockview,
+} from "./WorktreeCenterDockview";
 
 // ---------------------------------------------------------------------------
-// Per-workspace cross-panel context
+// Per-worktree cross-panel context
 // ---------------------------------------------------------------------------
 //
 // Cross-panel state (currentFile, openFilePath, find-in-file registration) is
-// per-workspace but read/written by leaves that live inside the per-workspace
-// dockviews cached by `MultiWorkspacePanelHost`. We use module-level handlers
-// wired by `SharedDockviewLayout`'s render so per-workspace callbacks always
+// per-worktree but read/written by leaves that live inside the per-worktree
+// dockviews cached by `MultiWorktreePanelHost`. We use module-level handlers
+// wired by `SharedDockviewLayout`'s render so per-worktree callbacks always
 // reference the latest closure without re-rendering every cached child.
 // ---------------------------------------------------------------------------
 
 interface CrossPanelHandlers {
   /** Called when the Changes leaf asks us to open a file in the Files leaf. */
-  onOpenFile: (workspaceId: string, filename: string) => void;
+  onOpenFile: (worktreeId: string, filename: string) => void;
   /** Called when the Files leaf reports the active file changed. */
-  onSelectFile: (workspaceId: string, filePath: string | null) => void;
+  onSelectFile: (worktreeId: string, filePath: string | null) => void;
   /** Called when the Files leaf finishes opening the requested file. */
-  onFileOpened: (workspaceId: string) => void;
+  onFileOpened: (worktreeId: string) => void;
   /** Called by a leaf to register/unregister its find-in-file callback. */
-  onFindInFile: (workspaceId: string, fn: (() => void) | null) => void;
+  onFindInFile: (worktreeId: string, fn: (() => void) | null) => void;
   /** Bring the Files leaf to the foreground (external-open flow). */
-  onActivateFilesPanel: (workspaceId: string) => void;
+  onActivateFilesPanel: (worktreeId: string) => void;
   /** Bring a Terminal leaf to the foreground ("Continue in terminal"). */
-  onActivateTerminalPanel: (workspaceId: string) => void;
+  onActivateTerminalPanel: (worktreeId: string) => void;
 }
 
 // Mutable module-level handlers — `SharedDockviewLayout` writes them on every
@@ -70,13 +70,13 @@ export const crossPanelHandlers: CrossPanelHandlers = {
 };
 
 // ---------------------------------------------------------------------------
-// Helpers: resolve + drive the ACTIVE workspace's dockview
+// Helpers: resolve + drive the ACTIVE worktree's dockview
 // ---------------------------------------------------------------------------
 
-/** Activate the first leaf of `kind` in a workspace's dockview; returns
+/** Activate the first leaf of `kind` in a worktree's dockview; returns
  *  whether a matching leaf was found. */
-function activateLeafOfKind(workspaceId: string | null, kind: LeafKind): boolean {
-  const api = getWorkspaceDockviewApi(workspaceId);
+function activateLeafOfKind(worktreeId: string | null, kind: LeafKind): boolean {
+  const api = getWorktreeDockviewApi(worktreeId);
   const panel = api ? firstLeafOfKind(api, kind) : undefined;
   if (panel) {
     panel.api.setActive();
@@ -85,22 +85,22 @@ function activateLeafOfKind(workspaceId: string | null, kind: LeafKind): boolean
   return false;
 }
 
-/** Add a new leaf of `kind` to the active group of a workspace's dockview.
+/** Add a new leaf of `kind` to the active group of a worktree's dockview.
  *  An edge group collapses to zero size when empty, so when one is active the
  *  leaf goes to the first grid group instead (same rule as the "+" menu). */
-function addLeafToActiveGroup(workspaceId: string | null, kind: LeafKind): void {
-  const api = getWorkspaceDockviewApi(workspaceId);
+function addLeafToActiveGroup(worktreeId: string | null, kind: LeafKind): void {
+  const api = getWorktreeDockviewApi(worktreeId);
   const active = api?.activeGroup;
   const group =
     active?.api.location.type === "grid"
       ? active
       : api?.groups.find((g) => g.api.location.type === "grid");
-  getWorkspaceLeafActions(workspaceId)?.onAdd(kind, group?.id);
+  getWorktreeLeafActions(worktreeId)?.onAdd(kind, group?.id);
 }
 
-/** Maximize the active group of a workspace's dockview, or restore it. */
-function toggleMaximizeActiveGroup(workspaceId: string | null): void {
-  const active = getWorkspaceDockviewApi(workspaceId)?.activeGroup;
+/** Maximize the active group of a worktree's dockview, or restore it. */
+function toggleMaximizeActiveGroup(worktreeId: string | null): void {
+  const active = getWorktreeDockviewApi(worktreeId)?.activeGroup;
   if (!active) return;
   if (active.api.isMaximized()) {
     active.api.exitMaximized();
@@ -109,12 +109,12 @@ function toggleMaximizeActiveGroup(workspaceId: string | null): void {
   }
 }
 
-/** Move focus into the active leaf of a workspace's dockview, after a palette
- *  command activated it. `WorkspaceCenterDockview` listens for
+/** Move focus into the active leaf of a worktree's dockview, after a palette
+ *  command activated it. `WorktreeCenterDockview` listens for
  *  `band:focus-active-leaf`. */
-function focusActiveLeaf(workspaceId: string | null): void {
-  if (!workspaceId) return;
-  window.dispatchEvent(new CustomEvent("band:focus-active-leaf", { detail: { workspaceId } }));
+function focusActiveLeaf(worktreeId: string | null): void {
+  if (!worktreeId) return;
+  window.dispatchEvent(new CustomEvent("band:focus-active-leaf", { detail: { worktreeId } }));
 }
 
 /** Reveal the right sidepanel and (optionally) select its Explorer/Changes tab.
@@ -127,50 +127,50 @@ function revealRightPanel(tab?: "explorer" | "changes"): void {
   }
 }
 
-// Empty state shown by the panel host when no workspace is selected.
-function NoWorkspaceMessage() {
+// Empty state shown by the panel host when no worktree is selected.
+function NoWorktreeMessage() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-3 text-center px-8">
         <FolderOpen className="size-8 text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground">Select a workspace to get started</p>
+        <p className="text-sm text-muted-foreground">Select a worktree to get started</p>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main SharedDockviewLayout — a thin host around one per-workspace dockview
+// Main SharedDockviewLayout — a thin host around one per-worktree dockview
 // ---------------------------------------------------------------------------
 
 /**
  * The app-shell layout. No longer owns a dockview: it renders a single
- * `MultiWorkspacePanelHost` whose child is a `WorkspaceCenterDockview` per
- * visited workspace (all stay mounted for instant switching). This
+ * `MultiWorktreePanelHost` whose child is a `WorktreeCenterDockview` per
+ * visited worktree (all stay mounted for instant switching). This
  * component keeps the shell-level concerns: the command dialogs, the global
  * keyboard shortcuts, and the cross-panel handler registry. Panel-activation
- * shortcuts resolve the active workspace's dockview from
- * `getWorkspaceDockviewApi`.
+ * shortcuts resolve the active worktree's dockview from
+ * `getWorktreeDockviewApi`.
  */
 export function SharedDockviewLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
 
-  const activeWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
-  activeWorkspaceIdRef.current = activeWorkspaceId;
+  const activeWorktreeIdRef = useRef<string | null>(activeWorktreeId);
+  activeWorktreeIdRef.current = activeWorktreeId;
 
-  // Notify the "recent workspaces" picker on every workspace switch.
+  // Notify the "recent worktrees" picker on every worktree switch.
   useEffect(() => {
-    if (activeWorkspaceId) recordWorkspaceAccess(activeWorkspaceId);
-  }, [activeWorkspaceId]);
+    if (activeWorktreeId) recordWorktreeAccess(activeWorktreeId);
+  }, [activeWorktreeId]);
 
-  const { recentFiles, trackFile } = useRecentFiles(activeWorkspaceId ?? "");
+  const { recentFiles, trackFile } = useRecentFiles(activeWorktreeId ?? "");
 
   // Desktop shell capabilities: `pickFile` (OS "Open File…" dialog) gates ⌘O.
   const capabilities = useCapabilities();
   const pickFile = capabilities.pickFile;
 
-  // Shadow of the active workspace's currentFile for the format/quick-open flows.
+  // Shadow of the active worktree's currentFile for the format/quick-open flows.
   const currentFileRef = useRef<string | undefined>(undefined);
   const findInFileRegistry = useRef(new Map<string, () => void>());
 
@@ -178,38 +178,38 @@ export function SharedDockviewLayout() {
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
-  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
+  const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [lastQuickOpenQuery, setLastQuickOpenQuery] = useState("");
   const [activeCurrentFile, setActiveCurrentFile] = useState<string | undefined>(undefined);
 
-  // Refresh the active workspace's currentFile shadow on navigation.
+  // Refresh the active worktree's currentFile shadow on navigation.
   useEffect(() => {
-    if (!activeWorkspaceId) {
+    if (!activeWorktreeId) {
       setActiveCurrentFile(undefined);
       currentFileRef.current = undefined;
       return;
     }
-    const state = getPerWorkspaceState(activeWorkspaceId);
+    const state = getPerWorktreeState(activeWorktreeId);
     setActiveCurrentFile(state.currentFile);
     currentFileRef.current = state.currentFile;
-    const unsub = subscribePerWorkspaceState(activeWorkspaceId, () => {
-      const next = getPerWorkspaceState(activeWorkspaceId).currentFile;
+    const unsub = subscribePerWorktreeState(activeWorktreeId, () => {
+      const next = getPerWorktreeState(activeWorktreeId).currentFile;
       setActiveCurrentFile(next);
       currentFileRef.current = next;
     });
     return unsub;
-  }, [activeWorkspaceId]);
+  }, [activeWorktreeId]);
 
   // ---------------------------------------------------------------------
   // Cross-panel handler wiring
   // ---------------------------------------------------------------------
 
   const handleOpenFile = useCallback(
-    (workspaceId: string, filename: string) => {
+    (worktreeId: string, filename: string) => {
       const loc = parseFileLocation(filename);
       trackFile(loc.filePath);
-      getWorkspaceLeafActions(workspaceId)?.openFile(loc.filePath, {
+      getWorktreeLeafActions(worktreeId)?.openFile(loc.filePath, {
         line: loc.line,
         column: loc.column,
       });
@@ -217,14 +217,14 @@ export function SharedDockviewLayout() {
     [trackFile],
   );
 
-  const handleFileOpened = useCallback((_workspaceId: string) => {
+  const handleFileOpened = useCallback((_worktreeId: string) => {
     // No-op now that files open as dedicated `file` leaves; kept so the
     // cross-panel handler surface stays stable for any legacy callers.
   }, []);
 
-  const handleOpenExternalFile = useCallback((workspaceId: string, location: string) => {
+  const handleOpenExternalFile = useCallback((worktreeId: string, location: string) => {
     const loc = parseFileLocation(location);
-    getWorkspaceLeafActions(workspaceId)?.openFile(loc.filePath, {
+    getWorktreeLeafActions(worktreeId)?.openFile(loc.filePath, {
       line: loc.line,
       column: loc.column,
       external: true,
@@ -232,25 +232,25 @@ export function SharedDockviewLayout() {
   }, []);
 
   const handleSelectFile = useCallback(
-    (_workspaceId: string, filePath: string | null) => {
+    (_worktreeId: string, filePath: string | null) => {
       if (filePath) trackFile(filePath);
     },
     [trackFile],
   );
 
-  const handleSetFindInFile = useCallback((workspaceId: string, fn: (() => void) | null) => {
-    if (fn) findInFileRegistry.current.set(workspaceId, fn);
-    else findInFileRegistry.current.delete(workspaceId);
+  const handleSetFindInFile = useCallback((worktreeId: string, fn: (() => void) | null) => {
+    if (fn) findInFileRegistry.current.set(worktreeId, fn);
+    else findInFileRegistry.current.delete(worktreeId);
   }, []);
 
-  const handleActivateFilesPanel = useCallback((_workspaceId: string) => {
+  const handleActivateFilesPanel = useCallback((_worktreeId: string) => {
     // "Reveal files" now means reveal the right sidepanel's Explorer tab.
     revealRightPanel("explorer");
   }, []);
 
-  const handleActivateTerminalPanel = useCallback((workspaceId: string) => {
-    if (workspaceId !== activeWorkspaceIdRef.current) return;
-    activateLeafOfKind(workspaceId, "term");
+  const handleActivateTerminalPanel = useCallback((worktreeId: string) => {
+    if (worktreeId !== activeWorktreeIdRef.current) return;
+    activateLeafOfKind(worktreeId, "term");
     queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-terminal")));
   }, []);
 
@@ -269,12 +269,12 @@ export function SharedDockviewLayout() {
     () =>
       buildCommands({
         // Adapt the command registry's `getPanel(id)` (id = "chat" /
-        // "terminal" / "browser") to the active workspace's dockview by
+        // "terminal" / "browser") to the active worktree's dockview by
         // resolving the first leaf of that kind. "files" / "changes" moved to
         // the right sidepanel and no longer map to a center leaf — return
         // undefined so the command falls through to its reveal path.
         getApi: () => {
-          const api = getWorkspaceDockviewApi(activeWorkspaceIdRef.current);
+          const api = getWorktreeDockviewApi(activeWorktreeIdRef.current);
           if (!api) return null;
           return {
             getPanel: (id: string) => {
@@ -289,55 +289,55 @@ export function SharedDockviewLayout() {
         openQuickOpen: () => setQuickOpenOpen(true),
         openSearchFiles: () => setSearchFilesOpen(true),
         findInFile: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
           if (fn) fn();
           else window.dispatchEvent(new CustomEvent("band:find-in-file"));
         },
         formatCurrentFile: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           if (!ws) return;
           window.dispatchEvent(
             new CustomEvent("band:format-current-file", {
-              detail: { workspaceId: ws, filePath: currentFileRef.current },
+              detail: { worktreeId: ws, filePath: currentFileRef.current },
             }),
           );
         },
         newUntitledTab: () => window.dispatchEvent(new CustomEvent("band:new-untitled-tab")),
         changeLanguageMode: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           if (!ws) return;
           window.dispatchEvent(
             new CustomEvent("band:open-language-picker", {
-              detail: { workspaceId: ws, filePath: currentFileRef.current },
+              detail: { worktreeId: ws, filePath: currentFileRef.current },
             }),
           );
         },
         editorGoBack: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           if (!ws) return;
           window.dispatchEvent(
-            new CustomEvent("band:editor-go-back", { detail: { workspaceId: ws } }),
+            new CustomEvent("band:editor-go-back", { detail: { worktreeId: ws } }),
           );
         },
         editorGoForward: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           if (!ws) return;
           window.dispatchEvent(
-            new CustomEvent("band:editor-go-forward", { detail: { workspaceId: ws } }),
+            new CustomEvent("band:editor-go-forward", { detail: { worktreeId: ws } }),
           );
         },
-        newLeaf: (kind) => addLeafToActiveGroup(activeWorkspaceIdRef.current, kind),
-        openWorkspacePicker: () => setWorkspacePickerOpen(true),
+        newLeaf: (kind) => addLeafToActiveGroup(activeWorktreeIdRef.current, kind),
+        openWorktreePicker: () => setWorktreePickerOpen(true),
         closeActiveTab: () => {
-          const ws = activeWorkspaceIdRef.current;
-          const active = getWorkspaceDockviewApi(ws)?.activePanel;
+          const ws = activeWorktreeIdRef.current;
+          const active = getWorktreeDockviewApi(ws)?.activePanel;
           if (!active) return;
-          getWorkspaceLeafActions(ws)?.onClose(active.id, active.api.component as LeafKind);
+          getWorktreeLeafActions(ws)?.onClose(active.id, active.api.component as LeafKind);
         },
         splitActiveTab: (direction) => {
-          const ws = activeWorkspaceIdRef.current;
-          const api = getWorkspaceDockviewApi(ws);
+          const ws = activeWorktreeIdRef.current;
+          const api = getWorktreeDockviewApi(ws);
           const active = api?.activePanel;
           const groupId = api?.activeGroup?.id;
           if (!active || !groupId) return;
@@ -350,28 +350,26 @@ export function SharedDockviewLayout() {
               }),
             );
           } else if (kind === "chat" || kind === "browser") {
-            getWorkspaceLeafActions(ws)?.onSplit(kind, groupId, direction);
+            getWorktreeLeafActions(ws)?.onSplit(kind, groupId, direction);
           }
         },
         cycleTabs: (direction) => {
-          const ws = activeWorkspaceIdRef.current;
-          cycleTabsInActiveGroup(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
+          const ws = activeWorktreeIdRef.current;
+          cycleTabsInActiveGroup(getWorktreeDockviewApi(ws) ?? null, direction, () =>
             focusActiveLeaf(ws),
           );
         },
         cycleGroups: (direction) => {
-          const ws = activeWorkspaceIdRef.current;
-          cycleGridGroups(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
-            focusActiveLeaf(ws),
-          );
+          const ws = activeWorktreeIdRef.current;
+          cycleGridGroups(getWorktreeDockviewApi(ws) ?? null, direction, () => focusActiveLeaf(ws));
         },
 
-        toggleMaximize: () => toggleMaximizeActiveGroup(activeWorkspaceIdRef.current),
+        toggleMaximize: () => toggleMaximizeActiveGroup(activeWorktreeIdRef.current),
         openFileExternal: () => {
-          const ws = activeWorkspaceIdRef.current;
+          const ws = activeWorktreeIdRef.current;
           if (!ws) return;
           window.dispatchEvent(
-            new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
+            new CustomEvent("band:open-file-external", { detail: { worktreeId: ws } }),
           );
         },
       }),
@@ -384,23 +382,23 @@ export function SharedDockviewLayout() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const ws = activeWorkspaceIdRef.current;
+      const ws = activeWorktreeIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // ⌘K → workspace picker (fires even with a terminal focused).
+      // ⌘K → worktree picker (fires even with a terminal focused).
       if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
-        setWorkspacePickerOpen(true);
+        setWorktreePickerOpen(true);
         return;
       }
 
-      // Ctrl+K → workspace picker on non-macOS (bail on focused terminal).
+      // Ctrl+K → worktree picker on non-macOS (bail on focused terminal).
       if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         if (terminalFocused) return;
         e.preventDefault();
         e.stopPropagation();
-        setWorkspacePickerOpen(true);
+        setWorktreePickerOpen(true);
         return;
       }
 
@@ -409,18 +407,18 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         e.stopPropagation();
         if (!activateLeafOfKind(ws, "term")) {
-          getWorkspaceLeafActions(ws)?.onAdd("term");
+          getWorktreeLeafActions(ws)?.onAdd("term");
         }
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-terminal")));
         return;
       }
 
-      // Ctrl+0 → reveal + focus the project sidebar.
+      // Ctrl+0 → reveal + focus the repo sidebar.
       if (e.ctrlKey && !e.metaKey && e.key === "0") {
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent("band:show-sidebar"));
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-projects")));
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-repos")));
         return;
       }
 
@@ -431,7 +429,7 @@ export function SharedDockviewLayout() {
         if (!ws) return;
         window.dispatchEvent(
           new CustomEvent("band:format-current-file", {
-            detail: { workspaceId: ws, filePath: currentFileRef.current },
+            detail: { worktreeId: ws, filePath: currentFileRef.current },
           }),
         );
         return;
@@ -504,7 +502,7 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         if (!ws) return;
         window.dispatchEvent(
-          new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
+          new CustomEvent("band:open-file-external", { detail: { worktreeId: ws } }),
         );
       } else if (
         e.code === "KeyI" &&
@@ -531,7 +529,7 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         addLeafToActiveGroup(ws, "browser");
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
-        // ⌘B → toggle the project sidebar.
+        // ⌘B → toggle the repo sidebar.
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
       } else if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
@@ -551,18 +549,18 @@ export function SharedDockviewLayout() {
   // File link clicks from chat → open Quick Open with query (scoped to active ws).
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filename?: string; workspaceId?: string }>).detail;
+      const detail = (e as CustomEvent<{ filename?: string; worktreeId?: string }>).detail;
       if (!detail?.filename) return;
-      if (detail.workspaceId && detail.workspaceId !== activeWorkspaceId) return;
+      if (detail.worktreeId && detail.worktreeId !== activeWorktreeId) return;
       setQuickOpenQuery(detail.filename);
       setQuickOpenOpen(true);
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
-  }, [activeWorkspaceId]);
+  }, [activeWorktreeId]);
 
   // LSP cross-file go-to-definition → open the resolved file directly. The LSP
-  // client resolves an exact workspace-relative path (no Quick Open picker) and
+  // client resolves an exact worktree-relative path (no Quick Open picker) and
   // waits for the new editor view to mount before scrolling to the definition.
   // The old listener lived in CodeBrowserView (removed in #643); without this,
   // clicking "Go to definition" across files did nothing.
@@ -571,20 +569,20 @@ export function SharedDockviewLayout() {
       const detail = (
         e as CustomEvent<{
           filePath?: string;
-          workspaceId?: string;
+          worktreeId?: string;
           line?: number;
           column?: number;
         }>
       ).detail;
       if (!detail?.filePath) return;
-      // Open in the ADDRESSED workspace (falling through to the active one when
+      // Open in the ADDRESSED worktree (falling through to the active one when
       // the event carries no id, for backwards-compat). Targeting the owning
-      // workspace directly is what prevents an A-relative path from leaking
-      // into a cached hidden workspace B/C — the nav opens in A even when A is
-      // not the active workspace.
+      // worktree directly is what prevents an A-relative path from leaking
+      // into a cached hidden worktree B/C — the nav opens in A even when A is
+      // not the active worktree.
       // A diff view's jump carries the definition's 1-based position; the
       // editor's own jump positions the cursor itself and sends none.
-      getWorkspaceLeafActions(detail.workspaceId ?? activeWorkspaceId)?.openFile(detail.filePath, {
+      getWorktreeLeafActions(detail.worktreeId ?? activeWorktreeId)?.openFile(detail.filePath, {
         preview: false,
         line: detail.line,
         column: detail.column,
@@ -592,7 +590,7 @@ export function SharedDockviewLayout() {
     };
     window.addEventListener("band:lsp-navigate", handler);
     return () => window.removeEventListener("band:lsp-navigate", handler);
-  }, [activeWorkspaceId]);
+  }, [activeWorktreeId]);
 
   // Toolbar window-event triggers for the dialogs.
   useEffect(() => {
@@ -622,7 +620,7 @@ export function SharedDockviewLayout() {
         return;
       }
       const kind = (panelId === "terminal" ? "term" : panelId) as LeafKind;
-      activateLeafOfKind(activeWorkspaceIdRef.current, kind);
+      activateLeafOfKind(activeWorktreeIdRef.current, kind);
     };
     window.addEventListener("band:activate-panel", handler);
     return () => window.removeEventListener("band:activate-panel", handler);
@@ -632,19 +630,19 @@ export function SharedDockviewLayout() {
   useEffect(() => {
     const handler = (e: Event) => {
       const reference = (e as CustomEvent<AddToTerminalDetail>).detail?.reference;
-      const workspaceId = activeWorkspaceIdRef.current;
-      if (!reference || !workspaceId) return;
-      activateLeafOfKind(workspaceId, "term");
+      const worktreeId = activeWorktreeIdRef.current;
+      if (!reference || !worktreeId) return;
+      activateLeafOfKind(worktreeId, "term");
       void (async () => {
         let terminalId: string | undefined;
         try {
-          terminalId = (await trpc.panelFocus.get.query({ workspaceId })).terminal;
+          terminalId = (await trpc.panelFocus.get.query({ worktreeId })).terminal;
         } catch {
           // best-effort — fall back to visible-terminal delivery
         }
         window.dispatchEvent(
           new CustomEvent("band:terminal-insert", {
-            detail: { reference, workspaceId, terminalId },
+            detail: { reference, worktreeId, terminalId },
           }),
         );
       })();
@@ -657,24 +655,24 @@ export function SharedDockviewLayout() {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<AddToChatDetail>).detail;
-      const workspaceId = activeWorkspaceIdRef.current;
-      if (!detail || !workspaceId) return;
-      activateLeafOfKind(workspaceId, "chat");
+      const worktreeId = activeWorktreeIdRef.current;
+      if (!detail || !worktreeId) return;
+      activateLeafOfKind(worktreeId, "chat");
       void (async () => {
         let chatId: string | undefined;
         try {
-          chatId = (await trpc.panelFocus.get.query({ workspaceId })).chat;
+          chatId = (await trpc.panelFocus.get.query({ worktreeId })).chat;
         } catch {
           // best-effort — fall back to visible-chat delivery
         }
         const insert: ChatInsertDetail =
           "text" in detail
-            ? { text: detail.text, workspaceId, chatId }
+            ? { text: detail.text, worktreeId, chatId }
             : {
                 filePath: detail.filePath,
                 startLine: detail.startLine,
                 endLine: detail.endLine,
-                workspaceId,
+                worktreeId,
                 chatId,
               };
         window.dispatchEvent(new CustomEvent("band:chat-insert", { detail: insert }));
@@ -686,16 +684,16 @@ export function SharedDockviewLayout() {
 
   // ⌘N → New Untitled File. The shell already dispatches
   // `band:new-untitled-tab` on ⌘N (and from the command palette); open a fresh
-  // untitled `file` leaf in the active workspace's dockview. The desktop
+  // untitled `file` leaf in the active worktree's dockview. The desktop
   // Save-As flow lives in `FileLeaf` (`onSaveAs` → `capabilities.pickSaveFile`).
   // Web builds without `pickSaveFile` still get a scratch buffer they can edit;
   // only persistence is desktop-only (same as CodeBrowserView).
   useEffect(() => {
     const handler = () => {
-      const ws = activeWorkspaceIdRef.current;
+      const ws = activeWorktreeIdRef.current;
       if (!ws) return;
       const filePath = nextUntitledPath(ws);
-      getWorkspaceLeafActions(ws)?.openFile(filePath, { untitled: true, preview: false });
+      getWorktreeLeafActions(ws)?.openFile(filePath, { untitled: true, preview: false });
     };
     window.addEventListener("band:new-untitled-tab", handler);
     return () => window.removeEventListener("band:new-untitled-tab", handler);
@@ -705,20 +703,20 @@ export function SharedDockviewLayout() {
   // OS file picker, then opens the chosen absolute path as an external `file`
   // leaf (reads/writes hit the host's external-file capability). Mirrors
   // CodeBrowserView's `handleOpenExternalFile`, but routed to the active
-  // workspace's leaf actions so multi-workspace setups open in the right one.
+  // worktree's leaf actions so multi-worktree setups open in the right one.
   useEffect(() => {
     if (!pickFile) return;
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ workspaceId?: string } | undefined>).detail;
-      const ws = detail?.workspaceId ?? activeWorkspaceIdRef.current;
-      if (!ws || (detail?.workspaceId && detail.workspaceId !== activeWorkspaceIdRef.current)) {
+      const detail = (e as CustomEvent<{ worktreeId?: string } | undefined>).detail;
+      const ws = detail?.worktreeId ?? activeWorktreeIdRef.current;
+      if (!ws || (detail?.worktreeId && detail.worktreeId !== activeWorktreeIdRef.current)) {
         return;
       }
       void (async () => {
         const absolutePath = await pickFile();
         if (!absolutePath) return;
         const loc = parseFileLocation(absolutePath);
-        getWorkspaceLeafActions(ws)?.openFile(loc.filePath, {
+        getWorktreeLeafActions(ws)?.openFile(loc.filePath, {
           line: loc.line,
           column: loc.column,
           external: true,
@@ -739,32 +737,32 @@ export function SharedDockviewLayout() {
       {/* `absolute inset-0` so we OVERLAY the AppShell's relative div instead of
         stacking in normal flow next to the <Outlet /> sibling. */}
       <div className="absolute inset-0">
-        <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage />}>
-          {(workspaceId, wsActive) => (
-            // Only the shown workspace puts app-regions on the page.
+        <MultiWorktreePanelHost emptyState={<NoWorktreeMessage />}>
+          {(worktreeId, wsActive) => (
+            // Only the shown worktree puts app-regions on the page.
             <WindowDragContext.Provider value={wsActive}>
-              <WorkspaceCenterDockview
-                workspaceId={workspaceId}
+              <WorktreeCenterDockview
+                worktreeId={worktreeId}
                 visible={wsActive}
                 wsActive={wsActive}
               />
             </WindowDragContext.Provider>
           )}
-        </MultiWorkspacePanelHost>
+        </MultiWorktreePanelHost>
       </div>
 
       <QuickOpenDialog
-        workspaceId={activeWorkspaceId ?? ""}
+        worktreeId={activeWorktreeId ?? ""}
         open={quickOpenOpen}
         onOpenChange={(open) => {
           setQuickOpenOpen(open);
           if (!open) setQuickOpenQuery(undefined);
         }}
         onOpenFile={(filename) => {
-          if (activeWorkspaceId) handleOpenFile(activeWorkspaceId, filename);
+          if (activeWorktreeId) handleOpenFile(activeWorktreeId, filename);
         }}
         onOpenExternalFile={(location) => {
-          if (activeWorkspaceId) handleOpenExternalFile(activeWorkspaceId, location);
+          if (activeWorktreeId) handleOpenExternalFile(activeWorktreeId, location);
         }}
         currentFile={activeCurrentFile}
         initialQuery={quickOpenQuery}
@@ -774,14 +772,14 @@ export function SharedDockviewLayout() {
         onQueryChange={setLastQuickOpenQuery}
       />
       <SearchFilesDialog
-        workspaceId={activeWorkspaceId ?? ""}
+        worktreeId={activeWorktreeId ?? ""}
         open={searchFilesOpen}
         onOpenChange={setSearchFilesOpen}
         onOpenFile={(filename) => {
-          if (activeWorkspaceId) handleOpenFile(activeWorkspaceId, filename);
+          if (activeWorktreeId) handleOpenFile(activeWorktreeId, filename);
         }}
       />
-      <WorkspacePickerDialog open={workspacePickerOpen} onOpenChange={setWorkspacePickerOpen} />
+      <WorktreePickerDialog open={worktreePickerOpen} onOpenChange={setWorktreePickerOpen} />
       <CommandPaletteDialog
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}

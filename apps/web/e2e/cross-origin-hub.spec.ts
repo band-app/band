@@ -13,7 +13,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { startRecordingHubStub } from "./fixtures/recording-hub-stub";
 import { type StaticUiServer, startStaticUiServer } from "./fixtures/static-ui-server";
 import { acpStubEnv } from "./helpers/acp-stub";
@@ -31,8 +31,8 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 import { TerminalSurface } from "./pages/TerminalSurface";
 
 const TOKEN = "e2e-cross-origin-hub-token";
-const PROJECT = "crossproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "crossproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -45,9 +45,9 @@ test.beforeAll(async () => {
   const repoDir = join(tmpHome, "repo");
   mkdirSync(repoDir, { recursive: true });
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -83,11 +83,11 @@ test("the dashboard works from a static host on another origin", async ({ page }
   expect(new URL(ui.url).origin).not.toBe(new URL(hub.url).origin);
 
   const chat = new ChatPanePage(page, ui.url, TOKEN, hub.url);
-  await chat.goto(WORKSPACE);
+  await chat.goto(WORKTREE);
 
-  // tRPC over HTTP: the workspace was listed and opened, and the terminal
+  // tRPC over HTTP: the worktree was listed and opened, and the terminal
   // WebSocket attached a shell.
-  const terminal = new TerminalSurface(page, WORKSPACE);
+  const terminal = new TerminalSurface(page, WORKTREE);
   await expect(terminal.wrapper).toBeVisible();
   await terminal.typeLine("echo $((6*7))-from-hub");
   await expect.poll(() => terminal.readScreenText()).toContain("42-from-hub");
@@ -107,13 +107,13 @@ test("a #hub= link to another hub never receives the token saved for this one", 
   try {
     // Save the real hub and its token.
     const chat = new ChatPanePage(page, ui.url, TOKEN, hub.url);
-    await chat.goto(WORKSPACE);
-    const terminal = new TerminalSurface(page, WORKSPACE);
+    await chat.goto(WORKTREE);
+    const terminal = new TerminalSurface(page, WORKTREE);
     await expect(terminal.wrapper).toBeVisible();
 
     // A link that switches the hub and carries no token of its own.
     const switched = new ChatPanePage(page, ui.url, "", other.url);
-    await switched.goto(WORKSPACE);
+    await switched.goto(WORKTREE);
     await expect.poll(() => other.requests.length).toBeGreaterThan(0);
     await expect(terminal.wrapper).toHaveCount(0);
     expect(JSON.stringify(other.requests)).not.toContain(TOKEN);
@@ -123,7 +123,7 @@ test("a #hub= link to another hub never receives the token saved for this one", 
 
     // The old token stayed with its old origin: a link back needs no token.
     const back = new ChatPanePage(page, ui.url, "", hub.url);
-    await back.goto(WORKSPACE);
+    await back.goto(WORKTREE);
     await expect(terminal.wrapper).toBeVisible();
   } finally {
     await other.close();

@@ -19,7 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -33,9 +33,9 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-queue-ui-token";
-// One project per test, so each gets a fresh chat and queue.
-const PROJECTS = ["queuerender", "queueedit", "queuereorder"];
-const [RENDER_WS, EDIT_WS, REORDER_WS] = PROJECTS.map((p) => toWorkspaceId(p, "main"));
+// One repo per test, so each gets a fresh chat and queue.
+const REPOS = ["queuerender", "queueedit", "queuereorder"];
+const [RENDER_WS, EDIT_WS, REORDER_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
 // A 1x1 PNG, the smallest image the composer accepts as an attachment.
 const PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -50,7 +50,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: PROJECTS.map((name) => {
+    repos: REPOS.map((name) => {
       const repoDir = join(tmpHome, name);
       mkdirSync(repoDir, { recursive: true });
       return {
@@ -102,8 +102,8 @@ test.afterAll(async () => {
 });
 
 /** Opens the chat and starts a turn that waits on a permission answer. */
-async function startHeldTurn(chatPane: ChatPanePage, workspaceId: string): Promise<void> {
-  await chatPane.goto(workspaceId);
+async function startHeldTurn(chatPane: ChatPanePage, worktreeId: string): Promise<void> {
+  await chatPane.goto(worktreeId);
   await chatPane.waitForReady();
   await chatPane.typeMessage("start a long task");
   await chatPane.submit();

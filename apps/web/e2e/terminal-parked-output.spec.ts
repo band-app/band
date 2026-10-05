@@ -27,7 +27,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -38,13 +38,13 @@ import {
   startServer,
 } from "./helpers/server";
 import { trpcQuery } from "./helpers/trpc";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-parked-output-token";
-const PROJECT_A = "alpha-parked-output";
-const PROJECT_B = "bravo-parked-output";
-const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
-const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
+const REPO_A = "alpha-parked-output";
+const REPO_B = "bravo-parked-output";
+const WORKTREE_A = toWorktreeId(REPO_A, "main");
+const WORKTREE_B = toWorktreeId(REPO_B, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -61,13 +61,13 @@ function makeGitWorkdir(prefix: string): string {
   return dir;
 }
 
-/** The server-side scrollback of the workspace's only terminal. */
-async function serverOutput(workspaceId: string): Promise<string> {
+/** The server-side scrollback of the worktree's only terminal. */
+async function serverOutput(worktreeId: string): Promise<string> {
   const { terminals } = await trpcQuery<{ terminals: { terminalId: string }[] }>(
     server.url,
     TOKEN,
     "terminal.list",
-    { workspaceId },
+    { worktreeId },
   );
   if (terminals.length !== 1) return "";
   const { output } = await trpcQuery<{ output: string }>(server.url, TOKEN, "terminal.output", {
@@ -88,15 +88,15 @@ test.beforeAll(async () => {
   workdirA = makeGitWorkdir("band-parked-output-a-");
   const workdirB = makeGitWorkdir("band-parked-output-b-");
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT_A,
+        name: REPO_A,
         path: workdirA,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirA }],
       },
       {
-        name: PROJECT_B,
+        name: REPO_B,
         path: workdirB,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
@@ -119,35 +119,35 @@ test("a parked terminal that overflows its output queue is resynced when shown",
   page,
 }) => {
   test.setTimeout(90_000);
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const socketCount = worktreePage.trackTerminalSocketOpensFor(WORKTREE_A);
 
-  await workspacePage.goto(WORKSPACE_A);
-  await workspacePage.waitForReady();
-  await workspacePage.openTerminalTab();
-  await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+  await worktreePage.goto(WORKTREE_A);
+  await worktreePage.waitForReady();
+  await worktreePage.openTerminalTab();
+  await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
     timeout: 20_000,
   });
-  await workspacePage.waitForTerminalReady(20_000);
-  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_A);
+  await worktreePage.waitForTerminalReady(20_000);
+  await worktreePage.waitForTerminalRenderedPrompt(WORKTREE_A);
   await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
   // The flood waits for a gate file, created only once A is parked. The
   // quoted fragments and `$((40+2))` keep the typed command line from
   // matching either marker.
   const gate = join(workdirA, "go");
-  await workspacePage.runInTerminalUntilRendered(
-    WORKSPACE_A,
+  await worktreePage.runInTerminalUntilRendered(
+    WORKTREE_A,
     `echo GATE_"ARMED"; while [ ! -e ${gate} ]; do sleep 0.1; done; seq 1 600000; echo PARKED_DONE_$((40+2))`,
     /GATE_ARMED/,
   );
 
-  await workspacePage.switchWorkspace(WORKSPACE_B);
-  await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
+  await worktreePage.switchWorktree(WORKTREE_B);
+  await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_B, true)).toBeVisible({
     timeout: 20_000,
   });
   await expect
-    .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+    .poll(() => worktreePage.isTerminalParked(WORKTREE_A), { timeout: 20_000 })
     .toBe(true);
   writeFileSync(gate, "");
 
@@ -162,7 +162,7 @@ test("a parked terminal that overflows its output queue is resynced when shown",
   await expect
     .poll(
       async () => {
-        const output = await serverOutput(WORKSPACE_A);
+        const output = await serverOutput(WORKTREE_A);
         const done = output.includes("PARKED_DONE_42");
         const seq = lastSeqNumber(output);
         if (seq > lastSeq || done) {
@@ -177,14 +177,14 @@ test("a parked terminal that overflows its output queue is resynced when shown",
     .toBe(true);
   expect(longestGap).toBeLessThan(4_000);
 
-  await workspacePage.switchWorkspace(WORKSPACE_A);
-  await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+  await worktreePage.switchWorktree(WORKTREE_A);
+  await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_A, true)).toBeVisible({
     timeout: 20_000,
   });
   await expect
     .poll(
       async () =>
-        (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("PARKED_DONE_42"),
+        (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("PARKED_DONE_42"),
       { timeout: 20_000 },
     )
     .toBe(true);

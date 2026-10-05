@@ -5,11 +5,11 @@ import { createContext, useContext } from "react";
  * (Chat / Terminal / Browser) propagates down to its tab panels.
  *
  * - `visible`  — combined "this container's outer panel is visible
- *                AND the workspace is active". Tab panels combine it
+ *                AND the worktree is active". Tab panels combine it
  *                with dockview's per-tab active state to decide
  *                whether the leaf content (chat / terminal / browser)
  *                should actually render or stay suspended.
- * - `wsActive` — workspace-level activity flag on its own. Some leaves
+ * - `wsActive` — worktree-level activity flag on its own. Some leaves
  *                (e.g. `BrowserPaneComponent`) use this to hide the
  *                native webview for reasons external to the inner
  *                dockview.

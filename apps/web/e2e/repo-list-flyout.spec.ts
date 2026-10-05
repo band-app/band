@@ -1,15 +1,15 @@
 /**
- * Mobile project-list fly-out coverage.
+ * Mobile repo-list fly-out coverage.
  *
- * On a narrow viewport the workspace header's hamburger opens the full project
- * list as a left-edge drawer *over* the current workspace. The defining
+ * On a narrow viewport the worktree header's hamburger opens the full repo
+ * list as a left-edge drawer *over* the current worktree. The defining
  * contract is that opening or closing the drawer is a pure overlay — it never
- * changes the route/URL, so the workspace stays mounted underneath.
+ * changes the route/URL, so the worktree stays mounted underneath.
  *
- * A real git repo backs the project so its branch reconciles to a
- * WorkspaceCard (whose `data-active` attribute is the observable active
+ * A real git repo backs the repo so its branch reconciles to a
+ * WorktreeCard (whose `data-active` attribute is the observable active
  * marker) and the DashboardShell inside the drawer renders its
- * `project-list__root`. Real production binary, no tRPC mocks, page objects
+ * `repo-list__root`. Real production binary, no tRPC mocks, page objects
  * only.
  */
 
@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -27,15 +27,15 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-project-list-flyout-token";
-const PROJECT = "flyout-repo";
+const TOKEN = "e2e-repo-list-flyout-token";
+const REPO = "flyout-repo";
 const DEFAULT_BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 // Narrow viewport so `useIsDesktop()` reports false (threshold 1024px) and the
-// mobile branch of `workspace.$workspaceId.tsx` mounts (header hamburger).
+// mobile branch of `worktree.$worktreeId.tsx` mounts (header hamburger).
 test.use({ viewport: { width: 800, height: 900 } });
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
@@ -61,7 +61,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Flyout test\n");
@@ -69,9 +69,9 @@ test.beforeAll(async () => {
   git(repoPath, ["commit", "-m", "init"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -91,52 +91,52 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Mobile project-list fly-out", () => {
-  test("the hamburger opens the project list as an overlay without changing the route", async ({
+test.describe("Mobile repo-list fly-out", () => {
+  test("the hamburger opens the repo list as an overlay without changing the route", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
-    await expect(page).toHaveURL(new RegExp(WORKSPACE));
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    await expect(page).toHaveURL(new RegExp(WORKTREE));
 
-    await workspacePage.openProjectListFlyout();
+    await worktreePage.openRepoListFlyout();
 
-    // The full project list rendered inside the drawer…
-    await expect(workspacePage.projectListRoot()).toBeVisible();
-    // …and opening it did NOT navigate — still on the same workspace route.
-    await expect(page).toHaveURL(new RegExp(WORKSPACE));
+    // The full repo list rendered inside the drawer…
+    await expect(worktreePage.repoListRoot()).toBeVisible();
+    // …and opening it did NOT navigate — still on the same worktree route.
+    await expect(page).toHaveURL(new RegExp(WORKTREE));
   });
 
   test("dismissing via the backdrop closes the drawer and keeps the route", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
-    await workspacePage.openProjectListFlyout();
-    await workspacePage.dismissProjectListFlyoutViaBackdrop();
+    await worktreePage.openRepoListFlyout();
+    await worktreePage.dismissRepoListFlyoutViaBackdrop();
 
-    // Positive anchor first: the workspace is interactive again and we're
+    // Positive anchor first: the worktree is interactive again and we're
     // still on the same route (dismissing did not navigate). Only then assert
     // the drawer is gone.
-    await workspacePage.waitForMobileReady();
-    await expect(page).toHaveURL(new RegExp(WORKSPACE));
-    await expect(workspacePage.projectListFlyout).toBeHidden();
+    await worktreePage.waitForMobileReady();
+    await expect(page).toHaveURL(new RegExp(WORKTREE));
+    await expect(worktreePage.repoListFlyout).toBeHidden();
   });
 
   test("dismissing via Escape closes the drawer and keeps the route", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForMobileReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
 
-    await workspacePage.openProjectListFlyout();
-    await workspacePage.pressEscape();
+    await worktreePage.openRepoListFlyout();
+    await worktreePage.pressEscape();
 
-    await workspacePage.waitForMobileReady();
-    await expect(page).toHaveURL(new RegExp(WORKSPACE));
-    await expect(workspacePage.projectListFlyout).toBeHidden();
+    await worktreePage.waitForMobileReady();
+    await expect(page).toHaveURL(new RegExp(WORKTREE));
+    await expect(worktreePage.repoListFlyout).toBeHidden();
   });
 });

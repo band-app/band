@@ -9,7 +9,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -19,12 +19,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-leaf-header-actions-token";
-const PROJECT = "center-leaf-header-repo";
+const REPO = "center-leaf-header-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -33,16 +33,16 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const repo = join(tmpHome, PROJECT);
+  const repo = join(tmpHome, REPO);
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   writeFileSync(join(repo, "README.md"), "# Title\n\nsome **markdown** body\n");
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repo,
         defaultBranch: BRANCH,
         worktrees: [{ branch: BRANCH, path: repo }],
@@ -65,19 +65,19 @@ test("opening a markdown file leaf does not trigger an infinite render loop", as
   });
   page.on("pageerror", (e) => errors.push(e.message));
 
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
 
   // Open README.md via Quick Open.
-  await workspacePage.openQuickOpen();
-  await workspacePage.typeQuickOpen("README");
-  await expect.poll(() => workspacePage.quickOpenItems.count()).toBeGreaterThan(0);
-  await workspacePage.pressQuickOpenKey("Enter");
+  await worktreePage.openQuickOpen();
+  await worktreePage.typeQuickOpen("README");
+  await expect.poll(() => worktreePage.quickOpenItems.count()).toBeGreaterThan(0);
+  await worktreePage.pressQuickOpenKey("Enter");
 
   // The file leaf renders and the markdown preview/source toggle is published
   // to the group header (proves the actions plumbing works, not just no crash).
-  await expect(workspacePage.fileTab("README.md")).toBeAttached({ timeout: 15_000 });
+  await expect(worktreePage.fileTab("README.md")).toBeAttached({ timeout: 15_000 });
   await expect(page.getByTestId("center-file-leaf__view--source")).toBeVisible({ timeout: 15_000 });
 
   // Give any runaway effect a chance to blow the stack, then assert none did.

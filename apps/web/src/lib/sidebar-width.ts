@@ -28,7 +28,7 @@ export function saveSidebarWidth(width: number): void {
 const SIDEBAR_COLLAPSED_KEY = "band:sidebar-collapsed";
 
 /**
- * Whether the project-list sidebar was last left collapsed (hidden).
+ * Whether the repo-list sidebar was last left collapsed (hidden).
  * Defaults to `false` (visible) when nothing is stored.
  */
 export function loadSidebarCollapsed(): boolean {

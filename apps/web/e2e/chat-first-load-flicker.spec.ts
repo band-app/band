@@ -39,7 +39,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -53,8 +53,8 @@ import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-first-load-flicker-token";
-const PROJECT = "flickerproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const REPO = "flickerproj";
+const WORKTREE = toWorktreeId(REPO, "main");
 const CHAT_ID = "flicker-chat-deterministic-id";
 const SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
@@ -78,9 +78,9 @@ test.beforeAll(async () => {
   mkdirSync(repoDir, { recursive: true });
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoDir,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: repoDir }],
@@ -112,12 +112,12 @@ test.beforeAll(async () => {
   // seeded session, hitting the real tRPC surface so the dashboard's
   // saved-layout + active-session bookkeeping matches production.
   await trpcMutate(server.url, TOKEN, "chats.create", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     id: CHAT_ID,
     agent: "claude-code",
   });
   await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
-    workspaceId: WORKSPACE,
+    worktreeId: WORKTREE,
     chatId: CHAT_ID,
     sessionId: SESSION_ID,
   });
@@ -138,7 +138,7 @@ test.describe("Chat first-load flicker", () => {
     // first frames the virtualized list paints.
     await chatPane.installFirstPaintObserver();
 
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(WORKTREE);
     await chatPane.waitForReady();
 
     // The list mounts once the subscription has replayed the session.

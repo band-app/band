@@ -12,7 +12,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -24,15 +24,15 @@ import {
 } from "./helpers/server";
 import { MobileLayoutPage } from "./pages/MobileLayoutPage";
 import { ToastHostPage } from "./pages/ToastHostPage";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
-const TOKEN = "e2e-workspace-git-pull-notice-token";
-const PROJECT = "pull-repo";
+const TOKEN = "e2e-worktree-git-pull-notice-token";
+const REPO = "pull-repo";
 const BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
-/** A project whose origin no longer exists, so a pull really fails. */
-const BROKEN_PROJECT = "broken-repo";
-const BROKEN_WORKSPACE = toWorkspaceId(BROKEN_PROJECT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH);
+/** A repo whose origin no longer exists, so a pull really fails. */
+const BROKEN_REPO = "broken-repo";
+const BROKEN_WORKTREE = toWorktreeId(BROKEN_REPO, BRANCH);
 /** `ToastHost`'s `right-4` / `bottom-4` gutter, in CSS px. */
 const GUTTER = 16;
 
@@ -44,7 +44,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const originPath = join(tmpHome, "origin.git");
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   const seederPath = join(tmpHome, "seeder");
   mkdirSync(originPath, { recursive: true });
   gitInHome(originPath, ["init", "--bare", "-b", BRANCH], tmpHome);
@@ -57,7 +57,7 @@ test.beforeAll(async () => {
   gitInHome(repoPath, ["remote", "add", "origin", originPath], tmpHome);
   gitInHome(repoPath, ["push", "-u", "origin", BRANCH], tmpHome);
 
-  // Origin moves one commit ahead, and the workspace has an uncommitted
+  // Origin moves one commit ahead, and the worktree has an uncommitted
   // edit, so `git pull --rebase` refuses.
   gitInHome(tmpHome, ["clone", originPath, seederPath], tmpHome);
   writeFileSync(join(seederPath, "upstream.md"), "# From upstream\n");
@@ -67,7 +67,7 @@ test.beforeAll(async () => {
   rmSync(seederPath, { recursive: true, force: true });
   writeFileSync(join(repoPath, "README.md"), "# Edited locally\n");
 
-  const brokenPath = join(tmpHome, BROKEN_PROJECT);
+  const brokenPath = join(tmpHome, BROKEN_REPO);
   mkdirSync(brokenPath, { recursive: true });
   gitInHome(brokenPath, ["init", "-b", BRANCH], tmpHome);
   writeFileSync(join(brokenPath, "README.md"), "# Broken origin\n");
@@ -77,14 +77,14 @@ test.beforeAll(async () => {
   gitInHome(brokenPath, ["config", `branch.${BRANCH}.remote`, "origin"], tmpHome);
   gitInHome(brokenPath, ["config", `branch.${BRANCH}.merge`, `refs/heads/${BRANCH}`], tmpHome);
 
-  const project = (name: string, path: string) => ({
+  const repo = (name: string, path: string) => ({
     name,
     path,
     defaultBranch: BRANCH,
     worktrees: [{ branch: BRANCH, path }],
   });
   seedState(tmpHome, {
-    projects: [project(PROJECT, repoPath), project(BROKEN_PROJECT, brokenPath)],
+    repos: [repo(REPO, repoPath), repo(BROKEN_REPO, brokenPath)],
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
@@ -97,12 +97,12 @@ test.afterAll(async () => {
 
 test.describe("Git pull with local changes", () => {
   test("shows an info notice in the bottom-right corner", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const toasts = new ToastHostPage(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
-    await workspacePage.pullWorkspaceFromSidebar(WORKSPACE);
+    await worktreePage.pullWorktreeFromSidebar(WORKTREE);
 
     const notice = toasts.infoNotices.first();
     await expect(notice).toBeVisible();
@@ -125,18 +125,18 @@ test.describe("Git pull with local changes", () => {
   });
 
   test("a pull that really fails shows an error that stays until closed", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const toasts = new ToastHostPage(page);
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
 
-    await workspacePage.pullWorkspaceFromSidebar(BROKEN_WORKSPACE);
+    await worktreePage.pullWorktreeFromSidebar(BROKEN_WORKTREE);
     const error = toasts.errorNotices.first();
     await expect(error).toContainText("does not appear to be a git repository");
     await expect(error).not.toContainText("TRPCClientError");
 
     // An info notice closes itself; once it has, the error is still there.
-    await workspacePage.pullWorkspaceFromSidebar(WORKSPACE);
+    await worktreePage.pullWorktreeFromSidebar(WORKTREE);
     await expect(toasts.infoNotices).toHaveCount(1);
     await expect(toasts.infoNotices).toHaveCount(0, { timeout: 15_000 });
     await expect(toasts.errorNotices).toHaveCount(1);
@@ -151,12 +151,12 @@ test.describe("Git pull notice on a phone", () => {
 
   test("sits above the dashboard action bar", async ({ page }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const toasts = new ToastHostPage(page);
     await layout.gotoDashboard();
     await expect(layout.dashboardActionBar).toBeVisible();
 
-    await workspacePage.pullWorkspaceFromSidebar(WORKSPACE);
+    await worktreePage.pullWorktreeFromSidebar(WORKTREE);
     const notice = toasts.infoNotices.first();
     await expect(notice).toBeVisible();
 

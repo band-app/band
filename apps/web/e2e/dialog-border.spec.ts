@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
+import { toWorktreeId } from "@/dashboard";
 import { readEdgeColors } from "./helpers/edge-colors";
 import { gitInHome } from "./helpers/git";
 import {
@@ -29,12 +29,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-dialog-border-token";
-const PROJECT = "dialog-border-repo";
+const REPO = "dialog-border-repo";
 const DEFAULT_BRANCH = "main";
-const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -42,7 +42,7 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoPath = join(tmpHome, PROJECT);
+  const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
   writeFileSync(join(repoPath, "README.md"), "# Dialog border test\n");
   gitInHome(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
@@ -50,9 +50,9 @@ test.beforeAll(async () => {
   gitInHome(repoPath, ["commit", "-m", "init"], tmpHome);
 
   seedState(tmpHome, {
-    projects: [
+    repos: [
       {
-        name: PROJECT,
+        name: REPO,
         path: repoPath,
         defaultBranch: DEFAULT_BRANCH,
         worktrees: [{ branch: DEFAULT_BRANCH, path: repoPath }],
@@ -78,17 +78,14 @@ test.describe("Dialog edges use the theme border colour", () => {
   test("Quick Open (command-palette variant) has a --border edge, not a white one", async ({
     page,
   }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-    await workspacePage.dispatchOpenQuickOpen();
-    await expect(workspacePage.quickOpenDialog()).toHaveAttribute(
-      "data-variant",
-      "command-palette",
-    );
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    await worktreePage.dispatchOpenQuickOpen();
+    await expect(worktreePage.quickOpenDialog()).toHaveAttribute("data-variant", "command-palette");
 
-    const colors = await readEdgeColors(workspacePage.quickOpenDialog());
+    const colors = await readEdgeColors(worktreePage.quickOpenDialog());
     expect(colors.themeBorder).not.toBe(colors.foreground);
     expect(colors.edge).toBe(colors.themeBorder);
   });

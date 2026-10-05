@@ -37,8 +37,8 @@ import { trpc } from "../lib/trpc-client";
 
 interface TaskRecord {
   id: string;
-  workspaceId: string;
-  project: string;
+  worktreeId: string;
+  repo: string;
   branch: string;
   prompt: string;
   status: "running" | "completed" | "failed";
@@ -48,10 +48,10 @@ interface TaskRecord {
   mode?: string;
   model?: string;
   codingAgentId?: string;
-  workspaceExists?: boolean;
+  worktreeExists?: boolean;
 }
 
-interface ProjectInfo {
+interface RepoInfo {
   name: string;
   worktrees: { branch: string }[];
 }
@@ -88,7 +88,7 @@ export function TasksPageContent() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [repoFilter, setRepoFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showNewTask, setShowNewTask] = useState(false);
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
@@ -128,26 +128,26 @@ export function TasksPageContent() {
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
-      if (projectFilter !== "all" && task.project !== projectFilter) return false;
+      if (repoFilter !== "all" && task.repo !== repoFilter) return false;
       if (statusFilter !== "all" && task.status !== statusFilter) return false;
       return true;
     });
-  }, [tasks, projectFilter, statusFilter]);
+  }, [tasks, repoFilter, statusFilter]);
 
-  const projectNames = useMemo(() => {
-    const names = new Set(tasks.map((t) => t.project).filter(Boolean));
+  const repoNames = useMemo(() => {
+    const names = new Set(tasks.map((t) => t.repo).filter(Boolean));
     return Array.from(names).sort();
   }, [tasks]);
 
   const handleNewTaskSubmit = useCallback(
     async (
-      workspaceId: string,
+      worktreeId: string,
       prompt: string,
       mode?: string,
       model?: string,
       codingAgentId?: string,
     ) => {
-      await trpc.tasks.submit.mutate({ workspaceId, prompt, mode, model, codingAgentId });
+      await trpc.tasks.submit.mutate({ worktreeId, prompt, mode, model, codingAgentId });
       setShowNewTask(false);
       await fetchData();
     },
@@ -157,13 +157,13 @@ export function TasksPageContent() {
   return (
     <div className="flex flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2">
-        <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="h-8 w-40 text-xs" data-testid="tasks__project-filter">
-            <SelectValue placeholder="All Projects" />
+        <Select value={repoFilter} onValueChange={setRepoFilter}>
+          <SelectTrigger className="h-8 w-40 text-xs" data-testid="tasks__repo-filter">
+            <SelectValue placeholder="All Repos" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projectNames.map((name) => (
+            <SelectItem value="all">All Repos</SelectItem>
+            {repoNames.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
               </SelectItem>
@@ -305,8 +305,8 @@ function TaskCard({
   agentMap: Map<string, CodingAgentDef>;
 }) {
   const sessionHref =
-    task.sessionId && task.workspaceExists
-      ? `/workspace/${encodeURIComponent(task.workspaceId)}`
+    task.sessionId && task.worktreeExists
+      ? `/worktree/${encodeURIComponent(task.worktreeId)}`
       : undefined;
   const [acting, setActing] = useState(false);
 
@@ -329,7 +329,7 @@ function TaskCard({
       await trpc.tasks.rerun.mutate({ taskId: task.id });
       onAction();
     } catch {
-      // Ignore — workspace may already have a running task
+      // Ignore — worktree may already have a running task
       onAction();
     } finally {
       setActing(false);
@@ -384,7 +384,7 @@ function TaskCard({
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground/70">
-          {task.project}/{task.branch}
+          {task.repo}/{task.branch}
         </span>
         <span className="text-border">·</span>
         <span className="inline-flex items-center gap-1">
@@ -456,15 +456,15 @@ function NewTaskDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (
-    workspaceId: string,
+    worktreeId: string,
     prompt: string,
     mode?: string,
     model?: string,
     codingAgentId?: string,
   ) => Promise<void>;
 }) {
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [selectedMode, setSelectedMode] = useState<string>("");
@@ -476,20 +476,19 @@ function NewTaskDialog({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const workspaceId =
-    selectedProject && selectedBranch ? `${selectedProject}-${selectedBranch}` : "";
+  const worktreeId = selectedRepo && selectedBranch ? `${selectedRepo}-${selectedBranch}` : "";
 
   useEffect(() => {
     if (open) {
-      setSelectedProject("");
+      setSelectedRepo("");
       setSelectedBranch("");
       setPrompt("");
       setSelectedMode("");
       setSelectedModel("");
       setSelectedAgent("");
       setSubmitError(null);
-      trpc.projects.list.query().then((data) => {
-        setProjects(data.projects as ProjectInfo[]);
+      trpc.repos.list.query().then((data) => {
+        setRepos(data.repos as RepoInfo[]);
       });
       trpc.settings.get.query().then((settings) => {
         const raw = (settings as Record<string, unknown>).codingAgents;
@@ -532,28 +531,28 @@ function NewTaskDialog({
   }, [open, selectedAgent]);
 
   const branches = useMemo(() => {
-    const project = projects.find((p) => p.name === selectedProject);
-    return project?.worktrees.map((w) => w.branch) ?? [];
-  }, [projects, selectedProject]);
+    const repo = repos.find((p) => p.name === selectedRepo);
+    return repo?.worktrees.map((w) => w.branch) ?? [];
+  }, [repos, selectedRepo]);
 
-  const handleProjectChange = useCallback((value: string) => {
-    setSelectedProject(value);
+  const handleRepoChange = useCallback((value: string) => {
+    setSelectedRepo(value);
     setSelectedBranch("");
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!workspaceId || !prompt.trim()) return;
+    if (!worktreeId || !prompt.trim()) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       await onSubmit(
-        workspaceId,
+        worktreeId,
         prompt.trim(),
         selectedMode || undefined,
         selectedModel || undefined,
         selectedAgent || undefined,
       );
-      setSelectedProject("");
+      setSelectedRepo("");
       setSelectedBranch("");
       setPrompt("");
       setSelectedMode("");
@@ -564,7 +563,7 @@ function NewTaskDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [workspaceId, prompt, selectedMode, selectedModel, selectedAgent, onSubmit]);
+  }, [worktreeId, prompt, selectedMode, selectedModel, selectedAgent, onSubmit]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -576,15 +575,15 @@ function NewTaskDialog({
 
         <div className="flex flex-col gap-4 py-2">
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium" htmlFor="project-select">
-              Project
+            <label className="text-sm font-medium" htmlFor="repo-select">
+              Repo
             </label>
-            <Select value={selectedProject} onValueChange={handleProjectChange}>
-              <SelectTrigger id="project-select" data-testid="tasks__new-task-project">
-                <SelectValue placeholder="Select a project" />
+            <Select value={selectedRepo} onValueChange={handleRepoChange}>
+              <SelectTrigger id="repo-select" data-testid="tasks__new-task-repo">
+                <SelectValue placeholder="Select a repo" />
               </SelectTrigger>
               <SelectContent>
-                {projects.map((p) => (
+                {repos.map((p) => (
                   <SelectItem key={p.name} value={p.name}>
                     {p.name}
                   </SelectItem>
@@ -595,16 +594,16 @@ function NewTaskDialog({
 
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium" htmlFor="branch-select">
-              Workspace
+              Worktree
             </label>
             <Select
               value={selectedBranch}
               onValueChange={setSelectedBranch}
-              disabled={!selectedProject}
+              disabled={!selectedRepo}
             >
-              <SelectTrigger id="branch-select" data-testid="tasks__new-task-workspace">
+              <SelectTrigger id="branch-select" data-testid="tasks__new-task-worktree">
                 <SelectValue
-                  placeholder={selectedProject ? "Select a workspace" : "Select a project first"}
+                  placeholder={selectedRepo ? "Select a worktree" : "Select a repo first"}
                 />
               </SelectTrigger>
               <SelectContent>
@@ -710,7 +709,7 @@ function NewTaskDialog({
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button onClick={handleSubmit} disabled={!workspaceId || !prompt.trim() || submitting}>
+          <Button onClick={handleSubmit} disabled={!worktreeId || !prompt.trim() || submitting}>
             {submitting && <Loader2 className="size-4 animate-spin" />}
             Submit Task
           </Button>
