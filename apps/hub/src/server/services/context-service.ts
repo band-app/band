@@ -42,6 +42,7 @@ export interface ContextView {
   remoteUrl: string | null;
   remoteVaultItemId: string | null;
   labels: string[];
+  repos: string[];
   workerAccess: ContextRow["workerAccess"];
   syncError: string | null;
   lastSyncAt: number | null;
@@ -65,6 +66,7 @@ function toView(row: ContextRow): ContextView {
     remoteUrl: row.remoteUrl,
     remoteVaultItemId: row.remoteVaultItemId,
     labels: row.labels,
+    repos: row.repos,
     workerAccess: row.workerAccess,
     syncError: row.syncError,
     lastSyncAt: row.lastSyncAt,
@@ -101,7 +103,7 @@ export function contextGitEnv(extra: Record<string, string> = {}): NodeJS.Proces
   };
 }
 
-function runGit(
+export function runGit(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
 ): Promise<GitResult> {
@@ -133,7 +135,7 @@ function runGit(
   });
 }
 
-async function git(
+export async function git(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
 ): Promise<string> {
@@ -233,6 +235,7 @@ export interface CreateContextInput {
   name: string;
   kind?: ContextRow["kind"];
   labels?: string[];
+  repos?: string[];
   workerAccess?: ContextRow["workerAccess"];
   remoteUrl?: string;
   remoteVaultItemId?: string;
@@ -263,6 +266,21 @@ export class ContextService {
     return this.queries.list().map(toView);
   }
 
+  /** The named context that serves as the project context of a repo's agents, if any. */
+  forRepo(repoName: string): ContextRow | undefined {
+    return this.queries.list().find((c) => c.kind === "mission" && c.repos.includes(repoName));
+  }
+
+  /** The user context, if one exists. */
+  userContext(): ContextRow | undefined {
+    return this.queries.findUser();
+  }
+
+  /** Runs `fn` after every earlier write to the named context's repo has finished. */
+  withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    return this.exclusive(name, fn);
+  }
+
   /** The row the git endpoint authorizes against, or undefined. */
   find(name: string): ContextRow | undefined {
     return CONTEXT_NAME.test(name) ? this.queries.find(name) : undefined;
@@ -287,6 +305,7 @@ export class ContextService {
       throw new ContextInputError("There is already a user context");
     }
     const labels = validateLabels(input.labels ?? []);
+    const repos = this.checkRepos(name, kind, input.repos ?? []);
     const remoteUrl = input.remoteUrl ? validateRemoteUrl(input.remoteUrl) : null;
     const vaultItemId = this.checkVaultItem(input.remoteVaultItemId, remoteUrl);
 
@@ -301,6 +320,7 @@ export class ContextService {
         remoteUrl,
         remoteVaultItemId: vaultItemId,
         labels,
+        repos,
         workerAccess: input.workerAccess ?? "read-write",
         syncError: null,
         lastSyncAt: null,
@@ -340,11 +360,12 @@ export class ContextService {
 
   update(
     name: string,
-    patch: { labels?: string[]; workerAccess?: ContextRow["workerAccess"] },
+    patch: { labels?: string[]; repos?: string[]; workerAccess?: ContextRow["workerAccess"] },
   ): ContextView {
-    this.require(name);
+    const row = this.require(name);
     const set: Partial<ContextRow> = {};
     if (patch.labels) set.labels = validateLabels(patch.labels);
+    if (patch.repos) set.repos = this.checkRepos(name, row.kind, patch.repos);
     if (patch.workerAccess) set.workerAccess = patch.workerAccess;
     if (Object.keys(set).length > 0) this.queries.update(name, set);
     return toView(this.require(name));
@@ -422,6 +443,21 @@ export class ContextService {
     const row = this.find(name);
     if (!row) throw new ContextNotFoundError(name);
     return row;
+  }
+
+  /** A repo serves one project context. The user context takes none. */
+  private checkRepos(name: string, kind: ContextRow["kind"], repos: string[]): string[] {
+    const unique = [...new Set(repos.map((r) => r.trim()).filter(Boolean))];
+    if (unique.length > 0 && kind === "user") {
+      throw new ContextInputError("The user context is not tied to repos");
+    }
+    for (const repo of unique) {
+      const other = this.queries.list().find((c) => c.name !== name && c.repos.includes(repo));
+      if (other) {
+        throw new ContextInputError(`Repo "${repo}" already uses context "${other.name}"`);
+      }
+    }
+    return unique;
   }
 
   private checkVaultItem(id: string | undefined, remoteUrl: string | null): string | null {

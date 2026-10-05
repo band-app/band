@@ -267,6 +267,46 @@ export class ChatEventQueries {
     return event?.type === "prompt" ? event.text : undefined;
   }
 
+  /** The prompt events of a session's live revision, oldest first. */
+  readPrompts(sessionId: string, revision: number): ChatEventRow[] {
+    return getDb()
+      .select()
+      .from(chatEvents)
+      .where(
+        and(
+          eq(chatEvents.sessionId, sessionId),
+          eq(chatEvents.revision, revision),
+          eq(chatEvents.kind, "prompt"),
+        ),
+      )
+      .orderBy(chatEvents.id)
+      .all()
+      .map(toRow);
+  }
+
+  /** `session/update` rows of the given kinds after `afterId` in one revision, oldest first. */
+  readUpdatesAfter(
+    sessionId: string,
+    revision: number,
+    afterId: number,
+    updateKinds: string[],
+  ): ChatEventRow[] {
+    return getDb()
+      .select()
+      .from(chatEvents)
+      .where(
+        and(
+          eq(chatEvents.sessionId, sessionId),
+          eq(chatEvents.revision, revision),
+          gt(chatEvents.id, afterId),
+          inArray(chatEvents.updateKind, updateKinds),
+        ),
+      )
+      .orderBy(chatEvents.id)
+      .all()
+      .map(toRow);
+  }
+
   /** Drops every row a chat wrote. Called when the chat is removed. */
   deleteForChat(chatId: string): void {
     getDb().delete(chatEvents).where(eq(chatEvents.chatId, chatId)).run();

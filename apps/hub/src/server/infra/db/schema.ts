@@ -795,6 +795,9 @@ export const contexts = sqliteTable(
     remoteUrl: text("remote_url"),
     remoteVaultItemId: text("remote_vault_item_id"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    // Repos whose agents use this context as their project context (a repo is in at
+    // most one). Phase 6 replaces this with projects. Always empty for the user context.
+    repos: text("repos", { mode: "json" }).$type<string[]>().notNull().default([]),
     workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
       .notNull()
       .default("read-write"),

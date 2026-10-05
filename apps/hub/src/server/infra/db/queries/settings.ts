@@ -187,6 +187,14 @@ export interface Settings {
     [key: string]: unknown;
   };
   /**
+   * Context settings (plan step 5.4). `captureLearnings` makes the hub append a
+   * summary of a chat to the project context when the chat is removed. Off by default.
+   */
+  context?: {
+    captureLearnings?: boolean;
+    [key: string]: unknown;
+  };
+  /**
    * Where and how environment images are built (plan step 3.2). `hostId` is
    * the host that runs docker (default `local`, the hub's machine), `registry`
    * a registry prefix to push to, and `workerImage` the worker base image the

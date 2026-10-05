@@ -13,6 +13,7 @@ import { adminProcedure, t } from "../trpc";
 
 const name = z.string().trim().min(1).max(63);
 const labels = z.array(z.string().min(1).max(100)).max(20);
+const repoNames = z.array(z.string().trim().min(1).max(200)).max(100);
 const workerAccess = z.enum(["read-write", "read-only"]);
 
 async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -38,6 +39,7 @@ export const contextRouter = t.router({
         name,
         kind: z.enum(["user", "mission"]).optional(),
         labels: labels.optional(),
+        repos: repoNames.optional(),
         workerAccess: workerAccess.optional(),
         remoteUrl: z.string().max(500).optional(),
         remoteVaultItemId: z.string().min(1).optional(),
@@ -46,11 +48,19 @@ export const contextRouter = t.router({
     .mutation(({ input }) => guard(async () => ({ context: await contextService.create(input) }))),
 
   update: adminProcedure
-    .input(z.object({ name, labels: labels.optional(), workerAccess: workerAccess.optional() }))
+    .input(
+      z.object({
+        name,
+        labels: labels.optional(),
+        repos: repoNames.optional(),
+        workerAccess: workerAccess.optional(),
+      }),
+    )
     .mutation(({ input }) =>
       guard(() => ({
         context: contextService.update(input.name, {
           labels: input.labels,
+          repos: input.repos,
           workerAccess: input.workerAccess,
         }),
       })),
