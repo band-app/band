@@ -1,70 +1,70 @@
 ---
 import DocsLayout from "../../layouts/DocsLayout.astro";
 ---
-<DocsLayout title="band projects — Band Docs">
-  <h1>band projects</h1>
+<DocsLayout title="band repos — Band Docs">
+  <h1>band repos</h1>
 
   <p>
-    The <code>band projects</code> command group manages the projects registered with Band. A
-    project is a directory on your filesystem — typically a Git repository — that you've
+    The <code>band repos</code> command group manages the repos registered with Band. A
+    repo is a directory on your filesystem — typically a Git repository — that you've
     registered with Band so it can create worktrees inside it.
   </p>
 
-  <h2>List projects</h2>
+  <h2>List repos</h2>
 
-  <p>Display all registered projects.</p>
+  <p>Display all registered repos.</p>
 
-  <pre><code>band projects list</code></pre>
+  <pre><code>band repos list</code></pre>
 
   <p>Example output:</p>
 
   <pre><code>NAME        PATH                         WORKTREES
-my-app      /Users/dev/projects/my-app   3 worktrees
-api-server  /Users/dev/projects/api      1 worktree
-docs-site   /Users/dev/projects/docs     0 worktrees</code></pre>
+my-app      /Users/dev/repos/my-app   3 worktrees
+api-server  /Users/dev/repos/api      1 worktree
+docs-site   /Users/dev/repos/docs     0 worktrees</code></pre>
 
-  <h2>Add a project</h2>
-
-  <p>
-    Register a directory as a Band project. The path must point to an existing Git repository.
-    The project name is derived from the directory name unless you pass <code>--label</code>.
-  </p>
-
-  <pre><code>band projects add /Users/dev/projects/my-app
-band projects add . --label "Frontend"</code></pre>
+  <h2>Add a repo</h2>
 
   <p>
-    Band reads <code>.band/config.json</code> from the project directory if it exists. If the
-    config file is missing, the project is still registered and you can add the file later.
+    Register a directory as a Band repo. The path must point to an existing Git repository.
+    The repo name is derived from the directory name unless you pass <code>--label</code>.
   </p>
 
-  <h2>Remove a project</h2>
+  <pre><code>band repos add /Users/dev/repos/my-app
+band repos add . --label "Frontend"</code></pre>
 
   <p>
-    Unregister a project <strong>by name</strong>. This does not delete the directory on disk —
-    it only removes the project (and any tracked worktrees) from Band's database.
+    Band reads <code>.band/config.json</code> from the repo directory if it exists. If the
+    config file is missing, the repo is still registered and you can add the file later.
   </p>
 
-  <pre><code>band projects remove my-app</code></pre>
+  <h2>Remove a repo</h2>
+
+  <p>
+    Unregister a repo <strong>by name</strong>. This does not delete the directory on disk —
+    it only removes the repo (and any tracked worktrees) from Band's database.
+  </p>
+
+  <pre><code>band repos remove my-app</code></pre>
 
   <h2>JSON output</h2>
 
   <p>All subcommands support <code>--output json</code> for machine-readable output.</p>
 
-  <pre><code>band projects list --output json</code></pre>
+  <pre><code>band repos list --output json</code></pre>
 
   <p>Example JSON output:</p>
 
   <pre><code set:html={`{
-  "projects": [
+  "repos": [
     {
       "name": "my-app",
-      "path": "/Users/dev/projects/my-app",
+      "path": "/Users/dev/repos/my-app",
       "worktreeCount": 3
     },
     {
       "name": "api-server",
-      "path": "/Users/dev/projects/api",
+      "path": "/Users/dev/repos/api",
       "worktreeCount": 1
     }
   ]
@@ -73,9 +73,9 @@ band projects add . --label "Frontend"</code></pre>
   <h2>Notes</h2>
 
   <ul>
-    <li>Project names default to the basename of the directory; pass <code>--label</code> to override.</li>
-    <li>Project names must be unique. Adding a directory whose name conflicts with an existing project will fail.</li>
-    <li>Projects are stored in Band's local SQLite database (<code>~/.band/band.db</code>).</li>
-    <li>The project directory should be a Git repository for workspace features (worktrees, diff, branch status) to work.</li>
+    <li>Repo names default to the basename of the directory; pass <code>--label</code> to override.</li>
+    <li>Repo names must be unique. Adding a directory whose name conflicts with an existing repo will fail.</li>
+    <li>Repos are stored in Band's local SQLite database (<code>~/.band/band.db</code>).</li>
+    <li>The repo directory should be a Git repository for worktree features (worktrees, diff, branch status) to work.</li>
   </ul>
 </DocsLayout>

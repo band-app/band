@@ -2,11 +2,11 @@
 
 The CLI is split into seven domain-specific skills, each authored as its own `SKILL.md` with its own command reference:
 
-- [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — workspaces, projects, cronjobs, tunnel, settings, schema, notify, skills install.
+- [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — worktrees, repos, cronjobs, tunnel, settings, schema, notify, skills install.
 - [`apps/cli/skills/band-chat/SKILL.md`](../apps/cli/skills/band-chat/SKILL.md) — chat panes (`band chats ...`), including label management.
 - [`apps/cli/skills/band-terminal/SKILL.md`](../apps/cli/skills/band-terminal/SKILL.md) — terminal sessions (`band terminals ...`).
 - [`apps/cli/skills/band-browser/SKILL.md`](../apps/cli/skills/band-browser/SKILL.md) — browser tabs (`band browsers ...`).
-- [`apps/cli/skills/band-start/SKILL.md`](../apps/cli/skills/band-start/SKILL.md) — kickoff flow (`band workspaces create --prompt ...`).
+- [`apps/cli/skills/band-start/SKILL.md`](../apps/cli/skills/band-start/SKILL.md) — kickoff flow (`band worktrees create --prompt ...`).
 - [`apps/cli/skills/band-loop/SKILL.md`](../apps/cli/skills/band-loop/SKILL.md) — recurring agent prompts (`band cronjobs ...`).
 - [`apps/cli/skills/band-subscribe/SKILL.md`](../apps/cli/skills/band-subscribe/SKILL.md) — wait for PR reviews, CI, webhooks and timers (`band subscriptions ...`).
 
@@ -19,7 +19,7 @@ Chat panes carry a free-form `Record<string, string>` of labels alongside their 
 There are two reasons to use them:
 
 1. **Organize your own chats.** Tag a chat with `phase=plan` / `phase=implement` / `phase=review`, or by feature area, owner, or anything else. Filter the list client-side with `band chats list --output json | jq '.chats[] | select(.labels.phase == "plan")'`.
-2. **Let the cronjob scheduler claim its own chat.** Each cronjob owns a dedicated chat in the target workspace, identified by the reserved `band:cronId` label. On the first fire the scheduler creates a chat tagged with `band:cronId=<jobId>`; subsequent fires reuse the same chat by looking it up via `findChatByLabels`. The user can delete the chat at any time — the next fire will recreate it (intentional soft reset). This replaces the older "dispatch to whichever chat happens to be active" behaviour, so cron output no longer interleaves with the user's interactive conversation.
+2. **Let the cronjob scheduler claim its own chat.** Each cronjob owns a dedicated chat in the target worktree, identified by the reserved `band:cronId` label. On the first fire the scheduler creates a chat tagged with `band:cronId=<jobId>`; subsequent fires reuse the same chat by looking it up via `findChatByLabels`. The user can delete the chat at any time — the next fire will recreate it (intentional soft reset). This replaces the older "dispatch to whichever chat happens to be active" behaviour, so cron output no longer interleaves with the user's interactive conversation.
 
 The `band:` key prefix is reserved for server-internal labels. Writes through the CLI or any user-facing tRPC route are rejected; only server code (e.g. `server/services/cronjob-service.ts`) can set them, and it does so by passing `allowReservedLabels: true` to `createChat`. Other validation rules at the write boundary: at most 20 keys per chat, keys match `^[a-zA-Z0-9_:-]{1,64}$` (colons allowed for namespacing), values are non-empty printable ASCII up to 256 chars.
 

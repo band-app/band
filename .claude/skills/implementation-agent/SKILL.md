@@ -1,15 +1,15 @@
 ---
 name: implementation-agent
-description: Workspace-level implementation agent that picks up work from a GitHub issue, tracks progress via issue comments, creates PRs, handles review feedback, and merges when approved. Designed to be invoked repeatedly by the backlog-burner orchestrator or manually via band tasks. Use when an agent needs to implement a GitHub issue end-to-end in a Band workspace.
+description: Worktree-level implementation agent that picks up work from a GitHub issue, tracks progress via issue comments, creates PRs, handles review feedback, and merges when approved. Designed to be invoked repeatedly by the backlog-burner orchestrator or manually via band tasks. Use when an agent needs to implement a GitHub issue end-to-end in a Band worktree.
 ---
 
 # Implementation Agent
 
-Implements a GitHub issue in a Band workspace. Each run does one piece of work: reads progress from the GitHub issue comment, picks the next task, implements it, commits, pushes, and updates progress. Designed to be called repeatedly — each invocation gets fresh context and picks up where the last one left off.
+Implements a GitHub issue in a Band worktree. Each run does one piece of work: reads progress from the GitHub issue comment, picks the next task, implements it, commits, pushes, and updates progress. Designed to be called repeatedly — each invocation gets fresh context and picks up where the last one left off.
 
 ## Prerequisites
 
-- Inside a Band workspace (git worktree managed by Band)
+- Inside a Band worktree (git worktree managed by Band)
 - `gh` CLI authenticated with GitHub
 - `band` CLI available
 - Branch name encodes the issue number: `<issue-number>-<summary>` (e.g., `99-task-loop-mode`)
@@ -41,7 +41,7 @@ gh api repos/$REPO/issues/$ISSUE_NUMBER/comments \
   --jq '.[] | select(.body | contains("## Implementation Progress")) | {id, body}'
 ```
 
-Also check the workspace state:
+Also check the worktree state:
 
 ```sh
 git log --oneline main..HEAD       # What's been committed
@@ -113,7 +113,7 @@ From the progress comment, find the first unchecked `- [ ]` item.
 1. Read the relevant source files
 2. Implement the change
 3. Follow existing code patterns and conventions
-4. Run the project's tests:
+4. Run the repo's tests:
    - Check for test scripts: `cat package.json | jq '.scripts | keys[]'` or `Makefile`, `Cargo.toml`, etc.
    - Run tests and fix failures before proceeding
 5. Stage and commit:
@@ -235,15 +235,15 @@ Update the progress comment:
 Merged
 ```
 
-Detect current project and branch from Band workspace list, then clean up:
+Detect current repo and branch from Band worktree list, then clean up:
 
 ```sh
-PROJECT=$(band workspaces list --output json | jq -r '.workspaces[] | select(.branch == "'"$BRANCH"'") | .project')
+REPO=$(band worktrees list --output json | jq -r '.worktrees[] | select(.branch == "'"$BRANCH"'") | .repo')
 
-# Must leave the workspace directory before deleting it
-cd $(band projects list --output json | jq -r '.projects[] | select(.name == "'"$PROJECT"'") | .path')
+# Must leave the worktree directory before deleting it
+cd $(band repos list --output json | jq -r '.repos[] | select(.name == "'"$REPO"'") | .path')
 
-band workspaces remove $PROJECT $BRANCH
+band worktrees remove $REPO $BRANCH
 ```
 
 ## Rules
@@ -254,5 +254,5 @@ band workspaces remove $PROJECT $BRANCH
 - **Never merge without approval** — only merge when `reviewDecision == "APPROVED"` or the `approved` label is present.
 - **Run tests before committing** — never push broken code.
 - **Small, focused commits** — one logical change per commit with a descriptive message.
-- **Follow existing patterns** — read neighboring code before writing new code. Match the project's style, naming, and architecture.
+- **Follow existing patterns** — read neighboring code before writing new code. Match the repo's style, naming, and architecture.
 - **Don't modify production code to fix tests** — if a test fails, either the implementation is wrong or the test needs updating. Never add test-only branches to production code.

@@ -1,27 +1,27 @@
 ---
 name: band-start
 version: 0.1.0
-description: Kick off work on a new feature, bug fix, or task in a fresh Band workspace. Use when the user describes a piece of work and wants an agent to start on it — "start working on X", "create a workspace and implement Y", "kick off a task for ABCD-1234", "spin up a worktree to fix #42". Auto-detects the project from the cwd, parses any Jira (e.g. `ABCD-1234`) or GitHub (`#123`) ticket reference out of the prompt, fetches richer context with `acli` / `gh`, picks a Conventional Commits branch prefix (`feat/`, `fix/`, or `chore/`) based on the work, generates a kebab-case branch name, and creates the workspace with `--prompt` so the agent starts immediately.
+description: Kick off work on a new feature, bug fix, or task in a fresh Band worktree. Use when the user describes a piece of work and wants an agent to start on it — "start working on X", "create a worktree and implement Y", "kick off a task for ABCD-1234", "spin up a worktree to fix #42". Auto-detects the repo from the cwd, parses any Jira (e.g. `ABCD-1234`) or GitHub (`#123`) ticket reference out of the prompt, fetches richer context with `acli` / `gh`, picks a Conventional Commits branch prefix (`feat/`, `fix/`, or `chore/`) based on the work, generates a kebab-case branch name, and creates the worktree with `--prompt` so the agent starts immediately.
 allowed-tools: Bash
 argument-hint: <prompt describing what to work on>
 ---
 
-# Start a Band Workspace
+# Start a Band Worktree
 
-Creates a Band workspace (git worktree) and submits a task to the coding agent in a single step. The only required input is the **prompt** — a natural-language description of what the agent should work on. This skill figures out the project, branch name, and any ticket context automatically.
+Creates a Band worktree (git worktree) and submits a task to the coding agent in a single step. The only required input is the **prompt** — a natural-language description of what the agent should work on. This skill figures out the repo, branch name, and any ticket context automatically.
 
 This skill is focused on the **kickoff flow**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
-- **`band-chat`** — chat panes inside a workspace (`band chats send/watch/...`).
-- **`band-loop`** — schedule a recurring prompt against a workspace (`band cronjobs ...`).
-- **`band-terminal`** — terminal sessions inside a workspace.
-- **`band-browser`** — browser tabs inside a workspace.
+- **`band`** — worktrees, repos, cronjobs, tunnel, settings.
+- **`band-chat`** — chat panes inside a worktree (`band chats send/watch/...`).
+- **`band-loop`** — schedule a recurring prompt against a worktree (`band cronjobs ...`).
+- **`band-terminal`** — terminal sessions inside a worktree.
+- **`band-browser`** — browser tabs inside a worktree.
 
 ## Prerequisites
 
 - The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default.
-- The target project must be registered with Band (`band projects list` to check).
+- The target repo must be registered with Band (`band repos list` to check).
 - Optional: `acli` for Jira ticket lookups, `gh` for GitHub issue lookups. Missing tools are non-fatal — the skill falls back to using the prompt as-is.
 
 ## JSON Output
@@ -33,37 +33,37 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Workflow
 
-### 1. Determine the project
+### 1. Determine the repo
 
-Match the current working directory against the registered Band projects:
+Match the current working directory against the registered Band repos:
 
 ```sh
-band projects list --output json | jq -r '.projects[] | "\(.name)\t\(.path)"'
+band repos list --output json | jq -r '.repos[] | "\(.name)\t\(.path)"'
 ```
 
-Pick the project whose `path` is the cwd or one of its ancestors. If no match or the cwd is ambiguous (multiple registered projects under the same root), ask the user to pick one.
+Pick the repo whose `path` is the cwd or one of its ancestors. If no match or the cwd is ambiguous (multiple registered repos under the same root), ask the user to pick one.
 
-### 1a. Plain (non-git) projects: short-circuit
+### 1a. Plain (non-git) repos: short-circuit
 
-A Band project can be either a git repo (the normal case) or a "plain" folder (no `.git`). Plain projects have a single implicit workspace whose path equals the project path — there are no branches, no PRs, no `workspaces create`.
+A Band repo can be either a git repo (the normal case) or a "plain" folder (no `.git`). Plain repos have a single implicit worktree whose path equals the repo path — there are no branches, no PRs, no `worktrees create`.
 
-After step 1, check the project's `kind` field:
+After step 1, check the repo's `kind` field:
 
 ```sh
-band projects list --output json | jq -r --arg name "$project_name" '.projects[] | select(.name == $name) | .kind'
+band repos list --output json | jq -r --arg name "$repo_name" '.repos[] | select(.name == $name) | .kind'
 ```
 
 If `kind` is `"plain"`:
 
-- **Skip steps 2–6 entirely.** No ticket detection, no branch-name generation, no `workspaces create`.
-- The workspace already exists — its `workspaceId` and `path` are both surfaced by `band workspaces list`.
-- Resolve the workspace ID from the API rather than reconstructing it locally — that keeps the skill insensitive to future changes in the `toWorkspaceId` separator/escaping rules:
+- **Skip steps 2–6 entirely.** No ticket detection, no branch-name generation, no `worktrees create`.
+- The worktree already exists — its `worktreeId` and `path` are both surfaced by `band worktrees list`.
+- Resolve the worktree ID from the API rather than reconstructing it locally — that keeps the skill insensitive to future changes in the `toWorktreeId` separator/escaping rules:
 
   ```sh
-  ws_id=$(band workspaces list "$project_name" --output json \
-    | jq -r '.workspaces[0].workspaceId // empty')
+  ws_id=$(band worktrees list "$repo_name" --output json \
+    | jq -r '.worktrees[0].worktreeId // empty')
   if [ -z "$ws_id" ]; then
-    echo "error: no implicit workspace found for project '$project_name' — check that the server is running and the project is registered" >&2
+    echo "error: no implicit worktree found for repo '$repo_name' — check that the server is running and the repo is registered" >&2
     exit 1
   fi
   # `chats send` lazy-creates a chat pane on the first call and returns
@@ -89,10 +89,10 @@ Scan the prompt for either format:
 - **Jira ticket** — `^[A-Z][A-Z0-9]+-\d+$` anywhere in the prompt (e.g. `ABCD-1234`, `WXYZ-567`). Letters-dash-numbers.
 - **GitHub issue** — `#\d+` (e.g. `#42`) or a full GitHub issue URL (e.g. `https://github.com/<owner>/<repo>/issues/123`).
 
-If neither is found and you still want to disambiguate which ticket system the project uses, check the git remote:
+If neither is found and you still want to disambiguate which ticket system the repo uses, check the git remote:
 
 ```sh
-git -C <project-path> remote get-url origin
+git -C <repo-path> remote get-url origin
 ```
 
 A `github.com` remote → assume GitHub Issues. Anything else → assume Jira.
@@ -162,25 +162,25 @@ Bad examples (do NOT produce these):
 - Start with the user's original prompt verbatim.
 - If you fetched ticket info in step 3, append a section with the ticket title and description so the agent has the full context.
 
-### 6. Create the workspace
+### 6. Create the worktree
 
-Always pass `--prompt` so the agent starts immediately — never create a workspace and then separately call `band chats send`. Capture the worktree path from `--output json` (the create response is shaped `{"path": "..."}`):
+Always pass `--prompt` so the agent starts immediately — never create a worktree and then separately call `band chats send`. Capture the worktree path from `--output json` (the create response is shaped `{"path": "..."}`):
 
 ```sh
-ws_path=$(band workspaces create <project> <branch> \
+ws_path=$(band worktrees create <repo> <branch> \
   --prompt "<composed prompt>" \
   --output json | jq -r .path)
 ```
 
-`workspaces create` is idempotent — creating an existing workspace just returns its path, so re-running with the same arguments is safe.
+`worktrees create` is idempotent — creating an existing worktree just returns its path, so re-running with the same arguments is safe.
 
-### 7. Resolve the workspace ID and chat pane
+### 7. Resolve the worktree ID and chat pane
 
-`band workspaces create` doesn't return the workspace ID, only the path. Look it up by path from `band workspaces list` (the list response uses the field name `workspaceId`):
+`band worktrees create` doesn't return the worktree ID, only the path. Look it up by path from `band worktrees list` (the list response uses the field name `worktreeId`):
 
 ```sh
-ws_id=$(band workspaces list --output json \
-  | jq -r --arg path "$ws_path" '.workspaces[] | select(.path == $path) | .workspaceId')
+ws_id=$(band worktrees list --output json \
+  | jq -r --arg path "$ws_path" '.worktrees[] | select(.path == $path) | .worktreeId')
 ```
 
 `--prompt` lazy-creates a chat pane for the agent task. Look up that pane's ID so you can print a fully-resolved watch command (no `<chat-id>` placeholders):
@@ -213,18 +213,18 @@ User input: `Start working on ABCD-1234 to add labels to the chat messages`
 3. Classify: adding labels → new functionality → `feat/`.
 4. Branch: `feat/abcd-1234-add-labels`.
 5. Compose prompt: user input + Jira summary/description.
-6. Create the workspace and resolve the chat ID:
+6. Create the worktree and resolve the chat ID:
 
    ```sh
-   ws_path=$(band workspaces create my-app feat/abcd-1234-add-labels \
+   ws_path=$(band worktrees create my-app feat/abcd-1234-add-labels \
      --prompt "Add labels to the chat messages.
 
    Jira ticket ABCD-1234: <summary>
    <description>" \
      --output json | jq -r .path)
 
-   ws_id=$(band workspaces list --output json \
-     | jq -r --arg path "$ws_path" '.workspaces[] | select(.path == $path) | .workspaceId')
+   ws_id=$(band worktrees list --output json \
+     | jq -r --arg path "$ws_path" '.worktrees[] | select(.path == $path) | .worktreeId')
 
    chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
    ```
@@ -240,18 +240,18 @@ User input: `Kick off #42 — the login button redirects in a loop`
 3. Classify: broken behavior → `fix/`.
 4. Branch: `fix/42-login-redirect`.
 5. Compose prompt: user input + GitHub issue body.
-6. Create the workspace and resolve the chat ID:
+6. Create the worktree and resolve the chat ID:
 
    ```sh
-   ws_path=$(band workspaces create my-app fix/42-login-redirect \
+   ws_path=$(band worktrees create my-app fix/42-login-redirect \
      --prompt "The login button redirects in a loop.
 
    GitHub issue #42: <title>
    <body>" \
      --output json | jq -r .path)
 
-   ws_id=$(band workspaces list --output json \
-     | jq -r --arg path "$ws_path" '.workspaces[] | select(.path == $path) | .workspaceId')
+   ws_id=$(band worktrees list --output json \
+     | jq -r --arg path "$ws_path" '.worktrees[] | select(.path == $path) | .worktreeId')
 
    chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
    ```
@@ -260,20 +260,20 @@ User input: `Kick off #42 — the login button redirects in a loop`
 
 ### No ticket reference (maintenance)
 
-User input: `Spin up a workspace to bump all the dependencies and refresh the lockfile`
+User input: `Spin up a worktree to bump all the dependencies and refresh the lockfile`
 
 1. No ticket pattern matches → skip step 3.
 2. Classify: not user-visible, not a bug → `chore/`.
 3. Branch: `chore/bump-deps`.
-4. Create the workspace and resolve the chat ID:
+4. Create the worktree and resolve the chat ID:
 
    ```sh
-   ws_path=$(band workspaces create my-app chore/bump-deps \
-     --prompt "Spin up a workspace to bump all the dependencies and refresh the lockfile" \
+   ws_path=$(band worktrees create my-app chore/bump-deps \
+     --prompt "Spin up a worktree to bump all the dependencies and refresh the lockfile" \
      --output json | jq -r .path)
 
-   ws_id=$(band workspaces list --output json \
-     | jq -r --arg path "$ws_path" '.workspaces[] | select(.path == $path) | .workspaceId')
+   ws_id=$(band worktrees list --output json \
+     | jq -r --arg path "$ws_path" '.worktrees[] | select(.path == $path) | .worktreeId')
 
    chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
    ```
@@ -282,19 +282,19 @@ User input: `Spin up a workspace to bump all the dependencies and refresh the lo
 
 ## Invariants
 
-- **Always pass `--prompt`** on `workspaces create` so the agent starts in one step. Never create-then-send as two CLI calls.
+- **Always pass `--prompt`** on `worktrees create` so the agent starts in one step. Never create-then-send as two CLI calls.
 - Branch names start with a Conventional Commits prefix (`feat/`, `fix/`, or `chore/`), then are lowercase kebab-case, optionally including a Jira key (`abcd-1234-`) or GitHub issue number (`42-`).
 - When the work doesn't clearly fit `feat/` or `fix/`, default to `chore/`. Never omit the prefix.
 - Skip ticket fetching when the relevant CLI (`acli`, `gh`) is missing or the lookup fails — the kickoff should still succeed.
-- `workspaces create` is idempotent — re-running with the same project/branch returns the existing worktree path.
+- `worktrees create` is idempotent — re-running with the same repo/branch returns the existing worktree path.
 - **Always resolve the chat ID and print `band chats watch <resolved-id>`** as the final step. The printed copy-paste command must contain the literal resolved ID (e.g. `band chats watch chat_8f2a1`), never a `<chat-id>` placeholder. Do not invoke `band chats watch` yourself — it streams indefinitely and would block the session.
-- `workspaces create` returns `{"path": "..."}` only — there is no `id` field. The workspace ID is `workspaceId` in `band workspaces list --output json`, looked up by matching `path`.
+- `worktrees create` returns `{"path": "..."}` only — there is no `id` field. The worktree ID is `worktreeId` in `band worktrees list --output json`, looked up by matching `path`.
 
 ## Cross-references
 
 - For sending follow-up messages to the agent after kickoff, see **`band-chat`** (`band chats send`).
-- For recurring or follow-up scheduled prompts against the same workspace, see **`band-loop`**.
-- For workspace cleanup (`band workspaces remove`), project management (`band projects add/remove`), and tunnel control, see **`band`**.
+- For recurring or follow-up scheduled prompts against the same worktree, see **`band-loop`**.
+- For worktree cleanup (`band worktrees remove`), repo management (`band repos add/remove`), and tunnel control, see **`band`**.
 
 ## Configuration
 

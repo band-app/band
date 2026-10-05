@@ -1,7 +1,7 @@
 ---
 name: band-chat
 version: 0.1.0
-description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, remove, or label agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "label chat", "tag chat", "submit prompt to workspace".
+description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, remove, or label agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "label chat", "tag chat", "submit prompt to worktree".
 allowed-tools: Bash
 argument-hint: chats [args...]
 ---
@@ -10,19 +10,19 @@ argument-hint: chats [args...]
 
 All chat operations live under a single `band chats <subcommand>` group: `list/create/send/watch/stop/remove`.
 
-The primary way to drive a coding agent from the CLI is `band chats send` — it sends a message to a workspace's *active* chat panel (auto-detected from cwd) and lazy-creates a "Chat" panel if the workspace has none.
+The primary way to drive a coding agent from the CLI is `band chats send` — it sends a message to a worktree's *active* chat panel (auto-detected from cwd) and lazy-creates a "Chat" panel if the worktree has none.
 
-Chat panes are agent processes attached to a Band workspace. Each chat pane has its own conversation history and can run a different agent, model, or mode.
+Chat panes are agent processes attached to a Band worktree. Each chat pane has its own conversation history and can run a different agent, model, or mode.
 
 This skill is focused on **chat pane management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
-- **`band-terminal`** — terminal sessions inside a workspace.
-- **`band-browser`** — browser tabs inside a workspace.
+- **`band`** — worktrees, repos, cronjobs, tunnel, settings.
+- **`band-terminal`** — terminal sessions inside a worktree.
+- **`band-browser`** — browser tabs inside a worktree.
 
 ## Prerequisites
 
-The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the workspace lifecycle.
+The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the worktree lifecycle.
 
 ## JSON Output
 
@@ -33,34 +33,34 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Commands
 
-### List chat panes for a workspace
+### List chat panes for a worktree
 
 ```sh
-band chats list [workspace_id]
+band chats list [worktree_id]
 ```
 
 Text output: `ID\tNAME\tAGENT\tSTATUS\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).
 JSON output: `{"chats": [{"id": "...", "name": "...", "agent": "...", "status": "...", "labels": {"k": "v"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable.
 
-### Create a new chat pane in a workspace
+### Create a new chat pane in a worktree
 
 ```sh
-band chats create [workspace_id] [--name <string>] [--agent <string>] [--model <string>] [--mode <string>] [--label <string>]
+band chats create [worktree_id] [--name <string>] [--agent <string>] [--model <string>] [--mode <string>] [--label <string>]
 ```
 
 Creates a new independent chat pane with its own agent process. Returns the chat ID.
 JSON output: `{"chat": {"id": "...", "name": "...", "agent": "...", "status": "idle", "labels": {"k": "v"}}}`
 
-### Send a message to a workspace chat (defaults to the workspace's active chat panel)
+### Send a message to a worktree chat (defaults to the worktree's active chat panel)
 
 ```sh
-band chats send [chat_id] --message <string> [--workspace <string>] [--mode <string>] [--model <string>] [--agent <string>]
+band chats send [chat_id] --message <string> [--worktree <string>] [--mode <string>] [--model <string>] [--agent <string>]
 ```
 
-Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new "Chat" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.
+Sends a message to a worktree chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the worktree's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new "Chat" panel if the worktree has none. This means CLI prompts land in the same conversation the user is looking at.
 
 Returns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.
-JSON output: `{"id": "tsk_...", "queued": false, "workspaceId": "...", "chatId": "chat_..."}`, or `{"id": null, "queued": true, "queuedMessageId": "...", "workspaceId": "...", "chatId": "chat_..."}` when queued.
+JSON output: `{"id": "tsk_...", "queued": false, "worktreeId": "...", "chatId": "chat_..."}`, or `{"id": null, "queued": true, "queuedMessageId": "...", "worktreeId": "...", "chatId": "chat_..."}` when queued.
 
 Replaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`).
 
@@ -112,27 +112,27 @@ Reads the chat's current labels, drops the listed keys (unknown keys are ignored
 Text output: the chat's final labels rendered as `k=v,k=v` with sorted keys.
 JSON output: `{"chat": {...}}` — the full chat record after the update.
 
-## Default workspace and chat resolution
+## Default worktree and chat resolution
 
-Every `band chats` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when no workspace is given, and resolves to the workspace's *active* chat panel when no chat ID is given. So the typical flow from inside a workspace is just `band chats send --message "..."` — no IDs to type.
+Every `band chats` subcommand auto-detects the worktree from the current working directory (matched against registered worktree paths) when no worktree is given, and resolves to the worktree's *active* chat panel when no chat ID is given. So the typical flow from inside a worktree is just `band chats send --message "..."` — no IDs to type.
 
 You only need to pass an explicit ID when:
 
-- you're not inside the workspace's directory (use `--workspace <ws_id>` for `chats send`, or pass the workspace ID positionally for `chats list/create`), or
-- the workspace has multiple chats and you want to target a specific one (pass the chat ID positionally to `chats send/watch/stop/remove`).
+- you're not inside the worktree's directory (use `--worktree <ws_id>` for `chats send`, or pass the worktree ID positionally for `chats list/create`), or
+- the worktree has multiple chats and you want to target a specific one (pass the chat ID positionally to `chats send/watch/stop/remove`).
 
 ## Workflows
 
 ### Send a message (most common)
 
 ```sh
-# From inside a workspace directory: workspace auto-detected from cwd,
+# From inside a worktree directory: worktree auto-detected from cwd,
 # chat auto-resolved to the active panel from the saved dashboard layout.
-# If the workspace has no chats yet, the server lazy-creates one.
+# If the worktree has no chats yet, the server lazy-creates one.
 band chats send --message "Fix the failing tests"
 
-# With an explicit workspace (when not in its cwd)
-band chats send --workspace ws_abc123 --message "Fix the failing tests"
+# With an explicit worktree (when not in its cwd)
+band chats send --worktree ws_abc123 --message "Fix the failing tests"
 
 # Target a specific chat pane instead of the active one
 band chats send chat_abc --message "Investigate the perf regression"
@@ -145,14 +145,14 @@ band chats send --mode plan --model claude-opus-4-20250514 \
 ### Send a message to a freshly-created chat
 
 ```sh
-# Create a chat pane (workspace auto-detected) and capture its ID
+# Create a chat pane (worktree auto-detected) and capture its ID
 chat=$(band chats create --name "review" --output json | jq -r .chat.id)
 
 # Send the prompt to that specific chat
 band chats send "$chat" --message "Summarize the changes on this branch"
 ```
 
-### List chats in the current workspace
+### List chats in the current worktree
 
 ```sh
 band chats list --output json | jq '.chats[] | select(.status == "running")'
@@ -171,7 +171,7 @@ band chats create \
 ### Watch a chat's running task as raw NDJSON
 
 ```sh
-# No chat_id: stream the cwd workspace's first chat pane.
+# No chat_id: stream the cwd worktree's first chat pane.
 band chats watch
 
 # Pipe through jq for live filtering — for example, only the agent's text:
@@ -185,7 +185,7 @@ band chats watch
 ### Stop and remove a chat
 
 ```sh
-# Abort the running task in the cwd workspace's first chat
+# Abort the running task in the cwd worktree's first chat
 band chats stop
 
 # Permanently remove that chat (kills the agent process)
@@ -218,8 +218,8 @@ band chats list --output json | jq '.chats[] | select(.labels.phase == "plan")'
 
 ## Cross-references
 
-- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
-- `band chats watch` streams a chat's running task; `band chats stop` aborts it. Both default to the cwd workspace's first chat pane when no ID is given.
+- To find the worktree ID explicitly, use `band worktrees list` (see the `band` skill).
+- `band chats watch` streams a chat's running task; `band chats stop` aborts it. Both default to the cwd worktree's first chat pane when no ID is given.
 
 ## Configuration
 

@@ -1,24 +1,24 @@
 ---
 name: band-browser
 version: 0.1.0
-description: Manage Band browser tabs via the CLI. Use when the user wants to create, list, navigate, inspect, or remove a browser tab inside a Band workspace. Triggers include "open browser", "navigate to URL", "browser tab", "browser pane", "remove browser tab".
+description: Manage Band browser tabs via the CLI. Use when the user wants to create, list, navigate, inspect, or remove a browser tab inside a Band worktree. Triggers include "open browser", "navigate to URL", "browser tab", "browser pane", "remove browser tab".
 allowed-tools: Bash
 argument-hint: browsers [list|create|navigate|get|remove] [args...]
 ---
 
 # Band Browser Tabs
 
-Browser tabs are web views attached to a Band workspace. Each tab has its own URL and status, and can be driven from the CLI.
+Browser tabs are web views attached to a Band worktree. Each tab has its own URL and status, and can be driven from the CLI.
 
 This skill is focused on **browser tab management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
-- **`band-chat`** — agent chat panes inside a workspace.
-- **`band-terminal`** — terminal sessions inside a workspace.
+- **`band`** — worktrees, repos, cronjobs, tunnel, settings.
+- **`band-chat`** — agent chat panes inside a worktree.
+- **`band-terminal`** — terminal sessions inside a worktree.
 
 ## Prerequisites
 
-The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the workspace lifecycle.
+The Band server must be running (started by the Band dashboard app). Connects to `http://localhost:3456` by default. See the `band` skill for general setup and the worktree lifecycle.
 
 ## JSON Output
 
@@ -29,19 +29,19 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Commands
 
-### List browser tabs for a workspace
+### List browser tabs for a worktree
 
 ```sh
-band browsers list [workspace_id]
+band browsers list [worktree_id]
 ```
 
 Text output: `ID\tNAME\tURL\tSTATUS` (tab-separated table).
 JSON output: `{"browsers": [{"id": "...", "name": "...", "url": "...", "status": "..."}]}`
 
-### Create a new browser tab in a workspace
+### Create a new browser tab in a worktree
 
 ```sh
-band browsers create [workspace_id] [--url <string>] [--name <string>]
+band browsers create [worktree_id] [--url <string>] [--name <string>]
 ```
 
 Text output: the new browser tab ID.
@@ -53,7 +53,7 @@ JSON output: `{"browser": {"id": "...", ...}}`
 band browsers navigate [browser_id] --url <string>
 ```
 
-Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag.
+Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the worktree from cwd and targets that worktree's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag.
 
 ### Get a browser tab's current state
 
@@ -72,18 +72,18 @@ band browsers remove [browser_id]
 
 Removes the browser tab and cleans up state.
 
-## Default workspace and browser resolution
+## Default worktree and browser resolution
 
-Every `band browsers` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first browser tab when `[browser_id]` is omitted. So the typical flow from inside a workspace is just `band browsers navigate --url <url>` — no IDs to type.
+Every `band browsers` subcommand auto-detects the worktree from the current working directory (matched against registered worktree paths) when `[worktree_id]` is omitted, and resolves to the worktree's first browser tab when `[browser_id]` is omitted. So the typical flow from inside a worktree is just `band browsers navigate --url <url>` — no IDs to type.
 
-You only need to pass an explicit ID when you're outside the workspace's cwd or you want to target a specific tab among several.
+You only need to pass an explicit ID when you're outside the worktree's cwd or you want to target a specific tab among several.
 
 ## Workflows
 
 ### Open a tab and inspect its state
 
 ```sh
-# Create a new tab pre-loaded with a URL (workspace auto-detected from cwd)
+# Create a new tab pre-loaded with a URL (worktree auto-detected from cwd)
 bid=$(band browsers create --url https://example.com --name "docs" --output json | jq -r .browser.id)
 
 # Read the current state — no browser_id needed if it's the only tab
@@ -110,7 +110,7 @@ band browsers list --output json | jq '.browsers[].id' | \
 
 ## Cross-references
 
-- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
+- To find the worktree ID explicitly, use `band worktrees list` (see the `band` skill).
 - For shell access, see `band-terminal`. For agent chats, see `band-chat`.
 
 ## Configuration

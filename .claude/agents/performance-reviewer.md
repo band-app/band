@@ -25,7 +25,7 @@ For every source file touched, read the whole file with `Read` — a perf concer
 
 ## What you check
 
-Apply each rule in `performance-criteria.md` (`PERF-1`…`PERF-10`). Cite the rule ID in each finding (e.g. `PERF-1: N+1 query — one Drizzle call per workspace in a loop over workspaces.length`).
+Apply each rule in `performance-criteria.md` (`PERF-1`…`PERF-10`). Cite the rule ID in each finding (e.g. `PERF-1: N+1 query — one Drizzle call per worktree in a loop over worktrees.length`).
 
 **When flagging a perf concern, name the multiplier.** Per `PERF-5`: state how often the code runs and the resulting cost. "This loop runs per ingested event — at 10k events/sec the cost is 0.3 ms × 10k = 3 s of CPU per second" makes the math visible. A finding without the multiplier reads as conjecture.
 

@@ -6,7 +6,7 @@ This supersedes [docs/experiments/federation.md](../experiments/federation.md).
 
 ## Context
 
-Today one Band server per machine owns everything: the database, the API, chat, scheduling and every git, file, process and terminal operation (`apps/hub/src/server/`). `federation.md` proposed connecting several of these servers as symmetric peers, each the authority for the workspaces on its machine.
+Today one Band server per machine owns everything: the database, the API, chat, scheduling and every git, file, process and terminal operation (`apps/hub/src/server/`). `federation.md` proposed connecting several of these servers as symmetric peers, each the authority for the worktrees on its machine.
 
 Several planned features need a place that is always on and reachable from every device and every machine:
 
@@ -20,7 +20,7 @@ A laptop that sleeps cannot host these. A mesh of peers has no natural owner for
 ## Decision
 
 1. **One hub, API only.** `apps/hub` owns the database, the API, the chat event log, scheduling and auth. Settings exist only on the hub. The UI stays in `apps/web` as a separate static SPA that connects to a hub URL. The hub, a static host or Electron can serve it.
-2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a workspace runs on that workspace's host, through a `Host` interface. The hub never touches a worker's disk directly.
+2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a worktree runs on that worktree's host, through a `Host` interface. The hub never touches a worker's disk directly.
 3. **Workers dial out.** Each worker keeps one outbound WebSocket to the hub and opens no inbound ports. This works behind NAT and tunnels without a VPN.
 4. **Local mode is unchanged.** The hub runs a `LocalHost` in-process, so a single-machine user sees no difference.
 5. **Chat stays on the hub, and only agent stdio is remote.** The hub keeps the ACP client and the event log. The worker spawns the agent and relays its stdio. Replay, queueing and subscriptions stay independent of where the agent runs.
@@ -47,7 +47,7 @@ Negative:
 
 ## Alternatives considered
 
-**Peer mesh (`federation.md`).** Symmetric Band installs, each the authority for its own workspaces, joined over Tailscale. It was rejected because the mesh has no always-on place for the coordinator, subscriptions, the OAuth vault or the runners. Each would have to live on one chosen peer, which makes that peer a hub without the design saying so. The mesh would also need state exchange, proxying of tRPC calls to the owning peer, discovery and settings replication, all of which the hub avoids.
+**Peer mesh (`federation.md`).** Symmetric Band installs, each the authority for its own worktrees, joined over Tailscale. It was rejected because the mesh has no always-on place for the coordinator, subscriptions, the OAuth vault or the runners. Each would have to live on one chosen peer, which makes that peer a hub without the design saying so. The mesh would also need state exchange, proxying of tRPC calls to the owning peer, discovery and settings replication, all of which the hub avoids.
 
 ## What carries over from federation.md
 

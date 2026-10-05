@@ -4,7 +4,7 @@
 
 ## Install
 
-The package is `@band-app/worker` and its binary is `band-worker`. It needs Node 22.5 or newer, and `git` on the machine for workspaces. `node-pty` compiles on Linux during the install, so a C++ toolchain, Python and `make` have to be present there (macOS and the container image need none).
+The package is `@band-app/worker` and its binary is `band-worker`. It needs Node 22.5 or newer, and `git` on the machine for worktrees. `node-pty` compiles on Linux during the install, so a C++ toolchain, Python and `make` have to be present there (macOS and the container image need none).
 
 ```sh
 npm install -g @band-app/worker
@@ -19,7 +19,7 @@ Release automation does not publish this package yet.
 
 ## Container image
 
-`docker/worker.Dockerfile` builds a `node:22-bookworm-slim` image with the packed worker, `git`, `ssh`, `curl`, `jq` and `bash`. It runs as uid 10001 (`worker`) and keeps workspaces in the `/work` volume and the worker id and session token in `/home/worker/.band/worker`.
+`docker/worker.Dockerfile` builds a `node:22-bookworm-slim` image with the packed worker, `git`, `ssh`, `curl`, `jq` and `bash`. It runs as uid 10001 (`worker`) and keeps worktrees in the `/work` volume and the worker id and session token in `/home/worker/.band/worker`.
 
 ```sh
 docker build -f docker/worker.Dockerfile -t band-worker .
@@ -45,7 +45,7 @@ pnpm --filter @band-app/worker start -- \
 | `--hub <url>` | `BAND_HUB_URL` | Hub URL. `http` and `ws` are accepted only for loopback, because the hello carries the token. |
 | `--token <token>` | `BAND_WORKER_TOKEN`, `BAND_BOOTSTRAP_TOKEN` | A session token, or a bootstrap token (prefix `bwb_`). |
 | `--worker-id <id>` | `BAND_WORKER_ID` | The id the hub issued with the bootstrap token. Without it the hub names the worker when it trades the token. |
-| `--root <dir>` | `BAND_WORKER_ROOTS` | A directory the worker may serve. Repeat for more. With none, `<state dir>/workspaces`. |
+| `--root <dir>` | `BAND_WORKER_ROOTS` | A directory the worker may serve. Repeat for more. With none, `<state dir>/worktrees`. |
 | `--name <name>` | `BAND_WORKER_NAME` | Reported as the `name` label. |
 | `--labels k=v,...` | `BAND_WORKER_LABELS` | Placement labels. |
 | `--state-dir <dir>` | `BAND_WORKER_STATE_DIR` | Default `$BAND_HOME/worker`, or `~/.band/worker`. |
@@ -87,7 +87,7 @@ Terminals run in the worker process (`InProcessTerminalBackend`), so they end wh
 
 ## Ephemeral mode
 
-An ephemeral worker asks the hub whether it may exit once nothing has run for `--idle-exit` (the hub can replace that time with `lifecycle.policy`). It exits with code 0 only when the hub answers that every workspace on it is stored. A refusal, such as a running terminal or a failed upload, keeps the worker up, and it asks again after another idle time. Against a hub with no `lifecycle.idle` handler it exits at once, as before.
+An ephemeral worker asks the hub whether it may exit once nothing has run for `--idle-exit` (the hub can replace that time with `lifecycle.policy`). It exits with code 0 only when the hub answers that every worktree on it is stored. A refusal, such as a running terminal or a failed upload, keeps the worker up, and it asks again after another idle time. Against a hub with no `lifecycle.idle` handler it exits at once, as before.
 
 A call in progress and every open channel count as activity, including channels the hub opened. The reads the hub makes on its own schedule (`host.info`, `worktree.list`, `git.exec`, `git.gh`, and the read-only `fs.*` and `search.listFiles` calls) hold the worker while they run but do not restart the idle clock, so a status poller does not keep a machine awake. A worker that has lost the hub for an hour (or its idle time, if longer) also exits, because it cannot store anything without the hub.
 

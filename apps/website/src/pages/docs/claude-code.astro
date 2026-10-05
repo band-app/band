@@ -26,17 +26,17 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <code>apps/hub/src/server/services/hooks.ts</code>):
   </p>
   <ul>
-    <li><strong>UserPromptSubmit</strong> — Fires when the user submits a prompt. Band marks the workspace as <em>working</em>.</li>
-    <li><strong>PreToolUse</strong> — Fires before each tool call. Band keeps the workspace <em>working</em> in the general case but flips it to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>.</li>
+    <li><strong>UserPromptSubmit</strong> — Fires when the user submits a prompt. Band marks the worktree as <em>working</em>.</li>
+    <li><strong>PreToolUse</strong> — Fires before each tool call. Band keeps the worktree <em>working</em> in the general case but flips it to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>.</li>
     <li><strong>PermissionRequest</strong> — Fires when the agent requests permission to use an unapproved tool.</li>
     <li><strong>PostToolUse</strong> — Fires after each tool call, providing real-time progress updates.</li>
-    <li><strong>Stop</strong> — Fires when the agent finishes. Band marks the workspace as <em>needs attention</em>.</li>
+    <li><strong>Stop</strong> — Fires when the agent finishes. Band marks the worktree as <em>needs attention</em>.</li>
   </ul>
   <p>
     Each hook runs the command <code>band notify</code>, which reads the JSON payload
-    from stdin, resolves the workspace from the hook's <code>cwd</code>, and posts a
+    from stdin, resolves the worktree from the hook's <code>cwd</code>, and posts a
     status update to the Band server. This is how Band detects agent activity in
-    workspaces where Claude Code is running independently (outside of Band-submitted tasks).
+    worktrees where Claude Code is running independently (outside of Band-submitted tasks).
   </p>
 
   <h3>Hooks Configuration</h3>
@@ -73,7 +73,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     Claude Code supports full session management through Band. You can:
   </p>
   <ul>
-    <li>View a list of previous sessions for any workspace, including the session summary, first prompt, git branch, and last modified time.</li>
+    <li>View a list of previous sessions for any worktree, including the session summary, first prompt, git branch, and last modified time.</li>
     <li>Resume a previous session by selecting it from the session list. Band passes the session ID to Claude Code, which picks up where it left off.</li>
     <li>Browse the full message history of any session, including user messages, assistant responses, tool calls, and tool results.</li>
   </ul>

@@ -99,7 +99,7 @@ text into a separate UI affordance (collapsible nested transcript).
 
 Manual reproduction:
 
-1. Run `pnpm dev:web` and open a workspace.
+1. Run `pnpm dev:web` and open a worktree.
 2. Open Settings → Coding Agents → toggle on "Stream Claude Code text
    (experimental)" → Save. (Off by default; flip explicitly.)
 3. Start a Claude Code chat.

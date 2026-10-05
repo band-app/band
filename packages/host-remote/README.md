@@ -1,6 +1,6 @@
 # @band-app/host-remote
 
-`RemoteHost` implements the `Host` interface from `@band-app/host-api` over a worker's link session. The hub keeps one per worker in its `HostRegistry`, so a service calls `workspace.host.fs.readFile(...)` the same way for the local machine and a worker.
+`RemoteHost` implements the `Host` interface from `@band-app/host-api` over a worker's link session. The hub keeps one per worker in its `HostRegistry`, so a service calls `worktree.host.fs.readFile(...)` the same way for the local machine and a worker.
 
 Each method is one call, or one channel, on the session. The method and channel names are the ones `apps/worker` registers (`fs.stat`, `git.exec`, `pty.attach`, `acp.spawn`, and so on).
 

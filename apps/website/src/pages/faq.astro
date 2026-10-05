@@ -4,7 +4,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 const faqs = [
   {
     q: "How is Band different from Cursor or VS Code with AI built in?",
-    a: "Cursor and VS Code are general-purpose editors that bolt agent features onto an interface designed for human keystrokes. Band flips that — it's an IDE designed for agent-driven work first, with hands-on editing as a secondary mode. You can run multiple agents in parallel (each in its own git worktree), schedule recurring agent tasks via cron, swap between Claude Code, Codex, and OpenCode per workspace, and check on long-running tasks from your phone. When you do want to edit by hand, one click opens the active worktree in Cursor, VS Code, JetBrains, Zed, or Xcode — pick whichever you prefer.",
+    a: "Cursor and VS Code are general-purpose editors that bolt agent features onto an interface designed for human keystrokes. Band flips that — it's an IDE designed for agent-driven work first, with hands-on editing as a secondary mode. You can run multiple agents in parallel (each in its own git worktree), schedule recurring agent tasks via cron, swap between Claude Code, Codex, and OpenCode per worktree, and check on long-running tasks from your phone. When you do want to edit by hand, one click opens the active worktree in Cursor, VS Code, JetBrains, Zed, or Xcode — pick whichever you prefer.",
   },
   {
     q: "What coding agents work with Band?",
@@ -20,19 +20,19 @@ const faqs = [
   },
   {
     q: "How does Band relate to Claude Code, Codex, or OpenCode?",
-    a: "Those are coding agents — they write the code. Band is the IDE you watch them in. Band doesn't ship a model or an agent of its own; it dispatches your prompts to whichever agent CLI you have installed (claude, codex, opencode) and shows you the chat, the file changes, and the worktree state in one window. You can mix and match: Claude Code in one workspace, Codex in another, OpenCode in a third.",
+    a: "Those are coding agents — they write the code. Band is the IDE you watch them in. Band doesn't ship a model or an agent of its own; it dispatches your prompts to whichever agent CLI you have installed (claude, codex, opencode) and shows you the chat, the file changes, and the worktree state in one window. You can mix and match: Claude Code in one worktree, Codex in another, OpenCode in a third.",
   },
   {
     q: "Can I use Band without a coding agent?",
-    a: "Yes. Even without a coding agent, Band is useful for managing git worktrees across projects. You can create isolated workspaces, organize projects, and use the window management features to quickly switch between different branches and IDE setups.",
+    a: "Yes. Even without a coding agent, Band is useful for managing git worktrees across repos. You can create isolated worktrees, organize repos, and use the window management features to quickly switch between different branches and IDE setups.",
   },
   {
-    q: "How does Band create workspaces?",
-    a: "Band uses git worktrees under the hood. Each workspace gets its own directory with a separate working tree and branch, all sharing the same git repository. This means you can have multiple branches checked out simultaneously without conflicts.",
+    q: "How does Band create worktrees?",
+    a: "Band uses git worktrees under the hood. Each worktree gets its own directory with a separate working tree and branch, all sharing the same git repository. This means you can have multiple branches checked out simultaneously without conflicts.",
   },
   {
     q: "What is a cronjob in Band?",
-    a: "Cronjobs are scheduled agent tasks. You define a cron expression (like \"every day at 9am\") and a prompt, and Band will automatically create a workspace and dispatch the task to a coding agent on schedule. Great for automated code reviews, dependency updates, and daily reports.",
+    a: "Cronjobs are scheduled agent tasks. You define a cron expression (like \"every day at 9am\") and a prompt, and Band will automatically create a worktree and dispatch the task to a coding agent on schedule. Great for automated code reviews, dependency updates, and daily reports.",
   },
   {
     q: "How does remote access work?",

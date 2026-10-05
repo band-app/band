@@ -140,12 +140,12 @@ Findings are **globally numbered** `[1]`, `[2]`, … across all domains so the c
 ```
 Coding 🚨
 
-[1] severity:blocker  apps/hub/src/server/api/projects/router.ts:42
+[1] severity:blocker  apps/hub/src/server/api/repos/router.ts:42
     CODE-2: router imports from infra/db/queries
-    Fix: move the DB call into ProjectService.delete and call that from the router
+    Fix: move the DB call into RepoService.delete and call that from the router
 
-[2] severity:nit  apps/hub/src/server/services/workspace-service.ts:88
-    correctness: null reference on workspace.id when findById returns undefined
+[2] severity:nit  apps/hub/src/server/services/worktree-service.ts:88
+    correctness: null reference on worktree.id when findById returns undefined
     Fix: add an early-return guard before line 88
 
 Testing ⚠️
@@ -158,9 +158,9 @@ Security ✅
 
 Performance 🚨
 
-[4] severity:blocker  apps/hub/src/server/services/project-service.ts:55
-    PERF-1: N+1 query — one Drizzle call per workspace in a loop over workspaces.length
-    Fix: use a single workspaces.listByProject(id) batch fetch
+[4] severity:blocker  apps/hub/src/server/services/repo-service.ts:55
+    PERF-1: N+1 query — one Drizzle call per worktree in a loop over worktrees.length
+    Fix: use a single worktrees.listByRepo(id) batch fetch
 
 Verdict: request changes 👎
 ```

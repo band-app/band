@@ -1,7 +1,7 @@
 ---
 name: band
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, start a coding agent in a workspace or list its agent sessions, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "start an agent", "list agent sessions", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
+description: Programmatic worktree management for Band. Use when the user wants to create, list, or remove Band worktrees or repos, start a coding agent in a worktree or list its agent sessions, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create worktree", "list repos", "band worktree", "band repo", "start an agent", "list agent sessions", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: "[command] [args...]"
 ---
@@ -10,7 +10,7 @@ argument-hint: "[command] [args...]"
 
 Thin client for the Band web server. All state, git operations, and script execution happen server-side.
 
-This skill covers **core workspace, project, agent, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
+This skill covers **core worktree, repo, agent, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
 
 - **`band-chat`** — chat panes (`band chats list/create/send/watch/stop/remove/label/unlabel`)
 - **`band-terminal`** — terminal sessions (`band terminals list/create/send/output/kill/attach`)
@@ -34,100 +34,100 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 band schema
 
 # Show a specific command's schema
-band schema "workspaces create"
+band schema "worktrees create"
 ```
 
 ## Commands
 
-### List registered projects
+### List registered repos
 
 ```sh
-band projects list
+band repos list
 ```
 
 Text output: `name\tpath\tN worktree(s)` (tab-separated).
-JSON output: `{"projects": [{"name": "...", "path": "...", "worktreeCount": N}]}`
+JSON output: `{"repos": [{"name": "...", "path": "...", "worktreeCount": N}]}`
 
-### Register an existing repository as a project
-
-```sh
-band projects add <path> [--label <string>]
-```
-
-Registers an existing git repository. Detects the default branch automatically. Returns the project name.
-
-### Unregister a project
+### Register an existing repository as a repo
 
 ```sh
-band projects remove <name>
+band repos add <path> [--label <string>]
 ```
 
-Removes the project from Band's registry (does not delete the repository).
+Registers an existing git repository. Detects the default branch automatically. Returns the repo name.
 
-### List workspaces, optionally filtered by project
+### Unregister a repo
 
 ```sh
-band workspaces list [project]
+band repos remove <name>
 ```
 
-Text output: `project\tbranch\tpath` (tab-separated, one per line).
-JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}]}`
+Removes the repo from Band's registry (does not delete the repository).
 
-### Create a new workspace (git worktree + state registration)
+### List worktrees, optionally filtered by repo
 
 ```sh
-band workspaces create <project> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-project-path <string>]
+band worktrees list [repo]
 ```
 
-Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
+Text output: `repo\tbranch\tpath` (tab-separated, one per line).
+JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "path": "..."}]}`
 
-**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.
+### Create a new worktree (git worktree + state registration)
+
+```sh
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>]
+```
+
+Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
+
+**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.
 
 **Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:
 - `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude "<prompt>"`, `codex "<prompt>"`, …). Returns a `terminalId` in the JSON output.
-- `chat` — submits a streaming task to the workspace's chat pane (the web UI default).
+- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).
 
 Precedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.
 
 When to use `--prompt` (most cases):
 ```sh
-# User says "create a workspace and implement X" or "start working on X"
-band workspaces create my-app feat/auth --prompt "Implement GitHub issue #42: Add JWT authentication"
+# User says "create a worktree and implement X" or "start working on X"
+band worktrees create my-app feat/auth --prompt "Implement GitHub issue #42: Add JWT authentication"
 
-# User says "create a workspace for issue #99 and start implementing"
-band workspaces create my-app fix/bug-99 --prompt "Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99"
+# User says "create a worktree for issue #99 and start implementing"
+band worktrees create my-app fix/bug-99 --prompt "Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99"
 
 # Force chat dispatch when terminal is the user-level default
-band workspaces create my-app feat/auth --prompt "..." --via chat
+band worktrees create my-app feat/auth --prompt "..." --via chat
 ```
 
 When to omit `--prompt` (rare — user explicitly wants no task):
 ```sh
-# User says "just create a workspace, I'll work on it myself"
-band workspaces create my-app feat/experiment
+# User says "just create a worktree, I'll work on it myself"
+band worktrees create my-app feat/experiment
 ```
 
-**Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the workspace appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that workspace, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-project-path` says where the repository is on the chosen host the first time the project is used there.
+**Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-repo-path` says where the repository is on the chosen host the first time the repo is used there.
 
-**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
+**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
 
-### Remove a workspace (git worktree + state cleanup)
+### Remove a worktree (git worktree + state cleanup)
 
 ```sh
-band workspaces remove <project> <name>
+band worktrees remove <repo> <name>
 ```
 
-`<name>` is the workspace's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
+`<name>` is the worktree's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
 
-Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
+Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
 
-### Start a coding agent in a workspace
+### Start a coding agent in a worktree
 
 ```sh
-band agents launch [workspace_id] [--agent <string>] [--mode <string>] [--prompt <string>]
+band agents launch [worktree_id] [--agent <string>] [--mode <string>] [--prompt <string>]
 ```
 
-Starts an agent session. `--mode gui` opens a chat pane and submits the prompt to the agent. `--mode tui` opens a terminal running the agent's CLI with the prompt pre-loaded (`claude "<prompt>"`, `codex "<prompt>"`, ...). `chat` and `terminal` are accepted as aliases. Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent, so an agent starts new agents the way it runs itself) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting (Settings > Coding Agents > "Open programmatically created agents in"). `--agent` picks a coding agent ID from settings; the default agent is used when omitted. The workspace is auto-detected from the cwd when `workspace_id` is omitted.
+Starts an agent session. `--mode gui` opens a chat pane and submits the prompt to the agent. `--mode tui` opens a terminal running the agent's CLI with the prompt pre-loaded (`claude "<prompt>"`, `codex "<prompt>"`, ...). `chat` and `terminal` are accepted as aliases. Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent, so an agent starts new agents the way it runs itself) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting (Settings > Coding Agents > "Open programmatically created agents in"). `--agent` picks a coding agent ID from settings; the default agent is used when omitted. The worktree is auto-detected from the cwd when `worktree_id` is omitted.
 
 An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.
 
@@ -135,25 +135,25 @@ Text output: `<mode>\t<chat or terminal ID>`, plus a `note:` line after a fallba
 JSON output: `{"agentSession": {...}, "mode": "gui" | "tui", "chatId": "...", "terminalId": "...", "notice": "..."}`. `chatId` is set for gui, `terminalId` for tui, `notice` only after a fallback.
 
 ```sh
-# Start the default agent in the cwd's workspace, in the server's default mode
+# Start the default agent in the cwd's worktree, in the server's default mode
 band agents launch --prompt "Fix the failing test in auth.test.ts"
 
 # Start Codex in a terminal
 band agents launch my-app-feat-auth --agent codex --mode tui --prompt "Review the diff"
 ```
 
-To start an agent in a new workspace, use `band workspaces create --prompt` instead.
+To start an agent in a new worktree, use `band worktrees create --prompt` instead.
 
-### List the running agent sessions of a workspace
+### List the running agent sessions of a worktree
 
 ```sh
-band agents list [workspace_id]
+band agents list [worktree_id]
 ```
 
 An agent session is one run of a coding agent, in a chat (`gui`) or in a terminal (`tui`). A session keeps its mode for its whole life. Ended sessions are not listed.
 
 Text output: `SESSION ID\tAGENT\tMODE\tSTATE\tPANE\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions; PROVIDER SESSION is the agent's own session ID once it is known.
-JSON output: `{"agentSessions": [{"id": "...", "workspaceId": "...", "agentDefinitionId": "...", "providerSessionId": "..." | null, "mode": "gui" | "tui", "chatId": "..." | null, "terminalId": "..." | null, "state": "starting" | "running", "createdAt": N, "updatedAt": N}]}`
+JSON output: `{"agentSessions": [{"id": "...", "worktreeId": "...", "agentDefinitionId": "...", "providerSessionId": "..." | null, "mode": "gui" | "tui", "chatId": "..." | null, "terminalId": "..." | null, "state": "starting" | "running", "createdAt": N, "updatedAt": N}]}`
 
 ### Show current settings
 
@@ -187,7 +187,7 @@ band tunnel stop
 
 Stops the remote tunnel.
 
-### List the hosts workspaces can run on
+### List the hosts worktrees can run on
 
 ```sh
 band hosts list
@@ -201,7 +201,7 @@ Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), la
 band hosts remove <id>
 ```
 
-Removes an offline worker host that has no workspaces and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with workspaces are refused.
+Removes an offline worker host that has no worktrees and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with worktrees are refused.
 
 ### List the runners and read their logs
 
@@ -210,7 +210,7 @@ band runners list
 band runners log <request-id>
 ```
 
-A runner is a pair of scripts the hub runs to start a worker when `band workspaces create --labels ...` finds no host. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one host request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
+A runner is a pair of scripts the hub runs to start a worker when `band worktrees create --labels ...` finds no host. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one host request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
 
 ### Validate a repository's environment file
 
@@ -220,14 +220,14 @@ band env validate [path]
 
 Checks `.band/environment.json` in the repository at `path` (default: the current directory), or the file itself. The path must exist on the hub's machine. Prints `OK <file>` and exits 0, or prints each problem with its key path and exits 1. With `--output json` it prints the parsed environment and the issues. Needs an admin token.
 
-### Build a project's environment image
+### Build a repo's environment image
 
 ```sh
-band env build <project> [--force] [--no-wait]
-band env status <project>
+band env build <repo> [--force] [--no-wait]
+band env status <repo>
 ```
 
-Builds the image for the project's `.band/environment.json` at the default branch: the worker base, the toolchain from `build`, then the result of `install`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused and reported as a cache hit. `build` follows the log and exits 0 for a ready image or a cache hit, 1 for a failed build. `--no-wait` returns once the build has started. `status` prints the current image (the newest ready build; a failed build never replaces it) and the latest build with its log. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine). `build` needs an admin token.
+Builds the image for the repo's `.band/environment.json` at the default branch: the worker base, the toolchain from `build`, then the result of `install`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused and reported as a cache hit. `build` follows the log and exits 0 for a ready image or a cache hit, 1 for a failed build. `--no-wait` returns once the build has started. `status` prints the current image (the newest ready build; a failed build never replaces it) and the latest build with its log. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine). `build` needs an admin token.
 
 ### List, create and revoke the hub's tokens
 
@@ -264,7 +264,7 @@ The hub keeps the user context (`user`) and named contexts as bare git repos and
 
 ```sh
 band vault list
-printf '%s' "$VALUE" | band vault put <name> [--kind api_key|env|git] [--scope global|project:<name>] [--description <string>]
+printf '%s' "$VALUE" | band vault put <name> [--kind api_key|env|git] [--scope global|repo:<name>] [--description <string>]
 printf '%s' "$TOKEN" | band vault put <name> --kind git --host github.com --path 'owner/*' [--username <name>]
 band vault delete <id>
 band vault rotate-key
@@ -272,19 +272,19 @@ band vault rotate-key
 
 The hub keeps credentials encrypted and never shows a value again: `list` prints id, name, kind, scope and last use. `put` reads the value from stdin (`--value` also works, but shows in the process list). A `git` item is an access token for private repositories on workers: workers ask the hub for it per remote, and `--path` is a pattern over `owner/repo` (`*` stays inside one segment). OAuth connections are made in Settings > Credentials, and `delete` revokes one at its server. These commands need an admin token. Run them only when the user asks, and never print or log a value.
 
-### List cronjobs, optionally filtered by project or workspace
+### List cronjobs, optionally filtered by repo or worktree
 
 ```sh
-band cronjobs list [--project <string>] [--workspace <string>]
+band cronjobs list [--repo <string>] [--worktree <string>]
 ```
 
 ### Create a new scheduled cronjob
 
 ```sh
-band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--workspace-id <string>] [--via <string>] [--disabled]
+band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--worktree-id <string>] [--via <string>] [--disabled]
 ```
 
-`--via` picks where each fire dispatches the prompt: `chat` (submits a task to the cronjob's dedicated chat pane — the default and backward-compatible behavior) or `terminal` (spawns the agent's vendor CLI in a fresh self-closing PTY pane; if the agent has no vendor CLI it silently falls back to chat). When omitted it resolves via the same precedence as `workspaces create`: `--via` flag → `BAND_DISPATCH` env → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`. A terminal fire is skipped (recorded `skipped`) when the previous run's pane is still active, so an agent that runs longer than the interval is never interrupted.
+`--via` picks where each fire dispatches the prompt: `chat` (submits a task to the cronjob's dedicated chat pane — the default and backward-compatible behavior) or `terminal` (spawns the agent's vendor CLI in a fresh self-closing PTY pane; if the agent has no vendor CLI it silently falls back to chat). When omitted it resolves via the same precedence as `worktrees create`: `--via` flag → `BAND_DISPATCH` env → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`. A terminal fire is skipped (recorded `skipped`) when the previous run's pane is still active, so an agent that runs longer than the interval is never interrupted.
 
 ### Update an existing cronjob
 
@@ -304,26 +304,26 @@ band cronjobs delete <key> <id>
 band cronjobs trigger <key> <id>
 ```
 
-### Open a file in the active Band workspace's editor pane
+### Open a file in the active Band worktree's editor pane
 
 ```sh
-band open <file_path> [--workspace <string>] [--no-focus]
+band open <file_path> [--worktree <string>] [--no-focus]
 ```
 
-Opens the file in the dashboard's currently focused workspace. When `--workspace` is omitted, the server uses the workspace most recently focused in the Band dashboard — exits non-zero if no workspace is active. Relative paths are resolved against the current working directory. Paths inside the workspace open as normal editor tabs; paths outside any workspace root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
+Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
 
 Example:
 ```sh
-# Open the file in whichever workspace the dashboard is currently focused on
+# Open the file in whichever worktree the dashboard is currently focused on
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-workspace fallback
-band open src/main.rs --workspace my-app/feat/auth
+# Override the active-worktree fallback
+band open src/main.rs --worktree my-app/feat/auth
 
-# An out-of-workspace file opens as an external tab (workspace-relative
+# An out-of-worktree file opens as an external tab (worktree-relative
 # routing is bypassed; the FileViewer reads via the server's
 # readExternalFile capability).
 band open ~/Downloads/v3.js
@@ -356,91 +356,91 @@ Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (
 ### Feature branch workflow
 
 ```sh
-# Create workspace, get path
-path=$(band workspaces create my-app feat/login --output json | jq -r .path)
+# Create worktree, get path
+path=$(band worktrees create my-app feat/login --output json | jq -r .path)
 cd "$path"
 
 # ... do work ...
 
 # Clean up
-band workspaces remove my-app feat/login
+band worktrees remove my-app feat/login
 ```
 
 ### Agent task submission
 
 ```sh
-band workspaces create my-app feat/auth --prompt "Add JWT authentication to the API"
+band worktrees create my-app feat/auth --prompt "Add JWT authentication to the API"
 ```
 
-### Enumerate workspaces
+### Enumerate worktrees
 
 ```sh
-band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
+band worktrees list --output json | jq '.worktrees[] | select(.repo == "my-app") | .branch'
 ```
 
 ### Open a file in the dashboard
 
-`band open <file>` routes a file to whichever workspace is currently
+`band open <file>` routes a file to whichever worktree is currently
 focused in the Band dashboard (the most recently active one). Use it
 from grep / stack-trace output to drop yourself straight into the
-editor without naming the workspace.
+editor without naming the worktree.
 
 ```sh
-# Open the file in whichever workspace the dashboard is currently focused on
+# Open the file in whichever worktree the dashboard is currently focused on
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-workspace fallback
-band open src/main.rs --workspace my-app/feat/auth
+# Override the active-worktree fallback
+band open src/main.rs --worktree my-app/feat/auth
 
-# Open an arbitrary file from outside any workspace — opens as an
+# Open an arbitrary file from outside any worktree — opens as an
 # external editor tab (the same surface as desktop Cmd+O / "Open File…")
 band open ~/Downloads/v3.js
 ```
 
-Files inside the target workspace open as normal editor tabs.
-Files outside any workspace root open as external tabs, hosted in
-the active workspace's editor pane. Errors when no workspace is
-active in the dashboard and no `--workspace` is supplied, or when
+Files inside the target worktree open as normal editor tabs.
+Files outside any worktree root open as external tabs, hosted in
+the active worktree's editor pane. Errors when no worktree is
+active in the dashboard and no `--worktree` is supplied, or when
 the file doesn't exist on disk.
 
 ### Drive a coding agent
 
-To send a message to a workspace's chat (the primary way to drive the
+To send a message to a worktree's chat (the primary way to drive the
 coding agent), use `band chats send` — see the **`band-chat`** skill. Task
 lifecycle (status, cancel, re-run) is managed inside the dashboard
 rather than from the CLI.
 
-### Project management
+### Repo management
 
 ```sh
-# Register a project
-band projects add /Users/me/code/my-app
+# Register a repo
+band repos add /Users/me/code/my-app
 
-# List all projects
-band projects list
+# List all repos
+band repos list
 
-# Remove a project
-band projects remove my-app
+# Remove a repo
+band repos remove my-app
 ```
 
 ## Invariants
 
 - The CLI never modifies files directly — all operations go through the server API
-- `workspaces create` is idempotent — creating an existing workspace returns its path
-- `setup` runs in its own terminal tab after workspace creation, in parallel with the `--prompt` dispatch (the agent does not wait for it). `teardown` runs in a terminal tab before removal, and removal waits for it. Both are non-fatal
-- Workspace file copying runs after `git worktree add` and before the `setup` script — see "Workspace file copying" below
-- Project and branch names must not contain control characters or path traversals (`../`)
+- `worktrees create` is idempotent — creating an existing worktree returns its path
+- `setup` runs in its own terminal tab after worktree creation, in parallel with the `--prompt` dispatch (the agent does not wait for it). `teardown` runs in a terminal tab before removal, and removal waits for it. Both are non-fatal
+- Worktree file copying runs after `git worktree add` and before the `setup` script — see "Worktree file copying" below
+- Repo and branch names must not contain control characters or path traversals (`../`)
 - Exit code 0 = success, 1 = error
 
-## Workspace file copying
+## Worktree file copying
 
-Workspaces are fresh git worktrees, so untracked files (`.env`, `.env.local`,
+Worktrees are fresh git worktrees, so untracked files (`.env`, `.env.local`,
 local credentials, IDE overrides) are missing by default. Band can copy a
-declared set of those files from the project's main checkout into each new
-worktree, driven by either of two sources at the project root:
+declared set of those files from the repo's main checkout into each new
+worktree, driven by either of two sources at the repo root:
 
 **Option A — `.band/config.json::workspace.copyFiles`** (explicit list,
 supports globs):
@@ -479,7 +479,7 @@ overrides, copy-back on cleanup, variable substitution.
 | Band home dir    | `BAND_HOME`       | `~/.band`                    |
 | Dispatch target  | `BAND_DISPATCH`   | `terminal` (from CLI)        |
 
-### `workspaces create --prompt` dispatch target (issue #551)
+### `worktrees create --prompt` dispatch target (issue #551)
 
 By default the CLI dispatches the `--prompt` value to a fresh **terminal**
 pane running the vendor coding agent CLI (cmux-style: `claude "<prompt>"`,

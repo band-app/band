@@ -6,9 +6,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Running Your First Task</h1>
 
   <p>
-    A "task" in Band is a message you send to a coding agent in one of a workspace's
+    A "task" in Band is a message you send to a coding agent in one of a worktree's
     chat panes. When you send the message, Band dispatches it to the agent, which works
-    inside the workspace's git worktree. You can watch the agent's progress in real time
+    inside the worktree's git worktree. You can watch the agent's progress in real time
     from the dashboard or your terminal.
   </p>
 
@@ -17,30 +17,30 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>Before sending your first message, make sure you have:</p>
 
   <ul>
-    <li>A <a href="/docs/first-project">registered project</a> in Band.</li>
-    <li>A <a href="/docs/first-workspace">workspace</a> created for that project.</li>
+    <li>A <a href="/docs/first-repo">registered repo</a> in Band.</li>
+    <li>A <a href="/docs/first-worktree">worktree</a> created for that repo.</li>
     <li>A coding agent (such as Claude Code, Codex, or OpenCode) installed and detected by Band.</li>
   </ul>
 
   <h2>Send a message via the dashboard</h2>
 
   <ol>
-    <li>Open the Band dashboard and select a workspace from the sidebar.</li>
-    <li>In the workspace view, focus the chat panel.</li>
+    <li>Open the Band dashboard and select a worktree from the sidebar.</li>
+    <li>In the worktree view, focus the chat panel.</li>
     <li>Type your prompt describing what you want the agent to do.</li>
     <li>Press <strong>Enter</strong> (or click <strong>Send</strong>) to dispatch the message.</li>
   </ol>
 
   <p>
-    Band lazy-creates a "Chat" pane the first time a workspace receives a message, then
+    Band lazy-creates a "Chat" pane the first time a worktree receives a message, then
     reuses it for follow-ups. The agent's output streams into the pane in real time.
   </p>
 
   <h2>Send a message via the CLI</h2>
 
   <p>
-    To submit a prompt from your terminal, change into the workspace directory and use
-    <code>band chats send</code>. The workspace and chat pane are auto-detected from
+    To submit a prompt from your terminal, change into the worktree directory and use
+    <code>band chats send</code>. The worktree and chat pane are auto-detected from
     your current working directory:
   </p>
 
@@ -48,19 +48,19 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 band chats send --message "Add input validation to all API endpoints"</code></pre>
 
   <p>
-    If you're not inside the workspace's directory, pass the workspace ID explicitly:
+    If you're not inside the worktree's directory, pass the worktree ID explicitly:
   </p>
 
-  <pre><code>band chats send --workspace ws_abc123 --message "Add input validation to all API endpoints"</code></pre>
+  <pre><code>band chats send --worktree ws_abc123 --message "Add input validation to all API endpoints"</code></pre>
 
   <p>
-    A common one-shot pattern is to create a workspace and kick off the agent in a
-    single command. <code>band workspaces create</code> accepts a <code>--prompt</code>
-    flag that creates the worktree, registers the workspace, and queues the message in
+    A common one-shot pattern is to create a worktree and kick off the agent in a
+    single command. <code>band worktrees create</code> accepts a <code>--prompt</code>
+    flag that creates the worktree, registers the worktree, and queues the message in
     its first chat pane:
   </p>
 
-  <pre><code>band workspaces create my-app feat/validation \
+  <pre><code>band worktrees create my-app feat/validation \
   --prompt "Add input validation to all API endpoints"</code></pre>
 
   <h2>Chat status</h2>
@@ -87,7 +87,7 @@ band chats send --message "Add input validation to all API endpoints"</code></pr
     NDJSON event feed with <code>band chats watch</code>:
   </p>
 
-  <pre><code># Stream the cwd workspace's first chat pane
+  <pre><code># Stream the cwd worktree's first chat pane
 band chats watch
 
 # Filter for text deltas only
@@ -103,7 +103,7 @@ band chats watch chat_abc</code></pre>
 
   <h2>Managing chats</h2>
 
-  <pre><code>band chats list                       # chats in the cwd workspace
+  <pre><code>band chats list                       # chats in the cwd worktree
 band chats list --output json | \
   jq '.chats[] | select(.status == "running")'   # filter by status
 band chats stop                       # abort the current task in the active chat
@@ -112,17 +112,17 @@ band chats remove                     # delete the chat pane (kills the agent)</
   <h2>Running multiple tasks in parallel</h2>
 
   <p>
-    Because each workspace is an isolated git worktree, you can run multiple agents
-    across different workspaces simultaneously without file conflicts:
+    Because each worktree is an isolated git worktree, you can run multiple agents
+    across different worktrees simultaneously without file conflicts:
   </p>
 
-  <pre><code>band workspaces create my-app feat/auth  --prompt "Implement OAuth2 login flow"
-band workspaces create my-app feat/api   --prompt "Add pagination to all list endpoints"
-band workspaces create my-app fix/tests  --prompt "Fix the 12 failing integration tests"</code></pre>
+  <pre><code>band worktrees create my-app feat/auth  --prompt "Implement OAuth2 login flow"
+band worktrees create my-app feat/api   --prompt "Add pagination to all list endpoints"
+band worktrees create my-app fix/tests  --prompt "Fix the 12 failing integration tests"</code></pre>
 
   <p>
-    You now know the core Band workflow: register a project, create a workspace, and
-    chat with an agent inside it. From here you can explore project configuration with
+    You now know the core Band workflow: register a repo, create a worktree, and
+    chat with an agent inside it. From here you can explore repo configuration with
     <code>.band/config.json</code>, remote tunnels, and cronjobs.
   </p>
 </DocsLayout>

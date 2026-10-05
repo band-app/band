@@ -6,40 +6,40 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The <code>band chats</code> command group manages <strong>chat panes</strong> inside a
-    workspace. A chat pane is an agent process bound to a workspace — it has its own
+    worktree. A chat pane is an agent process bound to a worktree — it has its own
     conversation history and can run a different coding agent, model, or mode from any
-    other pane in the same workspace. <code>band chats send</code> is the primary way to
-    drive an agent from the CLI: it sends a message to the workspace's active chat panel,
-    lazy-creating one if the workspace has none yet.
+    other pane in the same worktree. <code>band chats send</code> is the primary way to
+    drive an agent from the CLI: it sends a message to the worktree's active chat panel,
+    lazy-creating one if the worktree has none yet.
   </p>
 
-  <h2>Default workspace and chat resolution</h2>
+  <h2>Default worktree and chat resolution</h2>
 
   <p>
-    Every <code>band chats</code> subcommand auto-detects the workspace from the current
-    working directory (matched against registered workspace paths) when no workspace is
-    given, and resolves to the workspace's <em>active</em> chat panel when no chat ID is
-    given. From inside a workspace, you typically just run
+    Every <code>band chats</code> subcommand auto-detects the worktree from the current
+    working directory (matched against registered worktree paths) when no worktree is
+    given, and resolves to the worktree's <em>active</em> chat panel when no chat ID is
+    given. From inside a worktree, you typically just run
     <code>band chats send --message "…"</code> — no IDs to type. Pass an explicit ID only
-    when you're outside the workspace's cwd or you want to target a specific chat.
+    when you're outside the worktree's cwd or you want to target a specific chat.
   </p>
 
   <h2>List chats</h2>
 
-  <p>List chat panes for a workspace (defaults to the cwd workspace).</p>
+  <p>List chat panes for a worktree (defaults to the cwd worktree).</p>
 
   <pre><code>band chats list
-band chats list ws_abc123        # explicit workspace ID</code></pre>
+band chats list ws_abc123        # explicit worktree ID</code></pre>
 
   <h2>Create a chat pane</h2>
 
-  <pre><code>band chats create                       # cwd workspace, default agent
+  <pre><code>band chats create                       # cwd worktree, default agent
 band chats create --name "planning" --agent claude-code \
   --model claude-opus-4-20250514 --mode plan</code></pre>
 
   <p>Options:</p>
   <ul>
-    <li><code>workspace_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
+    <li><code>worktree_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
     <li><code>--name</code> — display name for the chat pane.</li>
     <li><code>--agent</code> — agent type (e.g. <code>claude-code</code>, <code>codex</code>, <code>opencode</code>).</li>
     <li><code>--model</code> — model override.</li>
@@ -60,11 +60,11 @@ band chats create --name "planning" --agent claude-code \
     can edit, reorder or cancel them.
   </p>
 
-  <pre><code># From inside a workspace directory: workspace and chat auto-resolved.
+  <pre><code># From inside a worktree directory: worktree and chat auto-resolved.
 band chats send --message "Fix the failing tests"
 
-# Outside the workspace's cwd
-band chats send --workspace ws_abc123 --message "Fix the failing tests"
+# Outside the worktree's cwd
+band chats send --worktree ws_abc123 --message "Fix the failing tests"
 
 # Target a specific chat pane instead of the active one
 band chats send chat_abc --message "Investigate the perf regression"
@@ -75,9 +75,9 @@ band chats send --mode plan --model claude-opus-4-20250514 \
 
   <p>Options:</p>
   <ul>
-    <li><code>chat_id</code> (positional, optional) — defaults to the workspace's active chat.</li>
+    <li><code>chat_id</code> (positional, optional) — defaults to the worktree's active chat.</li>
     <li><code>--message &lt;text&gt;</code> — the message to send (required).</li>
-    <li><code>--workspace &lt;id&gt;</code> — override the auto-detected workspace.</li>
+    <li><code>--worktree &lt;id&gt;</code> — override the auto-detected worktree.</li>
     <li><code>--mode</code>, <code>--model</code>, <code>--agent</code> — per-message overrides.</li>
   </ul>
 
@@ -89,7 +89,7 @@ band chats send --mode plan --model claude-opus-4-20250514 \
     <code>band chats send</code>.
   </p>
 
-  <pre><code># Stream the cwd workspace's first chat pane
+  <pre><code># Stream the cwd worktree's first chat pane
 band chats watch
 
 # Pipe through jq for live filtering — only text deltas
@@ -102,14 +102,14 @@ band chats watch chat_abc</code></pre>
 
   <p>Abort the running task in a chat pane. The agent process is signalled and the chat status flips to <code>completed</code>.</p>
 
-  <pre><code>band chats stop                  # cwd workspace's first chat
+  <pre><code>band chats stop                  # cwd worktree's first chat
 band chats stop chat_abc</code></pre>
 
   <h2>Remove a chat pane</h2>
 
   <p>Permanently remove a chat pane and its agent process.</p>
 
-  <pre><code>band chats remove                # cwd workspace's first chat
+  <pre><code>band chats remove                # cwd worktree's first chat
 band chats remove chat_abc</code></pre>
 
   <h2>JSON output</h2>

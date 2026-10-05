@@ -24,11 +24,11 @@ This document is the narrative — the *why*, the examples, the rationale. The c
 ```
 apps/hub/src/server/
   api/
-    projects/
+    repos/
       router.ts
-    workspaces/               # plural — workspace lifecycle (create/remove/setPinned/runScript/gitPull/gitPush by (project, branch))
+    worktrees/               # plural — worktree lifecycle (create/remove/setPinned/runScript/gitPull/gitPush by (repo, branch))
       router.ts
-    workspace/                # singular — per-workspace ops (file CRUD, search, diff, gitPull/Push by workspaceId, formatFile, generateCommitMessage, fileChanges)
+    worktree/                # singular — per-worktree ops (file CRUD, search, diff, gitPull/Push by worktreeId, formatFile, generateCommitMessage, fileChanges)
       router.ts
     chats/                    # plural — list/create + per-chat CRUD/send/stop/resume
       router.ts
@@ -38,9 +38,9 @@ apps/hub/src/server/
       router.ts              # browser tabs + browserLayout
     tasks/
       router.ts
-    queue/                    # message queue (per chat/workspace)
+    queue/                    # message queue (per chat/worktree)
       router.ts
-    history/                  # browser visit history (per workspace)
+    history/                  # browser visit history (per worktree)
       router.ts
     cronjobs/
       router.ts
@@ -74,23 +74,23 @@ apps/hub/src/server/
       router.ts              # services.* (health, activity, resources)
     router.ts                # merges all sub-routers
   services/
-    project-service.ts
-    workspace-service.ts
+    repo-service.ts
+    worktree-service.ts
     chat-service.ts          # CRUD + activeSessionSummary helpers
     browser-service.ts
     browser-history-service.ts
     task-service.ts
     cronjob-service.ts
     terminal-service.ts
-    workspace-script-service.ts # setup/teardown commands in a workspace terminal tab
+    worktree-script-service.ts # setup/teardown commands in a worktree terminal tab
     session-service.ts
     settings-service.ts
     tunnel-service.ts
     editor-service.ts        # LSP + file watch + format orchestration
     browser-host-service.ts  # CDP proxy + target list (wraps infra/browser-host/)
     agent-service.ts         # thin pass-through over the agent-pool for routers
-    files-service.ts         # workspace file CRUD (path-traversal + .git guards)
-    search-service.ts        # workspace file-name fuzzy + ripgrep content search
+    files-service.ts         # worktree file CRUD (path-traversal + .git guards)
+    search-service.ts        # worktree file-name fuzzy + ripgrep content search
     diff-service.ts          # listBranches / getDiff / getChanges / getFileDiff / stage / unstage / discard
     cli-service.ts           # band-CLI binary resolver + symlink installer
     cli-skills-service.ts    # render + install agent skill templates
@@ -121,9 +121,9 @@ apps/hub/src/server/
       schema.ts              # Drizzle schema (all tables)
       connection.ts          # DB singleton
       queries/
-        projects.ts
-        workspaces.ts
-        workspace-statuses.ts # workspace_statuses row CRUD
+        repos.ts
+        worktrees.ts
+        worktree-statuses.ts # worktree_statuses row CRUD
         tasks.ts
         chats.ts
         browsers.ts
@@ -155,17 +155,17 @@ apps/hub/src/server/
       install.ts             # raw brew install shell-out
     setup/
       script-run.ts          # wraps a setup/teardown command to report its exit code from a terminal
-      project-config.ts      # .band/config.json reader
+      repo-config.ts      # .band/config.json reader
 ```
 
 ### Singular vs plural sub-routers
 
 A few domains split into both a **singular** and a **plural** sub-router. The
-plural name (e.g. `workspaces/`, `chats/`) owns collection-level lifecycle
+plural name (e.g. `worktrees/`, `chats/`) owns collection-level lifecycle
 operations (create, remove, list-by-collection-shape, …); the singular name
-(e.g. `workspace/`, `chat/`) owns per-entity operations keyed by an opaque
+(e.g. `worktree/`, `chat/`) owns per-entity operations keyed by an opaque
 id. The split mirrors the wire-level namespace the client already speaks
-(`trpc.workspace.*` vs `trpc.workspaces.*`); keep both directories rather
+(`trpc.worktree.*` vs `trpc.worktrees.*`); keep both directories rather
 than collapsing the routes into a single sub-router with mixed keying.
 
 ## Tier 1: API (Routers)
@@ -178,85 +178,85 @@ Routers are the entry point for all client requests. They handle:
 
 Routers contain **no business logic**. They validate, delegate, and respond.
 
-A router can consume multiple services. This is expected — a project deletion route needs both the project service and the workspace service.
+A router can consume multiple services. This is expected — a repo deletion route needs both the repo service and the worktree service.
 
 ```typescript
-// api/projects/router.ts
+// api/repos/router.ts
 import { z } from "zod";
-import { ProjectService } from "../../services/project-service";
-import { WorkspaceService } from "../../services/workspace-service";
+import { RepoService } from "../../services/repo-service";
+import { WorktreeService } from "../../services/worktree-service";
 import { TaskService } from "../../services/task-service";
 
-const projectService = new ProjectService();
-const workspaceService = new WorkspaceService();
+const repoService = new RepoService();
+const worktreeService = new WorktreeService();
 const taskService = new TaskService();
 
-export const projectsRouter = t.router({
+export const reposRouter = t.router({
   delete: t.procedure
-    .input(z.object({ projectId: z.string() }))
+    .input(z.object({ repoId: z.string() }))
     .mutation(async ({ input }) => {
-      await taskService.abortAllForProject(input.projectId);
-      await workspaceService.removeAllForProject(input.projectId);
-      await projectService.delete(input.projectId);
+      await taskService.abortAllForRepo(input.repoId);
+      await worktreeService.removeAllForRepo(input.repoId);
+      await repoService.delete(input.repoId);
     }),
 
   list: t.procedure.query(async () => {
-    return projectService.list();
+    return repoService.list();
   }),
 });
 ```
 
 ### Rules
 
-- One sub-router per domain (`projects/router.ts`, `workspaces/router.ts`, etc.)
-- Routers mirror the CLI command structure: projects, workspaces, chats, tasks, etc.
+- One sub-router per domain (`repos/router.ts`, `worktrees/router.ts`, etc.)
+- Routers mirror the CLI command structure: repos, worktrees, chats, tasks, etc.
 - No direct DB queries or infra access in routers
-- Compose services for cross-domain operations (e.g., delete project = abort tasks + remove workspaces + delete project)
+- Compose services for cross-domain operations (e.g., delete repo = abort tasks + remove worktrees + delete repo)
 
 ## Tier 2: Services (Business Logic)
 
 Services contain all business logic. They are classes with explicit constructor dependencies to infra adapters and other services.
 
 ```typescript
-// services/workspace-service.ts
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { ProjectQueries } from "../infra/db/queries/projects";
+// services/worktree-service.ts
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { GitClient } from "../infra/git/git-client";
 
-export class WorkspaceService {
+export class WorktreeService {
   constructor(
-    private workspaceQueries = new WorkspaceQueries(),
-    private projectQueries = new ProjectQueries(),
+    private worktreeQueries = new WorktreeQueries(),
+    private repoQueries = new RepoQueries(),
     private git = new GitClient(),
   ) {}
 
-  async create(projectId: string, branch: string): Promise<Workspace> {
-    const project = await this.projectQueries.findById(projectId);
-    if (!project) {
-      throw new Error(`Project ${projectId} not found`);
+  async create(repoId: string, branch: string): Promise<Worktree> {
+    const repo = await this.repoQueries.findById(repoId);
+    if (!repo) {
+      throw new Error(`Repo ${repoId} not found`);
     }
-    const worktreePath = await this.git.createWorktree(project.path, branch);
-    return this.workspaceQueries.insert({
-      projectId,
+    const worktreePath = await this.git.createWorktree(repo.path, branch);
+    return this.worktreeQueries.insert({
+      repoId,
       branch,
       path: worktreePath,
     });
   }
 
-  async duplicate(workspaceId: string): Promise<Workspace> {
-    const source = await this.workspaceQueries.findById(workspaceId);
+  async duplicate(worktreeId: string): Promise<Worktree> {
+    const source = await this.worktreeQueries.findById(worktreeId);
     if (!source) {
-      throw new Error(`Workspace ${workspaceId} not found`);
+      throw new Error(`Worktree ${worktreeId} not found`);
     }
     const newBranch = `${source.branch}-copy-${Date.now()}`;
-    return this.create(source.projectId, newBranch);
+    return this.create(source.repoId, newBranch);
   }
 
-  async removeAllForProject(projectId: string): Promise<void> {
-    const workspaces = await this.workspaceQueries.listByProject(projectId);
-    for (const ws of workspaces) {
+  async removeAllForRepo(repoId: string): Promise<void> {
+    const worktrees = await this.worktreeQueries.listByRepo(repoId);
+    for (const ws of worktrees) {
       await this.git.removeWorktree(ws.path);
-      await this.workspaceQueries.remove(ws.id);
+      await this.worktreeQueries.remove(ws.id);
     }
   }
 }
@@ -269,15 +269,15 @@ export class WorkspaceService {
 - Services can depend on infra (queries, clients) and other services
 - Services never import from the API tier
 - All business logic lives here — not in routers, not in infra
-- Name methods as actions: `create`, `delete`, `duplicate`, `list`, not `handleCreateWorkspace` or `processWorkspaceDeletion`
+- Name methods as actions: `create`, `delete`, `duplicate`, `list`, not `handleCreateWorktree` or `processWorktreeDeletion`
 
 ### Naming Conventions
 
 | What | Pattern | Example |
 |---|---|---|
-| Service file | `{domain}-service.ts` | `workspace-service.ts` |
-| Service class | `{Domain}Service` | `WorkspaceService` |
-| Methods | verb or verb + noun | `create`, `delete`, `duplicate`, `listByProject` |
+| Service file | `{domain}-service.ts` | `worktree-service.ts` |
+| Service class | `{Domain}Service` | `WorktreeService` |
+| Methods | verb or verb + noun | `create`, `delete`, `duplicate`, `listByRepo` |
 
 ## Tier 3: Infra (Data Access & External Services)
 
@@ -288,25 +288,25 @@ Infra contains all adapters for external dependencies: database, git, file syste
 Query classes group related database operations. They use Drizzle ORM and operate on the shared schema.
 
 ```typescript
-// infra/db/queries/workspaces.ts
+// infra/db/queries/worktrees.ts
 import { eq } from "drizzle-orm";
 import { db } from "../connection";
 import { worktrees } from "../schema";
 
-export class WorkspaceQueries {
+export class WorktreeQueries {
   async findById(id: string) {
     return db.select().from(worktrees).where(eq(worktrees.id, id)).get();
   }
 
-  async listByProject(projectId: string) {
+  async listByRepo(repoId: string) {
     return db
       .select()
       .from(worktrees)
-      .where(eq(worktrees.projectId, projectId))
+      .where(eq(worktrees.repoId, repoId))
       .all();
   }
 
-  async insert(data: { projectId: string; branch: string; path: string }) {
+  async insert(data: { repoId: string; branch: string; path: string }) {
     return db.insert(worktrees).values(data).returning().get();
   }
 
@@ -358,8 +358,8 @@ export class GitClient {
 
 | What | Pattern | Example |
 |---|---|---|
-| Query file | `{domain}.ts` in `db/queries/` | `workspaces.ts` |
-| Query class | `{Domain}Queries` | `WorkspaceQueries` |
+| Query file | `{domain}.ts` in `db/queries/` | `worktrees.ts` |
+| Query class | `{Domain}Queries` | `WorktreeQueries` |
 | Client file | `{system}-client.ts` | `git-client.ts` |
 | Client class | `{System}Client` or `{System}Pool` | `GitClient`, `AgentPool` |
 
@@ -384,11 +384,11 @@ These are infra-level — they manage external resources (processes, connections
 ## Dependency Direction
 
 ```
-api/projects/router.ts
-  --> services/project-service.ts
-  --> services/workspace-service.ts
-        --> infra/db/queries/projects.ts
-        --> infra/db/queries/workspaces.ts
+api/repos/router.ts
+  --> services/repo-service.ts
+  --> services/worktree-service.ts
+        --> infra/db/queries/repos.ts
+        --> infra/db/queries/worktrees.ts
         --> infra/git/git-client.ts
 ```
 

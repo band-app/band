@@ -34,7 +34,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     OpenCode persists session transcripts under <code>~/.opencode/sessions/</code>
     (or wherever your OpenCode install configures them). Band reads this directory to
-    populate the session list per workspace, and resumes threads by passing the
+    populate the session list per worktree, and resumes threads by passing the
     session ID through to a follow-up <code>runSession</code> call.
   </p>
 
@@ -42,7 +42,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     Band discovers OpenCode skills via the standard
     <code>readSkillsFromDir</code> helper, looking under
-    <code>~/.opencode/skills/</code> and <code>&lt;workspace&gt;/.opencode/skills/</code>.
+    <code>~/.opencode/skills/</code> and <code>&lt;worktree&gt;/.opencode/skills/</code>.
   </p>
 
   <h2>Configuration Options</h2>

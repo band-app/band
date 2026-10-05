@@ -56,7 +56,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           <div class="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Designed for agents from day one</div>
-              <div class="text-sm text-muted-foreground">Chat panes, editor, terminal, and browser tabs &mdash; every pane scoped to a workspace and an agent.</div>
+              <div class="text-sm text-muted-foreground">Chat panes, editor, terminal, and browser tabs &mdash; every pane scoped to a worktree and an agent.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Bring your own coding agent</div>
@@ -64,7 +64,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Git worktree isolation by default</div>
-              <div class="text-sm text-muted-foreground">Every workspace is its own branch and worktree. Run agents in parallel without stepping on each other.</div>
+              <div class="text-sm text-muted-foreground">Every worktree is its own branch and worktree. Run agents in parallel without stepping on each other.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Drop into your editor when you need to</div>
@@ -79,7 +79,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <div class="relative mx-auto mt-16 max-w-[100rem] px-6 pb-20 md:pb-28">
         <img
           src="/screenshot-dashboard.png"
-          alt="The Band desktop app: workspace sidebar on the far left, chat pane next to it, project file tree in the middle, and a code editor on the right showing the active worktree."
+          alt="The Band desktop app: worktree sidebar on the far left, chat pane next to it, repo file tree in the middle, and a code editor on the right showing the active worktree."
           width="1946"
           height="1187"
           loading="eager"
@@ -170,7 +170,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
               1
             </div>
-            <h3 class="text-lg font-semibold text-text">Register projects</h3>
+            <h3 class="text-lg font-semibold text-text">Register repos</h3>
             <p class="mt-2 text-sm text-muted-foreground">
               Point Band at your git repos. It discovers branches, worktrees, and configuration automatically.
             </p>
@@ -180,9 +180,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
               2
             </div>
-            <h3 class="text-lg font-semibold text-text">Create workspaces</h3>
+            <h3 class="text-lg font-semibold text-text">Create worktrees</h3>
             <p class="mt-2 text-sm text-muted-foreground">
-              Each workspace gets an isolated git worktree with its own branch. No conflicts with your main work.
+              Each worktree gets an isolated git worktree with its own branch. No conflicts with your main work.
             </p>
           </div>
 
@@ -217,7 +217,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             Everything you need
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            Workspaces, agents, automation, and remote access &mdash; all built into the IDE.
+            Worktrees, agents, automation, and remote access &mdash; all built into the IDE.
           </p>
         </div>
 
@@ -256,12 +256,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
               title: "Git worktree isolation",
-              desc: "Clean branch-per-task workflow. Every workspace is isolated from the main branch.",
+              desc: "Clean branch-per-task workflow. Every worktree is isolated from the main branch.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
               title: "Setup & teardown scripts",
-              desc: "Per-project .band/config.json for automation. Run scripts on workspace creation and removal.",
+              desc: "Per-repo .band/config.json for automation. Run scripts on worktree creation and removal.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,

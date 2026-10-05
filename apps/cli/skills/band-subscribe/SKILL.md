@@ -18,7 +18,7 @@ Related skills:
 ## Prerequisites
 
 - The Band server is running.
-- The agent runs inside a Band chat. Band sets `BAND_CHAT_ID` and `BAND_WORKSPACE_ID` there, and `band subscriptions` uses them as defaults. A terminal has no chat, so outside a chat pass `--chat <id>`.
+- The agent runs inside a Band chat. Band sets `BAND_CHAT_ID` and `BAND_WORKTREE_ID` there, and `band subscriptions` uses them as defaults. A terminal has no chat, so outside a chat pass `--chat <id>`.
 
 ## When to subscribe
 
@@ -54,7 +54,7 @@ Exactly one of `--pr`, `--branch`, `--webhook`, `--cron`, `--at`.
 | `--at <when>` | One-off timer. Epoch milliseconds, or a delay: `90s`, `10m`, `2h`, `1d`. |
 | `--max-wakeups N` | Stop after N wakeups. |
 | `--coalesce S` | Seconds to hold events so a burst wakes the chat once (default 30). |
-| `--chat`, `--workspace` | Override `BAND_CHAT_ID` and `BAND_WORKSPACE_ID`. |
+| `--chat`, `--worktree` | Override `BAND_CHAT_ID` and `BAND_WORKTREE_ID`. |
 
 ```sh
 # After `gh pr create`: wake me on reviews, comments and CI
@@ -71,7 +71,7 @@ Output is one line per subscription (`ID`, then what it watches). With `--output
 
 ### `band subscriptions list`
 
-Lists the chat's subscriptions with wakeups used out of the cap and time to expiry. `--workspace <id>` lists every subscription in a workspace.
+Lists the chat's subscriptions with wakeups used out of the cap and time to expiry. `--worktree <id>` lists every subscription in a worktree.
 
 ```sh
 band subscriptions list --output json
@@ -83,7 +83,7 @@ Removes one subscription.
 
 ## MCP tools
 
-An agent connected to Band's MCP endpoint can call `band_subscriptions_create`, `band_subscriptions_list`, `band_subscriptions_remove` and `band_subscriptions_events`. The chat and workspace default to the caller's. The input names are `source` (`github`, `timer`, `webhook`) with `repo` and `pr` or `branch`, `cron` or `at`, `maxWakeups` and `coalesceSeconds`.
+An agent connected to Band's MCP endpoint can call `band_subscriptions_create`, `band_subscriptions_list`, `band_subscriptions_remove` and `band_subscriptions_events`. The chat and worktree default to the caller's. The input names are `source` (`github`, `timer`, `webhook`) with `repo` and `pr` or `branch`, `cron` or `at`, `maxWakeups` and `coalesceSeconds`.
 
 ## When an event arrives
 

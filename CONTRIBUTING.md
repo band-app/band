@@ -46,7 +46,7 @@ git checkout -b my-feature upstream/main
 
 ### 2. Make Your Changes
 
-Follow the existing code style — the project uses [Biome](https://biomejs.dev/) for JS/TS and `cargo fmt` / `cargo clippy` for Rust.
+Follow the existing code style — the repo uses [Biome](https://biomejs.dev/) for JS/TS and `cargo fmt` / `cargo clippy` for Rust.
 
 ### 3. Run Checks Locally
 
@@ -65,7 +65,7 @@ pnpm test
 Write clear, concise commit messages. Use imperative mood:
 
 ```
-Add workspace search shortcut
+Add worktree search shortcut
 Fix LSP timeout on large monorepos
 Update dashboard panel layout
 ```
@@ -96,7 +96,7 @@ CI does not run automatically on fork PRs to keep costs under control. Here's ho
 
 ## Automated Claude Reviews
 
-PRs opened by project collaborators (OWNER / MEMBER / COLLABORATOR on this repo) automatically receive an AI review from Anthropic's Claude via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) — see [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml). The review posts **one consolidated PR comment** with findings grouped by domain (Coding / Testing / Security / Performance) plus a final `Verdict:` line (`approved 👍` or `request changes 👎`); the same comment is updated in place on each subsequent push (marker-based PATCH, see [`.claude/skills/review-changes/SKILL.md`](.claude/skills/review-changes/SKILL.md)). It's advisory, not a required check, and a human reviewer is still expected to sign off. PRs from outside contributors / forks intentionally do **not** trigger the automated review (budget and noise control), and `pull_request` (rather than `pull_request_target`) is used so the `CLAUDE_CODE_OAUTH_TOKEN` secret is never exposed to fork code.
+PRs opened by repo collaborators (OWNER / MEMBER / COLLABORATOR on this repo) automatically receive an AI review from Anthropic's Claude via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) — see [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml). The review posts **one consolidated PR comment** with findings grouped by domain (Coding / Testing / Security / Performance) plus a final `Verdict:` line (`approved 👍` or `request changes 👎`); the same comment is updated in place on each subsequent push (marker-based PATCH, see [`.claude/skills/review-changes/SKILL.md`](.claude/skills/review-changes/SKILL.md)). It's advisory, not a required check, and a human reviewer is still expected to sign off. PRs from outside contributors / forks intentionally do **not** trigger the automated review (budget and noise control), and `pull_request` (rather than `pull_request_target`) is used so the `CLAUDE_CODE_OAUTH_TOKEN` secret is never exposed to fork code.
 
 ## What to Contribute
 
@@ -107,7 +107,7 @@ PRs opened by project collaborators (OWNER / MEMBER / COLLABORATOR on this repo)
 
 ## Testing
 
-This project uses **integration tests** as the primary testing approach. Do not write unit tests with mocked dependencies.
+This repo uses **integration tests** as the primary testing approach. Do not write unit tests with mocked dependencies.
 
 - **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs, the rendered DOM (frontend).
 - **The real binary runs inside the test.** Backend and frontend tests both boot the production server process — no shallow renders, no in-memory React mounts, no test-only build flags.

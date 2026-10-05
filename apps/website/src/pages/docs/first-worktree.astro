@@ -2,12 +2,12 @@
 import DocsLayout from "../../layouts/DocsLayout.astro";
 ---
 
-<DocsLayout title="Creating Your First Workspace — Band Docs">
-  <h1>Creating Your First Workspace</h1>
+<DocsLayout title="Creating Your First Worktree — Band Docs">
+  <h1>Creating Your First Worktree</h1>
 
   <p>
-    A workspace in Band is a <strong>git worktree</strong> &mdash; an isolated copy of your
-    repository with its own branch and working directory. Workspaces let coding agents work
+    A worktree in Band is a <strong>git worktree</strong> &mdash; an isolated copy of your
+    repository with its own branch and working directory. Worktrees let coding agents work
     on features or fixes without touching your main branch or interfering with each other.
   </p>
 
@@ -21,26 +21,26 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
 
   <p>
-    Band manages worktrees for you. When you create a workspace, Band creates a new branch,
-    sets up a worktree directory, and runs any setup scripts defined in your project
-    configuration. When you remove a workspace, Band cleans up the branch and directory.
+    Band manages worktrees for you. When you create a worktree, Band creates a new branch,
+    sets up a worktree directory, and runs any setup scripts defined in your repo
+    configuration. When you remove a worktree, Band cleans up the branch and directory.
   </p>
 
-  <h2>Create a workspace via the dashboard</h2>
+  <h2>Create a worktree via the dashboard</h2>
 
   <ol>
-    <li>Open the Band dashboard and find your project in the sidebar.</li>
-    <li>Click the <strong>"+ New"</strong> button next to the project name.</li>
-    <li>Enter a <strong>branch name</strong> for the workspace (e.g., <code>feat/auth</code>).</li>
-    <li>Optionally pick a <strong>base branch</strong> to branch from (defaults to the project's main branch).</li>
-    <li>Optionally type an <strong>initial prompt</strong> &mdash; this will be sent to the coding agent as soon as the workspace is ready.</li>
+    <li>Open the Band dashboard and find your repo in the sidebar.</li>
+    <li>Click the <strong>"+ New"</strong> button next to the repo name.</li>
+    <li>Enter a <strong>branch name</strong> for the worktree (e.g., <code>feat/auth</code>).</li>
+    <li>Optionally pick a <strong>base branch</strong> to branch from (defaults to the repo's main branch).</li>
+    <li>Optionally type an <strong>initial prompt</strong> &mdash; this will be sent to the coding agent as soon as the worktree is ready.</li>
     <li>Click <strong>Create</strong>.</li>
   </ol>
 
   <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
     <img
-      src="/screenshot-add-workspace.png"
-      alt="The Add Workspace dialog in the Band dashboard, with fields for branch name, base branch, and an optional initial prompt."
+      src="/screenshot-add-worktree.png"
+      alt="The Add Worktree dialog in the Band dashboard, with fields for branch name, base branch, and an optional initial prompt."
       width="430"
       height="426"
       loading="lazy"
@@ -48,25 +48,25 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       class="block h-auto w-full"
     />
     <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
-      The Add Workspace dialog &mdash; branch name, base branch, and an optional initial prompt.
+      The Add Worktree dialog &mdash; branch name, base branch, and an optional initial prompt.
     </figcaption>
   </figure>
 
   <p>
-    The workspace appears under the project in the sidebar. You can click on it to view its
+    The worktree appears under the repo in the sidebar. You can click on it to view its
     details, including the worktree path, branch name, and any running tasks.
   </p>
 
-  <h2>Create a workspace via the CLI</h2>
+  <h2>Create a worktree via the CLI</h2>
 
   <p>
-    Use the <code>band workspaces create</code> command to create a workspace from your terminal:
+    Use the <code>band worktrees create</code> command to create a worktree from your terminal:
   </p>
 
-  <pre><code>band workspaces create my-app feat/login</code></pre>
+  <pre><code>band worktrees create my-app feat/login</code></pre>
 
   <p>
-    This creates a new branch called <code>feat/login</code> in the <code>my-app</code> project
+    This creates a new branch called <code>feat/login</code> in the <code>my-app</code> repo
     and sets up a worktree directory for it. The command returns the path to the new worktree.
   </p>
 
@@ -74,23 +74,23 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     To branch from a specific base branch instead of the default:
   </p>
 
-  <pre><code>band workspaces create my-app feat/login --base develop</code></pre>
+  <pre><code>band worktrees create my-app feat/login --base develop</code></pre>
 
   <p>
-    You can also create a workspace and immediately submit a task to start the agent working:
+    You can also create a worktree and immediately submit a task to start the agent working:
   </p>
 
-  <pre><code>band workspaces create my-app feat/auth --prompt "Implement JWT authentication for the API"</code></pre>
+  <pre><code>band worktrees create my-app feat/auth --prompt "Implement JWT authentication for the API"</code></pre>
 
   <p>
-    This is the recommended workflow for most cases &mdash; it creates the workspace and
+    This is the recommended workflow for most cases &mdash; it creates the worktree and
     dispatches a task in a single step.
   </p>
 
   <h2>Setup scripts</h2>
 
   <p>
-    If your project contains a <code>.band/config.json</code> file with a <code>setup</code>
+    If your repo contains a <code>.band/config.json</code> file with a <code>setup</code>
     script, Band runs it automatically after creating the worktree. This is useful for
     installing dependencies or performing other initialization:
   </p>
@@ -101,38 +101,38 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 }`}></code></pre>
 
   <p>
-    Setup scripts run inside the worktree directory. If a setup script fails, the workspace is
+    Setup scripts run inside the worktree directory. If a setup script fails, the worktree is
     still created &mdash; the failure is non-fatal and reported in the dashboard.
   </p>
 
-  <h2>Workspace isolation</h2>
+  <h2>Worktree isolation</h2>
 
   <p>
-    Each workspace is fully isolated. An agent working in one workspace cannot affect files in
-    another workspace or on your main branch, so you can safely run multiple agents in parallel:
+    Each worktree is fully isolated. An agent working in one worktree cannot affect files in
+    another worktree or on your main branch, so you can safely run multiple agents in parallel:
   </p>
 
-  <pre><code>band workspaces create my-app feat/auth --prompt "Add authentication"
-band workspaces create my-app feat/search --prompt "Add full-text search"
-band workspaces create my-app fix/perf --prompt "Optimize database queries"</code></pre>
+  <pre><code>band worktrees create my-app feat/auth --prompt "Add authentication"
+band worktrees create my-app feat/search --prompt "Add full-text search"
+band worktrees create my-app fix/perf --prompt "Optimize database queries"</code></pre>
 
-  <h2>Listing and removing workspaces</h2>
+  <h2>Listing and removing worktrees</h2>
 
-  <p>To see all workspaces, or filter by project:</p>
+  <p>To see all worktrees, or filter by repo:</p>
 
-  <pre><code>band workspaces list
-band workspaces list my-app</code></pre>
+  <pre><code>band worktrees list
+band worktrees list my-app</code></pre>
 
   <p>
-    When you are done with a workspace, remove it to clean up the worktree directory and branch:
+    When you are done with a worktree, remove it to clean up the worktree directory and branch:
   </p>
 
-  <pre><code>band workspaces remove my-app feat/login</code></pre>
+  <pre><code>band worktrees remove my-app feat/login</code></pre>
 
   <h2>Next step</h2>
 
   <p>
-    Now that you have a workspace, learn how to
+    Now that you have a worktree, learn how to
     <a href="/docs/first-task">run your first task</a> and dispatch a prompt to a coding agent.
   </p>
 </DocsLayout>

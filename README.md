@@ -1,11 +1,11 @@
 # Band
 
-IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents across multiple workspaces and projects, with a built-in code editor, terminal, chat, LSP support, and a CLI for programmatic control.
+IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents across multiple worktrees and repos, with a built-in code editor, terminal, chat, LSP support, and a CLI for programmatic control.
 
 ```
 ┌──────────────────────────────────────────┐
 │  Desktop App (Electron + React 19)       │
-│  - Project & workspace management        │
+│  - Repo & worktree management        │
 │  - Code editor (CodeMirror 6 + LSP)      │
 │  - Integrated terminal & chat            │
 │  - Agent status overview                 │
@@ -53,13 +53,13 @@ open apps/desktop/dist-builder/*.dmg
 
 Local builds are unsigned — see [CONTRIBUTING.md](CONTRIBUTING.md#building-locally-vs-signed-releases) for how macOS handles them.
 
-## Project Structure
+## Repo Structure
 
 ```
 apps/
   desktop/            Electron desktop shell (main + preload + electron-builder)
   web/                Node.js web server (tRPC, git ops, LSP, coding agents) + React renderer
-  cli/                Band CLI (Rust) — programmatic workspace management
+  cli/                Band CLI (Rust) — programmatic worktree management
   website/            Marketing website (Astro)
 packages/
   dashboard-core/     Shared dashboard UI (CodeMirror, components)
@@ -132,12 +132,12 @@ The server runs on `http://localhost:3456` by default (configurable via `PORT` e
 
 ## Band CLI
 
-The CLI is a thin client for the web server, used for programmatic workspace management:
+The CLI is a thin client for the web server, used for programmatic worktree management:
 
 ```bash
-band projects list              # List registered projects
-band workspaces list            # List workspaces
-band workspaces create          # Create a new workspace (git worktree)
+band repos list              # List registered repos
+band worktrees list            # List worktrees
+band worktrees create          # Create a new worktree (git worktree)
 band tasks list                 # List coding agent tasks
 band tunnels start              # Start a tunnel
 band settings                   # View settings
@@ -164,7 +164,7 @@ pnpm format:fix
 pnpm test
 ```
 
-This project uses integration tests as the primary testing approach — see `CLAUDE.md` for the testing strategy.
+This repo uses integration tests as the primary testing approach — see `CLAUDE.md` for the testing strategy.
 
 ### Desktop Shell (Electron + TypeScript)
 

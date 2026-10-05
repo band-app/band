@@ -65,9 +65,9 @@ For every new test at `apps/hub/tests/<feature>.test.ts`:
 
 For every new test at `apps/web/e2e/<feature>.spec.ts`:
 
-- **TEST-19** *(blocker)* — Boots the real backend with `startServer` from `apps/web/e2e/helpers/server.ts`. A test that uses `createTrpcMock` for new behaviour is a blocker (legacy `workspace-switch-*.spec.ts` files are the only carve-out).
+- **TEST-19** *(blocker)* — Boots the real backend with `startServer` from `apps/web/e2e/helpers/server.ts`. A test that uses `createTrpcMock` for new behaviour is a blocker (legacy `worktree-switch-*.spec.ts` files are the only carve-out).
 - **TEST-20** *(nit)* — Uses `createTmpHome`, `seedState`, and `seedSettings` to set up the home directory and DB state.
-- **TEST-21** *(blocker)* — Drives the page through a **Page Object Model** under `apps/web/e2e/pages/`. The test body never calls `page.goto()`, `page.getByRole()`, or `page.getByTestId()` directly — only methods like `workspacePage.maximizePanel()`. Raw locators in the test body are a blocker.
+- **TEST-21** *(blocker)* — Drives the page through a **Page Object Model** under `apps/web/e2e/pages/`. The test body never calls `page.goto()`, `page.getByRole()`, or `page.getByTestId()` directly — only methods like `worktreePage.maximizePanel()`. Raw locators in the test body are a blocker.
 - **TEST-22** *(nit)* — Page objects take `(page, baseUrl, …)` in the constructor, own locators as readonly fields, and have a `goto()` method that is the only place URLs are constructed.
 - **TEST-23** *(blocker)* — Locator priority for elements the codebase owns, in decreasing preference:
   1. `getByRole(role, { name })` when the ARIA name is system-controlled.

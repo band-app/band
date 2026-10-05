@@ -1,18 +1,18 @@
 ---
 import DocsLayout from "../../layouts/DocsLayout.astro";
 ---
-<DocsLayout title="Project Management — Band Docs">
-  <h1>Project Management</h1>
+<DocsLayout title="Repo Management — Band Docs">
+  <h1>Repo Management</h1>
   <p>
-    Projects in Band represent git repositories that you want to manage with coding agent
-    workspaces. Every project must be a valid git repository. Band does not create or modify
+    Repos in Band represent git repositories that you want to manage with coding agent
+    worktrees. Every repo must be a valid git repository. Band does not create or modify
     your repositories &mdash; it simply registers them and manages worktrees within them.
   </p>
 
   <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-dashboard-overview.png"
-      alt="The Band desktop dashboard showing two registered projects, band and sidepanel, each with their workspaces, agent status indicators, and git status badges."
+      alt="The Band desktop dashboard showing two registered repos, band and sidepanel, each with their worktrees, agent status indicators, and git status badges."
       width="447"
       height="228"
       loading="lazy"
@@ -20,13 +20,13 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       class="block h-auto w-full"
     />
     <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
-      Two registered projects in the dashboard, each with their workspaces and live status.
+      Two registered repos in the dashboard, each with their worktrees and live status.
     </figcaption>
   </figure>
 
-  <h2>Adding Projects</h2>
+  <h2>Adding Repos</h2>
   <p>
-    There are two ways to register a project with Band:
+    There are two ways to register a repo with Band:
   </p>
 
   <h3>From the Dashboard UI</h3>
@@ -38,78 +38,78 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h3>From the CLI</h3>
   <p>
-    Use the <code>band projects add</code> command to register an existing git repository:
+    Use the <code>band repos add</code> command to register an existing git repository:
   </p>
-  <pre><code>band projects add /path/to/your/repo
-band projects add /path/to/your/repo --label my-label</code></pre>
+  <pre><code>band repos add /path/to/your/repo
+band repos add /path/to/your/repo --label my-label</code></pre>
   <p>
     The CLI detects the repository name and default branch. You can optionally assign a label
     at registration time using the <code>--label</code> flag.
   </p>
 
-  <h2>Removing Projects</h2>
+  <h2>Removing Repos</h2>
   <p>
-    Removing a project from Band unregisters it from the dashboard. It does <strong>not</strong>
-    delete the repository or any of its files. You can remove a project by:
+    Removing a repo from Band unregisters it from the dashboard. It does <strong>not</strong>
+    delete the repository or any of its files. You can remove a repo by:
   </p>
   <ul>
-    <li>Right-clicking the project name and selecting <strong>Remove from list</strong>.</li>
-    <li>Using the CLI: <code>band projects remove &lt;name&gt;</code></li>
+    <li>Right-clicking the repo name and selecting <strong>Remove from list</strong>.</li>
+    <li>Using the CLI: <code>band repos remove &lt;name&gt;</code></li>
   </ul>
 
-  <h2>Reordering Projects</h2>
+  <h2>Reordering Repos</h2>
   <p>
-    Projects in the sidebar can be reordered by drag-and-drop. On desktop, click and drag a
-    project name up or down to rearrange. On mobile, press and hold a project until it lifts,
+    Repos in the sidebar can be reordered by drag-and-drop. On desktop, click and drag a
+    repo name up or down to rearrange. On mobile, press and hold a repo until it lifts,
     then drag it to the new position. The new order is persisted automatically.
   </p>
 
-  <h2>Collapsing Projects</h2>
+  <h2>Collapsing Repos</h2>
   <p>
-    Click the chevron next to a project name to collapse or expand its workspaces. Collapse
-    state is remembered between reloads, so projects you rarely look at can stay tucked
+    Click the chevron next to a repo name to collapse or expand its worktrees. Collapse
+    state is remembered between reloads, so repos you rarely look at can stay tucked
     away. Label section headers can be collapsed the same way.
   </p>
 
   <h2>Labels and Filtering</h2>
   <p>
-    Projects can be organized using color-coded labels. Labels are created in the
-    <a href="/docs/settings">Settings</a> page, and then assigned to projects via the
+    Repos can be organized using color-coded labels. Labels are created in the
+    <a href="/docs/settings">Settings</a> page, and then assigned to repos via the
     right-click context menu.
   </p>
   <ul>
-    <li>Right-click a project name to see the <strong>Set label</strong> submenu.</li>
+    <li>Right-click a repo name to see the <strong>Set label</strong> submenu.</li>
     <li>Select a label to assign it, or choose <strong>None</strong> to remove the label.</li>
-    <li>Use the label filter dropdown in the toolbar to show only projects with a specific label.</li>
-    <li>When labels are defined, projects are visually grouped by label with colored section headers.</li>
+    <li>Use the label filter dropdown in the toolbar to show only repos with a specific label.</li>
+    <li>When labels are defined, repos are visually grouped by label with colored section headers.</li>
   </ul>
   <p>
-    You can also drag projects between label groups to reassign labels quickly.
+    You can also drag repos between label groups to reassign labels quickly.
   </p>
 
-  <h2>Project Configuration</h2>
+  <h2>Repo Configuration</h2>
   <p>
-    Each project can have a <code>.band/config.json</code> file in its repository root. This
-    file configures setup and teardown scripts that run during workspace lifecycle events.
+    Each repo can have a <code>.band/config.json</code> file in its repository root. This
+    file configures setup and teardown scripts that run during worktree lifecycle events.
   </p>
   <pre><code set:html={`{
   "setup": "npm install",
   "teardown": "docker compose down"
 }`}></code></pre>
   <p>
-    The <code>setup</code> script runs automatically after a workspace is created. The
-    <code>teardown</code> script runs before a workspace is removed. Both are non-fatal &mdash;
+    The <code>setup</code> script runs automatically after a worktree is created. The
+    <code>teardown</code> script runs before a worktree is removed. Both are non-fatal &mdash;
     if they fail, the operation continues.
   </p>
 
   <h2>Context Menu</h2>
   <p>
-    Right-clicking a project name reveals additional actions:
+    Right-clicking a repo name reveals additional actions:
   </p>
   <ul>
     <li><strong>Set label</strong> &mdash; Assign or remove a color-coded label.</li>
-    <li><strong>Copy path</strong> &mdash; Copy the project's filesystem path to the clipboard.</li>
-    <li><strong>Open in Finder</strong> &mdash; Reveal the project directory in Finder.</li>
-    <li><strong>Remove from list</strong> &mdash; Unregister the project from Band.</li>
+    <li><strong>Copy path</strong> &mdash; Copy the repo's filesystem path to the clipboard.</li>
+    <li><strong>Open in Finder</strong> &mdash; Reveal the repo directory in Finder.</li>
+    <li><strong>Remove from list</strong> &mdash; Unregister the repo from Band.</li>
   </ul>
 </DocsLayout>
