@@ -406,6 +406,11 @@ export class SettingsPage {
     return this.tokenRows().filter({ hasText: label });
   }
 
+  /** The "Add credential" button of the Credentials section. */
+  credentialsAddButton(): Locator {
+    return this.dialog.getByTestId("settings__credential-add");
+  }
+
   /** One row per stored credential. `data-testid` set in `CredentialsSettings.tsx`. */
   credentialRow(name: string): Locator {
     return this.dialog.getByTestId("settings__credential").filter({
