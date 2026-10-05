@@ -430,6 +430,9 @@ export class McpProxyService {
         if (kind === "oauth") {
           throw new McpProxyInputError("An OAuth connection can't be passed as an env value.");
         }
+        if (kind === "git") {
+          throw new McpProxyInputError("A git credential can't be passed as an env value.");
+        }
         return { name: entry.name, vaultItemId: entry.vaultItemId };
       }
       if (entry.value.length > 4096 || entry.value.includes("\0")) {
@@ -443,8 +446,10 @@ export class McpProxyService {
     if (id === undefined || id === null || id === "") return null;
     const kind = vaultService.kindOf(id);
     if (!kind) throw new McpProxyInputError("No credential with that id in the vault.");
-    if (kind === "env") {
-      throw new McpProxyInputError("An env credential can't authenticate an MCP server.");
+    if (kind === "env" || kind === "git") {
+      throw new McpProxyInputError(
+        `A${kind === "env" ? "n env" : " git"} credential can't authenticate an MCP server.`,
+      );
     }
     return id;
   }

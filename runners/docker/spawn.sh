@@ -96,6 +96,10 @@ if [ -z "$restore" ] && [ -n "${BAND_REPO_URLS:-}" ]; then
   case "$repo_name" in "" | . | ..) repo_name=repo ;; esac
   echo "BAND_HOST_PROJECT_PATH=/work/$repo_name"
 fi
+# With BAND_CLONE_BY_HUB the hub clones through the worker once it is up, because the worker can ask
+# the hub for the repository's git credential and this script cannot.
+clone_url="$repo"
+if [ -n "${BAND_CLONE_BY_HUB:-}" ]; then clone_url=""; fi
 
 # -e NAME without a value copies it from this script's environment, so the token never shows in `ps`
 # or in the docker command line.
@@ -125,7 +129,7 @@ set -- "$@" \
   -e HOME=/work/home \
   -e BAND_WORKER_ROOTS=/work \
   -e BAND_WORKER_STATE_DIR=/work/.band-worker \
-  -e "BAND_CLONE_URL=$repo" -e "BAND_CLONE_NAME=$repo_name"
+  -e "BAND_CLONE_URL=$clone_url" -e "BAND_CLONE_NAME=$repo_name"
 if [ -n "${BAND_IDLE_EXIT:-}" ]; then set -- "$@" -e "BAND_WORKER_IDLE_EXIT=$BAND_IDLE_EXIT"; fi
 
 start='set -e

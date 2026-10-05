@@ -23,6 +23,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type GitHttpAuthStub, startGitHttpAuthStub } from "./fixtures/git-http-auth-stub";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -102,6 +103,8 @@ function freePort(): Promise<number> {
 
 let server: ServerHandle;
 let gitDaemon: ReturnType<typeof spawn> | undefined;
+let authStub: GitHttpAuthStub | undefined;
+const PRIVATE_TOKEN = "gitpat_docker_s3cr3t_0123456789";
 let hubHome: string;
 
 const q = <T>(procedure: string, input?: unknown) =>
@@ -195,6 +198,22 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     const gitUrl = process.env.BAND_DOCKER_TEST_GIT_URL ?? `git://127.0.0.1:${port}`;
     git(seed, "remote", "add", "origin", `${gitUrl}/proj`);
 
+    // A private repository behind basic auth, for the git credential test. The container reaches it
+    // on loopback, like the git daemon above, so it needs the same network setup.
+    const privateRoot = tmp("band-docker-private-");
+    const privateSeed = join(tmp("band-docker-private-seed-"), "secret");
+    mkdirSync(privateSeed, { recursive: true });
+    git(privateSeed, "init", "-q", "-b", "main");
+    writeFileSync(join(privateSeed, "private.txt"), "private\n");
+    git(privateSeed, "add", ".");
+    git(privateSeed, "commit", "-q", "-m", "init");
+    git(privateRoot, "clone", "-q", "--bare", privateSeed, join(privateRoot, "secret.git"));
+    authStub = await startGitHttpAuthStub(privateRoot, {
+      username: "band-bot",
+      password: PRIVATE_TOKEN,
+    });
+    git(privateSeed, "remote", "add", "origin", `${authStub.url}/secret.git`);
+
     seedSettings(hubHome, { tokenSecret: TOKEN });
     seedState(hubHome, {
       projects: [
@@ -203,6 +222,12 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
           path: seed,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: seed }],
+        },
+        {
+          name: "secret",
+          path: privateSeed,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: privateSeed }],
         },
       ],
     });
@@ -246,6 +271,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       // Nothing to clean up.
     }
     gitDaemon?.kill();
+    await authStub?.stop();
     await server?.close();
     for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   });
@@ -304,6 +330,43 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     expect(() => docker("exec", containers[0][0], "touch", "/etc/band-probe")).toThrow();
     docker("exec", containers[0][0], "touch", "/work/band-probe");
     docker("exec", containers[0][0], "touch", "/tmp/band-probe");
+  }, 300_000);
+
+  it("clones a private repository in the container with a vault git credential", async () => {
+    const stub = authStub as GitHttpAuthStub;
+    await m("vault.put", {
+      name: "docker-private",
+      kind: "git",
+      host: stub.host,
+      pathPattern: "secret",
+      username: "band-bot",
+      value: PRIVATE_TOKEN,
+    });
+    const created = await m<CreateResult>("workspaces.create", {
+      project: "secret",
+      branch: "private-a",
+      placement: { labels: { pool: "docker" }, environment: { isolation: "container" } },
+    });
+    const requestId = created.provisioning?.requestId as string;
+    expect(requestId).toBeTruthy();
+    const wt = await waitFor(
+      async () =>
+        (await q<ProjectsList>("projects.list")).projects
+          .find((p) => p.name === "secret")
+          ?.worktrees.find((w) => w.name === "private-a"),
+      { label: "private workspace exists", timeoutMs: 180_000, intervalMs: 500 },
+    );
+    const [container] = containerOf(wt.hostId as string);
+    expect(docker("exec", container, "cat", "/work/secret/private.txt")).toBe("private");
+    expect(stub.authenticated).toContain("band-bot");
+    // The token is nowhere in the container's configuration, its files or its log.
+    expect(docker("inspect", container)).not.toContain(PRIVATE_TOKEN);
+    expect(docker("logs", container)).not.toContain(PRIVATE_TOKEN);
+    expect(
+      docker("exec", container, "sh", "-c", `grep -rl ${PRIVATE_TOKEN} /work /tmp || true`),
+    ).toBe("");
+    const { log } = await q<{ log: string | null }>("runners.log", { requestId });
+    expect(log).not.toContain(PRIVATE_TOKEN);
   }, 300_000);
 
   it("removes the container and its volume on destroy (S1)", async () => {

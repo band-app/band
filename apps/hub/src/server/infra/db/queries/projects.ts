@@ -262,6 +262,30 @@ export class ProjectQueries {
     return row?.path ?? null;
   }
 
+  /**
+   * The projects placed on a host: those with a checkout recorded there and those with a
+   * workspace there. `path` is a directory of the project's repository on that host.
+   */
+  projectsOnHost(hostId: string): { project: string; path: string }[] {
+    const db = getDb();
+    const out = new Map<string, string>();
+    for (const row of db
+      .select({ project: worktreesTable.projectName, path: worktreesTable.path })
+      .from(worktreesTable)
+      .where(eq(worktreesTable.hostId, hostId))
+      .all()) {
+      out.set(row.project, row.path);
+    }
+    for (const row of db
+      .select({ project: projectHostsTable.projectName, path: projectHostsTable.path })
+      .from(projectHostsTable)
+      .where(eq(projectHostsTable.hostId, hostId))
+      .all()) {
+      out.set(row.project, row.path);
+    }
+    return [...out].map(([project, path]) => ({ project, path }));
+  }
+
   /** Records where the project's checkout lives on a host. Replaces an earlier path. */
   setHostPath(projectName: string, hostId: string, path: string): void {
     getDb()

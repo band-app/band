@@ -25,6 +25,7 @@ import { selectWsProtocol } from "../../../auth";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
@@ -127,6 +128,7 @@ export class WorkerLinkService {
     this.remoteHost(session.workerId).attachSession(session);
     workerRelayService.attach(session);
     workerCliService.attach(session);
+    gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
   }
 
