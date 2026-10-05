@@ -19,7 +19,7 @@ export const adminProcedure = t.procedure.use(({ ctx, next }) => {
   if (!ctx.admin) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "This token cannot manage tokens. Use an admin token.",
+      message: "This token cannot manage tokens or credentials. Use an admin token.",
     });
   }
   return next();

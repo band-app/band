@@ -133,3 +133,26 @@ export class SharedTokenRevokeError extends Error {
     this.name = "SharedTokenRevokeError";
   }
 }
+
+/**
+ * Thrown by `VaultService` for an unknown item id or flow id.
+ * `api/vault/router.ts` maps it to 404 `NOT_FOUND`.
+ */
+export class VaultNotFoundError extends Error {
+  constructor(what = "Credential") {
+    super(`${what} not found`);
+    this.name = "VaultNotFoundError";
+  }
+}
+
+/**
+ * Thrown by `VaultService` for input or state the caller can fix: a bad
+ * name, a missing key, an OAuth server that refuses. The message never
+ * holds a secret. `api/vault/router.ts` maps it to 400 `BAD_REQUEST`.
+ */
+export class VaultInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VaultInputError";
+  }
+}

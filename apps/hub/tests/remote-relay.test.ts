@@ -260,6 +260,12 @@ beforeAll(async () => {
           probe("no-token", listChats("proj-relay-a"), { auth: "none" }),
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
+          probe("vault-list", "/trpc/vault.list"),
+          post("vault-oauth", "/trpc/vault.startOAuth", {
+            name: "x",
+            serverUrl: "http://127.0.0.1:1/mcp",
+            scope: "global",
+          }),
           probe("mcp-own", "/mcp", {
             method: "POST",
             body: mcpChatsList("proj-relay-a"),
@@ -467,6 +473,9 @@ describe("the worker relay (S2)", () => {
     expect(by("no-token")?.status).toBe(401);
     expect(by("tokens")?.status).toBe(403);
     expect(by("settings")?.status).toBe(403);
+    // The vault, and the OAuth flows it starts, are out of agent reach.
+    expect(by("vault-list")?.status).toBe(403);
+    expect(by("vault-oauth")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
     // A foreign target next to the agent's own workspaceId does not borrow its scope.

@@ -406,6 +406,69 @@ export class SettingsPage {
     return this.tokenRows().filter({ hasText: label });
   }
 
+  /** One row per stored credential. `data-testid` set in `CredentialsSettings.tsx`. */
+  credentialRow(name: string): Locator {
+    return this.dialog.getByTestId("settings__credential").filter({
+      has: this.page.getByTestId("settings__credential-name").getByText(name, { exact: true }),
+    });
+  }
+
+  /** The OAuth account and scopes line of a credential row. */
+  credentialOAuthDetail(row: Locator): Locator {
+    return row.getByTestId("settings__credential-oauth");
+  }
+
+  /** The error shown under the Credentials section. */
+  credentialError(): Locator {
+    return this.dialog.getByTestId("settings__credential-error");
+  }
+
+  /** Fills the "Add a key" form and submits it. */
+  async addCredential(
+    name: string,
+    value: string,
+    kind: "API key" | "Environment variable" = "API key",
+  ) {
+    await test.step(`Add the credential ${name}`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Credential name" }).fill(name);
+      await this.dialog
+        .getByRole("combobox", { name: "Credential kind" })
+        .selectOption({ label: kind });
+      await this.dialog.getByLabel("Credential value").fill(value);
+      await this.dialog.getByTestId("settings__credential-add").click();
+    });
+  }
+
+  /**
+   * Fills the "Connect a service" form and clicks Connect. Returns the window the hub sends to the
+   * consent page, which the caller follows.
+   */
+  async connectService(name: string, serverUrl: string): Promise<Page> {
+    return await test.step(`Connect ${name}`, async () => {
+      await this.dialog.getByRole("textbox", { name: "Connection name" }).fill(name);
+      await this.dialog.getByRole("textbox", { name: "Server URL" }).fill(serverUrl);
+      const popup = this.page.waitForEvent("popup");
+      await this.dialog.getByTestId("settings__credential-connect").click();
+      return await popup;
+    });
+  }
+
+  /** Waits for the consent window to land on the hub's callback page and report success. */
+  async expectOAuthCallbackConnected(consent: Page): Promise<void> {
+    await consent.waitForURL(/\/api\/oauth\/callback/);
+    await expect(consent.getByTestId("oauth-callback__message")).toHaveAttribute(
+      "data-status",
+      "connected",
+    );
+  }
+
+  /** Clicks Delete on a credential row. */
+  async deleteCredential(name: string): Promise<void> {
+    await test.step(`Delete the credential ${name}`, async () => {
+      await this.dialog.getByRole("button", { name: `Delete credential ${name}` }).click();
+    });
+  }
+
   /** One row per configured runner. `data-testid` set in `RunnersSettings.tsx`. */
   runnerRow(runnerId: string): Locator {
     return this.dialog.getByTestId("settings__runner").filter({
