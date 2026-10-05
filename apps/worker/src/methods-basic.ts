@@ -184,6 +184,9 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
       return { name, kind };
     });
   };
+  r.json("context.preamble", async (a) =>
+    host.context.preamble({ contexts: contexts(a), maxLines: optNum(a, "maxLines") }),
+  );
   r.json("context.pull", async (a) =>
     host.context.pull({ contexts: contexts(a), timeoutMs: optNum(a, "timeoutMs") }),
   );

@@ -1,0 +1,1 @@
+ALTER TABLE `contexts` ADD `preamble` integer DEFAULT true NOT NULL;
