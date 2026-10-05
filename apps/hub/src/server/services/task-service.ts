@@ -4,6 +4,7 @@ import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
 import { WorktreeNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
+import { emitChatLifecycle } from "../infra/events/chat-lifecycle-bus";
 import { hostRegistry } from "../infra/host/registry";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
@@ -123,6 +124,7 @@ function observePending(): void {
   agentSessionService.observePending((chatId, worktreeId) => {
     if (tasks.get(chatId)?.status !== "running") return;
     const waiting = agentSessionService.hasPendingRequest(chatId);
+    if (waiting) emitChatLifecycle({ chatId, worktreeId, kind: "waiting" });
     const updated = setWorktreeSourceStatus(worktreeId, chatStatusSource(chatId), {
       status: waiting ? "needs_attention" : "working",
     });
@@ -371,7 +373,7 @@ async function runTask(task: InternalTask): Promise<void> {
       taskId: task.id,
       error: message,
     });
-    finishTask(task, "failed");
+    finishTask(task, "failed", message);
     return;
   }
   if (!sessionId) {
@@ -473,7 +475,7 @@ async function runTask(task: InternalTask): Promise<void> {
       error: message,
       durationMs: Date.now() - task.startedAt,
     });
-    finishTask(task, "failed");
+    finishTask(task, "failed", message);
   } finally {
     unsubscribe();
   }
@@ -497,7 +499,11 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
  * failed asks for the user's attention; one the user stopped (or that ended
  * while a stop was pending) doesn't, since the user already knows.
  */
-function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cancelled"): void {
+function finishTask(
+  task: InternalTask,
+  outcome: "completed" | "failed" | "cancelled",
+  error?: string,
+): void {
   if (task.status !== "running") return;
   const status = outcome === "completed" ? "completed" : "failed";
   task.status = status;
@@ -509,6 +515,14 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
+  if (!stopped) {
+    emitChatLifecycle({
+      chatId: task.chatId,
+      worktreeId: task.worktreeId,
+      kind: status === "completed" ? "finished" : "failed",
+      ...(status === "failed" && { error: error ?? "The turn failed" }),
+    });
+  }
   const updated = setWorktreeSourceStatus(task.worktreeId, chatStatusSource(task.chatId), {
     status: stopped ? "waiting" : "needs_attention",
   });

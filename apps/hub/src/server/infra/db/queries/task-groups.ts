@@ -1,4 +1,4 @@
-/** Persistence for `task_groups`, `task_group_members` and `dispatch_requests`. Only `ProjectDispatchService` calls this. */
+/** Persistence for `task_groups`, `task_group_members` and `dispatch_requests`. `ProjectDispatchService` and `ProjectSubscriptionService` call this. */
 
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "../connection";
@@ -39,6 +39,37 @@ export class TaskGroupQueries {
       .where(eq(taskGroupMembers.groupId, groupId))
       .orderBy(asc(taskGroupMembers.mergeOrder))
       .all();
+  }
+
+  /** The member that works in a worktree, with its group, or undefined when no group names it. */
+  memberOfWorktree(
+    worktreeId: string,
+  ): { member: TaskGroupMemberRow; group: TaskGroupRow } | undefined {
+    return getDb()
+      .select({ member: taskGroupMembers, group: taskGroups })
+      .from(taskGroupMembers)
+      .innerJoin(taskGroups, eq(taskGroups.id, taskGroupMembers.groupId))
+      .where(eq(taskGroupMembers.worktreeId, worktreeId))
+      .get();
+  }
+
+  /** Every member of every group of a project. */
+  membersOfProject(projectId: string): TaskGroupMemberRow[] {
+    return getDb()
+      .select({ member: taskGroupMembers })
+      .from(taskGroupMembers)
+      .innerJoin(taskGroups, eq(taskGroups.id, taskGroupMembers.groupId))
+      .where(eq(taskGroups.projectId, projectId))
+      .all()
+      .map((r) => r.member);
+  }
+
+  setMemberPr(groupId: string, repo: string, prNumber: number | null): void {
+    getDb()
+      .update(taskGroupMembers)
+      .set({ prNumber })
+      .where(and(eq(taskGroupMembers.groupId, groupId), eq(taskGroupMembers.repo, repo)))
+      .run();
   }
 
   setMemberHost(groupId: string, repo: string, hostId: string | null): void {

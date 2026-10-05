@@ -18,6 +18,7 @@ import {
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
 import { projectDispatchService } from "../../services/project-dispatch-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
+import { projectSubscriptionService } from "../../services/project-subscription-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
 const ref = z.string().trim().min(1).max(200);
@@ -133,6 +134,13 @@ export const projectsRouter = t.router({
     .input(z.object({ project: ref }))
     .query(({ input }) =>
       guard(() => ({ groups: projectDispatchService.groupsOf(projectService.row(input.project)) })),
+    ),
+
+  /** What wakes the project's coordinator: its subscriptions and the recent wake-ups, with any guard that dropped one. */
+  subscriptions: publicProcedure
+    .input(z.object({ project: ref }))
+    .query(({ input }) =>
+      guard(() => projectSubscriptionService.describe(projectService.row(input.project))),
     ),
 
   /** Dispatches the coordinator asked for. `status` narrows the list, `pending` is what waits for the user. */

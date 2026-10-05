@@ -173,4 +173,11 @@ test("an approved group shows on the project page with its merge order", async (
   ]);
   await expect(projects.worktree(`${API}-feat-shared`)).toBeVisible();
   await expect(projects.worktree(`${CLIENT}-feat-shared`)).toBeVisible();
+
+  // The coordinator is subscribed to its workers, and a worker finishing its first turn shows as a wake-up.
+  await expect(projects.subscriptions()).toHaveCount(1);
+  await expect(projects.subscriptions().first()).toHaveAttribute("data-kind", "project");
+  await expect(projects.wakeups().filter({ hasText: "finished its turn" }).first()).toBeVisible({
+    timeout: 30_000,
+  });
 });
