@@ -239,6 +239,17 @@ band tokens revoke <id>
 
 `list` shows each token's id, kind, label, state and last use, never its secret. `create-device` prints a new device token once, for a UI or script. Add `--admin` only for a token that must manage tokens too; without it the token gets 403 on `band tokens`. These commands need an admin token, which the shared token in `settings.json` is. `revoke` stops a token from authenticating. The shared token in `settings.json` cannot be revoked. These commands change who can reach the hub, so run them only when the user asks.
 
+### Store credentials in the hub's vault
+
+```sh
+band vault list
+printf '%s' "$VALUE" | band vault put <name> [--kind api_key|env] [--scope global|project:<name>] [--description <string>]
+band vault delete <id>
+band vault rotate-key
+```
+
+The hub keeps credentials encrypted and never shows a value again: `list` prints id, name, kind, scope and last use. `put` reads the value from stdin (`--value` also works, but shows in the process list). OAuth connections are made in Settings > Credentials, and `delete` revokes one at its server. These commands need an admin token. Run them only when the user asks, and never print or log a value.
+
 ### List cronjobs, optionally filtered by project or workspace
 
 ```sh

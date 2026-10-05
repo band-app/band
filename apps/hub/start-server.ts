@@ -31,6 +31,7 @@ import { createContext } from "./src/server/api/context.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
+import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
 import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
@@ -80,6 +81,7 @@ import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tokenService } from "./src/server/services/token-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
+import { vaultService } from "./src/server/services/vault-service.ts";
 import {
   WORKER_CONNECT_PATH,
   WORKER_EXCHANGE_PATH,
@@ -735,6 +737,7 @@ async function main() {
   environmentBuildService.start();
   runnerService.start();
   runnerReaperService.start();
+  vaultService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -831,6 +834,13 @@ async function main() {
     // the device-token check, because the bootstrap token is the credential.
     if (req.url?.split("?")[0] === WORKER_EXCHANGE_PATH) {
       await workerLinkService.handleExchange(req, res);
+      return;
+    }
+
+    // OAuth consent returns here. Before the device-token check: the
+    // single-use state from `vault.startOAuth` is the credential.
+    if (req.method === "GET" && req.url?.split("?")[0] === OAUTH_CALLBACK_PATH) {
+      await handleOAuthCallback(req, res);
       return;
     }
 
@@ -1571,6 +1581,7 @@ async function main() {
     });
     runnerService.stop();
     runnerReaperService.stop();
+    vaultService.stop();
     placementService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});

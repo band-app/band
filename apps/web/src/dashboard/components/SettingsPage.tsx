@@ -37,6 +37,7 @@ import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } f
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
+import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
@@ -609,6 +610,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Hosts ──────────────────────────────────────── */}
             <SettingsSection title="Hosts">
               <HostsSettings />
+            </SettingsSection>
+
+            {/* ── Credentials ────────────────────────────────── */}
+            <SettingsSection title="Credentials">
+              <CredentialsSettings />
             </SettingsSection>
 
             {/* ── Runners ────────────────────────────────────── */}

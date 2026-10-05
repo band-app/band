@@ -82,6 +82,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: TokensCmd,
     },
+    /// Manage the credentials the hub stores encrypted (API keys, env values, OAuth connections)
+    Vault {
+        #[command(subcommand)]
+        cmd: VaultCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -631,6 +636,36 @@ enum TokensCmd {
 }
 
 #[derive(Subcommand)]
+enum VaultCmd {
+    /// List credentials (name, kind, scope, last use). Never their values.
+    List,
+    /// Store an API key or environment value. The value is read from stdin unless --value is given.
+    Put {
+        /// Credential name. An env item's name is the variable name.
+        name: String,
+        /// `api_key` (default) or `env`
+        #[arg(long, default_value = "api_key")]
+        kind: String,
+        /// `global` (default) or `project:<name>`
+        #[arg(long, default_value = "global")]
+        scope: String,
+        /// Short note shown in the list
+        #[arg(long)]
+        description: Option<String>,
+        /// The value. Prefer stdin: an argument shows in the process list and shell history.
+        #[arg(long)]
+        value: Option<String>,
+    },
+    /// Delete a credential. An OAuth connection is revoked at its server first.
+    Delete {
+        /// Credential ID (from `band vault list`)
+        id: String,
+    },
+    /// Re-encrypt every credential under a new key (key-file installs only)
+    RotateKey,
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -918,6 +953,18 @@ fn main() {
             TokensCmd::List => cmd_tokens_list(),
             TokensCmd::CreateDevice { label, admin } => cmd_tokens_create_device(&label, admin),
             TokensCmd::Revoke { id } => cmd_tokens_revoke(&id),
+        },
+        Commands::Vault { cmd } => match cmd {
+            VaultCmd::List => cmd_vault_list(),
+            VaultCmd::Put {
+                name,
+                kind,
+                scope,
+                description,
+                value,
+            } => cmd_vault_put(&name, &kind, &scope, description.as_deref(), value),
+            VaultCmd::Delete { id } => cmd_vault_delete(&id),
+            VaultCmd::RotateKey => cmd_vault_rotate_key(),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -3580,6 +3627,104 @@ fn cmd_tokens_revoke(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Vault commands ---
+
+fn cmd_vault_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("vault.list", &serde_json::json!({}))?;
+    let items = data
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 5]> = items
+        .iter()
+        .map(|item| {
+            let text = |key: &str| item.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let last_used = item
+                .get("lastUsedAt")
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(
+                    || "never".to_string(),
+                    |at| format!("{} ago", format_span(now_ms().saturating_sub(at))),
+                );
+            [
+                text("id").to_string(),
+                text("name").to_string(),
+                text("kind").to_string(),
+                text("scope").to_string(),
+                last_used,
+            ]
+        })
+        .collect();
+    Ok(CommandResult {
+        text: format_table(&["ID", "NAME", "KIND", "SCOPE", "LAST USED"], &rows),
+        json: serde_json::json!({"items": items}),
+    })
+}
+
+fn cmd_vault_put(
+    name: &str,
+    kind: &str,
+    scope: &str,
+    description: Option<&str>,
+    value: Option<String>,
+) -> Result<CommandResult, String> {
+    let value = if let Some(v) = value {
+        v
+    } else {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| format!("Could not read the value from stdin: {e}"))?;
+        buf.trim_end_matches(['\n', '\r']).to_string()
+    };
+    if value.is_empty() {
+        return Err("The value is empty. Pipe it on stdin or pass --value.".to_string());
+    }
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"name": name, "kind": kind, "scope": scope, "value": value});
+    if let Some(d) = description {
+        body["description"] = serde_json::json!(d);
+    }
+    let data = client.trpc_mutate("vault.put", &body)?;
+    let id = data
+        .pointer("/item/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Ok(CommandResult {
+        text: format!("Stored {name} ({kind}, {scope}) as {id}\n"),
+        json: serde_json::json!({"item": data.get("item")}),
+    })
+}
+
+fn cmd_vault_delete(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("vault.delete", &serde_json::json!({"id": id}))?;
+    let revoked = data.get("revoked").and_then(serde_json::Value::as_bool);
+    let note = match revoked {
+        Some(true) => ", token revoked at the server",
+        Some(false) => ", the server did not confirm the revocation",
+        None => "",
+    };
+    Ok(CommandResult {
+        text: format!("Deleted {id}{note}\n"),
+        json: serde_json::json!({"removed": true, "id": id, "revoked": revoked}),
+    })
+}
+
+fn cmd_vault_rotate_key() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("vault.rotateKey", &serde_json::json!({}))?;
+    let rotated = data
+        .get("rotated")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    Ok(CommandResult {
+        text: format!("Re-encrypted {rotated} credential(s) under a new key\n"),
+        json: serde_json::json!({"rotated": rotated}),
+    })
+}
+
 /// Resolve an explicit workspace ID, or auto-detect it from the current
 /// working directory by matching `git rev-parse --show-toplevel` against
 /// registered workspace paths.
@@ -4234,6 +4379,38 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Host ID (from `band hosts list`)"},
             ],
             "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has workspaces."
+        }),
+        serde_json::json!({
+            "name": "vault list",
+            "description": "List the credentials the hub stores encrypted (never their values)",
+            "parameters": [],
+            "notes": "Needs an admin token. Text output: `ID  NAME  KIND  SCOPE  LAST USED`.\nJSON output: `{\"items\": [{\"id\": \"v-...\", \"name\": \"...\", \"kind\": \"api_key|env|oauth\", \"scope\": \"global\", \"metadata\": {}, \"createdAt\": 0, \"updatedAt\": 0, \"lastUsedAt\": null}]}`."
+        }),
+        serde_json::json!({
+            "name": "vault put",
+            "description": "Store an API key or environment value encrypted on the hub",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Credential name (an env item's name is the variable name)"},
+                {"name": "kind", "type": "string", "required": false, "description": "api_key (default) or env"},
+                {"name": "scope", "type": "string", "required": false, "description": "global (default) or project:<name>"},
+                {"name": "description", "type": "string", "required": false, "description": "Short note shown in the list"},
+                {"name": "value", "type": "string", "required": false, "description": "The value. Without it the value is read from stdin."},
+            ],
+            "notes": "Needs an admin token. Replaces a value stored under the same name and scope. The value is never printed or returned."
+        }),
+        serde_json::json!({
+            "name": "vault delete",
+            "description": "Delete a stored credential (an OAuth connection is revoked at its server first)",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Credential ID (from `band vault list`)"},
+            ],
+            "notes": "Needs an admin token."
+        }),
+        serde_json::json!({
+            "name": "vault rotate-key",
+            "description": "Re-encrypt every stored credential under a new key",
+            "parameters": [],
+            "notes": "Needs an admin token. Only for a key file in BAND_HOME; a key from BAND_VAULT_KEY is changed in the environment."
         }),
         serde_json::json!({
             "name": "runners list",

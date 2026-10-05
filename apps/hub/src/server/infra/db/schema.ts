@@ -651,3 +651,27 @@ export const tokens = sqliteTable(
     index("tokens_created_at_idx").on(t.createdAt),
   ],
 );
+
+// Credentials the hub holds for services (API keys, OAuth tokens, env values).
+// `encrypted` is the AES-256-GCM blob of the secret (`services/_utils/vault-crypto.ts`);
+// `metadata` is JSON that never holds a secret (server URL, scopes, expiry,
+// account). Only `VaultService` reads or writes it, and no API returns it.
+export const vaultItems = sqliteTable(
+  "vault_items",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["api_key", "oauth", "env"] }).notNull(),
+    // `global` or `project:<name>`.
+    scope: text("scope").notNull().default("global"),
+    encrypted: text("encrypted").notNull(),
+    metadata: text("metadata", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+  },
+  (t) => [uniqueIndex("vault_items_scope_name_idx").on(t.scope, t.name)],
+);

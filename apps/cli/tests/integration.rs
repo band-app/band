@@ -2015,6 +2015,76 @@ fn tokens_create_list_revoke() {
     assert!(!unknown.status.success());
 }
 
+// --- Vault tests ---
+
+#[test]
+fn vault_put_list_delete() {
+    use std::io::Write;
+    let env = TestEnv::new();
+    let secret = "sk-cli-vault-VALUE-9876543210";
+
+    // `put` reads the value from stdin and never prints it.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["vault", "put", "OPENAI_API_KEY", "--output", "json"])
+        .env("BAND_HOME", &env.band_dir)
+        .env_remove("BAND_SERVER_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn band vault put");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(format!("{secret}\n").as_bytes())
+        .unwrap();
+    let put = child.wait_with_output().expect("band vault put");
+    assert!(put.status.success(), "stderr: {}", stderr(&put));
+    assert!(!stdout(&put).contains(secret));
+    let id = json_of(&put)["item"]["id"]
+        .as_str()
+        .expect("item id")
+        .to_string();
+
+    // The list shows metadata only, as JSON and as a table.
+    let listed = env.band(&["vault", "list", "--output", "json"]);
+    assert!(listed.status.success(), "stderr: {}", stderr(&listed));
+    assert!(!stdout(&listed).contains(secret));
+    let listed = json_of(&listed);
+    let row = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == id.as_str())
+        .expect("item listed");
+    assert_eq!(row["name"], "OPENAI_API_KEY");
+    assert_eq!(row["kind"], "api_key");
+    assert_eq!(row["scope"], "global");
+    let text = stdout(&env.band(&["vault", "list"]));
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("OPENAI_API_KEY"), "text: {text}");
+
+    // The key is encrypted in the database file.
+    let db = fs::read(env.band_dir.join("band.db")).unwrap();
+    assert!(!db.windows(secret.len()).any(|w| w == secret.as_bytes()));
+
+    // Rotating the key keeps the item, and delete removes it.
+    let rotated = env.band(&["vault", "rotate-key", "--output", "json"]);
+    assert!(rotated.status.success(), "stderr: {}", stderr(&rotated));
+    assert_eq!(json_of(&rotated)["rotated"], 1);
+    let deleted = env.band(&["vault", "delete", &id]);
+    assert!(deleted.status.success(), "stderr: {}", stderr(&deleted));
+    let listed = json_of(&env.band(&["vault", "list", "--output", "json"]));
+    assert!(listed["items"].as_array().unwrap().is_empty());
+    let again = env.band(&["vault", "delete", &id]);
+    assert!(!again.status.success());
+
+    // An empty value is refused before the hub is called.
+    let empty = env.band(&["vault", "put", "X", "--value", ""]);
+    assert!(!empty.status.success());
+}
+
 // --- Subscriptions tests ---
 
 /// A workspace with one chat, and the environment an agent in that chat has.
