@@ -8,9 +8,7 @@
 // — no mocks; the only seam is the band_token cookie used by the rest of
 // the integration-test suite.
 
-import { spawn } from "node:child_process";
 import {
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -18,14 +16,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
+const _PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "host-file-test-token";
 
 // ---------------------------------------------------------------------------
@@ -33,92 +31,6 @@ const DEFAULT_TOKEN = "host-file-test-token";
 // homogeneous; deliberately copied rather than imported to keep each test
 // file self-contained — the helper file already collected enough churn).
 // ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-host-file-test-")));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const home = opts.tmpHome;
-  const port = await getRandomPort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // tRPC HTTP helpers
@@ -161,7 +73,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
   let externalPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-host-file-test-");
     outsideDir = realpathSync(mkdtempSync(join(tmpdir(), "band-host-file-outside-")));
     externalPath = join(outsideDir, "scratch.md");
     writeFileSync(externalPath, "# external file\n\noriginal contents\n", "utf-8");
@@ -173,7 +85,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
     rmSync(outsideDir, { recursive: true, force: true });
   });
 

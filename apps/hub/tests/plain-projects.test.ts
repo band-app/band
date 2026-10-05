@@ -4,10 +4,8 @@
 // SQLite under a tmpdir HOME, real HTTP, real filesystem. No mocks. Each
 // describe block gets its own server so the test cases stay independent.
 
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -16,9 +14,13 @@ import {
   seedSettings,
   seedState,
 } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createCanonicalTmpHome,
+  type ServerHandle,
+  startServer as startCanonicalServer,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "plain-projects-token";
 
 // ---------------------------------------------------------------------------
@@ -27,89 +29,14 @@ const DEFAULT_TOKEN = "plain-projects-token";
 // existing test files each carry their own copies too).
 // ---------------------------------------------------------------------------
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
 function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-plain-test-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
+  return createCanonicalTmpHome("band-plain-test-");
 }
 
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: opts.tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: opts.tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
+async function startServer(
+  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+): Promise<ServerHandle> {
+  return startCanonicalServer({ tmpHome: opts.tmpHome || createTmpHome(), env: opts.env });
 }
 
 const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
@@ -183,7 +110,7 @@ describe("tRPC — plain projects (add)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.add registers a plain folder with kind='plain'", async () => {
@@ -278,7 +205,7 @@ describe("tRPC — plain projects (self-heal kind)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("re-detects kind=plain when the folder has no .git", async () => {
@@ -363,7 +290,7 @@ describe("tRPC — plain projects (self-heal replaces stale git worktrees)", () 
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("self-heal replaces orphaned git worktrees with the implicit main workspace", async () => {
@@ -414,7 +341,7 @@ describe("tRPC — plain projects (.git as file → kind: git)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.add classifies a folder with a `.git` *file* as kind=git", async () => {
@@ -464,7 +391,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("workspaces.create rejects a new workspace on a plain project", async () => {
@@ -595,7 +522,7 @@ describe("tRPC — plain projects (getChanges defensive .git guard)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("getChanges on a stale-git workspace returns empty sections (no git error)", async () => {
@@ -645,7 +572,7 @@ describe("tRPC — plain projects (promote to git)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.promoteToGit flips kind and creates a .git directory", async () => {
@@ -802,7 +729,7 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("syncWorktrees persists kind=plain to disk at boot", async () => {
@@ -855,7 +782,7 @@ describe("tRPC — plain projects (branch-status-poller skips)", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("no branch_statuses row is created for a plain project's implicit workspace", () => {
@@ -899,7 +826,7 @@ describe("tRPC — plain projects (sync-state worktree reconcile skips)", () => 
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    removeTmpHome(tmpHome);
   });
 
   it("syncWorktrees doesn't mutate a plain project's worktree rows", async () => {

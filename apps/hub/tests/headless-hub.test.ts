@@ -11,8 +11,16 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings } from "./helpers/seed-state";
-import { createTmpHome, getRandomPort, type ServerHandle, startServer } from "./helpers/server";
+import {
+  createTmpHome,
+  getRandomPort,
+  type ServerHandle,
+  startServer,
+  waitForProcessGroupExit,
+} from "./helpers/server";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { stopTerminalDaemon } from "./helpers/terminal-daemon";
+import { removeTmpHome } from "./helpers/tmp-home";
 
 const TOKEN = "headless-test-token";
 // The tests run without a built UI, so every server gets a stub one.
@@ -49,7 +57,7 @@ afterAll(() => {
 afterEach(async () => {
   for (const s of servers.splice(0)) await s.close();
   for (const h of homes.splice(0)) {
-    rmSync(h, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(h);
   }
 });
 
@@ -158,6 +166,7 @@ describe("admin token", () => {
               ...env,
             },
             stdio: ["ignore", "pipe", "pipe"],
+            detached: true,
           });
           let out = "";
           const onData = (c: Buffer) => {
@@ -165,11 +174,19 @@ describe("admin token", () => {
             if (/Web server listening/.test(out)) {
               resolve({
                 out,
-                stop: () =>
-                  new Promise((r) => {
+                stop: async () => {
+                  const pgid = child.pid as number;
+                  await new Promise<void>((r) => {
                     child.on("exit", () => r());
-                    child.kill("SIGTERM");
-                  }),
+                    try {
+                      process.kill(-pgid, "SIGTERM");
+                    } catch {
+                      child.kill("SIGTERM");
+                    }
+                  });
+                  await waitForProcessGroupExit(pgid);
+                  await stopTerminalDaemon(home);
+                },
               });
             }
           };

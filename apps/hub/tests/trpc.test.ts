@@ -1,108 +1,30 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome as createTmpHomeBase,
+  type ServerHandle,
+  startServer as startServerBase,
+} from "./helpers/server";
+import { removeTmpHome } from "./helpers/tmp-home";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "trpc-default-token";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
 function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-trpc-test-")));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
+  return createTmpHomeBase("band-trpc-test-");
 }
 
 async function startServer(
   opts: { tmpHome?: string; env?: Record<string, string> } = {},
 ): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
+  return startServerBase({ tmpHome: opts.tmpHome ?? createTmpHome(), env: opts.env });
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // tRPC HTTP helpers
@@ -186,7 +108,7 @@ describe("tRPC — projects CRUD", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.list returns empty list initially", async () => {
@@ -338,7 +260,7 @@ describe("tRPC — git init project validation", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.checkPath returns isGitRepo true for a git repo", async () => {
@@ -393,7 +315,7 @@ describe("tRPC — settings CRUD", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("settings.get returns defaults when only tokenSecret is seeded", async () => {
@@ -474,7 +396,7 @@ describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("settings.get still requires auth", async () => {
@@ -546,7 +468,7 @@ describe("tRPC — workspace operations", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   // -- workspace create / remove --
@@ -1768,7 +1690,7 @@ describe("tRPC — pinned workspaces", () => {
       // best-effort — fine if the test crashed before the worktree was created,
       // or if it was already cleaned up
     }
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.list returns pinned: false by default", async () => {
@@ -1931,7 +1853,7 @@ describe("tRPC — statuses", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("statuses.get returns null for non-existent workspace", async () => {
@@ -2019,7 +1941,7 @@ describe("tRPC — system checks", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("cli.check returns a valid status string", async () => {
@@ -2065,7 +1987,7 @@ describe("tRPC — services activity", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("services.getActivity defaults to 'active'", async () => {
@@ -2122,7 +2044,7 @@ describe("tRPC — browser history", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   // Each test gets its own workspaceId so suites stay independent — the
@@ -2570,7 +2492,7 @@ describe("tRPC — auth enforcement", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   // Queries
@@ -2684,7 +2606,7 @@ describe("tRPC — workspace identity survives a git branch switch", () => {
     } catch {
       // best-effort — fine if already removed by the test
     }
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    removeTmpHome(tmpHome);
   });
 
   it("projects.list keys the workspace id on `name` while reporting the live branch", async () => {
