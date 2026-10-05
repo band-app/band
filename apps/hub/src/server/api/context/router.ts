@@ -94,6 +94,13 @@ export const contextRouter = t.router({
       })),
     ),
 
+  /** What worker syncs reported: kept-both conflicts and files the redaction scan held back. */
+  events: adminProcedure
+    .input(z.object({ name: name.optional(), limit: z.number().int().min(1).max(200).optional() }))
+    .query(({ input }) => ({
+      events: contextService.events(input.limit ?? 50, input.name),
+    })),
+
   /** Mirrors with the remote now. */
   sync: adminProcedure
     .input(z.object({ name }))

@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { RepoQueries } from "../db/queries/repos";
+import { bandHome } from "../db/queries/settings";
 import { WorktreeQueries } from "../db/queries/worktrees";
 
 const worktreeQueries = new WorktreeQueries();
@@ -86,6 +88,11 @@ export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBacke
 
 export const hostRegistry = new HostRegistry(
   new LocalHost({
+    // The hub is a host too. Its working copies sit in its own BAND_HOME and read the bare repos by path.
+    context: {
+      bandHome: () => bandHome(),
+      remote: async (name) => ({ url: join(bandHome(), "context", `${name}.git`) }),
+    },
     terminalBackend: () => {
       if (!terminalBackend) throw new Error("The terminal backend has not been set up yet");
       return terminalBackend;

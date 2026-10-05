@@ -1,10 +1,11 @@
 /** Persistence for `contexts`. Only `ContextService` calls this. */
 
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq, lt } from "drizzle-orm";
 import { getDb } from "../connection";
-import { contexts } from "../schema";
+import { contextEvents, contexts } from "../schema";
 
 export type ContextRow = typeof contexts.$inferSelect;
+export type ContextEventRow = typeof contextEvents.$inferSelect;
 
 export class ContextQueries {
   list(): ContextRow[] {
@@ -30,5 +31,22 @@ export class ContextQueries {
   remove(name: string): boolean {
     const result = getDb().delete(contexts).where(eq(contexts.name, name)).run();
     return Number(result.changes ?? 0) > 0;
+  }
+
+  insertEvent(row: ContextEventRow): void {
+    getDb().insert(contextEvents).values(row).run();
+  }
+
+  /** Newest first. */
+  listEvents(limit: number, context?: string): ContextEventRow[] {
+    const q = getDb().select().from(contextEvents);
+    return (context ? q.where(eq(contextEvents.context, context)) : q)
+      .orderBy(desc(contextEvents.at))
+      .limit(limit)
+      .all();
+  }
+
+  pruneEvents(before: number): void {
+    getDb().delete(contextEvents).where(lt(contextEvents.at, before)).run();
   }
 }

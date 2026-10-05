@@ -29,6 +29,7 @@ import type {
   Host,
   HostAcp,
   HostAgentEnv,
+  HostContext,
   HostFs,
   HostGit,
   HostInfo,
@@ -58,6 +59,7 @@ import {
 import { checkHooks, installHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
+import { type ContextSource, ContextSync } from "./context/context-sync";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
 import { duBytes } from "./process/du";
@@ -83,6 +85,11 @@ export interface LocalHostOptions {
    * its backend at boot (and can replace it), after the host exists.
    */
   terminalBackend: () => TerminalBackend;
+  /**
+   * Where this host's context working copies live and how to reach the hub's
+   * repos. Without it `host.context` reports every context as unreachable.
+   */
+  context?: ContextSource;
 }
 
 /**
@@ -119,6 +126,7 @@ export class LocalHost implements Host {
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
   };
+  readonly context: HostContext;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
@@ -150,6 +158,28 @@ export class LocalHost implements Host {
   };
 
   constructor(private readonly options: LocalHostOptions) {
+    const source = options.context;
+    const sync = source ? new ContextSync(source) : null;
+    this.context = {
+      pull: async (request) =>
+        sync
+          ? sync.pull(request)
+          : request.contexts.map((c) => ({
+              name: c.name,
+              status: "missing" as const,
+              error: "this host has no context source",
+            })),
+      push: async (request) =>
+        sync
+          ? sync.push(request)
+          : request.contexts.map((c) => ({
+              name: c.name,
+              status: "failed" as const,
+              conflicts: [],
+              blocked: [],
+              error: "this host has no context source",
+            })),
+    };
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
     void this.toolVersions();
