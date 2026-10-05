@@ -827,14 +827,22 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   }
 }
 
-/** The charter a project's coordinator chat starts with, or undefined for any other chat. */
-function sessionCharter(rt: Runtime): string | undefined {
+/**
+ * A project's coordinator chat starts with its charter ahead of the context preamble (plan
+ * step 6.2), so the charter takes the same way into each agent. Any other chat is unchanged.
+ */
+function withCharter(chatId: string, preamble: SessionPreamble | null): SessionPreamble | null {
   try {
-    const project = projectCoordinatorService.projectOfChat(rt.chatId);
-    return project ? projectCoordinatorService.charter(project) : undefined;
+    const project = projectCoordinatorService.projectOfChat(chatId);
+    if (!project) return preamble;
+    const charter = projectCoordinatorService.charter(project);
+    return {
+      text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
+      memoryDir: preamble?.memoryDir ?? null,
+    };
   } catch (err) {
-    log.warn({ chatId: rt.chatId, err }, "could not prepare the coordinator charter");
-    return undefined;
+    log.warn({ chatId, err }, "could not prepare the coordinator charter");
+    return preamble;
   }
 }
 
@@ -845,16 +853,6 @@ function preambleMeta(
 ): Record<string, unknown> | undefined {
   if (!rt.preamble) return undefined;
   return injectionFor(def.type, rt.preamble)?.sessionMeta;
-}
-
-/** The `_meta` of a session: the preamble, with a coordinator's charter appended to the system prompt. */
-function sessionMeta(rt: Runtime, def: CodingAgentDefinition): Record<string, unknown> | undefined {
-  const meta = preambleMeta(rt, def);
-  const charter = sessionCharter(rt);
-  if (!charter) return meta;
-  const prompt = (meta?.systemPrompt ?? {}) as { append?: string };
-  const append = [prompt.append, charter].filter(Boolean).join("\n\n");
-  return { ...meta, systemPrompt: { ...prompt, append } };
 }
 
 async function attachNew(
@@ -872,7 +870,7 @@ async function attachNew(
       cwd,
       await agentExtraDirs(rt.worktreeId),
       sessionMcpServers(rt, proc),
-      sessionMeta(rt, def),
+      preambleMeta(rt, def),
     );
   } catch (err) {
     rt.routing = "log";
@@ -913,12 +911,12 @@ async function attachExisting(
   try {
     const attached =
       how === "load"
-        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), sessionMeta(rt, def))
+        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), preambleMeta(rt, def))
         : await proc.resumeSession(
             sessionId,
             cwd,
             sessionMcpServers(rt, proc),
-            sessionMeta(rt, def),
+            preambleMeta(rt, def),
           );
     rt.routing = "log";
     setLive(rt, def, attached);
@@ -1062,7 +1060,10 @@ export class AgentSessionService {
     const viewNeedsNothing =
       purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
     if (!attachedAlready && !viewNeedsNothing) {
-      rt.preamble = await contextPreambleService.forWorktree(chat.worktreeId);
+      rt.preamble = withCharter(
+        rt.chatId,
+        await contextPreambleService.forWorktree(chat.worktreeId),
+      );
       if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
         log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
       }

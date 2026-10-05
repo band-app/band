@@ -1,8 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "58645f5e-619a-4b83-9910-58a04f8a52a4",
+  "id": "049b5c26-6640-4add-8947-fb1e7bcb8155",
   "prevIds": [
+    "295130d8-8a8d-4826-b427-1424362051fb",
     "357972f7-43af-4cdb-b95c-15a09e10f12d"
   ],
   "ddl": [
@@ -771,6 +772,16 @@
       "default": "'read-write'",
       "generated": null,
       "name": "worker_access",
+      "entityType": "columns",
+      "table": "contexts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "preamble",
       "entityType": "columns",
       "table": "contexts"
     },
