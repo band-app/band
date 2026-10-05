@@ -343,7 +343,7 @@ describe("worktrees in a project", () => {
     expect(
       (await mFails("worktrees.create", { repo: "api", branch: "feat-y", projectId: "missing" }))
         .status,
-    ).toBe(400);
+    ).toBe(404);
   });
 
   it("attaches and detaches an existing worktree", async () => {
