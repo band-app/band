@@ -43,6 +43,7 @@ export type SettingsNavId =
   | "hosts"
   | "credentials"
   | "mcp"
+  | "context"
   | "runners"
   | "environment"
   | "labels"

@@ -36,6 +36,7 @@ import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } f
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
+import { ContextSettings } from "./settings/ContextSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
@@ -77,6 +78,7 @@ type SettingsSectionId =
   | "hosts"
   | "credentials"
   | "mcp"
+  | "context"
   | "runners"
   | "environment"
   | "labels"
@@ -151,6 +153,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "MCP",
     subtitle:
       "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
+    group: "AI capabilities",
+  },
+  {
+    id: "context",
+    title: "Context",
+    subtitle: "Preferences, notes and learnings the hub keeps for you and each project.",
     group: "AI capabilities",
   },
   {
@@ -821,6 +829,13 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   {active === "mcp" ? (
                     <SettingsSection title="MCP">
                       <McpSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Context ────────────────────────────────────── */}
+                  {active === "context" ? (
+                    <SettingsSection title="Context">
+                      <ContextSettings />
                     </SettingsSection>
                   ) : null}
 

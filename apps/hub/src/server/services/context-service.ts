@@ -101,7 +101,7 @@ export function contextGitEnv(extra: Record<string, string> = {}): NodeJS.Proces
   };
 }
 
-function runGit(
+export function runGit(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
 ): Promise<GitResult> {
@@ -133,7 +133,7 @@ function runGit(
   });
 }
 
-async function git(
+export async function git(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
 ): Promise<string> {
@@ -418,7 +418,7 @@ export class ContextService {
 
   // ---- internals ---------------------------------------------------------------
 
-  private require(name: string): ContextRow {
+  require(name: string): ContextRow {
     const row = this.find(name);
     if (!row) throw new ContextNotFoundError(name);
     return row;
@@ -436,7 +436,8 @@ export class ContextService {
     return id;
   }
 
-  private async exclusive<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  /** Runs `fn` after every earlier call for the same context, so writes to one repo never interleave. */
+  async exclusive<T>(name: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(name) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(fn);
     this.locks.set(name, next);
