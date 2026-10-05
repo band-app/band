@@ -314,7 +314,14 @@ describe("a runner with snapshot hooks", () => {
     expect(field(taken as string, "worker")).toBe(hostId);
     expect(field(taken as string, "handle")).toBe(handle);
     expect(field(taken as string, "workspaces")).toBe("proja-snap-a");
-    const recorded = await snapshots();
+    // The hub records the snapshot once the hook has exited, which is after the hook's own log line.
+    const recorded = await waitFor(
+      async () => {
+        const rows = await snapshots();
+        return rows.length > 0 ? rows : undefined;
+      },
+      { label: "the snapshot is recorded", timeoutMs: 30_000 },
+    );
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
       runnerId: "hib",
