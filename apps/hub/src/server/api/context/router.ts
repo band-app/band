@@ -17,7 +17,7 @@ import { adminProcedure, t } from "../trpc";
 
 const name = z.string().trim().min(1).max(63);
 const labels = z.array(z.string().min(1).max(100)).max(20);
-const repos = z.array(z.string().min(1).max(200)).max(100);
+const repoNames = z.array(z.string().trim().min(1).max(200)).max(100);
 const workerAccess = z.enum(["read-write", "read-only"]);
 
 async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -44,9 +44,9 @@ export const contextRouter = t.router({
     .input(
       z.object({
         name,
-        kind: z.enum(["user", "project"]).optional(),
+        kind: z.enum(["user", "mission"]).optional(),
         labels: labels.optional(),
-        repos: repos.optional(),
+        repos: repoNames.optional(),
         workerAccess: workerAccess.optional(),
         remoteUrl: z.string().max(500).optional(),
         remoteVaultItemId: z.string().min(1).optional(),
@@ -59,7 +59,7 @@ export const contextRouter = t.router({
       z.object({
         name,
         labels: labels.optional(),
-        repos: repos.optional(),
+        repos: repoNames.optional(),
         workerAccess: workerAccess.optional(),
       }),
     )

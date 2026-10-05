@@ -44,6 +44,12 @@ export const RULE_LABELS: Record<string, string> = {
   "vault-secret": "vault secret",
 };
 
+/** The fixed-shape rules as [label, pattern], for a caller that replaces matches instead of reporting them. */
+export const SECRET_PATTERNS: Array<[string, RegExp]> = RULES.map((r) => [
+  RULE_LABELS[r.id] ?? r.id,
+  r.pattern,
+]);
+
 /** Any value of 12 or more characters after a secret-sounding name, whatever its entropy. */
 const LOOSE_ASSIGNMENT =
   /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b["']?\s*[:=]\s*["']?[A-Za-z0-9/+_.-]{12,}/i;

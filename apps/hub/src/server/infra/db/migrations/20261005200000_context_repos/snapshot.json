@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "723008cf-eda8-420b-ad90-eda3144094d2",
+  "id": "325f3f69-d8f8-4f7c-80ee-a7bc0103c283",
   "prevIds": [
     "11edbb76-1969-4528-933b-5ec5fec0c2cb"
   ],
@@ -28,10 +28,6 @@
     },
     {
       "name": "client_state",
-      "entityType": "tables"
-    },
-    {
-      "name": "context_events",
       "entityType": "tables"
     },
     {
@@ -625,66 +621,6 @@
       "name": "updated_at",
       "entityType": "columns",
       "table": "client_state"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "context_events"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "context",
-      "entityType": "columns",
-      "table": "context_events"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "host_id",
-      "entityType": "columns",
-      "table": "context_events"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "kind",
-      "entityType": "columns",
-      "table": "context_events"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "detail",
-      "entityType": "columns",
-      "table": "context_events"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "at",
-      "entityType": "columns",
-      "table": "context_events"
     },
     {
       "type": "text",
@@ -3461,15 +3397,6 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "context_events_pk",
-      "table": "context_events",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "id"
-      ],
-      "nameExplicit": false,
       "name": "contexts_pk",
       "table": "contexts",
       "entityType": "pks"
@@ -3886,20 +3813,6 @@
       "name": "client_state_worktree_idx",
       "entityType": "indexes",
       "table": "client_state"
-    },
-    {
-      "columns": [
-        {
-          "value": "at",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "context_events_at_idx",
-      "entityType": "indexes",
-      "table": "context_events"
     },
     {
       "columns": [

@@ -1,0 +1,1 @@
+ALTER TABLE `contexts` ADD `repos` text DEFAULT '[]' NOT NULL;

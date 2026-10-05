@@ -233,10 +233,9 @@ beforeAll(async () => {
   });
 
   await m("context.create", { name: "user" });
-  await m("context.create", { name: "acme", kind: "project", repos: ["proj"] });
   await m("context.create", {
     name: "epic",
-    kind: "project",
+    kind: "mission",
     repos: ["proj"],
     labels: ["org=epic"],
   });
@@ -251,8 +250,8 @@ beforeAll(async () => {
       match: "^s3",
       steps: [
         write(join(home, "context/user/learnings/leak.md"), `token is ${GITHUB_TOKEN}\n`),
-        write(join(home, "context/projects/acme/vault.md"), `key=${VAULT_SECRET}\n`),
-        write(join(home, "context/projects/acme/fine.md"), "nothing secret here\n"),
+        write(join(home, "context/user/vault.md"), `key=${VAULT_SECRET}\n`),
+        write(join(home, "context/user/fine.md"), "nothing secret here\n"),
         { say: "ok" },
       ],
     },
@@ -358,14 +357,14 @@ describe("context sync", () => {
 
   it("S3: a token pattern and a vault secret are not pushed and are reported", async () => {
     await startTurn("proj-ctx-a", "s3 leak things");
-    await waitFor(async () => (hubFiles("acme").includes("fine.md") ? true : undefined), {
+    await waitFor(async () => (hubFiles("user").includes("fine.md") ? true : undefined), {
       label: "clean file pushed",
       timeoutMs: 20_000,
     });
-    expect(onHub("acme", "fine.md")).toBe("nothing secret here\n");
+    expect(onHub("user", "fine.md")).toBe("nothing secret here\n");
     expect(hubFiles("user")).not.toContain("learnings/leak.md");
-    expect(hubFiles("acme")).not.toContain("vault.md");
-    for (const name of ["user", "acme"]) {
+    expect(hubFiles("user")).not.toContain("vault.md");
+    for (const name of ["user", "epic"]) {
       const everything = git(bareRepo(name), "log", "-p", "--all");
       expect(everything).not.toContain(GITHUB_TOKEN);
       expect(everything).not.toContain(VAULT_SECRET);
@@ -374,7 +373,7 @@ describe("context sync", () => {
     await waitFor(
       async () => {
         const { events } = await q<{ events: Array<{ kind: string }> }>("context.events", {});
-        return events.filter((e) => e.kind === "blocked").length >= 2 ? true : undefined;
+        return events.some((e) => e.kind === "blocked") ? true : undefined;
       },
       { label: "blocked events", timeoutMs: 20_000 },
     );
@@ -402,13 +401,12 @@ describe("context sync", () => {
   });
 
   it("S4: a host whose labels do not allow a project context never receives it", async () => {
-    // Worker A has no labels. It got the unlabeled project context and not the labeled one.
+    // Worker A has no labels. The repo's project context needs org=epic, so A never gets it.
     await startTurn("proj-ctx-a", "plain message");
-    expect(existsSync(join(a.bandHome, "context", "projects", "acme"))).toBe(true);
     expect(existsSync(join(a.bandHome, "context", "projects", "epic"))).toBe(false);
-    // Worker B carries the label and gets both.
+    expect(existsSync(join(a.bandHome, "context", "projects"))).toBe(false);
+    // Worker B carries the label and gets it.
     await startTurn("proj-ctx-b", "plain message");
     expect(existsSync(join(b.bandHome, "context", "projects", "epic"))).toBe(true);
-    expect(existsSync(join(b.bandHome, "context", "projects", "acme"))).toBe(true);
   });
 });

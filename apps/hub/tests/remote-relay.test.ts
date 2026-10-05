@@ -58,6 +58,29 @@ function git(cwd: string, ...args: string[]): string {
   });
 }
 
+/** Seeds a context with files, pushing through the hub's git endpoint with the admin token. */
+function seedContext(name: string, files: Record<string, string>): void {
+  const dir = tmp(`band-relay-ctx-${name}-`);
+  const auth = ["-c", `http.extraHeader=Authorization: Bearer ${TEST_TOKEN}`];
+  git(dir, ...auth, "clone", "-q", `${server.url}/git/context/${name}.git`, "wc");
+  const wc = join(dir, "wc");
+  for (const [path, body] of Object.entries(files)) {
+    mkdirSync(join(wc, path, ".."), { recursive: true });
+    writeFileSync(join(wc, path), body);
+  }
+  git(wc, "add", "-A");
+  git(wc, "commit", "-q", "-m", "seed");
+  git(wc, ...auth, "push", "-q", "origin", "HEAD");
+}
+
+/** A fresh clone of a context, fetched with the admin token. */
+function cloneContext(name: string): string {
+  const dir = tmp(`band-relay-ctxread-${name}-`);
+  const auth = ["-c", `http.extraHeader=Authorization: Bearer ${TEST_TOKEN}`];
+  git(dir, ...auth, "clone", "-q", `${server.url}/git/context/${name}.git`, "wc");
+  return join(dir, "wc");
+}
+
 function makeRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
@@ -210,6 +233,18 @@ const mcpChatsList = (worktreeId: string) => ({
   params: { name: "band_chats_list", arguments: { worktreeId } },
 });
 const MCP_HEADERS = { accept: "application/json, text/event-stream" };
+const mcpContextCall = (id: number, name: string, args: object) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "tools/call",
+  params: { name, arguments: args },
+});
+// An agent on a worker naming a worktree and chat of the hub's other repo in headers.
+const FORGED_HEADERS = {
+  ...MCP_HEADERS,
+  "x-band-worktree-id": "other-main",
+  "x-band-chat-id": "other-chat",
+};
 
 beforeAll(async () => {
   hubHome = createTmpHome("band-relay-hub-");
@@ -221,6 +256,7 @@ beforeAll(async () => {
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     defaultCodingAgent: "claude-code",
   });
+  const otherRepo = tmp("band-relay-other-");
   seedState(hubHome, {
     repos: [
       {
@@ -228,6 +264,12 @@ beforeAll(async () => {
         path: hubRepo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: hubRepo }],
+      },
+      {
+        name: "other",
+        path: otherRepo,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: otherRepo }],
       },
     ],
   });
@@ -241,6 +283,13 @@ beforeAll(async () => {
       BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
       BAND_TEST_ACP_STATE: join(hubHome, "acp-state"),
     },
+  });
+
+  await m("context.create", { name: "proj-ctx", repos: ["proj"] });
+  await m("context.create", { name: "other-ctx", repos: ["other"] });
+  seedContext("proj-ctx", { "notes.md": "# Notes\n\nThe relaymarker lives in this project.\n" });
+  seedContext("other-ctx", {
+    "notes.md": "# Notes\n\nThe othermarker lives in another project.\n",
   });
 
   const probe = (name: string, path: string, extra: object = {}) => ({
@@ -302,6 +351,27 @@ beforeAll(async () => {
           }),
           probe("other-route", "/api/worktree-file/proj-main/hello.txt"),
           { say: "probed" },
+        ],
+      },
+      {
+        match: "^context-probe",
+        steps: [
+          probe("ctx-own", "/mcp", {
+            method: "POST",
+            body: mcpContextCall(1, "context_search", { query: "relaymarker" }),
+            headers: MCP_HEADERS,
+          }),
+          probe("ctx-forged-read", "/mcp", {
+            method: "POST",
+            body: mcpContextCall(2, "context_search", { query: "othermarker" }),
+            headers: FORGED_HEADERS,
+          }),
+          probe("ctx-forged-write", "/mcp", {
+            method: "POST",
+            body: mcpContextCall(3, "context_append_learning", { text: "forged-learning-text" }),
+            headers: FORGED_HEADERS,
+          }),
+          { say: "probed context" },
         ],
       },
       {
@@ -457,6 +527,32 @@ describe("the worker relay (S2)", () => {
     expect(by("own-chats")?.body).toContain('"chats"');
     expect(by("mcp-own")?.status).toBe(200);
     expect(by("mcp-own")?.body).toContain("chats");
+  });
+
+  it("scopes the context tools to the caller's own project, whatever its headers name", async () => {
+    await submit("proj-relay-a", "context-probe");
+    const by = (name: string) => httpLog(a).find((l) => l.name === name);
+
+    expect(by("ctx-own")?.status).toBe(200);
+    expect(by("ctx-own")?.body).toContain("relaymarker");
+
+    // The relay sets the session headers from the token's scope and drops the agent's own,
+    // so naming the other repo's worktree and chat reaches nothing of that project.
+    const forgedRead = by("ctx-forged-read");
+    expect(forgedRead?.status).toBe(200);
+    expect(forgedRead?.body).not.toContain("othermarker");
+    expect(forgedRead?.body).toContain("proj-ctx");
+    expect(forgedRead?.body).not.toContain("other-ctx");
+
+    expect(by("ctx-forged-write")?.status).toBe(200);
+    const learned = (name: string) => {
+      const dir = join(cloneContext(name), "learnings");
+      return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".md")) : [];
+    };
+    await waitFor(async () => (learned("proj-ctx").length > 0 ? true : undefined), {
+      label: "learning lands in the caller's own project context",
+    });
+    expect(learned("other-ctx")).toEqual([]);
   });
 
   it("refuses a call for another worker's worktree, or the hub's", async () => {

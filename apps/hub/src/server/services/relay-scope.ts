@@ -377,6 +377,12 @@ function bodyText(body: string | undefined): string {
   return body ? Buffer.from(body, "base64").toString("utf8") : "";
 }
 
+const CONTEXT_TOOLS: ReadonlySet<string> = new Set([
+  "context_search",
+  "context_append_learning",
+  "context_handoff",
+]);
+
 function checkMcp(
   request: RelayHttpRequest,
   workerId: string,
@@ -392,6 +398,9 @@ function checkMcp(
     const { method, params } = message as { method?: unknown; params?: Record<string, unknown> };
     if (method !== "tools/call") continue;
     const name = typeof params?.name === "string" ? params.name : "";
+    // The context tools name no worktree or context. The hub takes the session from
+    // the headers the relay sets from the token's scope, so a caller cannot widen them.
+    if (CONTEXT_TOOLS.has(name)) continue;
     if (!name.startsWith("band_")) return deny(403, "Unknown tool");
     const procedure = name.slice("band_".length).replace(/_/g, ".");
     const verdict = checkCall(procedure, params?.arguments, workerId, lookups);

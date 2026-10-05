@@ -40,7 +40,10 @@ export class ContextSyncService {
         ? ((await host.info().catch(() => null))?.labels ?? [])
         : (tokenService.hostLabels(host.id) ?? []);
     const rows = contextService.forSession(worktree.repo.name, labels);
-    const specs: ContextSpec[] = rows.map((row) => ({ name: row.name, kind: row.kind }));
+    const specs: ContextSpec[] = rows.map((row) => ({
+      name: row.name,
+      kind: row.kind === "user" ? "user" : "project",
+    }));
     const readOnly = new Set(rows.filter((r) => r.workerAccess === "read-only").map((r) => r.name));
     return { host, specs, readOnly };
   }

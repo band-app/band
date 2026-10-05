@@ -2216,7 +2216,7 @@ fn context_create_list_link_remove() {
     assert!(created.status.success(), "stderr: {}", stderr(&created));
     let context = &json_of(&created)["context"];
     assert_eq!(context["name"], "alpha");
-    assert_eq!(context["kind"], "project");
+    assert_eq!(context["kind"], "mission");
     assert_eq!(
         context["labels"],
         serde_json::json!(["org=epic", "region=eu"])

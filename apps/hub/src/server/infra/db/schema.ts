@@ -791,12 +791,12 @@ export const contexts = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["user", "project"] }).notNull(),
+    kind: text("kind", { enum: ["user", "mission"] }).notNull(),
     remoteUrl: text("remote_url"),
     remoteVaultItemId: text("remote_vault_item_id"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
-    // Repos whose sessions get this project context (plan step 5.2). Empty means none. A user
-    // context goes to every session and ignores it.
+    // Repos whose agents use this context as their project context (a repo is in at
+    // most one). Phase 6 replaces this with projects. Always empty for the user context.
     repos: text("repos", { mode: "json" }).$type<string[]>().notNull().default([]),
     workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
       .notNull()
