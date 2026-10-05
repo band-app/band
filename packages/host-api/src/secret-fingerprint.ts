@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SecretFingerprint } from "./host";
 
-const MIN_SECRET_LENGTH = 8;
+const MIN_SECRET_LENGTH = 12;
 
 /** SHA-256 of a string, hex. */
 export function sha256Hex(text: string): string {
@@ -10,8 +10,8 @@ export function sha256Hex(text: string): string {
 
 /**
  * What the hub sends a host so its redaction scan can spot a vault secret
- * without holding it. A value shorter than 8 characters is too common to match
- * safely and gets no fingerprint. A value with several lines gets one fingerprint per line.
+ * without holding it. A value shorter than 12 characters is too common to match
+ * safely, and short enough to guess from its prefix and hash, so it gets no fingerprint. A value with several lines gets one fingerprint per line.
  */
 export function fingerprintSecret(value: string): SecretFingerprint[] {
   const out: SecretFingerprint[] = [];

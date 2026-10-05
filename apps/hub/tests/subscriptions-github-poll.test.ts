@@ -165,6 +165,9 @@ afterAll(async () => {
   await stub.stop();
   closeDb();
   for (const key of ENV_KEYS) {
+    // An agent process that exits after this hook still reaches the database. With BAND_HOME
+    // restored it would open (and migrate) the real ~/.band, so the temp home stays set.
+    if (key === "BAND_HOME") continue;
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }

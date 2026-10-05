@@ -403,6 +403,7 @@ describe("context sync", () => {
 
   it("S4: a host whose labels do not allow a project context never receives it", async () => {
     // Worker A has no labels. It got the unlabeled project context and not the labeled one.
+    await startTurn("proj-ctx-a", "plain message");
     expect(existsSync(join(a.bandHome, "context", "projects", "acme"))).toBe(true);
     expect(existsSync(join(a.bandHome, "context", "projects", "epic"))).toBe(false);
     // Worker B carries the label and gets both.

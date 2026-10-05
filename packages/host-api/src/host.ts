@@ -561,7 +561,7 @@ export interface ContextSpec {
 
 /**
  * What the hub knows about its vault secrets, enough to spot one in a file and
- * never enough to recover it. A secret shorter than 8 characters is left out.
+ * hard to recover for a long secret. A secret shorter than 12 characters is left out.
  */
 export interface SecretFingerprint {
   length: number;

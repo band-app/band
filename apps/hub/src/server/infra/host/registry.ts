@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
-import { bandHome } from "../../services/state";
 import { RepoQueries } from "../db/queries/repos";
+import { bandHome } from "../db/queries/settings";
 import { WorktreeQueries } from "../db/queries/worktrees";
 
 const worktreeQueries = new WorktreeQueries();

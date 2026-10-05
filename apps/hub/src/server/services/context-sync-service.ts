@@ -41,7 +41,8 @@ export class ContextSyncService {
         : (tokenService.hostLabels(host.id) ?? []);
     const rows = contextService.forSession(worktree.repo.name, labels);
     const specs: ContextSpec[] = rows.map((row) => ({ name: row.name, kind: row.kind }));
-    return { host, specs };
+    const readOnly = new Set(rows.filter((r) => r.workerAccess === "read-only").map((r) => r.name));
+    return { host, specs, readOnly };
   }
 
   /**
@@ -81,9 +82,15 @@ export class ContextSyncService {
     try {
       const target = await this.specsFor(worktreeId);
       if (!target || target.specs.length === 0) return [];
+      const { readOnly } = target;
       const hostId = target.host.id;
+      // The hub's own host writes the bare repo by path, so honor read-only here.
+      const writable = target.specs.filter(
+        (s) => target.host.id !== LOCAL_HOST_ID || !readOnly.has(s.name),
+      );
+      if (writable.length === 0) return [];
       const results = await target.host.context.push({
-        contexts: target.specs,
+        contexts: writable,
         message: `agent ${chatId} turn ${turn}`,
         hostLabel: hostId,
         secrets: vaultService.secretFingerprints(),

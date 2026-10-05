@@ -48,7 +48,6 @@ const DEFAULT_PULL_TIMEOUT_MS = 10_000;
 const NETWORK_TIMEOUT_MS = 30_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 const MAX_PUSH_ATTEMPTS = 5;
-const MAX_SCAN_BYTES = 2 * 1024 * 1024;
 const APPEND_ONLY = ["learnings/**", "inbox/**"];
 
 interface GitOut {
@@ -155,7 +154,10 @@ export class ContextSync {
     const timeoutMs = request.timeoutMs ?? DEFAULT_PULL_TIMEOUT_MS;
     return Promise.all(
       request.contexts.map((spec) =>
-        this.exclusive(spec, () => this.pullOne(spec, timeoutMs)).catch(
+        this.withDeadline(
+          this.exclusive(spec, () => this.pullOne(spec, timeoutMs)),
+          timeoutMs,
+        ).catch(
           (err): ContextPullResult => ({
             name: spec.name,
             status: "stale",
@@ -373,9 +375,11 @@ export class ContextSync {
       if (listed[i] === "D") continue;
       const path = listed[i + 1];
       const blob = await this.git(dir, ["show", `:${path}`], true);
-      const sample = blob.buffer.subarray(0, MAX_SCAN_BYTES);
-      if (sample.includes(0)) continue;
-      findings.push(...scanText(path, sample.toString("utf8"), secrets));
+      // A binary file is scanned as latin1, so a NUL byte cannot hide a secret.
+      const text = blob.buffer.includes(0)
+        ? blob.buffer.toString("latin1")
+        : blob.buffer.toString("utf8");
+      findings.push(...scanText(path, text, secrets));
     }
     if (findings.length === 0) return { findings };
 
@@ -441,6 +445,22 @@ export class ContextSync {
       child.on("error", () => resolve({ buffer: Buffer.alloc(0), code: 127 }));
       child.on("close", (code) => resolve({ buffer: Buffer.concat(chunks), code: code ?? 1 }));
     });
+  }
+
+  /**
+   * A pull queues behind a running push of the same context. This bounds the
+   * wait for the lock as well as the git calls, so a slow push cannot hold a
+   * prompt past the pull timeout (the copy is then reported stale).
+   */
+  private withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`pull timed out after ${timeoutMs} ms`)),
+        timeoutMs + 1000,
+      );
+    });
+    return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
   }
 
   private async exclusive<T>(spec: ContextSpec, fn: () => Promise<T>): Promise<T> {
