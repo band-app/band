@@ -235,7 +235,7 @@ beforeAll(async () => {
   await m("context.create", { name: "user" });
   await m("context.create", {
     name: "epic",
-    kind: "mission",
+    kind: "project",
     repos: ["proj"],
     labels: ["org=epic"],
   });

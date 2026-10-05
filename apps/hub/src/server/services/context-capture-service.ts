@@ -72,12 +72,12 @@ export const contextCaptureService = {
    * Called by `ChatService` before it drops a chat's log. Reads the log at once
    * and writes in the background, so a removal never waits on git or fails on it.
    */
-  captureChat(chat: ChatRow, repo?: string): void {
+  captureChat(chat: ChatRow, repo?: string, projectId?: string): void {
     if (settingsService.get().context?.captureLearnings !== true) return;
     try {
       const text = summarize(chat);
       if (!text) return;
-      const session = sessionFromChat(chat, repo);
+      const session = sessionFromChat(chat, repo, projectId);
       if (!session.project) return;
       void contextToolsService
         .appendLearning(session, { text, tags: ["auto-captured"], source: "auto-captured" })

@@ -2200,6 +2200,75 @@ fn mcp_add_list_remove() {
 }
 
 #[test]
+fn projects_create_list_add_repo() {
+    let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
+    for name in ["api", "client"] {
+        let dir = env.tmp.path().join(name);
+        fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-b", "main"]);
+        git(&dir, &["commit", "--allow-empty", "-m", "init"]);
+        let added = env.band(&["repos", "add", dir.to_str().unwrap()]);
+        assert!(added.status.success(), "stderr: {}", stderr(&added));
+    }
+
+    let created = env.band(&[
+        "projects",
+        "create",
+        "checkout",
+        "--description",
+        "Checkout revamp",
+        "--repo",
+        "api:api",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let project = &json_of(&created)["project"];
+    assert_eq!(project["name"], "checkout");
+    assert_eq!(project["coordinatorModel"], "opus");
+    assert_eq!(project["contextName"], "checkout");
+    assert_eq!(
+        project["repos"],
+        serde_json::json!([{"repo": "api", "role": "api"}])
+    );
+
+    let added = env.band(&[
+        "projects", "add-repo", "checkout", "client", "--role", "client", "--output", "json",
+    ]);
+    assert!(added.status.success(), "stderr: {}", stderr(&added));
+
+    let listed = json_of(&env.band(&["projects", "list", "--output", "json"]));
+    let projects = listed["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["repos"].as_array().unwrap().len(), 2);
+    let text = stdout(&env.band(&["projects", "list"]));
+    assert!(text.starts_with("NAME"), "text: {text}");
+    assert!(text.contains("api:api,client:client"), "text: {text}");
+
+    let got = json_of(&env.band(&["projects", "get", "checkout", "--output", "json"]));
+    assert_eq!(got["project"]["description"], "Checkout revamp");
+    assert_eq!(got["project"]["context"]["kind"], "project");
+
+    // The model is editable, and an unknown repo or a duplicate name is refused.
+    let updated = env.band(&[
+        "projects", "update", "checkout", "--model", "sonnet", "--output", "json",
+    ]);
+    assert!(updated.status.success(), "stderr: {}", stderr(&updated));
+    assert_eq!(json_of(&updated)["project"]["coordinatorModel"], "sonnet");
+    assert!(!env
+        .band(&["projects", "add-repo", "checkout", "nope"])
+        .status
+        .success());
+    assert!(!env
+        .band(&["projects", "create", "checkout"])
+        .status
+        .success());
+
+    let removed = env.band(&["projects", "remove-repo", "checkout", "client"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+}
+
+#[test]
 fn context_create_list_link_remove() {
     let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
 
@@ -2216,7 +2285,7 @@ fn context_create_list_link_remove() {
     assert!(created.status.success(), "stderr: {}", stderr(&created));
     let context = &json_of(&created)["context"];
     assert_eq!(context["name"], "alpha");
-    assert_eq!(context["kind"], "mission");
+    assert_eq!(context["kind"], "project");
     assert_eq!(
         context["labels"],
         serde_json::json!(["org=epic", "region=eu"])

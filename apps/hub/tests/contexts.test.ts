@@ -167,7 +167,7 @@ describe("context repos over git smart HTTP", () => {
     const reserved = await trpcMutate(
       server.url,
       "context.create",
-      { name: "user", kind: "mission" },
+      { name: "user", kind: "project" },
       ADMIN,
     );
     expect(reserved.status).toBe(400);
@@ -270,7 +270,7 @@ describe("a context linked to a remote", () => {
   it("takes what the remote has instead of the scaffold, then mirrors both ways", async () => {
     const created = await m<{ context: { remoteUrl: string; syncError: string | null } }>(
       "context.create",
-      { name: "borko", kind: "mission", remoteUrl: remote },
+      { name: "borko", kind: "project", remoteUrl: remote },
     );
     expect(created.context.remoteUrl).toBe(remote);
 

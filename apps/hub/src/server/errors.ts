@@ -198,3 +198,27 @@ export class ContextInputError extends Error {
     this.name = "ContextInputError";
   }
 }
+
+/** Thrown by `ProjectService` for an unknown project. `api/projects/router.ts` maps it to 404. */
+export class ProjectNotFoundError extends Error {
+  constructor(name: string) {
+    super(`No project named "${name}"`);
+    this.name = "ProjectNotFoundError";
+  }
+}
+
+/** Thrown by `ProjectService` for input the caller can fix. Mapped to 400. */
+export class ProjectInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectInputError";
+  }
+}
+
+/** Thrown by `ProjectService` when the change clashes with current state, such as a repo still in use. Mapped to 409. */
+export class ProjectConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectConflictError";
+  }
+}

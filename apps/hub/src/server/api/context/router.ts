@@ -44,7 +44,7 @@ export const contextRouter = t.router({
     .input(
       z.object({
         name,
-        kind: z.enum(["user", "mission"]).optional(),
+        kind: z.enum(["user", "project"]).optional(),
         labels: labels.optional(),
         repos: repoNames.optional(),
         workerAccess: workerAccess.optional(),

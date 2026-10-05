@@ -85,6 +85,8 @@ export class RepoService {
         pinned: boolean;
         /** The remote host the worktree lives on. Absent for the hub's own machine. */
         hostId?: string;
+        /** The project the worktree belongs to (plan step 6.1). Absent when it has none. */
+        projectId?: string;
         /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is coming back (`waking`). */
         lifecycle?: WorktreeLifecycle;
         worktreeId: string;
@@ -175,6 +177,7 @@ export class RepoService {
                 path: wt.path,
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
+                ...(tracked?.projectId ? { projectId: tracked.projectId } : {}),
               };
             });
           worktrees = [
