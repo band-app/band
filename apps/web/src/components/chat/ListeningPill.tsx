@@ -1,7 +1,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "@/dashboard";
 import { trpc } from "../../lib/trpc-client";
 
@@ -63,13 +63,37 @@ export function ListeningPill({ chatId }: { chatId: string }) {
     staleTime: 30_000,
   });
 
+  // An invalidation during the first load does not start a second request: the query has no data
+  // yet, so TanStack Query hands back the one in flight, which was answered before the change.
+  // The flag makes the pill read the list again once that request ends.
+  const changedWhileFetching = useRef(false);
+
   useEffect(() => {
+    const refresh = () => {
+      if (queryClient.isFetching({ queryKey: listKey(chatId) }) > 0) {
+        changedWhileFetching.current = true;
+      }
+      void queryClient.invalidateQueries({ queryKey: listKey(chatId) });
+    };
     return adapter.subscribeStatusEvents((event) => {
+      // The stream replays nothing, so a subscription created while it was connecting or down
+      // sent an event this pill never saw. The on-connect snapshot is the cue to read the list.
+      if (event.kind === "snapshot") {
+        refresh();
+        return;
+      }
       if (event.chatId !== chatId) return;
       if (typeof event.kind !== "string" || !event.kind.startsWith("subscription-")) return;
-      void queryClient.invalidateQueries({ queryKey: listKey(chatId) });
+      refresh();
     });
   }, [adapter, chatId, queryClient]);
+
+  const { isFetching, refetch } = query;
+  useEffect(() => {
+    if (isFetching || !changedWhileFetching.current) return;
+    changedWhileFetching.current = false;
+    void refetch();
+  }, [isFetching, refetch]);
 
   const subscriptions = query.data ?? [];
   if (subscriptions.length === 0) return null;
