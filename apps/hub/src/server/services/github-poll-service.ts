@@ -13,6 +13,7 @@ import {
   initialCursor,
   parsePrActivity,
 } from "../infra/subscriptions/github-poll";
+import { withHubGhCredential } from "./_utils/hub-gh-auth";
 import { githubWebhookService, publicHubUrl } from "./github-webhook-service";
 import { pluginHost } from "./plugin-host-service";
 import { isBandPushed } from "./pushed-sha-service";
@@ -105,7 +106,7 @@ export class GithubPollService {
   /** One `gh` call, counted against the poll's budget. */
   private gh(args: string[]): Promise<string> {
     this.state.callsLeft--;
-    return execGh(args, tmpdir());
+    return withHubGhCredential((env) => execGh(args, tmpdir(), env));
   }
 
   /** Logs a failure once per distinct message, and skips the item for longer each time it repeats. */

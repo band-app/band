@@ -14,6 +14,7 @@ import {
   readWebhookSecret,
   verifyGithubSignature,
 } from "../infra/subscriptions/github";
+import { withHubGhCredential } from "./_utils/hub-gh-auth";
 import { isBandPushed } from "./pushed-sha-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
 import { tunnelService } from "./tunnel-service";
@@ -44,12 +45,14 @@ export function publicHubUrl(): string | undefined {
 
 /** `gh api` runs outside any checkout, so its working directory doesn't matter. */
 function ghApi(args: string[]): Promise<string> {
-  return execGh(["api", ...args], tmpdir());
+  return withHubGhCredential((env) => execGh(["api", ...args], tmpdir(), env));
 }
 
 /** `gh api` with a JSON body on stdin, so the body stays out of argv. */
 function ghApiJson(endpoint: string, body: unknown): Promise<string> {
-  return execGhWithInput(["api", endpoint, "--input", "-"], tmpdir(), JSON.stringify(body));
+  return withHubGhCredential((env) =>
+    execGhWithInput(["api", endpoint, "--input", "-"], tmpdir(), JSON.stringify(body), env),
+  );
 }
 
 const seenDeliveries = new Set<string>();

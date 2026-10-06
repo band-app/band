@@ -14,14 +14,17 @@
  */
 
 import {
+  type GhTokenReply,
   type GitCredentialParams,
   type GitCredentialReply,
+  METHOD_GH_TOKEN,
   METHOD_GIT_CREDENTIAL,
   RpcError,
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { RepoQueries } from "../infra/db/queries/repos";
+import { RunnerMachineQueries } from "../infra/db/queries/runner-machines";
 import { hostRegistry } from "../infra/host/registry";
 import {
   type GitTokenSource,
@@ -31,6 +34,7 @@ import {
   VaultGitTokenSource,
 } from "./_utils/git-token-source";
 import { loadState } from "./state";
+import { vaultService } from "./vault-service";
 
 const log = createLogger("git-credential");
 
@@ -44,6 +48,7 @@ interface PlacedRemote extends RemoteKey {
 
 export class GitCredentialService {
   private readonly repos = new RepoQueries();
+  private readonly machines = new RunnerMachineQueries();
   /** Remotes the hub will clone onto a worker that has no checkout yet, by worker id. */
   private readonly expected = new Map<string, PlacedRemote[]>();
 
@@ -51,6 +56,25 @@ export class GitCredentialService {
 
   attach(session: ServerSession): void {
     session.handle(METHOD_GIT_CREDENTIAL, (params) => this.handle(session.workerId, params));
+    session.handle(METHOD_GH_TOKEN, (params) => this.handleGhToken(session.workerId, params));
+  }
+
+  /**
+   * The token for `gh` on a worker's agents and terminals. Only a worker a runner started (it has
+   * a machine row) or one that opted in gets it. An attached worker keeps its own `gh auth login`.
+   */
+  private handleGhToken(workerId: string, params: unknown): GhTokenReply {
+    const optIn = (params as { optIn?: unknown } | null)?.optIn === true;
+    if (!optIn && !this.machines.latestLiveForWorker(workerId)) {
+      return { found: false, reason: "not a runner-started worker" };
+    }
+    const token = vaultService.findGitHubToken();
+    if (!token) {
+      log.warn(`no github.com git credential in the vault for the gh token of worker ${workerId}`);
+      return { found: false, reason: "no github.com git credential in the vault" };
+    }
+    log.info(`handed out the gh token to worker ${workerId}`);
+    return { found: true, token };
   }
 
   /** Allows `url` for the worker's credential requests before it has a checkout of the repository. */

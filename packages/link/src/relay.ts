@@ -145,3 +145,18 @@ export interface GitCredentialParams {
 export type GitCredentialReply =
   | { found: false }
   | { found: true; username: string; password: string };
+
+/**
+ * Worker to hub: `GhTokenParams` in, `GhTokenReply` out. A worker asks for the token its agents
+ * and terminals run `gh` with, as `GH_TOKEN`. The hub answers a worker it started through a
+ * runner, or one that sent `optIn`, and the token goes into the environment of the processes the
+ * worker starts. It is never written to disk and never logged on either side.
+ */
+export const METHOD_GH_TOKEN = "gh.token";
+
+export interface GhTokenParams {
+  /** The worker's operator asked for the hub's token (`BAND_WORKER_GH_TOKEN=hub`). */
+  optIn?: boolean;
+}
+
+export type GhTokenReply = { found: false; reason?: string } | { found: true; token: string };

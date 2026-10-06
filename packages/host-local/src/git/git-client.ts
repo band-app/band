@@ -231,8 +231,12 @@ async function execOffThread(
  * today are git/CI-adjacent (CI status polling, PR lookup), and the
  * subprocess + PATH boilerplate is the same.
  */
-export function execGh(args: string[], cwd: string): Promise<string> {
-  const env = { ...process.env };
+export function execGh(
+  args: string[],
+  cwd: string,
+  extraEnv?: Record<string, string>,
+): Promise<string> {
+  const env = { ...process.env, ...extraEnv };
   env.PATH = prependBinDirs(env.PATH);
   // `BAND_GH_BIN` overrides the binary, read on every call, the same way the
   // GitHub plugin's `runGh` does (tests point it at their `gh` stub).
@@ -245,8 +249,13 @@ export function execGh(args: string[], cwd: string): Promise<string> {
  * not appear in argv (a webhook secret shows up in `ps`). Pass `--input -`
  * in `args`. Rejects with gh's stderr, like `execGh`.
  */
-export function execGhWithInput(args: string[], cwd: string, input: string): Promise<string> {
-  const env = { ...process.env };
+export function execGhWithInput(
+  args: string[],
+  cwd: string,
+  input: string,
+  extraEnv?: Record<string, string>,
+): Promise<string> {
+  const env = { ...process.env, ...extraEnv };
   env.PATH = prependBinDirs(env.PATH);
   const bin = process.env.BAND_GH_BIN || "gh";
   return new Promise((resolve, reject) => {
