@@ -93,6 +93,12 @@ export const hostRegistry = new HostRegistry(
       bandHome: () => bandHome(),
       remote: async (name) => ({ url: join(bandHome(), "context", `${name}.git`) }),
     },
+    // `gh` is the GitHub plugin's tool: with that plugin disabled the host never runs it. The
+    // import is dynamic because the services import this registry.
+    ghEnabled: async () => {
+      const { loadSettings } = await import("../../services/state");
+      return !(loadSettings().plugins?.disabled ?? []).includes("github");
+    },
     terminalBackend: () => {
       if (!terminalBackend) throw new Error("The terminal backend has not been set up yet");
       return terminalBackend;

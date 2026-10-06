@@ -8,7 +8,6 @@ import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { seedSettings } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcQuery } from "./helpers/server";
 import { removeTmpHome } from "./helpers/tmp-home";
-import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "host-info-probe-cache-secret";
 
@@ -30,16 +29,23 @@ afterAll(async () => {
 });
 
 const versionProbes = () =>
-  stub.requests.filter((r) => r.args.length === 1 && r.args[0] === "--version");
+  stub.requests.filter((r) => r.args.length === 1 && r.args[0] === "--version").length;
 
-it("probes gh --version once, however many times hosts.list is called", async () => {
-  for (let i = 0; i < 3; i++) {
-    const res = await trpcQuery(server.url, "hosts.list", undefined, TOKEN);
-    expect(res.status).toBe(200);
-  }
-  await waitFor(async () => versionProbes().length >= 1);
-  expect(versionProbes()).toHaveLength(1);
-  expect(stub.requests).toHaveLength(1);
+const hostsList = async () => {
+  const res = await trpcQuery(server.url, "hosts.list", undefined, TOKEN);
+  expect(res.status).toBe(200);
+};
+
+it("probes gh --version once per host, however many hosts.list calls come, even at once", async () => {
+  // Five concurrent first calls share one probe. The count includes any worker host that the
+  // test mode (BAND_TEST_HOST=remote-loopback) runs, which probes on its own, so the check is
+  // that more calls add none, not an absolute number.
+  await Promise.all(Array.from({ length: 5 }, hostsList));
+  const afterFirst = versionProbes();
+  expect(afterFirst).toBeGreaterThanOrEqual(1);
+  for (let i = 0; i < 3; i++) await hostsList();
+  expect(versionProbes()).toBe(afterFirst);
+  expect(stub.requests).toHaveLength(afterFirst);
 });
 
 it("answers 401 to hosts.list without a token and starts no gh process", async () => {
