@@ -19,12 +19,14 @@
 
 import { createLogger } from "@band-app/logger";
 import { setBrowserLookup } from "../infra/browser-host/browser-lookup";
+import { setRemoteCdpOpener } from "../infra/browser-host/remote-cdp";
 import {
   BrowserQueries,
   type BrowserRow,
   type BrowserStatus,
   type BrowserUpdatePatch,
 } from "../infra/db/queries/browsers";
+import { hostRegistry } from "../infra/host/registry";
 import { DockviewLayoutManager } from "./_utils/dockview-layout-manager";
 
 const log = createLogger("browser-service");
@@ -434,3 +436,17 @@ export const browserService = new BrowserService();
 // so `infra/browser-host/host-state.ts` can resolve a Band tab id without
 // importing back into services (issue #535, follow-up 2).
 setBrowserLookup((browserId) => browserService.get(browserId));
+
+// A tab of a worktree on a worker is driven through that worker's Chromium: the worker starts it
+// on the first connection and the hub bridges CDP over a link channel (plan step 7.3).
+setRemoteCdpOpener(async (worktreeId) => {
+  let host: ReturnType<typeof hostRegistry.hostFor>;
+  try {
+    host = hostRegistry.hostFor(worktreeId);
+  } catch {
+    return null;
+  }
+  if (host.id === hostRegistry.local.id) return null;
+  await host.browser.open({ worktreeId });
+  return host.browser.connect(worktreeId);
+});

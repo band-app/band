@@ -26,6 +26,8 @@ export interface Host {
   readonly acp: HostAcp;
   /** Stdio MCP servers, which run on this host and speak JSON-RPC lines. */
   readonly mcp: HostMcp;
+  /** A Chromium per worktree with its DevTools endpoint on loopback (plan step 7.3). */
+  readonly browser: HostBrowser;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;
@@ -367,6 +369,40 @@ export interface McpStdio {
 export interface HostMcp {
   /** Starts one server process. Rejects when it cannot start, or with `HostOfflineError` on a worker with no link. */
   openStdio(spec: McpStdioSpec): Promise<McpStdio>;
+}
+
+/** What it takes to start a worktree's Chromium. */
+export interface BrowserOpenSpec {
+  worktreeId: string;
+  /** The user-data directory. The cookies and everything else of the worktree's profile live here. */
+  profileDir?: string;
+  /** Defaults to headless when the host has no display. */
+  headless?: boolean;
+}
+
+export interface BrowserInfo {
+  pid: number | undefined;
+  /** The user-data directory in use on the host. */
+  profileDir: string;
+  headless: boolean;
+  /** The DevTools port on the host's loopback. The hub never dials it, agents on the host may. */
+  port: number;
+}
+
+/** A CDP connection to a worktree's browser. One message is one JSON text. */
+export interface BrowserCdp {
+  send(message: string): void;
+  messages: Stream<string>;
+  close(): void;
+}
+
+export interface HostBrowser {
+  /** Starts the worktree's Chromium, or returns the one that runs. Rejects when no Chromium is installed. */
+  open(spec: BrowserOpenSpec): Promise<BrowserInfo>;
+  /** Opens a CDP connection to the browser-level endpoint of a running browser. Rejects when none runs. */
+  connect(worktreeId: string): Promise<BrowserCdp>;
+  /** Closes the browser cleanly so cookies are written, and kills it if it does not exit. A no-op when none runs. */
+  close(worktreeId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

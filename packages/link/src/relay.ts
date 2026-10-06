@@ -30,6 +30,11 @@ export interface RelayRegisterParams extends RelayScopeParams {
 export interface RelayRegisterReply {
   /** The relay's address on the worker, such as `http://127.0.0.1:41234`. */
   url: string;
+  /**
+   * The `DevToolsActivePort` file of the worktree's browser on the worker. It exists while the
+   * browser runs, and its first line is the loopback CDP port (plan step 7.3).
+   */
+  browserPortFile?: string;
 }
 
 export interface RelayRevokeParams {

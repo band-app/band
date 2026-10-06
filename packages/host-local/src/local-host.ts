@@ -29,6 +29,7 @@ import type {
   Host,
   HostAcp,
   HostAgentEnv,
+  HostBrowser,
   HostContext,
   HostFs,
   HostGit,
@@ -59,6 +60,7 @@ import {
 import { checkHooks, installHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
+import { ChromiumManager } from "./browser/chromium";
 import { type ContextSource, ContextSync } from "./context/context-sync";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
@@ -125,6 +127,14 @@ export class LocalHost implements Host {
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
+  };
+  private readonly chromium = new ChromiumManager(() =>
+    join(process.env.BAND_HOME ?? join(homedir(), ".band"), "browser-profiles"),
+  );
+  readonly browser: HostBrowser = {
+    open: (spec) => this.chromium.open(spec),
+    connect: (worktreeId) => this.chromium.connect(worktreeId),
+    close: (worktreeId) => this.chromium.close(worktreeId),
   };
   readonly context: HostContext;
   readonly scripts: HostScripts = {

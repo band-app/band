@@ -16,6 +16,8 @@ export interface WorkerContext {
   labels: Record<string, string>;
   /** The hub's `band` CLI, cached on this machine. Absent in a worker that does not fetch it. */
   cli?: CliCache;
+  /** The worker's private directory. */
+  stateDir: string;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */
@@ -93,4 +95,13 @@ export function hostDirs(roots: string[]): HostDirs | undefined {
   const root = roots[0];
   if (root === undefined) return undefined;
   return { uploads: join(root, ".band-uploads"), shared: join(root, ".band-shared") };
+}
+
+/** The Chromium profile of a worktree, in the worker's state dir. */
+export function browserProfileDir(stateDir: string, worktreeId: string): string {
+  return join(
+    stateDir,
+    "browser",
+    worktreeId.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_"),
+  );
 }
