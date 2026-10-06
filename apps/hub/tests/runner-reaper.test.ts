@@ -224,12 +224,16 @@ describe("orphans", () => {
     const work = tmp("band-reaper-orphan-hooks-");
     const live = join(work, "live.txt");
     const marker = join(work, "destroyed.log");
-    writeFileSync(live, "stray-1\nstray-2\n");
-    const statusHook = script(join(work, "status.sh"), 'cat "$LIVE"');
-    // Like a real hook, destroy removes the machine, so it stops being listed.
+    // One file per live machine, so concurrent destroys never rewrite a shared list.
+    mkdirSync(live);
+    writeFileSync(join(live, "stray-1"), "");
+    writeFileSync(join(live, "stray-2"), "");
+    const statusHook = script(join(work, "status.sh"), 'ls "$LIVE"');
+    // Like a real hook, destroy removes the machine, so it stops being listed. It does so before
+    // it writes the marker, so a marker line means that machine is already gone.
     const destroyHook = script(
       join(work, "destroy.sh"),
-      'w="$BAND_WORKER_ID"\n[ -n "$w" ] || w=none\necho "$BAND_RUNNER_ID handle=$BAND_MACHINE_HANDLE worker=$w" >> "$MARKER"\ngrep -v -x "$BAND_MACHINE_HANDLE" "$LIVE" > "$LIVE.new" || true\nmv "$LIVE.new" "$LIVE"',
+      'w="$BAND_WORKER_ID"\n[ -n "$w" ] || w=none\nrm -f "$LIVE/$BAND_MACHINE_HANDLE"\necho "$BAND_RUNNER_ID handle=$BAND_MACHINE_HANDLE worker=$w" >> "$MARKER"',
     );
     seedSettings(home, {
       tokenSecret: TOKEN,
@@ -265,7 +269,7 @@ describe("orphans", () => {
         "strays handle=stray-1 worker=none",
         "strays handle=stray-2 worker=none",
       ]);
-      expect(readFileSync(live, "utf8").trim()).toBe("");
+      expect(readdirSync(live)).toEqual([]);
       // Once gone they are not destroyed again.
       await new Promise((r) => setTimeout(r, 1200));
       expect(readFileSync(marker, "utf8").trim().split("\n")).toHaveLength(2);
