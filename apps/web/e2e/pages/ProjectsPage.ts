@@ -214,4 +214,43 @@ export class ProjectsPage {
   wakeups(): Locator {
     return this.detail.getByTestId("projects__wakeup");
   }
+
+  // ---- dashboard (step 6.6) ---------------------------------------------------------------
+
+  /** The agents the dashboard lists, the coordinator first. */
+  dashboardAgents(): Locator {
+    return this.detail.getByTestId("dashboard__agent");
+  }
+
+  dashboardAgent(role: "coordinator" | "worker"): Locator {
+    return this.detail.locator(`[data-testid="dashboard__agent"][data-role="${role}"]`);
+  }
+
+  async stopAgent(role: "coordinator" | "worker"): Promise<void> {
+    await test.step(`Stop the ${role}`, async () => {
+      await this.dashboardAgent(role).first().getByTestId("dashboard__agent-stop").click();
+    });
+  }
+
+  dashboardMembers(): Locator {
+    return this.detail.getByTestId("dashboard__member");
+  }
+
+  dashboardMember(repo: string): Locator {
+    return this.detail.locator(`[data-testid="dashboard__member"][data-repo="${repo}"]`);
+  }
+
+  dashboardApprovals(): Locator {
+    return this.detail.getByTestId("dashboard__approval");
+  }
+
+  async approveFromDashboard(): Promise<void> {
+    await test.step("Approve the dispatch from the dashboard", async () => {
+      await this.detail.getByTestId("dashboard__approval-approve").first().click();
+    });
+  }
+
+  spend(part: "today" | "week" | "total" | "remaining" | "unattributed"): Locator {
+    return this.detail.getByTestId(`dashboard__spend-${part}`);
+  }
 }

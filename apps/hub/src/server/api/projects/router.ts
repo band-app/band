@@ -16,6 +16,7 @@ import {
   ProjectNotFoundError,
 } from "../../errors";
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
+import { projectDashboardService } from "../../services/project-dashboard-service";
 import { projectDispatchService } from "../../services/project-dispatch-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { projectSubscriptionService } from "../../services/project-subscription-service";
@@ -127,6 +128,22 @@ export const projectsRouter = t.router({
           })
           .then(() => ({ removed: true })),
       ),
+    ),
+
+  /** Agents, task groups with their PRs, spend, pending approvals and wake-ups, for the project page. */
+  dashboard: publicProcedure
+    .input(z.object({ project: ref }))
+    .query(({ input }) =>
+      guard(() => projectDashboardService.dashboard(projectService.row(input.project))),
+    ),
+
+  /** Stops the running turn of one agent chat of the project. */
+  stopAgent: adminProcedure
+    .input(z.object({ project: ref, chatId: z.string().min(1).max(200) }))
+    .mutation(({ input }) =>
+      guard(() => ({
+        stopped: projectDashboardService.stopAgent(projectService.row(input.project), input.chatId),
+      })),
     ),
 
   /** Task groups of a project: one piece of work across several repos, with its PR merge order. */
