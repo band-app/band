@@ -197,6 +197,7 @@ export class LocalHost implements Host {
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
     void this.toolVersions();
+    void this.probeCliFacts();
   }
 
   get pty(): TerminalBackend {
@@ -227,22 +228,38 @@ export class LocalHost implements Host {
     return this.tools.value;
   }
 
+  /**
+   * `git --version` and `gh --version` run once per host and the answer is kept, so
+   * `info()` (called by every `hosts.list`) starts no process for them. A `git` or `gh` installed
+   * after the hub started shows up on the next hub restart.
+   */
+  private cliFacts: Promise<{ versions: Record<string, string>; gh: boolean }> | null = null;
+
+  private probeCliFacts(): Promise<{ versions: Record<string, string>; gh: boolean }> {
+    this.cliFacts ??= (async () => {
+      const versions: Record<string, string> = { node: process.versions.node };
+      let gh = false;
+      try {
+        versions.git = (await execGit(["--version"], process.cwd()))
+          .trim()
+          .replace(/^git version /, "");
+      } catch {
+        // No git on PATH: `versions.git` stays unset and the capability is off.
+      }
+      try {
+        versions.gh = (await execGh(["--version"], process.cwd())).split("\n")[0]?.trim() ?? "";
+        gh = true;
+      } catch {
+        // No gh on PATH.
+      }
+      return { versions, gh };
+    })();
+    return this.cliFacts;
+  }
+
   async info(): Promise<HostInfo> {
-    const versions: Record<string, string> = { node: process.versions.node };
-    let gh = false;
-    try {
-      versions.git = (await execGit(["--version"], process.cwd()))
-        .trim()
-        .replace(/^git version /, "");
-    } catch {
-      // No git on PATH: `versions.git` stays unset and the capability is off.
-    }
-    try {
-      versions.gh = (await execGh(["--version"], process.cwd())).split("\n")[0]?.trim() ?? "";
-      gh = true;
-    } catch {
-      // No gh on PATH.
-    }
+    const { versions: probed, gh } = await this.probeCliFacts();
+    const versions = { ...probed };
     return {
       id: this.id,
       os: process.platform,

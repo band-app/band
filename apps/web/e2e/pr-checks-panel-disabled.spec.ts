@@ -72,5 +72,11 @@ test("a disabled GitHub plugin adds no Checks tab and never runs gh", async ({ p
 
   await expect(worktree.rightPanelTab("changes")).toBeVisible();
   await expect(worktree.rightPanelTab("github-pull-request")).toHaveCount(0);
-  expect(stub.requests).toEqual([]);
+  // The local host probes `gh --version` once, at hub boot, to set its `gh` capability. That probe
+  // belongs to the host, not the plugin, and can land after the stub starts recording. Any other
+  // call is the plugin or a poller running gh.
+  const pluginRequests = stub.requests.filter(
+    (request) => !(request.args.length === 1 && request.args[0] === "--version"),
+  );
+  expect(pluginRequests).toEqual([]);
 });
