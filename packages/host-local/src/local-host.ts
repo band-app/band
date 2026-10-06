@@ -30,6 +30,7 @@ import type {
   HostAcp,
   HostAgentEnv,
   HostContext,
+  HostDesktop,
   HostFs,
   HostGit,
   HostInfo,
@@ -60,6 +61,7 @@ import { checkHooks, installHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { type ContextSource, ContextSync } from "./context/context-sync";
+import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
 import { duBytes } from "./process/du";
@@ -126,6 +128,7 @@ export class LocalHost implements Host {
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
   };
+  readonly desktop: HostDesktop = { open: () => openDesktop() };
   readonly context: HostContext;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
@@ -248,6 +251,7 @@ export class LocalHost implements Host {
         lsp: true,
         pty: true,
         acp: true,
+        desktop: desktopUnavailableReason() === null,
       },
     };
   }
