@@ -228,7 +228,11 @@ export class ChromiumManager {
     const startedAt = Date.now();
     try {
       const { port, path } = await readDevToolsPort(profileDir, proc).catch(async (err: Error) => {
-        const tail = (await readFile(logPath, "utf8").catch(() => "")).trim().split("\n").slice(-5);
+        const tail = (await readFile(logPath, "utf8").catch(() => ""))
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .slice(-5);
         const elapsed = `after ${Date.now() - startedAt} ms, pid ${proc.pid ?? "none"}`;
         throw new Error(
           `${err.message} (${elapsed})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`,

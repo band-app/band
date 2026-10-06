@@ -152,6 +152,16 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
   });
 }
 
+/** A close reason holds at most 123 bytes of UTF-8, and a cut must not split a character. */
+function closeReason(text: string): string {
+  const bytes = Buffer.from(text.replace(/\s+/g, " "));
+  if (bytes.length <= 123) return bytes.toString();
+  return bytes
+    .subarray(0, 123)
+    .toString()
+    .replace(/\uFFFD+$/, "");
+}
+
 const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 
 /**
@@ -180,7 +190,7 @@ async function bridgeRemote(ws: WsServerSocket, worktreeId: string): Promise<tru
     const message = err instanceof Error ? err.message : String(err);
     log.warn("remote CDP failed for worktree %s: %s", worktreeId, message);
     if (ws.readyState === ws.OPEN)
-      ws.close(4001, `Remote browser unavailable: ${message}`.slice(0, 123));
+      ws.close(4001, closeReason(`Remote browser unavailable: ${message}`));
     return true;
   }
   if (!cdp) {
