@@ -367,9 +367,21 @@ describe("gh credentials on a hub with no gh login", () => {
   });
 
   it("S4: with no vault token the error names the missing credential and does not crash", async () => {
-    await expect(withHubGhCredential((env) => execGh(["api", "user"], home, env))).rejects.toThrow(
-      MISSING_GH_CREDENTIAL,
-    );
+    const hookRepo = newRepo();
+    stub.setHookCreate(hookRepo.coords, {
+      stderr: "To get started with GitHub CLI, please run:  gh auth login",
+    });
+    await expect(
+      withHubGhCredential((env) => execGh(["api", `repos/${hookRepo.full}/hooks`], home, env)),
+    ).rejects.toThrow(MISSING_GH_CREDENTIAL);
+    // A failure that is not about authentication keeps gh's own message.
+    const other = newRepo();
+    stub.setHookCreate(other.coords, { stderr: "HTTP 404: Not Found" });
+    const failure = await withHubGhCredential((env) =>
+      execGh(["api", `repos/${other.full}/hooks`], home, env),
+    ).catch((err: Error) => err.message);
+    expect(failure).toContain("404");
+    expect(failure).not.toContain("No GitHub credential");
     expect(MISSING_GH_CREDENTIAL).toContain("--kind git --host github.com");
     const { coords, full } = newRepo();
     stub.setPrActivityQuery(coords, () => prAnswer([]));

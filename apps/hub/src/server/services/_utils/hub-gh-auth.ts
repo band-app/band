@@ -13,7 +13,11 @@ import { vaultService } from "../vault-service";
 const LOGIN_CHECK_TTL_MS = 60_000;
 
 export const MISSING_GH_CREDENTIAL =
-  "No GitHub credential for gh on this hub. Run `gh auth login` on the hub's machine, or store a token with `band vault put <name> --kind git --host github.com --path '<owner>/*'` (scopes: repo, read:org, admin:repo_hook for webhooks).";
+  "No GitHub credential for gh on this hub: run gh auth login, or store one with band vault put --kind git --host github.com";
+
+/** What gh prints when it has no usable login (`gh auth login`, `GH_TOKEN`, a 401). */
+const UNAUTHENTICATED =
+  /gh auth login|GH_TOKEN|GITHUB_TOKEN|authentication|HTTP 401|bad credentials/i;
 
 let loginCheck: { at: number; loggedIn: boolean } | null = null;
 
@@ -51,8 +55,9 @@ export function resetHubGhAuthCache(): void {
 }
 
 /**
- * Runs a hub `gh` call and, when it fails with no credential available, names the missing
- * credential instead of passing on gh's own message. The error never holds a token.
+ * Runs a hub `gh` call and, when it fails because gh is unauthenticated and no credential is
+ * available, adds the missing credential to gh's own message. Other failures pass through
+ * unchanged. The error never holds a token.
  */
 export async function withHubGhCredential<T>(
   run: (env: Record<string, string>) => Promise<T>,
@@ -61,13 +66,14 @@ export async function withHubGhCredential<T>(
   try {
     return await run(env);
   } catch (err) {
-    if (env.GH_TOKEN === undefined && (await hubGhHasNoCredential())) {
-      throw new Error(`${MISSING_GH_CREDENTIAL} (${firstLine(err)})`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      env.GH_TOKEN === undefined &&
+      UNAUTHENTICATED.test(message) &&
+      (await hubGhHasNoCredential())
+    ) {
+      throw new Error(`${message.split("\n")[0]} (${MISSING_GH_CREDENTIAL})`);
     }
     throw err;
   }
-}
-
-function firstLine(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err)).split("\n")[0];
 }
