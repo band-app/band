@@ -795,16 +795,17 @@ jobs:
           BAND_DOCKER_TEST_NETWORK: host
 
       # The desktop image through the hub (plan step 7.1): the `desktop` capability, an RFB handshake from
-      # x11vnc over the link, and DISPLAY plus xdpyinfo in a terminal on the worker.
+      # x11vnc over the link, a real framebuffer through the view-only bridge (step 7.2), and DISPLAY plus
+      # xdpyinfo in a terminal on the worker.
       - name: Desktop worker
         run: |
           pnpm --filter @band-app/server exec vitest run tests/desktop-docker.test.ts \
             --reporter=default --reporter=json --outputFile.json=/tmp/desktop-docker.json
-          # S1 and S2 must run with the real image: a skipped or missing test fails the job.
+          # 7.1 S1, S2 and 7.2 S1 must run with the real image: a skipped or missing test fails the job.
           node -e '
             const r = JSON.parse(require("fs").readFileSync("/tmp/desktop-docker.json", "utf8"));
-            if (r.numPassedTests < 3 || r.numPendingTests > 0 || r.numFailedTests > 0) {
-              console.error("desktop-docker.test.ts did not run all 3 tests:", r.numPassedTests, "passed,", r.numPendingTests, "skipped");
+            if (r.numPassedTests < 4 || r.numPendingTests > 0 || r.numFailedTests > 0) {
+              console.error("desktop-docker.test.ts did not run all 4 tests:", r.numPassedTests, "passed,", r.numPendingTests, "skipped");
               process.exit(1);
             }'
         env:

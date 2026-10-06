@@ -89,6 +89,13 @@ const m = <T>(procedure: string, input: unknown) =>
     return trpcData<T>(res);
   });
 
+async function closeAndWait(ws: WebSocket): Promise<void> {
+  if (ws.readyState === WebSocket.CLOSED) return;
+  const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+  ws.close();
+  await closed;
+}
+
 function dockerHas(image: string): boolean {
   try {
     docker("image", "inspect", image);
@@ -234,9 +241,61 @@ describe.skipIf(!IMAGE)("the desktop worker image", () => {
         timeoutMs: 30_000,
       });
     } finally {
-      ws.close();
+      await closeAndWait(ws);
     }
   }, 60_000);
+
+  it("sends a framebuffer from the real desktop through the hub (7.2 S1)", async () => {
+    // A bare RFB client (security None, as x11vnc -nopw offers). The hub keeps it view-only, which
+    // lets FramebufferUpdateRequest through, so the real Xvfb screen reaches this socket.
+    const ws = new WebSocket(
+      `${server.url.replace("http", "ws")}/api/hosts/${hostId}/desktop`,
+      ["binary"],
+      { headers: { Authorization: `Bearer ${TOKEN}` } },
+    );
+    let held = Buffer.alloc(0);
+    ws.on("message", (data: Buffer) => {
+      held = Buffer.concat([held, data]);
+    });
+    const take = async (size: number, label: string): Promise<Buffer> => {
+      await waitFor(() => (held.length >= size ? true : undefined), {
+        label,
+        timeoutMs: 30_000,
+      });
+      const out = held.subarray(0, size);
+      held = held.subarray(size);
+      return out;
+    };
+    try {
+      await take(12, "the server version");
+      ws.send(Buffer.from("RFB 003.008\n"));
+      const types = await take(2, "the security types");
+      expect(types[0]).toBe(1);
+      ws.send(Buffer.from([1])); // None
+      await take(4, "the security result");
+      ws.send(Buffer.from([1])); // ClientInit, shared
+      const init = await take(24, "ServerInit");
+      const width = init.readUInt16BE(0);
+      const height = init.readUInt16BE(2);
+      expect(width).toBeGreaterThan(0);
+      await take(init.readUInt32BE(20), "the desktop name");
+
+      const request = Buffer.alloc(10);
+      request.writeUInt8(3, 0);
+      request.writeUInt8(0, 1); // not incremental
+      request.writeUInt16BE(width, 6);
+      request.writeUInt16BE(height, 8);
+      ws.send(request);
+      const update = await take(4, "a FramebufferUpdate");
+      expect(update[0]).toBe(0);
+      expect(update.readUInt16BE(2)).toBeGreaterThan(0);
+      // The first rectangle's header and the start of its pixels follow.
+      const rect = await take(12 + 1024, "the first rectangle");
+      expect(rect.readUInt16BE(4)).toBeGreaterThan(0);
+    } finally {
+      await closeAndWait(ws);
+    }
+  }, 90_000);
 
   it("has no x11vnc listener outside loopback (constraint)", () => {
     const [container] = docker("ps", "--quiet", "--filter", `label=band.worker=${hostId}`)
