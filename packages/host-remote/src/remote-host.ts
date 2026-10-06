@@ -11,6 +11,7 @@ import type {
   ExecOptions,
   ExecResult,
   FileChange,
+  FsBrowseResult,
   FsEntry,
   FsStat,
   Host,
@@ -26,6 +27,7 @@ import type {
   HostMcp,
   HostProject,
   HostRelay,
+  HostRepos,
   HostScripts,
   HostSearch,
   HostWorktree,
@@ -138,6 +140,14 @@ export class RemoteHost implements Host {
     list: (repoPath): Promise<WorktreeInfo[]> => this.rpc.call("worktree.list", { repoPath }),
   };
 
+  readonly repos: HostRepos = {
+    inspect: (path) => this.rpc.call("repos.inspect", { path }),
+    ensure: (spec) => this.rpc.call("repos.ensure", { ...spec }),
+    map: (remoteUrl, path) => this.rpc.call("repos.map", { remoteUrl, path }),
+    unmap: (remoteUrl) => this.rpc.call("repos.unmap", { remoteUrl }),
+    addRoot: (path) => this.rpc.call("repos.addRoot", { path }),
+    list: () => this.rpc.call("repos.list", {}),
+  };
   readonly fs: HostFs = {
     stat: (path, options): Promise<FsStat> =>
       this.rpc.call("fs.stat", { path, followSymlinks: options?.followSymlinks }),
@@ -148,6 +158,7 @@ export class RemoteHost implements Host {
     glob: (pattern, cwd) => this.rpc.call("fs.glob", { pattern, cwd }),
     mkdtemp: (prefix) => this.rpc.call("fs.mkdtemp", { prefix }),
     list: (path): Promise<FsEntry[]> => this.rpc.call("fs.list", { path }),
+    browse: (path): Promise<FsBrowseResult> => this.rpc.call("fs.browse", { path }),
     mkdir: (path, options) => this.rpc.call("fs.mkdir", { path, recursive: options?.recursive }),
     rm: (path, options) =>
       this.rpc.call("fs.rm", { path, recursive: options?.recursive, force: options?.force }),

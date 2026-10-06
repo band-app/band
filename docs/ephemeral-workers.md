@@ -56,4 +56,4 @@ A worker that says `ephemeral` in its hello is claimed by the worktrees created 
 | `BAND_AGENT_SESSION_DIRS` | worker | Extra directories (separated like `PATH`) that hold agent sessions. |
 | `BAND_PLACEMENT_TIMEOUT_MS` | hub | How long a wake request may wait for a worker. |
 
-The restore puts the worktree under the new worker's first root, at `.band-worktrees/<repo>/<worktree>`. A repo must be reachable from the new worker through `BAND_REPO_URLS` (the origin URL, else the repo path), as for any request. Agent session files travel with the paths they were written under, so a worker with another root can resume a Claude Code session only if the working directory is the same.
+The restore puts the worktree under the new worker's first root, at `.band-worktrees/<repo>/<worktree>`. A repo must be reachable from the new worker through `BAND_REPO_URLS` (the stored remote URL, else the repo path), as for any request. Agent session files travel with the paths they were written under, so a worker with another root can resume a Claude Code session only if the working directory is the same.

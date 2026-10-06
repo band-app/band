@@ -2,9 +2,17 @@
 
 ## Repo
 
-One repository that Band knows about, registered with `band repos add` or the Add repo dialog. A repo is either `git` (it has a `.git` directory) or `plain` (a folder with no git). The name is unique and is the folder's base name by default.
+One repository that Band knows about, registered with `band repos add` or the Add repo dialog. The hub identifies a repo by its remote URL (the `origin` URL without credentials) and its default branch, and it keeps no folder of its own for it. A repo is either `git` or `plain` (a folder with no git). The name is unique. It is the repository name from the URL, or the folder's base name for a repo with no remote.
+
+A plain folder and a repo with no remote have no URL to clone from. They belong to the one host that holds them, and a worktree for them can only run there.
 
 In the API a repo is `repos.*`, in the database the `repos` table, and in the CLI `band repos`.
+
+## Repo mapping
+
+Each host (the hub's own machine and every worker) keeps its own table from a normalized remote URL to a folder. `git@github.com:o/r.git`, `ssh://git@github.com/o/r` and `https://github.com/o/r` are one key. When a worktree lands on a host, the host uses the mapped folder if it exists, and otherwise clones the repo to `~/band/repos/<owner>/<name>` (`--repos-dir` or `BAND_REPOS_DIR` change that) and records the folder. A worker keeps its table in `<state dir>/repos.json`. The hub's `repo_hosts` table is a cache of what the workers report, refreshed when a worker connects and after each call the hub makes.
+
+Adding a repo from a worker's folder picker records that folder in the worker's table, so the worker never clones it again.
 
 ## Worktree
 
@@ -19,7 +27,7 @@ In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an a
 
 ## Project
 
-A body of work across several repos with its own context repo, a policy and one coordinator chat (`projects.*`, `band projects`).
+A body of work across several repos with its own context repo and, when it has repos, a coordinator chat. The repos are added from inside a project. Every hub also has a default project, `personal` (shown as Personal), that takes the repos and worktrees created with no project. It cannot be removed and has no coordinator.
 
 - The **project folder** is `<BAND_HOME>/projects/<project>/` on the coordinator host. It is the working copy of the project's context repo, with a checkout of each repo's default branch under `repos/<repo>/`. You can edit, commit and push in those checkouts by hand, and the host keeps them current without overwriting local work.
 - The coordinator is a project-level chat. It has no worktree and runs in the project folder. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.

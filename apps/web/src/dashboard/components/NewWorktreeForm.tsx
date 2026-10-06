@@ -47,6 +47,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
     ? chosenHostId
     : (hostChoices[0]?.id ?? LOCAL_HOST_ID);
   const remote = hostId !== LOCAL_HOST_ID;
+  const repoInfo = repos.find((p) => p.name === repoName);
   const hostRoots = hostChoices.find((h) => h.id === hostId)?.roots ?? [];
 
   const slug = slugifyBranchName(branch);
@@ -113,12 +114,18 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
             {remote && (
               <>
                 <Label htmlFor="host-repo-path">
-                  Repository path on {hostChoices.find((h) => h.id === hostId)?.name ?? hostId}
+                  {repoInfo?.remoteUrl ? "Use another folder on " : "Repository path on "}
+                  {hostChoices.find((h) => h.id === hostId)?.name ?? hostId}
+                  {repoInfo?.remoteUrl ? " (optional)" : ""}
                 </Label>
                 <Input
                   id="host-repo-path"
                   data-testid="new-worktree-form__host-path"
-                  placeholder="Needed the first time. Remembered after that."
+                  placeholder={
+                    repoInfo?.remoteUrl
+                      ? "Optional. The worker uses its folder for this repo or clones it."
+                      : "Needed the first time. Remembered after that."
+                  }
                   value={hostRepoPath}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setHostRepoPath(e.target.value)

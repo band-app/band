@@ -50,8 +50,13 @@ export class ProjectFolderService {
     return hostRegistry.hostById(row.coordinatorHostId ?? hostRegistry.local.id);
   }
 
-  /** The project's git repos with their clone on `host`, and the repos that have none. */
-  private reposOn(row: ProjectRow, host: Host) {
+  /**
+   * The project's git repos with their clone on `host`, and the repos that have none. A repo with a
+   * remote URL goes through `host.repos.ensure`: the folder the host maps for the URL while it
+   * exists, else a fresh clone in the host's default location. A repo with no remote can only use
+   * a folder the hub already knows on that host.
+   */
+  private async reposOn(row: ProjectRow, host: Host) {
     const state = loadState();
     const specs: Array<{ name: string; clonePath: string; defaultBranch: string }> = [];
     const skipped: ProjectFolderState["skipped"] = [];
@@ -65,11 +70,30 @@ export class ProjectFolderService {
         skipped.push({ repo, reason: "a plain folder has no default branch to check out" });
         continue;
       }
-      const clonePath = hostRegistry.repoPathOn(entry.name, host.id, entry.path);
+      let clonePath: string | null = null;
+      if (entry.remoteUrl) {
+        try {
+          clonePath = (
+            await host.repos.ensure({
+              remoteUrl: entry.remoteUrl,
+              defaultBranch: entry.defaultBranch,
+            })
+          ).path;
+          hostRegistry.setRepoPathOn(entry.name, host.id, clonePath);
+        } catch (err) {
+          skipped.push({
+            repo,
+            reason: `host "${host.id}" could not provide a clone: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          continue;
+        }
+      } else {
+        clonePath = hostRegistry.repoPathOn(entry.name, host.id, entry.path) || null;
+      }
       if (!clonePath) {
         skipped.push({
           repo,
-          reason: `the repo has no checkout on host "${host.id}". Place a worktree of it there first.`,
+          reason: `the repo has no remote URL and no checkout on host "${host.id}"`,
         });
         continue;
       }
@@ -87,7 +111,7 @@ export class ProjectFolderService {
     if (running && fetch !== "force") return running;
     const work = (async () => {
       const host = this.hostOf(row);
-      const { specs, skipped } = this.reposOn(row, host);
+      const { specs, skipped } = await this.reposOn(row, host);
       const result = await host.project.ensure({ project: row.name, repos: specs, fetch });
       const state: ProjectFolderState = {
         hostId: host.id,
@@ -167,6 +191,7 @@ export class ProjectFolderService {
     const host = this.hostOf(row);
     const entry = loadState().repos.find((r) => r.name === repo);
     const clonePath = entry ? hostRegistry.repoPathOn(entry.name, host.id, entry.path) : null;
+    // The checkout is only there when a clone was found for this host, so an unknown clone has nothing to remove.
     if (!entry || !clonePath || entry.kind === "plain") return;
     await host.project.removeRepo({ project: row.name, repo, clonePath });
     const state = this.states.get(row.id);

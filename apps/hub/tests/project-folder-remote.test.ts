@@ -283,4 +283,36 @@ describe("the coordinator on a worker", () => {
     });
     expect(readFileSync(join(folder, "repos", "api", "news.md"), "utf8")).toBe("news\n");
   });
+
+  it("clones a repo registered by URL only, through repos.ensure, and checks it out", async () => {
+    // A repo with a remote URL and no checkout anywhere: the worker clones it into its repos dir.
+    git(workerRoot, "init", "-q", "--bare", "-b", "main", remoteOf("docs"));
+    const seed = join(tmp("band-folder-seed-"), "docs");
+    git(workerRoot, "clone", "-q", remoteOf("docs"), seed);
+    git(seed, "checkout", "-q", "-B", "main");
+    writeFileSync(join(seed, "README.md"), "docs by url\n");
+    git(seed, "add", ".");
+    git(seed, "commit", "-q", "-m", "init");
+    git(seed, "push", "-q", "-u", "origin", "main");
+    await m("repos.addByUrl", { remoteUrl: remoteOf("docs"), defaultBranch: "main", name: "docs" });
+    await m("projects.addRepo", { project: "shop", repo: "docs" });
+
+    const checkout = await waitFor(
+      async () => {
+        const f = (
+          await q<{ folder: { checkouts: Array<{ repo: string; status: string }> } | null }>(
+            "projects.folder",
+            { project: "shop" },
+          )
+        ).folder;
+        return f?.checkouts.find((c) => c.repo === "docs");
+      },
+      { label: "docs checkout", timeoutMs: 30_000 },
+    );
+    expect(checkout.status).toBe("current");
+    expect(readFileSync(join(folder, "repos", "docs", "README.md"), "utf8")).toBe("docs by url\n");
+    // The clone is the worker's own, under its default repos directory, not a path the hub chose.
+    const clone = git(join(folder, "repos", "docs"), "rev-parse", "--git-common-dir");
+    expect(clone).toContain(join(workerHome, "band", "repos"));
+  });
 });

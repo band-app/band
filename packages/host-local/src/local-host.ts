@@ -71,6 +71,7 @@ import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
 import { probeTools } from "./process/tools";
 import { ProjectFolder } from "./project/project-folder";
+import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
@@ -102,6 +103,11 @@ export interface LocalHostOptions {
    * unknown. Defaults to yes.
    */
   ghEnabled?: () => boolean | Promise<boolean>;
+  /**
+   * Where the repo mappings are kept and where new clones go. A worker passes its state dir.
+   * Defaults to `<BAND_HOME>/repo-mappings.json` and `~/band/repos` (`BAND_REPOS_DIR`).
+   */
+  repos?: { mappingsFile?: () => string; reposDir?: () => string };
 }
 
 /**
@@ -120,7 +126,8 @@ export class LocalHost implements Host {
     remove: (spec) => removeWorktree(spec),
     list: (repoPath): Promise<WorktreeInfo[]> => listWorktrees(repoPath),
   };
-  readonly fs: HostFs = localFs;
+  readonly fs: HostFs = { ...localFs, browse: (path) => browseFolder(path) };
+  readonly repos: LocalRepos;
   readonly search: HostSearch = {
     stream: (query: SearchQuery, root: string): Stream<SearchMatch> =>
       streamMatches({ ...query, cwd: root }),
@@ -180,6 +187,11 @@ export class LocalHost implements Host {
   };
 
   constructor(private readonly options: LocalHostOptions) {
+    const bandHome = () => process.env.BAND_HOME ?? join(homedir(), ".band");
+    this.repos = new LocalRepos({
+      mappingsFile: options.repos?.mappingsFile ?? (() => join(bandHome(), "repo-mappings.json")),
+      reposDir: options.repos?.reposDir ?? defaultReposDir,
+    });
     const source = options.context;
     const sync = source ? new ContextSync(source) : null;
     this.context = {
@@ -289,6 +301,7 @@ export class LocalHost implements Host {
       roots: [],
       versions,
       tools: await this.toolVersions(),
+      repoMappings: await this.repos.list(),
       capabilities: {
         git: "git" in versions,
         gh,
@@ -354,7 +367,7 @@ function kindOf(entry: {
   return "other";
 }
 
-const localFs: HostFs = {
+const localFs: Omit<HostFs, "browse"> = {
   async stat(path, options): Promise<FsStat> {
     const stats = options?.followSymlinks ? await stat(path) : await lstat(path);
     return { kind: kindOf(stats), size: stats.size, mtimeMs: stats.mtimeMs };

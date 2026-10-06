@@ -49,6 +49,20 @@ export class PathPolicy {
     return [...this.roots];
   }
 
+  /** Serves one more directory, which must exist. Returns its canonical path. */
+  async addRoot(dir: string): Promise<string> {
+    const canonical = await realpath(dir);
+    if (!this.roots.some((r) => canonical === r || canonical.startsWith(r + sep))) {
+      this.roots.push(canonical);
+    }
+    return canonical;
+  }
+
+  /** Whether a canonical path is in a root, or in a directory the worker made itself. */
+  covers(canonical: string): boolean {
+    return this.contains(canonical);
+  }
+
   /** Lets later calls use a directory the worker made itself. It is not reported as a root. */
   allow(canonicalDir: string): void {
     this.tempDirs.add(canonicalDir);

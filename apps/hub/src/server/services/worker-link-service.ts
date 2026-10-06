@@ -22,6 +22,7 @@ import { LinkServer, MAX_MESSAGE_BYTES, type ServerSession } from "@band-app/lin
 import { createLogger } from "@band-app/logger";
 import { type WebSocket, WebSocketServer } from "ws";
 import { selectWsProtocol } from "../../../auth";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
@@ -34,6 +35,7 @@ import { workerRelayService } from "./worker-relay-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("worker-link");
+const repoQueries = new RepoQueries();
 
 const LOCAL_HOST_ID = "local";
 
@@ -147,8 +149,11 @@ export class WorkerLinkService {
     if (this.server.getSession(workerId) !== session || !session.attached) return;
     // The hello alone says what the worker offers, so a failed `host.info` call
     // still leaves the host row with its agents, roots and capabilities.
+    // What the worker maps to folders is a cache in `repo_hosts`, not part of the host's info.
+    const { repoMappings, ...infoFacts } = info ?? ({} as Partial<HostInfo>);
+    if (repoMappings) repoQueries.replaceWorkerMappings(workerId, repoMappings);
     const stored: Record<string, unknown> = {
-      ...(info ?? {}),
+      ...infoFacts,
       roots: info?.roots ?? hello.roots,
       capabilities: info?.capabilities ?? hello.capabilities,
       labels: info?.labels ?? Object.entries(hello.labels).map(([k, v]) => `${k}=${v}`),

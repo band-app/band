@@ -139,9 +139,14 @@ export function filterReposReply(data: unknown, workerId: string): unknown {
   const kept = repos
     .map((repo) => {
       const worktrees = Array.isArray(repo?.worktrees) ? repo.worktrees : [];
+      const clones = Array.isArray(repo?.clones) ? repo.clones : undefined;
       return {
         ...repo,
         worktrees: worktrees.filter((w: { hostId?: string }) => w.hostId === workerId),
+        // Another worker's folder is no business of this worker's agent.
+        ...(clones
+          ? { clones: clones.filter((c: { hostId?: string }) => c.hostId === workerId) }
+          : {}),
       };
     })
     .filter((repo) => repo.worktrees.length > 0);

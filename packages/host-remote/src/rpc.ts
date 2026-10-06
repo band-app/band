@@ -25,6 +25,8 @@ const SLOW_CALLS: Record<string, number> = {
   "git.exec": 5 * 60_000,
   "git.gh": 5 * 60_000,
   "worktree.create": 5 * 60_000,
+  // A clone of a large repository.
+  "repos.ensure": 12 * 60_000,
   "worktree.remove": 5 * 60_000,
   "fs.copy": 5 * 60_000,
   "fs.rm": 2 * 60_000,

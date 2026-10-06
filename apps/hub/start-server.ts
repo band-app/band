@@ -79,6 +79,7 @@ import { projectCoordinatorService } from "./src/server/services/project-coordin
 import { projectRetroService } from "./src/server/services/project-retro-service.ts";
 import { projectSubscriptionService } from "./src/server/services/project-subscription-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
+import { repoService } from "./src/server/services/repo-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
@@ -1406,6 +1407,18 @@ async function main() {
   const phaseBSettlePromise: Promise<void> = new Promise<void>((resolve) => {
     phaseBStarted = resolve;
   });
+
+  // The default project and its context exist before the server answers its first request, so a
+  // list that follows the "listening" banner never races their creation. Adopting the repos and
+  // worktrees already in the database is plain DB work. The boot setup repeats it after the first
+  // sync, for the worktrees that sync finds.
+  try {
+    await repoService.adoptUnplaced();
+  } catch (err) {
+    console.warn(
+      `Could not set up the default project: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Bind the http server, scanning upward from `initialPort` until we
   // find a free port. Surfaces a clear error to stderr if every port

@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import { repoService } from "../../services/repo-service";
 import {
   DEFAULT_LIST_LIMIT,
   HostRemoveError,
@@ -15,6 +16,7 @@ import {
   tokenService,
 } from "../../services/token-service";
 import { emit } from "../../services/watcher-service";
+import { repoErrorToTrpc } from "../repos/errors";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
 const AGENT_TYPES = ["claude-code", "codex", "opencode", "gemini-cli", "cursor-cli"];
@@ -61,6 +63,22 @@ export const hostsRouter = t.router({
           sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
         })),
       };
+    }),
+
+  /**
+   * Lists the directories in a folder on a host, for the folder picker of "Add repo from a
+   * worker". Without a path it starts at the host's home directory. It reaches outside the
+   * host's roots, so only an admin token may call it, and picking a folder outside the roots
+   * needs confirmation before it becomes a root (`repos.addFromWorker`).
+   */
+  browse: adminProcedure
+    .input(z.object({ hostId: z.string().min(1), path: z.string().min(1).optional() }))
+    .query(async ({ input }) => {
+      try {
+        return await repoService.browse(input.hostId, input.path);
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
     }),
 
   /**

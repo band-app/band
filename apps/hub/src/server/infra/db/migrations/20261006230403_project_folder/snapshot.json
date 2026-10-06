@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "6626adf6-19bb-41ea-91ab-35b8f1c33d70",
+  "id": "ffe6020d-2108-4c90-b84e-ab6ccfc8896c",
   "prevIds": [
-    "d5dd74cb-3d28-4297-8971-410a5569d9bd"
+    "262ded63-b8b1-4112-a7bb-e1b688634eb6"
   ],
   "ddl": [
     {
@@ -2015,6 +2015,16 @@
       "table": "projects"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "is_default",
+      "entityType": "columns",
+      "table": "projects"
+    },
+    {
       "type": "text",
       "notNull": false,
       "autoincrement": false,
@@ -2191,6 +2201,26 @@
       "default": null,
       "generated": null,
       "name": "path",
+      "entityType": "columns",
+      "table": "repos"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "remote_url",
+      "entityType": "columns",
+      "table": "repos"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "remote_key",
       "entityType": "columns",
       "table": "repos"
     },

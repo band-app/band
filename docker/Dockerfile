@@ -55,6 +55,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# gh: the hub's GitHub polling and webhook services run it. Official release tarball, pinned,
+# for both architectures (TARGETARCH is amd64 or arm64). Authentication comes from the vault.
+ARG GH_VERSION=2.74.0
+ARG TARGETARCH
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      | tar -xz -C /tmp \
+ && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
+ && rm -rf "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}" \
+ && apt-get purge -y --auto-remove curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
+
 # Install the CLI where the dashboard's checkCli() recognizes it as
 # "Installed": a symlink at /usr/local/bin/band resolving to a path ending in
 # "binaries/band" (the Electron-sidecar layout). A plain file at that path

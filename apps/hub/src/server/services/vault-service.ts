@@ -331,6 +331,25 @@ export class VaultService {
   }
 
   /**
+   * The token `gh` runs with: the secret of a `git` item for github.com. `gh` is not tied to one
+   * repository, so the item with the broadest path pattern wins, and a repo-scoped item beats a
+   * global one only when `repo` is given. For hub services, never an API.
+   */
+  findGitHubToken(repo: string | null = null): string | undefined {
+    const candidates = this.queries
+      .list()
+      .filter((row) => row.kind === "git" && row.metadata.host === "github.com")
+      .filter((row) => row.scope === "global" || (repo !== null && row.scope === `repo:${repo}`));
+    const breadth = (row: VaultRow) =>
+      (row.scope === "global" ? 0 : 1_000_000) -
+      String(row.metadata.pathPattern ?? "").replace(/\*/g, "").length;
+    const best = candidates.sort((a, b) => breadth(b) - breadth(a))[0];
+    if (!best) return undefined;
+    this.queries.update(best.id, { lastUsedAt: Date.now() });
+    return decrypt(this.getKey(), best.id, best.encrypted);
+  }
+
+  /**
    * Fingerprints of every secret value in the vault, for the redaction scan on a host's context
    * pushes (plan step 5.2). A fingerprint holds a hash, a length and four characters, so a host
    * can spot a value in a file but never recover it. For hub services, never an API.

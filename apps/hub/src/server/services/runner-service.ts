@@ -1170,24 +1170,15 @@ function environmentOf(row: HostRequestRow): Environment | null {
 }
 
 /**
- * Where a hook can clone the request's repository from: the origin URL without
- * credentials, or the local path when the repo has no origin (only a hook
- * on this machine can use that).
+ * Where a hook can clone the request's repository from: the URL the hub stores for the repo
+ * (credentials already removed), or the local path when the repo has no remote (only a hook on
+ * this machine can use that). The hub needs no checkout of its own to answer.
  */
 async function repoUrls(row: HostRequestRow): Promise<string[]> {
   const repo = loadState().repos.find((p) => p.name === row.repo);
-  if (!repo?.path) return [];
-  try {
-    const { stdout } = await hostRegistry.local.git.exec(
-      ["remote", "get-url", "origin"],
-      repo.path,
-    );
-    const url = stdout.trim();
-    if (url) return [url.replace(/\/\/[^/@]*@/, "//")];
-  } catch {
-    // No origin remote.
-  }
-  return [repo.path];
+  if (!repo) return [];
+  if (repo.remoteUrl) return [repo.remoteUrl];
+  return repo.path ? [repo.path] : [];
 }
 
 function sleep(ms: number): Promise<void> {

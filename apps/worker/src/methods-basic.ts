@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { readdir, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
+import { isAbsolute, join, sep } from "node:path";
 import type {
   ClaudeCliArgs,
   ContextSpec,
@@ -11,6 +12,7 @@ import type {
 } from "@band-app/host-api";
 import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
+import { PathDeniedError } from "./path-policy.ts";
 import {
   asParams,
   compact,
@@ -25,6 +27,7 @@ import {
   strArray,
   strRecord,
 } from "./rpc-util.ts";
+import { loadExtraRoots, saveExtraRoots } from "./state.ts";
 
 const invalid = (message: string) => new RpcError(RPC_INVALID_PARAMS, message);
 
@@ -109,6 +112,67 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     host.worktree.remove({ repoPath: await path(a, "repoPath"), path: await path(a, "path") }),
   );
   r.json("worktree.list", async (a) => host.worktree.list(await path(a, "repoPath")));
+
+  // ---- repos --------------------------------------------------------------
+
+  /**
+   * The picker and the repo mapping may look anywhere under the user's home, not only in the
+   * roots, because choosing a folder outside them is how a root gets added. Nothing is read
+   * from or written to the folder here, and a root is added only by `repos.addRoot`.
+   */
+  const browsable = async (target: string): Promise<string> => {
+    const canonical = await realpath(target).catch(() => {
+      throw new PathDeniedError(target, "does not exist");
+    });
+    const home = homedir();
+    if (canonical === home || canonical.startsWith(home + sep) || policy.covers(canonical)) {
+      return canonical;
+    }
+    throw new PathDeniedError(target, "is outside the worker's roots and the home directory");
+  };
+
+  const addRoot = async (dir: string): Promise<void> => {
+    const canonical = await policy.addRoot(dir);
+    await saveExtraRoots(ctx.stateDir, [...(await loadExtraRoots(ctx.stateDir)), canonical]);
+  };
+
+  r.json("fs.browse", async (a) => {
+    const asked = optStr(a, "path");
+    const result = await host.fs.browse(asked === undefined ? undefined : await browsable(asked));
+    const parentOk =
+      result.parent !== null &&
+      (await browsable(result.parent).then(
+        () => true,
+        () => false,
+      ));
+    return {
+      ...result,
+      parent: parentOk ? result.parent : null,
+      insideRoots: policy.covers(result.path),
+    };
+  });
+  r.json("repos.inspect", async (a) => host.repos.inspect(await browsable(str(a, "path"))));
+  r.json("repos.list", async () => host.repos.list());
+  r.json("repos.ensure", async (a) => {
+    const result = await host.repos.ensure({
+      remoteUrl: str(a, "remoteUrl"),
+      defaultBranch: str(a, "defaultBranch"),
+    });
+    // The folder has to be one the worker serves before a worktree can go beside it.
+    const placed = await realpath(result.path);
+    if (!policy.covers(placed)) {
+      const reposDir = ctx.reposDir
+        ? await realpath(ctx.reposDir).catch(() => undefined)
+        : undefined;
+      await addRoot(reposDir && placed.startsWith(reposDir + sep) ? reposDir : placed);
+    }
+    return result;
+  });
+  r.json("repos.map", async (a) => {
+    await host.repos.map(str(a, "remoteUrl"), await browsable(str(a, "path")));
+  });
+  r.json("repos.unmap", async (a) => host.repos.unmap(str(a, "remoteUrl")));
+  r.json("repos.addRoot", async (a) => addRoot(await browsable(str(a, "path"))));
 
   // ---- fs -----------------------------------------------------------------
 

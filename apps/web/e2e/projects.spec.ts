@@ -92,7 +92,9 @@ test("creates a project with two repos, lists it and gives it a scaffolded conte
   const projects = new ProjectsPage(page, server.url, TOKEN);
   await projects.goto();
   await projects.open();
-  await expect(projects.emptyState()).toBeVisible();
+  // The only project so far is the default one, which takes repos added without a project.
+  await expect(projects.item("personal")).toContainText("Personal");
+  await expect(projects.item("personal")).toHaveAttribute("data-repo-count", "2");
 
   await projects.create({
     name: "checkout",

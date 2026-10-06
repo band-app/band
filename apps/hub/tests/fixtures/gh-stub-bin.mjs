@@ -7,7 +7,8 @@
  *
  * The request goes to `POST /<command>/<subcommand>` (`/api/graphql`,
  * `/pr/merge`) with the parsed arguments:
- *   { args, positional, fields, flags, input, cwd, env: { GH_PROMPT_DISABLED } }
+ *   { args, positional, fields, flags, input, cwd, env: { GH_PROMPT_DISABLED }, ghToken }
+ * (`ghToken` is the `GH_TOKEN` the process ran with, absent when unset)
  * `-f key=value` pairs land in `fields` (`key[]` pairs collect into an array); `--flag value` and bare `--flag`
  * land in `flags`. The stub replies `{ stdout, stderr?, exitCode? }`. A
  * command the test registered no route for exits 1.
@@ -72,6 +73,7 @@ const res = await fetch(new URL(path, url), {
     input,
     cwd: process.cwd(),
     env: { GH_PROMPT_DISABLED: process.env.GH_PROMPT_DISABLED ?? null },
+    ghToken: process.env.GH_TOKEN,
   }),
 });
 if (!res.ok) {

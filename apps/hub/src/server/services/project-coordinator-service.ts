@@ -86,7 +86,8 @@ export class ProjectCoordinatorService {
   async ensureCoordinator(ref: string): Promise<ProjectView> {
     const row = projectService.row(ref);
     const view = projectService.get(row.id);
-    if (view.repos.length === 0) return view;
+    // The default project is a place for repos, not a body of work to coordinate.
+    if (row.isDefault || view.repos.length === 0) return view;
     let pending = this.starting.get(row.id);
     if (!pending) {
       pending = this.create(row.id).finally(() => this.starting.delete(row.id));

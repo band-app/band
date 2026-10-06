@@ -19,6 +19,7 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
@@ -341,6 +342,7 @@ export function expandHome(given: string, home: string | undefined, hostId: stri
 
 export class WorktreeService {
   private readonly pendingRemovals = new PendingRemovalQueries();
+  private readonly repoQueries = new RepoQueries();
 
   constructor(
     private readonly queries: WorktreeQueries = new WorktreeQueries(),
@@ -389,15 +391,19 @@ export class WorktreeService {
   }
 
   /**
-   * The repo's checkout on a remote host. `given` records it the first
-   * time, since the hub can't know where a worker keeps the repository.
+   * The folder that holds the repo on `host`, where `git worktree add` runs. `given` is a path
+   * the caller chose: it is recorded, and the host maps the repo's remote URL to it. Otherwise
+   * the folder the hub last saw is used while it still exists, and a repo with a remote URL falls
+   * back to `repos.ensure` on the host, which uses the host's own mapping or clones to its default
+   * location. A repo with no remote lives on the one host that holds it.
    */
-  private async remoteCheckout(
-    repoName: string,
+  private async checkoutOn(
+    repo: RepoState,
     host: Host,
     given: string | undefined,
   ): Promise<string> {
-    if (given !== undefined) {
+    // A hub that already holds the repo keeps using its own copy, whatever path the caller names.
+    if (given !== undefined && !(host.id === hostRegistry.local.id && repo.path)) {
       const info = await host.info();
       const where = rootsHint(info.roots);
       const path = expandHome(given, info.home, host.id);
@@ -407,16 +413,33 @@ export class WorktreeService {
         }
         throw new Error(`Host "${host.id}" has no directory ${path}.${where}`);
       });
-      hostRegistry.setRepoPathOn(repoName, host.id, resolved);
+      hostRegistry.setRepoPathOn(repo.name, host.id, resolved);
+      if (repo.remoteUrl) await host.repos.map(repo.remoteUrl, resolved);
       return resolved;
     }
-    const known = hostRegistry.repoPathOn(repoName, host.id, "");
-    if (!known) {
+    const known = hostRegistry.repoPathOn(repo.name, host.id, repo.path);
+    if (
+      known &&
+      (await host.fs.stat(known).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return known;
+    if (!repo.remoteUrl) {
+      const holders = [...(this.repoQueries.allHostPaths().get(repo.name)?.keys() ?? [])];
       throw new Error(
-        `Repo "${repoName}" has no checkout on host "${host.id}". Pass hostRepoPath with the repository's path on that host.`,
+        `Repo "${repo.name}" has no remote URL, so it can only run on the host that holds it${
+          holders.length > 0 ? ` (${holders.join(", ")})` : ""
+        }. Host "${host.id}" does not.`,
       );
     }
-    return known;
+    const { path } = await host.repos.ensure({
+      remoteUrl: repo.remoteUrl,
+      defaultBranch: repo.defaultBranch,
+    });
+    hostRegistry.setRepoPathOn(repo.name, host.id, path);
+    return path;
   }
 
   /** Where a remote host keeps the worktrees of Band worktrees: under its first root. */
@@ -531,7 +554,7 @@ export class WorktreeService {
     // Check the project before anything is created, so a bad request leaves no trace.
     const projectId = input.projectId
       ? projectService.resolveForWorktree(input.projectId, input.repo)
-      : undefined;
+      : projectService.defaultProjectOf(input.repo);
     if (projectId) input = { ...input, projectId };
 
     const worktreeId = toWorktreeId(input.repo, input.branch);
@@ -552,9 +575,7 @@ export class WorktreeService {
     const remote = hostId !== hostRegistry.local.id;
     // On a remote host the repo's checkout and the worktree live under the
     // worker's roots, at paths the worker reports.
-    const repoPath = remote
-      ? await this.remoteCheckout(repo.name, host, input.hostRepoPath)
-      : repo.path;
+    const repoPath = await this.checkoutOn(repo, host, input.hostRepoPath);
     const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
     const worktreePath = remote
       ? posix.join(wtDir, input.repo, input.branch)

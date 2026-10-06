@@ -15,6 +15,7 @@ import { trpc } from "../../lib/trpc-client";
 import { useAdapter } from "../context";
 import { useRepos } from "../hooks/use-repos";
 import { getProjectTerminalRenderer } from "../lib/project-terminal-slot";
+import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
 
 type ProjectList = Awaited<ReturnType<typeof trpc.projects.list.query>>;
 type Project = ProjectList["projects"][number];
@@ -28,6 +29,10 @@ const AUTONOMY: Array<{ value: "observe" | "steer" | "autonomous"; label: string
   { value: "autonomous", label: "Autonomous: dispatch within the limits" },
 ];
 const ISOLATION = ["worktree", "container", "vm"] as const;
+
+/** The default project is named "personal"; show it capitalized. */
+const projectTitle = (p: { name: string; isDefault?: boolean }) =>
+  p.isDefault ? `${p.name.charAt(0).toUpperCase()}${p.name.slice(1)}` : p.name;
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const splitLabels = (text: string) =>
@@ -1367,6 +1372,31 @@ function WakeupSection({ project }: { project: Project }) {
   );
 }
 
+/** Where a repo comes from: its URL, or the one host that holds a repo with no remote. */
+function RepoLocation({
+  repo,
+}: {
+  repo: { remoteUrl?: string; clones?: Array<{ hostId: string }> } | undefined;
+}) {
+  if (!repo) return null;
+  if (repo.remoteUrl) {
+    return (
+      <span
+        className="block truncate text-xs text-muted-foreground"
+        data-testid="projects__repo-url"
+      >
+        {repo.remoteUrl}
+      </span>
+    );
+  }
+  const host = repo.clones?.[0]?.hostId;
+  return (
+    <span className="block text-xs text-muted-foreground" data-testid="projects__repo-local-only">
+      No remote. Lives on {host ?? "one host"} only, so worktrees can run only there.
+    </span>
+  );
+}
+
 function ProjectDetail({
   project,
   canEdit,
@@ -1387,6 +1417,7 @@ function ProjectDetail({
   const [confirming, setConfirming] = useState(false);
   const [addRepo, setAddRepo] = useState("");
   const [addRole, setAddRole] = useState("");
+  const [addingRepo, setAddingRepo] = useState(false);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
   const run = async (fn: () => Promise<unknown>) => {
@@ -1420,7 +1451,7 @@ function ProjectDetail({
             >
               Edit
             </Button>
-            {confirming ? (
+            {project.isDefault ? null : confirming ? (
               <Button
                 size="sm"
                 variant="destructive"
@@ -1449,7 +1480,7 @@ function ProjectDetail({
       </div>
       <div>
         <h2 className="text-lg font-semibold" data-testid="projects__detail-name">
-          {project.name}
+          {projectTitle(project)}
         </h2>
         <p className="text-sm text-muted-foreground" data-testid="projects__detail-description">
           {project.description || "No description."}
@@ -1463,14 +1494,18 @@ function ProjectDetail({
 
       <DashboardSection project={project} canEdit={canEdit} onOpenWorktree={onOpenWorktree} />
 
-      <CoordinatorSection project={project} canEdit={canEdit} run={run} />
+      {project.isDefault ? null : (
+        <>
+          <CoordinatorSection project={project} canEdit={canEdit} run={run} />
 
-      <PolicySection
-        key={`${project.id}:${JSON.stringify(project.policy)}:${project.coordinatorModel}`}
-        project={project}
-        canEdit={canEdit}
-        run={run}
-      />
+          <PolicySection
+            key={`${project.id}:${JSON.stringify(project.policy)}:${project.coordinatorModel}`}
+            project={project}
+            canEdit={canEdit}
+            run={run}
+          />
+        </>
+      )}
 
       <section className="space-y-1">
         <h3 className="text-sm font-medium">Context repo</h3>
@@ -1501,9 +1536,10 @@ function ProjectDetail({
               data-repo={r.repo}
               data-role={r.role ?? ""}
             >
-              <span>
+              <span className="min-w-0">
                 {r.repo}
                 {r.role ? <span className="text-muted-foreground"> ({r.role})</span> : null}
+                <RepoLocation repo={repos.find((x) => x.name === r.repo)} />
               </span>
               {canEdit ? (
                 <Button
@@ -1524,6 +1560,21 @@ function ProjectDetail({
             </li>
           ))}
         </ul>
+        {canEdit ? (
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="projects__add-repo-open"
+            onClick={() => setAddingRepo(true)}
+          >
+            Add repo
+          </Button>
+        ) : null}
+        <ProjectAddRepoDialog
+          open={addingRepo}
+          onOpenChange={setAddingRepo}
+          projectId={project.id}
+        />
         {canEdit && addable.length > 0 ? (
           <div className="flex items-center gap-2">
             <select
@@ -1694,13 +1745,13 @@ export function ProjectsDialog({
                     onClick={() => setViewing(p.id)}
                     className="flex w-full flex-col rounded-md border px-3 py-2 text-left hover:bg-muted"
                   >
-                    <span className="text-sm font-medium">{p.name}</span>
+                    <span className="text-sm font-medium">{projectTitle(p)}</span>
                     {p.description ? (
                       <span className="text-xs text-muted-foreground">{p.description}</span>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {p.repos.length} {p.repos.length === 1 ? "repo" : "repos"} · coordinator{" "}
-                      {p.coordinatorModel}
+                      {p.repos.length} {p.repos.length === 1 ? "repo" : "repos"}
+                      {p.isDefault ? "" : ` · coordinator ${p.coordinatorModel}`}
                     </span>
                   </button>
                 </li>
