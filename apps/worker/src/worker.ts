@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,7 @@ import { PathPolicy } from "./path-policy.ts";
 import { registerRelayMethods } from "./relay.ts";
 import {
   ensureStateDir,
+  loadExtraRoots,
   loadOrCreateWorkerId,
   readSessionToken,
   writeSessionToken,
@@ -108,9 +110,11 @@ export class Worker {
   static async start(config: WorkerConfig, options: WorkerOptions = {}): Promise<Worker> {
     await ensureStateDir(config.stateDir);
     let workerId = config.workerId ?? (await loadOrCreateWorkerId(config.stateDir));
-    const policy = await PathPolicy.create(
-      config.roots.length > 0 ? config.roots : [join(config.stateDir, "worktrees")],
-    );
+    const extraRoots = (await loadExtraRoots(config.stateDir)).filter((dir) => existsSync(dir));
+    const policy = await PathPolicy.create([
+      ...(config.roots.length > 0 ? config.roots : [join(config.stateDir, "worktrees")]),
+      ...extraRoots,
+    ]);
     const resolved = await resolveToken(config, workerId);
     const token = resolved.token;
     // The hub names the worker when it trades the bootstrap token, and a worker told its id keeps it.
@@ -123,6 +127,10 @@ export class Worker {
     const bandHome = config.bandHome ?? process.env.BAND_HOME ?? join(homedir(), ".band");
     const host = new LocalHost({
       terminalBackend: () => backend,
+      repos: {
+        mappingsFile: () => join(config.stateDir, "repos.json"),
+        ...(config.reposDir ? { reposDir: () => config.reposDir as string } : {}),
+      },
       context: {
         bandHome: () => bandHome,
         // The hub rotates the session token on every handshake, so read the newest one each time.
@@ -171,6 +179,7 @@ export class Worker {
       log,
       labels: config.labels,
       stateDir: config.stateDir,
+      reposDir: config.reposDir,
       cli: new CliCache(client.session, config.stateDir, log),
     };
     const registrar = new Registrar(ctx);

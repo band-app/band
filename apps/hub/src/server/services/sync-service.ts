@@ -172,6 +172,14 @@ async function runSync(): Promise<void> {
 async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
   let mutated = false;
 
+  // The hub holds no checkout of this repo (it was added by URL or from a worker), so there is
+  // no local `git worktree list` to reconcile. Its worktrees are on workers.
+  if (!repo.path) {
+    const remote = await refreshRemoteWorktrees(repo.name, repo.path, repo.worktrees);
+    if (remote.changed) repo.worktrees = remote.worktrees;
+    return remote.changed;
+  }
+
   let diskWorktrees: WorktreeState[];
   let remoteWorktrees: WorktreeState[] = [];
   try {

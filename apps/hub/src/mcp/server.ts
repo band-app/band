@@ -51,6 +51,10 @@ function discoverProcedures(): ProcedureInfo[] {
       continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
+    // `repos.addFromWorker` reads folders on a worker the caller names.
+    if (path === "repos.addFromWorker") continue;
+    // `repos.addByUrl` makes the hub and its workers contact a URL the caller names.
+    if (path === "repos.addByUrl") continue;
     // `environment.build` runs commands from the repository on the builder host.
     if (path === "environment.build") continue;
 

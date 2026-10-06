@@ -45,7 +45,8 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
 
 /** Commands the relay refuses or cannot carry, each with the reason. */
 export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
-  "repos add": "adds a repository on the hub's machine, not a worker action",
+  "repos add":
+    "registers a repo for the whole hub (a path, a URL or a worker folder), which is not a worker action",
   "repos remove": "removes a repo for every host",
   settings: "reads the hub's settings, which hold credentials",
   "tunnel start": "controls the hub's tunnel",

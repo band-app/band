@@ -54,6 +54,8 @@ export interface ProjectView {
   /** The host the coordinator is pinned to. Null means the hub's default. */
   coordinatorHostId: string | null;
   createdAt: number;
+  /** The project that takes repos and worktrees created with no project. It cannot be removed and has no coordinator. */
+  isDefault: boolean;
   repos: Array<{ repo: string; role: string | null }>;
   worktrees: Array<{
     worktreeId: string;
@@ -134,7 +136,11 @@ function labelsOf(labels: string[] | undefined): string[] {
   }
 }
 
+export const DEFAULT_PROJECT_NAME = "personal";
+
 export class ProjectService {
+  private defaultPending: Promise<ProjectRow> | null = null;
+
   constructor(
     private readonly queries = new ProjectQueries(),
     private readonly worktreeQueries = new WorktreeQueries(),
@@ -232,6 +238,7 @@ export class ProjectService {
       coordinatorChatId: null,
       coordinatorHostId: input.coordinatorHostId?.trim() || null,
       createdAt: Date.now(),
+      isDefault: false,
     };
     try {
       this.queries.insert(row, repos);
@@ -283,6 +290,11 @@ export class ProjectService {
     opts: { removeContext?: boolean; beforeRemove?: (row: ProjectRow) => Promise<void> } = {},
   ): Promise<void> {
     const row = this.require(ref);
+    if (row.isDefault) {
+      throw new ProjectConflictError(
+        `Project "${row.name}" is the default project and cannot be removed`,
+      );
+    }
     const attached = this.workersOf(row);
     if (attached.length > 0) {
       throw new ProjectConflictError(
@@ -296,6 +308,81 @@ export class ProjectService {
       await contextService.remove(row.contextName);
     }
     log.info(`removed project ${row.name}`);
+  }
+
+  /**
+   * The project that takes repos and worktrees created with none ("personal"), made on first use.
+   * It has a context repo like any project but never gets a coordinator.
+   */
+  async ensureDefault(): Promise<ProjectRow> {
+    const existing = this.queries.findDefault();
+    if (existing) return existing;
+    this.defaultPending ??= (async () => {
+      const taken = (name: string) => this.queries.findByName(name) || contextService.find(name);
+      let name = DEFAULT_PROJECT_NAME;
+      for (let n = 2; taken(name); n++) name = `${DEFAULT_PROJECT_NAME}-${n}`;
+      await contextService.create({ name, kind: "project" });
+      const row: ProjectRow = {
+        id: `prj-${randomBytes(6).toString("hex")}`,
+        name,
+        description: "Repos and worktrees you add without choosing a project.",
+        contextName: name,
+        coordinatorAgent: null,
+        coordinatorModel: DEFAULT_COORDINATOR_MODEL,
+        labels: [],
+        policy: {},
+        coordinatorWorktreeId: null,
+        coordinatorChatId: null,
+        coordinatorHostId: null,
+        createdAt: Date.now(),
+        isDefault: true,
+      };
+      this.queries.insert(row, []);
+      log.info(`created default project ${name}`);
+      return row;
+    })().finally(() => {
+      this.defaultPending = null;
+    });
+    return this.defaultPending;
+  }
+
+  /** The default project's id, or undefined before {@link ensureDefault} has run. */
+  defaultProjectId(): string | undefined {
+    return this.queries.findDefault()?.id;
+  }
+
+  /**
+   * Makes sure the default project exists and puts the repos and worktrees that belong to no
+   * project into it. A repo in another project stays there, and so do its worktrees.
+   */
+  async adoptUnplaced(
+    repos: Array<{ name: string; worktrees: Array<{ name: string }> }>,
+  ): Promise<void> {
+    const row = await this.ensureDefault();
+    for (const repo of repos) {
+      if (this.queries.projectsOfRepo(repo.name).length === 0) {
+        this.queries.upsertRepo(row.id, repo.name, null);
+      }
+      if (!this.queries.projectsOfRepo(repo.name).includes(row.id)) continue;
+      for (const wt of repo.worktrees) {
+        const id = toWorktreeIdOf(repo.name, wt.name);
+        if (this.worktreeQueries.findProjectId(id) === null) {
+          this.worktreeQueries.setProjectId(id, row.id);
+        }
+      }
+    }
+  }
+
+  /** The default project's id when it lists the repo, so a worktree made with no project lands there. */
+  defaultProjectOf(repo: string): string | undefined {
+    const id = this.queries.findDefault()?.id;
+    return id && this.queries.projectsOfRepo(repo).includes(id) ? id : undefined;
+  }
+
+  /** Puts a repo in the default project, unless it is in one already. */
+  async placeInDefault(repo: string): Promise<void> {
+    const row = await this.ensureDefault();
+    if (this.queries.projectsOfRepo(repo).length === 0) this.queries.upsertRepo(row.id, repo, null);
   }
 
   addRepo(ref: string, repo: string, role?: string | null): ProjectView {
@@ -358,7 +445,8 @@ export class ProjectService {
     // A worktree being removed has left the database, so its caller passes the project id.
     const projectId = knownProjectId ?? this.worktreeQueries.findProjectId(worktreeId);
     const project = projectId ? this.queries.find(projectId) : undefined;
-    return project ? contextService.find(project.contextName) : undefined;
+    // The default project only holds repos. Its context must not shadow the one a repo is bound to.
+    return project && !project.isDefault ? contextService.find(project.contextName) : undefined;
   }
 
   /** The project's worktrees, without the coordinator's own. */
@@ -480,6 +568,7 @@ export class ProjectService {
         : null,
       coordinatorHostId: row.coordinatorHostId,
       createdAt: row.createdAt,
+      isDefault: row.isDefault,
       repos: repoRows.map((r) => ({ repo: r.repoName, role: r.role })),
       worktrees: this.workersOf(row).map((w) => ({
         worktreeId: toWorktreeIdOf(w.repoName, w.name),

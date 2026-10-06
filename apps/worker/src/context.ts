@@ -18,6 +18,8 @@ export interface WorkerContext {
   cli?: CliCache;
   /** The worker's private directory. */
   stateDir: string;
+  /** Where this worker clones repos. A clone made there is covered by adding this directory as a root. */
+  reposDir?: string;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */

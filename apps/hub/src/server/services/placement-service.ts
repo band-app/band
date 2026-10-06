@@ -18,6 +18,7 @@ import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { hostRegistry } from "../infra/host/registry";
 import {
   type IsolationLevel,
@@ -35,6 +36,7 @@ import { emit } from "./watcher-service";
 import { type WorktreeCreateInput, worktreeService } from "./worktree-service";
 
 const log = createLogger("placement");
+const repoQueries = new RepoQueries();
 
 const LOCAL_HOST_ID = "local";
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
@@ -196,15 +198,29 @@ export class PlacementService {
    * a host, and a `worktree` worktree never lands on a host that was started
    * for one of those.
    */
-  async place(placement: Placement): Promise<string | null> {
+  async place(placement: Placement, onlyHosts?: string[]): Promise<string | null> {
     if (requestedIsolation(placement.environment ?? null) !== "worktree") return null;
     const fits = (await this.candidates()).filter(
-      (c) => !isExclusiveHost(c.labels) && matches(c, placement),
+      (c) =>
+        !isExclusiveHost(c.labels) &&
+        (onlyHosts === undefined || onlyHosts.includes(c.id)) &&
+        matches(c, placement),
     );
     if (fits.length === 0) return null;
     const load = this.queries.worktreeCounts();
     fits.sort((a, b) => (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0) || a.id.localeCompare(b.id));
     return fits[0].id;
+  }
+
+  /**
+   * The hosts that hold a repo owned by one worker (no remote URL and no checkout on the hub),
+   * or null for any other repo. A repo with a checkout on the hub can still be cloned from the
+   * hub's path by a hook on the hub's machine.
+   */
+  private holdersOfRemotelessRepo(repo: string): string[] | null {
+    const known = repoQueries.findLocation(repo);
+    if (!known || known.remoteUrl || known.path) return null;
+    return [...(repoQueries.allHostPaths().get(repo)?.keys() ?? [])];
   }
 
   /**
@@ -215,8 +231,18 @@ export class PlacementService {
     const worktreeId = toWorktreeId(input.repo, input.branch);
     const open = this.queries.findOpenForWorktree(worktreeId);
     if (open) return { kind: "request", requestId: open.id };
-    const hostId = await this.place(placement);
+    // A repo with no remote URL has nothing a new worker could clone, so it only runs on a host
+    // that already holds it, and waiting for a runner would never help.
+    const holders = this.holdersOfRemotelessRepo(input.repo);
+    const hostId = await this.place(placement, holders ?? undefined);
     if (hostId) return { kind: "host", hostId };
+    if (holders) {
+      throw new Error(
+        `Repo "${input.repo}" has no remote URL, so it can only run on the host that holds it (${
+          holders.join(", ") || "none recorded"
+        }), and none of them is online and fits the placement.`,
+      );
+    }
     // A concurrent create for the same worktree may have recorded a request
     // while `place` awaited. Nothing below awaits, so this check and the insert
     // run together.

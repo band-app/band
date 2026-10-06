@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, posix, resolve } from "node:path";
 import { gitRunner, type Host } from "@band-app/host-api";
+import { parseRemoteUrl } from "@band-app/shared/remote-url";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
+import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../errors";
 import {
   type RepoKind,
   RepoQueries,
@@ -12,16 +14,20 @@ import {
 } from "../infra/db/queries/repos";
 import { WorktreeStatusQueries } from "../infra/db/queries/worktree-statuses";
 import type { WorktreeAgentInfo } from "../infra/events/status-event-bus";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
+import { projectService } from "./project-service";
 import {
   type RepoAvatarInfo,
   type RepoAvatarService,
   repoAvatarService,
 } from "./repo-avatar-service";
 import { type SettingsService, settingsService } from "./settings-service";
+import { tokenService } from "./token-service";
+import { vaultService } from "./vault-service";
 
 /**
  * Business logic for managing Band repos — Phase 2 of the 3-tier
@@ -71,7 +77,12 @@ export class RepoService {
   async list(): Promise<{
     repos: Array<{
       name: string;
+      /** The folder on the hub's own machine, or "" when the hub holds no checkout. */
       path: string;
+      /** The remote the repo is identified by, without credentials. Absent for a plain folder or a repo with no remote. */
+      remoteUrl: string | undefined;
+      /** Where each host keeps the repo: the folder on the hub's machine and on each worker that has it. */
+      clones: Array<{ hostId: string; path: string }>;
       defaultBranch: string;
       label: string | undefined;
       kind: RepoKind;
@@ -106,6 +117,7 @@ export class RepoService {
     const statuses = this.statusQueries.loadCurrent();
     const statusMap = new Map(statuses.map((s) => [s.worktreeId, s]));
     const lifecycles = ephemeralLifecycleService.states();
+    const hostPaths = this.queries.allHostPaths();
 
     // Inline, read-only kind re-detection via the shared helper.
     // Persistence lives in `syncWorktrees` (called on every branch-
@@ -135,7 +147,15 @@ export class RepoService {
       // the `git worktree list` enrichment entirely and rely on the
       // worktree row that `add` synthesized into state.
       let worktrees = repo.worktrees;
-      if (repo.kind === "git") {
+      if (repo.kind === "git" && !repo.path) {
+        // No checkout on the hub's machine: its worktrees are on workers.
+        try {
+          worktrees = (await refreshRemoteWorktrees(repo.name, repo.path, repo.worktrees))
+            .worktrees;
+        } catch {
+          // Fall back to tracked worktrees
+        }
+      } else if (repo.kind === "git") {
         // state.json is the canonical "tracked worktrees" set — git's view
         // is just used to enrich each entry with current path/head. We
         // intersect the two so a worktree removed from state.json (e.g.
@@ -192,6 +212,10 @@ export class RepoService {
       return {
         name: repo.name,
         path: repo.path,
+        remoteUrl: repo.remoteUrl,
+        clones: [...(hostPaths.get(repo.name) ?? new Map<string, string>())].map(
+          ([hostId, path]) => ({ hostId, path }),
+        ),
         defaultBranch: repo.defaultBranch,
         label: repo.label,
         kind: repo.kind,
@@ -314,8 +338,20 @@ export class RepoService {
       worktrees = [{ name: "main", branch: "main", path: resolvedPath, pinned: false }];
     }
 
+    // The remote is the repo's identity, so a path-based add reads it from the checkout.
+    const inspected =
+      kind === "git"
+        ? await hostRegistry.local.repos.inspect(resolvedPath).catch(() => null)
+        : null;
+    const remote = inspected?.remoteUrl ? parseRemoteUrl(inspected.remoteUrl) : null;
+    if (remote && repos.some((p) => p.remoteKey === remote.key)) {
+      const other = repos.find((p) => p.remoteKey === remote.key);
+      throw new Error(`Repo "${other?.name}" already uses the remote ${remote.url}`);
+    }
+
     const repo: RepoState = {
       name,
+      ...(remote ? { remoteUrl: remote.url, remoteKey: remote.key } : {}),
       // Store the canonical path so downstream consumers
       // (cronjob-scheduler, branch-status-poller, etc.) and the
       // self-heal loop in `list` can compare against
@@ -337,8 +373,271 @@ export class RepoService {
 
     repos.push(repo);
     this.queries.saveAll(repos);
+    if (remote) await hostRegistry.local.repos.map(remote.url, resolvedPath);
+    await projectService.placeInDefault(name);
 
     return repo;
+  }
+
+  /**
+   * Adds the repo that a folder on a host holds. The host reads the folder's `origin` URL and
+   * default branch, the hub stores those, and the host's mapping and the hub's cache both record
+   * that the folder is where this host keeps the repo, so no worktree there clones it again.
+   * A folder with no git repository, or one with no `origin`, is added without a remote and
+   * stays on that one host. A folder outside the host's roots needs `addRoot`, which the UI
+   * sends after the user confirmed.
+   */
+  async addFromWorker(input: {
+    hostId: string;
+    path: string;
+    label?: string;
+    name?: string;
+    addRoot?: boolean;
+    /** The project to put the repo in. Defaults to the default project. */
+    project?: string;
+  }): Promise<RepoState> {
+    if (input.hostId === "local" && !isLocalHostEnabled()) {
+      throw new RepoInputError("This hub does not use its own machine. Choose a worker.");
+    }
+    let host: Host;
+    try {
+      host = hostRegistry.hostById(input.hostId);
+    } catch {
+      throw new RepoInputError(`Unknown host "${input.hostId}"`);
+    }
+    const inspected = await host.repos.inspect(input.path).catch((err: unknown) => {
+      throw new RepoInputError(err instanceof Error ? err.message : String(err));
+    });
+    if (input.hostId !== "local") {
+      const { roots } = await host.info();
+      const inside = roots.some(
+        (root) => inspected.path === root || inspected.path.startsWith(`${root}/`),
+      );
+      if (!inside) {
+        if (!input.addRoot) throw new RepoOutsideRootsError(inspected.path, roots);
+        await host.repos.addRoot(inspected.path);
+      }
+    }
+    const remote = inspected.remoteUrl ? parseRemoteUrl(inspected.remoteUrl) : null;
+    if (inspected.remoteUrl && !remote) {
+      throw new RepoInputError(`The origin URL of ${inspected.path} is not one Band can clone.`);
+    }
+
+    const repos = this.queries.loadAll();
+    const existing = remote ? repos.find((r) => r.remoteKey === remote.key) : undefined;
+    let repo = existing;
+    if (!repo) {
+      const name = this.pickName(
+        repos,
+        input.name ?? remote?.name ?? posix.basename(inspected.path),
+        remote?.owner,
+      );
+      this.checkLabel(input.label);
+      const kind: RepoKind = inspected.isGit ? "git" : "plain";
+      const onLocal = input.hostId === "local";
+      let worktrees: WorktreeState[] = [];
+      if (kind === "git") {
+        const listed = await host.worktree.list(inspected.path).catch(() => []);
+        worktrees = listed
+          .filter((wt) => !wt.isBare)
+          .map((wt) => ({
+            name: wt.branch,
+            branch: wt.branch,
+            path: wt.path,
+            head: wt.head,
+            pinned: false,
+            ...(onLocal ? {} : { hostId: input.hostId }),
+          }));
+      } else {
+        worktrees = [
+          {
+            name: "main",
+            branch: "main",
+            path: inspected.path,
+            pinned: false,
+            ...(onLocal ? {} : { hostId: input.hostId }),
+          },
+        ];
+      }
+      repo = {
+        name,
+        path: onLocal ? inspected.path : "",
+        ...(remote ? { remoteUrl: remote.url, remoteKey: remote.key } : {}),
+        defaultBranch: inspected.defaultBranch ?? "main",
+        worktrees,
+        label: input.label,
+        kind,
+        hasOrigin: kind === "git" && remote !== null,
+      };
+      // The awaits above may have let another change reach the database, so save a fresh tree.
+      const fresh = this.queries.loadAll();
+      if (fresh.some((r) => r.name === repo?.name || (remote && r.remoteKey === remote.key))) {
+        throw new RepoConflictError(`Repo "${repo.name}" was added while this request ran`);
+      }
+      fresh.push(repo);
+      this.queries.saveAll(fresh);
+    }
+    this.queries.setHostPath(repo.name, input.hostId, inspected.path);
+    if (remote) await host.repos.map(remote.url, inspected.path);
+    await this.placeInProject(repo.name, input.project);
+    return this.queries.loadAll().find((r) => r.name === repo?.name) ?? repo;
+  }
+
+  /**
+   * Adds a repo by its remote URL. The hub keeps only the URL and the default branch, and a
+   * worker clones the repo the first time a worktree for it lands there. Without `defaultBranch`
+   * it is read with `git ls-remote --symref` on a host (the local one, else the first online
+   * worker), or from the GitHub API when the vault holds a token for the host.
+   */
+  async addByUrl(input: {
+    remoteUrl: string;
+    defaultBranch?: string;
+    name?: string;
+    label?: string;
+    project?: string;
+  }): Promise<RepoState> {
+    const remote = parseRemoteUrl(input.remoteUrl);
+    if (!remote) {
+      throw new RepoInputError(
+        "That is not a git remote URL. Use https://host/owner/repo or git@host:owner/repo.",
+      );
+    }
+    const repos = this.queries.loadAll();
+    const dup = repos.find((r) => r.remoteKey === remote.key);
+    if (dup) throw new RepoConflictError(`Repo "${dup.name}" already uses ${remote.url}`);
+    this.checkLabel(input.label);
+    const defaultBranch =
+      input.defaultBranch?.trim() || (await this.resolveDefaultBranch(remote.url));
+    const repo: RepoState = {
+      name: this.pickName(repos, input.name ?? remote.name, remote.owner),
+      path: "",
+      remoteUrl: remote.url,
+      remoteKey: remote.key,
+      defaultBranch,
+      worktrees: [],
+      label: input.label,
+      kind: "git",
+      hasOrigin: true,
+    };
+    // Resolving the branch can take a while, so save a fresh tree.
+    const fresh = this.queries.loadAll();
+    if (fresh.some((r) => r.name === repo.name || r.remoteKey === remote.key)) {
+      throw new RepoConflictError(`Repo "${repo.name}" was added while this request ran`);
+    }
+    fresh.push(repo);
+    this.queries.saveAll(fresh);
+    await this.placeInProject(repo.name, input.project);
+    return repo;
+  }
+
+  /**
+   * Boot step for installs that predate repos by URL. A repo registered by path has no remote
+   * yet: read its `origin` from the hub's own checkout, store it, and put the folder into the
+   * local host's mapping, so a worktree for the repo on a worker clones by URL and the local
+   * host knows it holds the repo already. Safe to run on every boot.
+   */
+  async backfillRemotes(): Promise<void> {
+    for (const repo of this.queries.loadAll()) {
+      if (!repo.path || repo.kind !== "git") continue;
+      try {
+        let url = repo.remoteUrl;
+        if (!repo.remoteKey) {
+          const inspected = await hostRegistry.local.repos.inspect(repo.path);
+          const remote = inspected.remoteUrl ? parseRemoteUrl(inspected.remoteUrl) : null;
+          if (!remote) continue;
+          this.queries.setRemote(repo.name, remote.url, remote.key);
+          url = remote.url;
+        }
+        if (url) {
+          const mapped = (await hostRegistry.local.repos.list()).some(
+            (m) => m.key === parseRemoteUrl(url as string)?.key && m.path === repo.path,
+          );
+          if (!mapped) await hostRegistry.local.repos.map(url, repo.path);
+        }
+      } catch {
+        // A checkout that is gone or unreadable keeps no remote. Sync reports it.
+      }
+    }
+  }
+
+  /** Boot step after the first sync: the default project takes repos and worktrees that are in no project. */
+  async adoptUnplaced(): Promise<void> {
+    await projectService.adoptUnplaced(this.queries.loadAll());
+  }
+
+  /** Lists a folder on a host for the picker. */
+  browse(hostId: string, path: string | undefined) {
+    let host: Host;
+    try {
+      host = hostRegistry.hostById(hostId);
+    } catch {
+      throw new RepoInputError(`Unknown host "${hostId}"`);
+    }
+    return host.fs.browse(path);
+  }
+
+  private async placeInProject(repo: string, project: string | undefined): Promise<void> {
+    if (project) {
+      const row = projectService.row(project);
+      if (row.isDefault) await projectService.placeInDefault(repo);
+      else projectService.addRepo(row.id, repo);
+    } else {
+      await projectService.placeInDefault(repo);
+    }
+  }
+
+  private checkLabel(label: string | undefined): void {
+    if (!label) return;
+    const validIds = (this.settings.get().labels ?? []).map((l) => l.id);
+    if (!validIds.includes(label)) {
+      throw new RepoInputError(
+        `Label "${label}" does not exist. Valid labels: ${validIds.join(", ") || "(none)"}`,
+      );
+    }
+  }
+
+  /** The name for a new repo: the wanted one, else prefixed with the owner when that is taken by another repo. */
+  private pickName(repos: RepoState[], wanted: string, owner: string | undefined): string {
+    if (!repos.some((r) => r.name === wanted)) return wanted;
+    const prefixed = owner ? `${owner.replace(/\//g, "-")}-${wanted}` : undefined;
+    if (prefixed && !repos.some((r) => r.name === prefixed)) return prefixed;
+    for (let n = 2; ; n++) {
+      if (!repos.some((r) => r.name === `${wanted}-${n}`)) return `${wanted}-${n}`;
+    }
+  }
+
+  /** Reads the remote's default branch from a host, then the GitHub API, else asks the caller to name it. */
+  private async resolveDefaultBranch(url: string): Promise<string> {
+    const asked = parseRemoteUrl(url);
+    const hostIds = [
+      ...(isLocalHostEnabled() ? ["local"] : []),
+      ...tokenService
+        .listHosts()
+        .filter((h) => h.id !== "local" && h.status === "online")
+        .map((h) => h.id),
+    ];
+    let failure = "no host is available to ask";
+    for (const hostId of hostIds) {
+      try {
+        const { stdout } = await hostRegistry
+          .hostById(hostId)
+          .exec("git", ["ls-remote", "--symref", "--", url, "HEAD"], { timeoutMs: 60_000 });
+        const match = stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m);
+        if (match) return match[1];
+        failure = "the remote did not report a default branch";
+      } catch (err) {
+        failure = err instanceof Error ? err.message : String(err);
+      }
+    }
+    if (asked?.host) {
+      const viaApi = await githubDefaultBranch(asked.host, asked.owner, asked.name).catch(
+        () => null,
+      );
+      if (viaApi) return viaApi;
+    }
+    throw new RepoInputError(
+      `Could not read the default branch of ${asked?.url ?? url} (${failure}). Pass the branch.`,
+    );
   }
 
   /**
@@ -474,6 +773,34 @@ export class RepoService {
  * eventually lands.
  */
 export const repoService = new RepoService();
+
+/** The default branch from the GitHub API, using a vault git credential for the host when there is one. */
+async function githubDefaultBranch(
+  host: string,
+  owner: string,
+  name: string,
+): Promise<string | null> {
+  if (host !== "github.com") return null;
+  const credential = vaultService.findGitCredential({
+    host,
+    path: `${owner}/${name}`,
+    repo: null,
+    peek: true,
+  });
+  if (!credential) return null;
+  const base = (process.env.BAND_GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, "");
+  const res = await fetch(`${base}/repos/${owner}/${name}`, {
+    headers: {
+      Authorization: `Bearer ${credential.password}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "band-hub",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { default_branch?: unknown };
+  return typeof body.default_branch === "string" ? body.default_branch : null;
+}
 
 /**
  * The short symbolic ref of HEAD (the current branch name), or `null` when

@@ -21,6 +21,8 @@ export interface Host {
   readonly git: HostGit;
   readonly worktree: HostWorktree;
   readonly fs: HostFs;
+  /** Which folder holds each repo on this host, and how a repo gets there. */
+  readonly repos: HostRepos;
   readonly search: HostSearch;
   readonly lsp: HostLsp;
   readonly acp: HostAcp;
@@ -93,6 +95,78 @@ export interface HostInfo {
    * `BAND_HOME`.
    */
   dirs?: HostDirs;
+  /**
+   * The folders this host holds repos in, as the normalized remote URL key and the path. The hub
+   * keeps them as a cache of what the host reports.
+   */
+  repoMappings?: RepoMapping[];
+}
+
+/** One repo on a host: the normalized remote URL (`RemoteIdentity.key`) and the folder that holds it. */
+export interface RepoMapping {
+  key: string;
+  /** The clone URL, without credentials. */
+  remoteUrl: string;
+  path: string;
+}
+
+/** What a host finds in a folder when a repo is added from it. */
+export interface RepoInspection {
+  /** The canonical path of the folder, or of the repository root when the folder is inside one. */
+  path: string;
+  isGit: boolean;
+  /** The `origin` URL with credentials removed, or null when the folder has no origin. */
+  remoteUrl: string | null;
+  /** The branch `origin/HEAD` points at, else the current branch, else null. */
+  defaultBranch: string | null;
+}
+
+export interface EnsureRepoSpec {
+  remoteUrl: string;
+  defaultBranch: string;
+}
+
+export interface EnsureRepoResult {
+  /** The folder that holds the repo on this host. */
+  path: string;
+  /** True when this call cloned it. */
+  cloned: boolean;
+}
+
+export interface HostRepos {
+  /** Reads a folder: whether it is a git repository, its origin URL and default branch. Rejects when it is not a directory. */
+  inspect(path: string): Promise<RepoInspection>;
+  /**
+   * The folder that holds the repo. Uses the mapped folder when it still exists, else clones
+   * `remoteUrl` to the host's default location (`~/band/repos/<owner>/<name>`), records the
+   * mapping and returns the path. The clone uses the git credentials the host's own git has.
+   */
+  ensure(spec: EnsureRepoSpec): Promise<EnsureRepoResult>;
+  /** Records that `path` holds the repo for `remoteUrl`. Replaces an earlier folder. */
+  map(remoteUrl: string, path: string): Promise<void>;
+  /** Removes a mapping. The folder stays. */
+  unmap(remoteUrl: string): Promise<void>;
+  /**
+   * Makes a folder one the host serves, for a worker whose user picked a folder outside its
+   * roots. The hub calls it only after the user confirmed. A host that serves everything, like
+   * `LocalHost`, ignores it.
+   */
+  addRoot(path: string): Promise<void>;
+  list(): Promise<RepoMapping[]>;
+}
+
+/** A folder listing for the picker: where it is, where up is, and the directories in it. */
+export interface FsBrowseResult {
+  /** The canonical path that was listed. */
+  path: string;
+  /** The parent folder, or null at the filesystem root. */
+  parent: string | null;
+  /** The home directory of the user the host runs as, the picker's starting point. */
+  home: string;
+  /** Directories only, sorted by name. Hidden ones are included. */
+  entries: Array<{ name: string; path: string; isGit: boolean }>;
+  /** True when `path` is inside the directories the host serves. A pick outside needs confirmation. */
+  insideRoots: boolean;
 }
 
 export interface HostDirs {
@@ -240,6 +314,12 @@ export interface HostFs {
     to: string,
     options?: { recursive?: boolean; exclusive?: boolean },
   ): Promise<void>;
+  /**
+   * Lists the directories in a folder over the whole filesystem under the user's home, for the
+   * folder picker. Starts at the home directory without a path. A host that serves only its
+   * roots still lists outside them here, because the pick is confirmed before it becomes a root.
+   */
+  browse(path?: string): Promise<FsBrowseResult>;
   /** Disk space the path occupies, in bytes. */
   du(path: string): Promise<number>;
   /** Yields changes under `root` until aborted or the consumer stops iterating. */

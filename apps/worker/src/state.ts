@@ -57,3 +57,22 @@ export async function writeSessionToken(stateDir: string, token: string): Promis
   }
   await writePrivate(path, token);
 }
+
+const EXTRA_ROOTS_FILE = "roots.json";
+
+/** Directories added to the worker's roots after it started: a folder the user picked, a clone location. */
+export async function loadExtraRoots(stateDir: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await readFile(join(stateDir, EXTRA_ROOTS_FILE), "utf8")) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveExtraRoots(stateDir: string, roots: string[]): Promise<void> {
+  const path = join(stateDir, EXTRA_ROOTS_FILE);
+  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tmp, `${JSON.stringify([...new Set(roots)], null, 2)}\n`, { mode: 0o600 });
+  await rename(tmp, path);
+}

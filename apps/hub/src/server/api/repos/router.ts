@@ -3,7 +3,8 @@ import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
 import { projectService } from "../../services/project-service";
 import { repoService } from "../../services/repo-service";
-import { publicProcedure, t } from "../trpc";
+import { adminProcedure, publicProcedure, t } from "../trpc";
+import { repoErrorToTrpc } from "./errors";
 
 /**
  * Repos sub-router — Phase 2 of the 3-tier refactor
@@ -41,6 +42,53 @@ export const reposRouter = t.router({
     .input(z.object({ path: z.string(), label: z.string().optional() }))
     .mutation(async ({ input }) => {
       return repoService.add(input);
+    }),
+
+  /**
+   * Adds the repo that a folder on a host holds (the folder picker of a worker). The hub stores
+   * the URL and default branch the host reads there, and the host keeps the folder as its mapping
+   * for that URL. A folder outside the host's roots answers PRECONDITION_FAILED ("OUTSIDE_ROOTS:")
+   * until the call is repeated with `addRoot: true`, which the UI sends after the user confirmed.
+   */
+  addFromWorker: adminProcedure
+    .input(
+      z.object({
+        hostId: z.string().min(1),
+        path: z.string().min(1),
+        name: z.string().min(1).max(100).optional(),
+        label: z.string().optional(),
+        addRoot: z.boolean().optional(),
+        project: z.string().min(1).max(200).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return await repoService.addFromWorker(input);
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
+    }),
+
+  /**
+   * Adds a repo by its remote URL. A worker clones it when the first worktree lands there.
+   * Without `defaultBranch` the hub asks the remote.
+   */
+  addByUrl: adminProcedure
+    .input(
+      z.object({
+        remoteUrl: z.string().trim().min(1).max(500),
+        defaultBranch: z.string().trim().min(1).max(200).optional(),
+        name: z.string().min(1).max(100).optional(),
+        label: z.string().optional(),
+        project: z.string().min(1).max(200).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return await repoService.addByUrl(input);
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
     }),
 
   /**
