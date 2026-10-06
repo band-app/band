@@ -94,6 +94,12 @@ export interface LocalHostOptions {
    * repos. Without it `host.context` reports every context as unreachable.
    */
   context?: ContextSource;
+  /**
+   * Whether this host should look for `gh`. `gh` belongs to the GitHub plugin, so the hub says
+   * no when that plugin is disabled, and the host then runs no `gh` process and reports `gh` as
+   * unknown. Defaults to yes.
+   */
+  ghEnabled?: () => boolean | Promise<boolean>;
 }
 
 /**
@@ -227,22 +233,41 @@ export class LocalHost implements Host {
     return this.tools.value;
   }
 
+  /**
+   * `git --version` and `gh --version` run once per host, on the first `info()`, and callers
+   * that arrive meanwhile share that probe. `info()` is called by every `hosts.list`, so the
+   * answer is kept. A `git` or `gh` installed after the hub started shows up on the next hub
+   * restart. With `ghEnabled` returning false there is no `gh` probe at all.
+   */
+  private cliFacts: Promise<{ versions: Record<string, string>; gh: boolean }> | null = null;
+
+  private probeCliFacts(): Promise<{ versions: Record<string, string>; gh: boolean }> {
+    this.cliFacts ??= (async () => {
+      const versions: Record<string, string> = { node: process.versions.node };
+      let gh = false;
+      try {
+        versions.git = (await execGit(["--version"], process.cwd()))
+          .trim()
+          .replace(/^git version /, "");
+      } catch {
+        // No git on PATH: `versions.git` stays unset and the capability is off.
+      }
+      if ((await this.options.ghEnabled?.()) ?? true) {
+        try {
+          versions.gh = (await execGh(["--version"], process.cwd())).split("\n")[0]?.trim() ?? "";
+          gh = true;
+        } catch {
+          // No gh on PATH.
+        }
+      }
+      return { versions, gh };
+    })();
+    return this.cliFacts;
+  }
+
   async info(): Promise<HostInfo> {
-    const versions: Record<string, string> = { node: process.versions.node };
-    let gh = false;
-    try {
-      versions.git = (await execGit(["--version"], process.cwd()))
-        .trim()
-        .replace(/^git version /, "");
-    } catch {
-      // No git on PATH: `versions.git` stays unset and the capability is off.
-    }
-    try {
-      versions.gh = (await execGh(["--version"], process.cwd())).split("\n")[0]?.trim() ?? "";
-      gh = true;
-    } catch {
-      // No gh on PATH.
-    }
+    const { versions: probed, gh } = await this.probeCliFacts();
+    const versions = { ...probed };
     return {
       id: this.id,
       os: process.platform,
