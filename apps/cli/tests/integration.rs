@@ -2377,13 +2377,14 @@ fn context_create_list_link_remove() {
     assert!(user.status.success(), "stderr: {}", stderr(&user));
 
     let listed = json_of(&env.band(&["context", "list", "--output", "json"]));
-    let names: Vec<&str> = listed["contexts"]
+    let mut names: Vec<&str> = listed["contexts"]
         .as_array()
         .unwrap()
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
-    // "personal" is the context of the default project.
+    // "personal" is the context of the default project, made before the hub answers.
+    names.sort();
     assert_eq!(names, vec!["alpha", "personal", "user"]);
     let text = stdout(&env.band(&["context", "list"]));
     assert!(text.starts_with("NAME"), "text: {text}");
