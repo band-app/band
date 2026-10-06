@@ -570,6 +570,10 @@ jobs:
           grep -E '\[prerender\] Prerendered [1-9][0-9]* pages' docker-build.log
           docker run --rm --entrypoint test band-check -f dist/client/_shell.html
 
+      - name: Check gh is in the image
+        # images.yml builds both images for amd64 and arm64, and their `RUN gh --version` fails the build without gh.
+        run: docker run --rm --entrypoint gh band-check --version
+
       - name: Smoke-run the image
         run: |
           docker run -d --name band-smoke -p 3456:3456 -e BAND_ACCESS_TOKEN=ci-smoke band-check

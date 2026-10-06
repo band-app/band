@@ -185,7 +185,8 @@
     {
       "includes": [
         "apps/hub/src/server/services/github-webhook-service.ts",
-        "apps/hub/src/server/services/github-poll-service.ts"
+        "apps/hub/src/server/services/github-poll-service.ts",
+        "apps/hub/src/server/services/_utils/hub-gh-auth.ts"
       ],
       "linter": {
         "rules": {

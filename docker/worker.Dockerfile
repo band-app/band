@@ -48,6 +48,19 @@ RUN apt-get update \
       git ca-certificates openssh-client curl bash procps less jq \
  && rm -rf /var/lib/apt/lists/*
 
+# gh: agents open PRs and read checks with it. Official release tarball, pinned,
+# for both architectures (TARGETARCH is amd64 or arm64). The hub hands a token to agents and terminals as GH_TOKEN.
+ARG GH_VERSION=2.74.0
+ARG TARGETARCH
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      | tar -xz -C /tmp \
+ && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
+ && rm -rf "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}" \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
+
 COPY --from=builder /opt/band-worker /opt/band-worker
 RUN ln -s /opt/band-worker/node_modules/.bin/band-worker /usr/local/bin/band-worker
 

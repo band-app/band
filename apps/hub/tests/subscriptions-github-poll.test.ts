@@ -11,15 +11,22 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { execGh } from "@band-app/host-local/git/git-client";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { initialCursor } from "../src/server/infra/subscriptions/github-poll";
+import {
+  MISSING_GH_CREDENTIAL,
+  resetHubGhAuthCache,
+  withHubGhCredential,
+} from "../src/server/services/_utils/hub-gh-auth";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
 import { githubPollService } from "../src/server/services/github-poll-service";
 import { githubWebhookService } from "../src/server/services/github-webhook-service";
 import { subscriptionService } from "../src/server/services/subscription-service";
+import { vaultService } from "../src/server/services/vault-service";
 import { type CheckRunStub, type GhStub, ghStub } from "./fixtures/gh-stub";
 import { TEST_TOKEN, writeStubScenario } from "./helpers/acp-chat";
 import { assertTempBandHome } from "./helpers/band-home";
@@ -39,6 +46,8 @@ const ENV_KEYS = [
   "BAND_TEST_ACP_LOG",
   "BAND_TEST_ACP_STATE",
   "BAND_TEST_ACP_SCENARIO",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
 ] as const;
 const originalEnv: Record<string, string | undefined> = {};
 
@@ -118,6 +127,9 @@ beforeAll(async () => {
   process.env.BAND_HOME = join(home, ".band");
   assertTempBandHome();
   delete process.env.BAND_PUBLIC_URL;
+  // The hub reads the machine's gh login from these, so the machine running the suite must not leak one in.
+  delete process.env.GH_TOKEN;
+  delete process.env.GITHUB_TOKEN;
   process.env.BAND_GITHUB_WEBHOOK_SECRET = "poll-test-secret";
   const repo = join(home, "repo");
   mkdirSync(repo, { recursive: true });
@@ -316,5 +328,56 @@ describe("github polling fallback", () => {
     expect(queries()).toHaveLength(2);
     for (let i = 0; i < 3; i++) await githubPollService.poll();
     expect(queries()).toHaveLength(2);
+  });
+});
+
+describe("gh credentials on a hub with no gh login", () => {
+  const GH_TOKEN = "ghp_hubVaultToken0123456789";
+
+  afterEach(async () => {
+    for (const item of vaultService.list()) {
+      if (item.name === "github-poll") await vaultService.remove(item.id);
+    }
+    resetHubGhAuthCache();
+  });
+
+  it("S2: a poll runs gh with GH_TOKEN from the vault and delivers the event", async () => {
+    vaultService.put({
+      name: "github-poll",
+      kind: "git",
+      scope: "global",
+      host: "github.com",
+      pathPattern: "**",
+      value: GH_TOKEN,
+    });
+    const { coords, full } = newRepo();
+    stub.setPrActivityQuery(coords, () =>
+      prAnswer([{ id: "C_vault", body: "vault token review note", createdAt: future(2000) }]),
+    );
+    await subscribe({ pr: 7 }, full);
+    await githubPollService.poll();
+    await waitFor(async () => promptsAbout("vault token review note").length === 1, {
+      label: "the event delivered",
+    });
+    const graphql = calls("graphql").filter((r) =>
+      r.fields.query?.toString().includes(coords.name),
+    );
+    expect(graphql.length).toBeGreaterThan(0);
+    expect(graphql.every((r) => r.ghToken === GH_TOKEN)).toBe(true);
+  });
+
+  it("S4: with no vault token the error names the missing credential and does not crash", async () => {
+    await expect(withHubGhCredential((env) => execGh(["api", "user"], home, env))).rejects.toThrow(
+      MISSING_GH_CREDENTIAL,
+    );
+    expect(MISSING_GH_CREDENTIAL).toContain("--kind git --host github.com");
+    const { coords, full } = newRepo();
+    stub.setPrActivityQuery(coords, () => prAnswer([]));
+    await subscribe({ pr: 8 }, full);
+    await expect(githubPollService.poll()).resolves.not.toThrow();
+    const graphql = calls("graphql").filter((r) =>
+      r.fields.query?.toString().includes(coords.name),
+    );
+    expect(graphql.every((r) => r.ghToken === undefined)).toBe(true);
   });
 });

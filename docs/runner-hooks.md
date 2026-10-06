@@ -113,13 +113,35 @@ A hook has only the bootstrap token, so it cannot clone a private repository. Wo
    Settings > Credentials has the same form. `--scope repo:<name>` limits an item to one repo, and a repo-scoped item wins over a global one, then the pattern with more literal characters wins. `--username` defaults to `x-access-token`, which GitHub accepts for a token.
 3. Nothing else is configured. When a worker starts, it adds a git credential helper to the environment of every git command, agent and terminal it runs (`GIT_CONFIG_*` and `GIT_TERMINAL_PROMPT=0`). The helper (`band-worker git-credential`) asks the worker over a Unix socket in a private temp directory, and the worker asks the hub with the `git.credential` call on its link. The hub answers only for a remote of a repository placed on that worker: a repo with a checkout or a worktree there, or the repository it is about to clone there. Any other repository is refused, and a remote with no matching vault item gets no credential.
 
-The token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, host and path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
+The git token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, host and path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
 
 - Use a fine-grained PAT limited to the repositories the workers need and to the permissions above, so a leaked token reaches nothing else.
 - The hub logs every request (worker, host and path, never the credential), so each use is traceable to a worker.
-- The token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits.
+- The git token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits. (`GH_TOKEN` for `gh` is the exception, see [Git and GitHub auth](#git-and-github-auth).)
 
 The credential source sits behind the `GitTokenSource` interface (`services/_utils/git-token-source.ts`), so a GitHub App that mints installation tokens can replace the vault lookup later.
+
+## Git and GitHub auth
+
+The hub and workers use `git` for clones and pushes and `gh` for pull requests, checks and the GitHub subscription poller. Both images (`band-hub`, `band-worker`) contain `gh`, pinned by the `GH_VERSION` build argument. Each kind of machine authenticates differently.
+
+| Machine | git | gh |
+| --- | --- | --- |
+| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper. The worker adds the hub's git helper, which answers only when the vault has a matching item. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
+| Runner-started worker | The vault `git` item, through the helper described above. | `GH_TOKEN` from the same vault item, in the environment of agents and terminals only. |
+| Hub | The vault `git` item, for clones the hub makes through a worker. | The machine's own `gh auth login`. With none, `GH_TOKEN` from the vault `git` item for `github.com`. |
+
+For `gh`, the hub uses the `git` item for `github.com` whose path pattern is broadest (a repo-scoped item wins over a global one). A dedicated `github` item kind does not exist yet. A worker asks with the `gh.token` call on its link every time it starts an agent or a terminal. The token goes into that child's environment only. It is not written to the worker's disk, not kept in the worker's memory between spawns, and not logged on either side. A worker whose own environment has `GH_TOKEN` or `GITHUB_TOKEN` keeps it, and the hub answers only workers it started through a runner or workers that opted in.
+
+Any process of an agent on the worker can read its own environment, so use a fine-grained PAT limited to the repositories the workers need.
+
+Token scopes for one PAT that serves git, `gh` and the hub's poller:
+
+- Repository permissions: Contents (read and write), Pull requests (read and write), Metadata (read), Commit statuses (read) and Checks (read), so `gh pr create`, `gh pr checks` and the subscription poller work.
+- Repository permission Webhooks (read and write), only if the hub registers GitHub webhooks (it needs a public URL, see [Run the hub on a server](run-the-hub-on-a-server.md)). Without it the hub polls.
+- A classic token needs `repo`, and `admin:repo_hook` for webhooks.
+
+With no `gh` login and no vault item, the hub's GitHub calls fail with "No GitHub credential for gh on this hub" and the command to store one. The poller logs it once and keeps running.
 
 ## Snapshots
 

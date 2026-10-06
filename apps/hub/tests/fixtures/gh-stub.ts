@@ -21,6 +21,8 @@ export interface GhInvocation {
   input?: unknown;
   cwd: string;
   env: { GH_PROMPT_DISABLED: string | null };
+  /** The `GH_TOKEN` the `gh` process ran with, if any. */
+  ghToken?: string;
 }
 
 export interface CheckRunStub {
