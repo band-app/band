@@ -253,4 +253,50 @@ export class ProjectsPage {
   spend(part: "today" | "week" | "total" | "remaining" | "unattributed"): Locator {
     return this.detail.getByTestId(`dashboard__spend-${part}`);
   }
+
+  async setRetroSchedule(schedule: { enabled: boolean; cron: string }): Promise<void> {
+    await test.step(`Set the retro schedule to ${schedule.enabled ? schedule.cron : "off"}`, async () => {
+      const enabled = this.detail.getByTestId("projects__retro-enabled");
+      if (schedule.enabled) await enabled.check();
+      else await enabled.uncheck();
+      await this.detail.getByTestId("projects__retro-cron").fill(schedule.cron);
+      const saved = this.page.waitForResponse(
+        (r) => r.url().includes("projects.update") && r.request().method() === "POST",
+      );
+      await this.detail.getByTestId("projects__retro-save").click();
+      await saved;
+    });
+  }
+
+  async runRetro(): Promise<void> {
+    await test.step("Run a retro now", async () => {
+      await this.detail.getByTestId("projects__retro-run").click();
+    });
+  }
+
+  /** The proposed edit for `path` in the newest retro proposal. */
+  retroItem(path: string): Locator {
+    return this.detail.getByTestId("projects__retro-item").filter({ hasText: path }).first();
+  }
+
+  /** Resolves to the schedule state through `data-scheduled`, not the copy. */
+  retroScheduled(): Locator {
+    return this.detail.getByTestId("projects__retro-next");
+  }
+
+  retroItems(): Locator {
+    return this.detail.getByTestId("projects__retro-item");
+  }
+
+  async acceptRetroItem(path: string): Promise<void> {
+    await test.step(`Accept the retro edit of ${path}`, async () => {
+      await this.retroItem(path).getByTestId("projects__retro-accept").click();
+    });
+  }
+
+  async rejectRetroItem(path: string): Promise<void> {
+    await test.step(`Reject the retro edit of ${path}`, async () => {
+      await this.retroItem(path).getByTestId("projects__retro-reject").click();
+    });
+  }
 }

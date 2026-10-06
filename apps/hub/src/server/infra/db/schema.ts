@@ -929,3 +929,24 @@ export const dispatchRequests = sqliteTable(
   },
   (t) => [index("dispatch_requests_project_idx").on(t.projectId, t.status)],
 );
+
+// A retro of a project (plan step 6.5): the edits its retro agent proposed, kept for the user to
+// accept or reject one by one. `status` is `running` (the agent is working), `pending` (items wait
+// for a decision), `reviewed` (every item decided) or `failed` (`error` says why). `items` is the
+// list of `RetroItem` (`services/_utils/retro-items.ts`), each with its own status.
+export const retroProposals = sqliteTable(
+  "retro_proposals",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull(),
+    status: text("status").notNull(),
+    summary: text("summary"),
+    error: text("error"),
+    chatId: text("chat_id"),
+    items: text("items", { mode: "json" }).$type<unknown[]>().notNull(),
+  },
+  (t) => [index("retro_proposals_project_idx").on(t.projectId, t.createdAt)],
+);

@@ -5,6 +5,15 @@ import {
   helperCommand,
   runGitCredentialHelper,
 } from "./git-credentials.ts";
+import {
+  defaultServiceEnv,
+  installService,
+  parseServiceOptions,
+  SERVICE_SUBCOMMANDS,
+  serviceStatus,
+  serviceUsage,
+  uninstallService,
+} from "./service.ts";
 import { Worker } from "./worker.ts";
 
 const log = createLogger("band-worker");
@@ -13,6 +22,23 @@ const argv = process.argv.slice(2);
 // Git runs this as its credential helper (see git-credentials.ts), so it must not start a worker.
 if (argv[0] === GIT_CREDENTIAL_SUBCOMMAND) {
   process.exit(await runGitCredentialHelper(argv[1]));
+}
+
+const subcommand = SERVICE_SUBCOMMANDS.find((s) => s === argv[0]);
+if (subcommand && !argv.includes("--help")) {
+  try {
+    const env = defaultServiceEnv();
+    if (subcommand === "install-service") installService(parseServiceOptions(argv.slice(1)), env);
+    else if (subcommand === "uninstall-service") uninstallService(env);
+    else process.exit(serviceStatus(env));
+    process.exit(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `band-worker: ${message}\n${err instanceof ConfigError ? `\n${serviceUsage()}` : ""}`,
+    );
+    process.exit(err instanceof ConfigError ? 2 : 1);
+  }
 }
 
 if (argv.includes("--help") || argv.includes("-h")) {

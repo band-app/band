@@ -305,6 +305,40 @@ export class ContextBrowserService {
     return this.commit(name, [{ path, content }], checkMessage(message), { base, guard: path });
   }
 
+  /**
+   * Saves several files as one commit, as `author`. A `null` content deletes the file. Each
+   * written text goes through the same credential scan as `write`. `base` and `guard` work as
+   * in `write`: the commit is refused when the guarded file changed since `base`.
+   */
+  async writeMany(
+    name: string,
+    changes: Array<{ path: string; content: string | null }>,
+    message: string,
+    opts: { base?: string; guard?: string; author?: string } = {},
+  ): Promise<{ commit: string; changed: boolean }> {
+    const edits: Change[] = [];
+    for (const change of changes) {
+      checkPath(change.path);
+      if (change.content === null) {
+        edits.push({ path: change.path });
+        continue;
+      }
+      if (Buffer.byteLength(change.content) > MAX_FILE_BYTES) {
+        throw new ContextInputError(`"${change.path}" is larger than 1 MiB`);
+      }
+      const found = scanForSecrets(change.content);
+      if (found.length > 0) {
+        const list = found.map((f) => `${f.kind} on line ${f.line}`).join(", ");
+        throw new ContextInputError(
+          `Not saved: "${change.path}" looks like it holds a credential (${list}). Remove it first.`,
+        );
+      }
+      edits.push({ path: change.path, content: change.content });
+    }
+    if (opts.guard) checkPath(opts.guard);
+    return this.commit(name, edits, checkMessage(message), opts);
+  }
+
   /** Keeps one version of a conflicted file at its original path and deletes the conflict copy. */
   async resolveConflict(
     name: string,
@@ -348,7 +382,7 @@ export class ContextBrowserService {
     name: string,
     changes: Change[],
     message: string,
-    opts: { base?: string; guard?: string } = {},
+    opts: { base?: string; guard?: string; author?: string } = {},
   ): Promise<{ commit: string; changed: boolean }> {
     const repo = this.repo(name);
     return contextService.exclusive(name, async () => {
@@ -366,7 +400,7 @@ export class ContextBrowserService {
           );
         }
       }
-      return this.commitLocked(repo, name, head, changes, message);
+      return this.commitLocked(repo, name, head, changes, message, opts.author);
     });
   }
 
@@ -377,10 +411,21 @@ export class ContextBrowserService {
     head: string | null,
     changes: Change[],
     message: string,
+    author?: string,
   ): Promise<{ commit: string; changed: boolean }> {
     const dir = mkdtempSync(join(tmpdir(), "band-context-index-"));
     try {
-      const env = contextGitEnv({ GIT_INDEX_FILE: join(dir, "index") });
+      const env = contextGitEnv({
+        GIT_INDEX_FILE: join(dir, "index"),
+        ...(author
+          ? {
+              GIT_AUTHOR_NAME: author,
+              GIT_AUTHOR_EMAIL: `${author}@localhost`,
+              GIT_COMMITTER_NAME: author,
+              GIT_COMMITTER_EMAIL: `${author}@localhost`,
+            }
+          : {}),
+      });
       const opts = { cwd: repo, env };
       if (head) await git(["read-tree", head], opts);
       for (const change of changes) {

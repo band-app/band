@@ -18,6 +18,7 @@ import {
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
 import { projectDashboardService } from "../../services/project-dashboard-service";
 import { projectDispatchService } from "../../services/project-dispatch-service";
+import { projectRetroService } from "../../services/project-retro-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { projectSubscriptionService } from "../../services/project-subscription-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
@@ -83,6 +84,7 @@ export const projectsRouter = t.router({
     .mutation(({ input }) =>
       guard(async () => {
         const created = await projectService.create(input);
+        projectRetroService.reschedule(created.id);
         // A project with repos starts its coordinator at once. One without waits for its first repo.
         return { project: present(await projectCoordinatorService.ensureCoordinator(created.id)) };
       }),
@@ -112,6 +114,7 @@ export const projectsRouter = t.router({
         const { project, ...patch } = input;
         const updated = projectService.update(project, patch);
         projectCoordinatorService.syncModel(updated.id);
+        projectRetroService.reschedule(updated.id);
         return { project: present(projectService.get(updated.id)) };
       }),
     ),
@@ -124,7 +127,10 @@ export const projectsRouter = t.router({
         projectService
           .remove(input.project, {
             removeContext: input.removeContext,
-            beforeRemove: (row) => projectCoordinatorService.teardown(row.id),
+            beforeRemove: async (row) => {
+              await projectCoordinatorService.teardown(row.id);
+              projectRetroService.unschedule(row.id);
+            },
           })
           .then(() => ({ removed: true })),
       ),
@@ -191,6 +197,40 @@ export const projectsRouter = t.router({
         projectDispatchService.reject(input.requestId);
         return { rejected: true };
       }),
+    ),
+
+  /** The retro's schedule: on or off, the cron expression and the next run. Edit it with `update` and `policy.retro`. */
+  retroStatus: publicProcedure
+    .input(z.object({ project: ref }))
+    .query(({ input }) => guard(() => ({ retro: projectRetroService.status(input.project) }))),
+
+  /** Starts a retro now, whether or not the schedule is on. The proposal arrives when the agent calls its tool. */
+  retroRun: adminProcedure
+    .input(z.object({ project: ref }))
+    .mutation(({ input }) =>
+      guard(async () => ({ proposal: await projectRetroService.run(input.project) })),
+    ),
+
+  /** Retro proposals, newest first. They hold context file content, so they are admin only like `context.*`. */
+  retroProposals: adminProcedure
+    .input(z.object({ project: ref, limit: z.number().int().min(1).max(50).optional() }))
+    .query(({ input }) =>
+      guard(() => ({ proposals: projectRetroService.list(input.project, input.limit) })),
+    ),
+
+  /** Accepts or rejects one item of a proposal. Accepting commits a context edit, or dispatches a repo edit. */
+  retroDecide: adminProcedure
+    .input(
+      z.object({
+        proposalId: z.string().min(1).max(100),
+        itemId: z.string().min(1).max(20),
+        decision: z.enum(["accept", "reject"]),
+      }),
+    )
+    .mutation(({ input }) =>
+      guard(async () => ({
+        proposal: await projectRetroService.decide(input.proposalId, input.itemId, input.decision),
+      })),
     ),
 
   addRepo: adminProcedure

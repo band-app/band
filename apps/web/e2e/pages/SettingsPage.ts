@@ -779,9 +779,27 @@ export class SettingsPage {
     return this.bootstrapToken().inputValue();
   }
 
-  /** The `band-worker` command line's text. */
+  /** The foreground `band-worker` command line's text, the one a test can run as is. */
   async readWorkerCommand(): Promise<string> {
-    return this.workerCommand().inputValue();
+    return this.readInstallCommand("foreground");
+  }
+
+  /** Selects an install tab in the add-worker result and returns the command or file it shows. */
+  async readInstallCommand(tab: "service" | "foreground" | "docker" | "compose"): Promise<string> {
+    return test.step(`Read the "${tab}" install command`, async () => {
+      await this.dialog.getByTestId(`settings__install-tab-${tab}`).click();
+      await expect(this.workerCommand()).toHaveAttribute("data-tab", tab);
+      return this.workerCommand().inputValue();
+    });
+  }
+
+  /** Clicks Copy under the install command and returns what landed on the clipboard. */
+  async copyWorkerCommand(): Promise<string> {
+    return test.step("Copy the install command", async () => {
+      await this.page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await this.dialog.getByTestId("settings__copy-worker-command").click();
+      return this.page.evaluate(() => navigator.clipboard.readText());
+    });
   }
 
   /** Closes the add-worker result panel. */

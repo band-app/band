@@ -43,6 +43,12 @@ const USAGE = `Usage: band-worker --hub <url> --token <token> [options]
   --state-dir <dir>    Where the worker id and session token live (env BAND_WORKER_STATE_DIR).
   --ephemeral          Exit when idle (env BAND_WORKER_EPHEMERAL=1).
   --idle-exit <dur>    Idle time before an ephemeral worker exits, like 90s, 10m or 1h (env BAND_WORKER_IDLE_EXIT).
+
+Run as a service (systemd user unit on Linux, launchd agent on macOS):
+
+  band-worker install-service --hub <url> --token <bootstrap token> [--root <dir> --name <name> --labels k=v]
+  band-worker uninstall-service
+  band-worker status
 `;
 
 export function usage(): string {

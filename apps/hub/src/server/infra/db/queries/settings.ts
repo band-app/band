@@ -13,6 +13,8 @@ export interface RunnerSettings {
   labels: Record<string, string>;
   provides?: Record<string, string>;
   isolation: "process" | "worktree" | "container" | "vm";
+  /** The machines it starts have a virtual desktop (`BAND_DESKTOP=1` for the hook). */
+  desktop: boolean;
   maxConcurrent: number;
   timeoutSec: number;
   maxLifetimeSec?: number;
