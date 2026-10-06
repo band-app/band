@@ -70,6 +70,7 @@ let workerState: string;
 let hostId: string;
 let site: Server;
 let origin: string;
+let hubLog: string;
 const worktreeId = "proj-cdp-feat";
 
 const q = <T>(procedure: string, input?: unknown) =>
@@ -118,7 +119,35 @@ async function connectCdp(query: string) {
   };
 }
 
+/** Prints what the hub logged and the browser's own log, so a failed launch in CI names its cause. */
+function printLaunchDiagnostics(): void {
+  const lines: string[] = [];
+  try {
+    const log = readFileSync(hubLog, "utf8");
+    lines.push(...log.split("\n").filter((l) => l.includes("remote CDP failed")));
+  } catch {
+    // no hub log
+  }
+  try {
+    lines.push(
+      `chromium.log: ${readFileSync(join(workerState, "browser", worktreeId, "chromium.log"), "utf8").slice(-2000)}`,
+    );
+  } catch {
+    // browser never started
+  }
+  if (lines.length > 0) console.error(`remote browser launch diagnostics:\n${lines.join("\n")}`);
+}
+
 async function title(query: string, url: string): Promise<string> {
+  try {
+    return await readTitle(query, url);
+  } catch (err) {
+    printLaunchDiagnostics();
+    throw err;
+  }
+}
+
+async function readTitle(query: string, url: string): Promise<string> {
   const cdp = await connectCdp(query);
   try {
     const { targetId } = (await cdp.send("Target.createTarget", { url })) as { targetId: string };
@@ -188,11 +217,14 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
         },
       ],
     });
+    hubLog = join(hubHome, "hub.log");
+    process.env.BAND_TEST_SERVER_LOG = hubLog;
     server = await startServer({
       tmpHome: hubHome,
       remoteHost: false,
       env: { BAND_SERVE_UI: "false" },
     });
+    delete process.env.BAND_TEST_SERVER_LOG;
     const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
       hostName: "cdp-worker",
       labels: [],

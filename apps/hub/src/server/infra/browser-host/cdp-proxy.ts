@@ -179,7 +179,8 @@ async function bridgeRemote(ws: WsServerSocket, worktreeId: string): Promise<tru
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn("remote CDP failed for worktree %s: %s", worktreeId, message);
-    if (ws.readyState === ws.OPEN) ws.close(4001, "Remote browser unavailable");
+    if (ws.readyState === ws.OPEN)
+      ws.close(4001, `Remote browser unavailable: ${message}`.slice(0, 123));
     return true;
   }
   if (!cdp) {
