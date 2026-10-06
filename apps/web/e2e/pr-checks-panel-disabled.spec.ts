@@ -72,7 +72,5 @@ test("a disabled GitHub plugin adds no Checks tab and never runs gh", async ({ p
 
   await expect(worktree.rightPanelTab("changes")).toBeVisible();
   await expect(worktree.rightPanelTab("github-pull-request")).toHaveCount(0);
-  // `hosts.list` (the desktop button in the center header calls it on every worktree) probes the
-  // machine with `gh --version`, which is not the GitHub plugin at work.
-  expect(stub.requests.filter((r) => r.args[0] !== "--version")).toEqual([]);
+  expect(stub.requests).toEqual([]);
 });
