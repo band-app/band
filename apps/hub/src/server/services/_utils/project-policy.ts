@@ -4,10 +4,15 @@
  * fills in the defaults, and every check reads the resolved form.
  */
 
+import { Cron } from "croner";
 import { z } from "zod";
 
 /** The name the coordinator's tools go by in a session's `mcpServers`. The proxy route serves it itself, so no MCP server may take the name. */
 export const COORDINATOR_SERVER = "band-coordinator";
+/** The hub's own tools for a project's retro agent (plan step 6.5), served on the same proxy route. */
+export const RETRO_SERVER = "band-retro";
+/** The chat label that marks a project's retro chat. Its value is the project id. */
+export const RETRO_LABEL = "band:retro";
 /** The chat label that marks a project's coordinator chat. */
 export const COORDINATOR_LABEL = "band:coordinator";
 
@@ -23,6 +28,23 @@ export const DEFAULT_MODELS = {
   worker: "sonnet",
   reviewer: "sonnet",
 } as const;
+
+/** A weekly retro, Monday 09:00 server time, once the user turns it on. */
+export const DEFAULT_RETRO_CRON = "0 9 * * 1";
+
+function validCron(expression: string): boolean {
+  // croner also takes an ISO date as a one-off schedule, which a recurring retro must not.
+  const fields = expression.trim().split(/\s+/).length;
+  if (fields < 5 || fields > 6) return false;
+  try {
+    const cron = new Cron(expression, { maxRuns: 0 });
+    const [a, b] = cron.nextRuns(2);
+    // Each run starts an agent turn, so an expression that fires more often than hourly is refused.
+    return !a || !b || b.getTime() - a.getTime() >= 3_600_000;
+  } catch {
+    return false;
+  }
+}
 
 const model = z.string().trim().min(1).max(100);
 
@@ -48,6 +70,20 @@ export const projectPolicy = z.preprocess(
       autonomy: z.enum(AUTONOMY_LEVELS).optional(),
       /** With `autonomy: autonomous`, the coordinator may merge without asking. */
       autoMerge: z.boolean().optional(),
+      /** The scheduled retro (plan step 6.5). Off until `enabled` is true. */
+      retro: z
+        .object({
+          enabled: z.boolean().optional(),
+          cron: z
+            .string()
+            .trim()
+            .min(1)
+            .max(100)
+            .refine(validCron, "Invalid cron expression")
+            .optional(),
+        })
+        .strict()
+        .optional(),
       models: z
         .object({
           coordinator: model.optional(),
@@ -69,6 +105,7 @@ export interface ResolvedPolicy {
   autonomy: Autonomy;
   autoMerge: boolean;
   models: { coordinator: string; worker: string; reviewer: string };
+  retro: { enabled: boolean; cron: string };
 }
 
 export function resolvePolicy(
@@ -86,6 +123,7 @@ export function resolvePolicy(
     autonomy: p.autonomy ?? (parsed.success ? DEFAULT_AUTONOMY : "observe"),
     // Merging without asking needs both the autonomous level and the explicit opt-in.
     autoMerge: p.autonomy === "autonomous" && p.autoMerge === true,
+    retro: { enabled: p.retro?.enabled === true, cron: p.retro?.cron ?? DEFAULT_RETRO_CRON },
     models: {
       coordinator: p.models?.coordinator ?? coordinatorModel ?? DEFAULT_MODELS.coordinator,
       worker: p.models?.worker ?? DEFAULT_MODELS.worker,

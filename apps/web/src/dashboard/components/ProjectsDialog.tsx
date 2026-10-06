@@ -722,6 +722,204 @@ function DispatchSection({ project, canEdit }: { project: Project; canEdit: bool
   );
 }
 
+function RetroSection({
+  project,
+  canEdit,
+  run,
+}: {
+  project: Project;
+  canEdit: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const queryClient = useQueryClient();
+  const retro = project.effectivePolicy.retro;
+  const [enabled, setEnabled] = useState(retro.enabled);
+  const [cron, setCron] = useState(retro.cron);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const status = useQuery({
+    queryKey: ["projects.retroStatus", project.id, retro.enabled, retro.cron],
+    queryFn: () => trpc.projects.retroStatus.query({ project: project.id }),
+    refetchInterval: 5000,
+  });
+  // The proposals hold context content, which only an admin may read.
+  const proposals = useQuery({
+    queryKey: ["projects.retroProposals", project.id],
+    queryFn: () => trpc.projects.retroProposals.query({ project: project.id, limit: 5 }),
+    enabled: canEdit,
+    refetchInterval: status.data?.retro.running ? 2000 : 10000,
+  });
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["projects.retroProposals", project.id] });
+    await queryClient.invalidateQueries({ queryKey: ["projects.dispatches", project.id] });
+  };
+  const act = async (key: string, fn: () => Promise<unknown>) => {
+    setError(null);
+    setBusy(key);
+    try {
+      await fn();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+      await refresh();
+    }
+  };
+  const save = () =>
+    run(() =>
+      trpc.projects.update.mutate({
+        project: project.id,
+        policy: { ...project.policy, retro: { enabled, cron: cron.trim() || undefined } },
+      }),
+    );
+  const next = status.data?.retro.nextRunAt;
+
+  return (
+    <section className="space-y-2" data-testid="projects__retro" data-enabled={retro.enabled}>
+      <h3 className="text-sm font-medium">Retro</h3>
+      <p className="text-xs text-muted-foreground">
+        A retro reads the project's recent learnings, handoffs and task groups and proposes edits to
+        its notes and skills. Nothing applies until you accept it.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            data-testid="projects__retro-enabled"
+            checked={enabled}
+            disabled={!canEdit}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          Run on a schedule
+        </label>
+        <Label htmlFor="projects-retro-cron">Cron</Label>
+        <Input
+          id="projects-retro-cron"
+          data-testid="projects__retro-cron"
+          className="w-40"
+          disabled={!canEdit}
+          value={cron}
+          onChange={(e) => setCron(e.target.value)}
+        />
+        {canEdit ? (
+          <Button size="sm" data-testid="projects__retro-save" onClick={save}>
+            Save schedule
+          </Button>
+        ) : null}
+        {canEdit ? (
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="projects__retro-run"
+            disabled={busy !== null || status.data?.retro.running === true}
+            onClick={() => act("run", () => trpc.projects.retroRun.mutate({ project: project.id }))}
+          >
+            Run retro now
+          </Button>
+        ) : null}
+      </div>
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="projects__retro-next"
+        data-scheduled={retro.enabled && next ? "true" : "false"}
+      >
+        {retro.enabled && next
+          ? `Next run ${new Date(next).toLocaleString()}.`
+          : "The schedule is off."}
+      </p>
+      {(proposals.data?.proposals ?? []).map((p) => (
+        <div
+          key={p.id}
+          className="space-y-2 rounded-md border p-3"
+          data-testid="projects__retro-proposal"
+          data-proposal={p.id}
+          data-status={p.status}
+        >
+          <p className="text-xs text-muted-foreground">
+            {new Date(p.createdAt).toLocaleString()}, {p.status}
+            {p.error ? `: ${p.error}` : ""}
+          </p>
+          {p.summary ? <p className="text-sm">{p.summary}</p> : null}
+          {p.status === "reviewed" && p.items.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nothing to change.</p>
+          ) : null}
+          {p.items.map((item) => (
+            <div
+              key={item.id}
+              className="space-y-1 rounded border p-2"
+              data-testid="projects__retro-item"
+              data-item={item.id}
+              data-path={item.path}
+              data-status={item.status}
+            >
+              <p className="text-sm font-medium">
+                {item.target === "repo" ? `${item.repo}: ` : ""}
+                {item.path}
+                <span className="text-xs font-normal text-muted-foreground"> ({item.status})</span>
+              </p>
+              <p className="text-xs text-muted-foreground">{item.rationale}</p>
+              <pre
+                className="max-h-48 overflow-auto whitespace-pre-wrap text-xs"
+                data-testid="projects__retro-diff"
+              >
+                {item.diff}
+              </pre>
+              {item.error ? (
+                <p className="text-xs text-destructive" data-testid="projects__retro-item-error">
+                  {item.error}
+                </p>
+              ) : null}
+              {item.result?.dispatch ? (
+                <p className="text-xs" data-testid="projects__retro-item-result">
+                  Dispatch: {item.result.dispatch}
+                </p>
+              ) : null}
+              {canEdit && (item.status === "pending" || item.status === "failed") ? (
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    data-testid="projects__retro-accept"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      act(item.id, () =>
+                        trpc.projects.retroDecide.mutate({
+                          proposalId: p.id,
+                          itemId: item.id,
+                          decision: "accept",
+                        }),
+                      )
+                    }
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="projects__retro-reject"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      act(item.id, () =>
+                        trpc.projects.retroDecide.mutate({
+                          proposalId: p.id,
+                          itemId: item.id,
+                          decision: "reject",
+                        }),
+                      )
+                    }
+                  >
+                    Reject
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ))}
+      <ErrorLine message={error} />
+    </section>
+  );
+}
+
 function WakeupSection({ project }: { project: Project }) {
   const subscriptions = useQuery({
     queryKey: ["projects.subscriptions", project.id],
@@ -1020,6 +1218,13 @@ function ProjectDetail({
       </section>
 
       <DispatchSection project={project} canEdit={canEdit} />
+
+      <RetroSection
+        key={`${project.id}:${JSON.stringify(project.policy.retro ?? null)}`}
+        project={project}
+        canEdit={canEdit}
+        run={run}
+      />
 
       <WakeupSection project={project} />
 

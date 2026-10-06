@@ -58,7 +58,7 @@ import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
-import { COORDINATOR_SERVER } from "./_utils/project-policy";
+import { COORDINATOR_SERVER, RETRO_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { contextPreambleService } from "./context-preamble-service";
@@ -68,6 +68,7 @@ import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 // FRAGILE: ESM cycle leg, `project-coordinator-service` imports this file back.
 // Safe because it is only used inside function bodies.
 import { projectCoordinatorService } from "./project-coordinator-service";
+import { projectRetroService } from "./project-retro-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -793,7 +794,11 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
     const names = projectCoordinatorService.projectOfChat(rt.chatId)
       ? [COORDINATOR_SERVER]
-      : mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name);
+      : projectRetroService.projectOfChat(rt.chatId)
+        ? [RETRO_SERVER]
+        : mcpProxyService
+            .serversForSession(worktree.repo.name, worktree.host.id)
+            .map((s) => s.name);
     if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -834,8 +839,11 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
 function withCharter(chatId: string, preamble: SessionPreamble | null): SessionPreamble | null {
   try {
     const project = projectCoordinatorService.projectOfChat(chatId);
-    if (!project) return preamble;
-    const charter = projectCoordinatorService.charter(project);
+    const retro = project ? undefined : projectRetroService.projectOfChat(chatId);
+    if (!project && !retro) return preamble;
+    const charter = project
+      ? projectCoordinatorService.charter(project)
+      : projectRetroService.charter(retro as NonNullable<typeof retro>);
     return {
       text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
       memoryDir: preamble?.memoryDir ?? null,
