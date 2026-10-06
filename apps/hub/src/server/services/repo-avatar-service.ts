@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gitRunner } from "@band-app/host-api";
-import { getRepoInfo } from "@band-app/host-local/git/git-client";
+import { getRepoInfo, parseGitRemoteUrl } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
 import { RepoQueries, type RepoState } from "../infra/db/queries/repos";
 import { bandHome } from "../infra/db/queries/settings";
@@ -72,9 +72,11 @@ export class RepoAvatarService {
    * Avatar descriptor for `repos.list`. Never touches the network: it
    * reads the `origin` remote (memoised) and the cache sidecar only.
    */
-  async describe(repo: Pick<RepoState, "name" | "path" | "kind">): Promise<RepoAvatarInfo | null> {
+  async describe(
+    repo: Pick<RepoState, "name" | "path" | "kind" | "remoteUrl">,
+  ): Promise<RepoAvatarInfo | null> {
     if (repo.kind !== "git") return null;
-    const ref = await this.repoRef(repo.name, repo.path);
+    const ref = await this.repoRef(repo.name, repo.path, repo.remoteUrl);
     if (!ref) return null;
     const entry = await this.entry(ref);
     if (entry.meta?.status === "missing" && !this.isStale(entry.meta)) return null;
@@ -92,7 +94,7 @@ export class RepoAvatarService {
   async image(repoName: string): Promise<AvatarImage | null> {
     const repo = this.queries.findLocation(repoName);
     if (!repo || repo.kind !== "git") return null;
-    const ref = await this.repoRef(repoName, repo.path);
+    const ref = await this.repoRef(repoName, repo.path, repo.remoteUrl);
     if (!ref) return null;
 
     const key = cacheKey(ref);
@@ -180,7 +182,13 @@ export class RepoAvatarService {
     return Date.now() - meta.fetchedAt > CACHE_TTL_MS;
   }
 
-  private async repoRef(repoName: string, repoPath: string): Promise<GitHubRepoRef | null> {
+  private async repoRef(
+    repoName: string,
+    repoPath: string,
+    remoteUrl?: string,
+  ): Promise<GitHubRepoRef | null> {
+    // A repo the hub holds no checkout of is known by its stored URL.
+    if (!repoPath) return remoteUrl ? githubRepoRef(parseGitRemoteUrl(remoteUrl)) : null;
     const cached = this.remotes.get(repoPath);
     if (cached && Date.now() - cached.at < REMOTE_TTL_MS) return cached.ref;
     const ref = githubRepoRef(

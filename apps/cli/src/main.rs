@@ -160,13 +160,28 @@ enum SkillsCmd {
 enum ReposCmd {
     /// List registered repos
     List,
-    /// Register an existing repository as a repo
+    /// Register a repo from a path on the hub's machine, a remote URL (`--url`) or a folder on a worker (`--from`)
     Add {
-        /// Path to the git repository
-        path: String,
+        /// Path to the git repository. With `--from`, the folder on that host
+        path: Option<String>,
         /// Label for the repo
         #[arg(long)]
         label: Option<String>,
+        /// Add by remote URL. A worker clones it when a worktree first lands there
+        #[arg(long, conflicts_with = "from")]
+        url: Option<String>,
+        /// Default branch for `--url`. Without it the hub asks the remote
+        #[arg(long, requires = "url")]
+        branch: Option<String>,
+        /// Add the repo a folder on this host holds (host id, see `band hosts list`)
+        #[arg(long)]
+        from: Option<String>,
+        /// With `--from`: serve a folder outside the worker's roots after confirming it
+        #[arg(long, requires = "from")]
+        add_root: bool,
+        /// Project to put the repo in (defaults to the default project)
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Unregister a repo
     Remove {
@@ -943,7 +958,23 @@ fn main() {
     let result = match cli.command {
         Commands::Repos { cmd } => match cmd {
             ReposCmd::List => cmd_repos_list(),
-            ReposCmd::Add { path, label } => cmd_repos_add(&path, label.as_deref()),
+            ReposCmd::Add {
+                path,
+                label,
+                url,
+                branch,
+                from,
+                add_root,
+                project,
+            } => cmd_repos_add(&ReposAddArgs {
+                path: path.as_deref(),
+                label: label.as_deref(),
+                url: url.as_deref(),
+                branch: branch.as_deref(),
+                from: from.as_deref(),
+                add_root,
+                project: project.as_deref(),
+            }),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
         Commands::Worktrees { cmd } => match cmd {
@@ -1348,7 +1379,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_repos = Vec::new();
-    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut rows: Vec<[String; 6]> = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -1364,6 +1395,28 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         // output positionally — e.g. `awk '{print $2}'` to extract the
         // path — keep working. The JSON output is keyed and order-
         // insensitive, so the field placement there doesn't matter.
+        let remote_url = proj.get("remoteUrl").and_then(|u| u.as_str());
+        let clones = proj
+            .get("clones")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let clones_text = if clones.is_empty() {
+            "-".to_string()
+        } else {
+            clones
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{}:{}",
+                        c.get("hostId").and_then(|h| h.as_str()).unwrap_or(""),
+                        c.get("path").and_then(|p| p.as_str()).unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        // URL and CLONES go after KIND for the same positional-script reason.
         rows.push([
             name.to_string(),
             path.to_string(),
@@ -1373,16 +1426,23 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
                 if wt_count == 1 { "" } else { "s" }
             ),
             kind.to_string(),
+            remote_url.unwrap_or("-").to_string(),
+            clones_text,
         ]);
         json_repos.push(serde_json::json!({
             "name": name,
             "path": path,
             "kind": kind,
             "worktreeCount": wt_count,
+            "remoteUrl": remote_url,
+            "clones": clones,
         }));
     }
 
-    let text = format_table(&["NAME", "PATH", "WORKTREES", "KIND"], &rows);
+    let text = format_table(
+        &["NAME", "PATH", "WORKTREES", "KIND", "URL", "CLONES"],
+        &rows,
+    );
 
     Ok(CommandResult {
         text,
@@ -1390,21 +1450,76 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_repos_add(path: &str, label: Option<&str>) -> Result<CommandResult, String> {
-    validate::validate_path(path, "Path")?;
+struct ReposAddArgs<'a> {
+    path: Option<&'a str>,
+    label: Option<&'a str>,
+    url: Option<&'a str>,
+    branch: Option<&'a str>,
+    from: Option<&'a str>,
+    add_root: bool,
+    project: Option<&'a str>,
+}
 
+fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let mut input = serde_json::json!({"path": path});
-    if let Some(label) = label {
-        input["label"] = serde_json::json!(label);
-    }
-    let data = client.trpc_mutate("repos.add", &input)?;
+
+    let data = if let Some(url) = args.url {
+        if args.path.is_some() {
+            return Err("Pass either a path or --url, not both".to_string());
+        }
+        let mut input = serde_json::json!({"remoteUrl": url});
+        if let Some(branch) = args.branch {
+            input["defaultBranch"] = serde_json::json!(branch);
+        }
+        if let Some(label) = args.label {
+            input["label"] = serde_json::json!(label);
+        }
+        if let Some(project) = args.project {
+            input["project"] = serde_json::json!(project);
+        }
+        client.trpc_mutate("repos.addByUrl", &input)?
+    } else if let Some(host) = args.from {
+        let path = args
+            .path
+            .ok_or("--from needs the folder on that host: band repos add --from <host> <path>")?;
+        validate::validate_name(host, "Host")?;
+        let mut input = serde_json::json!({"hostId": host, "path": path});
+        if args.add_root {
+            input["addRoot"] = serde_json::json!(true);
+        }
+        if let Some(label) = args.label {
+            input["label"] = serde_json::json!(label);
+        }
+        if let Some(project) = args.project {
+            input["project"] = serde_json::json!(project);
+        }
+        client
+            .trpc_mutate("repos.addFromWorker", &input)
+            .map_err(|msg| {
+                if msg.contains("OUTSIDE_ROOTS:") {
+                    format!("{msg}\nRepeat with --add-root to serve that folder from the worker.")
+                } else {
+                    msg
+                }
+            })?
+    } else {
+        let path = args
+            .path
+            .ok_or("Pass a path, --url <url> or --from <host> <path>")?;
+        validate::validate_path(path, "Path")?;
+        let mut input = serde_json::json!({"path": path});
+        if let Some(label) = args.label {
+            input["label"] = serde_json::json!(label);
+        }
+        client.trpc_mutate("repos.add", &input)?
+    };
     let name = data.get("name").and_then(|n| n.as_str()).unwrap_or("");
     let result_path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    let remote_url = data.get("remoteUrl").and_then(|u| u.as_str());
 
     Ok(CommandResult {
         text: format!("{name}\n"),
-        json: serde_json::json!({"name": name, "path": result_path}),
+        json: serde_json::json!({"name": name, "path": result_path, "remoteUrl": remote_url}),
     })
 }
 

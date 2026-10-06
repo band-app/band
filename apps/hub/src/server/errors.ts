@@ -230,3 +230,35 @@ export class DispatchInputError extends Error {
     this.name = "DispatchInputError";
   }
 }
+
+/** Thrown by `RepoService` for input the caller can fix, such as a bad URL or a folder with no repo. Mapped to 400. */
+export class RepoInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepoInputError";
+  }
+}
+
+/** Thrown by `RepoService` when the repo is already registered. Mapped to 409. */
+export class RepoConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepoConflictError";
+  }
+}
+
+/**
+ * Thrown by `RepoService.addFromWorker` when the picked folder is outside the directories the
+ * worker serves. The UI asks the user to confirm and calls again with `addRoot`. Mapped to
+ * PRECONDITION_FAILED with the roots in the message.
+ */
+export class RepoOutsideRootsError extends Error {
+  readonly path: string;
+  readonly roots: string[];
+  constructor(path: string, roots: string[]) {
+    super(`${path} is outside the directories this host serves (${roots.join(", ") || "none"}).`);
+    this.name = "RepoOutsideRootsError";
+    this.path = path;
+    this.roots = roots;
+  }
+}

@@ -43,7 +43,12 @@ export type RepoKind = "git" | "plain";
  */
 export interface RepoState {
   name: string;
+  /** The folder on the hub's own machine, or "" when the hub has no checkout of the repo. */
   path: string;
+  /** The `origin` URL without credentials. Absent for a plain folder or a repo with no remote. */
+  remoteUrl?: string;
+  /** `normalizeRemoteUrl(remoteUrl)`, the identity a worker maps to a folder. */
+  remoteKey?: string;
   defaultBranch: string;
   worktrees: WorktreeState[];
   label?: string;
@@ -107,8 +112,9 @@ export interface WorktreeState {
  */
 export function reconcileKindForRepo(repo: RepoState): boolean {
   // Skip rows whose path no longer exists — leave kind alone rather
-  // than synthesize a worktree under a missing directory.
-  if (!existsSync(repo.path)) return false;
+  // than synthesize a worktree under a missing directory. A repo the hub holds no checkout of
+  // has no path to look at.
+  if (!repo.path || !existsSync(repo.path)) return false;
   // `existsSync(.git)` returns true for both directories AND files. Git
   // submodules and secondary worktrees embed a `.git` file (rather
   // than a directory) that points at the parent repo — we want those
@@ -179,6 +185,8 @@ export class RepoQueries {
     return repoRows.map((row) => ({
       name: row.name,
       path: row.path,
+      ...(row.remoteUrl ? { remoteUrl: row.remoteUrl } : {}),
+      ...(row.remoteKey ? { remoteKey: row.remoteKey } : {}),
       defaultBranch: row.defaultBranch,
       label: row.label ?? undefined,
       kind: (row.kind ?? "git") as RepoKind,
@@ -233,6 +241,8 @@ export class RepoQueries {
           .values({
             name: repo.name,
             path: repo.path,
+            remoteUrl: repo.remoteUrl ?? null,
+            remoteKey: repo.remoteKey ?? null,
             defaultBranch: repo.defaultBranch,
             label: repo.label ?? null,
             sortOrder: i,
@@ -258,9 +268,11 @@ export class RepoQueries {
             .run();
         }
 
-        tx.insert(repoHostsTable)
-          .values({ repoName: repo.name, hostId: "local", path: repo.path })
-          .run();
+        if (repo.path) {
+          tx.insert(repoHostsTable)
+            .values({ repoName: repo.name, hostId: "local", path: repo.path })
+            .run();
+        }
         for (const checkout of remoteCheckouts) {
           if (checkout.repoName === repo.name) {
             tx.insert(repoHostsTable).values(checkout).run();
@@ -306,6 +318,10 @@ export class RepoQueries {
 
   /** Records where the repo's checkout lives on a host. Replaces an earlier path. */
   setHostPath(repoName: string, hostId: string, path: string): void {
+    // The hub's own folder is also `repos.path`, which every local reader uses.
+    if (hostId === "local") {
+      getDb().update(reposTable).set({ path }).where(eq(reposTable.name, repoName)).run();
+    }
     getDb()
       .insert(repoHostsTable)
       .values({ repoName, hostId, path })
@@ -314,6 +330,59 @@ export class RepoQueries {
         set: { path },
       })
       .run();
+  }
+
+  /** Stores the remote a repo was found to have. Does not touch worktrees. */
+  setRemote(name: string, remoteUrl: string, remoteKey: string): void {
+    getDb().update(reposTable).set({ remoteUrl, remoteKey }).where(eq(reposTable.name, name)).run();
+  }
+
+  /** Forgets where a host keeps the repo. For the local host the repo has no hub checkout afterwards. */
+  clearHostPath(repoName: string, hostId: string): void {
+    if (hostId === "local") {
+      getDb().update(reposTable).set({ path: "" }).where(eq(reposTable.name, repoName)).run();
+    }
+    getDb()
+      .delete(repoHostsTable)
+      .where(and(eq(repoHostsTable.repoName, repoName), eq(repoHostsTable.hostId, hostId)))
+      .run();
+  }
+
+  /** Every host's recorded folder for each repo: `repo name -> host id -> path`. */
+  allHostPaths(): Map<string, Map<string, string>> {
+    const out = new Map<string, Map<string, string>>();
+    for (const row of getDb().select().from(repoHostsTable).all()) {
+      const hosts = out.get(row.repoName) ?? new Map<string, string>();
+      hosts.set(row.hostId, row.path);
+      out.set(row.repoName, hosts);
+    }
+    return out;
+  }
+
+  /** Replaces what a worker reported: the folder of each repo it holds, by remote key. */
+  replaceWorkerMappings(hostId: string, mappings: { key: string; path: string }[]): void {
+    const db = getDb();
+    db.transaction((tx) => {
+      const byKey = new Map<string, string[]>();
+      for (const r of tx
+        .select({ name: reposTable.name, key: reposTable.remoteKey })
+        .from(reposTable)
+        .all()) {
+        if (!r.key) continue;
+        byKey.set(r.key, [...(byKey.get(r.key) ?? []), r.name]);
+      }
+      for (const m of mappings) {
+        for (const repoName of byKey.get(m.key) ?? []) {
+          tx.insert(repoHostsTable)
+            .values({ repoName, hostId, path: m.path })
+            .onConflictDoUpdate({
+              target: [repoHostsTable.repoName, repoHostsTable.hostId],
+              set: { path: m.path },
+            })
+            .run();
+        }
+      }
+    });
   }
 
   /**
@@ -339,10 +408,13 @@ export class RepoQueries {
    * (e.g. the avatar route) that don't need the worktree tree `loadAll`
    * assembles.
    */
-  findLocation(name: string): { path: string; kind: RepoKind; defaultBranch: string } | undefined {
+  findLocation(
+    name: string,
+  ): { path: string; kind: RepoKind; defaultBranch: string; remoteUrl?: string } | undefined {
     const db = getDb();
     const row = db
       .select({
+        remoteUrl: reposTable.remoteUrl,
         path: reposTable.path,
         kind: reposTable.kind,
         defaultBranch: reposTable.defaultBranch,
@@ -355,6 +427,7 @@ export class RepoQueries {
           path: row.path,
           kind: (row.kind ?? "git") as RepoKind,
           defaultBranch: row.defaultBranch,
+          ...(row.remoteUrl ? { remoteUrl: row.remoteUrl } : {}),
         }
       : undefined;
   }

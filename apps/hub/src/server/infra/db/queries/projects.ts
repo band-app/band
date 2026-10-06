@@ -24,6 +24,20 @@ export class ProjectQueries {
     return getDb().select().from(projects).where(eq(projects.id, id)).get();
   }
 
+  findDefault(): ProjectRow | undefined {
+    return getDb().select().from(projects).where(eq(projects.isDefault, true)).get();
+  }
+
+  /** Ids of the projects that list the repo. */
+  projectsOfRepo(repoName: string): string[] {
+    return getDb()
+      .select({ id: projectRepos.projectId })
+      .from(projectRepos)
+      .where(eq(projectRepos.repoName, repoName))
+      .all()
+      .map((r) => r.id);
+  }
+
   findByName(name: string): ProjectRow | undefined {
     return getDb().select().from(projects).where(eq(projects.name, name)).get();
   }

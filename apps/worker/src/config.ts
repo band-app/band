@@ -19,6 +19,8 @@ export interface WorkerConfig {
   /** Absolute directories the worker serves. Empty means the default root under the state dir. */
   roots: string[];
   stateDir: string;
+  /** Where repos the worker clones go, as `<dir>/<owner>/<name>`. Defaults to `BAND_REPOS_DIR` or `~/band/repos`. */
+  reposDir?: string;
   /** The machine's `BAND_HOME`, where context working copies go. Defaults to `BAND_HOME` or `~/.band`. */
   bandHome?: string;
   ephemeral: boolean;
@@ -40,6 +42,7 @@ const USAGE = `Usage: band-worker --hub <url> --token <token> [options]
   --name <name>        Display name, reported as the "name" label (env BAND_WORKER_NAME).
   --labels k=v,...     Placement labels (env BAND_WORKER_LABELS).
   --root <dir>         Directory the worker may serve. Repeatable (env BAND_WORKER_ROOTS, ${delimiter} separated).
+  --repos-dir <dir>    Where repos this worker clones go (env BAND_REPOS_DIR, default ~/band/repos).
   --state-dir <dir>    Where the worker id and session token live (env BAND_WORKER_STATE_DIR).
   --ephemeral          Exit when idle (env BAND_WORKER_EPHEMERAL=1).
   --idle-exit <dur>    Idle time before an ephemeral worker exits, like 90s, 10m or 1h (env BAND_WORKER_IDLE_EXIT).
@@ -158,6 +161,9 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
         env.BAND_WORKER_STATE_DIR ??
         join(env.BAND_HOME ?? join(homedir(), ".band"), "worker"),
     ),
+    reposDir: resolve(
+      values["repos-dir"] ?? env.BAND_REPOS_DIR ?? join(homedir(), "band", "repos"),
+    ),
     bandHome: resolve(env.BAND_HOME ?? join(homedir(), ".band")),
     ephemeral,
     idleExitMs: idleText === undefined ? DEFAULT_IDLE_EXIT_MS : parseDuration(idleText),
@@ -178,6 +184,7 @@ function parse(argv: string[]) {
       "worker-id": { type: "string" },
       labels: { type: "string" },
       root: { type: "string", multiple: true },
+      "repos-dir": { type: "string" },
       "state-dir": { type: "string" },
       ephemeral: { type: "boolean" },
       "idle-exit": { type: "string" },

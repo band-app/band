@@ -403,6 +403,75 @@ fn repos_add_registers_new_repo() {
 }
 
 #[test]
+fn repos_add_by_url_stores_the_url_and_lists_it() {
+    let env = TestEnv::new();
+
+    // A bare repository on disk is a remote the hub can name without any network.
+    let remote = env.tmp.path().join("remote-repo.git");
+    fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "--bare", "-b", "main"]);
+    let url = remote.to_str().unwrap();
+
+    let output = env.band(&["repos", "add", "--url", url, "--branch", "main"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("remote-repo"),
+        "{}",
+        stdout(&output)
+    );
+
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    let repo = listed["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "remote-repo")
+        .expect("remote-repo in list");
+    assert_eq!(repo["remoteUrl"], url);
+    // The hub holds no checkout of a repo added by URL.
+    assert_eq!(repo["path"], "");
+    assert!(repo["clones"].as_array().unwrap().is_empty());
+
+    let text = stdout(&env.band(&["repos", "list"]));
+    assert!(text.contains(url), "expected the URL in the table: {text}");
+
+    // The same remote cannot be added twice.
+    let again = env.band(&["repos", "add", "--url", url, "--branch", "main"]);
+    assert!(!again.status.success());
+}
+
+#[test]
+fn repos_add_from_host_reads_the_folder_on_that_host() {
+    let env = TestEnv::new();
+
+    // `local` is the hub's own machine. A real worker needs the worker binary, which this
+    // harness does not start, so the folder-on-a-host path is exercised on the local host.
+    let folder = env.tmp.path().join("picked-repo");
+    fs::create_dir_all(&folder).unwrap();
+    git(&folder, &["init", "-b", "main"]);
+    git(&folder, &["commit", "--allow-empty", "-m", "init"]);
+
+    let output = env.band(&["repos", "add", "--from", "local", folder.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    let repo = listed["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "picked-repo")
+        .expect("picked-repo in list");
+    // The hub stores the canonical path (`/private/var/...` on macOS).
+    assert_eq!(
+        repo["path"],
+        fs::canonicalize(&folder).unwrap().to_str().unwrap()
+    );
+
+    let missing = env.band(&["repos", "add", "--from", "no-such-host", "/tmp"]);
+    assert!(!missing.status.success());
+}
+
+#[test]
 fn repos_remove_unregisters_repo() {
     let env = TestEnv::new();
 
@@ -2244,7 +2313,13 @@ fn projects_create_list_add_repo() {
     assert!(added.status.success(), "stderr: {}", stderr(&added));
 
     let listed = json_of(&env.band(&["projects", "list", "--output", "json"]));
-    let projects = listed["projects"].as_array().unwrap();
+    // The hub also has its default project ("personal"), which holds the repos added to no project.
+    let projects: Vec<&serde_json::Value> = listed["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["isDefault"] != true)
+        .collect();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0]["repos"].as_array().unwrap().len(), 2);
     let text = stdout(&env.band(&["projects", "list"]));
@@ -2302,13 +2377,15 @@ fn context_create_list_link_remove() {
     assert!(user.status.success(), "stderr: {}", stderr(&user));
 
     let listed = json_of(&env.band(&["context", "list", "--output", "json"]));
-    let names: Vec<&str> = listed["contexts"]
+    let mut names: Vec<&str> = listed["contexts"]
         .as_array()
         .unwrap()
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["alpha", "user"]);
+    // "personal" is the context of the default project, made before the hub answers.
+    names.sort();
+    assert_eq!(names, vec!["alpha", "personal", "user"]);
     let text = stdout(&env.band(&["context", "list"]));
     assert!(text.starts_with("NAME"), "text: {text}");
     assert!(text.contains("org=epic,region=eu"), "text: {text}");

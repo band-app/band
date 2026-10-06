@@ -118,6 +118,37 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       await assert.rejects(host.fs.stat(path));
     });
 
+    it("inspects a folder for its repository and browses directories", async () => {
+      const found = await host.repos.inspect(repo);
+      assert.equal(found.isGit, true);
+      assert.equal(found.remoteUrl, null);
+      assert.equal(found.defaultBranch, "main");
+      // A folder inside the repository resolves to the repository root.
+      await host.fs.mkdir(join(repo, "sub"), { recursive: true });
+      assert.equal((await host.repos.inspect(join(repo, "sub"))).path, found.path);
+      const plain = join(fixture.workDir, "plain-folder");
+      await host.fs.mkdir(plain, { recursive: true });
+      assert.deepEqual(await host.repos.inspect(plain), {
+        path: plain,
+        isGit: false,
+        remoteUrl: null,
+        defaultBranch: null,
+      });
+
+      const listing = await host.fs.browse(fixture.workDir);
+      assert.equal(listing.path, fixture.workDir);
+      assert.equal(listing.insideRoots, true);
+      assert.equal(listing.parent !== fixture.workDir, true);
+      const entry = listing.entries.find((e) => e.name === "repo");
+      assert.deepEqual(entry, { name: "repo", path: repo, isGit: true });
+      // Only directories are listed.
+      assert.equal(
+        listing.entries.some((e) => e.name === "hello.txt"),
+        false,
+      );
+      await assert.rejects(host.fs.browse(join(fixture.workDir, "missing")));
+    });
+
     it("branches a worktree from a base", async () => {
       const path = join(fixture.workDir, "wt", "from-base");
       await host.worktree.create({ repoPath: repo, path, branch: "from-base", base: "main" });

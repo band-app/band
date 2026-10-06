@@ -74,19 +74,27 @@ A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`,
 
 ## Add a repo
 
-Mount a repository into the container in `compose.yml` and register its container path:
+A repo on the hub is a remote URL and a default branch. The hub holds no checkout of it, and each worker maps the URL to a folder of its own. There are two ways to add one.
 
-```yaml
-    volumes:
-      - band-data:/data
-      - /srv/repos/myrepo:/repos/myrepo
-```
+**By URL.** The first worktree for the repo on a worker clones it to `~/band/repos/<owner>/<name>` on that worker, and later worktrees reuse the clone.
 
 ```sh
-docker compose exec band band repos add /repos/myrepo
+docker compose exec band band repos add --url https://github.com/owner/repo.git
 ```
 
-The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, terminals, git worktrees and setup scripts work in the container. With it off, the repository must also exist on the worker that runs the worktree.
+Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API when the vault holds a git credential for github.com. The clone uses the worker's own git credentials, or the vault's git credential on a runner worker (see [Runner hooks](runner-hooks.md)).
+
+**From a worker.** When a worker already has a checkout, pick it on that worker. In the UI, open a project, choose Add repo and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
+
+```sh
+band repos add --from <host id> /home/me/code/myrepo --add-root
+```
+
+A folder with no git remote is added without a URL and stays on that one worker. A worktree for it can only run there.
+
+`band repos list` shows each repo's URL and the folder it is cloned to on each host. Repos are added to a project, and to the default project (`personal`) when none is named.
+
+The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, the hub's own machine is a host too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
 
 ## Upgrade
 

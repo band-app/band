@@ -42,6 +42,7 @@ import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { McpSettings } from "./settings/McpSettings";
+import { ReposSettings } from "./settings/ReposSettings";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsPageContext, SettingsSection } from "./settings/SettingsSection";
@@ -76,6 +77,7 @@ type SettingsSectionId =
   | "hub"
   | "browser"
   | "hosts"
+  | "repos"
   | "credentials"
   | "mcp"
   | "context"
@@ -171,6 +173,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "hosts",
     title: "Hosts",
     subtitle: "Machines that run worktrees, and the tokens that reach the hub.",
+    group: "Infrastructure",
+  },
+  {
+    id: "repos",
+    title: "Repos",
+    subtitle: "Every repo, its remote URL and where each host keeps it.",
     group: "Infrastructure",
   },
   {
@@ -822,6 +830,13 @@ export function SettingsPage({ open, onOpenChange, initialSection, initialContex
                   {active === "hosts" ? (
                     <SettingsSection title="Hosts">
                       <HostsSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Repos ──────────────────────────────────────── */}
+                  {active === "repos" ? (
+                    <SettingsSection title="Repos">
+                      <ReposSettings />
                     </SettingsSection>
                   ) : null}
 

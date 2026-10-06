@@ -216,6 +216,7 @@ jobs:
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/shared test
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 
@@ -1108,6 +1109,7 @@ jobs:
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/shared test
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 

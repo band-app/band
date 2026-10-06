@@ -3,6 +3,7 @@ import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
 import { modelRefreshService } from "./model-refresh-service";
+import { repoService } from "./repo-service";
 import { agentModeFromVia } from "./settings-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
@@ -65,7 +66,11 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  */
 export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
-  const repoSync = ensureRepoStateInSync();
+  // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs and
+  // project membership with focused writes that it must not overwrite from a stale snapshot.
+  const repoSync = ensureRepoStateInSync()
+    .then(() => ensureRepoRemotes())
+    .then(() => adoptUnplacedRepos());
 
   await ensureCliInstalled();
 
@@ -175,6 +180,28 @@ async function ensureSettingsDefaults(): Promise<void> {
  * the sync parallel-per-repo rather than sequential — not to drop
  * the await.
  */
+async function ensureRepoRemotes(): Promise<void> {
+  try {
+    await repoService.backfillRemotes();
+  } catch (err) {
+    log.warn(
+      "Failed to record repo remotes at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function adoptUnplacedRepos(): Promise<void> {
+  try {
+    await repoService.adoptUnplaced();
+  } catch (err) {
+    log.warn(
+      "Failed to set up the default project at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 async function ensureRepoStateInSync(): Promise<void> {
   try {
     await syncService.syncWorktrees();

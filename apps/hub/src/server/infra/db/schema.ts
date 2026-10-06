@@ -87,7 +87,16 @@ export const branchStatuses = sqliteTable("branch_statuses", {
 
 export const repos = sqliteTable("repos", {
   name: text("name").primaryKey(),
+  // The repo's folder on the hub's own machine (the `local` host), or "" when the hub has no
+  // checkout of it (the column stays NOT NULL, because SQLite cannot relax it without
+  // rebuilding the table that every worktree row cascades from). A repo is identified by `remote_url`; every other host keeps its own folder
+  // in `repo_hosts`, which is a cache of what the worker reports.
   path: text("path").notNull(),
+  // The `origin` URL without credentials, as the user spelled it, and its normalized key
+  // (`normalizeRemoteUrl`). Both are null for a plain folder or a repo with no remote, which
+  // lives on one host only.
+  remoteUrl: text("remote_url"),
+  remoteKey: text("remote_key"),
   defaultBranch: text("default_branch").notNull(),
   label: text("label"),
   sortOrder: integer("sort_order").notNull(),
@@ -843,6 +852,8 @@ export const projects = sqliteTable(
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     contextName: text("context_name").notNull(),
+    // The project that takes repos and worktrees created with no project ("Personal").
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     coordinatorAgent: text("coordinator_agent"),
     coordinatorModel: text("coordinator_model").notNull().default("opus"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),

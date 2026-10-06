@@ -45,16 +45,25 @@ band schema "worktrees create"
 band repos list
 ```
 
-Text output: `name\tpath\tN worktree(s)` (tab-separated).
-JSON output: `{"repos": [{"name": "...", "path": "...", "worktreeCount": N}]}`
+Text output is a table with the columns `NAME`, `PATH`, `WORKTREES`, `KIND`, `URL` and `CLONES`. `URL` is the remote the repo is identified by (`-` for a plain folder or a repo with no remote). `CLONES` lists `host:folder` for each host that holds the repo. `PATH` is the folder on the hub's own machine and is empty when the hub holds no checkout.
+JSON output: `{"repos": [{"name": "...", "path": "...", "kind": "git", "worktreeCount": N, "remoteUrl": "..." | null, "clones": [{"hostId": "...", "path": "..."}]}]}`
 
 ### Register an existing repository as a repo
 
 ```sh
 band repos add <path> [--label <string>]
+band repos add --url <url> [--branch <branch>] [--label <string>] [--project <name>]
+band repos add --from <host> <path> [--add-root] [--label <string>] [--project <name>]
 ```
 
-Registers an existing git repository. Detects the default branch automatically. Returns the repo name.
+A repo is identified by its remote URL and default branch. The hub keeps no path of its own for a repo, and each worker maps the URL to a folder.
+
+- `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
+- `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
+- `--from <host> <path>` registers the repo that a folder on a host holds (host ids are in `band hosts list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
+- `--project` puts the repo in that project. Without it the repo goes to the default project.
+
+A folder with no remote is registered without a URL and can only run on the host that holds it.
 
 ### Unregister a repo
 
@@ -434,6 +443,10 @@ rather than from the CLI.
 ```sh
 # Register a repo
 band repos add /Users/me/code/my-app
+
+# Register a repo by URL, or from a folder on a worker
+band repos add --url https://github.com/acme/my-app --branch main
+band repos add --from w-1a2b3c4d5e6f /home/me/code/my-app
 
 # List all repos
 band repos list

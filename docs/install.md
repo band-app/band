@@ -83,6 +83,10 @@ docker run -d --name band-worker --restart unless-stopped \
 
 The worker takes plain `http` only for a loopback hub. A hub on the same machine is reached with `--network host` and `http://127.0.0.1:3456`. Add worker shows the same command as a compose file in its Docker compose tab.
 
+### Repos on a worker
+
+A worker owns a table from remote URL to folder (`repos.json` in its state directory). The first worktree of a repo on a worker clones it to `~/band/repos/<owner>/<name>`. Run the worker with `--repos-dir <dir>` (or `BAND_REPOS_DIR`) to clone elsewhere, and the worker serves that directory as a root. To use a checkout that already exists, add the repo from the worker's folder picker or with `band repos add --from <host id> <path>`. See [Add a repo](run-the-hub-on-a-server.md#add-a-repo).
+
 ### Runners
 
 A runner starts workers on demand when a worktree asks for a host that does not exist yet (a Docker container, a Kubernetes Pod, a cloud VM, an SSH machine). The hooks and their settings are in [Runner hooks](runner-hooks.md), and sleeping workers in [Ephemeral workers](ephemeral-workers.md).

@@ -42,9 +42,19 @@ export interface WorktreeStatus {
  */
 export type RepoKind = "git" | "plain";
 
+export interface RepoClone {
+  hostId: string;
+  path: string;
+}
+
 export interface RepoInfo {
   name: string;
+  /** The folder on the hub's own machine, or "" when the hub holds no checkout. */
   path: string;
+  /** The remote the repo is identified by. Absent for a plain folder or a repo with no remote. */
+  remoteUrl?: string;
+  /** Where each host keeps the repo. */
+  clones?: RepoClone[];
   defaultBranch: string;
   worktrees: WorktreeInfo[];
   label?: string;
