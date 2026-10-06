@@ -46,6 +46,7 @@ function git(cwd: string, ...args: string[]): string {
 
 interface ProjectView {
   id: string;
+  isDefault: boolean;
   name: string;
   description: string;
   contextName: string;
@@ -308,7 +309,12 @@ describe("worktrees in a project", () => {
 
     const listed = (await q<ReposList>("repos.list")).repos.find((r) => r.name === "api");
     expect(listed?.worktrees.find((w) => w.name === "feat-checkout")?.projectId).toBe(shop.id);
-    expect(listed?.worktrees.find((w) => w.name === "main")?.projectId).toBeUndefined();
+    // A worktree that no project claims belongs to the default project, never to "shop".
+    const personal = (await q<{ projects: ProjectView[] }>("projects.list")).projects.find(
+      (p) => p.isDefault,
+    );
+    expect(personal).toBeDefined();
+    expect(listed?.worktrees.find((w) => w.name === "main")?.projectId).toBe(personal?.id);
 
     const detail = await project("shop");
     expect(detail.worktrees).toEqual([
