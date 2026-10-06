@@ -225,10 +225,18 @@ export class ChromiumManager {
       proc.once("exit", () => resolve());
       proc.once("error", () => resolve());
     });
+    const startedAt = Date.now();
     try {
       const { port, path } = await readDevToolsPort(profileDir, proc).catch(async (err: Error) => {
-        const tail = (await readFile(logPath, "utf8").catch(() => "")).trim().split("\n").slice(-5);
-        throw new Error(`${err.message}${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`);
+        const tail = (await readFile(logPath, "utf8").catch(() => ""))
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .slice(-5);
+        const elapsed = `after ${Date.now() - startedAt} ms, pid ${proc.pid ?? "none"}`;
+        throw new Error(
+          `${err.message} (${elapsed})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`,
+        );
       });
       const info: BrowserInfo = { pid: proc.pid, profileDir, headless, port };
       const entry: Running = { proc, info, wsUrl: `ws://127.0.0.1:${port}${path}`, exited };
