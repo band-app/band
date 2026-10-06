@@ -113,6 +113,8 @@ export const ghStub = {
     // or a copy can drop it, and the server exec()s the file directly.
     chmodSync(GH_STUB_BIN, 0o755);
     const app = express();
+    const branchAnswers = new Map<string, (branch: string) => unknown>();
+    let branchRouteRegistered = false;
     app.use(express.json({ limit: "5mb" }));
     const requests: GhInvocation[] = [];
     app.use((req, _res, next) => {
@@ -149,6 +151,10 @@ export const ghStub = {
         });
       },
       setBranchStatusQuery(repo, answer) {
+        // One route answers every repository registered, so a project with several repos can be stubbed.
+        branchAnswers.set(`${repo.owner}/${repo.name}`, answer);
+        if (branchRouteRegistered) return;
+        branchRouteRegistered = true;
         app.post("/api/graphql", (req, res, next) => {
           const rawQuery = (req.body as GhInvocation).fields.query;
           const query = typeof rawQuery === "string" ? rawQuery : "";
@@ -159,8 +165,7 @@ export const ghStub = {
           }
           const data: Record<string, unknown> = {};
           for (const [, alias, owner, name, branch] of aliases) {
-            data[alias] =
-              owner === repo.owner && name === repo.name ? (answer(branch) ?? null) : null;
+            data[alias] = branchAnswers.get(`${owner}/${name}`)?.(branch) ?? null;
           }
           res.json({ stdout: JSON.stringify({ data }) });
         });
