@@ -1,10 +1,10 @@
 /**
- * The coordinator session of a project (plan step 6.2).
+ * The coordinator session of a project (plan steps 6.2 and T.1).
  *
- * A project has one long-lived coordinator chat. It runs in a worktree of one
- * of the project's repos (a chat needs a directory, and the worktree also
- * carries the project's context sync), on the host the project pins it to.
- * The agent gets a charter as its system prompt and a scoped set of hub tools
+ * A project has one long-lived coordinator chat. It is a project-level chat with no
+ * worktree: it runs in the project folder on the host the project pins it to (the
+ * working copy of the project's context repo, with a checkout of every repo's default
+ * branch under `repos/`). The agent gets a charter as its system prompt and a scoped set of hub tools
  * at `/mcp-proxy/band-coordinator`, authenticated by the session's own `mcp_`
  * token. Nothing in a tool call names the project: the hub takes it from the
  * chat the token was issued for, so a coordinator cannot reach another
@@ -18,8 +18,10 @@
 
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import type { ProjectRow } from "../infra/db/queries/projects";
+import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
+import { hostRegistry } from "../infra/host/registry";
+import { chatScope, projectScopeId } from "../infra/project-scope";
 import {
   type Autonomy,
   COORDINATOR_LABEL,
@@ -28,6 +30,7 @@ import {
 } from "./_utils/project-policy";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
+import { projectFolderService } from "./project-folder-service";
 import { type ProjectView, projectService } from "./project-service";
 import { projectSubscriptionService } from "./project-subscription-service";
 import { abortTask, hasRunningTask, submitOrQueueTask } from "./task-service";
@@ -70,14 +73,15 @@ export class ProjectCoordinatorService {
   /** Why the last start of a project's coordinator failed, for the project page. */
   private readonly startErrors = new Map<string, string>();
   private readonly starting = new Map<string, Promise<void>>();
+  private readonly legacy = new ProjectQueries();
 
   // ---- session start -----------------------------------------------------------------
 
   /**
-   * Creates the coordinator's worktree and chat when the project has none, and
-   * starts the agent so it receives the charter. Needs at least one repo. The
-   * agent starts in the background, so a slow or failing agent never fails the
-   * caller. Safe to call again: a running start is shared.
+   * Creates the coordinator's chat when the project has none, and starts the agent so it
+   * receives the charter. Needs at least one repo. The agent starts in the background (it
+   * prepares the project folder first), so a slow or failing agent never fails the caller.
+   * Safe to call again: a running start is shared.
    */
   async ensureCoordinator(ref: string): Promise<ProjectView> {
     const row = projectService.row(ref);
@@ -98,35 +102,17 @@ export class ProjectCoordinatorService {
 
   private async create(projectId: string): Promise<void> {
     try {
-      let row = projectService.row(projectId);
-      const repos = projectService.get(projectId).repos;
-      if (!row.coordinatorWorktreeId || !worktreeService.resolve(row.coordinatorWorktreeId)) {
-        const repo = repos[0]?.repo;
-        if (!repo) return;
-        const branch = `coordinator-${row.name}`;
-        await worktreeService.create({
-          repo,
-          branch,
-          projectId: row.id,
-          ...(row.coordinatorHostId ? { hostId: row.coordinatorHostId } : {}),
-        });
-        projectService.setCoordinator(row.id, toWorktreeId(repo, branch), null);
-        row = projectService.row(projectId);
-      }
-      const worktreeId = row.coordinatorWorktreeId;
-      if (!worktreeId) return;
+      const row = projectService.row(projectId);
       let chat = row.coordinatorChatId ? chatService.get(row.coordinatorChatId) : undefined;
       if (!chat) {
-        // A new worktree already has a default chat, which becomes the coordinator.
-        chat = chatService.update(chatService.getOrCreateDefault(worktreeId).id, {
+        chat = chatService.createForProject(row.id, {
           name: "Coordinator",
           agent: row.coordinatorAgent ?? DEFAULT_COORDINATOR_AGENT,
           model: row.coordinatorModel,
           labels: { [COORDINATOR_LABEL]: row.id },
           allowReservedLabels: true,
         });
-        if (!chat) throw new Error("The coordinator chat could not be created");
-        projectService.setCoordinator(row.id, worktreeId, chat.id);
+        projectService.setCoordinator(row.id, chat.id);
       }
       this.startErrors.delete(row.id);
       const chatId = chat.id;
@@ -134,7 +120,7 @@ export class ProjectCoordinatorService {
       void projectSubscriptionService.reconcile(row.id).catch((err) => {
         log.warn({ projectId: row.id, err }, "could not subscribe the coordinator");
       });
-      // Starting the agent attaches the session, which carries the charter and the tools.
+      // Starting the agent prepares the project folder and attaches the session, which carries the charter and the tools.
       void agentSessionService.ensureSession(chatId, "prompt").catch((err) => {
         this.startErrors.set(row.id, err instanceof Error ? err.message : String(err));
         log.warn({ projectId: row.id, chatId, err }, "coordinator agent did not start");
@@ -146,18 +132,86 @@ export class ProjectCoordinatorService {
     }
   }
 
-  /** Removes the coordinator's chat and worktree. Called before the project is removed. */
+  /**
+   * Removes the coordinator's chat. Called before the project is removed. The project folder
+   * stays on its host, because the checkouts in it may hold work that is not pushed.
+   */
   async teardown(ref: string): Promise<void> {
     const row = projectService.row(ref);
     if (row.coordinatorChatId) chatService.remove(row.coordinatorChatId);
-    const worktreeId = row.coordinatorWorktreeId;
-    const resolved = worktreeId ? worktreeService.resolve(worktreeId) : undefined;
-    // Remove first: if it throws, the pointers stay and the worktree is still excluded from the workers.
-    if (resolved) {
-      await worktreeService.remove({ repo: resolved.repo.name, name: resolved.worktree.name });
-    }
-    projectService.setCoordinator(row.id, null, null);
+    projectService.setCoordinator(row.id, null);
+    projectFolderService.forget(row.id);
     this.startErrors.delete(row.id);
+  }
+
+  /**
+   * Finishes the move of 6.2 coordinators into the project folder. The migration already moved
+   * their chats to the project and listed their worktrees in `legacy_coordinator_worktrees`.
+   * This removes each worktree and its branch, and starts the chat on a fresh session, because the
+   * old session belongs to the worktree's directory. Safe to run on every boot.
+   */
+  async removeLegacyWorktrees(): Promise<void> {
+    for (const legacy of this.legacy.legacyCoordinatorWorktrees()) {
+      try {
+        const resolved = worktreeService.resolve(legacy.worktreeId);
+        if (resolved) {
+          const { repo, worktree, host } = resolved;
+          await worktreeService.remove({ repo: repo.name, name: worktree.name });
+          if (host.id === hostRegistry.local.id)
+            await this.deleteLegacyBranch(host, repo, worktree.branch);
+        }
+        const project = projectService.find(legacy.projectId);
+        const chat = project?.coordinatorChatId
+          ? chatService.get(project.coordinatorChatId)
+          : undefined;
+        if (chat?.activeSessionId) chatService.updateActiveSession(chat.id, undefined);
+        this.legacy.clearLegacyCoordinatorWorktree(legacy.worktreeId);
+      } catch (err) {
+        log.warn(
+          { worktreeId: legacy.worktreeId, err },
+          "could not remove a legacy coordinator worktree",
+        );
+      }
+    }
+  }
+
+  /**
+   * Deletes the coordinator branch from its repo. The remote branch goes too, but only when it
+   * holds no commits of its own: a branch someone pushed work to is theirs to delete.
+   */
+  private async deleteLegacyBranch(
+    host: { git: { exec(args: string[], cwd: string): Promise<{ stdout: string }> } },
+    repo: { path: string; defaultBranch: string },
+    branch: string,
+  ): Promise<void> {
+    const git = (args: string[]) => host.git.exec(args, repo.path);
+    // Only the legacy coordinator branch is ours to delete, never the default branch.
+    if (!branch.startsWith("coordinator-") || branch === repo.defaultBranch) return;
+    await git(["branch", "-d", branch]).catch(() => undefined);
+    // Fetch first, so a push made since the last fetch is counted.
+    const fetched = await git(["fetch", "origin", branch]).then(
+      () => true,
+      () => false,
+    );
+    if (!fetched) return;
+    const sha = await git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`])
+      .then((r) => r.stdout.trim())
+      .catch(() => "");
+    if (!sha) return;
+    const own = await git(["rev-list", "--count", `origin/${repo.defaultBranch}..${sha}`])
+      .then((r) => Number(r.stdout.trim()))
+      .catch(() => Number.NaN);
+    if (own === 0) {
+      await git([
+        "push",
+        `--force-with-lease=refs/heads/${branch}:${sha}`,
+        "origin",
+        "--delete",
+        branch,
+      ]).catch((err) => {
+        log.warn({ branch, err }, "could not delete the remote coordinator branch");
+      });
+    }
   }
 
   /** Applies a changed coordinator model to a chat that already exists. */
@@ -215,13 +269,14 @@ export class ProjectCoordinatorService {
     return [
       `You are the coordinator of the Band project "${view.name}".`,
       view.description ? `\nProject description: ${view.description}` : "",
-      "\nYour job is to plan the work across the project's repos, hand it to worker agents, check on them and keep the user informed. You do not edit code yourself. Worker agents work in their own worktrees, one per task.",
+      "\nYour job is to plan the work across the project's repos, hand it to worker agents, check on them and keep the user informed. Worker agents work in their own worktrees, one per task.",
+      `\nWorking directory. You run in the project folder on the coordinator host. It is the working copy of the project context (notes.md, docs/, learnings/, inbox/, handoffs/) and has a checkout of every project repo's default branch under repos/<repo>/ (the local branch band/${view.name}/<default>, which tracks origin/<default>). Read the current code there, or through repo_read, repo_search and repo_log. Band fetches before your turns and fast-forwards a checkout only when it is clean, so a checkout with local changes can be behind origin. Code changes go through tasks (worktrees_create). Do not edit a default branch checkout unless the user explicitly asks you to. ${p.autonomy === "autonomous" ? "When the user asks for such an edit, you may commit it, and you may push it because autonomy is autonomous." : `When the user asks for such an edit, commit it but do not push without the user's confirmation, because autonomy is ${p.autonomy}.`} The folders repos/ and tasks/ are never committed to the context repo.`,
       `\nRepos in this project:\n${repos || "- none yet"}`,
       `\nModels: you run on ${p.models.coordinator}, worker agents on ${p.models.worker}, reviewers on ${p.models.reviewer}.`,
       `\nPolicy: ${limits}.`,
       `\n${autonomy[p.autonomy]}`,
       `\nContext. The project context repo "${view.contextName}" is shared by every agent in the project, and the user context holds the user's preferences. Read them before you plan. Layout of the project context: notes.md (running notes), docs/ (design and contracts), media/ (screenshots, recordings), inbox/<agent>.md (pointers to handoffs for an agent), handoffs/ (one file per handoff), learnings/ (what agents learned). Use context_search to find things, context_append_learning to record what future agents should know, and context_handoff to pass work on. Write contracts between repos (API shapes, event formats) to docs/ so the agent on the other side can read them.`,
-      `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, chats_read, chats_send, worktree_stop and worktrees_create. They are limited to this project's worktrees. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
+      `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, chats_read, chats_send, worktree_stop and worktrees_create, plus repo_read {repo, path}, repo_search {repo, query} and repo_log {repo, n} for the default branch checkouts. They are limited to this project's worktrees and repos. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
       "\nDispatching. worktrees_create starts a worker agent in a new worktree. Write the brief so the worker can act on it alone: the goal, the constraints, the contracts with other repos and what is out of scope, plus acceptance scenarios it can check. For work across repos, pass a group in mode split with the merge order. In steer mode the call waits for the user's approval, so tell the user it is pending and do not call it again.",
       `\nWake-ups. Band wakes you with a "Subscription update" message when something needs you: a worker chat ended its turn with an error, is waiting for a permission or an answer, or finished; a pull request of a task group has a review comment, a CI result or was merged or closed; or a new file appeared in inbox/ or handoffs/ of the project context. The message names the chat id or the file path. Read the source before you act on it. Events are batched, so one message can carry several. A pull request's subscriptions end when it merges or closes.`,
       `\nNotes and the inbox. You are the only writer of notes.md in the project context: workers do not edit it, so keep it current with decisions and status. learnings/ is append-only: add entries, never rewrite or delete them. Handoffs from workers land in handoffs/<stamp>-<from>-to-<to>.md and a pointer line in inbox/<to>.md. When you have dealt with an item in inbox/ or handoffs/, move the file into inbox/done/ (git mv in your working copy of the project context, which syncs after your turn). A file in inbox/done/ does not wake you again.`,
@@ -262,7 +317,10 @@ export class ProjectCoordinatorService {
 
   /** What the project has spent so far, from the usage scanner's numbers (its workers and its coordinator). */
   spendUsd(row: ProjectRow): number {
-    const ids = new Set(projectService.allWorktreesOf(row.id).map((w) => worktreeIdOf(w)));
+    const ids = new Set([
+      projectScopeId(row.id),
+      ...projectService.allWorktreesOf(row.id).map((w) => worktreeIdOf(w)),
+    ]);
     if (ids.size === 0) return 0;
     const buckets = this.usage.aggregate({
       fromMs: 0,
@@ -384,7 +442,7 @@ export class ProjectCoordinatorService {
     }
     // A running chat only queues the message, so it takes no new slot, but the budget still applies.
     this.checkDispatch(row, { newRun: !this.isRunning(chatId) });
-    const result = submitOrQueueTask({ worktreeId: chat.worktreeId, chatId, prompt: text });
+    const result = submitOrQueueTask({ worktreeId: chatScope(chat), chatId, prompt: text });
     return { chatId, queued: result.queued };
   }
 
@@ -402,6 +460,34 @@ export class ProjectCoordinatorService {
       if (this.isRunning(chat.id) && abortTask(chat.id)) stopped.push(chat.id);
     }
     return { worktreeId, stoppedChats: stopped };
+  }
+
+  // ---- repo tools (T.1) ---------------------------------------------------------------
+
+  /** A file of a repo's default-branch checkout, or the entries of a directory. */
+  async repoRead(row: ProjectRow, repo: string, path: string) {
+    return this.repoCall(() => projectFolderService.read(row, repo, path));
+  }
+
+  /** Fixed-string, case-insensitive search through a repo's checkout. */
+  async repoSearch(row: ProjectRow, repo: string, query: string) {
+    const matches = await this.repoCall(() => projectFolderService.search(row, repo, query));
+    return { matches };
+  }
+
+  /** The newest commits on a repo's default-branch checkout. */
+  async repoLog(row: ProjectRow, repo: string, n: number) {
+    const commits = await this.repoCall(() => projectFolderService.log(row, repo, n));
+    return { commits };
+  }
+
+  /** Reports a refusal from the folder or the host as a tool error the agent can read. */
+  private async repoCall<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      throw new CoordinatorToolError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   requireMutation(row: ProjectRow): void {

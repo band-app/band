@@ -115,8 +115,18 @@ export class ProjectsPage {
     return this.detail.getByTestId("projects__coordinator");
   }
 
-  coordinatorWorktree(): Locator {
-    return this.detail.getByTestId("projects__coordinator-worktree");
+  /** The coordinator chat's id, which stands in for a worktree name: the coordinator has none. */
+  coordinatorChat(): Locator {
+    return this.detail.getByTestId("projects__coordinator-chat");
+  }
+
+  /** The project folder section: the coordinator host's checkouts of each repo's default branch. */
+  folder(): Locator {
+    return this.detail.getByTestId("projects__folder");
+  }
+
+  checkout(repo: string): Locator {
+    return this.folder().locator(`[data-testid="projects__checkout"][data-repo="${repo}"]`);
   }
 
   autonomy(): Locator {

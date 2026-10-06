@@ -19,7 +19,10 @@ In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an a
 
 ## Project
 
-Reserved for the cross-repo unit planned for Phase 6: a body of work across several repos with its own context repo. Nothing in the code uses it yet.
+A body of work across several repos with its own context repo, a policy and one coordinator chat (`projects.*`, `band projects`).
+
+- The **project folder** is `<BAND_HOME>/projects/<project>/` on the coordinator host. It is the working copy of the project's context repo, with a checkout of each repo's default branch under `repos/<repo>/`. You can edit, commit and push in those checkouts by hand, and the host keeps them current without overwriting local work.
+- The coordinator is a project-level chat. It has no worktree and runs in the project folder. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
 
 ## Terms that kept their names
 

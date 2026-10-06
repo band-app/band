@@ -96,9 +96,11 @@ export class AgentSessionRegistryService {
    * agent sessions gets its row here, the first time its id is known.
    */
   recordChatProviderSession(
-    chat: { id: string; worktreeId: string; agent: string },
+    chat: { id: string; worktreeId: string | null; agent: string },
     providerSessionId: string | undefined,
   ): void {
+    // A project chat (the coordinator) has no worktree, and agent sessions are listed per worktree.
+    if (!chat.worktreeId) return;
     const open = this.queries.findOpenByChat(chat.id);
     if (open && open.providerSessionId === providerSessionId) return;
     if (open && open.providerSessionId === null) {

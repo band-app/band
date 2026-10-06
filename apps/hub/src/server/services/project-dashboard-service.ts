@@ -7,6 +7,7 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
+import { projectScopeId } from "../infra/project-scope";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { projectDispatchService } from "./project-dispatch-service";
@@ -19,11 +20,12 @@ const SPEND_DAYS = 7;
 
 export interface DashboardAgent {
   chatId: string;
-  worktreeId: string;
+  /** Null for the coordinator, which runs in the project folder and has no worktree. */
+  worktreeId: string | null;
   name: string;
   role: "coordinator" | "worker";
-  repo: string;
-  branch: string;
+  repo: string | null;
+  branch: string | null;
   hostId: string | null;
   agent: string;
   model: string | null;
@@ -52,7 +54,11 @@ export class ProjectDashboardService {
   dashboard(row: ProjectRow) {
     const view = projectService.get(row.id);
     const worktrees = projectService.allWorktreesOf(row.id);
-    const worktreeIds = worktrees.map((w) => toWorktreeId(w.repoName, w.name));
+    // Rows recorded under the project's own scope are the coordinator's, which has no worktree.
+    const worktreeIds = [
+      projectScopeId(row.id),
+      ...worktrees.map((w) => toWorktreeId(w.repoName, w.name)),
+    ];
     const now = Date.now();
     const today = localDay(now);
     const weekStart = now - (SPEND_DAYS - 1) * DAY_MS;
@@ -81,15 +87,31 @@ export class ProjectDashboardService {
     }
 
     const agents: DashboardAgent[] = [];
+    // Project-level chats (the coordinator) have no worktree.
+    for (const chat of chatService.listForProject(row.id)) {
+      agents.push({
+        chatId: chat.id,
+        worktreeId: null,
+        name: chat.name,
+        role: "coordinator",
+        repo: null,
+        branch: null,
+        hostId: row.coordinatorHostId ?? null,
+        agent: chat.agent,
+        model: chat.model ?? null,
+        status: this.isRunning(chat.id) ? "running" : "idle",
+        lastActivityAt: chat.activeSessionLastModified ?? null,
+        spendUsd: round(perChat.get(chat.id) ?? 0),
+      });
+    }
     for (const w of worktrees) {
       const worktreeId = toWorktreeId(w.repoName, w.name);
-      const isCoordinator = worktreeId === row.coordinatorWorktreeId;
       for (const chat of chatService.list(worktreeId)) {
         agents.push({
           chatId: chat.id,
           worktreeId,
           name: chat.name,
-          role: isCoordinator ? "coordinator" : "worker",
+          role: "worker",
           repo: w.repoName,
           branch: w.branch,
           hostId: w.hostId ?? null,
@@ -104,7 +126,7 @@ export class ProjectDashboardService {
     agents.sort(
       (a, b) =>
         Number(b.role === "coordinator") - Number(a.role === "coordinator") ||
-        a.worktreeId.localeCompare(b.worktreeId) ||
+        (a.worktreeId ?? "").localeCompare(b.worktreeId ?? "") ||
         a.chatId.localeCompare(b.chatId),
     );
 
@@ -151,11 +173,13 @@ export class ProjectDashboardService {
   /** Stops the running turn of one chat of the project, the coordinator's included. Returns whether a turn was stopped. */
   stopAgent(row: ProjectRow, chatId: string): boolean {
     const chat = chatService.get(chatId);
+    // The coordinator has no worktree: it belongs to the project directly.
     const inProject =
       chat &&
-      projectService
-        .allWorktreesOf(row.id)
-        .some((w) => toWorktreeId(w.repoName, w.name) === chat.worktreeId);
+      (chat.projectId === row.id ||
+        projectService
+          .allWorktreesOf(row.id)
+          .some((w) => toWorktreeId(w.repoName, w.name) === chat.worktreeId));
     if (!chat || !inProject) return false;
     return this.isRunning(chatId) ? abortTask(chatId) : false;
   }

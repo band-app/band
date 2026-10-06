@@ -1,8 +1,8 @@
 /**
  * Working copies of the hub's context repos on a host (plan step 5.2).
  *
- * A context lives at `<bandHome>/context/user` or `<bandHome>/context/projects/<name>`,
- * outside every worktree, so personal notes can't be committed to a product
+ * A context lives at `<bandHome>/context/user` or, for a project, in the project folder
+ * `<bandHome>/projects/<name>`, outside every worktree, so personal notes can't be committed to a product
  * repo. `pull` clones or fast-forwards a copy before an agent session starts.
  * `push` runs after each turn: it scans what the agent changed, commits it,
  * rebases on the hub's head and pushes.
@@ -52,14 +52,15 @@ const NETWORK_TIMEOUT_MS = 30_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 const MAX_PUSH_ATTEMPTS = 5;
 const APPEND_ONLY = ["learnings/**", "inbox/**"];
+const LOCAL_ONLY = ["/tasks/", "/repos/"];
 
-interface GitOut {
+export interface GitOut {
   stdout: string;
   stderr: string;
   code: number;
 }
 
-function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   // The worker puts its credential helper in GIT_CONFIG_*. Context git calls carry their own auth.
   for (const [k, v] of Object.entries(process.env)) {
@@ -79,7 +80,7 @@ function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   };
 }
 
-function run(
+export function run(
   args: string[],
   opts: { cwd?: string; env?: Record<string, string>; timeoutMs: number; input?: string },
 ): Promise<GitOut> {
@@ -118,7 +119,7 @@ function run(
 }
 
 /** The first line of git's complaint, with no URL or credential in it. */
-function brief(r: GitOut): string {
+export function brief(r: GitOut): string {
   const line = r.stderr
     .split("\n")
     .map((l) => l.trim())
@@ -149,8 +150,9 @@ export class ContextSync {
     if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(spec.name)) {
       throw new Error(`Not a context name: ${spec.name.slice(0, 80)}`);
     }
-    const base = join(this.source.bandHome(), "context");
-    return spec.kind === "user" ? join(base, "user") : join(base, "projects", spec.name);
+    return spec.kind === "user"
+      ? join(this.source.bandHome(), "context", "user")
+      : join(this.source.bandHome(), "projects", spec.name);
   }
 
   /** The always-loaded files and an index of the working copies, within a line budget (step 5.3). */
@@ -228,6 +230,7 @@ export class ContextSync {
       return { name: spec.name, status: "updated" };
     }
 
+    await this.configure(dir);
     const fetched = await run(["fetch", "--quiet", "--no-tags", "origin"], { cwd: dir, ...opts });
     if (fetched.code !== 0) {
       return {
@@ -435,6 +438,8 @@ export class ContextSync {
     const attributes = APPEND_ONLY.map((glob) => `${glob} merge=union`).join("\n");
     await mkdir(join(dir, ".git", "info"), { recursive: true });
     await writeFile(join(dir, ".git", "info", "attributes"), `${attributes}\n`);
+    // A project folder holds task folders and repo checkouts, which never go into the context repo.
+    await writeFile(join(dir, ".git", "info", "exclude"), `${LOCAL_ONLY.join("\n")}\n`);
     await this.git(dir, ["config", "rebase.autoStash", "false"]);
     await this.git(dir, ["config", "commit.gpgsign", "false"]);
   }

@@ -19,6 +19,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { chatScope } from "../../infra/project-scope";
 import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
@@ -247,7 +248,7 @@ export const chatsRouter = t.router({
       }
       // A busy chat queues the message; it runs once the turns ahead finish.
       const result = taskService.submitOrQueueTask({
-        worktreeId: chat.worktreeId,
+        worktreeId: chat.worktreeId || chat.projectId ? chatScope(chat) : input.worktreeId,
         chatId: chat.id,
         prompt: input.message,
         sessionId: input.sessionId,

@@ -6,6 +6,7 @@
  * it because it is not in `RELAY_PROCEDURES`.
  */
 
+import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -18,11 +19,14 @@ import {
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
 import { projectDashboardService } from "../../services/project-dashboard-service";
 import { projectDispatchService } from "../../services/project-dispatch-service";
+import { projectFolderService } from "../../services/project-folder-service";
 import { projectRetroService } from "../../services/project-retro-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { projectSubscriptionService } from "../../services/project-subscription-service";
+import { terminalService } from "../../services/terminal-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
+const log = createLogger("projects-router");
 const ref = z.string().trim().min(1).max(200);
 const repoName = z.string().trim().min(1).max(200);
 const role = z.string().max(40).nullable().optional();
@@ -238,20 +242,62 @@ export const projectsRouter = t.router({
     .mutation(({ input }) =>
       guard(async () => {
         const added = projectService.addRepo(input.project, input.repo, input.role);
-        // The first repo gives the coordinator a worktree to run in.
+        // The first repo starts the coordinator in the project folder.
         const project = added.coordinator
           ? added
           : await projectCoordinatorService.ensureCoordinator(added.id);
+        // A project that has a folder gets the new repo's checkout now.
+        if (added.coordinator) {
+          await projectFolderService.addRepo(projectService.row(added.id)).catch((err) => {
+            log.warn({ projectId: added.id, err }, "could not check out the new repo");
+          });
+        }
         return { project: present(project) };
       }),
     ),
 
-  /** Refused while a worktree of that repo belongs to the project. */
+  /**
+   * Refused while a worktree of that repo belongs to the project, and while the repo's checkout
+   * in the project folder has uncommitted changes or unpushed commits.
+   */
   removeRepo: adminProcedure
     .input(z.object({ project: ref, repo: repoName }))
     .mutation(({ input }) =>
-      guard(() => ({ project: projectService.removeRepo(input.project, input.repo) })),
+      guard(async () => {
+        const row = projectService.row(input.project);
+        projectService.checkRepoRemovable(row.id, input.repo);
+        try {
+          await projectFolderService.removeRepo(row, input.repo);
+        } catch (err) {
+          throw new ProjectConflictError(err instanceof Error ? err.message : String(err));
+        }
+        return { project: projectService.removeRepo(row.id, input.repo) };
+      }),
     ),
+
+  /** What the host last reported about the project folder: each checkout's branch, ahead, behind and dirty state. */
+  folder: publicProcedure.input(z.object({ project: ref })).query(({ input }) =>
+    guard(() => {
+      const row = projectService.row(input.project);
+      return { folder: projectFolderService.state(row.id) ?? null };
+    }),
+  ),
+
+  /** Fetches and fast-forwards the checkouts that are clean, now. Dirty or ahead ones are left alone. */
+  syncFolder: adminProcedure.input(z.object({ project: ref })).mutation(({ input }) =>
+    guard(async () => {
+      const row = projectService.row(input.project);
+      return { folder: await projectFolderService.ensure(row, "force") };
+    }),
+  ),
+
+  /** Opens a plain terminal in the project folder on its host. The WebSocket attaches by the returned scope. */
+  openTerminal: adminProcedure.input(z.object({ project: ref })).mutation(({ input }) =>
+    guard(async () => {
+      const row = projectService.row(input.project);
+      return terminalService.openProjectTerminal(row);
+    }),
+  ),
 
   attachWorktree: adminProcedure
     .input(z.object({ project: ref, worktreeId: z.string().min(1) }))

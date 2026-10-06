@@ -55,6 +55,7 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
+import { chatScope, projectIdOfScope } from "../infra/project-scope";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
@@ -68,7 +69,9 @@ import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 // FRAGILE: ESM cycle leg, `project-coordinator-service` imports this file back.
 // Safe because it is only used inside function bodies.
 import { projectCoordinatorService } from "./project-coordinator-service";
+import { projectFolderService } from "./project-folder-service";
 import { projectRetroService } from "./project-retro-service";
+import { projectService } from "./project-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -264,7 +267,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
   if (!rt) {
     rt = {
       chatId: chat.id,
-      worktreeId: chat.worktreeId,
+      worktreeId: chatScope(chat),
       agentDefId: def.id,
       process: null,
       generation: 0,
@@ -423,9 +426,9 @@ async function readClaudeDefaults(
   learn: boolean,
 ): Promise<ResolvedDefaults | undefined> {
   if (def.type !== "claude-code") return undefined;
-  const worktree = chat ? worktreeService.resolve(chat.worktreeId) : undefined;
-  const cwd = worktree?.worktree.path;
-  const host = worktree?.host ?? hostRegistry.local;
+  const location = chat ? chatLocation(chat) : undefined;
+  const cwd = location?.cwd;
+  const host = location?.host ?? hostRegistry.local;
   const configured = await host.agentEnv.claudeDefaults(
     cwd,
     runtimes.get(chatId)?.claudeCli ?? undefined,
@@ -633,6 +636,56 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
 }
 
 // ---------------------------------------------------------------------------
+// Where a chat runs
+// ---------------------------------------------------------------------------
+
+/** A worktree chat names its worktree to the agent. A project chat names its project. */
+function projectEnv(scope: string): Record<string, string> {
+  const projectId = projectIdOfScope(scope);
+  return projectId ? { BAND_PROJECT_ID: projectId } : { BAND_WORKTREE_ID: scope };
+}
+
+/**
+ * The directory and host a chat runs on: its worktree, or the project folder for a project
+ * chat. A project chat's folder is known after the first `projectChatCwd`, so this is undefined
+ * for one that has not started yet.
+ */
+function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefined {
+  if (chat.worktreeId) {
+    const worktree = worktreeService.resolve(chat.worktreeId);
+    return worktree ? { cwd: worktree.worktree.path, host: worktree.host } : undefined;
+  }
+  const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
+  const folder = project ? projectFolderService.state(project.id)?.folder : undefined;
+  return project && folder
+    ? { cwd: folder, host: projectFolderService.hostOf(project) }
+    : undefined;
+}
+
+/**
+ * The project folder a project chat runs in. A prompt brings the folder up to date first
+ * (the context, then each repo's checkout, fetched at most once a minute). A failure stops the
+ * turn and says why. A view reuses the folder the last prompt prepared, and prepares it when
+ * the hub has restarted since.
+ */
+async function projectChatCwd(chat: ChatSession, purpose: "prompt" | "view"): Promise<string> {
+  const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
+  if (!project) throw new Error(`Project not found for chat ${chat.id}`);
+  const known = projectFolderService.state(project.id);
+  if (purpose === "view" && known) return known.folder;
+  const state = await projectFolderService.ensure(project, "throttled");
+  for (const checkout of state.checkouts) {
+    if (checkout.error) {
+      log.warn(
+        { projectId: project.id, repo: checkout.repo, error: checkout.error },
+        "a project checkout is not ready",
+      );
+    }
+  }
+  return state.folder;
+}
+
+// ---------------------------------------------------------------------------
 // Process and session attach
 // ---------------------------------------------------------------------------
 
@@ -658,7 +711,8 @@ async function ensureProcess(
         ...launch.env,
         ...grant?.env,
         BAND_CHAT_ID: rt.chatId,
-        BAND_WORKTREE_ID: rt.worktreeId,
+        // A project chat has no worktree, so it names its project instead.
+        ...projectEnv(rt.worktreeId),
         ...(rt.preamble
           ? injectionFor(def.type, rt.preamble, { ...process.env, ...launch.env })?.env
           : undefined),
@@ -789,16 +843,19 @@ function localHubUrl(): string {
  */
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
   try {
-    const worktree = worktreeService.resolve(rt.worktreeId);
-    if (!worktree) return [];
+    const projectScope = projectIdOfScope(rt.worktreeId);
+    const worktree = projectScope ? undefined : worktreeService.resolve(rt.worktreeId);
+    if (!projectScope && !worktree) return [];
     // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
     const names = projectCoordinatorService.projectOfChat(rt.chatId)
       ? [COORDINATOR_SERVER]
       : projectRetroService.projectOfChat(rt.chatId)
         ? [RETRO_SERVER]
-        : mcpProxyService
-            .serversForSession(worktree.repo.name, worktree.host.id)
-            .map((s) => s.name);
+        : worktree
+          ? mcpProxyService
+              .serversForSession(worktree.repo.name, worktree.host.id)
+              .map((s) => s.name)
+          : [];
     if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -1050,14 +1107,21 @@ export class AgentSessionService {
   async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    // A message to a sleeping worktree brings its worker back first.
-    if (purpose === "prompt") {
-      await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
-      // Fresh context files before the agent reads them. A slow or unreachable hub never blocks it.
-      await contextSyncService.pullForWorktree(chat.worktreeId);
+    const scope = chatScope(chat);
+    let cwd: string;
+    if (chat.worktreeId) {
+      // A message to a sleeping worktree brings its worker back first.
+      if (purpose === "prompt") {
+        await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
+        // Fresh context files before the agent reads them. A slow or unreachable hub never blocks it.
+        await contextSyncService.pullForWorktree(chat.worktreeId);
+      }
+      const worktree = worktreeService.resolve(chat.worktreeId);
+      if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
+      cwd = worktree.worktree.path;
+    } else {
+      cwd = await projectChatCwd(chat, purpose);
     }
-    const worktree = worktreeService.resolve(chat.worktreeId);
-    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
@@ -1068,17 +1132,14 @@ export class AgentSessionService {
     const viewNeedsNothing =
       purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
     if (!attachedAlready && !viewNeedsNothing) {
-      rt.preamble = withCharter(
-        rt.chatId,
-        await contextPreambleService.forWorktree(chat.worktreeId),
-      );
+      rt.preamble = withCharter(rt.chatId, await contextPreambleService.forWorktree(scope));
       if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
         log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
       }
     }
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;
-    rt.attaching = attach(rt, fresh, def, worktree.worktree.path, purpose);
+    rt.attaching = attach(rt, fresh, def, cwd, purpose);
     try {
       await rt.attaching;
     } finally {
@@ -1469,11 +1530,14 @@ export class AgentSessionService {
   async listSessions(chatId: string): Promise<SessionListing> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const worktree = worktreeService.resolve(chat.worktreeId);
-    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
+    const location = chatLocation(chat);
+    if (!location) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
-    const sameAgent = chatService
-      .list(chat.worktreeId)
+    const sameAgent = (
+      chat.worktreeId
+        ? chatService.list(chat.worktreeId)
+        : chatService.listForProject(chat.projectId ?? "")
+    )
       .filter((c) => definitionFor(c).id === def.id)
       .map((c) => c.id);
     const logged = events.listSessions(sameAgent);
@@ -1482,9 +1546,9 @@ export class AgentSessionService {
     const rt = runtimeFor(chat, def);
     let agentSessions: acp.SessionInfo[] | null = null;
     try {
-      const proc = await ensureProcess(rt, def, worktree.worktree.path);
+      const proc = await ensureProcess(rt, def, location.cwd);
       if (!rt.inTurn) scheduleIdle(rt);
-      if (proc.canList) agentSessions = await proc.listSessions(worktree.worktree.path);
+      if (proc.canList) agentSessions = await proc.listSessions(location.cwd);
     } catch (err) {
       log.warn({ chatId, err }, "session/list failed; using Band's log");
       // Let the idle timer drop a runtime that never got a process.

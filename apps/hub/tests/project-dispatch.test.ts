@@ -137,7 +137,7 @@ const bearerOf = (request: StubRequest): string => {
 
 /** The bearer of a new project's coordinator session. */
 async function coordinatorOf(name: string): Promise<string> {
-  return bearerOf(await sessionNewFor(`coordinator-${name}`));
+  return bearerOf(await sessionNewFor(`/projects/${name}`));
 }
 
 async function callTool(bearer: string, name: string, args: Record<string, unknown> = {}) {

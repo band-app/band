@@ -41,7 +41,7 @@ interface ProjectView {
   id: string;
   name: string;
   coordinatorModel: string;
-  coordinator: { worktreeId: string; chatId: string | null } | null;
+  coordinator: { chatId: string } | null;
   effectivePolicy: {
     autonomy: string;
     autoMerge: boolean;
@@ -204,7 +204,7 @@ beforeAll(async () => {
 
   shop = await createProject("shop", ["api", "client"], { maxConcurrent: 5 });
   other = await createProject("other", ["docs"]);
-  shopCoordinator = await sessionNewFor("coordinator-shop");
+  shopCoordinator = await sessionNewFor("/projects/shop");
   bearer = bearerOf(shopCoordinator);
   a = await worker("shop", "api", "feat-a");
   b = await worker("shop", "client", "feat-b");
@@ -219,15 +219,17 @@ afterAll(async () => {
 
 describe("the coordinator session starts with the project (S1)", () => {
   it("creates a coordinator chat on the project's first repo, on opus by default", async () => {
-    expect(shop.coordinator?.worktreeId).toBe("api-coordinator-shop");
     expect(shop.coordinator?.chatId).toBeTruthy();
-    const { chats } = await q<{ chats: Array<{ id: string; model: string; labels: object }> }>(
-      "chats.list",
-      { worktreeId: "api-coordinator-shop" },
-    );
+    const { chats } = await q<{
+      chats: Array<{ id: string; model: string; labels: object; worktreeId: string | null }>;
+    }>("chats.list", { worktreeId: `project:${shop.id}` });
     expect(chats).toHaveLength(1);
     expect(chats[0].labels).toEqual({ "band:coordinator": shop.id });
-    expect(chats[0]).toMatchObject({ id: shop.coordinator?.chatId, model: "opus" });
+    expect(chats[0]).toMatchObject({
+      id: shop.coordinator?.chatId,
+      model: "opus",
+      worktreeId: null,
+    });
     expect(shop.coordinatorModel).toBe("opus");
   });
 
@@ -252,6 +254,9 @@ describe("the coordinator session starts with the project (S1)", () => {
       "chats_read",
       "chats_send",
       "project_status",
+      "repo_log",
+      "repo_read",
+      "repo_search",
       "worktree_stop",
       "worktrees_create",
       "worktrees_list",
@@ -306,7 +311,7 @@ describe("the tools are scoped to the project (S2)", () => {
   });
 
   it("answers for the project the token was issued for, whatever the caller names", async () => {
-    const otherSession = await sessionNewFor("coordinator-other");
+    const otherSession = await sessionNewFor("/projects/other");
     const res = await callTool(bearerOf(otherSession), "worktrees_list");
     const ids = (res.json().worktrees as Array<{ worktreeId: string }>).map((w) => w.worktreeId);
     expect(ids).toEqual([c.worktreeId]);
@@ -448,21 +453,20 @@ describe("policy limits and autonomy (S3)", () => {
     const { project } = await setPolicy("shop", { models: { coordinator: "sonnet" } });
     expect(project.coordinatorModel).toBe("sonnet");
     const { chats } = await q<{ chats: Array<{ model: string }> }>("chats.list", {
-      worktreeId: "api-coordinator-shop",
+      worktreeId: `project:${shop.id}`,
     });
     expect(chats[0].model).toBe("sonnet");
   });
 });
 
 describe("removing a project", () => {
-  it("removes its coordinator worktree with it", async () => {
+  it("removes its coordinator chat with it", async () => {
     await m("projects.detachWorktree", { worktreeId: c.worktreeId });
     await m("worktrees.remove", { repo: "docs", name: "feat-c" });
     await m("projects.remove", { project: "other" });
-    const { repos } = await q<{
-      repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
-    }>("repos.list");
-    const names = repos.find((r) => r.name === "docs")?.worktrees.map((w) => w.name) ?? [];
-    expect(names).not.toContain("coordinator-other");
+    const { chat } = await q<{ chat: unknown }>("chats.get", {
+      chatId: other.coordinator?.chatId,
+    });
+    expect(chat).toBeNull();
   });
 });

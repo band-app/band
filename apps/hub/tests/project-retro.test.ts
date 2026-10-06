@@ -273,7 +273,7 @@ describe("a triggered retro stores a proposal with diffs (S1)", () => {
 
     const { chats } = await q<{
       chats: Array<{ model: string; labels: Record<string, string> }>;
-    }>("chats.list", { worktreeId: "api-coordinator-shop" });
+    }>("chats.list", { worktreeId: `project:${projectId}` });
     const retroChat = chats.find((c) => c.labels["band:retro"]);
     expect(retroChat).toMatchObject({ model: "sonnet", labels: { "band:retro": projectId } });
 

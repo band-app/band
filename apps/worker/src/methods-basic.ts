@@ -204,6 +204,62 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     });
   });
 
+  // Project folders (plan step T.1). The folder is outside the worker's roots like a context copy,
+  // so a successful ensure lets later calls (the agent's cwd) use it.
+  r.json("project.ensure", async (a) => {
+    const list = a.repos;
+    if (!Array.isArray(list)) throw invalid("repos must be an array");
+    const repos = await Promise.all(
+      list.map(async (item) => {
+        const spec = asParams(item);
+        return {
+          name: str(spec, "name"),
+          // The clone is where the checkout's git data lives, so it must be inside a root.
+          clonePath: await path(spec, "clonePath"),
+          defaultBranch: str(spec, "defaultBranch"),
+        };
+      }),
+    );
+    const fetch = optStr(a, "fetch");
+    if (fetch !== undefined && fetch !== "throttled" && fetch !== "force" && fetch !== "never") {
+      throw invalid("fetch must be throttled, force or never");
+    }
+    const result = await host.project.ensure({
+      project: str(a, "project"),
+      repos,
+      ...(fetch ? { fetch } : {}),
+      contextTimeoutMs: optNum(a, "contextTimeoutMs"),
+    });
+    policy.allow(await host.fs.realpath(result.folder));
+    return result;
+  });
+  r.json("project.read", async (a) =>
+    host.project.read({
+      project: str(a, "project"),
+      repo: str(a, "repo"),
+      path: typeof a.path === "string" ? a.path : "",
+      maxBytes: optNum(a, "maxBytes"),
+    }),
+  );
+  r.json("project.search", async (a) =>
+    host.project.search({
+      project: str(a, "project"),
+      repo: str(a, "repo"),
+      query: str(a, "query"),
+      maxResults: optNum(a, "maxResults"),
+    }),
+  );
+  r.json("project.log", async (a) =>
+    host.project.log({ project: str(a, "project"), repo: str(a, "repo"), n: num(a, "n") }),
+  );
+  r.json("project.removeRepo", async (a) =>
+    host.project.removeRepo({
+      project: str(a, "project"),
+      repo: str(a, "repo"),
+      clonePath: await path(a, "clonePath"),
+    }),
+  );
+
   r.json("scripts.command", async (a) =>
     host.scripts.command({ ...(await worktreePaths(a)), label: label(a) }),
   );

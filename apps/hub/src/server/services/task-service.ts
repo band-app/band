@@ -3,9 +3,11 @@ import { computeCost } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
 import { WorktreeNotFoundError } from "../errors";
+import { ProjectQueries } from "../infra/db/queries/projects";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { emitChatLifecycle } from "../infra/events/chat-lifecycle-bus";
 import { hostRegistry } from "../infra/host/registry";
+import { projectIdOfScope } from "../infra/project-scope";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
   hasQueuedMessages,
@@ -125,15 +127,14 @@ function observePending(): void {
     if (tasks.get(chatId)?.status !== "running") return;
     const waiting = agentSessionService.hasPendingRequest(chatId);
     if (waiting) emitChatLifecycle({ chatId, worktreeId, kind: "waiting" });
-    const updated = setWorktreeSourceStatus(worktreeId, chatStatusSource(chatId), {
-      status: waiting ? "needs_attention" : "working",
-    });
-    emitStatusEvent({ kind: "update", status: updated });
+    setScopeStatus(worktreeId, chatId, waiting ? "needs_attention" : "working");
   });
 }
 
 function persistTask(task: InternalTask): void {
-  const worktree = worktreeService.resolve(task.worktreeId);
+  const worktree = projectIdOfScope(task.worktreeId)
+    ? undefined
+    : worktreeService.resolve(task.worktreeId);
   try {
     taskQueries.save({
       id: task.id,
@@ -266,11 +267,33 @@ function turnUsage(
 // Turn lifecycle
 // ---------------------------------------------------------------------------
 
+const projects = new ProjectQueries();
+
+/**
+ * Records a chat's status on its worktree and broadcasts the worktree's new status. A project
+ * chat has no worktree to show it on, so nothing is recorded.
+ */
+function setScopeStatus(scope: string, chatId: string, status: string): void {
+  if (projectIdOfScope(scope)) return;
+  const updated = setWorktreeSourceStatus(scope, chatStatusSource(chatId), { status });
+  emitStatusEvent({ kind: "update", status: updated });
+}
+
+/**
+ * Whether a turn can run in this scope: a worktree, or a project (the scope of a project chat,
+ * whose folder the agent session prepares itself).
+ */
+function scopeExists(scope: string): boolean {
+  const projectId = projectIdOfScope(scope);
+  return projectId
+    ? projects.find(projectId) !== undefined
+    : worktreeService.resolve(scope) !== null;
+}
+
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
   const { worktreeId, chatId, prompt, sessionId, mode, model, codingAgentId } = options;
 
-  const worktree = worktreeService.resolve(worktreeId);
-  if (!worktree) {
+  if (!scopeExists(worktreeId)) {
     throw new WorktreeNotFoundError(worktreeId);
   }
 
@@ -318,7 +341,7 @@ export type SubmitOrQueueResult =
  */
 export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResult {
   const { worktreeId, chatId } = options;
-  if (!worktreeService.resolve(worktreeId)) {
+  if (!scopeExists(worktreeId)) {
     throw new WorktreeNotFoundError(worktreeId);
   }
 
@@ -341,10 +364,7 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
 async function runTask(task: InternalTask): Promise<void> {
   const { chatId } = task;
   chatService.updateStatus(chatId, "running");
-  const working = setWorktreeSourceStatus(task.worktreeId, chatStatusSource(chatId), {
-    status: "working",
-  });
-  emitStatusEvent({ kind: "update", status: working });
+  setScopeStatus(task.worktreeId, chatId, "working");
 
   // Prepare the chat: switch agent or session when this task asks for it.
   const chat = chatService.get(chatId);
@@ -523,10 +543,7 @@ function finishTask(
       ...(status === "failed" && { error: error ?? "The turn failed" }),
     });
   }
-  const updated = setWorktreeSourceStatus(task.worktreeId, chatStatusSource(task.chatId), {
-    status: stopped ? "waiting" : "needs_attention",
-  });
-  emitStatusEvent({ kind: "update", status: updated });
+  setScopeStatus(task.worktreeId, task.chatId, stopped ? "waiting" : "needs_attention");
 }
 
 /** Starts the chat's next queued message, if any. */
@@ -588,10 +605,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: s
   if (record) {
     // Tasks saved before chats existed have no chatId, and so no source.
     if (record.chatId) {
-      const updated = setWorktreeSourceStatus(record.worktreeId, chatStatusSource(record.chatId), {
-        status: "waiting",
-      });
-      emitStatusEvent({ kind: "update", status: updated });
+      setScopeStatus(record.worktreeId, record.chatId, "waiting");
     }
     log.info({ taskId, worktreeId: record.worktreeId }, "orphaned task cancelled");
     return { cancelled: true, worktreeId: record.worktreeId };

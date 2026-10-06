@@ -37,6 +37,7 @@ import type {
   HostInfo,
   HostLsp,
   HostMcp,
+  HostProject,
   HostScripts,
   HostSearch,
   HostWorktree,
@@ -69,6 +70,7 @@ import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
 import { probeTools } from "./process/tools";
+import { ProjectFolder } from "./project/project-folder";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
@@ -146,6 +148,7 @@ export class LocalHost implements Host {
   };
   readonly desktop: HostDesktop = { open: () => openDesktop() };
   readonly context: HostContext;
+  readonly project: HostProject;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
@@ -199,6 +202,14 @@ export class LocalHost implements Host {
               blocked: [],
               error: "this host has no context source",
             })),
+    };
+    const folders = new ProjectFolder(() => (source ? source.bandHome() : ""), sync);
+    this.project = {
+      ensure: (request) => folders.ensure(request),
+      read: (request) => folders.read(request),
+      search: (request) => folders.search(request),
+      log: (request) => folders.log(request),
+      removeRepo: (request) => folders.removeRepo(request),
     };
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
