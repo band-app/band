@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import {
   METHOD_RELAY_HTTP,
   RELAY_MAX_BODY_BYTES,
@@ -8,7 +9,7 @@ import {
   type RelayHttpRequest,
   type RelayScopeParams,
 } from "@band-app/link";
-import type { Registrar, WorkerContext } from "./context.ts";
+import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import { optStr, str } from "./rpc-util.ts";
 
 /** Request headers the hub reads. The caller's credentials and everything else stay on the worker. */
@@ -216,7 +217,13 @@ export function registerRelayMethods(r: Registrar, ctx: WorkerContext): () => Pr
       worktreeId: str(a, "worktreeId"),
       ...(chatId !== undefined && { chatId }),
     });
-    return { url: await relay.url() };
+    return {
+      url: await relay.url(),
+      browserPortFile: join(
+        browserProfileDir(ctx.stateDir, str(a, "worktreeId")),
+        "DevToolsActivePort",
+      ),
+    };
   });
   r.json("relay.revoke", (a) => relay.revoke(str(a, "token")));
   return () => relay.close();

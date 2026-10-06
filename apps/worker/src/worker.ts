@@ -170,6 +170,7 @@ export class Worker {
       activity: new ActivityTracker(),
       log,
       labels: config.labels,
+      stateDir: config.stateDir,
       cli: new CliCache(client.session, config.stateDir, log),
     };
     const registrar = new Registrar(ctx);

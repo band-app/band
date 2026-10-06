@@ -16,6 +16,7 @@ import type {
   Host,
   HostAcp,
   HostAgentEnv,
+  HostBrowser,
   HostContext,
   HostDesktop,
   HostFs,
@@ -38,6 +39,8 @@ import type {
 } from "@band-app/host-api";
 import {
   type Channel,
+  decodeFrames,
+  encodeFrame,
   type LinkSession,
   METHOD_RELAY_REGISTER,
   METHOD_RELAY_REVOKE,
@@ -222,6 +225,24 @@ export class RemoteHost implements Host {
     },
   };
 
+  // The worker keeps the browser. `browser.connect` opens one channel of length-prefixed CDP
+  // messages, and resetting it drops the connection but not the browser.
+  readonly browser: HostBrowser = {
+    open: (spec) => this.rpc.call("browser.open", spec, { timeoutMs: 60_000 }),
+    connect: async (worktreeId) => {
+      const reply = await this.rpc.request<{ chan: number }>("browser.connect", { worktreeId });
+      const ch = this.rpc.channel(reply.chan);
+      return {
+        send: (message) => {
+          ch.send(encodeFrame(message)).catch(() => undefined);
+        },
+        messages: decodeFrames(channelBytes(ch)),
+        close: () => ch.reset("cdp connection closed"),
+      };
+    },
+    close: (worktreeId) => this.rpc.call("browser.close", { worktreeId }, { timeoutMs: 30_000 }),
+  };
+
   readonly context: HostContext = {
     preamble: (request) => this.rpc.call("context.preamble", request),
     // The worker pulls its contexts in parallel and bounds each by `timeoutMs`.
@@ -249,7 +270,12 @@ export class RemoteHost implements Host {
       });
       let revoked = false;
       return {
-        env: { BAND_SERVER_URL: reply.url, BAND_TOKEN: token },
+        env: {
+          BAND_SERVER_URL: reply.url,
+          BAND_TOKEN: token,
+          // The agent reads the port of the worktree's Chromium from this file once the pane opened it.
+          ...(reply.browserPortFile && { BAND_CDP_PORT_FILE: reply.browserPortFile }),
+        },
         revoke: async () => {
           if (revoked) return;
           revoked = true;
