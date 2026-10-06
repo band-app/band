@@ -20,7 +20,7 @@ const log = createLogger("cdp-proxy");
  *   - bandTabId: Band's `browser_<uuid>` id. Resolved server-side to the
  *     current chromium target id via `browser-host.ts::ensureCdpTargetId`.
  *   - worktreeId: for a worktree on a worker, the browser-level CDP endpoint
- *     of that worker's Chromium (`bandTabId` of such a worktree works too).
+ *     of that worker's Chromium. Without it the desktop's page-level path runs.
  *
  * Close codes:
  *   - 4000 — bad request (missing bandTabId)
@@ -42,23 +42,17 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
     ws.close(4000, "bandTabId does not belong to worktreeId");
     return;
   }
-  const worktreeId = requestedWorktreeId ?? tabWorktreeId;
 
-  if (!bandTabId && !worktreeId) {
+  if (!bandTabId && !requestedWorktreeId) {
     ws.close(4000, "Missing bandTabId");
     return;
   }
 
-  // A tab in a browser profile is never relayed, remote or not. Only an explicit worktreeId reaches
-  // the worker's browser, whose profile belongs to the worktree and is not a desktop session.
-  if (!requestedWorktreeId && bandTabId && lookupBrowser(bandTabId)?.profileId) {
-    ws.close(4003, "Tabs in a browser profile can't be streamed over CDP");
-    return;
-  }
-
+  // Only an explicit worktreeId reaches the worker's browser, whose profile belongs to the worktree
+  // and is not a desktop session. A bandTabId alone keeps the desktop's page-level path.
   let early: string[] = [];
-  if (worktreeId) {
-    const bridged = await bridgeRemote(ws, worktreeId);
+  if (requestedWorktreeId) {
+    const bridged = await bridgeRemote(ws, requestedWorktreeId);
     if (bridged === true) return;
     early = bridged;
   }
