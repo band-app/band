@@ -2313,7 +2313,13 @@ fn projects_create_list_add_repo() {
     assert!(added.status.success(), "stderr: {}", stderr(&added));
 
     let listed = json_of(&env.band(&["projects", "list", "--output", "json"]));
-    let projects = listed["projects"].as_array().unwrap();
+    // The hub also has its default project ("personal"), which holds the repos added to no project.
+    let projects: Vec<&serde_json::Value> = listed["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["isDefault"] != true)
+        .collect();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0]["repos"].as_array().unwrap().len(), 2);
     let text = stdout(&env.band(&["projects", "list"]));
@@ -2377,7 +2383,8 @@ fn context_create_list_link_remove() {
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["alpha", "user"]);
+    // "personal" is the context of the default project.
+    assert_eq!(names, vec!["alpha", "personal", "user"]);
     let text = stdout(&env.band(&["context", "list"]));
     assert!(text.starts_with("NAME"), "text: {text}");
     assert!(text.contains("org=epic,region=eu"), "text: {text}");
