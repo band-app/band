@@ -21,7 +21,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { rewriteSse, SseEventTooLargeError, sseDataOf } from "../../services/_utils/mcp-sse";
-import { COORDINATOR_SERVER } from "../../services/_utils/project-policy";
+import { COORDINATOR_SERVER, RETRO_SERVER } from "../../services/_utils/project-policy";
 import { type McpServerView, mcpProxyService } from "../../services/mcp-proxy-service";
 import { handleCoordinatorMcp } from "./coordinator";
 import {
@@ -37,6 +37,7 @@ import {
   planRequest,
 } from "./filter";
 import { readBody, sendJson } from "./http-util";
+import { handleRetroMcp } from "./retro";
 import { handleStdioProxy } from "./stdio";
 
 const log = createLogger("mcp-proxy");
@@ -193,6 +194,7 @@ export async function handleMcpProxy(req: IncomingMessage, res: ServerResponse):
   }
   // The hub's own coordinator tools, not an upstream.
   if (name === COORDINATOR_SERVER) return handleCoordinatorMcp(req, res, auth);
+  if (name === RETRO_SERVER) return handleRetroMcp(req, res, auth);
   const server = mcpProxyService.getEnabledServer(name);
   if (!server) return sendJson(res, 404, { error: "No such MCP server" });
 

@@ -21,7 +21,7 @@ import {
 import type { McpStdioEnvEntry } from "../infra/db/schema";
 import { subscribe } from "../infra/events/status-event-bus";
 import { hostRegistry } from "../infra/host/registry";
-import { COORDINATOR_SERVER } from "./_utils/project-policy";
+import { COORDINATOR_SERVER, RETRO_SERVER } from "./_utils/project-policy";
 import { mcpStdioService } from "./mcp-stdio-service";
 import { vaultService } from "./vault-service";
 
@@ -307,8 +307,8 @@ export class McpProxyService {
         "The name must be lowercase letters, digits, hyphens and underscores, starting with a letter or digit.",
       );
     }
-    if (name === COORDINATOR_SERVER) {
-      throw new McpProxyInputError(`"${name}" is the name of the hub's coordinator tools.`);
+    if (name === COORDINATOR_SERVER || name === RETRO_SERVER) {
+      throw new McpProxyInputError(`"${name}" is the name of the hub's own project tools.`);
     }
     if (this.queries.findServer(name)) {
       throw new McpProxyInputError(`An MCP server named "${name}" already exists.`);
@@ -547,7 +547,7 @@ export class McpProxyService {
       throw new McpProxyInputError(`Name between 1 and ${MAX_SERVERS_PER_TOKEN} servers.`);
     }
     for (const name of names) {
-      if (name !== COORDINATOR_SERVER && !this.queries.findServer(name)) {
+      if (name !== COORDINATOR_SERVER && name !== RETRO_SERVER && !this.queries.findServer(name)) {
         throw new McpServerNotFoundError(name);
       }
     }

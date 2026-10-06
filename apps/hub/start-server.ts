@@ -75,6 +75,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
+import { projectRetroService } from "./src/server/services/project-retro-service.ts";
 import { projectSubscriptionService } from "./src/server/services/project-subscription-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
@@ -1594,6 +1595,7 @@ async function main() {
       subscriptionService.start();
       // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
       projectSubscriptionService.start();
+      projectRetroService.start();
 
       // Activate the bundled plugins that ask for `onStartup`. The rest
       // activate lazily, e.g. the GitHub plugin on the first review lookup
@@ -1620,6 +1622,7 @@ async function main() {
     branchStatusPoller.stop();
     cronjobService.stop();
     projectSubscriptionService.stop();
+    projectRetroService.stop();
     subscriptionService.stop();
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
