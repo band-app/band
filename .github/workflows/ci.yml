@@ -705,6 +705,16 @@ jobs:
           test "$(docker run --rm --entrypoint id band-worker-check -u)" = 10001
           docker run --rm band-worker-check --help | grep -q -- '--hub <url>'
 
+      # The desktop worker image (plan step 7.1): the worker image plus Xvfb, fluxbox and x11vnc. Its
+      # entrypoint must start the display and x11vnc, and x11vnc must answer on loopback.
+      - name: Build desktop worker image
+        run: docker build -f docker/worker-desktop.Dockerfile --build-arg BASE_IMAGE=band-worker-check -t band-worker-desktop-check .
+
+      - name: Desktop worker image runs as a non-root user with a display
+        run: |
+          test "$(docker run --rm --entrypoint id band-worker-desktop-check -u)" = 10001
+          docker run --rm --entrypoint sh band-worker-desktop-check -c 'for b in Xvfb fluxbox x11vnc xdpyinfo chromium; do command -v $b || exit 1; done'
+
       - name: Hub for the worker
         working-directory: deploy/compose
         env:
@@ -784,10 +794,28 @@ jobs:
           BAND_DOCKER_TEST_IMAGE: band-worker-check
           BAND_DOCKER_TEST_NETWORK: host
 
+      # The desktop image through the hub (plan step 7.1): the `desktop` capability, an RFB handshake from
+      # x11vnc over the link, and DISPLAY plus xdpyinfo in a terminal on the worker.
+      - name: Desktop worker
+        run: |
+          pnpm --filter @band-app/server exec vitest run tests/desktop-docker.test.ts \
+            --reporter=default --reporter=json --outputFile.json=/tmp/desktop-docker.json
+          # S1 and S2 must run with the real image: a skipped or missing test fails the job.
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync("/tmp/desktop-docker.json", "utf8"));
+            if (r.numPassedTests < 3 || r.numPendingTests > 0 || r.numFailedTests > 0) {
+              console.error("desktop-docker.test.ts did not run all 3 tests:", r.numPassedTests, "passed,", r.numPendingTests, "skipped");
+              process.exit(1);
+            }'
+        env:
+          BAND_DOCKER_TEST_DESKTOP_IMAGE: band-worker-desktop-check
+          BAND_DOCKER_TEST_NETWORK: host
+
       - name: Remove runner containers
         if: always()
         run: |
           docker ps --all --quiet --filter label=band.runner=docker | xargs -r docker rm --force --volumes
+          docker ps --all --quiet --filter label=band.runner=desktop | xargs -r docker rm --force --volumes
           docker ps --all --quiet --filter label=band.runner=docker-hib | xargs -r docker rm --force --volumes
           docker images --quiet --filter label=band.runner=docker-hib | sort -u | xargs -r docker rmi --force
 

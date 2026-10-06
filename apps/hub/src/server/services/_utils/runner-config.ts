@@ -66,6 +66,11 @@ export const runnerSchema = z
      * `process` is the same as `worktree`. Passed to the hook as `BAND_ISOLATION`.
      */
     isolation: z.enum(RUNNER_ISOLATIONS).default("process"),
+    /**
+     * The machines this runner starts have a virtual desktop (plan step 7.1). Passed to the hook as
+     * `BAND_DESKTOP=1`. The `docker` hook then runs the `band-worker-desktop` image.
+     */
+    desktop: z.boolean().default(false),
     maxConcurrent: z.number().int().min(1).max(100).default(1),
     /** Seconds from the start of an attempt to the worker's hello. */
     timeoutSec: z

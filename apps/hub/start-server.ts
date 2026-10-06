@@ -49,6 +49,11 @@ import {
   startUsageEventPruneScheduler,
   stopUsageEventPruneScheduler,
 } from "./src/server/infra/db/queries/usage-events.ts";
+import {
+  desktopHostId,
+  handleDesktopConnection,
+  selectDesktopProtocol,
+} from "./src/server/infra/host/desktop-proxy.ts";
 import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
@@ -1277,6 +1282,16 @@ async function main() {
   // ---------------------------------------------------------------------------
   const cdpWss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for host desktops (RFB over the worker link)
+  // ---------------------------------------------------------------------------
+  const desktopWss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: selectDesktopProtocol,
+    // RFB client messages are small. The default 100 MiB frame limit lets a viewer queue far more.
+    maxPayload: 1024 * 1024,
+  });
+
   httpServer.on("upgrade", (req, socket, head) => {
     // Vite's HMR WebSocket lives on this same http server in dev mode. It
     // identifies itself with the `vite-hmr` subprotocol — leave that
@@ -1335,6 +1350,14 @@ async function main() {
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    const desktopHost = desktopHostId(url.pathname);
+    if (desktopHost !== null) {
+      desktopWss.handleUpgrade(req, socket, head, (ws) => {
+        void handleDesktopConnection(ws, req, desktopHost);
+      });
+      return;
+    }
 
     if (url.pathname === "/lsp") {
       lspWss.handleUpgrade(req, socket, head, (ws) => {
@@ -1639,6 +1662,7 @@ async function main() {
     wssHandler.broadcastReconnectNotification();
     wss.close();
     terminalWss.close();
+    desktopWss.close();
     lspWss.close();
     cdpWss.close();
     httpServer.close();

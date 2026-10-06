@@ -105,6 +105,28 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.json("lsp.killWorktree", (a) => host.lsp.killWorktree(str(a, "worktreeId")));
   r.json("lsp.killAll", () => host.lsp.killAll());
 
+  // ---- desktop ------------------------------------------------------------
+
+  // The channel carries the RFB stream: the hub's viewer writes to x11vnc and x11vnc's output comes back.
+  // Closing the channel drops the connection to x11vnc. `host.desktop.open` rejects, and so fails the
+  // call, when the host has no display or no x11vnc.
+  r.raw("desktop.open", async () => {
+    const duplex = await host.desktop.open();
+    let ch: Channel;
+    try {
+      ch = session.openChannel("desktop", {});
+    } catch (err) {
+      duplex.close();
+      throw err;
+    }
+    serve(ch, duplex.output, {
+      release: activity.hold(),
+      onInput: (chunk) => duplex.write(chunk),
+      onClosed: () => duplex.close(),
+    });
+    return { chan: ch.id };
+  });
+
   // ---- agents -------------------------------------------------------------
 
   const agents = new Map<string, RunningAgent>();
