@@ -350,6 +350,10 @@ beforeAll(async () => {
             headers: { "content-type": "application/json" },
           }),
           probe("other-route", "/api/worktree-file/proj-main/hello.txt"),
+          // The desktop route (plan step 7.1) is for a person's device token. The relay lists no
+          // route for it, so no host id gets an agent through, including the hub's own.
+          probe("desktop-local", "/api/hosts/local/desktop"),
+          probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
           { say: "probed" },
         ],
       },
@@ -574,6 +578,8 @@ describe("the worker relay (S2)", () => {
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
+    expect(by("desktop-local")?.status).toBe(403);
+    expect(by("desktop-worker")?.status).toBe(403);
     // A foreign target next to the agent's own worktreeId does not borrow its scope.
     expect(by("decoy-terminal")?.status).toBe(403);
     expect(by("decoy-repo")?.status).toBe(403);

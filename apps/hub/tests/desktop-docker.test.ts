@@ -5,7 +5,8 @@
 // `xdpyinfo`.
 //
 // It needs a docker daemon and the image from docker/worker-desktop.Dockerfile. Set
-// BAND_DOCKER_TEST_DESKTOP_IMAGE to the image name to run it. Without it the file is skipped. The CI
+// BAND_DOCKER_TEST_DESKTOP_IMAGE to the image name to run it. Without it the file is skipped, except on
+// Linux CI (`CI=true`), where a missing image or daemon is a failure. The CI
 // `docker` job builds both images and runs it, with `--network host` so the container reaches the hub.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -87,6 +88,29 @@ const m = <T>(procedure: string, input: unknown) =>
     if (res.status !== 200) throw new Error(`${procedure}: HTTP ${res.status} ${await res.text()}`);
     return trpcData<T>(res);
   });
+
+function dockerHas(image: string): boolean {
+  try {
+    docker("image", "inspect", image);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Linux CI has docker, so a missing image or daemon there is a broken job, not a reason to skip. The
+// jobs that run the whole hub suite set BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB=1, which skips it there.
+const mustRun =
+  process.env.CI === "true" &&
+  process.platform === "linux" &&
+  !process.env.BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB;
+if (mustRun && !(IMAGE && dockerHas(IMAGE))) {
+  throw new Error(
+    "CI on Linux requires desktop-docker.test.ts to run: set BAND_DOCKER_TEST_DESKTOP_IMAGE to the " +
+      `band-worker-desktop image a docker daemon has (got "${IMAGE}"), or set ` +
+      "BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB=1 in a job that does not build it",
+  );
+}
 
 describe.skipIf(!IMAGE)("the desktop worker image", () => {
   beforeAll(async () => {
