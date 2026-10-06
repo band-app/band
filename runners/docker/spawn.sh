@@ -14,6 +14,11 @@
 #   BAND_REPO_IMAGE      set by the hub: the repo's current image from `band env build` (plan
 #                           step 3.2). It wins over BAND_DOCKER_IMAGE when this docker daemon has it or
 #                           can pull it, else the base image runs. It needs git for the clone.
+#   BAND_DESKTOP           set by the hub for a runner with `desktop: true`: runs BAND_DOCKER_DESKTOP_IMAGE
+#                           (default: band-worker-desktop, built from docker/worker-desktop.Dockerfile),
+#                           which starts Xvfb, a window manager and x11vnc before the worker. The repo's
+#                           environment image has none of them, so it is not used. A snapshot restore
+#                           runs the image the snapshot was taken from.
 #   BAND_DOCKER_NETWORK     docker network (default: bridge). A worker accepts plain http only for a
 #                           loopback hub, so a hub on this machine needs "host" and http://127.0.0.1:<port>,
 #                           or an https BAND_HUB_URL.
@@ -70,6 +75,8 @@ if [ -n "$restore" ]; then
     echo "$BAND_SNAPSHOT_ID is not a snapshot of this runner (no band.snapshot.base label)" >&2
     exit 1
   fi
+elif [ -n "${BAND_DESKTOP:-}" ]; then
+  image="${BAND_DOCKER_DESKTOP_IMAGE:-band-worker-desktop}"
 elif [ -n "${BAND_REPO_IMAGE:-}" ]; then
   if docker image inspect "$BAND_REPO_IMAGE" >/dev/null 2>&1 || docker pull --quiet "$BAND_REPO_IMAGE" >/dev/null 2>&1; then
     image="$BAND_REPO_IMAGE"
@@ -130,6 +137,10 @@ set -- "$@" \
   -e BAND_WORKER_ROOTS=/work \
   -e BAND_WORKER_STATE_DIR=/work/.band-worker \
   -e "BAND_CLONE_URL=$clone_url" -e "BAND_CLONE_NAME=$repo_name"
+# A desktop image starts its display first. The entrypoint then execs band-worker.
+if [ -n "${BAND_DESKTOP:-}" ]; then
+  set -- "$@" -e BAND_WORKER_START=band-desktop-entrypoint -e BAND_DESKTOP_RESOLUTION="${BAND_DESKTOP_RESOLUTION:-1280x800x24}" --shm-size 1g
+fi
 if [ -n "${BAND_IDLE_EXIT:-}" ]; then set -- "$@" -e "BAND_WORKER_IDLE_EXIT=$BAND_IDLE_EXIT"; fi
 
 start='set -e
@@ -137,7 +148,10 @@ start='set -e
 if [ -f /home/worker/.gitconfig ]; then export GIT_CONFIG_GLOBAL=/home/worker/.gitconfig; fi
 mkdir -p "$HOME" "$BAND_WORKER_STATE_DIR"
 if [ -n "$BAND_CLONE_URL" ]; then env -u BAND_BOOTSTRAP_TOKEN GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- "$BAND_CLONE_URL" "/work/$BAND_CLONE_NAME"; fi
-exec band-worker'
+# A restored snapshot of a non-desktop image has no desktop entrypoint, so fall back to the worker.
+start_bin="${BAND_WORKER_START:-band-worker}"
+command -v "$start_bin" >/dev/null 2>&1 || start_bin=band-worker
+exec "$start_bin"'
 
 if [ -z "$restore" ]; then
   id="$(docker run --detach "$@" --entrypoint /bin/sh "$image" -c "$start")"

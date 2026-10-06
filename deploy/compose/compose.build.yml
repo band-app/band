@@ -1,0 +1,9 @@
+# Builds the hub image from this checkout instead of pulling the published one.
+#
+#   docker compose -f compose.yml -f compose.build.yml up -d --build
+services:
+  band:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: ${BAND_IMAGE:-band-hub:local}

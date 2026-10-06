@@ -76,4 +76,9 @@ ENV HOME=/home/worker \
     BAND_WORKER_STATE_DIR=/home/worker/.band/worker
 VOLUME ["/work", "/home/worker/.band/worker"]
 
+ARG BAND_VERSION=dev
+LABEL org.opencontainers.image.title="band-worker" \
+      org.opencontainers.image.source="https://github.com/band-app/band" \
+      org.opencontainers.image.version="${BAND_VERSION}"
+
 ENTRYPOINT ["band-worker"]

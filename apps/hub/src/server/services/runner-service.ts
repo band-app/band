@@ -1051,6 +1051,7 @@ export class RunnerService {
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
       BAND_NODE: process.execPath,
     });
+    if (runner.desktop) env.BAND_DESKTOP = "1";
     if (workerId) env.BAND_WORKER_ID = workerId;
     if (row) env.BAND_REQUEST_ID = row.id;
     if (handle) env.BAND_MACHINE_HANDLE = handle;

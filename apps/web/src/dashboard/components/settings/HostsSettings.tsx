@@ -1,11 +1,16 @@
 import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Copy, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
 import { SettingsRow } from "./SettingsRow";
+import {
+  WORKER_INSTALL_TABS,
+  type WorkerInstallTab,
+  workerInstallCommand,
+} from "./worker-install-commands";
 
 type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
 type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
@@ -30,15 +35,9 @@ function formatTime(at: number | null): string {
   return at == null ? "Never" : new Date(at).toLocaleString();
 }
 
-/** The command a user runs on the new machine. The hub URL is the one this page reaches the hub at. */
-function workerCommand(issued: IssuedWorker): string {
-  const hub = crossOriginHub()?.origin ?? window.location.origin;
-  return [
-    `BAND_HUB_URL=${hub}`,
-    `BAND_WORKER_ID=${issued.hostId}`,
-    `BAND_BOOTSTRAP_TOKEN=${issued.token}`,
-    "band-worker",
-  ].join(" ");
+/** The hub URL a worker dials: the one this page reaches the hub at. */
+function hubUrl(): string {
+  return crossOriginHub()?.origin ?? window.location.origin;
 }
 
 /**
@@ -74,6 +73,7 @@ export function HostsSettings() {
   const [hostName, setHostName] = useState("");
   const [labels, setLabels] = useState("");
   const [issued, setIssued] = useState<IssuedWorker | null>(null);
+  const [installTab, setInstallTab] = useState<WorkerInstallTab>("service");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -129,11 +129,24 @@ export function HostsSettings() {
     await refresh();
   };
 
+  const copy = (text: string) => {
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
+
   const closeAdd = () => {
     setAdding(false);
+    setInstallTab("service");
     setIssued(null);
     setError(null);
   };
+
+  const installCommand = issued
+    ? workerInstallCommand(installTab, {
+        hubUrl: hubUrl(),
+        hostId: issued.hostId,
+        token: issued.token,
+      })
+    : "";
 
   return (
     <>
@@ -225,16 +238,45 @@ export function HostsSettings() {
               data-testid="settings__bootstrap-token"
               className="h-8 font-mono text-xs"
             />
-            <label className="block text-xs font-medium" htmlFor="worker-command">
-              Run on the worker machine
-            </label>
-            <Input
-              id="worker-command"
+            <div className="text-xs font-medium">Run on the worker machine</div>
+            <div role="tablist" aria-label="Install method" className="flex flex-wrap gap-1">
+              {WORKER_INSTALL_TABS.map((tab) => (
+                <Button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={installTab === tab.id}
+                  data-testid={`settings__install-tab-${tab.id}`}
+                  variant={installTab === tab.id ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setInstallTab(tab.id)}
+                >
+                  {tab.label}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {WORKER_INSTALL_TABS.find((t) => t.id === installTab)?.hint}
+            </p>
+            <textarea
+              aria-label="Worker install command"
               readOnly
-              value={workerCommand(issued)}
+              rows={installTab === "compose" ? 14 : 4}
+              value={installCommand}
               data-testid="settings__worker-command"
-              className="h-8 font-mono text-xs"
+              data-tab={installTab}
+              className="w-full rounded-md border border-border bg-transparent p-2 font-mono text-xs"
             />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="settings__copy-worker-command"
+              onClick={() => copy(installCommand)}
+            >
+              <Copy className="size-3" />
+              Copy command
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={closeAdd}>
               Done
             </Button>

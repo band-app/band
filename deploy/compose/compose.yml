@@ -1,8 +1,15 @@
-# Run the Band hub on a server. From this directory:
+# Run the Band hub on a server, from the published image:
 #
-#   cp .env.example .env     # optional: pick a port, set BAND_ADMIN_TOKEN
-#   docker compose up -d     # builds the image from the repo on first run
+#   curl -O https://raw.githubusercontent.com/band-app/band/main/deploy/compose/compose.yml
+#   docker compose up -d
 #   docker compose logs band # the first run prints an admin token once
+#
+# BAND_VERSION picks the image tag (default latest). Optional settings (port,
+# BAND_ADMIN_TOKEN) go in an .env file next to this one, see .env.example.
+#
+# To build the image from a checkout instead, add the override file:
+#
+#   docker compose -f compose.yml -f compose.build.yml up -d --build
 #
 # With HTTPS through Caddy (set BAND_DOMAIN in .env first):
 #
@@ -11,10 +18,7 @@
 # Full guide: docs/run-the-hub-on-a-server.md
 services:
   band:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile
-    image: ${BAND_IMAGE:-band-hub:local}
+    image: ${BAND_IMAGE:-ghcr.io/band-app/band-hub:${BAND_VERSION:-latest}}
     restart: unless-stopped
     # Bound to localhost. Caddy or your own reverse proxy is the public side.
     # Set BAND_BIND=0.0.0.0 only on a trusted network.

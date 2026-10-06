@@ -18,6 +18,7 @@ import type {
   HostAgentEnv,
   HostBrowser,
   HostContext,
+  HostDesktop,
   HostFs,
   HostGit,
   HostInfo,
@@ -173,6 +174,13 @@ export class RemoteHost implements Host {
     },
     killWorktree: (worktreeId) => this.rpc.call("lsp.killWorktree", { worktreeId }),
     killAll: () => this.rpc.call("lsp.killAll"),
+  };
+
+  readonly desktop: HostDesktop = {
+    open: async (): Promise<Duplex> => {
+      const reply = await this.rpc.request<{ chan: number }>("desktop.open", {});
+      return duplexOf(this.rpc.channel(reply.chan));
+    },
   };
 
   readonly acp: HostAcp = {

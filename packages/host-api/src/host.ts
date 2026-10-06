@@ -28,6 +28,8 @@ export interface Host {
   readonly mcp: HostMcp;
   /** A Chromium per worktree with its DevTools endpoint on loopback (plan step 7.3). */
   readonly browser: HostBrowser;
+  /** The host's virtual desktop, when it has one (`capabilities.desktop`). */
+  readonly desktop: HostDesktop;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;
@@ -58,6 +60,8 @@ export interface HostCapabilities {
   lsp: boolean;
   pty: boolean;
   acp: boolean;
+  /** A display (`DISPLAY`) and a VNC server (`x11vnc`) are available, so `desktop.open` works. */
+  desktop: boolean;
 }
 
 export interface HostInfo {
@@ -364,6 +368,15 @@ export interface McpStdio {
   stdin: { write(chunk: Uint8Array | string): void; end(): void };
   stdout: Stream<Uint8Array>;
   kill(): void;
+}
+
+export interface HostDesktop {
+  /**
+   * Opens a connection to the host's VNC server. `write` sends bytes to it and `output` carries the
+   * RFB stream back, starting with the server's `RFB 003.00x` greeting. Rejects with a message that
+   * names the missing piece when the host has no display or no x11vnc. Closing it ends the connection.
+   */
+  open(): Promise<Duplex>;
 }
 
 export interface HostMcp {
