@@ -184,15 +184,11 @@ jobs:
         if: always()
         uses: ./.github/actions/apple-sign-cleanup
 
-      # Give the user-facing DMGs unambiguous arch suffixes
-      # (Band-X.dmg → Band-X-intel.dmg, Band-X-arm64.dmg →
-      # Band-X-apple-silicon.dmg) so people don't accidentally download
-      # the Intel build on Apple Silicon (or vice versa). Only DMGs are
+      # Name the user-facing DMG Band-X-apple-silicon.dmg. Only DMGs are
       # renamed — the `.zip` artifacts referenced from `latest-mac.yml`
       # keep the `-arm64` substring that electron-updater's MacUpdater
-      # uses to pick the right auto-update file. See the script header
-      # for the full rationale.
-      - name: Rename DMGs to intel/apple-silicon
+      # uses to pick the auto-update file. See the script header.
+      - name: Rename DMG to apple-silicon
         working-directory: apps/desktop
         run: node scripts/rename-dmgs-by-arch.mjs
 
@@ -259,7 +255,6 @@ jobs:
           # would otherwise build a wrong DMG path and fail shasum silently.)
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION is not a plain semver: $VERSION" >&2; exit 1; }
           ARM_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-apple-silicon.dmg" | awk '{print $1}')
-          INTEL_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-intel.dmg" | awk '{print $1}')
           KEY_FILE="$RUNNER_TEMP/tap_deploy_key"
           printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
@@ -272,7 +267,6 @@ jobs:
           node scripts/generate-homebrew-cask.mjs \
             --version "$VERSION" \
             --arm-sha "$ARM_SHA" \
-            --intel-sha "$INTEL_SHA" \
             > "$RUNNER_TEMP/homebrew-band/Casks/band.rb"
           cd "$RUNNER_TEMP/homebrew-band"
           git config user.name "github-actions[bot]"

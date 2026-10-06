@@ -23,7 +23,6 @@ const SCRIPT = fileURLToPath(
 );
 
 const ARM_SHA = "a".repeat(64);
-const INTEL_SHA = "b".repeat(64);
 
 /** Run the generator with the given argv array; return { status, stdout, stderr }. */
 function run(args) {
@@ -39,25 +38,26 @@ const VALID_ARGS = [
   "0.26.1",
   "--arm-sha",
   ARM_SHA,
-  "--intel-sha",
-  INTEL_SHA,
 ];
 
 describe("generate-homebrew-cask", () => {
-  test("valid args render a cask containing version, shas, and urls", () => {
+  test("valid args render a cask containing version, sha, url, and arm64 constraint", () => {
     const { status, stdout } = run(VALID_ARGS);
     assert.equal(status, 0);
 
-    // Version, both arch shas, and both download URLs are interpolated.
+    // Version, the arm64 sha and its download URL are interpolated.
     assert.match(stdout, /cask "band" do/);
     assert.match(stdout, /version "0\.26\.1"/);
     assert.ok(stdout.includes(`sha256 "${ARM_SHA}"`), "arm sha present");
-    assert.ok(stdout.includes(`sha256 "${INTEL_SHA}"`), "intel sha present");
+    assert.equal(stdout.match(/sha256 "/g)?.length, 1, "exactly one sha256");
+    assert.equal(stdout.match(/url "/g)?.length, 1, "exactly one url");
+    assert.ok(stdout.includes("depends_on arch: :arm64"), "arm64 constraint");
+    assert.equal(stdout.includes("on_intel"), false, "no intel stanza");
     assert.ok(
       stdout.includes("Band-#{version}-apple-silicon.dmg"),
       "arm url present",
     );
-    assert.ok(stdout.includes("Band-#{version}-intel.dmg"), "intel url present");
+    assert.equal(stdout.includes("-intel.dmg"), false, "no intel url");
 
     // Fix [1]: the app self-updates via Squirrel, so `auto_updates true` owns
     // upgrades and there is no (redundant, contradictory) livecheck block.
@@ -70,12 +70,7 @@ describe("generate-homebrew-cask", () => {
   });
 
   test("missing --version exits 1 with a meaningful message", () => {
-    const { status, stderr } = run([
-      "--arm-sha",
-      ARM_SHA,
-      "--intel-sha",
-      INTEL_SHA,
-    ]);
+    const { status, stderr } = run(["--arm-sha", ARM_SHA]);
     assert.equal(status, 1);
     assert.match(stderr, /version/i);
   });
@@ -86,27 +81,23 @@ describe("generate-homebrew-cask", () => {
       "not-semver",
       "--arm-sha",
       ARM_SHA,
-      "--intel-sha",
-      INTEL_SHA,
     ]);
     assert.equal(status, 1);
     assert.match(stderr, /version/i);
   });
 
   test("missing --arm-sha exits 1", () => {
-    const { status, stderr } = run(["--version", "0.26.1", "--intel-sha", INTEL_SHA]);
+    const { status, stderr } = run(["--version", "0.26.1"]);
     assert.equal(status, 1);
     assert.match(stderr, /sha/i);
   });
 
-  test("missing --intel-sha exits 1", () => {
-    const { status, stderr } = run(["--version", "0.26.1", "--arm-sha", ARM_SHA]);
+  test("the removed --intel-sha flag is rejected", () => {
+    const { status, stderr } = run([...VALID_ARGS, "--intel-sha", "b".repeat(64)]);
     assert.equal(status, 1);
-    assert.match(stderr, /sha/i);
+    assert.match(stderr, /unknown argument/i);
   });
 
-  // Both sha flags share one validation path, but exercise each independently
-  // so a regression touching only one branch can't hide behind the other.
   // One test() per bad shape so the first failure doesn't mask the rest.
   const BAD_SHAS = {
     "too short": "abc",
@@ -114,33 +105,16 @@ describe("generate-homebrew-cask", () => {
     "non-hex char": `${"a".repeat(63)}g`,
     "too long": "a".repeat(65),
   };
-  for (const flag of ["--arm-sha", "--intel-sha"]) {
-    for (const [shape, bad] of Object.entries(BAD_SHAS)) {
-      test(`${flag} that is ${shape} exits 1`, () => {
-        const otherFlag = flag === "--arm-sha" ? "--intel-sha" : "--arm-sha";
-        const good = flag === "--arm-sha" ? INTEL_SHA : ARM_SHA;
-        const { status, stderr } = run([
-          "--version",
-          "0.26.1",
-          flag,
-          bad,
-          otherFlag,
-          good,
-        ]);
-        assert.equal(status, 1);
-        assert.match(stderr, /sha/i);
-      });
-    }
+  for (const [shape, bad] of Object.entries(BAD_SHAS)) {
+    test(`--arm-sha that is ${shape} exits 1`, () => {
+      const { status, stderr } = run(["--version", "0.26.1", "--arm-sha", bad]);
+      assert.equal(status, 1);
+      assert.match(stderr, /sha/i);
+    });
   }
 
   test("a flag with no following value exits 1 with a requires-a-value message", () => {
-    const { status, stderr } = run([
-      "--arm-sha",
-      ARM_SHA,
-      "--intel-sha",
-      INTEL_SHA,
-      "--version",
-    ]);
+    const { status, stderr } = run(["--arm-sha", ARM_SHA, "--version"]);
     assert.equal(status, 1);
     assert.match(stderr, /--version requires a value/);
   });

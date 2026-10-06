@@ -9,12 +9,11 @@
 // Usage:
 //   node scripts/generate-homebrew-cask.mjs \
 //     --version 0.26.0 \
-//     --arm-sha <sha256 of Band-<v>-apple-silicon.dmg> \
-//     --intel-sha <sha256 of Band-<v>-intel.dmg>
+//     --arm-sha <sha256 of Band-<v>-apple-silicon.dmg>
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { version: null, armSha: null, intelSha: null };
+  const opts = { version: null, armSha: null };
 
   // Read the value that follows a flag, failing with a flag-specific message
   // if it was the last token (so an omitted value isn't misreported later as
@@ -35,9 +34,6 @@ function parseArgs() {
       case "--arm-sha":
         opts.armSha = takeValue("--arm-sha", ++i);
         break;
-      case "--intel-sha":
-        opts.intelSha = takeValue("--intel-sha", ++i);
-        break;
       default:
         console.error(`Unknown argument: ${args[i]}`);
         process.exit(1);
@@ -48,20 +44,15 @@ function parseArgs() {
     console.error("--version must be a semver like 0.26.0");
     process.exit(1);
   }
-  for (const [flag, value] of [
-    ["--arm-sha", opts.armSha],
-    ["--intel-sha", opts.intelSha],
-  ]) {
-    if (!/^[0-9a-f]{64}$/.test(value ?? "")) {
-      console.error(`${flag} must be a lowercase hex sha256`);
-      process.exit(1);
-    }
+  if (!/^[0-9a-f]{64}$/.test(opts.armSha ?? "")) {
+    console.error("--arm-sha must be a lowercase hex sha256");
+    process.exit(1);
   }
 
   return opts;
 }
 
-const { version, armSha, intelSha } = parseArgs();
+const { version, armSha } = parseArgs();
 
 // The `binary` stanza symlinks the CLI sidecar bundled inside the app
 // (placed in Contents/Resources/binaries/ by electron-builder's
@@ -71,16 +62,9 @@ const { version, armSha, intelSha } = parseArgs();
 process.stdout.write(`cask "band" do
   version "${version}"
 
-  on_arm do
-    sha256 "${armSha}"
+  sha256 "${armSha}"
 
-    url "https://github.com/band-app/band/releases/download/v#{version}/Band-#{version}-apple-silicon.dmg"
-  end
-  on_intel do
-    sha256 "${intelSha}"
-
-    url "https://github.com/band-app/band/releases/download/v#{version}/Band-#{version}-intel.dmg"
-  end
+  url "https://github.com/band-app/band/releases/download/v#{version}/Band-#{version}-apple-silicon.dmg"
 
   name "Band"
   desc "IDE-agnostic agent orchestrator"
@@ -91,6 +75,7 @@ process.stdout.write(`cask "band" do
   # tells Homebrew not to manage upgrades -- hence no livecheck block, which
   # would only matter if brew upgrade owned the upgrade path.
   auto_updates true
+  depends_on arch: :arm64
   depends_on macos: :big_sur
 
   app "Band.app"
