@@ -13,6 +13,8 @@ import { Worker } from "../src/worker.ts";
 // scripted ACP stub, not the installed adapters.
 export const BAND_HOME = realpathSync(mkdtempSync(join(tmpdir(), "band-worker-home-")));
 process.env.BAND_HOME = BAND_HOME;
+// The band CLI sync installs skills under $HOME, so an in-process worker must never see the real one.
+process.env.HOME = BAND_HOME;
 process.env.SHELL = "/bin/bash";
 export const ACP_STUB = fileURLToPath(
   new URL("../../hub/tests/fixtures/acp-stub-agent.mjs", import.meta.url),

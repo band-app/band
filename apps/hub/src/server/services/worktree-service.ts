@@ -956,6 +956,11 @@ export class WorktreeService {
       log.warn({ worktreeId, err }, "failed to kill the worktree's language servers");
     });
 
+    // Close the worktree's browser. Only a remote host runs one, and the worker kills Chromium.
+    void host.browser.close(worktreeId).catch((err) => {
+      log.warn({ worktreeId, err }, "failed to close the worktree's browser");
+    });
+
     // Clean up worktree-scoped cronjobs
     cronjobService.removeForKey(worktreeId);
 

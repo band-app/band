@@ -2,8 +2,8 @@ import { delimiter, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { AgentStdio, McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
 import { shellPath } from "@band-app/host-local/process/path";
-import type { Channel } from "@band-app/link";
-import type { Registrar, WorkerContext } from "./context.ts";
+import { type Channel, decodeFrames, encodeFrame } from "@band-app/link";
+import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import {
   encodeJson,
   num,
@@ -224,6 +224,83 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     return { chan: ch.id, pid: stdio.pid ?? null };
   });
 
+  // ---- browsers -----------------------------------------------------------
+
+  // The profile lives in the worker's state dir, one per worktree, so the hub never names a path.
+  // `browser.connect` bridges one CDP connection: each channel message is one CDP message, in
+  // both directions. Resetting the channel drops the connection, and `browser.close` (or the
+  // worker stopping) ends the browser.
+  const profileDirFor = (worktreeId: string) => browserProfileDir(ctx.stateDir, worktreeId);
+  const openBrowsers = new Set<string>();
+  r.json("browser.open", (a) => {
+    const worktreeId = str(a, "worktreeId");
+    return host.browser
+      .open({
+        worktreeId,
+        profileDir: profileDirFor(worktreeId),
+        headless: optBool(a, "headless"),
+      })
+      .then((info) => {
+        openBrowsers.add(worktreeId);
+        return info;
+      });
+  });
+  r.raw("browser.connect", async (a) => {
+    const cdp = await host.browser.connect(str(a, "worktreeId"));
+    let ch: Channel;
+    try {
+      ch = session.openChannel("browser.cdp", { worktreeId: str(a, "worktreeId") });
+    } catch (err) {
+      cdp.close();
+      throw err;
+    }
+    const outbound = (async function* () {
+      for await (const message of cdp.messages) yield encodeFrame(message);
+    })();
+    // The hub's bytes arrive in arbitrary chunks, so they go through a queue into the frame decoder.
+    const chunks: Buffer[] = [];
+    let wake: (() => void) | undefined;
+    let ended = false;
+    const inbound = (async function* () {
+      for (;;) {
+        const next = chunks.shift();
+        if (next) {
+          yield next;
+          continue;
+        }
+        if (ended) return;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    })();
+    void (async () => {
+      try {
+        for await (const message of decodeFrames(inbound)) cdp.send(message);
+      } catch {
+        cdp.close();
+        ch.reset("bad frame");
+      }
+    })();
+    serve(ch, outbound, {
+      release: activity.hold(),
+      onInput: (chunk) => {
+        chunks.push(chunk);
+        wake?.();
+      },
+      onClosed: () => {
+        ended = true;
+        wake?.();
+        cdp.close();
+      },
+    });
+    return { chan: ch.id };
+  });
+  r.json("browser.close", (a) => {
+    openBrowsers.delete(str(a, "worktreeId"));
+    return host.browser.close(str(a, "worktreeId"));
+  });
+
   // ---- terminals ----------------------------------------------------------
 
   const pty = host.pty;
@@ -338,6 +415,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     unsubscribeExit();
     for (const { stdio } of agents.values()) stdio.kill();
     for (const proc of mcpProcesses) proc.kill();
+    await Promise.all([...openBrowsers].map((id) => host.browser.close(id)));
     await pty.close();
     await host.lsp.killAll();
   };

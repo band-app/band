@@ -8,6 +8,7 @@ import {
   ensureCdpTargetId,
   markTargetDestroyed,
 } from "./host-state";
+import { openRemoteCdp } from "./remote-cdp";
 
 const log = createLogger("cdp-proxy");
 
@@ -18,6 +19,8 @@ const log = createLogger("cdp-proxy");
  * Query params:
  *   - bandTabId: Band's `browser_<uuid>` id. Resolved server-side to the
  *     current chromium target id via `browser-host.ts::ensureCdpTargetId`.
+ *   - worktreeId: for a worktree on a worker, the browser-level CDP endpoint
+ *     of that worker's Chromium. Without it the desktop's page-level path runs.
  *
  * Close codes:
  *   - 4000 — bad request (missing bandTabId)
@@ -33,9 +36,28 @@ const log = createLogger("cdp-proxy");
 export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url ?? "", `http://${req.headers.host}`);
   const bandTabId = url.searchParams.get("bandTabId");
+  const requestedWorktreeId = url.searchParams.get("worktreeId");
+  const tabWorktreeId = lookupBrowser(bandTabId ?? "")?.worktreeId;
+  if (requestedWorktreeId && bandTabId && tabWorktreeId !== requestedWorktreeId) {
+    ws.close(4000, "bandTabId does not belong to worktreeId");
+    return;
+  }
 
-  if (!bandTabId) {
+  if (!bandTabId && !requestedWorktreeId) {
     ws.close(4000, "Missing bandTabId");
+    return;
+  }
+
+  // Only an explicit worktreeId reaches the worker's browser, whose profile belongs to the worktree
+  // and is not a desktop session. A bandTabId alone keeps the desktop's page-level path.
+  let early: string[] = [];
+  if (requestedWorktreeId) {
+    const bridged = await bridgeRemote(ws, requestedWorktreeId);
+    if (bridged === true) return;
+    early = bridged;
+  }
+  if (!bandTabId) {
+    ws.close(4000, "Worktree is not on a remote host");
     return;
   }
 
@@ -47,7 +69,7 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
   // Buffer client messages that arrive before the upstream WS opens.
   // Mirrors the LSP proxy pattern: without this the client's first request
   // (CDP `Runtime.enable`, etc.) can be dropped.
-  const pending: string[] = [];
+  const pending: string[] = early;
   let upstream: WebSocket | null = null;
 
   ws.on("message", (raw) => {
@@ -128,4 +150,61 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
       // best-effort
     }
   });
+}
+
+const MAX_PENDING_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Bridges the client to the Chromium of a worktree on a worker. Returns the client
+ * messages received so far when the worktree is local, so the caller falls through to the desktop path.
+ * The remote profile belongs to the worktree and the hub only relays, so the
+ * cookie rule of the desktop's profiles does not apply here.
+ */
+async function bridgeRemote(ws: WsServerSocket, worktreeId: string): Promise<true | string[]> {
+  const pending: string[] = [];
+  let pendingBytes = 0;
+  let cdp: Awaited<ReturnType<typeof openRemoteCdp>> = null;
+  // Registered before the first await so no early client message is dropped.
+  ws.on("message", (raw) => {
+    const data = raw.toString();
+    if (cdp) cdp.send(data);
+    else if (pendingBytes + data.length > MAX_PENDING_BYTES) ws.close(1009, "Too much data");
+    else {
+      pendingBytes += data.length;
+      pending.push(data);
+    }
+  });
+  try {
+    cdp = await openRemoteCdp(worktreeId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("remote CDP failed for worktree %s: %s", worktreeId, message);
+    if (ws.readyState === ws.OPEN) ws.close(4001, "Remote browser unavailable");
+    return true;
+  }
+  if (!cdp) {
+    ws.removeAllListeners("message");
+    return pending;
+  }
+  const open = cdp;
+  if (ws.readyState !== ws.OPEN) {
+    // The client left while the browser was starting; its close event already fired.
+    open.close();
+    return true;
+  }
+  for (const msg of pending) open.send(msg);
+  pending.length = 0;
+  ws.on("close", () => open.close());
+  ws.on("error", () => open.close());
+  void (async () => {
+    try {
+      for await (const message of open.messages) {
+        if (ws.readyState === ws.OPEN) ws.send(message);
+      }
+    } catch (err) {
+      log.debug("remote CDP stream ended for worktree %s: %s", worktreeId, String(err));
+    }
+    if (ws.readyState === ws.OPEN) ws.close(1000, "Upstream closed");
+  })();
+  return true;
 }

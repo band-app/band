@@ -172,15 +172,7 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
-      - name: Test (web)
-        run: |
-          pnpm --filter @band-app/server test
-          pnpm --filter @band-app/web test
-          pnpm --filter @band-app/link test
-          pnpm --filter @band-app/environment test
-          pnpm --filter @band-app/host-local test
-          pnpm --filter @band-app/worker test
-
+      # Before the tests: the remote browser suites (hub and worker) skip when no Chromium is found.
       # Keyed on the Playwright version, with no restore-keys, so a bump
       # starts clean instead of carrying old browser builds forward.
       - name: Resolve Playwright version
@@ -214,6 +206,18 @@ jobs:
           # When editing path/key here, mirror in "Restore Playwright browsers cache".
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
+
+      - name: Test (web)
+        env:
+          # The runner's user namespace policy can stop Chromium's sandbox from starting.
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        run: |
+          pnpm --filter @band-app/server test
+          pnpm --filter @band-app/web test
+          pnpm --filter @band-app/link test
+          pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/host-local test
+          pnpm --filter @band-app/worker test
 
       - name: Test e2e (web)
         run: pnpm --filter @band-app/web test:e2e
@@ -398,9 +402,13 @@ jobs:
       - name: Worker package smoke
         run: pnpm --filter @band-app/worker pack:smoke
 
+      - name: Install Playwright Chromium (remote browser suite)
+        run: pnpm --filter @band-app/web exec playwright install --with-deps chromium
+
       - name: Test hub (remote-loopback)
         run: pnpm --filter @band-app/server exec vitest run
         env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
 
   # ---------------------------------------------------------------------------
