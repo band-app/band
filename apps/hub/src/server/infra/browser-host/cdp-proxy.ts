@@ -49,6 +49,13 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
     return;
   }
 
+  // A tab in a browser profile is never relayed, remote or not. Only an explicit worktreeId reaches
+  // the worker's browser, whose profile belongs to the worktree and is not a desktop session.
+  if (!requestedWorktreeId && bandTabId && lookupBrowser(bandTabId)?.profileId) {
+    ws.close(4003, "Tabs in a browser profile can't be streamed over CDP");
+    return;
+  }
+
   let early: string[] = [];
   if (worktreeId) {
     const bridged = await bridgeRemote(ws, worktreeId);

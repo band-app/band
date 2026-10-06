@@ -99,13 +99,18 @@ async function connectCdp(query: string) {
     ws.once("close", (code, reason) => reject(new Error(`closed ${code} ${reason}`)));
   });
   let nextId = 0;
+  // A closed socket fails the waiting calls at once, with the close reason, instead of timing the test out.
+  const closed = new Promise<never>((_, reject) =>
+    ws.once("close", (code, reason) => reject(new Error(`CDP socket closed ${code} ${reason}`))),
+  );
+  closed.catch(() => undefined);
   return {
     ws,
     send(method: string, params: unknown = {}, sessionId?: string) {
       const id = ++nextId;
       const reply = new Promise<Record<string, unknown>>((resolve) => pending.set(id, resolve));
       ws.send(JSON.stringify({ id, method, params, sessionId }));
-      return reply.then((message) => {
+      return Promise.race([reply, closed]).then((message) => {
         if (message.error) throw new Error(`${method}: ${JSON.stringify(message.error)}`);
         return message.result as Record<string, unknown>;
       });

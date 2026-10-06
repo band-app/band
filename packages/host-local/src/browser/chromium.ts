@@ -8,7 +8,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -199,7 +199,10 @@ export class ChromiumManager {
       "--use-mock-keychain",
       "--password-store=basic",
       // Needed as root and in containers, where the sandbox cannot start.
-      ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
+      // `BAND_CHROMIUM_NO_SANDBOX=1` is for hosts that forbid the sandbox's user namespaces, such as CI runners.
+      ...(process.getuid?.() === 0 || process.env.BAND_CHROMIUM_NO_SANDBOX === "1"
+        ? ["--no-sandbox"]
+        : []),
       ...(headless ? ["--headless=new"] : []),
       "about:blank",
     ];
@@ -210,17 +213,23 @@ export class ChromiumManager {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([key]) => !key.startsWith("BAND_")),
     );
+    const logPath = join(profileDir, "chromium.log");
+    const logFd = openSync(logPath, "w", 0o600);
     const proc = spawn(bin, args, {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", logFd],
       detached: true,
       env: { ...env, HOME: home },
     });
+    closeSync(logFd);
     const exited = new Promise<void>((resolve) => {
       proc.once("exit", () => resolve());
       proc.once("error", () => resolve());
     });
     try {
-      const { port, path } = await readDevToolsPort(profileDir, proc);
+      const { port, path } = await readDevToolsPort(profileDir, proc).catch(async (err: Error) => {
+        const tail = (await readFile(logPath, "utf8").catch(() => "")).trim().split("\n").slice(-5);
+        throw new Error(`${err.message}${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`);
+      });
       const info: BrowserInfo = { pid: proc.pid, profileDir, headless, port };
       const entry: Running = { proc, info, wsUrl: `ws://127.0.0.1:${port}${path}`, exited };
       this.running.set(spec.worktreeId, entry);

@@ -208,6 +208,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
 
       - name: Test (web)
+        env:
+          # The runner's user namespace policy can stop Chromium's sandbox from starting.
+          BAND_CHROMIUM_NO_SANDBOX: "1"
         run: |
           pnpm --filter @band-app/server test
           pnpm --filter @band-app/web test
@@ -405,6 +408,7 @@ jobs:
       - name: Test hub (remote-loopback)
         run: pnpm --filter @band-app/server exec vitest run
         env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
 
   # ---------------------------------------------------------------------------
