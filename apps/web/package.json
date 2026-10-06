@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.5.0",
+    "@novnc/novnc": "^1.7.0",
     "@xterm/addon-search": "0.17.0-beta.300",
     "@xterm/addon-unicode11": "0.10.0-beta.300",
     "@xterm/addon-webgl": "0.20.0-beta.299",

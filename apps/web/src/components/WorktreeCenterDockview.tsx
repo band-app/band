@@ -158,6 +158,7 @@ import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
+import { DesktopHeaderButton } from "./DesktopHeaderButton";
 import {
   CenterDragBar,
   RightPanelToggle,
@@ -2923,10 +2924,13 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
 
   const MaxIcon = isMaximized ? Minimize2 : Maximize2;
   const maxLabel = isMaximized ? "Restore" : "Maximize";
+  const activeWorktreeId = (props.group.activePanel?.params as { worktreeId?: string } | undefined)
+    ?.worktreeId;
 
   return (
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
+      {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
