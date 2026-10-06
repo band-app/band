@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { getDb } from "../connection";
 import { usageEvents as usageEventsTable } from "../schema";
 import { SettingsQueries } from "./settings";
@@ -298,6 +298,35 @@ export class UsageEventQueries {
         sessionCount: Number(r.sessionCount),
       };
     });
+  }
+
+  /**
+   * Cost per worktree, chat and local day for the given worktrees since `fromMs`.
+   * `chatId` is null for rows the disk scanner backfilled, which no chat owns.
+   */
+  spendByChatAndDay(
+    worktreeIds: string[],
+    fromMs: number,
+  ): Array<{ worktreeId: string; chatId: string | null; day: string; costUsd: number }> {
+    if (worktreeIds.length === 0) return [];
+    const day = sql<string>`strftime('%Y-%m-%d', ${usageEventsTable.capturedAt} / 1000, 'unixepoch', 'localtime')`;
+    return getDb()
+      .select({
+        worktreeId: usageEventsTable.worktreeId,
+        chatId: usageEventsTable.chatId,
+        day: day.as("day"),
+        costUsd: sql<number>`COALESCE(SUM(${usageEventsTable.costUsd}), 0)`,
+      })
+      .from(usageEventsTable)
+      .where(
+        and(
+          inArray(usageEventsTable.worktreeId, worktreeIds),
+          gte(usageEventsTable.capturedAt, fromMs),
+        ),
+      )
+      .groupBy(usageEventsTable.worktreeId, usageEventsTable.chatId, sql`day`)
+      .all()
+      .map((r) => ({ ...r, costUsd: Number(r.costUsd) }));
   }
 
   /**

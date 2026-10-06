@@ -10,8 +10,9 @@ import {
   Label,
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
+import { useAdapter } from "../context";
 import { useRepos } from "../hooks/use-repos";
 
 type ProjectList = Awaited<ReturnType<typeof trpc.projects.list.query>>;
@@ -591,6 +592,259 @@ function PolicySection({
   );
 }
 
+const usd = (n: number) => `$${n.toFixed(2)}`;
+
+function DashboardSection({
+  project,
+  canEdit,
+  onOpenWorktree,
+}: {
+  project: Project;
+  canEdit: boolean;
+  onOpenWorktree: (worktreeId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const adapter = useAdapter();
+  const key = ["projects.dashboard", project.id];
+  // The status stream says when chats, sessions, PRs or wake-ups change. A turn starting or ending and
+  // a dispatch changing have no event of their own, so a slow poll stays as the fallback.
+  useEffect(
+    () =>
+      adapter.subscribeStatusEvents((event) => {
+        if (
+          event.kind === "update" ||
+          event.kind === "branch-status" ||
+          event.kind === "chat-created" ||
+          event.kind === "chat-removed" ||
+          event.kind === "agent-session-created" ||
+          event.kind === "agent-session-updated" ||
+          event.kind === "agent-session-ended" ||
+          event.kind === "subscription-created" ||
+          event.kind === "subscription-delivered" ||
+          event.kind === "subscription-removed"
+        ) {
+          void queryClient.invalidateQueries({ queryKey: ["projects.dashboard", project.id] });
+        }
+      }),
+    [adapter, queryClient, project.id],
+  );
+  const query = useQuery({
+    queryKey: key,
+    queryFn: () => trpc.projects.dashboard.query({ project: project.id }),
+    refetchInterval: 5000,
+  });
+  const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await fn();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: key });
+      await queryClient.invalidateQueries({ queryKey: ["projects.dispatches", project.id] });
+    }
+  };
+  const data = query.data;
+  if (!data) return null;
+  const { spend } = data;
+  return (
+    <div className="space-y-4" data-testid="dashboard">
+      <section className="space-y-2" data-testid="dashboard__agents">
+        <h3 className="text-sm font-medium">Agents</h3>
+        {data.agents.length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="dashboard__no-agents">
+            No agents yet.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {data.agents.map((a) => (
+              <li
+                key={a.chatId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
+                data-testid="dashboard__agent"
+                data-chat={a.chatId}
+                data-role={a.role}
+                data-status={a.status}
+              >
+                <span>
+                  <span className="font-medium">
+                    {a.role === "coordinator" ? "Coordinator" : a.name}
+                  </span>{" "}
+                  <span className="text-xs text-muted-foreground">
+                    {a.repo}/{a.branch}, host {a.hostId ?? "local"}, {a.agent}
+                    {a.model ? ` (${a.model})` : ""}, {usd(a.spendUsd)}
+                    {a.lastActivityAt
+                      ? `, active ${new Date(a.lastActivityAt).toLocaleString()}`
+                      : ""}
+                  </span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="text-xs" data-testid="dashboard__agent-status">
+                    {a.status}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="dashboard__agent-open"
+                    onClick={() => onOpenWorktree(a.worktreeId)}
+                  >
+                    Open chat
+                  </Button>
+                  {canEdit && a.status === "running" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="dashboard__agent-stop"
+                      onClick={() =>
+                        act(() =>
+                          trpc.projects.stopAgent.mutate({ project: project.id, chatId: a.chatId }),
+                        )
+                      }
+                    >
+                      Stop
+                    </Button>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-2" data-testid="dashboard__spend">
+        <h3 className="text-sm font-medium">Spend</h3>
+        <p className="text-sm">
+          Today <span data-testid="dashboard__spend-today">{usd(spend.todayUsd)}</span>, last 7 days{" "}
+          <span data-testid="dashboard__spend-week">{usd(spend.last7DaysUsd)}</span>, total{" "}
+          <span data-testid="dashboard__spend-total">{usd(spend.totalUsd)}</span>
+          {spend.budgetUsd !== null ? (
+            <>
+              , budget {usd(spend.budgetUsd)}, remaining{" "}
+              <span data-testid="dashboard__spend-remaining">{usd(spend.remainingUsd ?? 0)}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground"> (no budget set)</span>
+          )}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Unattributed (no chat owns it):{" "}
+          <span data-testid="dashboard__spend-unattributed">{usd(spend.unattributedUsd)}</span>
+        </p>
+        <ul className="flex gap-3 text-xs text-muted-foreground">
+          {spend.days.map((d) => (
+            <li key={d.day} data-testid="dashboard__spend-day" data-day={d.day}>
+              {d.day.slice(5)} {usd(d.usd)}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-2" data-testid="dashboard__groups">
+        <h3 className="text-sm font-medium">Task groups and pull requests</h3>
+        {data.groups.length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="dashboard__no-groups">
+            No task groups yet.
+          </p>
+        ) : null}
+        {data.groups.map((g) => (
+          <div
+            key={g.id}
+            className="space-y-1 rounded-md border p-3"
+            data-testid="dashboard__group"
+            data-group={g.id}
+          >
+            <p className="text-sm font-medium">{g.title}</p>
+            <ol className="list-decimal pl-5 text-sm">
+              {g.members.map((m) => (
+                <li
+                  key={m.repo}
+                  data-testid="dashboard__member"
+                  data-repo={m.repo}
+                  data-order={m.mergeOrder}
+                  data-ci={m.ci ?? ""}
+                  data-pr-state={m.pr?.state ?? ""}
+                >
+                  {m.repo}
+                  {m.worktreeId ? `, worktree ${m.worktreeId}` : ", waiting for a host"}
+                  {m.pr ? (
+                    <>
+                      {", "}
+                      <a
+                        href={m.pr.url ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                        data-testid="dashboard__member-pr"
+                      >
+                        PR #{m.pr.number}
+                      </a>
+                      {`, ${m.pr.isDraft ? "draft" : m.pr.state}`}
+                    </>
+                  ) : (
+                    ", no PR"
+                  )}
+                  <span data-testid="dashboard__member-ci">{m.ci ? `, CI ${m.ci}` : ""}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </section>
+
+      <section className="space-y-2" data-testid="dashboard__approvals">
+        <h3 className="text-sm font-medium">Waiting for approval</h3>
+        {data.pendingDispatches.length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="dashboard__no-approvals">
+            Nothing waits for approval.
+          </p>
+        ) : null}
+        {data.pendingDispatches.map((r) => (
+          <div
+            key={r.id}
+            className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm"
+            data-testid="dashboard__approval"
+            data-dispatch={r.id}
+          >
+            <span>
+              {r.title}{" "}
+              <span className="text-xs text-muted-foreground">({r.repos.join(", ")})</span>
+            </span>
+            {canEdit ? (
+              <Button
+                size="sm"
+                data-testid="dashboard__approval-approve"
+                onClick={() => act(() => trpc.projects.approveDispatch.mutate({ requestId: r.id }))}
+              >
+                Approve
+              </Button>
+            ) : null}
+          </div>
+        ))}
+      </section>
+
+      <section className="space-y-1" data-testid="dashboard__wakeups">
+        <h3 className="text-sm font-medium">Recent coordinator wake-ups</h3>
+        {data.wakeups.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nothing has woken the coordinator yet.</p>
+        ) : (
+          <ul className="space-y-1 text-xs">
+            {data.wakeups.slice(0, 5).map((w) => (
+              <li key={`${w.subscriptionId}-${w.receivedAt}-${w.summary}`}>
+                <span className="text-muted-foreground">
+                  {new Date(w.receivedAt).toLocaleString()}:{" "}
+                </span>
+                {w.summary}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <ErrorLine message={error} />
+    </div>
+  );
+}
+
 function DispatchSection({ project, canEdit }: { project: Project; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -1078,6 +1332,8 @@ function ProjectDetail({
           </p>
         ) : null}
       </div>
+
+      <DashboardSection project={project} canEdit={canEdit} onOpenWorktree={onOpenWorktree} />
 
       <CoordinatorSection
         project={project}
