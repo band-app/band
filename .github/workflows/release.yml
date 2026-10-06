@@ -26,6 +26,8 @@ jobs:
     name: Release
     runs-on: macos-latest
     environment: production
+    outputs:
+      version: ${{ steps.version.outputs.new_version }}
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
 
@@ -231,6 +233,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # The worker ships as its own package, so `npm i -g @band-app/worker`
+      # works on a machine that only runs worktrees.
+      - name: Publish worker to npm
+        working-directory: apps/worker
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       # Regenerate the Homebrew cask in band-app/homebrew-band so
       # `brew install --cask band` resolves the release that was just
       # published. Hashes the local signed DMGs (same files uploaded above)
@@ -274,3 +284,17 @@ jobs:
           fi
           git commit -m "band ${VERSION}"
           git push origin HEAD:main
+
+  # ghcr.io/band-app/band-hub and band-worker, built from the tag the release
+  # job pushed. See images.yml.
+  images:
+    name: Images
+    needs: release
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.release.outputs.version }}
+      ref: v${{ needs.release.outputs.version }}
+      push: true

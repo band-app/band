@@ -274,6 +274,10 @@ Worktrees on an ephemeral worker sleep when it idles and wake on the next use (`
 - Limits: ignored files, running processes and terminals do not survive. The snapshot upload needs a writable origin or a usable `<BAND_HOME>/sleep`.
 - Tests: `apps/hub/tests/ephemeral-lifecycle.test.ts` (real hub, real `local` hook and worker, scripted ACP agent), `apps/worker/tests/lifecycle.test.ts`, `apps/web/e2e/sleeping-worktree.spec.ts`.
 
+## Architecture: distribution
+
+`release.yml` publishes the DMGs, the Homebrew cask, `@band-app/server` and `@band-app/worker` on npm, and then calls `images.yml`, which builds `docker/Dockerfile` and `docker/worker.Dockerfile` as `ghcr.io/band-app/band-hub` and `band-worker` (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`, pushed by digest and merged into a manifest tagged `<version>` and `latest`). The same workflow runs on a pull request that touches `docker/`, `deploy/compose/` or the release workflows, with nothing pushed. `deploy/compose/compose.yml` pulls `ghcr.io/band-app/band-hub:${BAND_VERSION:-latest}` (`BAND_IMAGE` overrides the whole name), and `compose.build.yml` is the override that builds from the checkout. The CI `docker` job tags its build as `ghcr.io/band-app/band-hub:ci` and runs compose with `BAND_VERSION=ci`. `band-worker install-service | uninstall-service | status` (`apps/worker/src/service.ts`) manage a systemd user unit or a launchd agent, with the token only in a 0600 file under a 0700 `~/.band/worker-service`. Tests: `apps/worker/tests/service.test.ts` (the real binary against stub `systemctl`, `loginctl` and `launchctl` on PATH) and `apps/web/e2e/settings-hosts.spec.ts` for the install tabs of Add worker. The guide is `docs/install.md`.
+
 ## Architecture: headless hub deploy
 
 `deploy/compose/compose.yml` runs the hub image with a `band-data` volume for BAND_HOME, a healthcheck that reads the token from `settings.json`, and an optional Caddy `tls` profile. The guide is `docs/run-the-hub-on-a-server.md`, and the CI `docker` job runs the compose file.

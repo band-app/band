@@ -5,13 +5,12 @@ This page covers running the Band hub on a home server or a VPS with Docker Comp
 ## Start the hub
 
 ```sh
-cd deploy/compose
-cp .env.example .env      # optional
+curl -O https://raw.githubusercontent.com/band-app/band/main/deploy/compose/compose.yml
 docker compose up -d
 docker compose logs band  # find the admin token
 ```
 
-The first run builds the image from the repository, so it takes a few minutes. The hub listens on `127.0.0.1:3456` of the host. Set `BAND_BIND=0.0.0.0` in `.env` to publish it on all interfaces, and only do that on a trusted network.
+Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a release. For settings, copy `deploy/compose/.env.example` to `.env` next to `compose.yml`. To build the image from a checkout instead, run `docker compose -f compose.yml -f compose.build.yml up -d --build` in `deploy/compose`. The hub listens on `127.0.0.1:3456` of the host. Set `BAND_BIND=0.0.0.0` in `.env` to publish it on all interfaces, and only do that on a trusted network.
 
 ### The admin token
 
