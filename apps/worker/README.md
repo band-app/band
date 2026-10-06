@@ -15,17 +15,28 @@ band-worker --hub https://hub.example.com --token "$BAND_WORKER_TOKEN" --root ~/
 
 A checkout runs `src/` through `tsx`. Set `BAND_WORKER_USE_DIST=1` to run the bundle from a checkout.
 
-Release automation does not publish this package yet.
+The release workflow publishes this package with the same version as the desktop app, and the container image below as `ghcr.io/band-app/band-worker`.
+
+### Run as a service
+
+`band-worker install-service --hub <url> --token <bootstrap token> [--root <dir> --name <name> --labels k=v --worker-id <id> --state-dir <dir>]` registers the worker so it starts at login and restarts on failure (`src/service.ts`):
+
+- Linux: the systemd user unit `~/.config/systemd/user/band-worker.service` reads `~/.band/worker-service/worker.env`, then `systemctl --user enable --now` and `loginctl enable-linger`. When linger is refused, the command prints what to run.
+- macOS: the launchd agent `~/Library/LaunchAgents/app.band.worker.plist` carries the environment and logs to `~/.band/worker-service/worker.log`.
+
+`~/.band/worker-service` is mode 0700 and the file holding the token is 0600. Neither the command nor the unit file prints or contains the token outside that file. `band-worker uninstall-service` removes the service files and keeps the worker's state. `band-worker status` exits 0 when the service runs, 3 when it is installed but stopped and 4 when it is not installed.
 
 ## Container image
 
 `docker/worker.Dockerfile` builds a `node:22-bookworm-slim` image with the packed worker, `git`, `ssh`, `curl`, `jq` and `bash`. It runs as uid 10001 (`worker`) and keeps worktrees in the `/work` volume and the worker id and session token in `/home/worker/.band/worker`.
 
 ```sh
-docker build -f docker/worker.Dockerfile -t band-worker .
 docker run -d -v band-work:/work -v band-worker-state:/home/worker/.band/worker \
   -e BAND_HUB_URL=https://hub.example.com \
-  -e BAND_WORKER_TOKEN=bwb_... band-worker
+  -e BAND_WORKER_TOKEN=bwb_... ghcr.io/band-app/band-worker:latest
+
+# or from a checkout:
+docker build -f docker/worker.Dockerfile -t band-worker .
 ```
 
 The worker takes plain `http` only for a loopback hub. For a hub on the same Docker host, add `--network host` and use `http://127.0.0.1:<port>`; otherwise put the hub behind HTTPS.

@@ -554,7 +554,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build image
-        run: docker build -f docker/Dockerfile -t band-check . 2>&1 | tee docker-build.log
+        # Tagged as the published name, so compose.yml pulls nothing and runs this build.
+        run: docker build -f docker/Dockerfile -t band-check -t ghcr.io/band-app/band-hub:ci . 2>&1 | tee docker-build.log
 
       - name: Check the shell was prerendered
         run: |
@@ -587,10 +588,18 @@ jobs:
         if: always()
         run: docker rm -f band-smoke || true
 
+      - name: Compose files resolve to the published image and the local build
+        working-directory: deploy/compose
+        env:
+          BAND_VERSION: ci
+        run: |
+          docker compose config --images | grep -qx 'ghcr.io/band-app/band-hub:ci'
+          docker compose -f compose.yml -f compose.build.yml config | grep -q 'dockerfile: docker/Dockerfile'
+
       - name: Compose up
         working-directory: deploy/compose
         env:
-          BAND_IMAGE: band-check
+          BAND_VERSION: ci
           BAND_PORT: "3466"
           BAND_ADMIN_TOKEN: ci-compose-token
         run: |
@@ -617,7 +626,7 @@ jobs:
       - name: Compose keeps data across a recreate
         working-directory: deploy/compose
         env:
-          BAND_IMAGE: band-check
+          BAND_VERSION: ci
           BAND_PORT: "3466"
           BAND_ADMIN_TOKEN: ci-compose-token
         run: |
@@ -640,7 +649,7 @@ jobs:
       - name: Compose with BAND_SERVE_UI=false
         working-directory: deploy/compose
         env:
-          BAND_IMAGE: band-check
+          BAND_VERSION: ci
           BAND_PORT: "3466"
           BAND_ADMIN_TOKEN: ci-compose-token
           BAND_SERVE_UI: "false"
@@ -659,7 +668,7 @@ jobs:
       - name: First run prints the admin token once
         working-directory: deploy/compose
         env:
-          BAND_IMAGE: band-check
+          BAND_VERSION: ci
           BAND_PORT: "3466"
         run: |
           docker compose down -v
@@ -699,7 +708,7 @@ jobs:
       - name: Hub for the worker
         working-directory: deploy/compose
         env:
-          BAND_IMAGE: band-check
+          BAND_VERSION: ci
           BAND_PORT: "3466"
           BAND_ADMIN_TOKEN: ci-worker-hub-token
         run: |

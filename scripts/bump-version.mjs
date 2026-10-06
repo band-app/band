@@ -11,6 +11,7 @@ const JSON_FILES = [
   "package.json",
   "apps/web/package.json",
   "apps/hub/package.json",
+  "apps/worker/package.json",
   "apps/desktop/package.json",
   "packages/ui/package.json",
   "packages/coding-agent/package.json",

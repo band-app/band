@@ -77,8 +77,28 @@ test("creates a worker bootstrap token and lists its offline host", async ({ pag
   expect(command).toMatch(/BAND_WORKER_ID=h-[0-9a-f]+/);
   expect(command.endsWith("band-worker")).toBe(true);
 
-  // The new host is listed, offline, with its labels.
+  // The npm service tab installs the worker as a service with the same token and host id.
   const hostId = /BAND_WORKER_ID=(\S+)/.exec(command)?.[1] ?? "";
+  const service = await settingsPage.readInstallCommand("service");
+  expect(service).toBe(
+    `npm install -g @band-app/worker && band-worker install-service --hub ${server.url} --worker-id ${hostId} --token ${token}`,
+  );
+
+  expect(await settingsPage.copyWorkerCommand()).toBe(service);
+
+  // The Docker tabs run the published worker image. The test hub is on loopback, so they join the host network.
+  const docker = await settingsPage.readInstallCommand("docker");
+  expect(docker).toContain("ghcr.io/band-app/band-worker:latest");
+  expect(docker).toContain("--network host");
+  expect(docker).toContain(`-e BAND_WORKER_TOKEN=${token}`);
+  expect(docker).toContain(`-e BAND_HUB_URL=${server.url}`);
+  const compose = await settingsPage.readInstallCommand("compose");
+  expect(compose).toContain("image: ghcr.io/band-app/band-worker:latest");
+  expect(compose).toContain(`BAND_WORKER_TOKEN: ${token}`);
+  expect(compose).toContain(`BAND_WORKER_ID: ${hostId}`);
+  expect(compose).toContain("network_mode: host");
+
+  // The new host is listed, offline, with its labels.
   const row = settingsPage.hostRow(hostId);
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-status", "offline");

@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 ##############################################################################
-# Band server — Linux test image (issue #594)
+# Band hub image (issue #594)
 #
 # Builds the standalone @band-app/server (API server plus UI, no Electron) plus the
 # Rust `band` CLI, then runs them on a stock Debian host that has NO zsh and
 # NO Homebrew — exactly the environment the Linux-compatibility work targets.
-# This is a test harness, not a production/publish image.
+# The release workflow publishes it as ghcr.io/band-app/band-hub (amd64, arm64).
 ##############################################################################
 
 # ---------------------------------------------------------------------------
@@ -85,4 +85,8 @@ ENV NODE_ENV=production \
     BAND_CLI_PATH=/opt/band/binaries/band \
     HOME=/data
 EXPOSE 3456
+ARG BAND_VERSION=dev
+LABEL org.opencontainers.image.title="band-hub" \
+      org.opencontainers.image.source="https://github.com/band-app/band" \
+      org.opencontainers.image.version="${BAND_VERSION}"
 ENTRYPOINT ["/usr/local/bin/band-entrypoint.sh"]
