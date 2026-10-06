@@ -2,6 +2,7 @@ import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
@@ -188,6 +189,18 @@ export function HostsSettings() {
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">
                   {host.status}
                 </span>
+                {host.capabilities.includes("desktop") && host.status === "online" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Open desktop of ${host.name}`}
+                    data-testid="settings__host-open-desktop"
+                    onClick={() => openDesktopViewer(host.id)}
+                  >
+                    Open desktop
+                  </Button>
+                )}
                 {host.id !== "local" && (
                   <Button
                     type="button"

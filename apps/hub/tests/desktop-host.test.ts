@@ -44,6 +44,8 @@ const tmp = (prefix: string) => {
 let server: ServerHandle;
 let rfb: Server;
 let rfbPort = 0;
+/** Every byte the stand-in RFB server has received since the last reset, as hex. */
+let rfbReceived = "";
 const workers: ChildProcess[] = [];
 let withDesktop: string;
 let withoutDesktop: string;
@@ -120,7 +122,10 @@ beforeAll(async () => {
   // Stand-in for x11vnc: sends the RFB greeting, then echoes what the viewer writes.
   rfb = createServer((socket) => {
     socket.write("RFB 003.008\n");
-    socket.on("data", (d) => socket.write(Buffer.concat([Buffer.from("echo:"), d])));
+    socket.on("data", (d) => {
+      rfbReceived += d.toString("hex");
+      socket.write(Buffer.concat([Buffer.from("echo:"), d]));
+    });
     socket.on("error", () => undefined);
   });
   await new Promise<void>((resolve) => rfb.listen(0, "127.0.0.1", resolve));
@@ -239,5 +244,76 @@ describe("GET /api/hosts/<id>/desktop", () => {
       ws.on("error", () => resolve("refused"));
     });
     expect(outcome).toBe("refused");
+  });
+});
+
+describe("view-only and control", () => {
+  const handshake = [
+    Buffer.from("RFB 003.008\n"),
+    Buffer.from([1]), // security type None
+    Buffer.from([1]), // ClientInit, shared
+  ];
+  const keyEvent = Buffer.from("0401000000000061", "hex");
+  const pointerEvent = Buffer.from("050100640064", "hex");
+  const cutText = Buffer.concat([Buffer.from("0600000000000002", "hex"), Buffer.from("hi")]);
+  const updateRequest = Buffer.from("03000000000000640064", "hex");
+  const setEncodings = Buffer.from("0200000100000000", "hex");
+
+  async function session() {
+    rfbReceived = "";
+    const v = viewer(withDesktop);
+    await v.opened;
+    await waitFor(() => (v.text().startsWith("RFB") ? true : undefined), { label: "RFB greeting" });
+    for (const part of handshake) v.ws.send(part);
+    return v;
+  }
+  const seen = (message: Buffer) => rfbReceived.includes(message.toString("hex"));
+
+  it("drops KeyEvent, PointerEvent and ClientCutText sent directly in view-only mode", async () => {
+    const v = await session();
+    // One frame carrying every kind, so a filter that looked only at the first byte would fail.
+    v.ws.send(Buffer.concat([setEncodings, keyEvent, pointerEvent, cutText, updateRequest]));
+    await waitFor(() => (seen(updateRequest) ? true : undefined), {
+      label: "the FramebufferUpdateRequest to reach x11vnc",
+    });
+    expect(seen(setEncodings)).toBe(true);
+    expect(seen(keyEvent)).toBe(false);
+    expect(seen(pointerEvent)).toBe(false);
+    expect(seen(cutText)).toBe(false);
+    v.ws.close();
+    await v.closed;
+  });
+
+  it("does not take a binary frame for a control request", async () => {
+    const v = await session();
+    v.ws.send(Buffer.from(JSON.stringify({ type: "control", enabled: true })));
+    // The hub reads the frame as RFB, finds no such message type and ends the session.
+    expect((await v.closed).code).toBe(1008);
+    expect(seen(keyEvent)).toBe(false);
+  });
+
+  it("forwards input after the pane asks for control, and drops it again when it gives control up", async () => {
+    const v = await session();
+    v.ws.send(JSON.stringify({ type: "control", enabled: true }));
+    // Text and binary frames arrive in order on one socket, so the request is applied first.
+    v.ws.send(Buffer.concat([keyEvent, pointerEvent, cutText]));
+    await waitFor(() => (seen(cutText) ? true : undefined), { label: "input to reach x11vnc" });
+    expect(seen(keyEvent)).toBe(true);
+    expect(seen(pointerEvent)).toBe(true);
+
+    rfbReceived = "";
+    v.ws.send(JSON.stringify({ type: "control", enabled: false }));
+    v.ws.send(Buffer.concat([keyEvent, updateRequest]));
+    await waitFor(() => (seen(updateRequest) ? true : undefined), { label: "the update request" });
+    expect(seen(keyEvent)).toBe(false);
+    v.ws.close();
+    await v.closed;
+  });
+
+  it("closes a viewer that sends a message type the hub cannot follow", async () => {
+    const v = await session();
+    v.ws.send(Buffer.from([250, 0, 0, 0]));
+    const { code } = await v.closed;
+    expect(code).toBe(1008);
   });
 });

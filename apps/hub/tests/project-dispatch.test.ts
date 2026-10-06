@@ -19,7 +19,13 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { STUB_AGENT_PATH, type StubRequest, stubRequests, TEST_TOKEN } from "./helpers/acp-chat";
+import {
+  completeLines,
+  STUB_AGENT_PATH,
+  type StubRequest,
+  stubRequests,
+  TEST_TOKEN,
+} from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -162,9 +168,7 @@ const briefOf = (repo: string, branch: string) =>
 
 const workerPrompts = (): string[] =>
   existsSync(workerStubLog)
-    ? readFileSync(workerStubLog, "utf8")
-        .split("\n")
-        .filter(Boolean)
+    ? completeLines(readFileSync(workerStubLog, "utf8"))
         .map((l) => JSON.parse(l) as { method: string; params: unknown })
         .filter((r) => r.method === "session/prompt")
         .map((r) => JSON.stringify(r.params))
@@ -532,11 +536,15 @@ describe("the policy refuses a dispatch (S3)", () => {
     expect(observe.isError).toBe(true);
     expect(observe.text).toContain("observe mode");
 
-    const bearer = await coordinatorOf("auto");
+    // The checks below need an autonomous project and a branch that is already taken, so they
+    // make their own and do not depend on what the S1 tests dispatched.
+    await createProject("strict", { autonomy: "autonomous", labels: ["zone=home"] });
+    const bearer = await coordinatorOf("strict");
+    await m("worktrees.create", { repo: "api", branch: "feat-taken" });
     const outside = await callTool(bearer, "worktrees_create", base("feat-x", { repo: "ghost" }));
     expect(outside.isError).toBe(true);
     expect(outside.text).toContain('Repo "ghost" is not in project');
-    const taken = await callTool(bearer, "worktrees_create", base("feat-search"));
+    const taken = await callTool(bearer, "worktrees_create", base("feat-taken"));
     expect(taken.isError).toBe(true);
     expect(taken.text).toContain("already exists");
     const both = await callTool(bearer, "worktrees_create", {

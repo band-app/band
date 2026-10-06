@@ -130,14 +130,22 @@ export interface StubRequest {
   };
 }
 
+/**
+ * The newline-terminated lines of a log the stub agent is still appending to. A read can land
+ * between the start and the end of a write, so the text after the last newline is not a line yet.
+ */
+export function completeLines(text: string): string[] {
+  return text
+    .slice(0, text.lastIndexOf("\n") + 1)
+    .split("\n")
+    .filter(Boolean);
+}
+
 /** Every request and notification the stub agent received, in order. */
 export function stubRequests(home: string, method?: string): StubRequest[] {
   const path = join(home, "acp-stub-log.jsonl");
   if (!existsSync(path)) return [];
-  const all = readFileSync(path, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as StubRequest);
+  const all = completeLines(readFileSync(path, "utf8")).map((l) => JSON.parse(l) as StubRequest);
   return method ? all.filter((r) => r.method === method) : all;
 }
 

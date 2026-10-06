@@ -90,6 +90,8 @@ export interface WorktreeInfo {
   pinned: boolean;
   /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is being started again (`waking`). */
   lifecycle?: "sleeping" | "waking";
+  /** The host the worktree lives on. Absent or `local` for this machine. */
+  hostId?: string;
 }
 
 export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";
