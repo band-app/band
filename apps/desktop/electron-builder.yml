@@ -122,20 +122,17 @@ mac:
   # absent (local dev builds). Setting `notarize: false` disables
   # electron-builder's built-in flow in favor of our hook.
   notarize: false
-  # Universal builds are produced as separate x64 / arm64 artifacts; we do
-  # not assemble a single fat binary because the bundled web resources also
-  # ship per-arch native modules.
+  # Apple Silicon only. Intel (x64) and universal builds are not produced:
+  # the bundled web resources ship per-arch native modules.
   target:
     - target: dmg
       arch:
-        - x64
         - arm64
     # zip is required for electron-updater diff downloads — the .app inside
     # the .dmg cannot be auto-updated in place because macOS mounts the DMG
     # read-only. See https://www.electron.build/auto-update.
     - target: zip
       arch:
-        - x64
         - arm64
 
 dmg:

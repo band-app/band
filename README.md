@@ -29,7 +29,7 @@ IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents acr
 
 ### Stable
 
-Download the latest signed `.dmg` from [GitHub Releases](https://github.com/band-app/band/releases/latest), open it, and drag **Band** to `/Applications`. First launch should open without Gatekeeper warnings — releases are signed and notarized with an Apple Developer ID.
+Download the latest signed Apple Silicon `.dmg` (`Band-<version>-apple-silicon.dmg`) from [GitHub Releases](https://github.com/band-app/band/releases/latest), open it, and drag **Band** to `/Applications`. First launch should open without Gatekeeper warnings — releases are signed and notarized with an Apple Developer ID. Intel Macs are no longer supported.
 
 Auto-update is built in (via `electron-updater`): the app checks daily and prompts before installing.
 
