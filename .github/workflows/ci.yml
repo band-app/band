@@ -801,8 +801,9 @@ jobs:
 
       # The snapshot and restore hooks (plan step 3.10) run in the same job: a container worktree
       # sleeps, its /work is snapshotted into an image, and the restored container has an untracked file.
+      # A two-member task (step T.4) starts one container with both worktrees, and sleeps and wakes with both.
       - name: Docker runner hook
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
+        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts tests/project-tasks-docker.test.ts
         env:
           BAND_DOCKER_TEST_IMAGE: band-worker-check
           BAND_DOCKER_TEST_NETWORK: host

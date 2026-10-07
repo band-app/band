@@ -97,6 +97,16 @@ It prints `OK <file>` and exits 0, or prints each problem as `<key path>: <messa
 
 The hub reads the file, so the path must exist on the hub's machine. The same check is available as `environment.validate` over tRPC, and `environment.forRepo` returns a repo's environment with the host check.
 
+## Project-level environment for multi-repo tasks
+
+A task with several member repos on a runner-started worker has one machine, so it has one environment. The hub picks it when the task request is made:
+
+1. If the project's context repo has `.band/environment.json`, that file is the environment. Its `build.image` is the machine's image, `requires`, `isolation` and `resources` apply to the machine, and its `install` runs once in the task folder after every member worktree exists. Only `build.image` (or no `build`) is supported there for now. A file that builds from a `dockerfile` or `devcontainer` is refused with the reason, because a runner has no checkout to build it from.
+2. Otherwise the primary member's file is the base: role `primary`, else the first repo listed. Its image is the machine's image. The `requires` of the other members are added to it, joining two different ranges for one tool as `a b` so both must hold, and `resources.cpu` takes the highest. The primary's `install` is part of its image build.
+3. Whichever file decided, each member's own `install` runs in that member's worktree when the worktree is created, the same setup a one-member task runs. That is how a member that is not the primary gets its dependencies.
+
+A task with one member keeps the repo's own environment, unchanged. The environment reaches the runner hook as `BAND_ENVIRONMENT` and `BAND_REPO_IMAGE` (`docs/runner-hooks.md`). Not merged yet: `services` and `secrets` of members other than the primary.
+
 ## Environment images
 
 A repo with a `build` in its `environment.json` can have an image: layer 1, then layer 2, then the result of `install`. A runner that boots the image starts with the toolchain and the dependencies in place.

@@ -15,6 +15,7 @@
 
 import { randomBytes } from "node:crypto";
 import { join, posix } from "node:path";
+import { type Environment, parseEnvironment } from "@band-app/environment";
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
@@ -30,12 +31,22 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { hostRegistry } from "../infra/host/registry";
 import { taskScopeId } from "../infra/project-scope";
 import { BRIEF_FILE, type BriefRepo, renderBrief, workerPrompt } from "./_utils/dispatch-brief";
+import { requestedIsolation } from "./_utils/isolation";
 import type { Placement } from "./_utils/placement-input";
 import { TASK_SERVER } from "./_utils/project-policy";
+import {
+  combineEnvironments,
+  type MemberEnvironment,
+  mergeTaskLabels,
+  primaryOf,
+  unmetLabels,
+} from "./_utils/task-environment";
 import { chatService } from "./chat-service";
-import { placementService } from "./placement-service";
+import { contextBrowserService } from "./context-browser-service";
+import { placementService, type TaskRequestInput } from "./placement-service";
 import { projectFolderService } from "./project-folder-service";
 import { projectService } from "./project-service";
+import { repoService } from "./repo-service";
 import { loadState } from "./state";
 import { taskService } from "./task-service";
 import { tokenService } from "./token-service";
@@ -52,7 +63,12 @@ export interface TaskCreateInput {
   title?: string;
   brief: string;
   scenarios?: string[];
-  repos?: Array<{ repo: string; role?: string | null }>;
+  /** `labels` are host labels this member needs. The task's host must carry every member's. */
+  repos?: Array<{ repo: string; role?: string | null; labels?: Record<string, string> }>;
+  /** Where the repo of the primary member already is on the host, set when a runner cloned it. */
+  hostRepoPath?: string;
+  /** An `install` command of the project-level environment, run in the task folder after the members exist. */
+  projectInstall?: string;
   /** The host to create the task on. Without one, `placement` and the project's labels choose. */
   hostId?: string;
   placement?: Placement;
@@ -91,6 +107,17 @@ export interface TaskView {
 export interface TaskCreateResult {
   task: TaskView;
   chatId: string;
+}
+
+/** No attached host fits, so a runner was asked for a machine. The task is made when it connects. */
+export interface TaskProvisioningResult {
+  provisioning: { requestId: string };
+}
+
+export function isProvisioning(
+  result: TaskCreateResult | TaskProvisioningResult,
+): result is TaskProvisioningResult {
+  return "provisioning" in result;
 }
 
 /** Task names are folder names. */
@@ -210,31 +237,37 @@ export class ProjectTaskService {
 
   /**
    * The one host a task goes on: the named one, or the least loaded online host that has the
-   * project's labels and the placement's, and can hold every member repo. Throws the reason when
-   * there is none, because a task is never split across hosts.
+   * project's labels, the placement's and every member's, and can hold every member repo. When no
+   * attached host fits, a configured runner that offers all those labels and the isolation may
+   * start one (`request`). Throws the reason, naming the member and label, when neither can,
+   * because a task is never split across hosts.
    */
   private async chooseHost(
     projectId: string,
-    repos: string[],
+    members: Array<{ repo: string; labels?: Record<string, string> }>,
     hostId: string | undefined,
     placement: Placement | undefined,
-  ): Promise<Host> {
+  ): Promise<{ host: Host } | { request: Placement }> {
     const project = projectService.get(projectId);
-    const labels: Record<string, string> = { ...(placement?.labels ?? {}) };
+    const base: Record<string, string> = { ...(placement?.labels ?? {}) };
     for (const label of project.effectivePolicy.labels) {
       const at = label.indexOf("=");
-      if (at > 0) labels[label.slice(0, at)] = label.slice(at + 1);
+      if (at > 0) base[label.slice(0, at)] = label.slice(at + 1);
     }
+    const merged = mergeTaskLabels(base, members);
+    if (merged.conflicts.length > 0) {
+      throw new ProjectInputError(
+        `No host can satisfy every repo of this task: ${merged.conflicts.join("; ")}. A task runs on one host, so split it into tasks or change the labels.`,
+      );
+    }
+    const labels = merged.labels;
     const wanted: Placement = {
       ...(Object.keys(labels).length > 0 ? { labels } : {}),
       ...(placement?.requires ? { requires: placement.requires } : {}),
+      ...(placement?.environment ? { environment: placement.environment } : {}),
     };
-    const isolation = placement?.environment?.isolation;
-    if (isolation && isolation !== "worktree") {
-      throw new ProjectInputError(
-        `A task runs at isolation worktree for now. Isolation ${isolation} needs the combined environments of a later step.`,
-      );
-    }
+    const isolation = requestedIsolation(placement?.environment ?? null);
+    const repos = members.map((m) => m.repo);
 
     // A repo with no remote URL lives on the hosts that hold it, so a task with such a repo is limited to them.
     let only: string[] | undefined;
@@ -254,10 +287,10 @@ export class ProjectTaskService {
         );
       }
       const have = await this.labelsOf(hostId);
-      const missing = wantedLabels.filter((l) => !have.has(l));
+      const missing = unmetLabels(base, members, [...have]);
       if (missing.length > 0) {
         throw new ProjectInputError(
-          `Host "${hostId}" lacks the label${missing.length === 1 ? "" : "s"} ${missing.join(", ")}, which project "${project.name}" or the request needs.`,
+          `Host "${hostId}" lacks the label${missing.length === 1 ? "" : "s"} ${missing.join(", ")}.`,
         );
       }
       if (only && !only.includes(hostId)) {
@@ -265,23 +298,41 @@ export class ProjectTaskService {
           `A repo of this task has no remote URL and is held only by ${only.join(", ") || "no host"}, not by "${hostId}".`,
         );
       }
-      return hostRegistry.hostById(hostId);
+      return { host: hostRegistry.hostById(hostId) };
     }
     const placed = await placementService.place(wanted, only);
-    if (!placed) {
-      const needs = [
-        ...wantedLabels.map((l) => `label ${l}`),
-        ...Object.entries(wanted.requires ?? {}).map(([k, v]) => `${k} ${v}`),
-      ];
-      throw new ProjectInputError(
-        `No online host fits this task${needs.length ? ` (it needs ${needs.join(", ")})` : ""}${
-          only
-            ? `, with every repo reachable: the repos without a remote URL are held only by ${only.join(", ") || "no host"}`
-            : ""
-        }. A task runs on one host, so it is not split across hosts. Pick another host or change the placement.`,
-      );
+    if (placed) return { host: hostRegistry.hostById(placed) };
+
+    // No attached host fits. A runner may start a machine, unless a repo can only run where it already is.
+    if (!only && placementService.runnersFor(labels, isolation).length > 0) {
+      return { request: wanted };
     }
-    return hostRegistry.hostById(placed);
+    const needs = [
+      ...wantedLabels.map((l) => `label ${l}`),
+      ...Object.entries(wanted.requires ?? {}).map(([k, v]) => `${k} ${v}`),
+      ...(isolation !== "worktree" ? [`isolation ${isolation}`] : []),
+    ];
+    const offers = placementService.runnerOffers();
+    const why =
+      offers.length === 0
+        ? "No runner is configured"
+        : offers
+            .map((r) => {
+              const lacks = unmetLabels(base, members, r.labels);
+              return `runner ${r.id} ${
+                lacks.length > 0
+                  ? `lacks ${lacks.join(", ")}`
+                  : `offers isolation ${r.isolation} only`
+              }`;
+            })
+            .join("; ");
+    throw new ProjectInputError(
+      `No online host fits this task${needs.length ? ` (it needs ${needs.join(", ")})` : ""}${
+        only
+          ? `, with every repo reachable: the repos without a remote URL are held only by ${only.join(", ") || "no host"}`
+          : `, and no runner can start one. ${why}`
+      }. A task runs on one host, so it is not split across hosts. Pick another host or change the placement.`,
+    );
   }
 
   /** The labels of a host: the ones set on its record and the ones the worker reports (`k=v`). */
@@ -296,12 +347,93 @@ export class ProjectTaskService {
   // ---- create -----------------------------------------------------------------------
 
   /** Creates a task: its folder, brief, member worktrees and chat. A failure undoes what it made. */
-  create(projectRef: string, input: TaskCreateInput): Promise<TaskCreateResult> {
+  create(
+    projectRef: string,
+    input: TaskCreateInput,
+  ): Promise<TaskCreateResult | TaskProvisioningResult> {
     const project = projectService.row(projectRef);
     return this.serialized(`project:${project.id}`, () => this.createNow(project.id, input));
   }
 
-  private async createNow(projectId: string, input: TaskCreateInput): Promise<TaskCreateResult> {
+  /**
+   * Creates the task of a fulfilled task request on the machine a runner started. The request
+   * was made after no attached host fit, so this names the host and skips the choice.
+   */
+  async createFromRequest(
+    task: TaskRequestInput,
+    hostId: string,
+    hostRepoPath?: string,
+  ): Promise<{ taskId: string }> {
+    const input = {
+      ...(task.create as unknown as TaskCreateInput),
+      hostId,
+      ...(hostRepoPath ? { hostRepoPath } : {}),
+    };
+    const project = projectService.row(task.projectId);
+    const result = await this.serialized(`project:${project.id}`, () =>
+      this.createNow(project.id, input),
+    );
+    if (isProvisioning(result)) throw new Error("A task on a named host cannot need provisioning");
+    return { taskId: result.task.id };
+  }
+
+  /** Removes a task made for a request that was cancelled meanwhile. */
+  removeForced(taskId: string): Promise<void> {
+    return this.remove(taskId, { force: true });
+  }
+
+  /**
+   * The one environment of a task with several members (plan step T.4): the project context's
+   * `.band/environment.json` when it has one, else the primary member's. Members' own files are
+   * read from the hub's checkout when it has one.
+   */
+  private async combinedEnvironment(
+    projectId: string,
+    members: Array<{ repo: string; role: string | null }>,
+  ) {
+    const project = projectService.row(projectId);
+    let projectEnv: Environment | null = null;
+    const file = await contextBrowserService
+      .file(project.contextName, ".band/environment.json")
+      .catch(() => null);
+    if (file && !file.binary && file.content !== null) {
+      const parsed = parseEnvironment(file.content);
+      if (!parsed.ok) {
+        throw new ProjectInputError(
+          `The project environment ${project.contextName}:.band/environment.json is invalid: ${parsed.issues
+            .map((i) => (i.path ? `${i.path}: ${i.message}` : i.message))
+            .join("; ")}`,
+        );
+      }
+      if (parsed.environment.build?.dockerfile || parsed.environment.build?.devcontainer) {
+        throw new ProjectInputError(
+          `The project environment ${project.contextName}:.band/environment.json builds from a dockerfile or devcontainer, which a runner cannot do yet. Use build.image.`,
+        );
+      }
+      projectEnv = parsed.environment;
+    }
+    const envs: MemberEnvironment[] = [];
+    for (const [i, m] of members.entries()) {
+      const path = repoService.findPath(m.repo);
+      const report = path
+        ? await hostRegistry.local.scripts
+            .environment({ repoPath: path, worktreePath: path })
+            .catch(() => null)
+        : null;
+      envs.push({
+        repo: m.repo,
+        role: m.role,
+        mergeOrder: i,
+        environment: report?.environment ?? null,
+      });
+    }
+    return combineEnvironments(envs, projectEnv);
+  }
+
+  private async createNow(
+    projectId: string,
+    input: TaskCreateInput,
+  ): Promise<TaskCreateResult | TaskProvisioningResult> {
     const project = projectService.get(projectId);
     const branch = slugifyBranchName(input.branch);
     if (!branch) {
@@ -334,7 +466,37 @@ export class ProjectTaskService {
       }
     }
 
-    const host = await this.chooseHost(projectId, repoNames, input.hostId, input.placement);
+    const chosen = await this.chooseHost(projectId, wanted, input.hostId, input.placement);
+    if ("request" in chosen) {
+      const roles = wanted.map((r) => ({
+        repo: r.repo,
+        role: r.role ?? projectRoleOf(project.repos, r.repo),
+      }));
+      const combined = await this.combinedEnvironment(projectId, roles);
+      const isolation = requestedIsolation(chosen.request.environment ?? null);
+      const environment = {
+        ...combined.environment,
+        ...(isolation !== "worktree" ? { isolation } : {}),
+      };
+      const { hostId: _h, placement: _p, ...replay } = input;
+      const primary = primaryOf(roles.map((r, i) => ({ ...r, mergeOrder: i })));
+      const { requestId } = placementService.requestTask({
+        projectId,
+        name,
+        repo: primary?.repo ?? "",
+        branch,
+        placement: { ...chosen.request, environment },
+        create: {
+          ...replay,
+          name,
+          ...(combined.source === "project" && combined.environment.install
+            ? { projectInstall: combined.environment.install }
+            : {}),
+        },
+      });
+      return { provisioning: { requestId } };
+    }
+    const host = chosen.host;
     const projectRow = projectService.row(projectId);
     const { folder: projectFolder } = await projectFolderService.ensureOn(projectRow, host);
     const folder = joinOn(host, projectFolder, "tasks", name);
@@ -384,8 +546,21 @@ export class ProjectTaskService {
         },
         members,
       );
+      const primary = primaryOf(members)?.repoName;
       for (const m of members) {
-        await this.createMember(taskId, projectId, host, folder, m.repoName, branch);
+        await this.createMember(
+          taskId,
+          projectId,
+          host,
+          folder,
+          m.repoName,
+          branch,
+          m.repoName === primary ? input.hostRepoPath : undefined,
+        );
+      }
+      if (input.projectInstall) {
+        // The project-level environment's install runs once in the task folder, after every member exists.
+        await host.exec("sh", ["-c", input.projectInstall], { cwd: folder, timeoutMs: 600_000 });
       }
     } catch (err) {
       await this.undo(taskId, host, folder);
@@ -422,8 +597,12 @@ export class ProjectTaskService {
     folder: string,
     repo: string,
     branch: string,
+    hostRepoPath?: string,
   ): Promise<string> {
-    await worktreeService.create({ repo, branch, hostId: host.id }, { taskId, projectId, folder });
+    await worktreeService.create(
+      { repo, branch, hostId: host.id, ...(hostRepoPath ? { hostRepoPath } : {}) },
+      { taskId, projectId, folder },
+    );
     const worktreeId = toWorktreeId(repo, branch);
     this.queries.setMemberWorktree(taskId, repo, worktreeId);
     return worktreeId;
@@ -686,3 +865,9 @@ function projectRoleOf(
 }
 
 export const projectTaskService = new ProjectTaskService();
+
+placementService.setTaskFinisher({
+  create: (task, hostId, hostRepoPath) =>
+    projectTaskService.createFromRequest(task, hostId, hostRepoPath),
+  remove: (taskId) => projectTaskService.removeForced(taskId),
+});

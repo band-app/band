@@ -79,6 +79,29 @@ export function wakeOf(row: HostRequestRow): WakeInput | null {
   return wake && typeof wake.hostId === "string" ? wake : null;
 }
 
+/** What a task request (plan step T.4) carries in `input.task`: the task create call to replay on the host. */
+export interface TaskRequestInput {
+  projectId: string;
+  /** The `TaskCreateInput` of the call, without `hostId` and `placement`. */
+  create: Record<string, unknown>;
+}
+
+/** The task a request is for, or null for a worktree or wake request. */
+export function taskOf(row: HostRequestRow): TaskRequestInput | null {
+  const task = (row.input as { task?: TaskRequestInput }).task;
+  return task && typeof task.projectId === "string" ? task : null;
+}
+
+/** Creates a task on the host a task request was fulfilled with. Set by `ProjectTaskService` to avoid an import cycle. */
+export interface TaskFinisher {
+  create(
+    task: TaskRequestInput,
+    hostId: string,
+    hostRepoPath?: string,
+  ): Promise<{ taskId: string }>;
+  remove(taskId: string): Promise<void>;
+}
+
 /** What placement knows about a host. */
 interface Candidate {
   id: string;
@@ -136,6 +159,7 @@ export class PlacementService {
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly completing = new Set<string>();
+  private taskFinisher: TaskFinisher | null = null;
 
   constructor(options: PlacementOptions = {}) {
     this.queries = options.queries ?? new HostRequestQueries();
@@ -151,6 +175,10 @@ export class PlacementService {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  setTaskFinisher(finisher: TaskFinisher): void {
+    this.taskFinisher = finisher;
   }
 
   timeoutMs(): number {
@@ -273,6 +301,75 @@ export class PlacementService {
     log.info(`no host fits ${worktreeId}; recorded request ${id}`);
     this.publish(id, worktreeId, "pending");
     return { kind: "request", requestId: id };
+  }
+
+  /**
+   * Records a request for a machine to run a task on (plan step T.4), after no attached host fit.
+   * `labels` is every member's labels merged with the project's. A runner leases it by the same
+   * rules as a worktree request, and when its host says hello the hub replays the task create
+   * there. Asking again for the same task name returns the open request.
+   */
+  requestTask(args: {
+    projectId: string;
+    name: string;
+    repo: string;
+    branch: string;
+    placement: Placement;
+    create: Record<string, unknown>;
+  }): { requestId: string } {
+    const key = `task:${args.projectId}:${args.name}`;
+    const open = this.queries.findOpenForWorktree(key);
+    if (open) return { requestId: open.id };
+    const now = this.now();
+    const id = `hr-${randomUUID().slice(0, 12)}`;
+    this.queries.insert({
+      id,
+      worktreeId: key,
+      repo: args.repo,
+      branch: args.branch,
+      labels: args.placement.labels ?? {},
+      requires: args.placement.requires ?? {},
+      environment: args.placement.environment ?? null,
+      input: {
+        task: { projectId: args.projectId, create: args.create } satisfies TaskRequestInput,
+      },
+      status: "pending",
+      leasedBy: null,
+      leaseExpiresAt: null,
+      hostId: null,
+      error: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    log.info(`no host fits task ${args.name}; recorded request ${id}`);
+    this.publish(id, key, "pending");
+    return { requestId: id };
+  }
+
+  /**
+   * The runners (from settings) that could start a machine for a request with these labels and
+   * isolation: they carry every label and offer at least the isolation.
+   */
+  runnersFor(labels: Record<string, string>, wanted: IsolationLevel): string[] {
+    const { runners } = parseRunners(settingsService.get().runners);
+    const wantedLabels = Object.entries(labels).map(([k, v]) => `${k}=${v}`);
+    return runners
+      .filter((r) => {
+        const have = new Set(Object.entries(r.labels).map(([k, v]) => `${k}=${v}`));
+        return offers(runnerLevel(r.isolation), wanted) && wantedLabels.every((l) => have.has(l));
+      })
+      .map((r) => r.id);
+  }
+
+  /** The labels each configured runner offers, as `k=v`, for a refusal message. */
+  runnerOffers(): Array<{ id: string; labels: string[]; isolation: IsolationLevel }> {
+    const { runners } = parseRunners(settingsService.get().runners);
+    return runners.map((r) => ({
+      id: r.id,
+      labels: Object.entries(r.labels).map(([k, v]) => `${k}=${v}`),
+      isolation: runnerLevel(r.isolation),
+    }));
   }
 
   /**
@@ -484,6 +581,24 @@ export class PlacementService {
         if (this.queries.complete(row.id, this.now())) {
           log.info(`host ${wake.hostId} is awake`);
           this.publish(row.id, row.worktreeId, "fulfilled");
+        }
+        return;
+      }
+      const task = taskOf(row);
+      if (task) {
+        if (!this.taskFinisher) throw new Error("Task placement is not wired");
+        const { taskId } = await this.taskFinisher.create(
+          task,
+          row.hostId,
+          (row.input as { hostRepoPath?: string }).hostRepoPath,
+        );
+        if (this.queries.complete(row.id, this.now())) {
+          log.info(`task ${row.worktreeId} is ready on ${row.hostId}`);
+          this.publish(row.id, row.worktreeId, "fulfilled");
+        } else {
+          await this.taskFinisher
+            .remove(taskId)
+            .catch((err) => log.warn(`could not remove cancelled ${row.worktreeId}: ${err}`));
         }
         return;
       }

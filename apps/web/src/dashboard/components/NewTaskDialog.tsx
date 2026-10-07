@@ -88,7 +88,8 @@ export function NewTaskDialog({
       setBrief("");
       setHostId(DEFAULT_PLACEMENT);
       onOpenChange(false);
-      onCreated({ id: created.task.id, name: created.task.name });
+      // With no host that fits, a runner is asked for a machine and the task appears when it connects.
+      if ("task" in created) onCreated({ id: created.task.id, name: created.task.name });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
