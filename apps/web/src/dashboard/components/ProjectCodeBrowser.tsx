@@ -493,10 +493,7 @@ function ChangesTab({
       <div className="space-y-1" data-testid="code-browser__behind">
         <h4 className="text-xs font-medium">Behind ({s.behind})</h4>
         {s.diverged ? (
-          <p
-            className="text-xs text-destructive"
-            data-testid="code-browser__diverged"
-          >
+          <p className="text-xs text-destructive" data-testid="code-browser__diverged">
             This checkout and {s.upstream} each have commits the other lacks. Resolve it in a
             terminal. Band does not merge, rebase or force push.
           </p>

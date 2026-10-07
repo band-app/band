@@ -48,7 +48,8 @@ let server: ServerHandle;
 
 const remoteOf = (name: string) => join(home, "remotes", `${name}.git`);
 const cloneOf = (name: string) => join(home, "repos", name);
-const checkoutOf = (name: string) => join(realpathSync(home), ".band", "projects", "shop", "repos", name);
+const checkoutOf = (name: string) =>
+  join(realpathSync(home), ".band", "projects", "shop", "repos", name);
 
 const call = (kind: "query" | "mutate", proc: string, input: unknown) =>
   kind === "query"
