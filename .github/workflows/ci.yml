@@ -39,6 +39,8 @@ jobs:
   check:
     name: Lint, Test & Build
     runs-on: ubuntu-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
 
     # Always run on push to main.
     # For same-repo PRs (collaborators): run automatically.
@@ -918,6 +920,8 @@ jobs:
   cli-macos:
     name: CLI Integration Tests (macOS)
     runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
     needs: macos-changes
     if: needs.macos-changes.outputs.cli == 'true'
     env:
@@ -1019,6 +1023,8 @@ jobs:
   web-macos:
     name: Web Tests (macOS)
     runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
     needs: macos-changes
     if: needs.macos-changes.outputs.web == 'true'
     env:
@@ -1148,6 +1154,8 @@ jobs:
   desktop-macos:
     name: Desktop e2e (macOS)
     runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
     needs: macos-changes
     if: needs.macos-changes.outputs.desktop == 'true'
     env:
@@ -1202,6 +1210,8 @@ jobs:
   desktop-packaged-macos:
     name: Desktop e2e, packaged app (macOS)
     runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
     needs: macos-changes
     if: needs.macos-changes.outputs.desktop == 'true'
     env:

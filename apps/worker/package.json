@@ -23,7 +23,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node bin/band-worker.mjs",
-    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 --test-timeout=90000 --test-force-exit tests/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
     "prepack": "node scripts/build.mjs",
     "postinstall": "node scripts/postinstall.mjs",

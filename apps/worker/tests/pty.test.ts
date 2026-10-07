@@ -17,17 +17,30 @@ interface Attached {
   snapshot: string;
 }
 
+/** Every shell this suite started, so the suite can check none outlives it. */
+const shellPids = new Set<number>();
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function spawnTerminal(
   w: TestWorker,
   terminalId: string,
   options?: { command?: string },
 ): Promise<void> {
-  await call(w.session, "pty.spawn", {
+  const entry = await call<{ pid: number }>(w.session, "pty.spawn", {
     worktreeId: "ws",
     terminalId,
     worktreeRoot: w.root,
     options,
   });
+  shellPids.add(entry.pid);
 }
 
 async function attach(
@@ -70,6 +83,12 @@ describe("terminals over the link", () => {
     await w.worker.stop();
     await hub.close();
     cleanup(w.root, w.stateDir);
+    // The worker's stop kills every shell, and a killed shell is escalated to SIGKILL, so none may remain.
+    await waitFor(
+      () => [...shellPids].every((pid) => !isAlive(pid)),
+      10_000,
+      `shells to exit, still alive: ${[...shellPids].filter(isAlive).join(", ")}`,
+    );
   });
 
   // S3
