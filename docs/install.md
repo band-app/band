@@ -67,7 +67,7 @@ Options: `--root <dir>` (repeatable, the directories the worker may serve), `--n
 
 ```sh
 band-worker status            # exit code 0 running, 3 installed but stopped, 4 not installed
-band-worker uninstall-service # removes the unit or plist and the env file, keeps the worker's state
+band-worker uninstall-service # removes the unit or plist and the env file, ends the terminals, keeps the worker's state
 ```
 
 To run the worker in the foreground without a service, use `band-worker --hub <url> --token <token>`.

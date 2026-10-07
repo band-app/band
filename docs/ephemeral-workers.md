@@ -57,3 +57,16 @@ A worker that says `ephemeral` in its hello is claimed by the worktrees created 
 | `BAND_PLACEMENT_TIMEOUT_MS` | hub | How long a wake request may wait for a worker. |
 
 The restore puts the worktree under the new worker's first root, at `.band-worktrees/<repo>/<worktree>`. A repo must be reachable from the new worker through `BAND_REPO_URLS` (the stored remote URL, else the repo path), as for any request. Agent session files travel with the paths they were written under, so a worker with another root can resume a Claude Code session only if the working directory is the same.
+
+## What survives what
+
+Terminals on a worker run in a detached terminal daemon (see `apps/worker/README.md`).
+
+| Event | Terminals (shell, agent CLI in tui mode) |
+| --- | --- |
+| Worker process restart, upgrade, crash, `systemctl restart` | Keep running. The hub lists the same ids and replays the scrollback. |
+| Hub restart or a dropped link | Keep running, as before. |
+| Closing the terminal in the UI or CLI | The shell ends. |
+| `band-worker uninstall-service` | Every shell ends. |
+| Machine reboot | End. Their scrollback is not restored on the worker. |
+| Ephemeral sleep | End. Sleep keeps git state and agent sessions, not live processes. |

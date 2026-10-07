@@ -14,6 +14,7 @@ import {
   probeEndpoint,
   publishEndpoint,
 } from "./endpoint";
+import { writeExitRecord } from "./exit-records";
 import {
   type ClientRole,
   type ControlNotify,
@@ -90,6 +91,11 @@ export interface DaemonOptions {
    * endpoint from. It drains; see `retiredDaemonPaths`.
    */
   supersede?: EndpointIdentity;
+  /**
+   * Keep a record of each shell that exits while no server is connected, for
+   * the next server to read (see `exit-records.ts`).
+   */
+  recordExits?: boolean;
   /** Called once the endpoint is published and the token and pid files are written. */
   onReady: () => void;
 }
@@ -205,6 +211,13 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   log.info({ pid: process.pid, socket: paths.socket, buildId }, "terminal daemon ready");
 
   pool.onExit((event) => {
+    if (options.recordExits && !event.killed && clients.size === 0) {
+      try {
+        writeExitRecord(paths.runDir, event);
+      } catch (err) {
+        log.warn({ err, terminalId: event.terminalId }, "could not record a terminal exit");
+      }
+    }
     for (const client of clients.values()) {
       client.attached.delete(event.terminalId);
       client.held.delete(event.terminalId);

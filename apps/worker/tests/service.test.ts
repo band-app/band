@@ -53,6 +53,7 @@ describe("render", () => {
       /^ExecStart="\/usr\/bin\/node" "\/opt\/band worker\/bin\/band-worker\.mjs"$/m,
     );
     assert.match(unit, /^Restart=always$/m);
+    assert.match(unit, /^KillMode=process$/m, "a restart must leave the terminals' shells running");
     assert.match(unit, /^WantedBy=default\.target$/m);
     assert.ok(!unit.includes(TOKEN));
   });

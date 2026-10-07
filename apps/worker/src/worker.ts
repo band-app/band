@@ -5,7 +5,6 @@ import { join } from "node:path";
 import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
-import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
 import {
   type Channel,
   type LifecycleIdleReply,
@@ -45,6 +44,7 @@ import {
   writeSessionToken,
   writeWorkerId,
 } from "./state.ts";
+import { createWorkerTerminalBackend } from "./terminals.ts";
 
 const log = createLogger("band-worker");
 
@@ -70,6 +70,11 @@ export interface WorkerOptions {
    * and terminals it starts inherit. A worker started in a test process has none.
    */
   gitCredentialHelper?: string;
+  /**
+   * Run terminals in a detached daemon that outlives the worker, so they survive a restart (see
+   * `terminals.ts`). Off by default: a worker started in a test process would leave a daemon behind.
+   */
+  persistentTerminals?: boolean;
 }
 
 export class Worker {
@@ -86,6 +91,8 @@ export class Worker {
   private exitCode = 0;
   /** The save of the latest session token. Writes queue behind it, and shutdown waits for it. */
   private tokenSaved: Promise<void> = Promise.resolve();
+  /** The daemon backend, when terminals persist. It reports the exits that happened while the worker was down. */
+  private terminalDaemon: { recoverExits(): Promise<number> } | null = null;
 
   private constructor(
     client: LinkClient,
@@ -123,7 +130,11 @@ export class Worker {
       await writeWorkerId(config.stateDir, workerId);
     }
 
-    const backend = new InProcessTerminalBackend();
+    const terminals = createWorkerTerminalBackend(
+      config.stateDir,
+      options.persistentTerminals === true,
+    );
+    const backend = terminals.backend;
     const bandHome = config.bandHome ?? process.env.BAND_HOME ?? join(homedir(), ".band");
     const host = new LocalHost({
       terminalBackend: () => backend,
@@ -170,6 +181,7 @@ export class Worker {
       },
     });
     const worker = new Worker(client, workerId, policy.rootPaths, config, config.stateDir);
+    worker.terminalDaemon = terminals.daemon;
 
     const ctx: WorkerContext = {
       host,
@@ -237,6 +249,15 @@ export class Worker {
       disconnectedSince = null;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
       void ctx.cli?.sync();
+      // Shells that ended while the worker was down: the hub hears of them now.
+      void this.terminalDaemon
+        ?.recoverExits()
+        .catch((err) =>
+          log.warn(
+            { message: err instanceof Error ? err.message : String(err) },
+            "could not recover terminal exits",
+          ),
+        );
       // The hub rotates the session token on every handshake. Keep the newest one.
       this.tokenSaved = this.tokenSaved
         .then(() => writeSessionToken(this.stateDir, ready.sessionToken))

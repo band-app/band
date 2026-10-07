@@ -9,6 +9,7 @@ import {
 import type { TerminalExitEvent, TerminalListEntry } from "../terminal-pool";
 import { DaemonClient, DaemonNotRunningError, DaemonRejectedError } from "./client";
 import { type EndpointIdentity, entryIdentity } from "./endpoint";
+import { drainExitRecords } from "./exit-records";
 import { launchDaemon, retireOlderDaemons } from "./launch";
 import {
   type ControlNotify,
@@ -51,6 +52,14 @@ export interface DaemonBackendOptions {
   cwd: string;
   /** Identifies the daemon code. New sessions only start on a daemon of this build. */
   buildId: string;
+  /**
+   * Have the daemon record exits that happen while no server is connected, and
+   * let {@link DaemonTerminalBackend.recoverExits} report them. For a worker,
+   * whose hub learns of an exit only from a notification.
+   */
+  recordExits?: boolean;
+  /** Node flags for the daemon process, such as a loader for a `.ts` entry. */
+  execArgv?: string[];
 }
 
 interface KnownSession {
@@ -294,6 +303,21 @@ export class DaemonTerminalBackend implements TerminalBackend {
       );
     }
     return { killedCount };
+  }
+
+  /**
+   * Connects to a running daemon, if there is one, and reports the shells that
+   * exited while no server was connected, once each. Needs `recordExits`.
+   * Connecting first matters: a daemon only streams exits to a connected
+   * server, so a shell that ends after this returns is reported live.
+   * Returns how many it reported.
+   */
+  async recoverExits(): Promise<number> {
+    if (!this.options.recordExits) return 0;
+    await this.connection(false).catch(() => null);
+    const events = drainExitRecords(this.options.runDir);
+    for (const event of events) this.emitExit(event);
+    return events.length;
   }
 
   /** Disconnect only. The daemons and every shell in them keep running. */
