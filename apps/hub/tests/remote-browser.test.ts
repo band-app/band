@@ -276,9 +276,11 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
     for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   });
 
+  // The first call starts Chromium. Its launch budget is 44 s, so the test waits longer than that and a
+  // failed launch reports the launcher's error with the browser's log instead of a bare timeout.
   it("reads the title of a page on the worker's localhost through the hub (S1)", async () => {
     expect(await title(`worktreeId=${worktreeId}`, origin)).toBe("dev server on the worker");
-  });
+  }, 90_000);
 
   it("keeps cookies across a reopen of the worktree's browser (S2)", async () => {
     expect(await title(`worktreeId=${worktreeId}`, `${origin}/cookie`)).toBe(

@@ -325,7 +325,10 @@ describe("runner hooks on a hub with no checkout (S6)", () => {
     }).catch(() => undefined);
     const marks = tmp("band-repos-url-marks-");
     const hook = join(marks, "spawn.sh");
-    writeFileSync(hook, `#!/bin/sh\nenv > "${join(marks, "env")}"\nexit 1\n`);
+    writeFileSync(
+      hook,
+      `#!/bin/sh\nenv > "${join(marks, "env.tmp")}" && mv "${join(marks, "env.tmp")}" "${join(marks, "env")}"\nexit 1\n`,
+    );
     chmodSync(hook, 0o755);
     await m("settings.update", {
       runners: [{ id: "fake", spawn: hook, labels: { pool: "fake" }, timeoutSec: 20 }],
