@@ -6,6 +6,7 @@
  * it because it is not in `RELAY_PROCEDURES`.
  */
 
+import { RPC_INTERNAL_ERROR, RpcError } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -59,7 +60,11 @@ async function checkout<T>(fn: () => Promise<T> | T): Promise<T> {
     try {
       return await fn();
     } catch (err) {
-      if (err instanceof Error && err.constructor === Error) {
+      // On a worker the host's plain Error arrives as an RpcError with the internal-error code.
+      const refusal =
+        err instanceof Error &&
+        (err.constructor === Error || (err instanceof RpcError && err.code === RPC_INTERNAL_ERROR));
+      if (err instanceof Error && refusal) {
         throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
       }
       throw err;
