@@ -398,6 +398,9 @@ test("frontmatter is a Key / Value grid edited in place, keeping quoting and com
         "---",
       ]),
     );
+  // The disk is written before the viewer drops its dirty state. Edit only
+  // once the save is complete, so its completion cannot reset the new edits.
+  await viewer.expectSaved();
 
   await fm.press("ControlOrMeta+a");
   await fm.type("status");

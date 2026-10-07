@@ -403,8 +403,12 @@ describe("worktrees.create via=chat path", () => {
       { label: "chat task submitted for via=chat" },
     );
     expect(tasks.some((t) => t.prompt === "implement feature Y")).toBe(true);
-    // ...and the prompt reached the agent over ACP.
-    await expect.poll(() => promptTexts(tmpHome)).toContain("implement feature Y");
+    // ...and the prompt reached the agent over ACP. The task row is written
+    // before the agent process starts, so this waits on the agent spawn, which
+    // outlasts `expect.poll`'s 1 s default on a loaded CI runner.
+    await waitFor(() => promptTexts(tmpHome).includes("implement feature Y"), {
+      label: "prompt reached the chat agent",
+    });
 
     // No PTY should be associated with this worktree — chat-path
     // dispatch goes through `taskService.submitTask`, which never
