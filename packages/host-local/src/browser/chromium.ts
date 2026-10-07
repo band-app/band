@@ -14,7 +14,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-api";
 
-const START_TIMEOUT_MS = 20_000;
+// A Chromium that is alive but never writes its port file is stuck, and a fresh launch usually is not.
+// Each attempt gets a bounded wait, and the attempts together stay well inside the link's 60 s `browser.open` limit.
+const START_ATTEMPT_TIMEOUT_MS = 12_000;
+const START_ATTEMPTS = 3;
 const CLOSE_GRACE_MS = 4_000;
 
 interface Running {
@@ -79,15 +82,23 @@ export function findChromium(): string | undefined {
   return candidates.find((c) => existsSync(c));
 }
 
+class StartTimeoutError extends Error {}
+
 async function readDevToolsPort(
   profileDir: string,
   proc: ChildProcess,
+  logPath: string,
 ): Promise<{ port: number; path: string }> {
   const file = join(profileDir, "DevToolsActivePort");
-  const deadline = Date.now() + START_TIMEOUT_MS;
+  const deadline = Date.now() + START_ATTEMPT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (proc.exitCode !== null || proc.signalCode !== null) {
       throw new Error("Chromium exited before it opened a DevTools port");
+    }
+    // A Chromium that hits a fatal error at startup (no usable sandbox, for one) can linger for
+    // many seconds before it exits. Its log already says why, so stop waiting.
+    if (/\bFATAL:/.test(await readFile(logPath, "utf8").catch(() => ""))) {
+      throw new Error("Chromium hit a fatal error at startup");
     }
     try {
       const [port, path] = (await readFile(file, "utf8")).split("\n");
@@ -97,7 +108,7 @@ async function readDevToolsPort(
     }
     await sleep(50);
   }
-  throw new Error("Chromium did not open a DevTools port in time");
+  throw new StartTimeoutError("Chromium did not open a DevTools port in time");
 }
 
 const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
@@ -184,8 +195,6 @@ export class ChromiumManager {
         spec.worktreeId.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_"),
       );
     await mkdir(profileDir, { recursive: true, mode: 0o700 });
-    // A port file from an earlier run would point at a dead browser.
-    await rm(join(profileDir, "DevToolsActivePort"), { force: true });
     const headless = spec.headless ?? !process.env.DISPLAY;
     const args = [
       "--remote-debugging-port=0",
@@ -194,6 +203,9 @@ export class ChromiumManager {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-background-networking",
+      // Small /dev/shm (containers, CI runners) makes Chromium's renderers fail or stall.
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
       // No Keychain or keyring: with a HOME that has none, the cookie store blocks on the lookup
       // and every navigation hangs. Cookies are stored with a fixed key, which is the automation default.
       "--use-mock-keychain",
@@ -211,44 +223,53 @@ export class ChromiumManager {
     await mkdir(home, { recursive: true, mode: 0o700 });
     // Pages the browser loads are untrusted, so the worker's own BAND_* settings stay out of its environment.
     const env = Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith("BAND_")),
+      // The session bus is the caller's desktop, not this browser's: Chromium blocks on a bus that does not answer.
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("BAND_") && key !== "DBUS_SESSION_BUS_ADDRESS",
+      ),
     );
     const logPath = join(profileDir, "chromium.log");
-    const logFd = openSync(logPath, "w", 0o600);
-    const proc = spawn(bin, args, {
-      stdio: ["ignore", "ignore", logFd],
-      detached: true,
-      env: { ...env, HOME: home },
-    });
-    closeSync(logFd);
-    const exited = new Promise<void>((resolve) => {
-      proc.once("exit", () => resolve());
-      proc.once("error", () => resolve());
-    });
-    const startedAt = Date.now();
-    try {
-      const { port, path } = await readDevToolsPort(profileDir, proc).catch(async (err: Error) => {
+    const failures: string[] = [];
+    for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+      // A port file from the attempt before would point at a dead browser.
+      await rm(join(profileDir, "DevToolsActivePort"), { force: true });
+      const logFd = openSync(logPath, "w", 0o600);
+      const proc = spawn(bin, args, {
+        stdio: ["ignore", "ignore", logFd],
+        detached: true,
+        env: { ...env, HOME: home },
+      });
+      closeSync(logFd);
+      const exited = new Promise<void>((resolve) => {
+        proc.once("exit", () => resolve());
+        proc.once("error", () => resolve());
+      });
+      const startedAt = Date.now();
+      try {
+        const { port, path } = await readDevToolsPort(profileDir, proc, logPath);
+        const info: BrowserInfo = { pid: proc.pid, profileDir, headless, port };
+        const entry: Running = { proc, info, wsUrl: `ws://127.0.0.1:${port}${path}`, exited };
+        this.running.set(spec.worktreeId, entry);
+        void exited.then(() => {
+          if (this.running.get(spec.worktreeId) === entry) this.running.delete(spec.worktreeId);
+        });
+        return info;
+      } catch (err) {
+        this.kill(proc, "SIGKILL");
+        await exited;
         const tail = (await readFile(logPath, "utf8").catch(() => ""))
           .trim()
           .split("\n")
           .filter(Boolean)
           .slice(-5);
         const elapsed = `after ${Date.now() - startedAt} ms, pid ${proc.pid ?? "none"}`;
-        throw new Error(
-          `${err.message} (${elapsed})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`,
-        );
-      });
-      const info: BrowserInfo = { pid: proc.pid, profileDir, headless, port };
-      const entry: Running = { proc, info, wsUrl: `ws://127.0.0.1:${port}${path}`, exited };
-      this.running.set(spec.worktreeId, entry);
-      void exited.then(() => {
-        if (this.running.get(spec.worktreeId) === entry) this.running.delete(spec.worktreeId);
-      });
-      return info;
-    } catch (err) {
-      this.kill(proc, "SIGKILL");
-      throw err;
+        const message = `${(err as Error).message} (${elapsed})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`;
+        // Only a launch that hung is worth another try. An exit or a fatal error will repeat.
+        if (!(err instanceof StartTimeoutError)) throw new Error(message);
+        failures.push(`attempt ${attempt}: ${message}`);
+      }
     }
+    throw new Error(failures.join(" ; "));
   }
 
   async connect(worktreeId: string): Promise<BrowserCdp> {
