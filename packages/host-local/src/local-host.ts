@@ -221,6 +221,11 @@ export class LocalHost implements Host {
       read: (request) => folders.read(request),
       search: (request) => folders.search(request),
       log: (request) => folders.log(request),
+      status: (request) => folders.status(request),
+      diff: (request) => folders.diff(request),
+      commit: (request) => folders.commit(request),
+      push: (request) => folders.push(request),
+      pull: (request) => folders.pull(request),
       removeRepo: (request) => folders.removeRepo(request),
     };
     // The first probe takes about half a second (seven processes). Starting it

@@ -6,6 +6,7 @@
  * it because it is not in `RELAY_PROCEDURES`.
  */
 
+import { RPC_INTERNAL_ERROR, RpcError } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -51,6 +52,24 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
     }
     throw err;
   }
+}
+
+/** A refusal from the host's git work (a bad path, nothing to commit, behind the upstream) reaches the user as a bad request. */
+async function checkout<T>(fn: () => Promise<T> | T): Promise<T> {
+  return guard(async () => {
+    try {
+      return await fn();
+    } catch (err) {
+      // On a worker the host's plain Error arrives as an RpcError with the internal-error code.
+      const refusal =
+        err instanceof Error &&
+        (err.constructor === Error || (err instanceof RpcError && err.code === RPC_INTERNAL_ERROR));
+      if (err instanceof Error && refusal) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+      }
+      throw err;
+    }
+  });
 }
 
 /** The view with why the coordinator failed to start, when it did. */
@@ -290,6 +309,100 @@ export const projectsRouter = t.router({
       return { folder: await projectFolderService.ensure(row, "force") };
     }),
   ),
+
+  /** Code browser (T.1b): every call is scoped to one repo of the project and its checkout on the coordinator host. */
+  codeRead: publicProcedure
+    .input(z.object({ project: ref, repo: repoName, path: z.string().max(1000).default("") }))
+    .query(({ input }) =>
+      checkout(() =>
+        projectFolderService.read(projectService.row(input.project), input.repo, input.path),
+      ),
+    ),
+
+  codeSearch: publicProcedure
+    .input(z.object({ project: ref, repo: repoName, query: z.string().trim().min(1).max(200) }))
+    .query(({ input }) =>
+      checkout(() =>
+        projectFolderService.search(projectService.row(input.project), input.repo, input.query),
+      ),
+    ),
+
+  codeStatus: publicProcedure
+    .input(z.object({ project: ref, repo: repoName }))
+    .query(({ input }) =>
+      checkout(() => projectFolderService.status(projectService.row(input.project), input.repo)),
+    ),
+
+  codeLog: publicProcedure
+    .input(
+      z.object({ project: ref, repo: repoName, n: z.number().int().min(1).max(100).default(20) }),
+    )
+    .query(({ input }) =>
+      checkout(() =>
+        projectFolderService.log(projectService.row(input.project), input.repo, input.n),
+      ),
+    ),
+
+  codeDiff: publicProcedure
+    .input(
+      z.object({
+        project: ref,
+        repo: repoName,
+        target: z.union([
+          z.object({ kind: z.literal("working") }),
+          z.object({ kind: z.literal("commit"), sha: z.string().regex(/^[0-9a-f]{7,64}$/) }),
+        ]),
+        path: z.string().max(1000).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      checkout(() =>
+        projectFolderService.diff(
+          projectService.row(input.project),
+          input.repo,
+          input.target,
+          input.path,
+        ),
+      ),
+    ),
+
+  codeOpenWork: publicProcedure
+    .input(z.object({ project: ref, repo: repoName }))
+    .query(({ input }) =>
+      checkout(() => projectFolderService.openWork(projectService.row(input.project), input.repo)),
+    ),
+
+  codeCommit: adminProcedure
+    .input(
+      z.object({
+        project: ref,
+        repo: repoName,
+        message: z.string().trim().min(1).max(10_000),
+        paths: z.array(z.string().min(1).max(1000)).max(500).optional(),
+      }),
+    )
+    .mutation(({ input }) =>
+      checkout(() =>
+        projectFolderService.commit(
+          projectService.row(input.project),
+          input.repo,
+          input.message,
+          input.paths,
+        ),
+      ),
+    ),
+
+  codePush: adminProcedure
+    .input(z.object({ project: ref, repo: repoName }))
+    .mutation(({ input }) =>
+      checkout(() => projectFolderService.push(projectService.row(input.project), input.repo)),
+    ),
+
+  codePull: adminProcedure
+    .input(z.object({ project: ref, repo: repoName }))
+    .mutation(({ input }) =>
+      checkout(() => projectFolderService.pull(projectService.row(input.project), input.repo)),
+    ),
 
   /** Opens a plain terminal in the project folder on its host. The WebSocket attaches by the returned scope. */
   openTerminal: adminProcedure.input(z.object({ project: ref })).mutation(({ input }) =>

@@ -263,6 +263,11 @@ export class RemoteHost implements Host {
     read: (request) => this.rpc.call("project.read", request),
     search: (request) => this.rpc.call("project.search", request),
     log: (request) => this.rpc.call("project.log", request),
+    status: (request) => this.rpc.call("project.status", request),
+    diff: (request) => this.rpc.call("project.diff", request),
+    commit: (request) => this.rpc.call("project.commit", request),
+    push: (request) => this.rpc.call("project.push", request, { timeoutMs: 2 * 60_000 }),
+    pull: (request) => this.rpc.call("project.pull", request, { timeoutMs: 2 * 60_000 }),
     removeRepo: (request) => this.rpc.call("project.removeRepo", request),
   };
 

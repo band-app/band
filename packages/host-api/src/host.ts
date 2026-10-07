@@ -899,6 +899,46 @@ export interface ProjectCommit {
   subject: string;
 }
 
+export interface ProjectCheckoutRef {
+  project: string;
+  repo: string;
+}
+
+export interface ProjectChangedFile {
+  path: string;
+  /** `modified`, `added`, `deleted`, `renamed`, `untracked` or `conflicted`. */
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+  oldPath?: string;
+}
+
+/** The live state of a checkout, read from git with no fetch. */
+export interface ProjectStatus {
+  branch: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  /** Both sides have commits the other lacks, so neither a pull nor a push can go through. */
+  diverged: boolean;
+  files: ProjectChangedFile[];
+  /** Commits the checkout has that the upstream lacks, newest first. */
+  unpushed: ProjectCommit[];
+  /** Commits the upstream has that the checkout lacks, newest first. */
+  incoming: ProjectCommit[];
+}
+
+export interface ProjectDiffRequest extends ProjectCheckoutRef {
+  target: { kind: "working" } | { kind: "commit"; sha: string };
+  /** Limits the diff to one path of the checkout. */
+  path?: string;
+}
+
+export interface ProjectCommitRequest extends ProjectCheckoutRef {
+  message: string;
+  /** Paths to commit. Without any, every change in the checkout is committed. */
+  paths?: string[];
+}
+
 export interface ProjectRemoveRepoRequest {
   project: string;
   repo: string;
@@ -919,6 +959,16 @@ export interface HostProject {
   search(request: ProjectSearchRequest): Promise<ProjectSearchMatch[]>;
   /** The newest commits of the checkout's branch. */
   log(request: ProjectLogRequest): Promise<ProjectCommit[]>;
+  /** Changed files, ahead and behind commits of the checkout. Does not fetch. */
+  status(request: ProjectCheckoutRef): Promise<ProjectStatus>;
+  /** A unified diff of the working tree against HEAD (untracked files included), or of one commit. */
+  diff(request: ProjectDiffRequest): Promise<{ diff: string; truncated: boolean }>;
+  /** Commits changes of the checkout and returns the new commit's SHA. Rejects an empty message or nothing to commit. */
+  commit(request: ProjectCommitRequest): Promise<{ sha: string }>;
+  /** Pushes the checkout to its upstream. Never forces; rejects when the checkout is behind. */
+  push(request: ProjectCheckoutRef): Promise<{ pushed: number }>;
+  /** Fetches, then fast-forwards the checkout to its upstream. Rejects when it has local commits. */
+  pull(request: ProjectCheckoutRef): Promise<{ moved: number }>;
   /**
    * Removes a repo's checkout. Rejects while it has uncommitted changes or commits no remote
    * has, and says which.
