@@ -73,7 +73,7 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_HUB_URL` | The URL the worker dials. `env.BAND_HUB_URL` of the runner, else `BAND_RUNNER_HUB_URL`, else `BAND_PUBLIC_URL`, else `http://127.0.0.1:<hub port>`. A worker accepts plain `http` only for a loopback hub, so a remote machine needs an `https` URL. |
 | `BAND_WORKER_ID` | The id of the host the hub created. The worker must run with this id. |
 | `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
-| `BAND_REPO_URLS` | Comma-separated clone URLs of the request's repository: the URL the hub stores for the repo, without credentials, so the hub needs no checkout to answer. The hub's local path when the repo has no remote; only a hook on the hub's machine can use that. |
+| `BAND_REPO_URLS` | Comma-separated clone URLs of the request's repository (for a task, of every member, the primary first, see [Multi-repo tasks](#multi-repo-tasks-on-runner-workers)): the URL the hub stores for the repo, without credentials, so the hub needs no checkout to answer. The hub's local path when the repo has no remote; only a hook on the hub's machine can use that. |
 | `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser (`docs/agent-environments.md`), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
 | `BAND_CLONE_BY_HUB` | `1` when the vault holds a git credential for the first repository URL. The hook must skip its own clone and still print `BAND_HOST_REPO_PATH`. The hub clones into that path through the worker once it says hello, so the clone can use the credential (see [Git credentials](#git-credentials-for-private-repositories)). Unset otherwise, and always unset for `restore`. The `local`, `ssh`, `docker` and `k8s` hooks honor it. The VM hooks clone in cloud-init and ignore it, so a private repository needs a hook of your own there. |
 | `BAND_REPO_IMAGE` | The repo's current environment image (`band env build`, `docs/agent-environments.md`), empty before its first ready build. |
@@ -81,7 +81,8 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
 | `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the host carries them. |
 | `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
-| `BAND_REPO` | The repo name. |
+| `BAND_REPO` | The repo name. For a task, the primary member's. |
+| `BAND_TASK_NAME`, `BAND_TASK_BRANCH`, `BAND_TASK_REPOS` | Only for a task request: the task folder's name, the branch every member is on, and the member repo names (comma-separated, primary first). Empty otherwise. |
 | `BAND_RUNNER_ID`, `BAND_REQUEST_ID` | The runner and the host request. |
 | `BAND_MACHINE_HANDLE` | Only for `destroy`. The handle `spawn` printed, when it printed one. |
 | `BAND_RUNNER_DIR` | A directory for the runner under `BAND_HOME`. Mode 0700, created by the hub. The hook runs with it as its working directory. |
@@ -98,6 +99,18 @@ A hook must:
 `destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`, plus `BAND_MACHINE_HANDLE`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo. For a machine the hub has no record of (an orphan), the hub sets `BAND_MACHINE_HANDLE` and `BAND_RUNNER_ID` and leaves `BAND_WORKER_ID` and the request variables unset, so a `destroy` must be able to work from the handle alone. It must check that the handle is one of its own machines before it kills anything.
 
 `status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, with or without a `BAND_MACHINE_HANDLE=` prefix; the VM hooks print `BAND_MACHINE_HANDLE=<id> worker=... state=...`), and exits 0. It must list only this runner's machines.
+
+## Multi-repo tasks on runner workers
+
+A task (`projectTasks.create`, `band tasks create`, the coordinator's `tasks_create`) runs on one host. When no attached host carries the labels of the project's policy, the call and every member, the hub asks a runner for a machine instead of failing, provided one is configured that offers all those labels and the isolation. Members name their labels in `repos[].labels`, for example `--repo api` needing `gpu=yes` and `--repo client` needing `os=mac`. The hub takes the union of the project policy's labels, the call's `placement.labels` and each member's labels. Two members that ask for different values of one key (`zone=eu` and `zone=us`) can never share a host, and the call fails naming both repos. When no host and no runner fits, the refusal names each runner and the labels it lacks with the member that asked for them.
+
+The request is leased like a worktree request, with `BAND_LABELS` holding the merged labels. The hook gets the contract variables above plus:
+
+- `BAND_REPO_URLS` lists every member's URL, the primary first, and `BAND_REPO` names the primary. The bundled hooks clone only the first URL and print `BAND_HOST_REPO_PATH` for it. The other members come from the worker itself: when the hub replays the task create on the machine, each member's worktree goes through `repos.ensure`, which clones the URL with the worker's git credential helper (a vault `git` credential, see below), so the hook needs no credential for them.
+- `BAND_TASK_NAME`, `BAND_TASK_BRANCH` and `BAND_TASK_REPOS` give the layout. The worker builds the task folder itself, at `<BAND_HOME>/projects/<project>/tasks/<task name>/`, with `BRIEF.md` and one worktree per member in a folder named after the repo.
+- `BAND_ENVIRONMENT` is the task's one combined environment, and `BAND_REPO_IMAGE` is its image. The primary member is the one with role `primary`, else the first one listed. See [the project-level environment](agent-environments.md#project-level-environment-for-multi-repo-tasks).
+
+Once the machine says hello, the hub creates the task on it. The host request stays in `hostRequests.list` until then, and a cancelled request removes the task it made meanwhile. Sleep, wake and snapshots work per task as for a one-member task: every member worktree is stored, and a wake puts each back into the task folder.
 
 ## Git credentials for private repositories
 

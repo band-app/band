@@ -35,7 +35,7 @@ import { isIsolationLevel, offers } from "./_utils/isolation";
 import type { Placement } from "./_utils/placement-input";
 import { CoordinatorToolError, projectCoordinatorService } from "./project-coordinator-service";
 import { projectService } from "./project-service";
-import { projectTaskService, type TaskView } from "./project-task-service";
+import { isProvisioning, projectTaskService, type TaskView } from "./project-task-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("project-dispatch");
@@ -48,13 +48,16 @@ export interface DispatchedWorktree {
 }
 
 export interface DispatchResult {
-  status: "dispatched";
-  taskId: string;
+  /** `provisioning`: no attached host fit, a runner was asked for a machine and the task is made when it connects. */
+  status: "dispatched" | "provisioning";
+  taskId: string | null;
   name: string;
   hostId: string | null;
   folder: string | null;
-  chatId: string;
+  chatId: string | null;
   worktrees: DispatchedWorktree[];
+  /** The host request of a `provisioning` result. */
+  requestId?: string;
 }
 
 export interface PendingDispatchResult {
@@ -233,7 +236,7 @@ export class ProjectDispatchService {
     const policy = projectService.get(row.id).effectivePolicy;
     const placement = this.placementFor(row, input.placement);
     try {
-      const { task, chatId } = await projectTaskService.create(row.id, {
+      const created = await projectTaskService.create(row.id, {
         name: input.name,
         branch: input.branch,
         title: input.title?.trim() || undefined,
@@ -245,6 +248,19 @@ export class ProjectDispatchService {
         codingAgentId: row.coordinatorAgent ?? DEFAULT_WORKER_AGENT,
         model: policy.models.worker,
       });
+      if (isProvisioning(created)) {
+        return {
+          status: "provisioning",
+          taskId: null,
+          name: input.name ?? input.branch,
+          hostId: null,
+          folder: null,
+          chatId: null,
+          worktrees: [],
+          requestId: created.provisioning.requestId,
+        };
+      }
+      const { task, chatId } = created;
       return {
         status: "dispatched",
         taskId: task.id,

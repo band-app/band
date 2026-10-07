@@ -75,7 +75,16 @@ export const projectTasksRouter = t.router({
         title: z.string().max(200).optional(),
         brief: z.string().max(100_000).default(""),
         repos: z
-          .array(z.object({ repo: repoName, role: z.string().max(100).nullable().optional() }))
+          .array(
+            z.object({
+              repo: repoName,
+              role: z.string().max(100).nullable().optional(),
+              labels: z
+                .record(z.string().min(1).max(100), z.string().max(200))
+                .refine((m) => Object.keys(m).length <= 20, "at most 20 labels")
+                .optional(),
+            }),
+          )
           .max(10)
           .default([]),
         hostId: z.string().min(1).max(200).optional(),

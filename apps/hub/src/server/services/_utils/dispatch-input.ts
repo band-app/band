@@ -19,7 +19,12 @@ export const dispatchPlacement = z
   .strict();
 
 export const taskRepo = z
-  .object({ repo: z.string().min(1).max(200), role: z.string().max(100).optional() })
+  .object({
+    repo: z.string().min(1).max(200),
+    role: z.string().max(100).optional(),
+    /** Host labels this repo needs. The task's host must carry the labels of every repo. */
+    labels: labelMap.optional(),
+  })
   .strict();
 
 /** The shape the MCP tool registers. Cross-field rules run in `parseDispatchInput`. */
