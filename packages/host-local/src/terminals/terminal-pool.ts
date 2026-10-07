@@ -139,6 +139,9 @@ export interface TerminalSnapshot {
   seq: number;
 }
 
+/** How long a shell gets to exit after SIGHUP before it is sent SIGKILL. */
+const KILL_ESCALATION_MS = 2000;
+
 /**
  * One live PTY session tracked by the pool.
  *
@@ -224,6 +227,8 @@ export class TerminalPool {
    * stay cold-restorable.
    */
   private readonly pruneHistoryOnExit = new Set<string>();
+  /** SIGKILL timers of sessions that were sent SIGHUP and have not exited yet. */
+  private readonly killTimers = new WeakMap<TerminalSession, NodeJS.Timeout>();
   /**
    * In-flight history checkpoint writes (see {@link checkpointHistoryNow}).
    * `hasPendingHistoryWrites` lets the daemon's shutdown wait for these
@@ -573,6 +578,9 @@ export class TerminalPool {
 
     ptyProcess.onExit(({ exitCode }) => {
       log.debug("Terminal exited: %s (worktree %s)", terminalId, worktreeId);
+      const killTimer = this.killTimers.get(session);
+      if (killTimer) clearTimeout(killTimer);
+      this.killTimers.delete(session);
       // Distinguish a natural exit from an explicit `kill()`: the `kill()` path
       // calls `pty.kill()` and then synchronously deletes the session from
       // `terminals` — both run before node-pty's async `onExit` fires here, so
@@ -1174,6 +1182,28 @@ export class TerminalPool {
   }
 
   /**
+   * Ends a shell: SIGHUP first, so it can wind down, then SIGKILL when it has
+   * not exited after {@link KILL_ESCALATION_MS}. A single SIGHUP is not enough:
+   * a shell that is still starting up (killed right after spawn) can miss it
+   * and then sits at its prompt forever, with no `onExit` ever firing. The
+   * timer is cleared by the exit handler and does not keep the process alive.
+   */
+  private terminate(session: TerminalSession): void {
+    session.pty.kill();
+    if (this.killTimers.has(session)) return;
+    const timer = setTimeout(() => {
+      this.killTimers.delete(session);
+      try {
+        session.pty.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }, KILL_ESCALATION_MS);
+    timer.unref();
+    this.killTimers.set(session, timer);
+  }
+
+  /**
    * Kill a single terminal by terminalId.
    */
   kill(terminalId: string): void {
@@ -1186,7 +1216,7 @@ export class TerminalPool {
       // `pty.kill()` triggers the `onExit` handler registered in `spawn`,
       // which is what unlinks `session.autoRunFile` — cleanup is delegated
       // there rather than duplicated in every kill path.
-      session.pty.kill();
+      this.terminate(session);
       this.terminals.delete(terminalId);
       const set = this.worktreeTerminals.get(session.worktreeId);
       if (set) {
@@ -1214,7 +1244,7 @@ export class TerminalPool {
         if (session) {
           // The worktree is actually being deleted: prune saved history too.
           this.pruneHistoryOnExit.add(terminalId);
-          session.pty.kill();
+          this.terminate(session);
           this.terminals.delete(terminalId);
         }
       }
@@ -1231,7 +1261,7 @@ export class TerminalPool {
    */
   killAll(): void {
     for (const [, session] of this.terminals) {
-      session.pty.kill();
+      this.terminate(session);
     }
     this.terminals.clear();
     this.worktreeTerminals.clear();
