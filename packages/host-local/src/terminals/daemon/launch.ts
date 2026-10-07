@@ -23,6 +23,10 @@ export interface LaunchOptions {
   buildId: string;
   /** Take the endpoint from the live daemon of another build at this entry. */
   supersede?: EndpointIdentity;
+  /** The daemon records exits that happen while no server is connected. */
+  recordExits?: boolean;
+  /** Node flags for the daemon, such as a loader for a `.ts` entry. Defaults to this process's. */
+  execArgv?: string[];
 }
 
 /**
@@ -37,7 +41,7 @@ export interface LaunchOptions {
  * process's event loop alive, and the file still captures a startup crash.
  */
 export async function launchDaemon(options: LaunchOptions): Promise<"launched" | "occupied"> {
-  const { entry, paths, cwd, buildId, supersede } = options;
+  const { entry, paths, cwd, buildId, supersede, recordExits, execArgv } = options;
   ensurePrivateDir(paths.runDir);
   rotateLog(paths.log);
   const logFd = openSync(paths.log, "a", 0o600);
@@ -52,8 +56,10 @@ export async function launchDaemon(options: LaunchOptions): Promise<"launched" |
     try {
       const args = ["--run-dir", paths.runDir, "--build-id", buildId];
       if (supersede) args.push("--supersede", `${supersede.dev}:${supersede.ino}`);
+      if (recordExits) args.push("--record-exits");
       return fork(entry, args, {
         cwd,
+        ...(execArgv ? { execArgv } : {}),
         detached: true,
         stdio: ["ignore", logFd, logFd, "ipc"],
         env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },

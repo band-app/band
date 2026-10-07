@@ -94,7 +94,11 @@ Calls that stream open a channel and reply with its id, so the hub sees `link.op
 - `acp.spawn`: agent stdout and stdin on one channel, stderr on another, plus `acp.exit` as a notification. The hub ending its side closes stdin, and resetting the channel kills the agent.
 - `pty.attach`: terminal output down, keystrokes up. Closing the channel detaches the viewer, and with `killOnClose` it kills the terminal. The reply carries the screen snapshot. A terminal that exits ends its channels and sends a `pty.exit` notification.
 
-Terminals run in the worker process (`InProcessTerminalBackend`), so they end when the worker does. They survive a dropped link, because a channel resumes after a reconnect. Running them in the terminal daemon is a follow-up.
+Terminals run in a terminal daemon, a detached process the worker launches on the first spawn (`src/terminal-daemon.ts`, bundled to `dist/terminal-daemon.mjs`, the same code as the hub's daemon). It owns the PTYs and a scrollback mirror, so a shell survives a worker restart, an upgrade or a crash. The daemon's files live in `<state dir>/run/` (mode 0700): the pid record, the token and the log, and the socket (mode 0600, moved to a private dir in `/tmp` when the path would exceed the Unix socket limit). Scrollback checkpoints are in `<state dir>/terminal-history/`.
+
+After a restart the worker reconnects to the daemon when the hub connects. `pty.listAll` lists the same terminal ids, and `pty.attach` replays the screen. A shell that exited while the worker was down left a record in `<state dir>/run/exits/`, and the worker sends its `pty.exit` (exit code, `killed: false`) on the next connect, once. The daemon exits when it has no shell and no worker connected. Closing a terminal kills its shell. `band-worker uninstall-service` ends the daemon and every shell. The systemd unit has `KillMode=process` and the launchd plist `AbandonProcessGroup`, so stopping or restarting the service leaves the shells running.
+
+`BAND_TERMINAL_DAEMON=0` keeps terminals in the worker process, where they end with it. A worker started in a test process (`Worker.start` without `persistentTerminals`) does the same.
 
 ## Ephemeral mode
 

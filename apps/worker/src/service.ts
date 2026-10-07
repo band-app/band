@@ -1,9 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, platform as osPlatform } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ConfigError, parseLabels } from "./config.ts";
+import { stopTerminalDaemons } from "./terminals.ts";
 
 export const SERVICE_SUBCOMMANDS = ["install-service", "uninstall-service", "status"] as const;
 export type ServiceSubcommand = (typeof SERVICE_SUBCOMMANDS)[number];
@@ -143,6 +152,8 @@ EnvironmentFile=${opts.envFile}
 ExecStart=${systemdQuote(opts.node)} ${systemdQuote(opts.script)}
 Restart=always
 RestartSec=5
+# Stopping or restarting the worker must not end the terminals' shells, which run in their own daemon.
+KillMode=process
 
 [Install]
 WantedBy=default.target
@@ -180,6 +191,8 @@ ${env}
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
   <true/>
   <key>StandardOutPath</key>
   <string>${xml(opts.logFile)}</string>
@@ -271,8 +284,22 @@ export function installService(opts: ServiceOptions, env: ServiceEnv): void {
   unsupported(env.platform);
 }
 
+/** The state dir the installed service uses: the one in its env file, else the default under BAND_HOME. */
+function installedStateDir(env: ServiceEnv, envFile: string): string {
+  try {
+    const match = /^BAND_WORKER_STATE_DIR="((?:[^"\\]|\\.)*)"$/m.exec(
+      readFileSync(envFile, "utf8"),
+    );
+    if (match) return match[1].replace(/\\(.)/g, "$1");
+  } catch {
+    // No env file: the service was never installed, or its file is gone.
+  }
+  return join(process.env.BAND_HOME ?? join(env.home, ".band"), "worker");
+}
+
 export function uninstallService(env: ServiceEnv): void {
   const paths = servicePaths(env);
+  const stateDir = installedStateDir(env, paths.envFile);
   if (env.platform === "linux") {
     try {
       env.run("systemctl", ["--user", "disable", "--now", SYSTEMD_UNIT]);
@@ -296,6 +323,9 @@ export function uninstallService(env: ServiceEnv): void {
   } else {
     unsupported(env.platform);
   }
+  // The terminals run in their own daemon, which the service manager does not stop (see `KillMode=process`).
+  const ended = stopTerminalDaemons(stateDir);
+  if (ended > 0) env.log("Ended the terminal daemon and its shells.");
   env.log("Removed the band-worker service. The worker's state directory is kept.");
 }
 

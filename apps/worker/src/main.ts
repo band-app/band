@@ -63,6 +63,7 @@ try {
   delete process.env.BAND_BOOTSTRAP_TOKEN;
   worker = await Worker.start(config, {
     gitCredentialHelper: helperCommand(process.execPath, process.argv[1] ?? ""),
+    persistentTerminals: true,
   });
 } catch (err) {
   if (err instanceof ConfigError) {

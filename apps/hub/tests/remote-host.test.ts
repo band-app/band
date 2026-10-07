@@ -315,9 +315,11 @@ describe("a worktree on the remote host", () => {
       token: SHARED_TOKEN,
     });
     try {
-      // The shell's parent is the worker process, so the PTY runs on the worker.
-      socket.type("echo parent=$(ps -o ppid= -p $$ | tr -d ' ') pwd=$PWD\r");
-      await socket.waitForOutput(`parent=${worker.child.pid} pwd=`);
+      // The shell's parent is the worker's terminal daemon (its --run-dir is in the worker's state
+      // dir), so the PTY runs on the worker and not in the hub.
+      socket.type("echo parent=$(ps -o command= -p $(ps -o ppid= -p $$)) pwd=$PWD\r");
+      await socket.waitForOutput(`terminal-daemon`);
+      await socket.waitForOutput(`--run-dir ${join(workerState, "run")}`);
       await socket.waitForOutput(join(workerRoot, ".band-worktrees", "proj", "remote-feat"));
     } finally {
       await socket.close();
