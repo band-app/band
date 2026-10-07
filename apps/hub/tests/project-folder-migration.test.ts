@@ -76,7 +76,10 @@ beforeAll(async () => {
   // An install from before this step.
   const before = join(home, "migrations-before");
   cpSync(migrationsDir, before, { recursive: true });
-  rmSync(join(before, FOLDER_MIGRATION), { recursive: true });
+  // Drizzle applies only migrations newer than the last one applied, so the install also lacks every later one.
+  for (const name of readdirSync(migrationsDir)) {
+    if (name >= FOLDER_MIGRATION) rmSync(join(before, name), { recursive: true });
+  }
   const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
   migrate(drizzle({ client: sqlite }), { migrationsFolder: before });
   const now = Date.now();

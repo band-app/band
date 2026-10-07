@@ -19,6 +19,7 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
@@ -86,6 +87,7 @@ import { worktreeScriptService } from "./worktree-script-service";
 /** How long {@link WorktreeService.remove} waits for a `teardown` command. */
 const TEARDOWN_TIMEOUT_MS = 60_000;
 const log = createLogger("worktree-service");
+const projectTaskQueries = new ProjectTaskQueries();
 
 /**
  * Resolved worktree shape (repo row + worktree row) returned by
@@ -502,7 +504,15 @@ export class WorktreeService {
    * distinguish "newly created + dispatched" from "already existed,
    * no dispatch."
    */
-  async create(input: WorktreeCreateInput): Promise<{
+  async create(
+    input: WorktreeCreateInput,
+    /**
+     * Set when the worktree is a member of a task (plan step T.2): it goes in the task folder,
+     * branches from the repo's default branch, belongs to the task's project and gets no chat,
+     * brief or prompt of its own, because the task's chat and BRIEF.md serve all its members.
+     */
+    member?: { taskId: string; projectId: string; folder: string },
+  ): Promise<{
     ok: true;
     path: string;
     via?: WorktreeVia;
@@ -548,13 +558,20 @@ export class WorktreeService {
       (wt) => wt.name === input.branch || wt.branch === input.branch,
     );
     if (existing) {
+      if (member) {
+        throw new Error(
+          `Repo "${input.repo}" already has a worktree on branch "${input.branch}" (${existing.path}). Pick another branch name.`,
+        );
+      }
       return { ok: true, path: existing.path };
     }
 
     // Check the project before anything is created, so a bad request leaves no trace.
-    const projectId = input.projectId
-      ? projectService.resolveForWorktree(input.projectId, input.repo)
-      : projectService.defaultProjectOf(input.repo);
+    const projectId = member
+      ? member.projectId
+      : input.projectId
+        ? projectService.resolveForWorktree(input.projectId, input.repo)
+        : projectService.defaultProjectOf(input.repo);
     if (projectId) input = { ...input, projectId };
 
     const worktreeId = toWorktreeId(input.repo, input.branch);
@@ -567,7 +584,7 @@ export class WorktreeService {
         return { ok: true, path: "", provisioning: { requestId: placed.requestId } };
       }
       const { placement: _placement, ...rest } = input;
-      return this.create({ ...rest, hostId: placed.hostId });
+      return this.create({ ...rest, hostId: placed.hostId }, member);
     }
     const hostId = resolveWorktreeHostId(input.hostId);
     // No row exists for a new worktree yet, so the host comes from the request.
@@ -577,9 +594,13 @@ export class WorktreeService {
     // worker's roots, at paths the worker reports.
     const repoPath = await this.checkoutOn(repo, host, input.hostRepoPath);
     const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
-    const worktreePath = remote
-      ? posix.join(wtDir, input.repo, input.branch)
-      : join(wtDir, input.repo, input.branch);
+    const worktreePath = member
+      ? remote
+        ? posix.join(member.folder, input.repo)
+        : join(member.folder, input.repo)
+      : remote
+        ? posix.join(wtDir, input.repo, input.branch)
+        : join(wtDir, input.repo, input.branch);
     // Pre-create the `<repo>` subdir under the worktrees root so the
     // first `worktrees.create` call on a freshly-installed Band has
     // somewhere to land. For slash-containing branch names (e.g.
@@ -590,9 +611,28 @@ export class WorktreeService {
     // redundant. Verified against `git 2.x` — `git worktree add
     // /tmp/wt/feature/login -b feature/login` succeeds without the
     // parent existing.
-    await host.fs.mkdir(remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo), {
-      recursive: true,
-    });
+    await host.fs.mkdir(
+      member ? member.folder : remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo),
+      { recursive: true },
+    );
+    // A task's worktrees start from the repo's default branch as the remote has it now.
+    let base = input.base;
+    if (member && !base && repo.defaultBranch) {
+      await host.git.exec(["fetch", "--quiet", "--no-tags", "origin"], repoPath).catch(() => null);
+      // A repo with no origin (a local folder) starts from its default branch as it is.
+      for (const candidate of [`origin/${repo.defaultBranch}`, repo.defaultBranch]) {
+        const found = await host.git
+          .exec(["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`], repoPath)
+          .then(
+            () => true,
+            () => false,
+          );
+        if (found) {
+          base = candidate;
+          break;
+        }
+      }
+    }
 
     try {
       // Async — `git worktree add` on a large repo can take 200–500 ms
@@ -604,7 +644,7 @@ export class WorktreeService {
         repoPath,
         path: worktreePath,
         branch: input.branch,
-        base: input.base,
+        base,
       });
     } catch (e) {
       throw new Error(e instanceof Error ? e.message : String(e));
@@ -619,6 +659,7 @@ export class WorktreeService {
       pinned: false,
       ...(remote ? { hostId } : {}),
       ...(projectId ? { projectId } : {}),
+      ...(member ? { taskId: member.taskId } : {}),
     };
     // Re-read state: `git worktree add` took a while, and a sync or another
     // create may have saved since `state` was loaded.
@@ -629,6 +670,17 @@ export class WorktreeService {
       saveState(fresh);
     }
     syncService.commitWorktreeAdd(input.repo, row);
+    // Every worktree belongs to a task. One made on its own is a one-member task, whose folder is
+    // the worktree. A worktree in no project yet gets its task at the next boot.
+    if (!member && projectId) {
+      projectTaskQueries.adoptWorktree({
+        repoName: input.repo,
+        name: input.branch,
+        branch: input.branch,
+        hostId: remote ? hostId : hostRegistry.local.id,
+        projectId,
+      });
+    }
 
     // Copy declared worktree files from the main checkout into the new
     // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
@@ -652,7 +704,7 @@ export class WorktreeService {
       log.warn({ err, worktreeId }, "copyWorktreeFiles raised — continuing");
     }
 
-    if (input.brief) {
+    if (input.brief && !member) {
       try {
         await writeBrief(host, worktreePath, input.brief, remote);
       } catch (err) {
@@ -671,6 +723,10 @@ export class WorktreeService {
     // Materialize the default chat pane so the worktree surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt. A `gui`
     // prompt runs in it.
+    if (member) {
+      worktreeScriptService.startSetup(worktreeId, worktreePath, repoPath);
+      return { ok: true, path: worktreePath };
+    }
     let defaultChat = chatService.getOrCreateDefault(worktreeId);
     // A dispatched worker runs on the model of its lane from its first session, which the chat's
     // own model decides (plan step 6.3).
@@ -934,6 +990,7 @@ export class WorktreeService {
     repo.worktrees = repo.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
     removal.commit();
+    projectTaskQueries.forgetWorktree(worktreeId);
 
     try {
       // Older installs keep prompt files in `workspace-prompts`; the directory name is not renamed.

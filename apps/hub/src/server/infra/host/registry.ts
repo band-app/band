@@ -1,15 +1,17 @@
 import { join } from "node:path";
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
+import { ProjectTaskQueries } from "../db/queries/project-tasks";
 import { ProjectQueries } from "../db/queries/projects";
 import { RepoQueries } from "../db/queries/repos";
 import { bandHome } from "../db/queries/settings";
 import { WorktreeQueries } from "../db/queries/worktrees";
-import { projectIdOfScope } from "../project-scope";
+import { projectIdOfScope, taskIdOfScope } from "../project-scope";
 
 const worktreeQueries = new WorktreeQueries();
 const repoQueries = new RepoQueries();
 const projectQueries = new ProjectQueries();
+const projectTaskQueries = new ProjectTaskQueries();
 
 /**
  * Finds the host a worktree or repo lives on. A worktree's host is the
@@ -49,6 +51,8 @@ export class HostRegistry {
   hostIdOfScope(scopeId: string): string | null {
     const projectId = projectIdOfScope(scopeId);
     if (projectId) return projectQueries.find(projectId)?.coordinatorHostId ?? this.local.id;
+    const taskId = taskIdOfScope(scopeId);
+    if (taskId) return projectTaskQueries.find(taskId)?.hostId ?? this.local.id;
     return worktreeQueries.findHostId(scopeId);
   }
 

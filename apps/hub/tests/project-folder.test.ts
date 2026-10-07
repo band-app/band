@@ -355,8 +355,12 @@ describe("repo tools read only the project's repos (S4)", () => {
       "repo_log",
       "repo_read",
       "repo_search",
+      "task_add_repo",
+      "task_remove_repo",
+      "task_stop",
+      "tasks_create",
+      "tasks_list",
       "worktree_stop",
-      "worktrees_create",
       "worktrees_list",
     ]);
   });

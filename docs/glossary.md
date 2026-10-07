@@ -32,6 +32,10 @@ A body of work across several repos with its own context repo and, when it has r
 - The **project folder** is `<BAND_HOME>/projects/<project>/` on the coordinator host. It is the working copy of the project's context repo, with a checkout of each repo's default branch under `repos/<repo>/`. You can edit, commit and push in those checkouts by hand, and the host keeps them current without overwriting local work.
 - The coordinator is a project-level chat. It has no worktree and runs in the project folder. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
 
+## Task
+
+One piece of work in one project. A task is a folder `<BAND_HOME>/projects/<project>/tasks/<task>/` on one host, with a `BRIEF.md` and one git worktree per member repo in a folder named after the repo. It has its own chat, which runs in that folder. The API is `projectTasks.*` (`tasks.*` is the queue of agent turns), the CLI is `band tasks`, and an agent in a task chat gets `BAND_TASK_ID` and `BAND_PROJECT_ID`. A worktree made on its own is a one-member task whose folder is the worktree. See `docs/tasks.md`.
+
 ## Terms that kept their names
 
 - `.band/config.json` still reads `workspace.copyFiles`, `workspace.defaultVia` and `workspace.terminal`. The format of a file in a user's repo is not renamed.

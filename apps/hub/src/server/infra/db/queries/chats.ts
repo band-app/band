@@ -51,6 +51,8 @@ export interface ChatRow {
   worktreeId: string | null;
   /** Set for a project-level chat. */
   projectId?: string | null;
+  /** Set for a task chat, and for a chat of a worktree that belongs to a task. */
+  taskId?: string | null;
   name: string;
   agent: string;
   model: string | undefined;
@@ -190,6 +192,7 @@ export class ChatQueries {
       id: row.id,
       worktreeId: row.worktreeId,
       projectId: row.projectId ?? null,
+      taskId: row.taskId ?? null,
       panelType: CHAT_PANEL_TYPE,
       state: serializeState(row),
       labels: serializeLabels(row.labels),
@@ -285,6 +288,7 @@ export class ChatQueries {
         id: row.id,
         worktreeId: row.worktreeId,
         projectId: row.projectId ?? null,
+        taskId: row.taskId ?? null,
         name: parsed.name,
         agent: parsed.agent,
         model: parsed.model ?? undefined,

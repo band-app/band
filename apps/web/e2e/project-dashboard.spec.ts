@@ -1,7 +1,7 @@
 /**
  * The project dashboard (plan step 6.6): agents with live status, task groups with each member's PR and CI
  * state in merge order, pending approvals and the quick actions. The coordinator's agent is the scripted ACP
- * stub (a message makes it call `worktrees_create`, or hold a turn until it is stopped). `gh` is the Express
+ * stub (a message makes it call `tasks_create`, or hold a turn until it is stopped). `gh` is the Express
  * stub, answering the branch-status poller's query for the PRs. No tRPC mocking.
  */
 
@@ -108,13 +108,9 @@ test.beforeAll(async () => {
                 mcpCall: {
                   name: "dispatch-group",
                   server: "band-coordinator",
-                  tool: "worktrees_create",
+                  tool: "tasks_create",
                   args: {
-                    group: {
-                      repos: [{ repo: API }, { repo: CLIENT }],
-                      mode: "split",
-                      mergeOrder: [CLIENT, API],
-                    },
+                    repos: [{ repo: CLIENT }, { repo: API }],
                     branch: BRANCH,
                     title: "Shared change",
                     brief: "Change both sides.",

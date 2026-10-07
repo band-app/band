@@ -222,6 +222,7 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
           head: wt.head,
           pinned: existing?.pinned ?? false,
           ...(existing?.projectId ? { projectId: existing.projectId } : {}),
+          ...(existing?.taskId ? { taskId: existing.taskId } : {}),
         };
       });
   } catch {

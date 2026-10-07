@@ -7,12 +7,13 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
-import { projectScopeId } from "../infra/project-scope";
+import { projectScopeId, taskScopeId } from "../infra/project-scope";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { projectDispatchService } from "./project-dispatch-service";
 import { projectService } from "./project-service";
 import { projectSubscriptionService } from "./project-subscription-service";
+import { projectTaskService } from "./project-task-service";
 import { abortTask, hasRunningTask } from "./task-service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,9 +56,12 @@ export class ProjectDashboardService {
     const view = projectService.get(row.id);
     const worktrees = projectService.allWorktreesOf(row.id);
     // Rows recorded under the project's own scope are the coordinator's, which has no worktree.
+    const tasks = projectTaskService.list(row.id);
     const worktreeIds = [
       projectScopeId(row.id),
       ...worktrees.map((w) => toWorktreeId(w.repoName, w.name)),
+      // A task's own chat runs in the task folder, and its usage is recorded under the task.
+      ...tasks.map((t) => taskScopeId(t.id)),
     ];
     const now = Date.now();
     const today = localDay(now);
@@ -103,6 +107,25 @@ export class ProjectDashboardService {
         lastActivityAt: chat.activeSessionLastModified ?? null,
         spendUsd: round(perChat.get(chat.id) ?? 0),
       });
+    }
+    // A task's own chat has no worktree either. It works on every repo of the task.
+    for (const task of tasks) {
+      for (const chat of chatService.listForTask(task.id)) {
+        agents.push({
+          chatId: chat.id,
+          worktreeId: null,
+          name: chat.name,
+          role: "worker",
+          repo: null,
+          branch: task.branch,
+          hostId: task.hostId,
+          agent: chat.agent,
+          model: chat.model ?? null,
+          status: this.isRunning(chat.id) ? "running" : "idle",
+          lastActivityAt: chat.activeSessionLastModified ?? null,
+          spendUsd: round(perChat.get(chat.id) ?? 0),
+        });
+      }
     }
     for (const w of worktrees) {
       const worktreeId = toWorktreeId(w.repoName, w.name);

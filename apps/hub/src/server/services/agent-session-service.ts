@@ -55,11 +55,11 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
-import { chatScope, projectIdOfScope } from "../infra/project-scope";
+import { chatScope, projectIdOfScope, taskIdOfScope } from "../infra/project-scope";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
-import { COORDINATOR_SERVER, RETRO_SERVER } from "./_utils/project-policy";
+import { COORDINATOR_SERVER, RETRO_SERVER, TASK_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { contextPreambleService } from "./context-preamble-service";
@@ -72,6 +72,7 @@ import { projectCoordinatorService } from "./project-coordinator-service";
 import { projectFolderService } from "./project-folder-service";
 import { projectRetroService } from "./project-retro-service";
 import { projectService } from "./project-service";
+import { projectTaskService } from "./project-task-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -639,10 +640,19 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
 // Where a chat runs
 // ---------------------------------------------------------------------------
 
-/** A worktree chat names its worktree to the agent. A project chat names its project. */
+/**
+ * A worktree chat names its worktree to the agent. A project chat names its project, and a task
+ * chat its task and project.
+ */
 function projectEnv(scope: string): Record<string, string> {
   const projectId = projectIdOfScope(scope);
-  return projectId ? { BAND_PROJECT_ID: projectId } : { BAND_WORKTREE_ID: scope };
+  if (projectId) return { BAND_PROJECT_ID: projectId };
+  const taskId = taskIdOfScope(scope);
+  if (taskId) {
+    const task = projectTaskService.find(taskId);
+    return { BAND_TASK_ID: taskId, ...(task ? { BAND_PROJECT_ID: task.projectId } : {}) };
+  }
+  return { BAND_WORKTREE_ID: scope };
 }
 
 /**
@@ -654,6 +664,12 @@ function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefine
   if (chat.worktreeId) {
     const worktree = worktreeService.resolve(chat.worktreeId);
     return worktree ? { cwd: worktree.worktree.path, host: worktree.host } : undefined;
+  }
+  if (chat.taskId) {
+    const task = projectTaskService.find(chat.taskId);
+    const folder = task ? projectTaskService.folderOf(task) : null;
+    const host = task ? projectTaskService.hostOf(task) : null;
+    return folder && host ? { cwd: folder, host } : undefined;
   }
   const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
   const folder = project ? projectFolderService.state(project.id)?.folder : undefined;
@@ -844,18 +860,21 @@ function localHubUrl(): string {
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
   try {
     const projectScope = projectIdOfScope(rt.worktreeId);
-    const worktree = projectScope ? undefined : worktreeService.resolve(rt.worktreeId);
-    if (!projectScope && !worktree) return [];
+    const taskScope = taskIdOfScope(rt.worktreeId);
+    const worktree = projectScope || taskScope ? undefined : worktreeService.resolve(rt.worktreeId);
+    if (!projectScope && !taskScope && !worktree) return [];
     // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
     const names = projectCoordinatorService.projectOfChat(rt.chatId)
       ? [COORDINATOR_SERVER]
       : projectRetroService.projectOfChat(rt.chatId)
         ? [RETRO_SERVER]
-        : worktree
-          ? mcpProxyService
-              .serversForSession(worktree.repo.name, worktree.host.id)
-              .map((s) => s.name)
-          : [];
+        : taskScope
+          ? [TASK_SERVER]
+          : worktree
+            ? mcpProxyService
+                .serversForSession(worktree.repo.name, worktree.host.id)
+                .map((s) => s.name)
+            : [];
     if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -895,6 +914,17 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
  */
 function withCharter(chatId: string, preamble: SessionPreamble | null): SessionPreamble | null {
   try {
+    const chat = chatService.get(chatId);
+    if (chat?.taskId && !chat.worktreeId) {
+      const task = projectTaskService.find(chat.taskId);
+      if (task) {
+        const charter = projectTaskService.charter(task);
+        return {
+          text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
+          memoryDir: preamble?.memoryDir ?? null,
+        };
+      }
+    }
     const project = projectCoordinatorService.projectOfChat(chatId);
     const retro = project ? undefined : projectRetroService.projectOfChat(chatId);
     if (!project && !retro) return preamble;
@@ -1119,6 +1149,17 @@ export class AgentSessionService {
       const worktree = worktreeService.resolve(chat.worktreeId);
       if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
       cwd = worktree.worktree.path;
+    } else if (chat.taskId) {
+      // A message to a task on a sleeping worker brings it back first, and the task's folder is the cwd.
+      const task = projectTaskService.find(chat.taskId);
+      if (!task) throw new Error(`Task not found: ${chat.taskId}`);
+      if (purpose === "prompt") {
+        await ephemeralLifecycleService.ensureAwakeTask(task.id);
+        await contextSyncService.pullForWorktree(scope);
+      }
+      const folder = projectTaskService.folderOf(task);
+      if (!folder) throw new Error(`Task ${task.name} has no folder`);
+      cwd = folder;
     } else {
       cwd = await projectChatCwd(chat, purpose);
     }
@@ -1536,7 +1577,9 @@ export class AgentSessionService {
     const sameAgent = (
       chat.worktreeId
         ? chatService.list(chat.worktreeId)
-        : chatService.listForProject(chat.projectId ?? "")
+        : chat.taskId
+          ? chatService.listForTask(chat.taskId)
+          : chatService.listForProject(chat.projectId ?? "")
     )
       .filter((c) => definitionFor(c).id === def.id)
       .map((c) => c.id);

@@ -285,6 +285,18 @@ band projects detach-worktree <worktree-id>
 
 A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project, and `remove-repo` also refuses while the repo's checkout in the project folder (`<BAND_HOME>/projects/<project>/repos/<repo>`) has uncommitted changes or unpushed commits. The coordinator runs in that project folder, not in a worktree. Changes need an admin token. Run them only when the user asks.
 
+### Work in tasks
+
+```sh
+band tasks create <project> <branch> [--repo <name[:role]>...] [--brief <file>] [--name <folder>] [--title <text>] [--host <id>] [--labels k=v,k=v] [--agent <id>] [--model <model>] [--no-start]
+band tasks list [<project>]
+band tasks add-repo <task> <repo> [--role <role>] [--project <project>]
+band tasks remove-repo <task> <repo> [--project <project>]
+band tasks remove <task> [--project <project>] [--force]
+```
+
+A task is one piece of work in a project. It is a folder on one host, `<BAND_HOME>/projects/<project>/tasks/<task>/`, with a `BRIEF.md` and one git worktree per repo. Each worktree is on the task's branch, started from the repo's default branch, in a folder named after the repo. The task has its own chat, and the agent in it runs in the task folder. `create` takes the repos to start with from the project's repos. With none, the task starts empty and its agent adds the repos it needs. A task runs on one host, so `create` fails with the reason when no host has the project's labels and can hold every repo. `remove-repo` and `remove` refuse while a worktree has commits that are not on the default branch or uncommitted changes, and `remove --force` skips that check. A worktree made on its own with `band worktrees create` is a one-member task whose folder is the worktree. Changes need an admin token. Run them only when the user asks.
+
 ### Store credentials in the hub's vault
 
 ```sh

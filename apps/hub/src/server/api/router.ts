@@ -63,6 +63,7 @@ import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
 import { pluginsRouter } from "./plugins/router";
 import { prereqsRouter } from "./prereqs/router";
+import { projectTasksRouter } from "./project-tasks/router";
 import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
@@ -111,6 +112,7 @@ export const appRouter = t.router({
   vault: vaultRouter,
   context: contextRouter,
   projects: projectsRouter,
+  projectTasks: projectTasksRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

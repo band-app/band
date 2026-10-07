@@ -11,7 +11,7 @@
 import path from "node:path";
 import type { RelayHttpRequest } from "@band-app/link";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { projectIdOfScope } from "../infra/project-scope";
+import { isFolderScope } from "../infra/project-scope";
 
 /**
  * The tRPC procedures an agent may call, by exact name. A procedure missing
@@ -455,12 +455,12 @@ export function checkRelayRequest(
   }
   const { pathname } = url;
   if (pathname === "/api/health" && request.method === "GET") return { ok: true };
-  // A project chat (the coordinator) has no worktree. Its only route is the MCP proxy, where its
-  // per-session token and the project it was issued for decide what it can do.
-  if (projectIdOfScope(request.scope.worktreeId)) {
+  // A project chat (the coordinator) and a task chat have no worktree. Their only route is the MCP
+  // proxy, where the per-session token and the project or task it was issued for decide what they can do.
+  if (isFolderScope(request.scope.worktreeId)) {
     return MCP_PROXY_ROUTE.test(pathname)
       ? { ok: true }
-      : deny(403, "A project chat may call the MCP proxy only");
+      : deny(403, "A project or task chat may call the MCP proxy only");
   }
   if (pathname === "/mcp") return checkMcp(request, workerId, lookups);
   // The MCP proxy checks its own per-session token, so the relay only has to

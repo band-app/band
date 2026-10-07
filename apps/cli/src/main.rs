@@ -102,6 +102,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: ProjectsCmd,
     },
+    /// Manage tasks: a folder per piece of work in a project, with a worktree per repo
+    Tasks {
+        #[command(subcommand)]
+        cmd: TasksCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -882,6 +887,83 @@ enum ProjectsCmd {
 }
 
 #[derive(Subcommand)]
+enum TasksCmd {
+    /// Create a task: a folder on one host with BRIEF.md, a worktree per repo and a chat
+    Create {
+        /// Project name or ID
+        project: String,
+        /// Branch every repo's worktree is made on, from its default branch
+        branch: String,
+        /// A repo of the project to start with, as `name` or `name:role` (repeatable). None starts an empty task.
+        #[arg(long = "repo")]
+        repos: Vec<String>,
+        /// A file with the task's brief (markdown)
+        #[arg(long)]
+        brief: Option<String>,
+        /// Task folder name (default: the branch with `/` replaced by `-`)
+        #[arg(long)]
+        name: Option<String>,
+        /// Title of the task's chat
+        #[arg(long)]
+        title: Option<String>,
+        /// Host ID to create the task on (default: a host that fits)
+        #[arg(long)]
+        host: Option<String>,
+        /// Comma-separated `key=value` host labels the host must have
+        #[arg(long)]
+        labels: Option<String>,
+        /// Coding agent ID of the task's chat
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model of the task's chat
+        #[arg(long)]
+        model: Option<String>,
+        /// Make the task and its chat without sending the first prompt
+        #[arg(long)]
+        no_start: bool,
+    },
+    /// List a project's tasks, or every project's
+    List {
+        /// Project name or ID
+        project: Option<String>,
+    },
+    /// Add a repo of the task's project to a task
+    AddRepo {
+        /// Task ID, or its name with --project
+        task: String,
+        /// Repo name
+        repo: String,
+        /// Role of the repo in the task
+        #[arg(long)]
+        role: Option<String>,
+        /// Project name or ID, when `task` is a name
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Remove a repo from a task. Refused while its worktree has commits or uncommitted changes.
+    RemoveRepo {
+        /// Task ID, or its name with --project
+        task: String,
+        /// Repo name
+        repo: String,
+        /// Project name or ID, when `task` is a name
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Remove a task with its worktrees, chats and folder
+    Remove {
+        /// Task ID, or its name with --project
+        task: String,
+        /// Project name or ID, when `task` is a name
+        #[arg(long)]
+        project: Option<String>,
+        /// Remove it even when a worktree has commits or uncommitted changes
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -1261,6 +1343,50 @@ fn main() {
                 vault_item,
                 unlink,
             } => cmd_context_link_remote(&name, remote.as_deref(), vault_item.as_deref(), unlink),
+        },
+        Commands::Tasks { cmd } => match cmd {
+            TasksCmd::Create {
+                project,
+                branch,
+                repos,
+                brief,
+                name,
+                title,
+                host,
+                labels,
+                agent,
+                model,
+                no_start,
+            } => cmd_tasks_create(
+                &project,
+                &branch,
+                &repos,
+                brief.as_deref(),
+                name.as_deref(),
+                title.as_deref(),
+                host.as_deref(),
+                labels.as_deref(),
+                agent.as_deref(),
+                model.as_deref(),
+                no_start,
+            ),
+            TasksCmd::List { project } => cmd_tasks_list(project.as_deref()),
+            TasksCmd::AddRepo {
+                task,
+                repo,
+                role,
+                project,
+            } => cmd_tasks_add_repo(&task, &repo, role.as_deref(), project.as_deref()),
+            TasksCmd::RemoveRepo {
+                task,
+                repo,
+                project,
+            } => cmd_tasks_remove_repo(&task, &repo, project.as_deref()),
+            TasksCmd::Remove {
+                task,
+                project,
+                force,
+            } => cmd_tasks_remove(&task, project.as_deref(), force),
         },
         Commands::Projects { cmd } => match cmd {
             ProjectsCmd::List => cmd_projects_list(),
@@ -4408,6 +4534,209 @@ fn project_repos_text(project: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cmd_tasks_create(
+    project: &str,
+    branch: &str,
+    repos: &[String],
+    brief: Option<&str>,
+    name: Option<&str>,
+    title: Option<&str>,
+    host: Option<&str>,
+    labels: Option<&str>,
+    agent: Option<&str>,
+    model: Option<&str>,
+    no_start: bool,
+) -> Result<CommandResult, String> {
+    use std::fmt::Write as _;
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"project": project, "branch": branch});
+    if !repos.is_empty() {
+        let list: Vec<serde_json::Value> = repos
+            .iter()
+            .map(|spec| match spec.split_once(':') {
+                Some((repo, role)) => serde_json::json!({"repo": repo, "role": role}),
+                None => serde_json::json!({"repo": spec}),
+            })
+            .collect();
+        body["repos"] = serde_json::json!(list);
+    }
+    if let Some(path) = brief {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("Could not read the brief {path}: {e}"))?;
+        body["brief"] = serde_json::json!(text);
+    }
+    if let Some(v) = name {
+        body["name"] = serde_json::json!(v);
+    }
+    if let Some(v) = title {
+        body["title"] = serde_json::json!(v);
+    }
+    if let Some(v) = host {
+        body["hostId"] = serde_json::json!(v);
+    }
+    if let Some(v) = labels {
+        let mut map = serde_json::Map::new();
+        for pair in split_list(v) {
+            let (k, val) = pair
+                .split_once('=')
+                .ok_or_else(|| format!("Label {pair} is not key=value"))?;
+            map.insert(k.to_string(), serde_json::json!(val));
+        }
+        body["placement"] = serde_json::json!({"labels": map});
+    }
+    if let Some(v) = agent {
+        body["codingAgentId"] = serde_json::json!(v);
+    }
+    if let Some(v) = model {
+        body["model"] = serde_json::json!(v);
+    }
+    if no_start {
+        body["start"] = serde_json::json!(false);
+    }
+    let data = client.trpc_mutate("projectTasks.create", &body)?;
+    let task = data.get("task").cloned().unwrap_or_default();
+    let text = |key: &str| task.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let mut out = format!(
+        "Created task {} ({}) on host {}\n  folder: {}\n",
+        text("name"),
+        text("id"),
+        text("hostId"),
+        text("folder"),
+    );
+    for m in task
+        .get("members")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let _ = writeln!(
+            out,
+            "  repo {}: {}",
+            m.get("repo").and_then(|v| v.as_str()).unwrap_or(""),
+            m.get("path").and_then(|v| v.as_str()).unwrap_or("")
+        );
+    }
+    Ok(CommandResult {
+        text: out,
+        json: serde_json::json!({"task": task, "chatId": data.get("chatId")}),
+    })
+}
+
+fn cmd_tasks_list(project: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let names: Vec<String> = match project {
+        Some(p) => vec![p.to_string()],
+        None => client
+            .trpc_query_no_input("projects.list")?
+            .get("projects")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect(),
+    };
+    let mut tasks: Vec<serde_json::Value> = Vec::new();
+    let mut rows: Vec<[String; 5]> = Vec::new();
+    for name in &names {
+        let data = client.trpc_query("projectTasks.list", &serde_json::json!({"project": name}))?;
+        for t in data
+            .get("tasks")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let text = |key: &str| {
+                t.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let repos: Vec<String> = t
+                .get("members")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.get("repo").and_then(|v| v.as_str()).map(str::to_string))
+                .collect();
+            rows.push([
+                text("name"),
+                text("project"),
+                text("branch"),
+                text("hostId"),
+                repos.join(","),
+            ]);
+            tasks.push(t.clone());
+        }
+    }
+    Ok(CommandResult {
+        text: format_table(&["NAME", "PROJECT", "BRANCH", "HOST", "REPOS"], &rows),
+        json: serde_json::json!({"tasks": tasks}),
+    })
+}
+
+fn cmd_tasks_add_repo(
+    task: &str,
+    repo: &str,
+    role: Option<&str>,
+    project: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"task": task, "repo": repo});
+    if let Some(v) = role {
+        body["role"] = serde_json::json!(v);
+    }
+    if let Some(v) = project {
+        body["project"] = serde_json::json!(v);
+    }
+    let data = client.trpc_mutate("projectTasks.addRepo", &body)?;
+    let member = data.get("member").cloned().unwrap_or_default();
+    Ok(CommandResult {
+        text: format!(
+            "Added repo {repo} to task {task}: {}\n",
+            member.get("path").and_then(|v| v.as_str()).unwrap_or("")
+        ),
+        json: serde_json::json!({"member": member}),
+    })
+}
+
+fn cmd_tasks_remove_repo(
+    task: &str,
+    repo: &str,
+    project: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"task": task, "repo": repo});
+    if let Some(v) = project {
+        body["project"] = serde_json::json!(v);
+    }
+    client.trpc_mutate("projectTasks.removeRepo", &body)?;
+    Ok(CommandResult {
+        text: format!("Removed repo {repo} from task {task}\n"),
+        json: serde_json::json!({"removed": true, "task": task, "repo": repo}),
+    })
+}
+
+fn cmd_tasks_remove(
+    task: &str,
+    project: Option<&str>,
+    force: bool,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut body = serde_json::json!({"task": task});
+    if let Some(v) = project {
+        body["project"] = serde_json::json!(v);
+    }
+    if force {
+        body["force"] = serde_json::json!(true);
+    }
+    client.trpc_mutate("projectTasks.remove", &body)?;
+    Ok(CommandResult {
+        text: format!("Removed task {task}\n"),
+        json: serde_json::json!({"removed": true, "task": task}),
+    })
+}
+
 fn cmd_projects_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let data = client.trpc_query_no_input("projects.list")?;
@@ -5392,6 +5721,63 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "unlink", "type": "boolean", "required": false, "description": "Drop the remote link"},
             ],
             "notes": "Needs an admin token. The hub fetches the remote's branches and pushes its own, never forcing. A branch that moved on both sides is left alone and shown in the SYNC column."
+        }),
+        serde_json::json!({
+            "name": "tasks create",
+            "description": "Create a task: a folder on one host with BRIEF.md, a worktree per repo and a chat",
+            "parameters": [
+                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
+                {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch every repo's worktree is made on, from its default branch"},
+                {"name": "repo", "type": "string", "required": false, "description": "A repo of the project to start with, as `name` or `name:role` (repeatable). None starts an empty task."},
+                {"name": "brief", "type": "string", "required": false, "description": "A file with the task's brief (markdown)"},
+                {"name": "name", "type": "string", "required": false, "description": "Task folder name (default: the branch with `/` replaced by `-`)"},
+                {"name": "title", "type": "string", "required": false, "description": "Title of the task's chat"},
+                {"name": "host", "type": "string", "required": false, "description": "Host ID to create the task on"},
+                {"name": "labels", "type": "string", "required": false, "description": "Comma-separated key=value host labels the host must have"},
+                {"name": "agent", "type": "string", "required": false, "description": "Coding agent ID of the task's chat"},
+                {"name": "model", "type": "string", "required": false, "description": "Model of the task's chat"},
+                {"name": "no-start", "type": "boolean", "required": false, "description": "Make the task and its chat without sending the first prompt"},
+            ],
+            "notes": "Needs an admin token. A task runs on one host, so the call fails with the reason when no host fits every repo. JSON output: `{\"task\": {\"id\": \"tsk-...\", \"name\": \"...\", \"folder\": \"...\", \"hostId\": \"...\", \"members\": [{\"repo\": \"api\", \"worktreeId\": \"api-feat-x\", \"path\": \"...\"}]}, \"chatId\": \"...\"}`."
+        }),
+        serde_json::json!({
+            "name": "tasks list",
+            "description": "List a project's tasks, or every project's",
+            "parameters": [
+                {"name": "project", "type": "string", "required": false, "positional": true, "description": "Project name or ID"},
+            ],
+            "notes": "Text output: `NAME  PROJECT  BRANCH  HOST  REPOS`. Worktrees made before tasks show as one-member tasks."
+        }),
+        serde_json::json!({
+            "name": "tasks add-repo",
+            "description": "Add a repo of the task's project to a task",
+            "parameters": [
+                {"name": "task", "type": "string", "required": true, "positional": true, "description": "Task ID, or its name with --project"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "role", "type": "string", "required": false, "description": "Role of the repo in the task"},
+                {"name": "project", "type": "string", "required": false, "description": "Project name or ID, when `task` is a name"},
+            ],
+            "notes": "Needs an admin token. Makes a git worktree on the task's branch in the task folder."
+        }),
+        serde_json::json!({
+            "name": "tasks remove-repo",
+            "description": "Remove a repo from a task",
+            "parameters": [
+                {"name": "task", "type": "string", "required": true, "positional": true, "description": "Task ID, or its name with --project"},
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "project", "type": "string", "required": false, "description": "Project name or ID, when `task` is a name"},
+            ],
+            "notes": "Needs an admin token. Refused while the repo's worktree has commits that are not on the default branch or uncommitted changes."
+        }),
+        serde_json::json!({
+            "name": "tasks remove",
+            "description": "Remove a task with its worktrees, chats and folder",
+            "parameters": [
+                {"name": "task", "type": "string", "required": true, "positional": true, "description": "Task ID, or its name with --project"},
+                {"name": "project", "type": "string", "required": false, "description": "Project name or ID, when `task` is a name"},
+                {"name": "force", "type": "boolean", "required": false, "description": "Remove it even when a worktree has commits or uncommitted changes"},
+            ],
+            "notes": "Needs an admin token."
         }),
         serde_json::json!({
             "name": "projects list",

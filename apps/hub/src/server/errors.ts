@@ -262,3 +262,11 @@ export class RepoOutsideRootsError extends Error {
     this.roots = roots;
   }
 }
+
+/** Thrown by `ProjectTaskService` when no task has the id or name. Mapped to 404. */
+export class ProjectTaskNotFoundError extends Error {
+  constructor(ref: string) {
+    super(`No task "${ref}"`);
+    this.name = "ProjectTaskNotFoundError";
+  }
+}

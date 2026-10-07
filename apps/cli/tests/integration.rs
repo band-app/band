@@ -354,6 +354,20 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
 fn stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
@@ -2350,6 +2364,123 @@ fn projects_create_list_add_repo() {
 }
 
 #[test]
+fn tasks_create_list_add_repo_remove() {
+    // Creating a task starts its chat, so run it on the scripted stub agent.
+    let stub_agent = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/hub/tests/fixtures/acp-stub-agent.mjs");
+    let env = TestEnv::with_server_env(&[
+        ("BAND_SERVE_UI", "false"),
+        ("BAND_TEST_ACP_AGENT", stub_agent.to_str().unwrap()),
+    ]);
+    for name in ["api", "client", "docs"] {
+        let dir = env.tmp.path().join(name);
+        fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-b", "main"]);
+        git(&dir, &["commit", "--allow-empty", "-m", "init"]);
+        let added = env.band(&["repos", "add", dir.to_str().unwrap()]);
+        assert!(added.status.success(), "stderr: {}", stderr(&added));
+    }
+    let made = env.band(&[
+        "projects",
+        "create",
+        "shop",
+        "--repo",
+        "api:backend",
+        "--repo",
+        "client",
+    ]);
+    assert!(made.status.success(), "stderr: {}", stderr(&made));
+
+    let brief = env.tmp.path().join("brief.md");
+    fs::write(&brief, "# Checkout\nGoal: it checks out.\n").unwrap();
+    let created = env.band(&[
+        "tasks",
+        "create",
+        "shop",
+        "feat/x",
+        "--repo",
+        "api",
+        "--brief",
+        brief.to_str().unwrap(),
+        "--no-start",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let body = json_of(&created);
+    let task = &body["task"];
+    assert_eq!(task["name"], "feat-x");
+    assert_eq!(task["branch"], "feat/x");
+    let folder = Path::new(task["folder"].as_str().unwrap()).to_path_buf();
+    assert!(folder.ends_with("projects/shop/tasks/feat-x"), "{folder:?}");
+    let text = fs::read_to_string(folder.join("BRIEF.md")).unwrap();
+    assert!(text.contains("Goal: it checks out."), "brief: {text}");
+    // The worktree is a folder of the task, on the task's branch.
+    let head = git_out(&folder.join("api"), &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert_eq!(head.trim(), "feat/x");
+    assert!(body["chatId"].is_string());
+
+    let listed = json_of(&env.band(&["tasks", "list", "shop", "--output", "json"]));
+    let names: Vec<&str> = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"feat-x"), "tasks: {names:?}");
+    let text = stdout(&env.band(&["tasks", "list", "shop"]));
+    assert!(text.starts_with("NAME"), "text: {text}");
+
+    // Another repo of the project joins the task. A repo outside the project, and a name in use, are refused.
+    let added = env.band(&[
+        "tasks",
+        "add-repo",
+        "feat-x",
+        "client",
+        "--project",
+        "shop",
+        "--output",
+        "json",
+    ]);
+    assert!(added.status.success(), "stderr: {}", stderr(&added));
+    assert!(folder.join("client").join(".git").exists());
+    let outside = env.band(&["tasks", "add-repo", "feat-x", "docs", "--project", "shop"]);
+    assert!(!outside.status.success());
+    assert!(
+        stderr(&outside).contains("is not in project"),
+        "stderr: {}",
+        stderr(&outside)
+    );
+    assert!(!env
+        .band(&["tasks", "create", "shop", "feat/x", "--no-start"])
+        .status
+        .success());
+
+    // A member with uncommitted changes stays, a clean one goes.
+    fs::write(folder.join("api").join("wip.txt"), "wip\n").unwrap();
+    let refused = env.band(&["tasks", "remove-repo", "feat-x", "api", "--project", "shop"]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("uncommitted changes"),
+        "stderr: {}",
+        stderr(&refused)
+    );
+    let removed = env.band(&[
+        "tasks",
+        "remove-repo",
+        "feat-x",
+        "client",
+        "--project",
+        "shop",
+    ]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+
+    let gone = env.band(&["tasks", "remove", "feat-x", "--project", "shop", "--force"]);
+    assert!(gone.status.success(), "stderr: {}", stderr(&gone));
+    assert!(!folder.exists());
+}
+
+#[test]
 fn context_create_list_link_remove() {
     let env = TestEnv::with_server_env(&[("BAND_SERVE_UI", "false")]);
 
@@ -3872,16 +4003,20 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"worktrees create"), "missing: {names:?}");
     assert!(names.contains(&"worktrees remove"), "missing: {names:?}");
     assert!(names.contains(&"settings"), "missing: {names:?}");
-    // The `tasks` subcommand was fully removed — agent task submission
+    // The old agent-turn `tasks` commands were removed — agent task submission
     // happens via the top-level `chat` command, and lifecycle management
-    // moved server-side.
-    for removed in [
-        "tasks list",
+    // moved server-side. `tasks` now names the project tasks (a folder with a
+    // worktree per repo), which have their own create, list and repo commands.
+    for present in [
         "tasks create",
-        "tasks cancel",
-        "tasks rerun",
-        "tasks watch",
+        "tasks list",
+        "tasks add-repo",
+        "tasks remove-repo",
+        "tasks remove",
     ] {
+        assert!(names.contains(&present), "missing {present}: {names:?}");
+    }
+    for removed in ["tasks cancel", "tasks rerun", "tasks watch"] {
         assert!(
             !names.contains(&removed),
             "expected `{removed}` to be removed: {names:?}"

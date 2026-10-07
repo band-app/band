@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { TaskGroupQueries } from "../src/server/infra/db/queries/task-groups";
+import { ProjectTaskQueries } from "../src/server/infra/db/queries/project-tasks";
 import { emit } from "../src/server/infra/events/status-event-bus";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
@@ -119,18 +119,33 @@ async function newProject(): Promise<Fixture> {
   await worktreeService.create({ repo: repoName, branch, projectId: project.id });
   const workerWorktreeId = toWorktreeId(repoName, branch);
   const workerChat = chatService.getOrCreateDefault(workerWorktreeId);
-  new TaskGroupQueries().insertGroup(
+  // A task with a folder is one the coordinator tracks. This one has a brief path and the worker's worktree.
+  const tasks = new ProjectTaskQueries();
+  // The create above made the worktree a one-member task of its own. The worker moves into the tracked task.
+  tasks.forgetWorktree(workerWorktreeId);
+  tasks.insert(
     {
       id: `grp-${seq}`,
       projectId: project.id,
-      title: `Group ${seq}`,
-      brief: "brief",
+      name: `group-${seq}`,
       branch,
-      mode: "split",
+      briefPath: join(home, `group-${seq}`, "BRIEF.md"),
+      hostId: "local",
+      status: "active",
       createdAt: Date.now(),
     },
-    [{ repo: repoName, worktreeId: workerWorktreeId, hostId: null, mergeOrder: 0 }],
+    [
+      {
+        taskId: `grp-${seq}`,
+        repoName,
+        worktreeId: workerWorktreeId,
+        role: null,
+        mergeOrder: 0,
+        prNumber: null,
+      },
+    ],
   );
+  tasks.setWorktreeTask(repoName, branch, `grp-${seq}`);
   await projectSubscriptionService.reconcile(project.id);
   stoppable.add(workerChat.id);
   stoppable.add(row.coordinatorChatId as string);
@@ -269,7 +284,11 @@ describe("project subscriptions", () => {
     emitPr(f, 7, "open");
     await new Promise((r) => setTimeout(r, 200));
     expect(projectSubs(f)).toHaveLength(2);
-    expect(new TaskGroupQueries().membersOfProject(f.projectId)[0].prNumber).toBe(7);
+    expect(
+      new ProjectTaskQueries()
+        .membersOfProject(f.projectId)
+        .find((m) => m.worktreeId === f.workerWorktreeId)?.prNumber,
+    ).toBe(7);
 
     await githubPollService.poll();
     comments = [
