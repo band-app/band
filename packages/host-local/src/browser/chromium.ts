@@ -15,8 +15,9 @@ import { join } from "node:path";
 import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-api";
 
 // A Chromium that is alive but never writes its port file is stuck, and a fresh launch usually is not.
-// Each attempt gets a bounded wait, and the attempts together stay well inside the link's 60 s `browser.open` limit.
-const START_ATTEMPT_TIMEOUT_MS = 12_000;
+// Each attempt gets a bounded wait. Chromium starts in well under a second, and the attempts together stay
+// inside the 30 s a caller (the hub's CDP test, for one) may wait, so a failure reports its cause instead of a timeout.
+const START_ATTEMPT_TIMEOUT_MS = 7_000;
 const START_ATTEMPTS = 3;
 const CLOSE_GRACE_MS = 4_000;
 
@@ -206,6 +207,8 @@ export class ChromiumManager {
       // Small /dev/shm (containers, CI runners) makes Chromium's renderers fail or stall.
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      // Startup progress in chromium.log, so a launch that hangs says where.
+      "--enable-logging=stderr",
       // No Keychain or keyring: with a HOME that has none, the cookie store blocks on the lookup
       // and every navigation hangs. Cookies are stored with a fixed key, which is the automation default.
       "--use-mock-keychain",
@@ -261,9 +264,10 @@ export class ChromiumManager {
           .trim()
           .split("\n")
           .filter(Boolean)
-          .slice(-5);
+          .slice(-12);
+        const files = readdirSync(profileDir).slice(0, 30).join(",");
         const elapsed = `after ${Date.now() - startedAt} ms, pid ${proc.pid ?? "none"}`;
-        const message = `${(err as Error).message} (${elapsed})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`;
+        const message = `${(err as Error).message} (${elapsed}, bin ${bin}, profile has ${files})${tail.length > 0 ? `: ${tail.join(" | ")}` : ""}`;
         // Only a launch that hung is worth another try. An exit or a fatal error will repeat.
         if (!(err instanceof StartTimeoutError)) throw new Error(message);
         failures.push(`attempt ${attempt}: ${message}`);
