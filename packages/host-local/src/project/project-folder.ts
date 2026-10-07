@@ -603,7 +603,7 @@ export class ProjectFolder {
       // `push.default=upstream` sends HEAD to the tracked default branch. Never forced.
       const r = await repoGit(
         path,
-        ["push", "origin", "HEAD:" + (await this.upstreamBranch(path))],
+        ["push", "origin", `HEAD:${await this.upstreamBranch(path)}`],
         NETWORK_TIMEOUT_MS,
       );
       if (r.code !== 0) throw new Error(brief(r));
