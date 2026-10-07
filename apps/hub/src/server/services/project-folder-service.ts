@@ -18,8 +18,10 @@ import type {
   ProjectEnsureResult,
   ProjectReadResult,
   ProjectSearchMatch,
+  ProjectStatus,
 } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { ProjectInputError } from "../errors";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import { hostRegistry } from "../infra/host/registry";
@@ -175,6 +177,74 @@ export class ProjectFolderService {
   async log(row: ProjectRow, repo: string, n: number): Promise<ProjectCommit[]> {
     this.requireRepo(row, repo);
     return this.hostOf(row).project.log({ project: row.name, repo, n });
+  }
+
+  async status(row: ProjectRow, repo: string): Promise<ProjectStatus> {
+    this.requireRepo(row, repo);
+    return this.hostOf(row).project.status({ project: row.name, repo });
+  }
+
+  async diff(
+    row: ProjectRow,
+    repo: string,
+    target: { kind: "working" } | { kind: "commit"; sha: string },
+    path?: string,
+  ) {
+    this.requireRepo(row, repo);
+    return this.hostOf(row).project.diff({ project: row.name, repo, target, path });
+  }
+
+  async commit(row: ProjectRow, repo: string, message: string, paths?: string[]) {
+    this.requireRepo(row, repo);
+    const result = await this.hostOf(row).project.commit({
+      project: row.name,
+      repo,
+      message,
+      paths,
+    });
+    await this.refreshState(row);
+    return result;
+  }
+
+  async push(row: ProjectRow, repo: string) {
+    this.requireRepo(row, repo);
+    const result = await this.hostOf(row).project.push({ project: row.name, repo });
+    await this.refreshState(row);
+    return result;
+  }
+
+  async pull(row: ProjectRow, repo: string) {
+    this.requireRepo(row, repo);
+    const result = await this.hostOf(row).project.pull({ project: row.name, repo });
+    await this.refreshState(row);
+    return result;
+  }
+
+  /** Re-reads the checkouts' ahead, behind and dirty state without fetching, so the folder section follows a write. */
+  private async refreshState(row: ProjectRow): Promise<void> {
+    await this.ensure(row, "never").catch((err) => {
+      log.warn({ projectId: row.id, err }, "could not re-read the project checkouts");
+    });
+  }
+
+  /** The project's worktrees of one repo with their pull request. Their diffs come from the worktree Changes calls. */
+  openWork(row: ProjectRow, repo: string) {
+    this.requireRepo(row, repo);
+    return projectService
+      .workersOf(row)
+      .filter((w) => w.repoName === repo)
+      .map((w) => {
+        const worktreeId = toWorktreeId(w.repoName, w.name);
+        const status = projectService.branchStatus(worktreeId);
+        return {
+          worktreeId,
+          name: w.name,
+          branch: w.branch,
+          hostId: w.hostId ?? null,
+          ciState: status?.ciState ?? null,
+          pr: status?.ciPr ?? null,
+        };
+      });
   }
 
   /** Creates the checkout of a repo that joined the project, when the project has a folder already. */

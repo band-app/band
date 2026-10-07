@@ -16,8 +16,12 @@ import { spawn } from "node:child_process";
 import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type {
+  ProjectChangedFile,
   ProjectCheckout,
+  ProjectCheckoutRef,
   ProjectCommit,
+  ProjectCommitRequest,
+  ProjectDiffRequest,
   ProjectEnsureRequest,
   ProjectEnsureResult,
   ProjectLogRequest,
@@ -27,6 +31,7 @@ import type {
   ProjectRepoSpec,
   ProjectSearchMatch,
   ProjectSearchRequest,
+  ProjectStatus,
 } from "@band-app/host-api";
 import { brief, type ContextSync, type GitOut } from "../context/context-sync";
 
@@ -44,6 +49,13 @@ const MAX_LINE_CHARS = 300;
 const MAX_LOG = 100;
 const MAX_DIR_ENTRIES = 500;
 const MAX_SEARCH_STDOUT_BYTES = 2_000_000;
+const MAX_DIFF_BYTES = 1_000_000;
+const MAX_STATUS_FILES = 1000;
+const MAX_COMMIT_PATHS = 500;
+const MAX_COMMIT_MESSAGE = 10_000;
+const NETWORK_TIMEOUT_MS = 60_000;
+const LOG_FORMAT = "--format=%H%x1f%an%x1f%aI%x1f%s";
+const SHA = /^[0-9a-f]{7,64}$/;
 
 /** `BAND_PROJECT_FETCH_THROTTLE_MS` overrides the one-minute spacing of fetches, read on every call. */
 function fetchThrottleMs(): number {
@@ -403,6 +415,231 @@ export class ProjectFolder {
         const [sha = "", author = "", date = "", subject = ""] = line.split("\x1f");
         return { sha, author, date, subject };
       });
+  }
+
+  // ---- changes -----------------------------------------------------------------
+
+  private parseCommits(stdout: string): ProjectCommit[] {
+    return stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [sha = "", author = "", date = "", subject = ""] = line.split("\x1f");
+        return { sha, author, date, subject };
+      });
+  }
+
+  /** A path the caller named: relative, inside the checkout, never `.git`. Returns it normalised. */
+  private checkRelativePath(root: string, path: string): string {
+    if (path.includes("\0") || path.startsWith("/") || /^[A-Za-z]:/.test(path)) {
+      throw new Error("The path is outside the repo");
+    }
+    const wanted = resolve(root, path);
+    if (wanted === root || !wanted.startsWith(root + sep)) {
+      throw new Error("The path is outside the repo");
+    }
+    const rel = wanted.slice(root.length + 1);
+    if (rel === ".git" || rel.startsWith(`.git${sep}`)) {
+      throw new Error("The path is outside the repo");
+    }
+    return rel;
+  }
+
+  async status(req: ProjectCheckoutRef): Promise<ProjectStatus> {
+    const path = await this.existingCheckout(req.project, req.repo);
+    const state = await this.state(path);
+    const branch = (await repoGit(path, ["symbolic-ref", "--short", "HEAD"])).stdout.trim();
+    const upstream = (
+      await repoGit(path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+    ).stdout.trim();
+    const porcelain = await repoGit(path, [
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+    ]);
+    if (porcelain.code !== 0) throw new Error(brief(porcelain));
+    const files: ProjectChangedFile[] = [];
+    const parts = porcelain.stdout.split("\0");
+    for (let i = 0; i < parts.length && files.length < MAX_STATUS_FILES; i++) {
+      const entry = parts[i] as string;
+      if (entry.length < 4) continue;
+      const code = entry.slice(0, 2);
+      const file = entry.slice(3);
+      if (code[0] === "R" || code[1] === "R" || code[0] === "C" || code[1] === "C") {
+        files.push({ path: file, status: "renamed", oldPath: parts[++i] });
+      } else if (code === "??") {
+        files.push({ path: file, status: "untracked" });
+      } else if (code.includes("U") || code === "AA" || code === "DD") {
+        files.push({ path: file, status: "conflicted" });
+      } else if (code.includes("D")) {
+        files.push({ path: file, status: "deleted" });
+      } else if (code.includes("A")) {
+        files.push({ path: file, status: "added" });
+      } else {
+        files.push({ path: file, status: "modified" });
+      }
+    }
+    const [unpushed, incoming] = await Promise.all([
+      repoGit(path, ["log", "-n50", LOG_FORMAT, "@{u}..HEAD"]),
+      repoGit(path, ["log", "-n50", LOG_FORMAT, "HEAD..@{u}"]),
+    ]);
+    return {
+      branch,
+      upstream,
+      ahead: state.ahead,
+      behind: state.behind,
+      dirty: state.dirty,
+      diverged: state.ahead > 0 && state.behind > 0,
+      files,
+      unpushed: this.parseCommits(unpushed.stdout),
+      incoming: this.parseCommits(incoming.stdout),
+    };
+  }
+
+  async diff(req: ProjectDiffRequest): Promise<{ diff: string; truncated: boolean }> {
+    const path = await this.existingCheckout(req.project, req.repo);
+    const root = await realpath(path);
+    const rel = req.path ? this.checkRelativePath(root, req.path) : undefined;
+    const spec = rel ? ["--", rel] : [];
+    if (req.target.kind === "commit") {
+      if (!SHA.test(req.target.sha)) throw new Error("Not a commit SHA");
+      const r = await repoGit(
+        path,
+        [
+          "--literal-pathspecs",
+          "show",
+          "--format=",
+          "--no-color",
+          "--no-ext-diff",
+          req.target.sha,
+          ...spec,
+        ],
+        LOCAL_TIMEOUT_MS,
+        MAX_DIFF_BYTES,
+      );
+      if (r.code !== 0) throw new Error(brief(r));
+      return { diff: r.stdout, truncated: r.buffer.length >= MAX_DIFF_BYTES };
+    }
+    const tracked = await repoGit(
+      path,
+      ["--literal-pathspecs", "diff", "HEAD", "--no-color", "--no-ext-diff", ...spec],
+      LOCAL_TIMEOUT_MS,
+      MAX_DIFF_BYTES,
+    );
+    if (tracked.code !== 0) throw new Error(brief(tracked));
+    let diff = tracked.stdout;
+    // Untracked files have no HEAD side. `--no-index` diffs them against /dev/null without touching the index.
+    const untracked = await repoGit(path, [
+      "--literal-pathspecs",
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+      ...spec,
+    ]);
+    for (const file of untracked.stdout.split("\0").filter(Boolean)) {
+      if (diff.length >= MAX_DIFF_BYTES) break;
+      const r = await repoGit(
+        path,
+        ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file],
+        LOCAL_TIMEOUT_MS,
+        MAX_DIFF_BYTES,
+      );
+      // `--no-index` exits 1 when the files differ.
+      if (r.code === 0 || r.code === 1) diff += r.stdout;
+    }
+    const truncated = diff.length >= MAX_DIFF_BYTES;
+    return { diff: truncated ? diff.slice(0, MAX_DIFF_BYTES) : diff, truncated };
+  }
+
+  async commit(req: ProjectCommitRequest): Promise<{ sha: string }> {
+    const message = req.message.trim();
+    if (!message) throw new Error("The commit message is empty");
+    if (message.length > MAX_COMMIT_MESSAGE) throw new Error("The commit message is too long");
+    const path = await this.existingCheckout(req.project, req.repo);
+    const root = await realpath(path);
+    const paths = (req.paths ?? []).map((p) => this.checkRelativePath(root, p));
+    if (paths.length > MAX_COMMIT_PATHS) throw new Error("Too many paths");
+    return this.exclusive(req.project, async () => {
+      const staged = await repoGit(path, [
+        "--literal-pathspecs",
+        "add",
+        "-A",
+        ...(paths.length > 0 ? ["--", ...paths] : ["--", "."]),
+      ]);
+      if (staged.code !== 0) throw new Error(brief(staged));
+      const cached = await repoGit(path, [
+        "--literal-pathspecs",
+        "diff",
+        "--cached",
+        "--quiet",
+        ...(paths.length > 0 ? ["--", ...paths] : []),
+      ]);
+      if (cached.code === 0) throw new Error("There is nothing to commit");
+      const committed = await repoGit(path, [
+        "--literal-pathspecs",
+        "commit",
+        "-m",
+        message,
+        ...(paths.length > 0 ? ["--", ...paths] : []),
+      ]);
+      if (committed.code !== 0) throw new Error(brief(committed));
+      const sha = await repoGit(path, ["rev-parse", "HEAD"]);
+      return { sha: sha.stdout.trim() };
+    });
+  }
+
+  async push(req: ProjectCheckoutRef): Promise<{ pushed: number }> {
+    const path = await this.existingCheckout(req.project, req.repo);
+    return this.exclusive(req.project, async () => {
+      const state = await this.state(path);
+      if (state.ahead === 0) throw new Error("There is nothing to push");
+      if (state.behind > 0) {
+        throw new Error(
+          `The checkout is ${state.behind} commit${state.behind === 1 ? "" : "s"} behind its upstream. Pull first, or resolve the divergence in a terminal.`,
+        );
+      }
+      // `push.default=upstream` sends HEAD to the tracked default branch. Never forced.
+      const r = await repoGit(
+        path,
+        ["push", "origin", "HEAD:" + (await this.upstreamBranch(path))],
+        NETWORK_TIMEOUT_MS,
+      );
+      if (r.code !== 0) throw new Error(brief(r));
+      return { pushed: state.ahead };
+    });
+  }
+
+  private async upstreamBranch(path: string): Promise<string> {
+    const r = await repoGit(path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    const name = r.stdout.trim();
+    if (r.code !== 0 || !name.startsWith("origin/")) {
+      throw new Error("The checkout does not track an origin branch");
+    }
+    return name.slice("origin/".length);
+  }
+
+  async pull(req: ProjectCheckoutRef): Promise<{ moved: number }> {
+    const path = await this.existingCheckout(req.project, req.repo);
+    return this.exclusive(req.project, async () => {
+      const fetched = await repoGit(
+        path,
+        ["fetch", "--quiet", "--no-tags", "origin"],
+        NETWORK_TIMEOUT_MS,
+      );
+      if (fetched.code !== 0) throw new Error(brief(fetched));
+      const state = await this.state(path);
+      if (state.behind === 0) throw new Error("The checkout is already up to date");
+      if (state.ahead > 0) {
+        throw new Error(
+          "The checkout has local commits and its upstream has moved. Resolve the divergence in a terminal.",
+        );
+      }
+      const moved = await repoGit(path, ["merge", "--quiet", "--ff-only", "@{u}"]);
+      if (moved.code !== 0) throw new Error(brief(moved));
+      return { moved: state.behind };
+    });
   }
 
   // ---- remove ------------------------------------------------------------------

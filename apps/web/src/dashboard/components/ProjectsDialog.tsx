@@ -16,6 +16,7 @@ import { useAdapter } from "../context";
 import { useRepos } from "../hooks/use-repos";
 import { getProjectTerminalRenderer } from "../lib/project-terminal-slot";
 import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
+import { ProjectCodeBrowser } from "./ProjectCodeBrowser";
 
 type ProjectList = Awaited<ReturnType<typeof trpc.projects.list.query>>;
 type Project = ProjectList["projects"][number];
@@ -1497,6 +1498,14 @@ function ProjectDetail({
       {project.isDefault ? null : (
         <>
           <CoordinatorSection project={project} canEdit={canEdit} run={run} />
+
+          {project.coordinator ? (
+            <ProjectCodeBrowser
+              project={project.id}
+              repos={project.repos.map((r) => r.repo)}
+              canEdit={canEdit}
+            />
+          ) : null}
 
           <PolicySection
             key={`${project.id}:${JSON.stringify(project.policy)}:${project.coordinatorModel}`}

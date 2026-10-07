@@ -316,6 +316,42 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   r.json("project.log", async (a) =>
     host.project.log({ project: str(a, "project"), repo: str(a, "repo"), n: num(a, "n") }),
   );
+  r.json("project.status", async (a) =>
+    host.project.status({ project: str(a, "project"), repo: str(a, "repo") }),
+  );
+  r.json("project.diff", async (a) => {
+    const target = asParams(a.target);
+    const kind = str(target, "kind");
+    if (kind !== "working" && kind !== "commit")
+      throw invalid("target.kind must be working or commit");
+    return host.project.diff({
+      project: str(a, "project"),
+      repo: str(a, "repo"),
+      target: kind === "commit" ? { kind, sha: str(target, "sha") } : { kind },
+      ...(optStr(a, "path") ? { path: optStr(a, "path") as string } : {}),
+    });
+  });
+  r.json("project.commit", async (a) => {
+    const paths = a.paths;
+    if (
+      paths !== undefined &&
+      (!Array.isArray(paths) || paths.some((p) => typeof p !== "string"))
+    ) {
+      throw invalid("paths must be an array of strings");
+    }
+    return host.project.commit({
+      project: str(a, "project"),
+      repo: str(a, "repo"),
+      message: str(a, "message"),
+      ...(paths ? { paths: paths as string[] } : {}),
+    });
+  });
+  r.json("project.push", async (a) =>
+    host.project.push({ project: str(a, "project"), repo: str(a, "repo") }),
+  );
+  r.json("project.pull", async (a) =>
+    host.project.pull({ project: str(a, "project"), repo: str(a, "repo") }),
+  );
   r.json("project.removeRepo", async (a) =>
     host.project.removeRepo({
       project: str(a, "project"),
