@@ -40,6 +40,7 @@ import type { RepoInfo } from "../types";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
 import { ProjectsDialog } from "./ProjectsDialog";
+import { ProjectTaskList } from "./ProjectTaskList";
 import { RepoList } from "./RepoList";
 import { SettingsPage } from "./SettingsPage";
 
@@ -94,6 +95,7 @@ export function DashboardShell({
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
+  const [coordinatorProject, setCoordinatorProject] = useState<string | undefined>(undefined);
   const [settingsContext, setSettingsContext] = useState<string | undefined>(undefined);
   const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
@@ -481,6 +483,12 @@ export function DashboardShell({
             keeps horizontal text truncation via min-w-0 + truncate on its
             children. pb-3 gives the last row breathing room. */}
         <main className="pb-3">
+          <ProjectTaskList
+            onOpenCoordinator={(projectId) => {
+              setCoordinatorProject(projectId);
+              setShowProjects(true);
+            }}
+          />
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner className="size-5 text-muted-foreground" />
@@ -553,7 +561,10 @@ export function DashboardShell({
             variant="ghost"
             className="text-muted-foreground"
             data-testid="repo-list__projects-button"
-            onClick={() => setShowProjects(true)}
+            onClick={() => {
+              setCoordinatorProject(undefined);
+              setShowProjects(true);
+            }}
           >
             <FolderKanban className="size-4" />
             Projects
@@ -571,6 +582,7 @@ export function DashboardShell({
       <ProjectsDialog
         open={showProjects}
         onOpenChange={setShowProjects}
+        initialProject={coordinatorProject}
         onOpenContext={(name) => {
           setSettingsContext(name);
           setShowSettingsDialog(true);

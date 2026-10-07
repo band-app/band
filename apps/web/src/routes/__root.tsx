@@ -35,6 +35,7 @@ import {
 import { MobileWorktreeShell } from "../components/MobileWorktreeShell";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
+import { TaskView } from "../components/TaskView";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
@@ -46,6 +47,7 @@ import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/cli
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
+import { parseTaskFromPath } from "../lib/parse-task";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import {
   loadRightPanelCollapsed,
@@ -835,6 +837,7 @@ function AppShell() {
       <>
         <Outlet />
         <MobileWorktreeShell />
+        <TaskOverlay pathname={pathname} className="fixed inset-0 z-20" />
       </>
     );
   }
@@ -921,6 +924,7 @@ function AppShell() {
                         <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
                           <Outlet />
                           <SharedDockviewLayout />
+                          <TaskOverlay pathname={pathname} className="absolute inset-0 z-20" />
                           <BrowserHostBridge />
                           <BrowserProfileSweeper />
                         </div>
@@ -991,6 +995,17 @@ function AppShell() {
         </div>
       </WorktreeChromeContext.Provider>
     </ToolbarOverflowProvider>
+  );
+}
+
+/** The task view for a `/task/<id>` URL, over whatever layout is mounted. */
+function TaskOverlay({ pathname, className }: { pathname: string; className: string }) {
+  const taskId = parseTaskFromPath(pathname);
+  if (!taskId) return null;
+  return (
+    <div className={`${className} bg-background`} data-testid="app-shell__task">
+      <TaskView key={taskId} taskId={taskId} />
+    </div>
   );
 }
 
