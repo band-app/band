@@ -3073,9 +3073,24 @@ fn stream_terminal_output(tid: &str, done: &AtomicBool) {
             return;
         }
     };
-    if response.status().as_u16() >= 400 {
-        eprintln!("error: server returned HTTP {}", response.status().as_u16());
-        return;
+    let mut response = response;
+    let status = response.status().as_u16();
+    if status == 401 {
+        eprintln!("error: Authentication failed. Check tokenSecret in settings");
+        std::process::exit(1);
+    }
+    if status >= 400 {
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .unwrap_or(serde_json::Value::Null);
+        let msg = body
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .map_or_else(|| format!("server returned HTTP {status}"), str::to_string);
+        eprintln!("error: {msg}");
+        std::process::exit(1);
     }
     let mut body = response.into_body();
     let mut reader = std::io::BufReader::new(body.as_reader());
@@ -3106,7 +3121,8 @@ fn stream_terminal_output(tid: &str, done: &AtomicBool) {
                             eprintln!("\n[terminal exited]");
                         }
                         done.store(true, Ordering::Relaxed);
-                        break;
+                        // The main thread may be blocked reading stdin, so end the process here.
+                        std::process::exit(0);
                     }
                 }
                 data_buf.clear();
@@ -3173,8 +3189,10 @@ fn cmd_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> Result<(
         }
     }
 
+    // Detaching leaves the terminal running. The output thread may be waiting for the next chunk,
+    // so it is left to end with the process instead of being joined.
     done.store(true, Ordering::Relaxed);
-    let _ = output_handle.join();
+    drop(output_handle);
 
     Ok(())
 }

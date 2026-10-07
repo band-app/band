@@ -677,6 +677,8 @@ describe("the band CLI through the relay (S2)", () => {
     cwd?: string;
     /** Stops a command that streams, after this many ms. */
     killAfterMs?: number;
+    /** Keeps stdin open this long after writing `stdin`, for a command that quits at EOF. */
+    stdinHoldMs?: number;
   }
   const runWith = (options: RunOptions, ...args: string[]) =>
     new Promise<{ code: number | null; out: string }>((resolve) => {
@@ -709,7 +711,12 @@ describe("the band CLI through the relay (S2)", () => {
       child.stdin.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code !== "EPIPE") throw err;
       });
-      child.stdin.end(options.stdin ?? "");
+      if (options.stdinHoldMs) {
+        child.stdin.write(options.stdin ?? "");
+        setTimeout(() => child.stdin.end(), options.stdinHoldMs);
+      } else {
+        child.stdin.end(options.stdin ?? "");
+      }
     });
   const run = (...args: string[]) => runWith({}, ...args);
 
@@ -916,6 +923,58 @@ describe("the band CLI through the relay (S2)", () => {
     const other = await run("chats", "list", "proj-relay-b");
     expect(other.out).toContain("chats.list");
     expect(other.out).not.toContain("Unknown error");
+  });
+
+  it.skipIf(!cli)(
+    "attaches to a terminal on the worker through the relay and detaches without killing it (S1, S3)",
+    async () => {
+      const created = await m<{ terminalId: string }>("terminal.create", {
+        worktreeId: "proj-relay-a",
+      });
+      // The attach detaches at EOF on stdin, so the input stays open long enough for the output to arrive.
+      const attached = await runWith(
+        { stdin: "echo attach-marker-$((20+22))\n", stdinHoldMs: 3_000, killAfterMs: 30_000 },
+        "terminals",
+        "attach",
+        created.terminalId,
+      );
+      expect(attached.out, attached.out).toContain("attach-marker-42");
+      expect(attached.out).not.toContain("error:");
+      succeeded.add("terminals attach");
+
+      // Detaching, or killing the CLI, leaves the terminal running.
+      const listed = await ok("terminals", "list", "proj-relay-a");
+      expect(listed).toContain(created.terminalId);
+
+      // Closing the terminal on the hub ends an attached CLI with a clear message.
+      const watching = runWith(
+        { stdinHoldMs: 20_000, killAfterMs: 25_000 },
+        "terminals",
+        "attach",
+        created.terminalId,
+      );
+      await new Promise((r) => setTimeout(r, 1_000));
+      await m("terminal.kill", { terminalId: created.terminalId, worktreeId: "proj-relay-a" });
+      const closed = await watching;
+      expect(closed.out).toContain("[terminal exited]");
+    },
+  );
+
+  it.skipIf(!cli)("refuses to attach to a terminal on another host (S2)", async () => {
+    const hubTerminal = await m<{ terminalId: string }>("terminal.create", {
+      worktreeId: "proj-main",
+    });
+    const result = await runWith(
+      { stdinHoldMs: 10_000, killAfterMs: 15_000 },
+      "terminals",
+      "attach",
+      hubTerminal.terminalId,
+    );
+    expect(result.out).toContain("terminal.stream");
+    expect(result.out).not.toContain("Unknown error");
+    expect(result.out).not.toContain("HTTP 403");
+    expect(result.code).toBe(1);
+    await m("terminal.kill", { terminalId: hubTerminal.terminalId, worktreeId: "proj-main" });
   });
 
   it.skipIf(!cli)("has run every command in the list the drift check reads", () => {

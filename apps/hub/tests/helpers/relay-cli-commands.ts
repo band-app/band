@@ -33,6 +33,7 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "subscriptions create",
   "subscriptions list",
   "subscriptions remove",
+  "terminals attach",
   "terminals create",
   "terminals kill",
   "terminals list",
@@ -89,8 +90,6 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "env build": "admin only, runs repository commands on the builder host",
   "env status": "reads a repo's image builds, which a worker has no need to see",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
-  "terminals attach":
-    "streams over a WebSocket, which the relay does not carry yet (follow-up in the PR)",
   "skills install": "local to the machine, calls no hub procedure",
   schema: "prints the CLI's own schema, calls no hub procedure",
 };
