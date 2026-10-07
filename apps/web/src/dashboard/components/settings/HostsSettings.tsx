@@ -1,7 +1,7 @@
 import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
@@ -51,15 +51,26 @@ function hubUrl(): string {
 export function HostsSettings() {
   const queryClient = useQueryClient();
   const adapter = useAdapter();
+  // Refetches a list that something just changed. A plain invalidate during the
+  // first load reuses that load's request, which the hub may have answered
+  // before the change, so the stale answer would stay on screen. Cancelling
+  // first makes the refetch a new request.
+  const refetchFresh = useCallback(
+    async (queryKey: readonly string[]) => {
+      await queryClient.cancelQueries({ queryKey });
+      await queryClient.invalidateQueries({ queryKey });
+    },
+    [queryClient],
+  );
   // A worker connecting or dropping changes its row, so follow the hub's status stream.
   useEffect(
     () =>
       adapter.subscribeStatusEvents((event) => {
         if (event.kind === "host-status-changed") {
-          void queryClient.invalidateQueries({ queryKey: HOSTS_KEY });
+          void refetchFresh(HOSTS_KEY);
         }
       }),
-    [adapter, queryClient],
+    [adapter, refetchFresh],
   );
   const hosts = useQuery<HostList>({
     queryKey: HOSTS_KEY,
@@ -78,11 +89,7 @@ export function HostsSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: HOSTS_KEY }),
-      queryClient.invalidateQueries({ queryKey: TOKENS_KEY }),
-    ]);
+  const refresh = () => Promise.all([refetchFresh(HOSTS_KEY), refetchFresh(TOKENS_KEY)]);
 
   const issue = async () => {
     setBusy(true);

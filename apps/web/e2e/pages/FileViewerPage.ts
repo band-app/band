@@ -337,6 +337,20 @@ export class FileViewerPage {
     });
   }
 
+  /**
+   * Assert (auto-retrying) that the active file leaf has finished saving.
+   * The file on disk changes before the viewer clears its dirty state, and
+   * the group-header Save button renders only while the buffer is dirty, so
+   * an edit made before this holds can be reset by the save completing.
+   */
+  async expectSaved(): Promise<void> {
+    await test.step("File leaf has finished saving", async () => {
+      await expect(this.page.getByTestId("center-file-leaf__save")).toBeHidden({
+        timeout: 15_000,
+      });
+    });
+  }
+
   /** Assert (auto-retrying) that the file viewer is mounted and visible.
    *  Used for previews (e.g. markdown) that render outside the CodeMirror
    *  `.cm-content` surface, where `expectContent` doesn't apply. */
