@@ -18,6 +18,7 @@ import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
+import { backfillTasks } from "./_utils/task-backfill";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
 import { projectService } from "./project-service";
 import {
@@ -563,6 +564,8 @@ export class RepoService {
   /** Boot step after the first sync: the default project takes repos and worktrees that are in no project. */
   async adoptUnplaced(): Promise<void> {
     await projectService.adoptUnplaced(this.queries.loadAll());
+    // Every worktree belongs to a task, so the ones the migration could not place get theirs now.
+    backfillTasks();
   }
 
   /** Lists a folder on a host for the picker. */

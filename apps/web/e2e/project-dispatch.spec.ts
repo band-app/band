@@ -1,6 +1,6 @@
 /**
  * Dispatch approvals and task groups (plan step 6.3). The coordinator's agent is the scripted ACP stub: a
- * message to its chat makes it call `worktrees_create` through the MCP entry Band gave the session. The
+ * message to its chat makes it call `tasks_create` through the MCP entry Band gave the session. The
  * project is in steer mode, so each call waits as a card on the project page until the user decides.
  */
 
@@ -50,12 +50,12 @@ function seedRepo(name: string) {
   return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
 }
 
-/** A scripted turn in which the coordinator calls `worktrees_create` with `args`. */
+/** A scripted turn in which the coordinator calls `tasks_create` with `args`. */
 const dispatchTurn = (match: string, args: object) => ({
   match,
   steps: [
     {
-      mcpCall: { name: match, server: "band-coordinator", tool: "worktrees_create", args },
+      mcpCall: { name: match, server: "band-coordinator", tool: "tasks_create", args },
     },
     { say: "dispatch requested" },
   ],
@@ -81,23 +81,19 @@ test.beforeAll(async () => {
       ...acpStubEnv(tmpHome, {
         turns: [
           dispatchTurn("^dispatch-one", {
-            repo: API,
+            repos: [{ repo: API }],
             branch: "feat-one",
             brief: "Do the first thing.",
             scenarios: ["it works"],
           }),
           dispatchTurn("^dispatch-two", {
-            repo: API,
+            repos: [{ repo: API }],
             branch: "feat-two",
             brief: "Do the second thing.",
             scenarios: ["it works"],
           }),
           dispatchTurn("^dispatch-group", {
-            group: {
-              repos: [{ repo: API }, { repo: CLIENT }],
-              mode: "split",
-              mergeOrder: [CLIENT, API],
-            },
+            repos: [{ repo: CLIENT }, { repo: API }],
             branch: "feat-shared",
             title: "Shared change",
             brief: "Change both sides.",

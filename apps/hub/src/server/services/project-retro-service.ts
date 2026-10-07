@@ -517,7 +517,7 @@ export class ProjectRetroService {
       const repo = item.repo as string;
       const suffix = proposalId.replace(/^rp-/, "");
       const outcome = await projectDispatchService.dispatch(row, {
-        repo,
+        repos: [{ repo }],
         branch: `retro-${suffix}-${item.id}-${newId("a").slice(-4)}`,
         title: `Retro: ${item.path}`,
         brief: [
@@ -533,7 +533,10 @@ export class ProjectRetroService {
       if (outcome.status === "pending approval") {
         return { dispatch: "pending approval", requestId: outcome.requestId };
       }
-      return { dispatch: "dispatched", worktreeIds: outcome.worktrees.map((w) => w.worktreeId) };
+      return {
+        dispatch: "dispatched",
+        worktreeIds: outcome.worktrees.flatMap((w) => (w.worktreeId ? [w.worktreeId] : [])),
+      };
     }
     const context = this.contextOf(row, item.target);
     const changes =

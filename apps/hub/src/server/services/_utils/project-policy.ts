@@ -11,6 +11,8 @@ import { z } from "zod";
 export const COORDINATOR_SERVER = "band-coordinator";
 /** The hub's own tools for a project's retro agent (plan step 6.5), served on the same proxy route. */
 export const RETRO_SERVER = "band-retro";
+/** The hub's own tools for the agent of a task (plan step T.2): add and remove the task's repos. */
+export const TASK_SERVER = "band-task";
 /** The chat label that marks a project's retro chat. Its value is the project id. */
 export const RETRO_LABEL = "band:retro";
 /** The chat label that marks a project's coordinator chat. */

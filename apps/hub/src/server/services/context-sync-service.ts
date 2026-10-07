@@ -15,8 +15,9 @@
 
 import type { ContextPushResult, ContextSpec } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import { hostRegistry } from "../infra/host/registry";
-import { projectIdOfScope } from "../infra/project-scope";
+import { projectIdOfScope, taskIdOfScope } from "../infra/project-scope";
 import { contextService } from "./context-service";
 import { projectService } from "./project-service";
 import { tokenService } from "./token-service";
@@ -24,6 +25,7 @@ import { vaultService } from "./vault-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("context-sync");
+const projectTaskQueries = new ProjectTaskQueries();
 
 const LOCAL_HOST_ID = "local";
 const DEFAULT_PULL_TIMEOUT_MS = 10_000;
@@ -39,12 +41,15 @@ export class ContextSyncService {
    * context on the project's coordinator host.
    */
   async contextsFor(scopeId: string) {
-    const projectId = projectIdOfScope(scopeId);
+    // A task chat uses its project's context on the task's host.
+    const taskId = taskIdOfScope(scopeId);
+    const task = taskId ? projectTaskQueries.find(taskId) : undefined;
+    const projectId = task ? task.projectId : projectIdOfScope(scopeId);
     const project = projectId ? projectService.find(projectId) : undefined;
     const worktree = projectId ? undefined : worktreeService.resolve(scopeId);
     if (projectId ? !project : !worktree) return null;
     const host = project
-      ? hostRegistry.hostById(project.coordinatorHostId ?? LOCAL_HOST_ID)
+      ? hostRegistry.hostById(task?.hostId ?? project.coordinatorHostId ?? LOCAL_HOST_ID)
       : (worktree as NonNullable<typeof worktree>).host;
     const labels =
       host.id === LOCAL_HOST_ID

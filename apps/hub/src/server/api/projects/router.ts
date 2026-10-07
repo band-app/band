@@ -24,6 +24,7 @@ import { projectFolderService } from "../../services/project-folder-service";
 import { projectRetroService } from "../../services/project-retro-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { projectSubscriptionService } from "../../services/project-subscription-service";
+import { projectTaskService } from "../../services/project-task-service";
 import { terminalService } from "../../services/terminal-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
@@ -151,6 +152,10 @@ export const projectsRouter = t.router({
           .remove(input.project, {
             removeContext: input.removeContext,
             beforeRemove: async (row) => {
+              // No worktree is left at this point, so what remains are tasks that never got a repo.
+              for (const task of projectTaskService.list(row.id)) {
+                await projectTaskService.remove(task.id, { force: true });
+              }
               await projectCoordinatorService.teardown(row.id);
               projectRetroService.unschedule(row.id);
             },

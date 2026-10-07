@@ -132,6 +132,17 @@ export class ProjectFolderService {
     return work;
   }
 
+  /**
+   * Makes sure the project folder exists on `host` with a current copy of the context, and
+   * returns it. It makes no repo checkouts, so a task on any host can use it without cloning the
+   * project's repos. The state the project page shows is the coordinator host's, so it is not
+   * touched here.
+   */
+  async ensureOn(row: ProjectRow, host: Host): Promise<{ folder: string }> {
+    const result = await host.project.ensure({ project: row.name, repos: [], fetch: "never" });
+    return { folder: result.folder };
+  }
+
   /** The project folder on its host: the last known one, else the folder after a first ensure. */
   async folder(row: ProjectRow): Promise<string> {
     return this.states.get(row.id)?.folder ?? (await this.ensure(row, "never")).folder;

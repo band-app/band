@@ -159,6 +159,9 @@ export const worktrees = sqliteTable("worktrees", {
   projectId: text("project_id").references((): AnySQLiteColumn => projects.id, {
     onDelete: "set null",
   }),
+  // The task this worktree is a member of (plan step T.2), or null before the boot backfill
+  // has made its one-member task. No foreign key: the whole-tree repo save rewrites this table.
+  taskId: text("task_id"),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was
@@ -392,6 +395,9 @@ export const panelStates = sqliteTable("panel_states", {
   worktreeId: text("worktree_id"),
   // The project a project-level chat belongs to. Null for a worktree's chat.
   projectId: text("project_id"),
+  // The task a task chat belongs to (plan step T.2). A task's own chat has no worktree and
+  // runs in the task folder. The chat of a migrated one-member task keeps its worktree.
+  taskId: text("task_id"),
   panelType: text("panel_type").notNull(),
   state: text("state").notNull(), // JSON blob — panel-type-specific
   // Free-form labels for taxonomy and dispatch lookups (issue #520). JSON-encoded
@@ -885,40 +891,45 @@ export const projectRepos = sqliteTable(
   (t) => [primaryKey({ columns: [t.projectId, t.repoName] })],
 );
 
-// A task group is one piece of work that spans several repos of a project (plan step 6.3,
-// section 13). `mode` is `split` (one worktree and agent per repo, on the same branch) or
-// `combined` (one root with the repos side by side). `merge_order` lists the repos in the
-// order their pull requests merge. `worktree_id` and `host_id` of a member stay null while a
-// host is still being provisioned for it.
-export const taskGroups = sqliteTable(
-  "task_groups",
+// A task is one piece of work in one project (plan step T.2, section 14): a folder on one host
+// that holds a BRIEF.md and one git worktree per member repo. `brief_path` is the BRIEF.md on the
+// host, `host_id` the host the folder is on (null while a host is still being provisioned),
+// `status` is `active` or `removed`.
+export const projectTasks = sqliteTable(
+  "project_tasks",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
-    brief: text("brief").notNull(),
+    name: text("name").notNull(),
     branch: text("branch").notNull(),
-    mode: text("mode").notNull(),
+    briefPath: text("brief_path"),
+    hostId: text("host_id"),
+    status: text("status").notNull().default("active"),
     createdAt: integer("created_at").notNull(),
   },
-  (t) => [index("task_groups_project_idx").on(t.projectId)],
+  (t) => [
+    index("project_tasks_project_idx").on(t.projectId),
+    uniqueIndex("project_tasks_project_name_idx").on(t.projectId, t.name),
+  ],
 );
 
-export const taskGroupMembers = sqliteTable(
-  "task_group_members",
+// The repos of a task. `worktree_id` is null while a member waits for a host. `merge_order` is
+// the order the members' pull requests merge.
+export const taskMembers = sqliteTable(
+  "task_members",
   {
-    groupId: text("group_id")
+    taskId: text("task_id")
       .notNull()
-      .references(() => taskGroups.id, { onDelete: "cascade" }),
-    repo: text("repo").notNull(),
+      .references(() => projectTasks.id, { onDelete: "cascade" }),
+    repoName: text("repo_name").notNull(),
     worktreeId: text("worktree_id"),
-    hostId: text("host_id"),
+    role: text("role"),
+    mergeOrder: integer("merge_order").notNull().default(0),
     prNumber: integer("pr_number"),
-    mergeOrder: integer("merge_order").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.groupId, t.repo] })],
+  (t) => [primaryKey({ columns: [t.taskId, t.repoName] })],
 );
 
 // Worktrees that held a project's coordinator before it moved into the project folder (step T.1).

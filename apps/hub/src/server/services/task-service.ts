@@ -3,11 +3,12 @@ import { computeCost } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
 import { WorktreeNotFoundError } from "../errors";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import { ProjectQueries } from "../infra/db/queries/projects";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { emitChatLifecycle } from "../infra/events/chat-lifecycle-bus";
 import { hostRegistry } from "../infra/host/registry";
-import { projectIdOfScope } from "../infra/project-scope";
+import { isFolderScope, projectIdOfScope, taskIdOfScope } from "../infra/project-scope";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
   hasQueuedMessages,
@@ -132,7 +133,7 @@ function observePending(): void {
 }
 
 function persistTask(task: InternalTask): void {
-  const worktree = projectIdOfScope(task.worktreeId)
+  const worktree = isFolderScope(task.worktreeId)
     ? undefined
     : worktreeService.resolve(task.worktreeId);
   try {
@@ -268,13 +269,14 @@ function turnUsage(
 // ---------------------------------------------------------------------------
 
 const projects = new ProjectQueries();
+const projectTasks = new ProjectTaskQueries();
 
 /**
  * Records a chat's status on its worktree and broadcasts the worktree's new status. A project
  * chat has no worktree to show it on, so nothing is recorded.
  */
 function setScopeStatus(scope: string, chatId: string, status: string): void {
-  if (projectIdOfScope(scope)) return;
+  if (isFolderScope(scope)) return;
   const updated = setWorktreeSourceStatus(scope, chatStatusSource(chatId), { status });
   emitStatusEvent({ kind: "update", status: updated });
 }
@@ -285,9 +287,10 @@ function setScopeStatus(scope: string, chatId: string, status: string): void {
  */
 function scopeExists(scope: string): boolean {
   const projectId = projectIdOfScope(scope);
-  return projectId
-    ? projects.find(projectId) !== undefined
-    : worktreeService.resolve(scope) !== null;
+  if (projectId) return projects.find(projectId) !== undefined;
+  const taskId = taskIdOfScope(scope);
+  if (taskId) return projectTasks.find(taskId) !== undefined;
+  return worktreeService.resolve(scope) !== null;
 }
 
 export function submitTask(options: SubmitTaskOptions): TaskInfo {

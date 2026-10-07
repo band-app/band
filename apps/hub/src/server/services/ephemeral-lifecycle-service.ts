@@ -53,6 +53,8 @@ import {
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { HostRequestQueries } from "../infra/db/queries/host-requests";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
+import { ProjectQueries } from "../infra/db/queries/projects";
 import { bandHome } from "../infra/db/queries/settings";
 import { WorktreeSleepQueries, type WorktreeSleepRow } from "../infra/db/queries/worktree-sleep";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
@@ -114,6 +116,8 @@ export class EphemeralLifecycleService {
   private readonly sleeps = new WorktreeSleepQueries();
   private readonly worktrees = new WorktreeQueries();
   private readonly requests = new HostRequestQueries();
+  private readonly projectTasks = new ProjectTaskQueries();
+  private readonly projects = new ProjectQueries();
   private readonly sessions = new Map<string, ServerSession>();
   /** Per host: settles when a worker the hub told to exit has gone, or when the handshake gave up. */
   private readonly draining = new Map<string, Promise<void>>();
@@ -272,9 +276,11 @@ export class EphemeralLifecycleService {
       const stored: WorktreeSleepRow[] = [];
       try {
         for (const ws of tracked) stored.push(await this.persist(host, rpc, ws, hostId));
+        await this.persistTasks(host, rpc, hostId);
       } catch (err) {
         // A host stores all of its worktrees or none, so the next wake has nothing half done.
         for (const row of stored) this.forget(row);
+        this.forgetTasks(hostId);
         throw err;
       }
       this.errors.delete(hostId);
@@ -354,6 +360,21 @@ export class EphemeralLifecycleService {
       return "a worktree is still being created on this host";
     }
     const host = hostRegistry.hostById(hostId);
+    // A task is stored with its worktrees. One with no worktree has nothing a wake could restore it from.
+    for (const task of this.projectTasks.all().filter((t) => t.hostId === hostId && t.briefPath)) {
+      if (this.projectTasks.membersOf(task.id).length === 0) {
+        return `task ${task.name} has no repo yet, so it cannot be stored`;
+      }
+      for (const chat of chatService.listForTask(task.id)) {
+        if (
+          hasRunningTask(chat.id) ||
+          agentSessionService.isActive(chat.id) ||
+          hasQueuedMessages(chat.id)
+        ) {
+          return `an agent is working in task ${task.name}`;
+        }
+      }
+    }
     for (const ws of tracked) {
       for (const chat of chatService.list(ws.worktreeId)) {
         // A task is running from the submit on, before the agent process has started a turn.
@@ -504,6 +525,106 @@ export class EphemeralLifecycleService {
     return ids;
   }
 
+  // ---- tasks --------------------------------------------------------------
+
+  /** Where a sleeping task's brief and chat sessions are kept on the hub. */
+  private taskDir(taskId: string): string {
+    return join(bandHome(), "sleep", `task-${taskId}`);
+  }
+
+  /**
+   * Stores what a task has besides its worktrees: its BRIEF.md and the agent session files of its
+   * own chat. The folder itself is made again on the new worker, from the project folder there.
+   */
+  private async persistTasks(host: Host, rpc: RemoteRpc, hostId: string): Promise<void> {
+    for (const task of this.projectTasks.all()) {
+      if (task.hostId !== hostId || !task.briefPath) continue;
+      const dir = this.taskDir(task.id);
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      await writeFile(join(dir, "BRIEF.md"), await host.fs.readFile(task.briefPath), {
+        mode: 0o600,
+      });
+      const ids = chatService
+        .listForTask(task.id)
+        .map((c) => c.activeSessionId)
+        .filter((id): id is string => typeof id === "string" && id !== "");
+      let sessionCount = 0;
+      if (ids.length > 0) {
+        const { files } = await rpc.call<{ files: SessionFile[] }>(
+          METHOD_LIFECYCLE_EXPORT_SESSIONS,
+          { sessionIds: ids },
+        );
+        if (files.length > 0) {
+          await writeFile(join(dir, "sessions.json"), JSON.stringify({ files }), { mode: 0o600 });
+          sessionCount = ids.length;
+        }
+      }
+      await writeFile(
+        join(dir, "meta.json"),
+        JSON.stringify({ taskId: task.id, hostId, sessions: sessionCount }),
+        { mode: 0o600 },
+      );
+    }
+  }
+
+  private forgetTasks(hostId: string): void {
+    for (const task of this.projectTasks.all()) {
+      if (task.hostId === hostId) rmSync(this.taskDir(task.id), { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Makes each stored task's folder on the new worker, with its BRIEF.md and chat sessions, and
+   * points the task at it. Returns the new folder of each task by id, for its worktrees.
+   */
+  private async restoreTasks(
+    host: Host,
+    rpc: RemoteRpc,
+    hostId: string,
+    root: string,
+  ): Promise<Map<string, string>> {
+    const folders = new Map<string, string>();
+    for (const task of this.projectTasks.all()) {
+      if (task.hostId !== hostId || !task.briefPath) continue;
+      const dir = this.taskDir(task.id);
+      let brief: Buffer;
+      try {
+        brief = await readFile(join(dir, "BRIEF.md"));
+      } catch {
+        continue; // not stored by a sleep: the folder is still there
+      }
+      const project = this.projects.find(task.projectId);
+      if (!project) continue;
+      const { folder } = await host.project.ensure({
+        project: project.name,
+        repos: [],
+        fetch: "never",
+      });
+      const taskFolder = posix.join(folder, "tasks", task.name);
+      await host.fs.mkdir(taskFolder, { recursive: true });
+      const briefPath = posix.join(taskFolder, "BRIEF.md");
+      await host.fs.writeFile(briefPath, brief);
+      this.projectTasks.setHost(task.id, hostId, briefPath);
+      folders.set(task.id, taskFolder);
+      try {
+        const files = (
+          JSON.parse(await readFile(join(dir, "sessions.json"), "utf8")) as { files: SessionFile[] }
+        ).files;
+        const stage = posix.join(root, WIP_DIR, "sessions", `task-${task.id}`);
+        await host.fs.rm(stage, { recursive: true, force: true });
+        for (const file of files) {
+          const target = posix.join(stage, file.root, file.rel);
+          await host.fs.mkdir(posix.dirname(target), { recursive: true });
+          await host.fs.writeFile(target, Buffer.from(file.data, "base64"));
+        }
+        await rpc.call(METHOD_LIFECYCLE_IMPORT_SESSIONS, { dir: stage });
+      } catch (err) {
+        log.warn(`task ${task.name}: no saved agent sessions: ${errorText(err)}`);
+      }
+    }
+    return folders;
+  }
+
   private forget(row: WorktreeSleepRow): void {
     this.sleeps.delete(row.worktreeId);
     rmSync(sleepDir(row.worktreeId), { recursive: true, force: true });
@@ -531,6 +652,22 @@ export class EphemeralLifecycleService {
       return;
     }
     throw new Error(`worktree ${worktreeId} is being stored, retry in a moment`);
+  }
+
+  /**
+   * Like `ensureAwake`, for a task: wakes its host when the task's worktrees sleep. A task with no
+   * worktree is never stored, so it is never asleep.
+   */
+  async ensureAwakeTask(taskId: string): Promise<void> {
+    const task = this.projectTasks.find(taskId);
+    const hostId = task?.hostId;
+    if (!task || !hostId || hostId === LOCAL_HOST_ID) return;
+    for (const member of this.projectTasks.membersOf(task.id)) {
+      if (member.worktreeId) {
+        await this.ensureAwake(member.worktreeId);
+        return;
+      }
+    }
   }
 
   wake(hostId: string): Promise<void> {
@@ -574,7 +711,7 @@ export class EphemeralLifecycleService {
    * Restores the sleeping worktrees of `hostId` onto its new worker. Called
    * by placement once the worker said hello.
    */
-  async restoreHost(hostId: string, hostRepoPath?: string): Promise<void> {
+  async restoreHost(hostId: string, hostRepoPath?: string, pathRepo?: string): Promise<void> {
     const rows = this.sleeps.listByHost(hostId);
     if (rows.length === 0) return;
     const host = hostRegistry.hostById(hostId);
@@ -583,8 +720,23 @@ export class EphemeralLifecycleService {
     const rpc = new RemoteRpc(hostId, () => session);
     // A restore hook put the machine's disk back, so the checkouts may be there already.
     const fromSnapshot = runnerService.restoredSnapshot(hostId) !== undefined;
+    const [root] = (await host.info()).roots;
+    const taskFolders = root
+      ? await this.restoreTasks(host, rpc, hostId, root)
+      : new Map<string, string>();
     for (const row of rows) {
-      await this.restore(host, rpc, row, hostRepoPath, fromSnapshot);
+      await this.restore(
+        host,
+        rpc,
+        row,
+        // The path the runner reports is the clone of the repo the request was made for. Another repo on the host is cloned again.
+        pathRepo === undefined || pathRepo === row.repo ? hostRepoPath : undefined,
+        fromSnapshot,
+        taskFolders,
+      );
+    }
+    for (const taskId of taskFolders.keys()) {
+      rmSync(this.taskDir(taskId), { recursive: true, force: true });
     }
     // The snapshots are used up, or stale when a fresh worker came up after a failed restore.
     void runnerService.dropHostSnapshots(hostId);
@@ -596,6 +748,7 @@ export class EphemeralLifecycleService {
     row: WorktreeSleepRow,
     hostRepoPath?: string,
     fromSnapshot = false,
+    taskFolders: Map<string, string> = new Map(),
   ): Promise<void> {
     const [root] = (await host.info()).roots;
     if (!root) throw new Error(`host ${host.id} serves no directory`);
@@ -607,7 +760,22 @@ export class EphemeralLifecycleService {
       const resolved = await host.fs.realpath(hostRepoPath);
       hostRegistry.setRepoPathOn(row.repo, host.id, resolved);
     }
-    const repoPath = hostRegistry.repoPathOn(row.repo, host.id, "");
+    let repoPath = hostRegistry.repoPathOn(row.repo, host.id, "");
+    // A new machine has none of the clones the old one made, so a repo with a remote is cloned again.
+    const remoteUrl = loadState().repos.find((r) => r.name === row.repo)?.remoteUrl;
+    if (
+      remoteUrl &&
+      (!repoPath ||
+        !(await host.fs.stat(repoPath).then(
+          () => true,
+          () => false,
+        )))
+    ) {
+      const defaultBranch =
+        loadState().repos.find((r) => r.name === row.repo)?.defaultBranch ?? "main";
+      repoPath = (await host.repos.ensure({ remoteUrl, defaultBranch })).path;
+      hostRegistry.setRepoPathOn(row.repo, host.id, repoPath);
+    }
     if (!repoPath) {
       throw new Error(`Repo "${row.repo}" has no checkout on host "${host.id}"`);
     }
@@ -635,7 +803,12 @@ export class EphemeralLifecycleService {
     }
     await git(["cat-file", "-e", `${row.snapshotSha}^{commit}`]);
 
-    const worktreePath = posix.join(root, ".band-worktrees", row.repo, row.name);
+    // A member of a task goes back into its task folder, which is on the new worker by now.
+    const member = this.projectTasks.memberOfWorktree(row.worktreeId);
+    const taskFolder = member ? taskFolders.get(member.task.id) : undefined;
+    const worktreePath = taskFolder
+      ? posix.join(taskFolder, row.repo)
+      : posix.join(root, ".band-worktrees", row.repo, row.name);
     await host.fs.mkdir(posix.dirname(worktreePath), { recursive: true });
     await host.fs.rm(worktreePath, { recursive: true, force: true });
     await git(["worktree", "prune"]);

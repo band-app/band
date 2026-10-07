@@ -1,8 +1,9 @@
 /**
- * Dispatch from a project coordinator (plan step 6.3): the `worktrees_create` tool.
+ * Dispatch from a project coordinator (plan steps 6.3 and T.2): the `tasks_create` tool.
  *
- * A call names a repo, or a group of repos, with a branch, a brief, acceptance scenarios and
- * placement requirements. The project's policy decides what happens:
+ * A call names a branch, a brief, acceptance scenarios, the repos the task starts with (none is
+ * allowed, and the agent then adds repos itself) and placement requirements. The project's policy
+ * decides what happens:
  *
  * - `observe` refuses.
  * - `steer` stores the call as a pending dispatch request and answers "pending approval". The
@@ -10,32 +11,31 @@
  * - `autonomous` dispatches at once.
  *
  * The limits (labels, isolation floor, concurrency, budget) are checked when the call arrives and
- * again at approval, because the project may have changed in between. A dispatch creates one
- * worktree per repo under the project, writes `.am/BRIEF.md` in each through the worktree's host,
- * and starts a worker agent on the project's worker model lane with a prompt that points at it.
- * A group is recorded as a task group (plan section 13). Mode `split` is one worktree and agent
- * per repo on the same branch. Mode `combined` needs the multi-repo worktree root of the next
- * phase and is refused for now.
+ * again at approval, because the project may have changed in between. A dispatch creates a task
+ * (`ProjectTaskService`): its folder with BRIEF.md, one worktree per repo on one host, and a chat
+ * that runs in the folder on the project's worker model lane.
  */
 
 import { randomBytes } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { DispatchInputError } from "../errors";
+import { DispatchInputError, ProjectInputError } from "../errors";
+import {
+  DispatchRequestQueries,
+  type DispatchRequestRow,
+} from "../infra/db/queries/dispatch-requests";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import {
-  type DispatchRequestRow,
-  type TaskGroupMemberRow,
-  TaskGroupQueries,
-  type TaskGroupRow,
-} from "../infra/db/queries/task-groups";
-import { type BriefSibling, renderBrief, workerPrompt } from "./_utils/dispatch-brief";
-import { type DispatchInput, parseDispatchInput } from "./_utils/dispatch-input";
+  type DispatchInput,
+  normalizeStoredDispatchInput,
+  parseDispatchInput,
+} from "./_utils/dispatch-input";
 import { isIsolationLevel, offers } from "./_utils/isolation";
 import type { Placement } from "./_utils/placement-input";
 import { CoordinatorToolError, projectCoordinatorService } from "./project-coordinator-service";
 import { projectService } from "./project-service";
+import { projectTaskService, type TaskView } from "./project-task-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("project-dispatch");
@@ -44,14 +44,16 @@ const DEFAULT_WORKER_AGENT = "claude-code";
 
 export interface DispatchedWorktree {
   repo: string;
-  worktreeId: string;
-  /** Set while no host fits yet. The worktree is created, with its brief and agent, once one does. */
-  provisioning?: { requestId: string };
+  worktreeId: string | null;
 }
 
 export interface DispatchResult {
   status: "dispatched";
-  groupId?: string;
+  taskId: string;
+  name: string;
+  hostId: string | null;
+  folder: string | null;
+  chatId: string;
   worktrees: DispatchedWorktree[];
 }
 
@@ -61,6 +63,7 @@ export interface PendingDispatchResult {
   message: string;
 }
 
+/** A task as the project page lists it. The name keeps the earlier "task group" wording of the page's data. */
 export interface TaskGroupView {
   id: string;
   title: string;
@@ -88,6 +91,7 @@ export interface DispatchRequestView {
   repos: string[];
   branch: string;
   mode: "single" | "split" | "combined";
+  name: string | null;
   brief: string;
   scenarios: string[];
   placement: DispatchInput["placement"] | null;
@@ -110,15 +114,15 @@ function newId(prefix: string): string {
 }
 
 function reposOf(input: DispatchInput): string[] {
-  return input.group ? input.group.repos.map((r) => r.repo) : [input.repo as string];
+  return input.repos.map((r) => r.repo);
 }
 
 export class ProjectDispatchService {
-  private readonly queries = new TaskGroupQueries();
+  private readonly queries = new DispatchRequestQueries();
 
   // ---- the tool ---------------------------------------------------------------------
 
-  /** The `worktrees_create` call. Throws `CoordinatorToolError` for a refusal. */
+  /** The `tasks_create` call. Throws `CoordinatorToolError` for a refusal. */
   dispatch(row: ProjectRow, raw: unknown): Promise<DispatchResult | PendingDispatchResult> {
     return serialized(row.id, () => this.dispatchNow(row, raw));
   }
@@ -142,7 +146,7 @@ export class ProjectDispatchService {
       return {
         status: "pending approval",
         requestId: request.id,
-        message: `Project "${row.name}" is in steer mode, so the user has to approve this dispatch on the project page. Nothing was created yet. Do not call worktrees_create again for it. Check worktrees_list later to see whether it was approved.`,
+        message: `Project "${row.name}" is in steer mode, so the user has to approve this dispatch on the project page. Nothing was created yet. Do not call tasks_create again for it. Check tasks_list later to see whether it was approved.`,
       };
     }
     return this.execute(row, input);
@@ -152,7 +156,8 @@ export class ProjectDispatchService {
     const request: DispatchRequestRow = {
       id: newId("dr"),
       projectId: row.id,
-      title: input.title?.trim() || `${reposOf(input).join(", ")} on ${input.branch}`,
+      title:
+        input.title?.trim() || `${reposOf(input).join(", ") || "empty task"} on ${input.branch}`,
       input: input as unknown as Record<string, unknown>,
       status: "pending",
       error: null,
@@ -168,19 +173,13 @@ export class ProjectDispatchService {
 
   /** Refuses a call the project's policy does not allow. Nothing has been created when it throws. */
   private check(row: ProjectRow, input: DispatchInput): void {
-    if (input.group?.mode === "combined") {
-      throw new CoordinatorToolError(
-        "Refused: group mode combined needs the multi-repo worktree root, which Band does not have yet. Use mode split, one worktree and agent per repo.",
-      );
-    }
     const branch = slugifyBranchName(input.branch);
     if (!branch) {
       throw new CoordinatorToolError(
         `Branch name "${input.branch}" has no valid characters. Use letters, digits, "-", "_", "/" or ".".`,
       );
     }
-    const repos = reposOf(input);
-    for (const repo of repos) {
+    for (const repo of reposOf(input)) {
       try {
         projectService.resolveForWorktree(row.id, repo);
       } catch (err) {
@@ -193,7 +192,7 @@ export class ProjectDispatchService {
       }
     }
     this.placementFor(row, input.placement);
-    projectCoordinatorService.checkDispatch(row, { newRun: true, runs: repos.length });
+    projectCoordinatorService.checkDispatch(row, { newRun: true, runs: 1 });
   }
 
   /** The placement a worktree is created with: the caller's, narrowed to what the project allows. */
@@ -231,102 +230,44 @@ export class ProjectDispatchService {
   // ---- execution --------------------------------------------------------------------
 
   private async execute(row: ProjectRow, input: DispatchInput): Promise<DispatchResult> {
-    const branch = slugifyBranchName(input.branch);
     const policy = projectService.get(row.id).effectivePolicy;
     const placement = this.placementFor(row, input.placement);
-    const agent = row.coordinatorAgent ?? DEFAULT_WORKER_AGENT;
-    const repos = reposOf(input);
-    const mergeOrder = input.group?.mergeOrder ?? repos;
-    const groupId = input.group ? newId("tg") : undefined;
-    const roles = new Map((input.group?.repos ?? []).map((r) => [r.repo, r.role ?? null]));
-    const title = input.title?.trim() || undefined;
-
-    const created: DispatchedWorktree[] = [];
-    const hostIds = new Map<string, string | null>();
-    let failure: { repo: string; message: string } | undefined;
-    for (const repo of repos) {
-      const siblings: BriefSibling[] = repos
-        .filter((r) => r !== repo)
-        .map((r) => ({ repo: r, worktreeId: toWorktreeId(r, branch), role: roles.get(r) }));
-      const brief = renderBrief({
-        title,
-        branch,
-        repo,
+    try {
+      const { task, chatId } = await projectTaskService.create(row.id, {
+        name: input.name,
+        branch: input.branch,
+        title: input.title?.trim() || undefined,
         brief: input.brief,
         scenarios: input.scenarios,
-        ...(groupId && input.group
-          ? { group: { id: groupId, mode: "split", mergeOrder, siblings } }
-          : {}),
+        repos: input.repos,
+        hostId: input.host,
+        placement,
+        codingAgentId: row.coordinatorAgent ?? DEFAULT_WORKER_AGENT,
+        model: policy.models.worker,
       });
-      try {
-        const result = await worktreeService.create({
-          repo,
-          branch,
-          projectId: row.id,
-          placement,
-          brief,
-          prompt: workerPrompt(),
-          codingAgentId: agent,
-          model: policy.models.worker,
-          agentMode: "gui",
-        });
-        const worktreeId = toWorktreeId(repo, branch);
-        created.push({
-          repo,
-          worktreeId,
-          ...(result.provisioning ? { provisioning: result.provisioning } : {}),
-        });
-        hostIds.set(repo, result.provisioning ? null : this.hostOf(worktreeId));
-      } catch (err) {
-        failure = { repo, message: err instanceof Error ? err.message : String(err) };
-        log.warn({ projectId: row.id, repo, err }, "dispatch failed for a repo");
-        break;
-      }
+      return {
+        status: "dispatched",
+        taskId: task.id,
+        name: task.name,
+        hostId: task.hostId,
+        folder: task.folder,
+        chatId,
+        worktrees: task.members.map((m) => ({ repo: m.repo, worktreeId: m.worktreeId })),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ projectId: row.id, err }, "dispatch failed");
+      if (err instanceof ProjectInputError) throw new CoordinatorToolError(message);
+      throw new CoordinatorToolError(`Dispatch failed: ${message}`);
     }
-
-    if (groupId && input.group && created.length > 0) {
-      this.queries.insertGroup(
-        {
-          id: groupId,
-          projectId: row.id,
-          title: title ?? `${repos.join(", ")} on ${branch}`,
-          brief: input.brief,
-          branch,
-          mode: input.group.mode,
-          createdAt: Date.now(),
-        },
-        created.map((c) => ({
-          repo: c.repo,
-          worktreeId: c.worktreeId,
-          hostId: hostIds.get(c.repo) ?? null,
-          mergeOrder: mergeOrder.indexOf(c.repo),
-        })),
-      );
-    }
-    if (failure) {
-      const done = created.length
-        ? ` Created before the failure: ${created.map((c) => c.worktreeId).join(", ")}.`
-        : "";
-      throw new CoordinatorToolError(
-        `Dispatch failed for repo ${failure.repo}: ${failure.message}${done}`,
-      );
-    }
-    return {
-      status: "dispatched",
-      ...(groupId ? { groupId } : {}),
-      worktrees: created,
-    };
-  }
-
-  private hostOf(worktreeId: string): string | null {
-    return worktreeService.resolve(worktreeId)?.host.id ?? null;
   }
 
   // ---- approvals --------------------------------------------------------------------
 
   requestsOf(row: ProjectRow, status?: string): DispatchRequestView[] {
     return this.queries.requestsOf(row.id, status).map((r) => {
-      const input = r.input as unknown as DispatchInput;
+      const input = (normalizeStoredDispatchInput(r.input) ?? {}) as DispatchInput;
+      if (!Array.isArray(input.repos)) input.repos = [];
       return {
         id: r.id,
         title: r.title,
@@ -336,7 +277,8 @@ export class ProjectDispatchService {
         decidedAt: r.decidedAt,
         repos: reposOf(input),
         branch: input.branch,
-        mode: input.group ? input.group.mode : "single",
+        mode: input.repos.length > 1 ? "split" : "single",
+        name: input.name ?? null,
         brief: input.brief,
         scenarios: input.scenarios ?? [],
         placement: input.placement ?? null,
@@ -361,7 +303,7 @@ export class ProjectDispatchService {
 
   private async approveNow(id: string): Promise<DispatchResult> {
     const { row, request } = this.pending(id);
-    const input = parseDispatchInput(request.input);
+    const input = parseDispatchInput(normalizeStoredDispatchInput(request.input));
     try {
       this.check(row, input);
     } catch (err) {
@@ -390,27 +332,29 @@ export class ProjectDispatchService {
     }
   }
 
-  // ---- task groups ------------------------------------------------------------------
+  // ---- tasks ------------------------------------------------------------------------
 
+  /** The project's tasks that have a folder or several repos, for the project page. Worktrees that predate tasks are not listed. */
   groupsOf(row: ProjectRow): TaskGroupView[] {
-    return this.queries.groupsOf(row.id).map((g) => this.view(g));
+    return projectTaskService
+      .list(row.id)
+      .filter((t) => t.briefPath !== null || t.members.length > 1)
+      .map((t) => this.view(t));
   }
 
-  private view(g: TaskGroupRow): TaskGroupView {
-    const members: TaskGroupMemberRow[] = this.queries.membersOf(g.id);
+  private view(t: TaskView): TaskGroupView {
     return {
-      id: g.id,
-      title: g.title,
-      brief: g.brief,
-      branch: g.branch,
-      mode: g.mode,
-      mergeOrder: members.map((m) => m.repo),
-      createdAt: g.createdAt,
-      members: members.map((m) => ({
+      id: t.id,
+      title: t.name,
+      brief: "",
+      branch: t.branch,
+      mode: "split",
+      mergeOrder: t.members.map((m) => m.repo),
+      createdAt: t.createdAt,
+      members: t.members.map((m) => ({
         repo: m.repo,
         worktreeId: m.worktreeId,
-        // A member placed after provisioning has no stored host, so read the live one.
-        hostId: m.hostId ?? (m.worktreeId ? this.hostOf(m.worktreeId) : null),
+        hostId: t.hostId,
         prNumber:
           m.prNumber ?? projectService.branchStatus(m.worktreeId ?? "")?.ciPr?.number ?? null,
         mergeOrder: m.mergeOrder,

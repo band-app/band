@@ -257,8 +257,12 @@ describe("the coordinator session starts with the project (S1)", () => {
       "repo_log",
       "repo_read",
       "repo_search",
+      "task_add_repo",
+      "task_remove_repo",
+      "task_stop",
+      "tasks_create",
+      "tasks_list",
       "worktree_stop",
-      "worktrees_create",
       "worktrees_list",
     ]);
   });
@@ -294,10 +298,10 @@ describe("the tools are scoped to the project (S2)", () => {
   it("refuses to read or message a chat of another project's worktree", async () => {
     const read = await callTool(bearer, "chats_read", { chatId: c.chatId });
     expect(read.isError).toBe(true);
-    expect(read.text).toContain('not a chat of a worktree in project "shop"');
+    expect(read.text).toContain('not a chat of a task or worktree in project "shop"');
     const send = await callTool(bearer, "chats_send", { chatId: c.chatId, message: "hello" });
     expect(send.isError).toBe(true);
-    expect(send.text).toContain('not a chat of a worktree in project "shop"');
+    expect(send.text).toContain('not a chat of a task or worktree in project "shop"');
     const stop = await callTool(bearer, "worktree_stop", { worktreeId: c.worktreeId });
     expect(stop.isError).toBe(true);
     expect(stop.text).toContain('not in project "shop"');

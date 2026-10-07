@@ -24,7 +24,7 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { projectIdOfScope } from "../infra/project-scope";
+import { projectIdOfScope, taskIdOfScope } from "../infra/project-scope";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
@@ -256,6 +256,8 @@ export class ChatService {
   private readonly worktreeChats = new Map<string, Set<string>>();
   // Reverse index for project-level chats: projectId → Set<chatId>
   private readonly projectChats = new Map<string, Set<string>>();
+  // Reverse index for task chats (no worktree): taskId → Set<chatId>
+  private readonly taskChats = new Map<string, Set<string>>();
 
   /**
    * Lazy initialization flag. In dev mode (vite dev) the service may be
@@ -281,6 +283,7 @@ export class ChatService {
   /** The reverse index a chat belongs in: its worktree's, or its project's when it has no worktree. */
   private indexFor(session: ChatSession): { map: Map<string, Set<string>>; key: string } | null {
     if (session.worktreeId) return { map: this.worktreeChats, key: session.worktreeId };
+    if (session.taskId) return { map: this.taskChats, key: session.taskId };
     if (session.projectId) return { map: this.projectChats, key: session.projectId };
     return null;
   }
@@ -406,6 +409,48 @@ export class ChatService {
     return session;
   }
 
+  /**
+   * Create a task chat: it belongs to a task and has no worktree, and runs in the task folder.
+   * Its project is the task's project.
+   */
+  createForTask(task: { id: string; projectId: string }, options?: CreateChatOptions): ChatSession {
+    const defaultAgent = settingsService.getAgentDefinition();
+    const now = Date.now();
+    const labels = options?.labels
+      ? validateLabels(options.labels, { rejectReservedPrefix: !options.allowReservedLabels })
+      : {};
+    const session: ChatSession = {
+      id: options?.id ?? this.generateChatId(),
+      worktreeId: null,
+      projectId: task.projectId,
+      taskId: task.id,
+      name: options?.name ?? "Chat",
+      agent: options?.agent ?? defaultAgent.id,
+      model: options?.model,
+      mode: options?.mode,
+      activeSessionId: undefined,
+      activeSessionSummary: undefined,
+      activeSessionLastModified: undefined,
+      status: "idle",
+      labels,
+    };
+    this.queries.insert({ ...session, createdAt: now, updatedAt: now });
+    this.addToIndex(session);
+    log.info({ chatId: session.id, taskId: task.id, agent: session.agent }, "task chat created");
+    return session;
+  }
+
+  /** The chats of a task that have no worktree. */
+  listForTask(taskId: string): ChatSession[] {
+    this.ensureInitialized();
+    const ids = this.taskChats.get(taskId);
+    if (!ids) return [];
+    return [...ids].flatMap((id) => {
+      const session = this.chatSessions.get(id);
+      return session ? [session] : [];
+    });
+  }
+
   /** The chats of a project that have no worktree. */
   listForProject(projectId: string): ChatSession[] {
     this.ensureInitialized();
@@ -431,6 +476,8 @@ export class ChatService {
     this.ensureInitialized();
     const projectId = projectIdOfScope(worktreeId);
     if (projectId) return this.listForProject(projectId);
+    const taskId = taskIdOfScope(worktreeId);
+    if (taskId) return this.listForTask(taskId);
     const ids = this.worktreeChats.get(worktreeId);
     if (!ids) return [];
     const sessions: ChatSession[] = [];

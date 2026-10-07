@@ -217,7 +217,7 @@ export class PlacementService {
    * or null for any other repo. A repo with a checkout on the hub can still be cloned from the
    * hub's path by a hook on the hub's machine.
    */
-  private holdersOfRemotelessRepo(repo: string): string[] | null {
+  holdersOfRemotelessRepo(repo: string): string[] | null {
     const known = repoQueries.findLocation(repo);
     if (!known || known.remoteUrl || known.path) return null;
     return [...(repoQueries.allHostPaths().get(repo)?.keys() ?? [])];
@@ -479,6 +479,7 @@ export class PlacementService {
         await ephemeralLifecycleService.restoreHost(
           wake.hostId,
           (row.input as { hostRepoPath?: string }).hostRepoPath,
+          row.repo,
         );
         if (this.queries.complete(row.id, this.now())) {
           log.info(`host ${wake.hostId} is awake`);

@@ -21,8 +21,8 @@
 
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import type { ProjectRow } from "../infra/db/queries/projects";
-import { TaskGroupQueries } from "../infra/db/queries/task-groups";
 import {
   type ChatLifecycleEvent,
   subscribeChatLifecycle,
@@ -31,7 +31,7 @@ import {
   type StatusEvent,
   subscribe as subscribeStatusBus,
 } from "../infra/events/status-event-bus";
-import { projectScopeId } from "../infra/project-scope";
+import { projectScopeId, taskIdOfScope } from "../infra/project-scope";
 import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
 import { redactSecrets } from "./_utils/context-redaction";
 import { chatService } from "./chat-service";
@@ -122,7 +122,7 @@ export interface ProjectWakeupView {
 }
 
 export class ProjectSubscriptionService {
-  private readonly groups = new TaskGroupQueries();
+  private readonly tasks = new ProjectTaskQueries();
   private readonly lastWorkerEvent = new Map<string, number>();
   /** The commit of each project context the last time this service looked at it. */
   private readonly seenHeads = new Map<string, string>();
@@ -170,11 +170,17 @@ export class ProjectSubscriptionService {
     if (!row?.coordinatorChatId) return;
     this.ensureProjectSubscription(row);
     await this.baseline(row.contextName);
-    for (const member of this.groups.membersOfProject(row.id)) {
-      if (!member.worktreeId) continue;
+    for (const member of this.tasks.membersOfProject(row.id)) {
+      if (!member.worktreeId || !this.isRealTask(member.taskId)) continue;
       const pr = projectService.branchStatus(member.worktreeId)?.ciPr;
       if (pr) await this.syncMemberPr(member.worktreeId, pr);
     }
+  }
+
+  /** A task the coordinator tracks: it has its own folder, or several repos. A worktree that predates tasks does not. */
+  private isRealTask(taskId: string): boolean {
+    const task = this.tasks.find(taskId);
+    return Boolean(task && (task.briefPath || this.tasks.membersOf(taskId).length > 1));
   }
 
   // ---- views ---------------------------------------------------------------------------
@@ -276,7 +282,11 @@ export class ProjectSubscriptionService {
 
       const rawName = chatService.get(event.chatId)?.name;
       const chatName = rawName ? oneLine(rawName, 80) : undefined;
-      const who = `Worker chat ${event.chatId}${chatName ? ` ("${chatName}")` : ""} in worktree ${event.worktreeId}`;
+      const taskId = taskIdOfScope(event.worktreeId);
+      const where = taskId
+        ? `task ${this.tasks.find(taskId)?.name ?? taskId}`
+        : `worktree ${event.worktreeId}`;
+      const who = `Worker chat ${event.chatId}${chatName ? ` ("${chatName}")` : ""} in ${where}`;
       const summary =
         event.kind === "failed"
           ? `${who} ended its turn with an error: ${oneLine(redactSecrets(event.error ?? "unknown error"), MAX_ERROR_CHARS)}`
@@ -324,17 +334,18 @@ export class ProjectSubscriptionService {
     worktreeId: string,
     pr: { number: number; url: string; state: "open" | "merged" | "closed" },
   ): Promise<void> {
-    const found = this.groups.memberOfWorktree(worktreeId);
-    if (!found) return;
-    const row = projectService.find(found.group.projectId);
+    const found = this.tasks.memberOfWorktree(worktreeId);
+    // A worktree that is only its own one-member task is not a project task, so the coordinator is not woken for it.
+    if (!found || !this.isRealTask(found.task.id)) return;
+    const row = projectService.find(found.task.projectId);
     if (!row?.coordinatorChatId) return;
     if (found.member.prNumber !== pr.number) {
-      this.groups.setMemberPr(found.group.id, found.member.repo, pr.number);
+      this.tasks.setMemberPr(found.task.id, found.member.repoName, pr.number);
     }
     const parsed = parsePrUrl(pr.url);
     if (!parsed) return;
     const prKey = githubPrKey(parsed.repo, pr.number);
-    const ciKey = githubCiKey(parsed.repo, found.group.branch);
+    const ciKey = githubCiKey(parsed.repo, found.task.branch);
     const coordinatorChatId = row.coordinatorChatId;
     const mine = () =>
       subscriptionService
@@ -354,7 +365,7 @@ export class ProjectSubscriptionService {
       this.emitProjectEvent(row, {
         id: `pr:${parsed.repo}#${pr.number}:${pr.state}`,
         kind: pr.state === "merged" ? "pr_merged" : "pr_closed",
-        summary: `Pull request ${parsed.repo}#${pr.number} of task group "${found.group.title}" (${found.member.repo}) was ${pr.state}.`,
+        summary: `Pull request ${parsed.repo}#${pr.number} of task "${found.task.name}" (${found.member.repoName}) was ${pr.state}.`,
         url: pr.url,
       });
       for (const sub of existing) subscriptionService.remove(sub.id);
@@ -383,7 +394,7 @@ export class ProjectSubscriptionService {
       );
     }
     if (!have.has(ciKey)) {
-      created.push(subscriptionService.createGithubCi({ ...base, branch: found.group.branch }));
+      created.push(subscriptionService.createGithubCi({ ...base, branch: found.task.branch }));
     }
     // Registers the repo webhook, or records that it waits for a public URL (the poller serves it meanwhile).
     for (const sub of created) await githubWebhookService.ensureRegistered(sub);

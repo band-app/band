@@ -13,8 +13,10 @@ import { createLogger } from "@band-app/logger";
 import { toWorktreeId as toWorktreeIdOf } from "@band-app/shared/worktree-id";
 import { ProjectConflictError, ProjectInputError, ProjectNotFoundError } from "../errors";
 import type { ContextRow } from "../infra/db/queries/contexts";
+import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
+import { taskIdOfScope } from "../infra/project-scope";
 import {
   type ProjectPolicy,
   projectPolicy,
@@ -144,6 +146,7 @@ export class ProjectService {
   constructor(
     private readonly queries = new ProjectQueries(),
     private readonly worktreeQueries = new WorktreeQueries(),
+    private readonly taskQueries = new ProjectTaskQueries(),
   ) {}
 
   list(): ProjectView[] {
@@ -487,7 +490,11 @@ export class ProjectService {
 
   /** The project a worker worktree belongs to, or undefined for a worktree in no project. */
   projectOfWorker(worktreeId: string): ProjectRow | undefined {
-    const projectId = this.worktreeQueries.findProjectId(worktreeId);
+    // A task chat has no worktree: its scope id names the task, which names the project.
+    const taskId = taskIdOfScope(worktreeId);
+    const projectId = taskId
+      ? this.taskQueries.find(taskId)?.projectId
+      : this.worktreeQueries.findProjectId(worktreeId);
     return projectId ? this.queries.find(projectId) : undefined;
   }
 

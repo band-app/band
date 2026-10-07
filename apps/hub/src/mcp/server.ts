@@ -44,6 +44,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("mcp.") ||
       path.startsWith("context.") ||
       path.startsWith("projects.") ||
+      path.startsWith("projectTasks.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")
