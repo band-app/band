@@ -15,9 +15,11 @@ import {
   ProjectNotFoundError,
   ProjectTaskNotFoundError,
 } from "../../errors";
+import { taskScopeId } from "../../infra/project-scope";
 import { dispatchPlacement } from "../../services/_utils/dispatch-input";
 import { projectService } from "../../services/project-service";
 import { projectTaskService } from "../../services/project-task-service";
+import { terminalService } from "../../services/terminal-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
 const ref = z.string().trim().min(1).max(200);
@@ -57,6 +59,17 @@ export const projectTasksRouter = t.router({
       ),
     })),
   ),
+
+  /**
+   * The task a worktree is a member of, or null. The UI sends a worktree that sits in a task
+   * folder to the task view, so an old worktree link lands on its task.
+   */
+  forWorktree: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1) }))
+    .query(({ input }) => {
+      const row = projectTaskService.taskOfWorktree(input.worktreeId);
+      return { task: row ? projectTaskService.get(row.id) : null };
+    }),
 
   /**
    * Creates a task: its folder with BRIEF.md, a worktree of each repo in `repos` on `branch`, all
@@ -139,15 +152,32 @@ export const projectTasksRouter = t.router({
       }),
     ),
 
+  /**
+   * Opens a plain terminal in the task folder on its host. With `repo` it starts in that member's
+   * worktree. The terminal WebSocket attaches by the returned scope (`task:<id>`).
+   */
+  openTerminal: adminProcedure
+    .input(z.object({ task: ref, project: ref.optional(), repo: repoName.optional() }))
+    .mutation(({ input }) =>
+      guard(async () => {
+        const task = projectTaskService.row(
+          input.task,
+          input.project ? projectService.row(input.project).id : undefined,
+        );
+        return await terminalService.openTaskTerminal(task.id, input.repo);
+      }),
+    ),
+
   /** Removes the task, its worktrees, chats and folder. Refused while a worktree has commits or changes, unless `force`. */
   remove: adminProcedure
     .input(z.object({ task: ref, project: ref.optional(), force: z.boolean().optional() }))
     .mutation(({ input }) =>
       guard(async () => {
-        await projectTaskService.remove(input.task, {
-          force: input.force,
-          projectId: input.project ? projectService.row(input.project).id : undefined,
-        });
+        const projectId = input.project ? projectService.row(input.project).id : undefined;
+        const task = projectTaskService.row(input.task, projectId);
+        await projectTaskService.remove(input.task, { force: input.force, projectId });
+        // Shells opened in the task folder would otherwise run on in a deleted directory.
+        await terminalService.killWorktree(taskScopeId(task.id));
         return { removed: true };
       }),
     ),

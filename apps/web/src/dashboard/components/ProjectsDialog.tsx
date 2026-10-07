@@ -1678,9 +1678,12 @@ export function ProjectsDialog({
   onOpenChange,
   onOpenContext,
   onOpenWorktree,
+  initialProject,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Shows this project's page when the dialog opens, for the sidebar's Coordinator row. */
+  initialProject?: string;
   /** Opens Settings > Context on this context. */
   onOpenContext: (name: string) => void;
   /** Shows a worktree, for the coordinator's chat. */
@@ -1701,6 +1704,9 @@ export function ProjectsDialog({
   const canEdit = admin.isSuccess;
   const [viewing, setViewing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  useEffect(() => {
+    if (open && initialProject) setViewing(initialProject);
+  }, [open, initialProject]);
   const projects = list.data?.projects ?? [];
   const current = projects.find((p) => p.id === viewing) ?? null;
 

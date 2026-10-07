@@ -1,6 +1,8 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useDashboardStore } from "@/dashboard";
+import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/worktree/$worktreeId")({
   component: WorktreeLayout,
@@ -61,6 +63,17 @@ function WorktreeLayout() {
   useEffect(() => {
     clearNeedsAttention(decoded);
   }, [decoded, clearNeedsAttention]);
+
+  // A worktree inside a task folder belongs to its task, so an old link to it opens the task view.
+  // A worktree that predates task folders is its own task and keeps this view.
+  const owner = useQuery({
+    queryKey: ["projectTasks.forWorktree", decoded],
+    queryFn: async () => (await trpc.projectTasks.forWorktree.query({ worktreeId: decoded })).task,
+    staleTime: 30_000,
+  });
+  if (owner.data?.briefPath) {
+    return <Navigate to="/task/$taskId" params={{ taskId: owner.data.id }} replace />;
+  }
 
   // Both layouts render every worktree from AppShell: the desktop
   // `SharedDockviewLayout` and the mobile `MobileWorktreeShell` keep each
