@@ -91,6 +91,24 @@ function createServer(projectId: string): McpServer {
     (args) => projectCoordinatorService.stopWorktree(project(), args.worktreeId),
   );
   tool(
+    "repo_read",
+    "Read a file from the checkout of a repo's default branch in the project folder, or list a directory (an empty path lists the top level). Only this project's repos can be read.",
+    { repo: z.string().min(1).max(200), path: z.string().max(1000) },
+    (args) => projectCoordinatorService.repoRead(project(), args.repo, args.path),
+  );
+  tool(
+    "repo_search",
+    "Search the checkout of a repo's default branch for a fixed string (case-insensitive). Returns file, line and text. Only this project's repos can be searched.",
+    { repo: z.string().min(1).max(200), query: z.string().min(1).max(500) },
+    (args) => projectCoordinatorService.repoSearch(project(), args.repo, args.query),
+  );
+  tool(
+    "repo_log",
+    "The newest commits on the checkout of a repo's default branch. Only this project's repos can be read.",
+    { repo: z.string().min(1).max(200), n: z.number().int().min(1).max(100) },
+    (args) => projectCoordinatorService.repoLog(project(), args.repo, args.n),
+  );
+  tool(
     "worktrees_create",
     "Dispatch work: create a worktree in a repo of this project (or a group of repos), write your brief to .am/BRIEF.md in it, and start a worker agent on the project's worker model that reads it. Pass `repo`, or `group` ({repos:[{repo, role}], mode: split, mergeOrder:[repo...]}) for work across repos: split makes one worktree and agent per repo on the same branch and tells each the siblings and the pull request order. `brief` is markdown the worker works from alone, so state the goal, the constraints and what is out of scope. `scenarios` are the acceptance scenarios the worker must check. `placement` takes labels, requires and isolation within the project's policy. In steer mode the call answers \"pending approval\" and the user decides on the project page. Returns the worktree ids.",
     dispatchInputShape,

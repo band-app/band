@@ -22,6 +22,7 @@ import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/ad
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { ToastHost } from "@/dashboard/components/ToastHost";
 import { queryClient, queryKeys } from "@/dashboard/query-client";
+import "../components/ProjectTerminalRegistration";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {

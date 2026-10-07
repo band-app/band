@@ -283,7 +283,7 @@ band projects attach-worktree <project> <worktree-id>
 band projects detach-worktree <worktree-id>
 ```
 
-A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project. Changes need an admin token. Run them only when the user asks.
+A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project, and `remove-repo` also refuses while the repo's checkout in the project folder (`<BAND_HOME>/projects/<project>/repos/<repo>`) has uncommitted changes or unpushed commits. The coordinator runs in that project folder, not in a worktree. Changes need an admin token. Run them only when the user asks.
 
 ### Store credentials in the hub's vault
 

@@ -388,7 +388,10 @@ export const chatEvents = sqliteTable(
 
 export const panelStates = sqliteTable("panel_states", {
   id: text("id").primaryKey(),
-  worktreeId: text("worktree_id").notNull(),
+  // Null for a project-level chat (the coordinator), which has no worktree.
+  worktreeId: text("worktree_id"),
+  // The project a project-level chat belongs to. Null for a worktree's chat.
+  projectId: text("project_id"),
   panelType: text("panel_type").notNull(),
   state: text("state").notNull(), // JSON blob — panel-type-specific
   // Free-form labels for taxonomy and dispatch lookups (issue #520). JSON-encoded
@@ -860,7 +863,6 @@ export const projects = sqliteTable(
     policy: text("policy", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
     // The coordinator session of step 6.2: its worktree (in one of the project's
     // repos), its chat, and the host it is pinned to (null means the local host).
-    coordinatorWorktreeId: text("coordinator_worktree_id"),
     coordinatorChatId: text("coordinator_chat_id"),
     coordinatorHostId: text("coordinator_host_id"),
     createdAt: integer("created_at").notNull(),
@@ -918,6 +920,14 @@ export const taskGroupMembers = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.groupId, t.repo] })],
 );
+
+// Worktrees that held a project's coordinator before it moved into the project folder (step T.1).
+// The migration fills it from `projects.coordinator_worktree_id`, and the hub removes each
+// worktree on boot and then the row.
+export const legacyCoordinatorWorktrees = sqliteTable("legacy_coordinator_worktrees", {
+  worktreeId: text("worktree_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+});
 
 // A dispatch the coordinator of a `steer` project asked for and the user has yet to decide
 // (plan step 6.3). `input` is the validated `worktrees_create` call. A decided row stays as a

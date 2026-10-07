@@ -132,9 +132,13 @@ test.beforeAll(async () => {
     },
   });
   const created = await trpc<{
-    project: { coordinator: { worktreeId: string; chatId: string } };
+    project: { id: string; coordinator: { chatId: string } };
   }>("projects.create", { name: "shop", repos: [{ repo: API }, { repo: CLIENT }] });
-  coordinator = created.project.coordinator;
+  // The coordinator has no worktree. Its turns are keyed by the project's scope id.
+  coordinator = {
+    worktreeId: `project:${created.project.id}`,
+    chatId: created.project.coordinator.chatId,
+  };
 });
 
 test.beforeEach(() => resetClientState(tmpHome));

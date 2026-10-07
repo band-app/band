@@ -24,6 +24,7 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
+import { projectIdOfScope } from "../infra/project-scope";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
@@ -253,6 +254,8 @@ export class ChatService {
   private readonly chatSessions = new Map<string, ChatSession>();
   // Reverse index: worktreeId → Set<chatId>
   private readonly worktreeChats = new Map<string, Set<string>>();
+  // Reverse index for project-level chats: projectId → Set<chatId>
+  private readonly projectChats = new Map<string, Set<string>>();
 
   /**
    * Lazy initialization flag. In dev mode (vite dev) the service may be
@@ -275,12 +278,21 @@ export class ChatService {
     this.loadFromDb();
   }
 
+  /** The reverse index a chat belongs in: its worktree's, or its project's when it has no worktree. */
+  private indexFor(session: ChatSession): { map: Map<string, Set<string>>; key: string } | null {
+    if (session.worktreeId) return { map: this.worktreeChats, key: session.worktreeId };
+    if (session.projectId) return { map: this.projectChats, key: session.projectId };
+    return null;
+  }
+
   private addToIndex(session: ChatSession): void {
     this.chatSessions.set(session.id, session);
-    let ids = this.worktreeChats.get(session.worktreeId);
+    const index = this.indexFor(session);
+    if (!index) return;
+    let ids = index.map.get(index.key);
     if (!ids) {
       ids = new Set();
-      this.worktreeChats.set(session.worktreeId, ids);
+      index.map.set(index.key, ids);
     }
     ids.add(session.id);
   }
@@ -289,11 +301,12 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return;
     this.chatSessions.delete(chatId);
-    const ids = this.worktreeChats.get(session.worktreeId);
-    if (ids) {
+    const index = this.indexFor(session);
+    const ids = index?.map.get(index.key);
+    if (index && ids) {
       ids.delete(chatId);
       if (ids.size === 0) {
-        this.worktreeChats.delete(session.worktreeId);
+        index.map.delete(index.key);
       }
     }
   }
@@ -363,15 +376,61 @@ export class ChatService {
     return session;
   }
 
+  /**
+   * Create a project-level chat: it belongs to a project and has no worktree, so it appears in
+   * no worktree's layout. The coordinator is one. It runs in the project folder.
+   */
+  createForProject(projectId: string, options?: CreateChatOptions): ChatSession {
+    const defaultAgent = settingsService.getAgentDefinition();
+    const now = Date.now();
+    const labels = options?.labels
+      ? validateLabels(options.labels, { rejectReservedPrefix: !options.allowReservedLabels })
+      : {};
+    const session: ChatSession = {
+      id: options?.id ?? this.generateChatId(),
+      worktreeId: null,
+      projectId,
+      name: options?.name ?? "Chat",
+      agent: options?.agent ?? defaultAgent.id,
+      model: options?.model,
+      mode: options?.mode,
+      activeSessionId: undefined,
+      activeSessionSummary: undefined,
+      activeSessionLastModified: undefined,
+      status: "idle",
+      labels,
+    };
+    this.queries.insert({ ...session, createdAt: now, updatedAt: now });
+    this.addToIndex(session);
+    log.info({ chatId: session.id, projectId, agent: session.agent }, "project chat created");
+    return session;
+  }
+
+  /** The chats of a project that have no worktree. */
+  listForProject(projectId: string): ChatSession[] {
+    this.ensureInitialized();
+    const ids = this.projectChats.get(projectId);
+    if (!ids) return [];
+    return [...ids].flatMap((id) => {
+      const session = this.chatSessions.get(id);
+      return session ? [session] : [];
+    });
+  }
+
   /** Get a chat session by ID. */
   get(chatId: string): ChatSession | undefined {
     this.ensureInitialized();
     return this.chatSessions.get(chatId);
   }
 
-  /** List all chat sessions for a worktree. */
+  /**
+   * List all chat sessions for a worktree. A project's scope id (`project:<id>`) lists the
+   * project's own chats, the ones with no worktree.
+   */
   list(worktreeId: string): ChatSession[] {
     this.ensureInitialized();
+    const projectId = projectIdOfScope(worktreeId);
+    if (projectId) return this.listForProject(projectId);
     const ids = this.worktreeChats.get(worktreeId);
     if (!ids) return [];
     const sessions: ChatSession[] = [];
@@ -552,16 +611,21 @@ export class ChatService {
     // `terminal.kill` and `browsers.remove` do via their respective
     // `remove*FromLayout` helpers — keeps the layout in sync with
     // the registry so an open dashboard doesn't show a ghost tab.
-    this.removeFromLayout(session.worktreeId, chatId);
+    if (session.worktreeId) this.removeFromLayout(session.worktreeId, chatId);
 
     // Remove from in-memory maps
     this.removeFromIndex(chatId);
 
     // Notify any open dashboard. Same pattern as `browser-removed` /
-    // `terminal-killed`.
-    emit({ kind: "chat-removed", worktreeId: session.worktreeId, chatId });
+    // `terminal-killed`. A project chat has no dockview to sync.
+    if (session.worktreeId) {
+      emit({ kind: "chat-removed", worktreeId: session.worktreeId, chatId });
+    }
 
-    log.info({ chatId, worktreeId: session.worktreeId }, "chat pane removed");
+    log.info(
+      { chatId, worktreeId: session.worktreeId, projectId: session.projectId },
+      "chat pane removed",
+    );
     return true;
   }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type Host, HostOfflineError, HostTimeoutError, type RelayGrant } from "@band-app/host-api";
 import { loadRepoConfig } from "@band-app/host-local/setup/repo-config";
 import { TerminalDaemonUnavailableError } from "@band-app/host-local/terminals/daemon/daemon-backend";
@@ -14,12 +15,15 @@ import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
+import { projectIdOfScope, projectScopeId } from "../infra/project-scope";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { projectFolderService } from "./project-folder-service";
+import { projectService } from "./project-service";
 import { emit } from "./watcher-service";
 import { worktreeService } from "./worktree-service";
 
@@ -240,26 +244,42 @@ export class TerminalService {
     // behavior); only opt-in callers get the auto-prune. The backend stores the
     // flag on the session and reports it back on the exit event (see
     // `handleExit`), so it holds even when the shell outlives this server.
-    opts?: { cleanupOnExit?: boolean },
+    // `project` lets the call open a terminal in a project folder. Only the admin-only
+    // `projects.openTerminal` sets it, so the terminal routes and the WebSocket cannot.
+    opts?: { cleanupOnExit?: boolean; project?: boolean },
   ): Promise<TerminalListEntry> {
-    // Opening a terminal in a sleeping worktree brings its worker back first.
-    await ephemeralLifecycleService.ensureAwake(worktreeId);
-    const worktree = worktreeService.resolve(worktreeId);
-    if (!worktree) {
-      throw new Error(`Worktree not found: ${worktreeId}`);
+    // A project terminal opens in the project folder on the coordinator host. It has no worktree,
+    // so it gets no relay grant and no place in a worktree's saved layout.
+    const projectId = projectIdOfScope(worktreeId);
+    if (projectId && !opts?.project) throw new Error(`Worktree not found: ${worktreeId}`);
+    let host: Host;
+    let root: string;
+    if (projectId) {
+      const project = projectService.find(projectId);
+      if (!project) throw new Error(`Project not found: ${projectId}`);
+      root = await projectFolderService.folder(project);
+      host = projectFolderService.hostOf(project);
+    } else {
+      // Opening a terminal in a sleeping worktree brings its worker back first.
+      await ephemeralLifecycleService.ensureAwake(worktreeId);
+      const worktree = worktreeService.resolve(worktreeId);
+      if (!worktree) {
+        throw new Error(`Worktree not found: ${worktreeId}`);
+      }
+      root = worktree.worktree.path;
+      host = this.hostOfWorktree(worktreeId);
     }
-    const host = this.hostOfWorktree(worktreeId);
     const known = this.terminalHosts.get(terminalId);
     if (known && known.id !== host.id) {
       throw new Error(`Terminal ${terminalId} already runs on another host`);
     }
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.
-    const grant = await host.relay?.issue({ worktreeId });
+    const grant = projectId ? undefined : await host.relay?.issue({ worktreeId });
     const request = {
       worktreeId,
       terminalId,
-      worktreeRoot: worktree.worktree.path,
+      worktreeRoot: root,
       options: grant ? { ...options, env: { ...options?.env, ...grant.env } } : options,
       cleanupOnExit: opts?.cleanupOnExit,
     };
@@ -303,7 +323,7 @@ export class TerminalService {
     // existed, so end the shell here and don't resurrect the layout row that
     // the removal already deleted. Shells now outlive the server, so a stray
     // one would otherwise run until the next boot's reconcile.
-    if (!worktreeService.resolve(worktreeId)) {
+    if (!projectId && !worktreeService.resolve(worktreeId)) {
       await this.ptyOf(host).kill(terminalId);
       throw new Error(`Worktree removed while its terminal was starting: ${worktreeId}`);
     }
@@ -314,13 +334,30 @@ export class TerminalService {
     // this, terminals spawned via the WebSocket handler would be
     // invisible in the dashboard. `addPanel` is idempotent, so the tRPC
     // `create` path doesn't need a separate call.
-    addTerminalToLayout(worktreeId, terminalId, {
-      command: options?.command,
-      cwd: options?.cwd,
-      env: options?.env,
-    });
+    if (!projectId) {
+      addTerminalToLayout(worktreeId, terminalId, {
+        command: options?.command,
+        cwd: options?.cwd,
+        env: options?.env,
+      });
+    }
 
     return entry;
+  }
+
+  /** Opens a plain terminal in a project's folder on its host. */
+  async openProjectTerminal(
+    row: Parameters<typeof projectFolderService.folder>[0],
+  ): Promise<{ terminalId: string; worktreeId: string; pid: number; folder: string }> {
+    const terminalId = randomUUID();
+    const scope = projectScopeId(row.id);
+    const entry = await this.spawn(scope, terminalId, undefined, { project: true });
+    return {
+      terminalId,
+      worktreeId: scope,
+      pid: entry.pid,
+      folder: await projectFolderService.folder(row),
+    };
   }
 
   /** The id of the host a terminal runs on, or null when this service does not know the terminal. */
@@ -411,7 +448,11 @@ export class TerminalService {
     const deleted = new Set(
       entries
         .map((entry) => entry.worktreeId)
-        .filter((worktreeId) => !worktreeService.resolve(worktreeId)),
+        .filter((worktreeId) => {
+          const projectId = projectIdOfScope(worktreeId);
+          if (projectId) return !projectService.find(projectId);
+          return !worktreeService.resolve(worktreeId);
+        }),
     );
     for (const worktreeId of deleted) {
       log.info({ worktreeId }, "killing terminals of a deleted worktree");

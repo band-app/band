@@ -5,7 +5,7 @@
  * (croner, as the cronjob service uses) starts a run on the schedule. `run` also starts one by hand.
  * A run reads the project context (notes.md, recent learnings and handoffs, the user context's
  * skills) and the project's task groups, then sends them as a prompt to a retro chat in the
- * coordinator's worktree. That chat runs on the reviewer model lane and has one tool,
+ * project folder, like the coordinator's. That chat runs on the reviewer model lane and has one tool,
  * `retro_propose` on the hub's `band-retro` server (`api/mcp-proxy/retro.ts`).
  *
  * The tool stores the proposal in `retro_proposals`: a list of items, each a file edit with a
@@ -23,6 +23,7 @@ import { ProjectConflictError, ProjectInputError } from "../errors";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import { RetroProposalQueries, type RetroProposalRow } from "../infra/db/queries/retro-proposals";
 import { subscribeChatLifecycle } from "../infra/events/chat-lifecycle-bus";
+import { projectScopeId } from "../infra/project-scope";
 import { scanForSecrets } from "./_utils/context-redaction";
 import { COORDINATOR_LABEL, RETRO_LABEL, RETRO_SERVER } from "./_utils/project-policy";
 import {
@@ -181,7 +182,7 @@ export class ProjectRetroService {
 
   // ---- the run -----------------------------------------------------------------------
 
-  /** Starts a retro now. Refused while one is running, or when the project has no coordinator worktree. */
+  /** Starts a retro now. Refused while one is running, or when the project has no coordinator. */
   run(ref: string): Promise<RetroProposalView> {
     const row = projectService.row(ref);
     return serialized(`run:${row.id}`, () => this.runNow(row));
@@ -191,19 +192,19 @@ export class ProjectRetroService {
     if (this.expire(this.queries.listOf(row.id, 1)).some((p) => p.status === "running")) {
       throw new ProjectConflictError(`A retro of project "${row.name}" is already running.`);
     }
-    const worktreeId = row.coordinatorWorktreeId;
-    if (!worktreeId) {
+    if (!row.coordinatorChatId) {
       throw new ProjectInputError(
-        `Project "${row.name}" has no coordinator worktree yet. Add a repo to the project first.`,
+        `Project "${row.name}" has no coordinator yet. Add a repo to the project first.`,
       );
     }
+    const scope = projectScopeId(row.id);
     const prompt = renderRetroPrompt(await this.gather(row));
     const policy = projectService.get(row.id).effectivePolicy;
     // Each run starts a clean chat, so an old run's context does not carry over.
-    for (const old of chatService.list(worktreeId)) {
+    for (const old of chatService.listForProject(row.id)) {
       if (old.labels[RETRO_LABEL] === row.id) chatService.remove(old.id);
     }
-    const chat = chatService.create(worktreeId, {
+    const chat = chatService.createForProject(row.id, {
       name: "Retro",
       agent: row.coordinatorAgent ?? DEFAULT_AGENT,
       model: policy.models.reviewer,
@@ -222,7 +223,7 @@ export class ProjectRetroService {
     };
     this.queries.insert(proposal);
     try {
-      submitOrQueueTask({ worktreeId, chatId: chat.id, prompt });
+      submitOrQueueTask({ worktreeId: scope, chatId: chat.id, prompt });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.queries.update(proposal.id, { status: "failed", error: message });

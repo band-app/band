@@ -738,8 +738,8 @@ export class WorktreeService {
       };
     }
 
-    const worktree = this.resolve(chat.worktreeId);
-    if (!worktree) {
+    const worktree = chat.worktreeId ? this.resolve(chat.worktreeId) : null;
+    if (!chat.worktreeId || !worktree) {
       return { ok: false, code: "NOT_FOUND", message: "Worktree not found" };
     }
 

@@ -162,7 +162,9 @@ test("a new project starts its coordinator and shows the default policy and mode
   await projects.openProject("ledger");
 
   await expect(projects.coordinator()).toHaveAttribute("data-state", "started");
-  await expect(projects.coordinatorWorktree()).toHaveText(`${CLIENT}-coordinator-ledger`);
+  await expect(projects.coordinatorChat()).not.toBeEmpty();
+  // The folder section lists the project's repo as a checkout of its default branch.
+  await expect(projects.folder()).toBeVisible();
   await expect(projects.autonomy()).toHaveValue("steer");
   await expect(projects.lane("coordinator")).toHaveValue("opus");
   await expect(projects.lane("worker")).toHaveValue("sonnet");

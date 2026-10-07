@@ -2,7 +2,13 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../connection";
-import { branchStatuses, projectRepos, projects, worktrees } from "../schema";
+import {
+  branchStatuses,
+  legacyCoordinatorWorktrees,
+  projectRepos,
+  projects,
+  worktrees,
+} from "../schema";
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectRepoRow = typeof projectRepos.$inferSelect;
@@ -50,12 +56,16 @@ export class ProjectQueries {
     return getDb().select().from(projects).where(eq(projects.coordinatorChatId, chatId)).get();
   }
 
-  findByCoordinatorWorktree(worktreeId: string): ProjectRow | undefined {
-    return getDb()
-      .select()
-      .from(projects)
-      .where(eq(projects.coordinatorWorktreeId, worktreeId))
-      .get();
+  /** Coordinator worktrees of the 6.2 layout that the hub has yet to remove. */
+  legacyCoordinatorWorktrees() {
+    return getDb().select().from(legacyCoordinatorWorktrees).all();
+  }
+
+  clearLegacyCoordinatorWorktree(worktreeId: string): void {
+    getDb()
+      .delete(legacyCoordinatorWorktrees)
+      .where(eq(legacyCoordinatorWorktrees.worktreeId, worktreeId))
+      .run();
   }
 
   /** The CI state and pull request the branch-status poller last stored for a worktree. */

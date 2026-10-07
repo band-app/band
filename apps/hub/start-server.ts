@@ -75,6 +75,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
+import { projectCoordinatorService } from "./src/server/services/project-coordinator-service.ts";
 import { projectRetroService } from "./src/server/services/project-retro-service.ts";
 import { projectSubscriptionService } from "./src/server/services/project-subscription-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
@@ -1606,8 +1607,15 @@ async function main() {
       // Rebuild the subscription index from the database. Events that were
       // waiting out a coalesce window when the last server stopped are gone.
       subscriptionService.start();
-      // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
-      projectSubscriptionService.start();
+      // A 6.2 coordinator worktree goes away before the coordinators are subscribed again, so the
+      // old subscriptions (keyed to that worktree) are dropped first and the project's replace them.
+      void projectCoordinatorService
+        .removeLegacyWorktrees()
+        .catch((err) => console.error("Failed to remove legacy coordinator worktrees:", err))
+        .finally(() => {
+          // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
+          projectSubscriptionService.start();
+        });
       projectRetroService.start();
 
       // Activate the bundled plugins that ask for `onStartup`. The rest

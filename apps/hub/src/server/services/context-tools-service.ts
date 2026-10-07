@@ -84,10 +84,20 @@ function repoOf(worktreeId: string): string | undefined {
 
 /** Session of a chat row the caller already holds, for a write after the chat is gone. */
 export function sessionFromChat(
-  chat: { id: string; worktreeId: string; agent: string },
+  chat: { id: string; worktreeId: string | null; projectId?: string | null; agent: string },
   knownRepo?: string,
   knownProjectId?: string,
 ): ToolSession {
+  if (!chat.worktreeId) {
+    // A project chat writes to its project's context.
+    const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
+    return {
+      worktreeId: "",
+      chatId: chat.id,
+      agent: slug(chat.agent, "agent"),
+      project: project ? contextService.find(project.contextName) : undefined,
+    };
+  }
   // A worktree being removed has already left the state, so its caller passes the repo.
   const repo = knownRepo ?? repoOf(chat.worktreeId);
   return {

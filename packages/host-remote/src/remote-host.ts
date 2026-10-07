@@ -25,6 +25,7 @@ import type {
   HostInfo,
   HostLsp,
   HostMcp,
+  HostProject,
   HostRelay,
   HostRepos,
   HostScripts,
@@ -252,6 +253,17 @@ export class RemoteHost implements Host {
       };
     },
     close: (worktreeId) => this.rpc.call("browser.close", { worktreeId }, { timeoutMs: 30_000 }),
+  };
+
+  readonly project: HostProject = {
+    ensure: (request) =>
+      this.rpc.call("project.ensure", request, {
+        timeoutMs: (request.contextTimeoutMs ?? 10_000) + 2 * 60_000,
+      }),
+    read: (request) => this.rpc.call("project.read", request),
+    search: (request) => this.rpc.call("project.search", request),
+    log: (request) => this.rpc.call("project.log", request),
+    removeRepo: (request) => this.rpc.call("project.removeRepo", request),
   };
 
   readonly context: HostContext = {

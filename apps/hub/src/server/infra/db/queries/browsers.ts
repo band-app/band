@@ -185,6 +185,7 @@ export class BrowserQueries {
         );
         continue;
       }
+      if (!row.worktreeId) continue;
       out.push({
         id: row.id,
         worktreeId: row.worktreeId,

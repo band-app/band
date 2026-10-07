@@ -20,7 +20,10 @@ import { panelStates } from "../schema";
 
 export interface PanelStateRow {
   id: string;
-  worktreeId: string;
+  /** Null for a project-level chat. */
+  worktreeId: string | null;
+  /** Set for a project-level chat. */
+  projectId?: string | null;
   panelType: string;
   state: string; // raw JSON string
   /**

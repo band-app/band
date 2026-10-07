@@ -15,6 +15,8 @@
 
 import type { ContextPushResult, ContextSpec } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+import { hostRegistry } from "../infra/host/registry";
+import { projectIdOfScope } from "../infra/project-scope";
 import { contextService } from "./context-service";
 import { projectService } from "./project-service";
 import { tokenService } from "./token-service";
@@ -31,20 +33,30 @@ function pullTimeoutMs(): number {
 }
 
 export class ContextSyncService {
-  /** The contexts a worktree's host may hold for its session, and the host that holds them. */
-  async contextsFor(worktreeId: string) {
-    const worktree = worktreeService.resolve(worktreeId);
-    if (!worktree) return null;
-    const host = worktree.host;
+  /**
+   * The contexts a session's host may hold, and the host that holds them. The scope is a
+   * worktree id, or a project chat's scope id (the coordinator), which uses the project's own
+   * context on the project's coordinator host.
+   */
+  async contextsFor(scopeId: string) {
+    const projectId = projectIdOfScope(scopeId);
+    const project = projectId ? projectService.find(projectId) : undefined;
+    const worktree = projectId ? undefined : worktreeService.resolve(scopeId);
+    if (projectId ? !project : !worktree) return null;
+    const host = project
+      ? hostRegistry.hostById(project.coordinatorHostId ?? LOCAL_HOST_ID)
+      : (worktree as NonNullable<typeof worktree>).host;
     const labels =
       host.id === LOCAL_HOST_ID
         ? ((await host.info().catch(() => null))?.labels ?? [])
         : (tokenService.hostLabels(host.id) ?? []);
-    const rows = contextService.forSession(
-      worktree.repo.name,
-      labels,
-      projectService.contextForWorktree(worktreeId),
-    );
+    const rows = project
+      ? contextService.forSession("", labels, contextService.find(project.contextName))
+      : contextService.forSession(
+          (worktree as NonNullable<typeof worktree>).repo.name,
+          labels,
+          projectService.contextForWorktree(scopeId),
+        );
     const specs: ContextSpec[] = rows.map((row) => ({
       name: row.name,
       kind: row.kind === "user" ? "user" : "project",

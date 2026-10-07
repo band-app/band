@@ -39,7 +39,7 @@ interface Dashboard {
     role: string;
     status: string;
     spendUsd: number;
-    worktreeId: string;
+    worktreeId: string | null;
     model: string | null;
   }>;
   spend: {
@@ -90,7 +90,8 @@ const seedSpend = (
 };
 
 let workerA: { worktreeId: string; chatId: string };
-let coordinator: { worktreeId: string; chatId: string };
+let coordinator: { chatId: string };
+let projectScope: string;
 
 beforeAll(async () => {
   home = createTmpHome("band-dashboard-");
@@ -139,10 +140,13 @@ beforeAll(async () => {
       await m<{ chat: { id: string } }>("chats.create", { worktreeId: "api-feat-a", name: "a" })
     ).chat.id,
   };
-  const { project } = await q<{ project: { coordinator: typeof coordinator } }>("projects.get", {
-    project: "shop",
-  });
+  const { project } = await q<{ project: { id: string; coordinator: typeof coordinator } }>(
+    "projects.get",
+    { project: "shop" },
+  );
   coordinator = project.coordinator;
+  // The coordinator has no worktree, so the usage scanner's rows for it sit under the project scope.
+  projectScope = `project:${project.id}`;
 }, 180_000);
 
 afterAll(async () => {
@@ -157,7 +161,7 @@ describe("project dashboard (S3)", () => {
     const tenDaysAgo = now - 10 * 24 * 60 * 60 * 1000;
     seedSpend(workerA.worktreeId, "api", workerA.chatId, 1.5, now, "k1");
     seedSpend(workerA.worktreeId, "api", workerA.chatId, 0.5, threeDaysAgo, "k2");
-    seedSpend(coordinator.worktreeId, "api", coordinator.chatId, 2, now, "k3");
+    seedSpend(projectScope, "api", coordinator.chatId, 2, now, "k3");
     // The scanner backfills sessions Band did not own with no chat id.
     seedSpend(workerA.worktreeId, "api", null, 0.25, now, "k4");
     // Too old for the 7 day window, still part of the total.

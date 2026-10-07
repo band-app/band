@@ -41,6 +41,11 @@ export interface Host {
   /** Working copies of the hub's context repos, under `<BAND_HOME>/context` on the host. */
   readonly context: HostContext;
   /**
+   * Project folders: a working copy of a project's context repo with a checkout of each
+   * project repo's default branch under `repos/<repo>/`, at `<BAND_HOME>/projects/<project>`.
+   */
+  readonly project: HostProject;
+  /**
    * How a process on the host reaches the hub. A host that runs in the hub
    * process (`LocalHost`) has none, because its processes use the hub's own
    * URL and token. A remote host's processes go through the worker's relay.
@@ -791,4 +796,132 @@ export interface HostContext {
   pull(request: ContextPullRequest): Promise<ContextPullResult[]>;
   /** Commits what changed in each working copy, scans it, rebases on the hub's head and pushes. */
   push(request: ContextPushRequest): Promise<ContextPushResult[]>;
+}
+
+// ---------------------------------------------------------------------------
+// project folders
+// ---------------------------------------------------------------------------
+
+/** One repo of a project, as the hub resolves it for a host. */
+export interface ProjectRepoSpec {
+  name: string;
+  /** The repo's clone on this host, which the checkout is a git worktree of. */
+  clonePath: string;
+  defaultBranch: string;
+}
+
+export interface ProjectEnsureRequest {
+  /** The project's name, which is also the name of its context repo's working copy. */
+  project: string;
+  repos: ProjectRepoSpec[];
+  /**
+   * `throttled` (default) fetches a clone at most once a minute. `force` always fetches.
+   * `never` only reads the state.
+   */
+  fetch?: "throttled" | "force" | "never";
+  /** How long the pull of the context may take. */
+  contextTimeoutMs?: number;
+}
+
+export type ProjectCheckoutStatus =
+  /** On the remote's head. */
+  | "current"
+  /** Fast-forwarded by this call. */
+  | "updated"
+  /** Behind the remote and left alone, because it has local commits or changes. */
+  | "behind"
+  /** Has commits or changes the remote has not, and is not behind. */
+  | "ahead"
+  /** The checkout could not be made or read. `error` says why. */
+  | "error";
+
+export interface ProjectCheckout {
+  repo: string;
+  path: string;
+  /** The local branch, `band/<project>/<default>`. */
+  branch: string;
+  /** The remote branch it tracks, `origin/<default>`. */
+  upstream: string;
+  status: ProjectCheckoutStatus;
+  /** Commits the checkout has that the upstream lacks. */
+  ahead: number;
+  /** Commits the upstream has that the checkout lacks. */
+  behind: number;
+  /** Uncommitted changes or untracked files. */
+  dirty: boolean;
+  /** The fetch of the clone failed, so ahead and behind may be out of date. */
+  fetchError?: string;
+  error?: string;
+}
+
+export interface ProjectEnsureResult {
+  /** The project folder on the host. */
+  folder: string;
+  context: ContextPullResult;
+  checkouts: ProjectCheckout[];
+}
+
+export interface ProjectReadRequest {
+  project: string;
+  repo: string;
+  /** Path inside the checkout. Empty lists the checkout's top directory. */
+  path: string;
+  maxBytes?: number;
+}
+
+export type ProjectReadResult =
+  | { kind: "file"; content: string; truncated: boolean; size: number }
+  | { kind: "dir"; entries: Array<{ name: string; isDir: boolean }> };
+
+export interface ProjectSearchRequest {
+  project: string;
+  repo: string;
+  query: string;
+  maxResults?: number;
+}
+
+export interface ProjectSearchMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface ProjectLogRequest {
+  project: string;
+  repo: string;
+  n: number;
+}
+
+export interface ProjectCommit {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface ProjectRemoveRepoRequest {
+  project: string;
+  repo: string;
+  /** The repo's clone on this host. */
+  clonePath: string;
+}
+
+export interface HostProject {
+  /**
+   * Pulls the project's context into the project folder, then creates or refreshes each repo's
+   * checkout. A checkout is fast-forwarded only when it is clean and has no local commits. It
+   * rejects when the context has no working copy and none could be made.
+   */
+  ensure(request: ProjectEnsureRequest): Promise<ProjectEnsureResult>;
+  /** Reads a file or lists a directory of a repo's checkout. Refuses a path outside it. */
+  read(request: ProjectReadRequest): Promise<ProjectReadResult>;
+  /** Fixed-string search through the checkout's files. */
+  search(request: ProjectSearchRequest): Promise<ProjectSearchMatch[]>;
+  /** The newest commits of the checkout's branch. */
+  log(request: ProjectLogRequest): Promise<ProjectCommit[]>;
+  /**
+   * Removes a repo's checkout. Rejects while it has uncommitted changes or commits no remote
+   * has, and says which.
+   */
+  removeRepo(request: ProjectRemoveRepoRequest): Promise<void>;
 }

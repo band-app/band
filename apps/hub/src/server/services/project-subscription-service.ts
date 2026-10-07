@@ -31,11 +31,13 @@ import {
   type StatusEvent,
   subscribe as subscribeStatusBus,
 } from "../infra/events/status-event-bus";
+import { projectScopeId } from "../infra/project-scope";
 import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
 import { redactSecrets } from "./_utils/context-redaction";
 import { chatService } from "./chat-service";
 import { contextRepoPath, contextService, runGit } from "./context-service";
 import { githubWebhookService } from "./github-webhook-service";
+import { projectFolderService } from "./project-folder-service";
 import { projectService } from "./project-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
 
@@ -165,7 +167,7 @@ export class ProjectSubscriptionService {
    */
   async reconcile(projectId: string): Promise<void> {
     const row = projectService.find(projectId);
-    if (!row?.coordinatorChatId || !row.coordinatorWorktreeId) return;
+    if (!row?.coordinatorChatId) return;
     this.ensureProjectSubscription(row);
     await this.baseline(row.contextName);
     for (const member of this.groups.membersOfProject(row.id)) {
@@ -221,8 +223,8 @@ export class ProjectSubscriptionService {
 
   private ensureProjectSubscription(row: ProjectRow): Subscription | undefined {
     const chatId = row.coordinatorChatId;
-    const worktreeId = row.coordinatorWorktreeId;
-    if (!chatId || !worktreeId || !chatService.get(chatId)) return undefined;
+    const worktreeId = projectScopeId(row.id);
+    if (!chatId || !chatService.get(chatId)) return undefined;
     const key = projectKey(row.id);
     const now = Date.now();
     const existing = subscriptionService
@@ -325,7 +327,7 @@ export class ProjectSubscriptionService {
     const found = this.groups.memberOfWorktree(worktreeId);
     if (!found) return;
     const row = projectService.find(found.group.projectId);
-    if (!row?.coordinatorChatId || !row.coordinatorWorktreeId) return;
+    if (!row?.coordinatorChatId) return;
     if (found.member.prNumber !== pr.number) {
       this.groups.setMemberPr(found.group.id, found.member.repo, pr.number);
     }
@@ -356,13 +358,15 @@ export class ProjectSubscriptionService {
         url: pr.url,
       });
       for (const sub of existing) subscriptionService.remove(sub.id);
+      // The default branch moved, so the project's checkouts should catch up.
+      if (pr.state === "merged") projectFolderService.refreshAfterMerge(row);
       return;
     }
 
     const have = new Set(current.map((s) => s.filterKey));
     const base = {
       chatId: coordinatorChatId,
-      worktreeId: row.coordinatorWorktreeId,
+      worktreeId: projectScopeId(row.id),
       repo: parsed.repo,
       coalesceSeconds: coalesceSeconds(),
       maxWakeups: MEMBER_MAX_WAKEUPS,

@@ -49,8 +49,8 @@ export interface ProjectView {
   policy: ProjectPolicy;
   /** The policy with its defaults filled in, which is what the coordinator runs under. */
   effectivePolicy: ResolvedPolicy;
-  /** The coordinator session (plan step 6.2), or null until it has started. */
-  coordinator: { worktreeId: string; chatId: string | null; hostId: string | null } | null;
+  /** The coordinator session (plan steps 6.2 and T.1), or null until it has started. */
+  coordinator: { chatId: string; hostId: string | null } | null;
   /** The host the coordinator is pinned to. Null means the hub's default. */
   coordinatorHostId: string | null;
   createdAt: number;
@@ -234,7 +234,6 @@ export class ProjectService {
       coordinatorModel,
       labels,
       policy,
-      coordinatorWorktreeId: null,
       coordinatorChatId: null,
       coordinatorHostId: input.coordinatorHostId?.trim() || null,
       createdAt: Date.now(),
@@ -331,7 +330,6 @@ export class ProjectService {
         coordinatorModel: DEFAULT_COORDINATOR_MODEL,
         labels: [],
         policy: {},
-        coordinatorWorktreeId: null,
         coordinatorChatId: null,
         coordinatorHostId: null,
         createdAt: Date.now(),
@@ -397,8 +395,8 @@ export class ProjectService {
     return this.get(row.id);
   }
 
-  /** Refused while a worktree of that repo belongs to the project. */
-  removeRepo(ref: string, repo: string): ProjectView {
+  /** Throws when a worktree of the repo still belongs to the project. */
+  checkRepoRemovable(ref: string, repo: string): void {
     const row = this.require(ref);
     if (!this.queries.reposOf(row.id).some((r) => r.repoName === repo)) {
       throw new ProjectInputError(`Repo "${repo}" is not in project "${row.name}"`);
@@ -409,6 +407,12 @@ export class ProjectService {
         `Cannot remove repo "${repo}" from project "${row.name}": ${using.length} active worktree${using.length === 1 ? "" : "s"} (${this.describe(using)}) belong${using.length === 1 ? "s" : ""} to the project. Remove or detach them first.`,
       );
     }
+  }
+
+  /** Refused while a worktree of that repo belongs to the project. */
+  removeRepo(ref: string, repo: string): ProjectView {
+    const row = this.require(ref);
+    this.checkRepoRemovable(row.id, repo);
     this.queries.removeRepo(row.id, repo);
     return this.get(row.id);
   }
@@ -449,18 +453,16 @@ export class ProjectService {
     return project && !project.isDefault ? contextService.find(project.contextName) : undefined;
   }
 
-  /** The project's worktrees, without the coordinator's own. */
+  /** The project's worktrees. The coordinator has none, so every one is a worker's. */
   workersOf(row: ProjectRow) {
-    return this.queries
-      .worktreesOf(row.id)
-      .filter((w) => toWorktreeIdOf(w.repoName, w.name) !== row.coordinatorWorktreeId);
+    return this.queries.worktreesOf(row.id);
   }
 
   branchStatus(worktreeId: string) {
     return this.queries.branchStatus(worktreeId);
   }
 
-  /** Every worktree of the project, the coordinator's included. */
+  /** Every worktree of the project. */
   allWorktreesOf(projectId: string) {
     return this.queries.worktreesOf(projectId);
   }
@@ -483,24 +485,19 @@ export class ProjectService {
     return this.queries.findByContext(contextName);
   }
 
-  /** The project a worker worktree belongs to. The coordinator's own worktree and a worktree in no project give undefined. */
+  /** The project a worker worktree belongs to, or undefined for a worktree in no project. */
   projectOfWorker(worktreeId: string): ProjectRow | undefined {
     const projectId = this.worktreeQueries.findProjectId(worktreeId);
-    const row = projectId ? this.queries.find(projectId) : undefined;
-    return row && row.coordinatorWorktreeId !== worktreeId ? row : undefined;
+    return projectId ? this.queries.find(projectId) : undefined;
   }
 
   findByCoordinatorChat(chatId: string): ProjectRow | undefined {
     return this.queries.findByCoordinatorChat(chatId);
   }
 
-  isCoordinatorWorktree(worktreeId: string): boolean {
-    return this.queries.findByCoordinatorWorktree(worktreeId) !== undefined;
-  }
-
-  /** Records the coordinator's worktree and chat, or clears them with nulls. */
-  setCoordinator(id: string, worktreeId: string | null, chatId: string | null): void {
-    this.queries.update(id, { coordinatorWorktreeId: worktreeId, coordinatorChatId: chatId });
+  /** Records the coordinator's chat, or clears it with null. */
+  setCoordinator(id: string, chatId: string | null): void {
+    this.queries.update(id, { coordinatorChatId: chatId });
   }
 
   /** A repo was removed from Band: drop it from every project. */
@@ -559,12 +556,8 @@ export class ProjectService {
       labels: row.labels,
       policy,
       effectivePolicy: resolvePolicy(policy, row.coordinatorModel),
-      coordinator: row.coordinatorWorktreeId
-        ? {
-            worktreeId: row.coordinatorWorktreeId,
-            chatId: row.coordinatorChatId,
-            hostId: row.coordinatorHostId,
-          }
+      coordinator: row.coordinatorChatId
+        ? { chatId: row.coordinatorChatId, hostId: row.coordinatorHostId }
         : null,
       coordinatorHostId: row.coordinatorHostId,
       createdAt: row.createdAt,

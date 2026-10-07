@@ -75,7 +75,6 @@ interface Fixture {
   projectId: string;
   contextName: string;
   coordinatorChatId: string;
-  coordinatorWorktreeId: string;
   workerWorktreeId: string;
   workerChatId: string;
   branch: string;
@@ -139,7 +138,6 @@ async function newProject(): Promise<Fixture> {
     projectId: project.id,
     contextName: row.contextName,
     coordinatorChatId: row.coordinatorChatId as string,
-    coordinatorWorktreeId: row.coordinatorWorktreeId as string,
     workerWorktreeId,
     workerChatId: workerChat.id,
     branch,

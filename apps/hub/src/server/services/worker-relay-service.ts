@@ -18,7 +18,8 @@ import {
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { CHAT_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
-import { WorktreeQueries } from "../infra/db/queries/worktrees";
+import { hostRegistry } from "../infra/host/registry";
+import { chatScope } from "../infra/project-scope";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 import {
@@ -48,11 +49,12 @@ const FORWARDED_HEADERS = [
 
 const RPC_INVALID_PARAMS = -32602;
 
-const worktreeQueries = new WorktreeQueries();
-
 const defaultLookups: ScopeLookups = {
-  hostOfWorktree: (id) => worktreeQueries.findHostId(id),
-  worktreeOfChat: (id) => chatService.get(id)?.worktreeId ?? null,
+  hostOfWorktree: (id) => hostRegistry.hostIdOfScope(id),
+  worktreeOfChat: (id) => {
+    const chat = chatService.get(id);
+    return chat ? chatScope(chat) : null;
+  },
   worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
   worktreeOfBrowser: (id) => browserService.get(id)?.worktreeId ?? null,

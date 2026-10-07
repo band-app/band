@@ -29,6 +29,9 @@ In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an a
 
 A body of work across several repos with its own context repo and, when it has repos, a coordinator chat. The repos are added from inside a project. Every hub also has a default project, `personal` (shown as Personal), that takes the repos and worktrees created with no project. It cannot be removed and has no coordinator.
 
+- The **project folder** is `<BAND_HOME>/projects/<project>/` on the coordinator host. It is the working copy of the project's context repo, with a checkout of each repo's default branch under `repos/<repo>/`. You can edit, commit and push in those checkouts by hand, and the host keeps them current without overwriting local work.
+- The coordinator is a project-level chat. It has no worktree and runs in the project folder. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
+
 ## Terms that kept their names
 
 - `.band/config.json` still reads `workspace.copyFiles`, `workspace.defaultVia` and `workspace.terminal`. The format of a file in a user's repo is not renamed.

@@ -187,7 +187,7 @@ describe("session preamble", () => {
     };
     expect(meta.systemPrompt.append).toContain("Always use pnpm.");
     expect(meta.claudeCode.options.settings.autoMemoryDirectory).toBe(
-      join(home, ".band", "context", "projects", "acme", "memory"),
+      join(home, ".band", "projects", "acme", "memory"),
     );
   });
 
@@ -245,7 +245,7 @@ describe("auto memory on a worker", () => {
     git(repo, "add", ".");
     git(repo, "commit", "-q", "-m", "init");
     const bandHome = join(wHome, ".band");
-    const memoryDir = join(bandHome, "context", "projects", "acme", "memory");
+    const memoryDir = join(bandHome, "projects", "acme", "memory");
     writeFileSync(
       join(wHome, "scenario.json"),
       JSON.stringify({

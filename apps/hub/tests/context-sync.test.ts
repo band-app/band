@@ -403,10 +403,10 @@ describe("context sync", () => {
   it("S4: a host whose labels do not allow a project context never receives it", async () => {
     // Worker A has no labels. The repo's project context needs org=epic, so A never gets it.
     await startTurn("proj-ctx-a", "plain message");
-    expect(existsSync(join(a.bandHome, "context", "projects", "epic"))).toBe(false);
-    expect(existsSync(join(a.bandHome, "context", "projects"))).toBe(false);
+    expect(existsSync(join(a.bandHome, "projects", "epic"))).toBe(false);
+    expect(existsSync(join(a.bandHome, "projects"))).toBe(false);
     // Worker B carries the label and gets it.
     await startTurn("proj-ctx-b", "plain message");
-    expect(existsSync(join(b.bandHome, "context", "projects", "epic"))).toBe(true);
+    expect(existsSync(join(b.bandHome, "projects", "epic"))).toBe(true);
   });
 });

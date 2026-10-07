@@ -47,7 +47,10 @@ export type ChatStatus = "running" | "idle" | "stopped" | "error";
  */
 export interface ChatRow {
   id: string;
-  worktreeId: string;
+  /** Null for a project-level chat (the coordinator), which has no worktree. */
+  worktreeId: string | null;
+  /** Set for a project-level chat. */
+  projectId?: string | null;
   name: string;
   agent: string;
   model: string | undefined;
@@ -186,6 +189,7 @@ export class ChatQueries {
     insertPanelState({
       id: row.id,
       worktreeId: row.worktreeId,
+      projectId: row.projectId ?? null,
       panelType: CHAT_PANEL_TYPE,
       state: serializeState(row),
       labels: serializeLabels(row.labels),
@@ -280,6 +284,7 @@ export class ChatQueries {
       out.push({
         id: row.id,
         worktreeId: row.worktreeId,
+        projectId: row.projectId ?? null,
         name: parsed.name,
         agent: parsed.agent,
         model: parsed.model ?? undefined,

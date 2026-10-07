@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter } from "../context";
 import { useRepos } from "../hooks/use-repos";
+import { getProjectTerminalRenderer } from "../lib/project-terminal-slot";
 import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
 
 type ProjectList = Awaited<ReturnType<typeof trpc.projects.list.query>>;
@@ -375,12 +376,10 @@ function CoordinatorSection({
   project,
   canEdit,
   run,
-  onOpenWorktree,
 }: {
   project: Project;
   canEdit: boolean;
   run: (fn: () => Promise<unknown>) => Promise<void>;
-  onOpenWorktree: (worktreeId: string) => void;
 }) {
   const coordinator = project.coordinator;
   return (
@@ -391,17 +390,9 @@ function CoordinatorSection({
     >
       <h3 className="text-sm font-medium">Coordinator</h3>
       {coordinator ? (
-        <div className="flex items-center gap-2 text-sm">
-          <span data-testid="projects__coordinator-worktree">{coordinator.worktreeId}</span>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="projects__coordinator-open"
-            onClick={() => onOpenWorktree(coordinator.worktreeId)}
-          >
-            Open coordinator chat
-          </Button>
-        </div>
+        <p className="text-sm" data-testid="projects__coordinator-chat">
+          {coordinator.chatId}
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="projects__coordinator-none">
           {project.repos.length === 0
@@ -409,6 +400,7 @@ function CoordinatorSection({
             : "The coordinator has not started."}
         </p>
       )}
+      {coordinator ? <ProjectFolderSection project={project} canEdit={canEdit} /> : null}
       {project.coordinatorError ? (
         <p
           role="alert"
@@ -428,6 +420,139 @@ function CoordinatorSection({
         </Button>
       ) : null}
     </section>
+  );
+}
+
+interface FolderCheckout {
+  repo: string;
+  path: string;
+  branch: string;
+  status: "current" | "updated" | "behind" | "ahead" | "error";
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  fetchError?: string;
+  error?: string;
+}
+
+interface FolderState {
+  hostId: string;
+  folder: string;
+  checkedAt: number;
+  checkouts: FolderCheckout[];
+  skipped: Array<{ repo: string; reason: string }>;
+}
+
+function checkoutLine(c: FolderCheckout): string {
+  if (c.error) return c.error;
+  const parts = [];
+  if (c.behind > 0) parts.push(`${c.behind} behind`);
+  if (c.ahead > 0) parts.push(`${c.ahead} ahead`);
+  if (c.dirty) parts.push("uncommitted changes");
+  return parts.length > 0 ? parts.join(", ") : "up to date";
+}
+
+/**
+ * The project folder on the coordinator host: each repo's default-branch checkout with how far
+ * it is from origin, a sync button, and a plain terminal in the folder.
+ */
+function ProjectFolderSection({ project, canEdit }: { project: Project; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const key = ["projects.folder", project.id];
+  const folder = useQuery({
+    queryKey: key,
+    queryFn: () => trpc.projects.folder.query({ project: project.id }),
+    refetchInterval: 5_000,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [terminal, setTerminal] = useState<{ worktreeId: string; terminalId: string } | null>(null);
+  const state = folder.data?.folder as FolderState | null | undefined;
+  const renderTerminal = getProjectTerminalRenderer();
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await queryClient.invalidateQueries({ queryKey: key });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1" data-testid="projects__folder">
+      <h4 className="text-xs font-medium text-muted-foreground">Project folder</h4>
+      {state ? (
+        <>
+          <p className="break-all text-xs" data-testid="projects__folder-path">
+            {state.folder} (host {state.hostId})
+          </p>
+          <ul className="space-y-1">
+            {state.checkouts.map((c) => (
+              <li
+                key={c.repo}
+                className="text-xs"
+                data-testid="projects__checkout"
+                data-repo={c.repo}
+                data-status={c.status}
+                data-dirty={c.dirty ? "true" : "false"}
+              >
+                <span className="font-medium">{c.repo}</span> on {c.branch}:{" "}
+                <span data-testid="projects__checkout-state">{checkoutLine(c)}</span>
+              </li>
+            ))}
+            {state.skipped.map((s) => (
+              <li key={s.repo} className="text-xs text-muted-foreground">
+                {s.repo}: no checkout, {s.reason}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="projects__folder-none">
+          The folder is prepared when the coordinator starts a turn.
+        </p>
+      )}
+      {error ? <ErrorLine message={error} /> : null}
+      {canEdit ? (
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            data-testid="projects__folder-sync"
+            onClick={() => act(() => trpc.projects.syncFolder.mutate({ project: project.id }))}
+          >
+            Fetch and pull
+          </Button>
+          {renderTerminal ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              data-testid="projects__folder-terminal"
+              onClick={() =>
+                act(async () => {
+                  const opened = await trpc.projects.openTerminal.mutate({ project: project.id });
+                  setTerminal({ worktreeId: opened.worktreeId, terminalId: opened.terminalId });
+                })
+              }
+            >
+              Open terminal
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {terminal && renderTerminal ? (
+        <div className="h-64 rounded-md border" data-testid="projects__terminal">
+          {renderTerminal(terminal)}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -677,7 +802,8 @@ function DashboardSection({
                     {a.role === "coordinator" ? "Coordinator" : a.name}
                   </span>{" "}
                   <span className="text-xs text-muted-foreground">
-                    {a.repo}/{a.branch}, host {a.hostId ?? "local"}, {a.agent}
+                    {a.repo ? `${a.repo}/${a.branch}, ` : "project folder, "}host{" "}
+                    {a.hostId ?? "local"}, {a.agent}
                     {a.model ? ` (${a.model})` : ""}, {usd(a.spendUsd)}
                     {a.lastActivityAt
                       ? `, active ${new Date(a.lastActivityAt).toLocaleString()}`
@@ -688,14 +814,16 @@ function DashboardSection({
                   <span className="text-xs" data-testid="dashboard__agent-status">
                     {a.status}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="dashboard__agent-open"
-                    onClick={() => onOpenWorktree(a.worktreeId)}
-                  >
-                    Open chat
-                  </Button>
+                  {a.worktreeId ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="dashboard__agent-open"
+                      onClick={() => onOpenWorktree(a.worktreeId as string)}
+                    >
+                      Open chat
+                    </Button>
+                  ) : null}
                   {canEdit && a.status === "running" ? (
                     <Button
                       size="sm"
@@ -1368,12 +1496,7 @@ function ProjectDetail({
 
       {project.isDefault ? null : (
         <>
-          <CoordinatorSection
-            project={project}
-            canEdit={canEdit}
-            run={run}
-            onOpenWorktree={onOpenWorktree}
-          />
+          <CoordinatorSection project={project} canEdit={canEdit} run={run} />
 
           <PolicySection
             key={`${project.id}:${JSON.stringify(project.policy)}:${project.coordinatorModel}`}
