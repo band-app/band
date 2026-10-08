@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -75,6 +76,23 @@ export interface WorkerOptions {
    * `terminals.ts`). Off by default: a worker started in a test process would leave a daemon behind.
    */
   persistentTerminals?: boolean;
+}
+
+/** Git repos that are a root or sit directly in one. A repo with no remote URL has no mapping, so this finds it. */
+async function gitReposAtRoots(roots: string[]): Promise<string[]> {
+  const found: string[] = [];
+  for (const root of roots) {
+    const candidates = [root];
+    try {
+      for (const entry of await readdir(root, { withFileTypes: true })) {
+        if (entry.isDirectory()) candidates.push(join(root, entry.name));
+      }
+    } catch {
+      // An unreadable root has no repos to find.
+    }
+    for (const dir of candidates) if (existsSync(join(dir, ".git"))) found.push(dir);
+  }
+  return found;
 }
 
 export class Worker {
@@ -159,6 +177,13 @@ export class Worker {
           };
         },
       },
+    });
+    policy.useWorktrees({
+      repoPaths: async () => [
+        ...(await host.repos.list()).map((m) => m.path),
+        ...(await gitReposAtRoots(policy.rootPaths)),
+      ],
+      worktreePaths: async (repo) => (await host.worktree.list(repo)).map((w) => w.path),
     });
     const info = await host.info();
 
