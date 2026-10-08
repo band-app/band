@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { lstat, mkdir, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -11,6 +12,16 @@ export class PathDeniedError extends Error {
 }
 
 const MAX_SYMLINK_HOPS = 40;
+/** How long a repo's worktree list is trusted. Creating or removing a worktree through the worker clears it sooner. */
+const WORKTREE_CACHE_TTL_MS = 5000;
+
+/** What the policy asks the host about the repos it serves. */
+export interface WorktreeSource {
+  /** Folders of the repos registered on this worker. */
+  repoPaths(): Promise<string[]>;
+  /** Paths of the worktrees git has registered for a repo, the main checkout included. */
+  worktreePaths(repoPath: string): Promise<string[]>;
+}
 
 /**
  * Keeps every path a hub call names inside the worker's roots. A path is
@@ -30,6 +41,8 @@ export class PathPolicy {
   private readonly roots: string[];
   /** Private directories the worker made itself. Usable like a root, and removable. */
   private readonly tempDirs = new Set<string>();
+  private worktrees: WorktreeSource | null = null;
+  private readonly worktreeCache = new Map<string, { at: number; paths: string[] }>();
 
   private constructor(roots: string[]) {
     this.roots = roots;
@@ -56,6 +69,19 @@ export class PathPolicy {
       this.roots.push(canonical);
     }
     return canonical;
+  }
+
+  /**
+   * Also allows a path that is, or is inside, a git worktree registered by a repo
+   * that sits inside a root. Such a worktree may live anywhere on the disk.
+   */
+  useWorktrees(source: WorktreeSource): void {
+    this.worktrees = source;
+  }
+
+  /** Forgets the cached worktree lists, after a worktree was created or removed. */
+  invalidateWorktrees(): void {
+    this.worktreeCache.clear();
   }
 
   /** Whether a canonical path is in a root, or in a directory the worker made itself. */
@@ -93,8 +119,80 @@ export class PathPolicy {
       const parent = await this.canonical(dirname(lexical), 0);
       canonical = lexical === parent ? parent : join(parent, basename(lexical));
     }
-    if (!this.contains(canonical)) throw new PathDeniedError(path, "is outside the worker's roots");
+    if (!this.contains(canonical) && !(await this.inRegisteredWorktree(canonical))) {
+      throw new PathDeniedError(path, `is outside the worker's roots${await this.hint(canonical)}`);
+    }
     return canonical;
+  }
+
+  private async inRegisteredWorktree(canonical: string): Promise<boolean> {
+    const source = this.worktrees;
+    if (!source) return false;
+    let repos: string[];
+    try {
+      repos = await source.repoPaths();
+    } catch {
+      return false;
+    }
+    for (const repo of repos) {
+      let repoCanonical: string;
+      try {
+        repoCanonical = await realpath(repo);
+      } catch {
+        continue;
+      }
+      if (!this.contains(repoCanonical)) continue;
+      for (const wt of await this.worktreePathsOf(source, repoCanonical)) {
+        if (canonical === wt || canonical.startsWith(wt + sep)) return true;
+      }
+    }
+    return false;
+  }
+
+  private async worktreePathsOf(source: WorktreeSource, repo: string): Promise<string[]> {
+    const cached = this.worktreeCache.get(repo);
+    if (cached && Date.now() - cached.at < WORKTREE_CACHE_TTL_MS) return cached.paths;
+    const paths: string[] = [];
+    try {
+      for (const p of await source.worktreePaths(repo)) {
+        try {
+          paths.push(await realpath(p));
+        } catch {
+          // A registered worktree whose folder is gone grants nothing.
+        }
+      }
+    } catch {
+      return [];
+    }
+    this.worktreeCache.set(repo, { at: Date.now(), paths });
+    return paths;
+  }
+
+  /** Says so when the path is a worktree of a repo that is not under a root, because the fix is to add that repo's folder. */
+  private async hint(canonical: string): Promise<string> {
+    let dir = canonical;
+    for (let i = 0; i < 64; i++) {
+      try {
+        if ((await lstat(dir)).isDirectory()) break;
+      } catch {
+        // Keep climbing to an existing directory.
+      }
+      const up = dirname(dir);
+      if (up === dir) return "";
+      dir = up;
+    }
+    const common = await new Promise<string>((done) => {
+      execFile(
+        "git",
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { cwd: dir, timeout: 3000 },
+        (err, stdout) => done(err ? "" : stdout.trim()),
+      );
+    });
+    if (!common) return "";
+    const repo = basename(common) === ".git" ? dirname(common) : common;
+    if (this.contains(await realpath(repo).catch(() => repo))) return "";
+    return `. It is a worktree of ${repo}, which is not inside a root, so add that repo's folder as a root`;
   }
 
   private contains(canonical: string): boolean {

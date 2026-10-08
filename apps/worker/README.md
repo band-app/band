@@ -79,6 +79,8 @@ The hub answers from `$BAND_CLI_BINARIES_DIR/band-<platform>-<arch>` (for exampl
 
 Every path in a call must be absolute and, once `..` and symlinks are resolved, inside a declared root. The check follows a symlink at the end of the path only when the call does (`readFile`, `writeFile`, `list`), so `rm` and `rename` of a link act on the link. A write through a dangling link is checked against where it would land. A root itself can't be removed or renamed. A rejected call fails with code `-32010` and `data.path`.
 
+A path outside every root is also allowed when, once resolved, it is or lies inside a git worktree that a repo on this worker lists in `git worktree list`, and that repo is itself inside a root. A repo is one with a URL mapping on the worker, or a git folder that is a root or sits directly in one. This covers worktrees another tool made outside the repo folder. Only the resolved path counts, so a symlink in a root that points at a non-worktree folder is refused, and one that points at a registered worktree is allowed. The worker reads each repo's worktree list at most every 5 seconds, and `worktree.create` and `worktree.remove` clear it at once. A worktree removed with plain `git` outside the worker is refused again within 5 seconds. When a refused path is a worktree of a repo that is not inside a root, the error names that repo and says to add its folder as a root.
+
 The policy covers the paths the hub names. It does not limit what a shell, command or agent does once it runs, and a local process that swaps a directory for a symlink between the check and the use can still escape.
 
 ## Calls

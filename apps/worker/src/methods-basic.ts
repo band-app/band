@@ -100,17 +100,23 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   r.json("git.exec", async (a) => host.git.exec(strArray(a, "args"), await path(a, "cwd")));
   r.json("git.gh", async (a) => host.git.gh(strArray(a, "args"), await path(a, "cwd")));
 
-  r.json("worktree.create", async (a) =>
-    host.worktree.create({
+  r.json("worktree.create", async (a) => {
+    const created = await host.worktree.create({
       repoPath: await path(a, "repoPath"),
       path: await path(a, "path"),
       branch: str(a, "branch"),
       base: optStr(a, "base"),
-    }),
-  );
-  r.json("worktree.remove", async (a) =>
-    host.worktree.remove({ repoPath: await path(a, "repoPath"), path: await path(a, "path") }),
-  );
+    });
+    policy.invalidateWorktrees();
+    return created;
+  });
+  r.json("worktree.remove", async (a) => {
+    await host.worktree.remove({
+      repoPath: await path(a, "repoPath"),
+      path: await path(a, "path"),
+    });
+    policy.invalidateWorktrees();
+  });
   r.json("worktree.list", async (a) => host.worktree.list(await path(a, "repoPath")));
 
   // ---- repos --------------------------------------------------------------
