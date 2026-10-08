@@ -68,6 +68,7 @@ import { agentSessionRegistry } from "./src/server/services/agent-session-regist
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
+import { contextAutosyncService } from "./src/server/services/context-autosync-service.ts";
 import { contextService } from "./src/server/services/context-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
@@ -76,10 +77,10 @@ import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectCoordinatorService } from "./src/server/services/project-coordinator-service.ts";
-import { projectRetroService } from "./src/server/services/project-retro-service.ts";
+import { projectFolderService } from "./src/server/services/project-folder-service.ts";
+import { projectService } from "./src/server/services/project-service.ts";
 import { projectSubscriptionService } from "./src/server/services/project-subscription-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
-import { repoService } from "./src/server/services/repo-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
@@ -1408,15 +1409,13 @@ async function main() {
     phaseBStarted = resolve;
   });
 
-  // The default project and its context exist before the server answers its first request, so a
-  // list that follows the "listening" banner never races their creation. Adopting the repos and
-  // worktrees already in the database is plain DB work. The boot setup repeats it after the first
-  // sync, for the worktrees that sync finds.
+  // Older hubs left a default project and multi-repo task links behind. They go before the server
+  // answers its first request, so no client sees them. It is plain DB work.
   try {
-    await repoService.adoptUnplaced();
+    projectService.retireLegacy();
   } catch (err) {
     console.warn(
-      `Could not set up the default project: ${err instanceof Error ? err.message : String(err)}`,
+      `Could not retire the old default project: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
@@ -1615,8 +1614,11 @@ async function main() {
         .finally(() => {
           // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
           projectSubscriptionService.start();
+          // Each project's folder on its coordinator host, so its view opens on known files.
+          void projectFolderService.warmAll();
+          // Keeps every host's copy of each project folder in step with the hub, in the background.
+          contextAutosyncService.start();
         });
-      projectRetroService.start();
 
       // Activate the bundled plugins that ask for `onStartup`. The rest
       // activate lazily, e.g. the GitHub plugin on the first review lookup
@@ -1643,7 +1645,7 @@ async function main() {
     branchStatusPoller.stop();
     cronjobService.stop();
     projectSubscriptionService.stop();
-    projectRetroService.stop();
+    contextAutosyncService.stop();
     subscriptionService.stop();
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();

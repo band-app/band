@@ -1,8 +1,9 @@
 /**
- * The project dashboard (plan step 6.6): agents with live status, task groups with each member's PR and CI
- * state in merge order, pending approvals and the quick actions. The coordinator's agent is the scripted ACP
- * stub (a message makes it call `tasks_create`, or hold a turn until it is stopped). `gh` is the Express
- * stub, answering the branch-status poller's query for the PRs. No tRPC mocking.
+ * The project dashboard on the Activity tab: agents with live status, the project's worktrees with
+ * each one's PR and CI state, and the quick actions. The coordinator's agent is the scripted ACP
+ * stub (a message makes it call `worktree_create` once per repo, or hold a turn until it is
+ * stopped). `gh` is the Express stub, answering the branch-status poller's query for the PRs. No
+ * tRPC mocking.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -104,20 +105,20 @@ test.beforeAll(async () => {
           {
             match: "^dispatch-group",
             steps: [
-              {
+              ...[CLIENT, API].map((repo) => ({
                 mcpCall: {
-                  name: "dispatch-group",
+                  name: `dispatch-group-${repo}`,
                   server: "band-coordinator",
-                  tool: "tasks_create",
+                  tool: "worktree_create",
                   args: {
-                    repos: [{ repo: CLIENT }, { repo: API }],
+                    repo,
                     branch: BRANCH,
                     title: "Shared change",
-                    brief: "Change both sides.",
+                    brief: `Change the ${repo} side.`,
                     scenarios: ["both sides agree"],
                   },
                 },
-              },
+              })),
               { say: "dispatch requested" },
             ],
           },
@@ -125,6 +126,8 @@ test.beforeAll(async () => {
           { steps: [{ say: "ok" }] },
         ],
       }),
+      // The stub logs each MCP call here; without it a turn ends after its first call.
+      BAND_TEST_ACP_HTTP_LOG: join(tmpHome, "acp-http-log.jsonl"),
     },
   });
   const created = await trpc<{
@@ -145,24 +148,15 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("an approved group shows both PRs with CI state in merge order, and approving works from the dashboard", async ({
-  page,
-}) => {
+test("two dispatched worktrees show their PRs with CI state", async ({ page }) => {
   // The branch-status poller ticks about 30 s apart, longer than the default 30 s test timeout.
   test.setTimeout(150_000);
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("shop");
+  await projects.gotoProject("shop");
+  await projects.showTab("activity");
 
   await ask("dispatch-group");
-  await expect(projects.dashboardApprovals()).toHaveCount(1, { timeout: 20_000 });
-  await projects.approveFromDashboard();
-  await expect(projects.dashboardApprovals()).toHaveCount(0);
-
-  await expect(projects.dashboardMembers()).toHaveCount(2);
-  await expect(projects.dashboardMembers().nth(0)).toHaveAttribute("data-repo", CLIENT);
-  await expect(projects.dashboardMembers().nth(1)).toHaveAttribute("data-repo", API);
+  await expect(projects.dashboardMembers()).toHaveCount(2, { timeout: 20_000 });
   await expect(projects.dashboardMember(CLIENT)).toContainText("PR #101", { timeout: 60_000 });
   await expect(projects.dashboardMember(CLIENT)).toHaveAttribute("data-ci", "failure");
   await expect(projects.dashboardMember(API)).toContainText("PR #201", { timeout: 60_000 });
@@ -173,9 +167,8 @@ test("agents list the coordinator and workers, and a running agent can be stoppe
   page,
 }) => {
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("shop");
+  await projects.gotoProject("shop");
+  await projects.showTab("activity");
 
   await expect(projects.dashboardAgent("coordinator")).toHaveCount(1);
   await expect(projects.dashboardAgent("worker").first()).toBeVisible({ timeout: 20_000 });

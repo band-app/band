@@ -154,29 +154,14 @@ describe("upgrading a path-based install", () => {
     expect(repos.find((r) => r.name === "scratch")?.path).toBe(withoutOrigin);
   });
 
-  it("puts the repos and their worktrees in the default project", async () => {
-    // The boot step records remotes first and adopts the unplaced repos right after.
-    const personal = await waitFor(
-      async () => {
-        const { projects } = await q<{
-          projects: Array<{
-            id: string;
-            name: string;
-            isDefault: boolean;
-            repos: Array<{ repo: string }>;
-          }>;
-        }>("projects.list");
-        const found = projects.find((p) => p.isDefault);
-        return found && found.repos.length === 2 ? found : undefined;
-      },
-      { label: "default project adopts repos", timeoutMs: 20_000 },
-    );
-    expect(personal.name).toBe("personal");
-    expect(personal.repos.map((r) => r.repo).sort()).toEqual(["app", "scratch"]);
+  it("makes no default project and leaves the repos and their worktrees in none", async () => {
+    const { projects } = await q<{ projects: Array<{ name: string }> }>("projects.list");
+    expect(projects).toEqual([]);
     const { repos } = await q<{ repos: RepoView[] }>("repos.list");
+    expect(repos.map((r) => r.name).sort()).toEqual(["app", "scratch"]);
     for (const repo of repos) {
       for (const wt of repo.worktrees)
-        expect(wt.projectId, `${repo.name}/${wt.name}`).toBe(personal.id);
+        expect(wt.projectId, `${repo.name}/${wt.name}`).toBeUndefined();
     }
   });
 

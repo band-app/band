@@ -42,6 +42,14 @@ interface Dashboard {
     worktreeId: string | null;
     model: string | null;
   }>;
+  worktrees: Array<{
+    worktreeId: string;
+    repo: string;
+    branch: string;
+    hostId: string | null;
+    pr: { number: number; state: string } | null;
+    ci: string | null;
+  }>;
   spend: {
     totalUsd: number;
     todayUsd: number;
@@ -183,6 +191,20 @@ describe("project dashboard (S3)", () => {
     });
     expect(d.spend.days).toHaveLength(7);
     expect(d.spend.days.reduce((n, day) => n + day.usd, 0)).toBeCloseTo(4.25, 4);
+  });
+
+  it("lists the project's worktrees with no PR or CI before the poller has seen one", async () => {
+    expect((await dashboard("shop")).worktrees).toEqual([
+      {
+        worktreeId: "api-feat-a",
+        repo: "api",
+        branch: "feat-a",
+        hostId: "local",
+        pr: null,
+        ci: null,
+      },
+    ]);
+    expect((await dashboard("other")).worktrees).toEqual([]);
   });
 
   it("leaves the remaining budget empty when the policy has none", async () => {

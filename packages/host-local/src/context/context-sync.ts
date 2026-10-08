@@ -52,7 +52,9 @@ const NETWORK_TIMEOUT_MS = 30_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 const MAX_PUSH_ATTEMPTS = 5;
 const APPEND_ONLY = ["learnings/**", "inbox/**"];
-const LOCAL_ONLY = ["/tasks/", "/repos/"];
+// The repo checkouts and old task folders are code, not context. AGENTS.md and CLAUDE.md are the
+// instructions Band writes into each host's copy from the project's settings, so they never sync.
+const LOCAL_ONLY = ["/tasks/", "/repos/", "/AGENTS.md", "/CLAUDE.md"];
 
 export interface GitOut {
   stdout: string;
@@ -85,11 +87,15 @@ export function run(
   opts: { cwd?: string; env?: Record<string, string>; timeoutMs: number; input?: string },
 ): Promise<GitOut> {
   return new Promise((resolve) => {
-    const child = spawn("git", ["-c", "core.hooksPath=/dev/null", ...args], {
-      cwd: opts.cwd,
-      env: gitEnv(opts.env),
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
+      {
+        cwd: opts.cwd,
+        env: gitEnv(opts.env),
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let timedOut = false;
@@ -269,6 +275,21 @@ export class ContextSync {
     };
     const dir = this.dirOf(spec);
     if (!(await this.isRepo(dir))) return result;
+
+    // The background sync asks every few seconds, so answer an idle copy with one git call: no
+    // change in the tree and a branch that tracks origin and is not ahead of it.
+    const status = await this.git(dir, [
+      "status",
+      "--porcelain",
+      "--branch",
+      "--untracked-files=normal",
+    ]);
+    if (status.code === 0) {
+      const lines = status.stdout.split("\n").filter(Boolean);
+      if (lines.length === 1 && lines[0].includes("...") && !lines[0].includes("[ahead")) {
+        return result;
+      }
+    }
 
     await this.git(dir, ["add", "-A"]);
     const blocked = await this.quarantineFindings(spec, dir, req.secrets);
@@ -458,11 +479,15 @@ export class ContextSync {
 
   private gitBytes(dir: string, args: string[]): Promise<{ buffer: Buffer; code: number }> {
     return new Promise((resolve) => {
-      const child = spawn("git", ["-c", "core.hooksPath=/dev/null", ...args], {
-        cwd: dir,
-        env: gitEnv(),
-        stdio: ["ignore", "pipe", "ignore"],
-      });
+      const child = spawn(
+        "git",
+        ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
+        {
+          cwd: dir,
+          env: gitEnv(),
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      );
       const chunks: Buffer[] = [];
       child.stdout.on("data", (c: Buffer) => chunks.push(c));
       child.on("error", () => resolve({ buffer: Buffer.alloc(0), code: 127 }));

@@ -18,7 +18,6 @@ import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
-import { backfillTasks } from "./_utils/task-backfill";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
 import { projectService } from "./project-service";
 import {
@@ -29,6 +28,16 @@ import {
 import { type SettingsService, settingsService } from "./settings-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
+
+/** Whether `path` is one of `roots` or inside one. Trailing slashes are ignored, so `/` covers everything. */
+function isInsideRoots(path: string, roots: string[]): boolean {
+  const trim = (p: string) => p.replace(/\/+$/, "");
+  const at = trim(path);
+  return roots.some((root) => {
+    const r = trim(root);
+    return at === r || at.startsWith(`${r}/`);
+  });
+}
 
 /**
  * Business logic for managing Band repos — Phase 2 of the 3-tier
@@ -364,7 +373,6 @@ export class RepoService {
     repos.push(repo);
     this.queries.saveAll(repos);
     if (remote) await hostRegistry.local.repos.map(remote.url, resolvedPath);
-    await projectService.placeInDefault(name);
 
     return repo;
   }
@@ -383,7 +391,7 @@ export class RepoService {
     label?: string;
     name?: string;
     addRoot?: boolean;
-    /** The project to put the repo in. Defaults to the default project. */
+    /** The project to put the repo in. Without it the repo is in no project. */
     project?: string;
   }): Promise<RepoState> {
     if (input.hostId === "local" && !isLocalHostEnabled()) {
@@ -400,10 +408,7 @@ export class RepoService {
     });
     if (input.hostId !== "local") {
       const { roots } = await host.info();
-      const inside = roots.some(
-        (root) => inspected.path === root || inspected.path.startsWith(`${root}/`),
-      );
-      if (!inside) {
+      if (!isInsideRoots(inspected.path, roots)) {
         if (!input.addRoot) throw new RepoOutsideRootsError(inspected.path, roots);
         await host.repos.addRoot(inspected.path);
       }
@@ -550,11 +555,61 @@ export class RepoService {
     }
   }
 
-  /** Boot step after the first sync: the default project takes repos and worktrees that are in no project. */
-  async adoptUnplaced(): Promise<void> {
-    await projectService.adoptUnplaced(this.queries.loadAll());
-    // Every worktree belongs to a task, so the ones the migration could not place get theirs now.
-    backfillTasks();
+  /**
+   * What `addFromWorker` would add for a folder, without adding it: the host's reading of the
+   * folder (git or not, `origin` URL, default branch), whether it is inside the host's roots, and
+   * the repo that already uses the same remote. The add-repo dialog shows this before confirming.
+   */
+  async inspectOnHost(hostId: string, path: string) {
+    if (hostId === "local" && !isLocalHostEnabled()) {
+      throw new RepoInputError("This hub does not use its own machine. Choose a worker.");
+    }
+    let host: Host;
+    try {
+      host = hostRegistry.hostById(hostId);
+    } catch {
+      throw new RepoInputError(`Unknown host "${hostId}"`);
+    }
+    const inspected = await host.repos.inspect(path).catch((err: unknown) => {
+      throw new RepoInputError(err instanceof Error ? err.message : String(err));
+    });
+    let roots: string[] = [];
+    let insideRoots = true;
+    if (hostId !== "local") {
+      roots = (await host.info()).roots;
+      insideRoots = isInsideRoots(inspected.path, roots);
+    }
+    const remote = inspected.remoteUrl ? parseRemoteUrl(inspected.remoteUrl) : null;
+    const repos = this.queries.loadAll();
+    const existing = remote ? repos.find((r) => r.remoteKey === remote.key) : undefined;
+    return {
+      path: inspected.path,
+      isGit: inspected.isGit,
+      remoteUrl: remote?.url ?? null,
+      cloneable: inspected.remoteUrl ? remote !== null : true,
+      defaultBranch: inspected.defaultBranch ?? null,
+      name: this.pickName(repos, remote?.name ?? posix.basename(inspected.path), remote?.owner),
+      insideRoots,
+      roots,
+      existingRepo: existing?.name ?? null,
+    };
+  }
+
+  /**
+   * What `addByUrl` would add for a URL, without adding it: the normalized URL, the repo name and
+   * the remote's default branch, read the same way `addByUrl` reads it.
+   */
+  async resolveRemote(remoteUrl: string) {
+    const remote = parseRemoteUrl(remoteUrl);
+    if (!remote) {
+      throw new RepoInputError(
+        "That is not a git remote URL. Use https://host/owner/repo or git@host:owner/repo.",
+      );
+    }
+    const existing = this.queries.loadAll().find((r) => r.remoteKey === remote.key);
+    if (existing) throw new RepoConflictError(`Repo "${existing.name}" already uses ${remote.url}`);
+    const defaultBranch = await this.resolveDefaultBranch(remote.url);
+    return { url: remote.url, name: remote.name, defaultBranch };
   }
 
   /** Lists a folder on a host for the picker. */
@@ -569,13 +624,7 @@ export class RepoService {
   }
 
   private async placeInProject(repo: string, project: string | undefined): Promise<void> {
-    if (project) {
-      const row = projectService.row(project);
-      if (row.isDefault) await projectService.placeInDefault(repo);
-      else projectService.addRepo(row.id, repo);
-    } else {
-      await projectService.placeInDefault(repo);
-    }
+    if (project) projectService.addRepo(projectService.row(project).id, repo);
   }
 
   private checkLabel(label: string | undefined): void {

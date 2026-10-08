@@ -138,7 +138,6 @@ The CLI is a thin client for the web server, used for programmatic worktree mana
 band repos list              # List registered repos
 band worktrees list            # List worktrees
 band worktrees create          # Create a new worktree (git worktree)
-band tasks list                 # List coding agent tasks
 band tunnels start              # Start a tunnel
 band settings                   # View settings
 ```

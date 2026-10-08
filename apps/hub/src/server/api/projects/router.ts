@@ -8,23 +8,21 @@
 
 import { RPC_INTERNAL_ERROR, RpcError } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import { projectScopeId } from "@band-app/shared/scope-id";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   ContextInputError,
-  DispatchInputError,
   ProjectConflictError,
   ProjectInputError,
   ProjectNotFoundError,
 } from "../../errors";
+import { clientStateService } from "../../services/client-state-service";
 import { projectCoordinatorService } from "../../services/project-coordinator-service";
 import { projectDashboardService } from "../../services/project-dashboard-service";
-import { projectDispatchService } from "../../services/project-dispatch-service";
 import { projectFolderService } from "../../services/project-folder-service";
-import { projectRetroService } from "../../services/project-retro-service";
 import { type ProjectView, projectPolicy, projectService } from "../../services/project-service";
 import { projectSubscriptionService } from "../../services/project-subscription-service";
-import { projectTaskService } from "../../services/project-task-service";
 import { terminalService } from "../../services/terminal-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
@@ -44,11 +42,7 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T> {
     if (err instanceof ProjectConflictError) {
       throw new TRPCError({ code: "CONFLICT", message: err.message });
     }
-    if (
-      err instanceof ProjectInputError ||
-      err instanceof ContextInputError ||
-      err instanceof DispatchInputError
-    ) {
+    if (err instanceof ProjectInputError || err instanceof ContextInputError) {
       throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
     }
     throw err;
@@ -86,6 +80,13 @@ export const projectsRouter = t.router({
     .input(z.object({ project: ref }))
     .query(({ input }) => guard(() => ({ project: present(projectService.get(input.project)) }))),
 
+  /** The charter the coordinator starts with, for the project's view. */
+  charter: publicProcedure
+    .input(z.object({ project: ref }))
+    .query(({ input }) =>
+      guard(() => ({ charter: projectCoordinatorService.charterFor(input.project) })),
+    ),
+
   create: adminProcedure
     .input(
       z.object({
@@ -108,7 +109,6 @@ export const projectsRouter = t.router({
     .mutation(({ input }) =>
       guard(async () => {
         const created = await projectService.create(input);
-        projectRetroService.reschedule(created.id);
         // A project with repos starts its coordinator at once. One without waits for its first repo.
         return { project: present(await projectCoordinatorService.ensureCoordinator(created.id)) };
       }),
@@ -125,6 +125,7 @@ export const projectsRouter = t.router({
     .input(
       z.object({
         project: ref,
+        title: z.string().max(100).optional(),
         description: z.string().max(2000).optional(),
         coordinatorAgent: z.string().max(100).nullable().optional(),
         coordinatorModel: z.string().min(1).max(100).optional(),
@@ -134,12 +135,12 @@ export const projectsRouter = t.router({
       }),
     )
     .mutation(({ input }) =>
-      guard(() => {
+      guard(async () => {
         const { project, ...patch } = input;
-        const updated = projectService.update(project, patch);
-        projectCoordinatorService.syncModel(updated.id);
-        projectRetroService.reschedule(updated.id);
-        return { project: present(projectService.get(updated.id)) };
+        const updated = await projectCoordinatorService.update(project, patch);
+        // The folder's AGENTS.md is the charter, which names the policy and the models.
+        void projectFolderService.writeInstructions(projectService.row(updated.id));
+        return { project: present(updated) };
       }),
     ),
 
@@ -152,19 +153,16 @@ export const projectsRouter = t.router({
           .remove(input.project, {
             removeContext: input.removeContext,
             beforeRemove: async (row) => {
-              // No worktree is left at this point, so what remains are tasks that never got a repo.
-              for (const task of projectTaskService.list(row.id)) {
-                await projectTaskService.remove(task.id, { force: true });
-              }
               await projectCoordinatorService.teardown(row.id);
-              projectRetroService.unschedule(row.id);
+              // The project's folder view keeps its tabs and drafts under its scope id.
+              clientStateService.removeAllForWorktree(projectScopeId(row.id));
             },
           })
           .then(() => ({ removed: true })),
       ),
     ),
 
-  /** Agents, task groups with their PRs, spend, pending approvals and wake-ups, for the project page. */
+  /** Agents, worktrees with their PRs, spend and wake-ups, for the project's view. */
   dashboard: publicProcedure
     .input(z.object({ project: ref }))
     .query(({ input }) =>
@@ -180,85 +178,11 @@ export const projectsRouter = t.router({
       })),
     ),
 
-  /** Task groups of a project: one piece of work across several repos, with its PR merge order. */
-  groups: publicProcedure
-    .input(z.object({ project: ref }))
-    .query(({ input }) =>
-      guard(() => ({ groups: projectDispatchService.groupsOf(projectService.row(input.project)) })),
-    ),
-
   /** What wakes the project's coordinator: its subscriptions and the recent wake-ups, with any guard that dropped one. */
   subscriptions: publicProcedure
     .input(z.object({ project: ref }))
     .query(({ input }) =>
       guard(() => projectSubscriptionService.describe(projectService.row(input.project))),
-    ),
-
-  /** Dispatches the coordinator asked for. `status` narrows the list, `pending` is what waits for the user. */
-  dispatches: publicProcedure
-    .input(
-      z.object({
-        project: ref,
-        status: z.enum(["pending", "approved", "rejected", "failed"]).optional(),
-      }),
-    )
-    .query(({ input }) =>
-      guard(() => ({
-        dispatches: projectDispatchService.requestsOf(
-          projectService.row(input.project),
-          input.status,
-        ),
-      })),
-    ),
-
-  /** Runs a pending dispatch. The project's limits are checked again first. */
-  approveDispatch: adminProcedure
-    .input(z.object({ requestId: z.string().min(1).max(100) }))
-    .mutation(({ input }) =>
-      guard(async () => ({ result: await projectDispatchService.approve(input.requestId) })),
-    ),
-
-  rejectDispatch: adminProcedure
-    .input(z.object({ requestId: z.string().min(1).max(100) }))
-    .mutation(({ input }) =>
-      guard(() => {
-        projectDispatchService.reject(input.requestId);
-        return { rejected: true };
-      }),
-    ),
-
-  /** The retro's schedule: on or off, the cron expression and the next run. Edit it with `update` and `policy.retro`. */
-  retroStatus: publicProcedure
-    .input(z.object({ project: ref }))
-    .query(({ input }) => guard(() => ({ retro: projectRetroService.status(input.project) }))),
-
-  /** Starts a retro now, whether or not the schedule is on. The proposal arrives when the agent calls its tool. */
-  retroRun: adminProcedure
-    .input(z.object({ project: ref }))
-    .mutation(({ input }) =>
-      guard(async () => ({ proposal: await projectRetroService.run(input.project) })),
-    ),
-
-  /** Retro proposals, newest first. They hold context file content, so they are admin only like `context.*`. */
-  retroProposals: adminProcedure
-    .input(z.object({ project: ref, limit: z.number().int().min(1).max(50).optional() }))
-    .query(({ input }) =>
-      guard(() => ({ proposals: projectRetroService.list(input.project, input.limit) })),
-    ),
-
-  /** Accepts or rejects one item of a proposal. Accepting commits a context edit, or dispatches a repo edit. */
-  retroDecide: adminProcedure
-    .input(
-      z.object({
-        proposalId: z.string().min(1).max(100),
-        itemId: z.string().min(1).max(20),
-        decision: z.enum(["accept", "reject"]),
-      }),
-    )
-    .mutation(({ input }) =>
-      guard(async () => ({
-        proposal: await projectRetroService.decide(input.proposalId, input.itemId, input.decision),
-      })),
     ),
 
   addRepo: adminProcedure
@@ -295,7 +219,9 @@ export const projectsRouter = t.router({
         } catch (err) {
           throw new ProjectConflictError(err instanceof Error ? err.message : String(err));
         }
-        return { project: projectService.removeRepo(row.id, input.repo) };
+        const view = projectService.removeRepo(row.id, input.repo);
+        void projectFolderService.writeInstructions(projectService.row(row.id));
+        return { project: view };
       }),
     ),
 
@@ -304,6 +230,21 @@ export const projectsRouter = t.router({
     guard(() => {
       const row = projectService.row(input.project);
       return { folder: projectFolderService.state(row.id) ?? null };
+    }),
+  ),
+
+  /**
+   * Makes sure the project folder exists on its coordinator host, without fetching, and returns
+   * its state. The project's view calls it when it opens, so its files resolve after a restart. A
+   * folder this hub already prepared answers from memory, so opening the view again clones and
+   * pulls nothing. Making the repo checkouts can clone, so only an admin token does that; another
+   * token gets the folder and its context, and `null` until an admin or the coordinator prepares
+   * the checkouts.
+   */
+  prepareFolder: publicProcedure.input(z.object({ project: ref })).mutation(({ input, ctx }) =>
+    guard(async () => {
+      const row = projectService.row(input.project);
+      return { folder: await projectFolderService.prepare(row, { checkouts: ctx.admin }) };
     }),
   ),
 

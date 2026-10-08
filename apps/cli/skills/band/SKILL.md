@@ -61,7 +61,7 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
 - `--from <host> <path>` registers the repo that a folder on a host holds (host ids are in `band hosts list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
-- `--project` puts the repo in that project. Without it the repo goes to the default project.
+- `--project` puts the repo in that project. Without `--project` the repo is in no project.
 
 A folder with no remote is registered without a URL and can only run on the host that holds it.
 
@@ -285,17 +285,15 @@ band projects detach-worktree <worktree-id>
 
 A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project, and `remove-repo` also refuses while the repo's checkout in the project folder (`<BAND_HOME>/projects/<project>/repos/<repo>`) has uncommitted changes or unpushed commits. The coordinator runs in that project folder, not in a worktree. Changes need an admin token. Run them only when the user asks.
 
-### Work in tasks
+### Work on a project
+
+A project's work is worktrees that belong to the project, one repo per worktree and one agent per worktree. Start one with a prompt:
 
 ```sh
-band tasks create <project> <branch> [--repo <name[:role]>...] [--brief <file>] [--name <folder>] [--title <text>] [--host <id>] [--labels k=v,k=v] [--agent <id>] [--model <model>] [--no-start]
-band tasks list [<project>]
-band tasks add-repo <task> <repo> [--role <role>] [--project <project>]
-band tasks remove-repo <task> <repo> [--project <project>]
-band tasks remove <task> [--project <project>] [--force]
+band worktrees create <repo> <branch> --project <project> --prompt "<brief>"
 ```
 
-A task is one piece of work in a project. It is a folder on one host, `<BAND_HOME>/projects/<project>/tasks/<task>/`, with a `BRIEF.md` and one git worktree per repo. Each worktree is on the task's branch, started from the repo's default branch, in a folder named after the repo. The task has its own chat, and the agent in it runs in the task folder. `create` takes the repos to start with from the project's repos. With none, the task starts empty and its agent adds the repos it needs. A task runs on one host, so `create` fails with the reason when no host has the project's labels and can hold every repo. `remove-repo` and `remove` refuse while a worktree has commits that are not on the default branch or uncommitted changes, and `remove --force` skips that check. A worktree made on its own with `band worktrees create` is a one-member task whose folder is the worktree. Changes need an admin token. Run them only when the user asks.
+Work that spans several repos is several worktrees, one per repo, each with its own agent. The project's coordinator starts them the same way. Changes need an admin token. Run them only when the user asks.
 
 ### Store credentials in the hub's vault
 

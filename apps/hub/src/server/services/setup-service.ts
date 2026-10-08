@@ -68,9 +68,7 @@ export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
   // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs and
   // project membership with focused writes that it must not overwrite from a stale snapshot.
-  const repoSync = ensureRepoStateInSync()
-    .then(() => ensureRepoRemotes())
-    .then(() => adoptUnplacedRepos());
+  const repoSync = ensureRepoStateInSync().then(() => ensureRepoRemotes());
 
   await ensureCliInstalled();
 
@@ -186,17 +184,6 @@ async function ensureRepoRemotes(): Promise<void> {
   } catch (err) {
     log.warn(
       "Failed to record repo remotes at boot: %s",
-      err instanceof Error ? err.message : String(err),
-    );
-  }
-}
-
-async function adoptUnplacedRepos(): Promise<void> {
-  try {
-    await repoService.adoptUnplaced();
-  } catch (err) {
-    log.warn(
-      "Failed to set up the default project at boot: %s",
       err instanceof Error ? err.message : String(err),
     );
   }

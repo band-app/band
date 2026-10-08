@@ -109,7 +109,7 @@ async function readListState(page: Page): Promise<{
   url: string;
 }> {
   return await page.evaluate(() => {
-    const vp = document.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    const vp = document.querySelector<HTMLElement>('[data-testid="repos-panel__list"]');
     if (!vp) {
       return {
         scrollTop: -1,
@@ -185,7 +185,7 @@ test("clicking a card in the list preserves the scroll position (no auto-scroll)
   // Manually scroll the list to the top — simulates a user who wants to
   // explore other repos without losing their scroll context.
   await page.evaluate(() => {
-    const vp = document.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    const vp = document.querySelector<HTMLElement>('[data-testid="repos-panel__list"]');
     if (vp) vp.scrollTop = 0;
   });
   const beforeClick = await readListState(page);
@@ -227,7 +227,7 @@ test("browser back navigation re-centers the active card", async ({ page }) => {
   // Scroll to the top and click repo-00's main — the in-list click
   // path, so no auto-scroll.
   await page.evaluate(() => {
-    const vp = document.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    const vp = document.querySelector<HTMLElement>('[data-testid="repos-panel__list"]');
     if (vp) vp.scrollTop = 0;
   });
   const firstWorktreeCard = page

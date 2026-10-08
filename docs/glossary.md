@@ -27,14 +27,14 @@ In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an a
 
 ## Project
 
-A body of work across several repos with its own context repo and, when it has repos, a coordinator chat. The repos are added from inside a project. Every hub also has a default project, `personal` (shown as Personal), that takes the repos and worktrees created with no project. It cannot be removed and has no coordinator.
+A body of work across several repos. A project is a meta repo that lives on the hub: its context repo, which every agent of the project reads from and writes to. The hub holds the master copy, and a linked remote such as GitHub is an optional backup. A repo may belong to a project or to none, and a hub has no default project.
 
-- The **project folder** is `<BAND_HOME>/projects/<project>/` on the coordinator host. It is the working copy of the project's context repo, with a checkout of each repo's default branch under `repos/<repo>/`. You can edit, commit and push in those checkouts by hand, and the host keeps them current without overwriting local work.
-- The coordinator is a project-level chat. It has no worktree and runs in the project folder. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
+- The **project folder** is `<BAND_HOME>/projects/<project>/`, the working copy of the context repo. It exists on the hub and on every host doing the project's work: the coordinator's host and each host running an agent of the project. Its files sync in the background, so an edit from an agent, the UI or a terminal reaches the hub and the other hosts without anyone pushing or pulling.
+- The coordinator is a project-level chat. It runs in the project folder on a host that has every repo of the project cloned. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
 
 ## Task
 
-One piece of work in one project. A task is a folder `<BAND_HOME>/projects/<project>/tasks/<task>/` on one host, with a `BRIEF.md` and one git worktree per member repo in a folder named after the repo. It has its own chat, which runs in that folder. The API is `projectTasks.*` (`tasks.*` is the queue of agent turns), the CLI is `band tasks`, and an agent in a task chat gets `BAND_TASK_ID` and `BAND_PROJECT_ID`. A worktree made on its own is a one-member task whose folder is the worktree. See `docs/tasks.md`.
+A worktree in a project that the coordinator started for one piece of work. A task covers one repo and runs one agent. Work that spans several repos is several worktrees, each with its own agent, which the coordinator manages. A task needs no API of its own: it is a worktree with a `projectId` (`worktrees.*`, `band worktrees create --project`).
 
 ## Terms that kept their names
 

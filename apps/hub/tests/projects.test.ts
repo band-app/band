@@ -46,8 +46,8 @@ function git(cwd: string, ...args: string[]): string {
 
 interface ProjectView {
   id: string;
-  isDefault: boolean;
   name: string;
+  title: string;
   description: string;
   contextName: string;
   coordinatorAgent: string | null;
@@ -159,6 +159,25 @@ afterAll(async () => {
   if (home) removeTmpHome(home);
 });
 
+describe("a fresh hub", () => {
+  it("has no project, and its repos and worktrees belong to none", async () => {
+    const { projects } = await q<{ projects: ProjectView[] }>("projects.list");
+    expect(projects).toEqual([]);
+    const { repos } = await q<ReposList>("repos.list");
+    expect(repos.map((r) => r.name).sort()).toEqual(["api", "client", "docs"]);
+    for (const repo of repos) {
+      for (const wt of repo.worktrees) expect(wt.projectId, wt.worktreeId).toBeUndefined();
+    }
+    const personal = await trpcQuery(
+      server.url,
+      "projects.get",
+      { project: "personal" },
+      TEST_TOKEN,
+    );
+    expect(personal.status).toBe(404);
+  });
+});
+
 describe("projects.create", () => {
   it("creates a project with its repos, roles and a scaffolded project context (S1)", async () => {
     const { project: created } = await m<{ project: ProjectView }>("projects.create", {
@@ -196,6 +215,18 @@ describe("projects.create", () => {
       expect(existsSync(join(dir, "wc", file)), file).toBe(true);
     }
     expect(readFileSync(join(dir, "wc", "notes.md"), "utf8")).toContain("# Notes");
+  });
+
+  it("drops the retired retro schedule from a policy and keeps the rest", async () => {
+    const { project: created } = await m<{
+      project: ProjectView & { effectivePolicy: Record<string, unknown> };
+    }>("projects.create", {
+      name: "p-retro",
+      policy: { maxConcurrent: 2, retro: { enabled: true, cron: "0 9 * * 1" } },
+    });
+    expect(created.policy).toEqual({ maxConcurrent: 2 });
+    expect(created.effectivePolicy).toMatchObject({ maxConcurrent: 2 });
+    expect(created.effectivePolicy).not.toHaveProperty("retro");
   });
 
   it("answers by id or by name, and refuses bad input", async () => {
@@ -293,6 +324,50 @@ describe("coordinator model (S5)", () => {
   });
 });
 
+describe("projects.charter", () => {
+  it("returns the coordinator's charter, and 404 for an unknown project", async () => {
+    const { charter } = await q<{ charter: string | null }>("projects.charter", {
+      project: "shop",
+    });
+    expect(charter).toContain('coordinator of the Band project "shop"');
+    expect(charter).toContain("- api (role: api)");
+    const missing = await trpcQuery(
+      server.url,
+      "projects.charter",
+      { project: "ghost" },
+      TEST_TOKEN,
+    );
+    expect(missing.status).toBe(404);
+  });
+});
+
+describe("renaming a project", () => {
+  it("changes the title and keeps the name its folders and context use", async () => {
+    const { project: renamed } = await m<{ project: ProjectView }>("projects.update", {
+      project: "picky",
+      title: "Picky eater",
+    });
+    expect(renamed).toMatchObject({ name: "picky", title: "Picky eater", contextName: "picky" });
+    expect((await project("picky")).title).toBe("Picky eater");
+    // Naming it back to its name clears the title.
+    const { project: back } = await m<{ project: ProjectView }>("projects.update", {
+      project: "picky",
+      title: "picky",
+    });
+    expect(back.title).toBe("");
+  });
+
+  it("refuses a title over 100 characters and a non-admin token, and keeps the title", async () => {
+    await m("projects.update", { project: "picky", title: "Picky eater" });
+    const long = await mFails("projects.update", { project: "picky", title: "x".repeat(101) });
+    expect(long.status).toBe(400);
+    const viewer = (await m<{ token: string }>("tokens.createDevice", { label: "renamer" })).token;
+    const denied = await mFails("projects.update", { project: "picky", title: "Sneaky" }, viewer);
+    expect(denied.status).toBe(403);
+    expect((await project("picky")).title).toBe("Picky eater");
+  });
+});
+
 describe("worktrees in a project", () => {
   it("appears under the project and gives its agent the project context (S2)", async () => {
     seedContextFile("shop", "docs/checkout.md", "The zebra protocol governs checkout retries.\n");
@@ -309,12 +384,8 @@ describe("worktrees in a project", () => {
 
     const listed = (await q<ReposList>("repos.list")).repos.find((r) => r.name === "api");
     expect(listed?.worktrees.find((w) => w.name === "feat-checkout")?.projectId).toBe(shop.id);
-    // A worktree that no project claims belongs to the default project, never to "shop".
-    const personal = (await q<{ projects: ProjectView[] }>("projects.list")).projects.find(
-      (p) => p.isDefault,
-    );
-    expect(personal).toBeDefined();
-    expect(listed?.worktrees.find((w) => w.name === "main")?.projectId).toBe(personal?.id);
+    // A worktree that no project claims belongs to no project.
+    expect(listed?.worktrees.find((w) => w.name === "main")?.projectId).toBeUndefined();
 
     const detail = await project("shop");
     expect(detail.worktrees).toEqual([
@@ -441,5 +512,17 @@ describe("removing repos and projects (S4)", () => {
     await m("projects.remove", { project: "tail", removeContext: true });
     const { contexts } = await q<{ contexts: Array<{ name: string }> }>("context.list");
     expect(contexts.map((c) => c.name)).not.toContain("tail");
+  });
+});
+
+describe("removing any project", () => {
+  it("removes every project that has no worktrees, leaving none", async () => {
+    const before = (await q<{ projects: ProjectView[] }>("projects.list")).projects;
+    expect(before.length).toBeGreaterThan(0);
+    for (const p of before) await m("projects.remove", { project: p.id });
+    expect((await q<{ projects: ProjectView[] }>("projects.list")).projects).toEqual([]);
+    // The repos stay, in no project.
+    const { repos } = await q<ReposList>("repos.list");
+    expect(repos.map((r) => r.name).sort()).toEqual(["api", "client"]);
   });
 });

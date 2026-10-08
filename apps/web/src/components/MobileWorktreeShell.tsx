@@ -1,7 +1,16 @@
 import { ClientPluginHostProvider } from "@band-app/plugin-api/client";
+import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
+import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
-import { ChevronsUpDown, FolderOpen, GitCompare, Menu, MoreVertical } from "lucide-react";
+import {
+  ChevronsUpDown,
+  FolderKanban,
+  FolderOpen,
+  GitCompare,
+  Menu,
+  MoreVertical,
+} from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -9,6 +18,10 @@ import {
   type ChangeSection,
   DashboardShell,
   FileBrowser,
+  PROJECT_SIDE_TABS,
+  ProjectRepoTree,
+  ProjectSideTab,
+  type ProjectSideTabId,
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
@@ -20,7 +33,8 @@ import {
 } from "@/dashboard";
 import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { isDesktop } from "../lib/is-desktop";
-import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import { useWorktreeFromPath } from "../lib/parse-worktree";
+import { trpc } from "../lib/trpc-client";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
 import { useWorktreeSideTabs } from "../plugins/use-plugin-slot";
@@ -109,7 +123,17 @@ function useChangesSummary(worktreeId: string) {
  *  back to the worktree id until the repos query has answered. */
 function useWorktreeNames(worktreeId: string): { name: string; repoName: string } {
   const { repos } = useRepos();
+  const projectId = projectIdOfScope(worktreeId);
+  const projects = useQuery({
+    queryKey: ["projects.list"],
+    queryFn: () => trpc.projects.list.query(),
+    enabled: projectId !== undefined,
+  });
   return useMemo(() => {
+    if (projectId) {
+      const project = projects.data?.projects.find((p) => p.id === projectId);
+      return { name: project ? project.title || project.name : worktreeId, repoName: "project" };
+    }
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
         if (toWorktreeId(repo.name, worktree.name) === worktreeId) {
@@ -118,7 +142,7 @@ function useWorktreeNames(worktreeId: string): { name: string; repoName: string 
       }
     }
     return { name: worktreeId, repoName: "" };
-  }, [repos, worktreeId]);
+  }, [repos, worktreeId, projectId, projects.data]);
 }
 
 // Which mobile view is showing. "editor" is the dockview; the others open a
@@ -126,13 +150,19 @@ function useWorktreeNames(worktreeId: string): { name: string; repoName: string 
 // hold a tree and return to "editor" on select or dismiss, and
 // `plugin:<pluginId>.<tabId>` holds a plugin's `worktree.sideTabs` tab (named
 // as in `RightSidepanel`).
-type MobileView = "editor" | "menu" | "explorer" | "changes" | `plugin:${string}`;
+type MobileView =
+  | "editor"
+  | "menu"
+  | "explorer"
+  | "changes"
+  | `plugin:${string}`
+  | `project:${ProjectSideTabId}`;
 
 function isMobileView(value: unknown): value is MobileView {
   return (
     value === "explorer" ||
     value === "changes" ||
-    (typeof value === "string" && value.startsWith("plugin:"))
+    (typeof value === "string" && (value.startsWith("plugin:") || value.startsWith("project:")))
   );
 }
 
@@ -154,7 +184,7 @@ const NO_WORKTREE_STYLE: React.CSSProperties = {
 
 export function MobileWorktreeShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeWorktreeId = parseWorktreeFromPath(pathname);
+  const activeWorktreeId = useWorktreeFromPath(pathname);
   const { height: appHeight, offsetTop: appOffsetTop, keyboardOpen } = useAppHeight();
 
   // Render nothing on the server: the SSR pass can't know the viewport, and
@@ -334,7 +364,10 @@ function MobileWorktreeChrome({
   const worktreePath = useWorktreePath(worktreeId);
   const { changes, changeCount } = useChangesSummary(worktreeId);
   const { name, repoName } = useWorktreeNames(worktreeId);
-  const pluginTabs = useWorktreeSideTabs();
+  const projectId = projectIdOfScope(worktreeId);
+  const allPluginTabs = useWorktreeSideTabs();
+  // A project's folder is no git checkout: no Changes and no plugin tabs, and its project tabs.
+  const pluginTabs = projectId ? [] : allPluginTabs;
 
   // The dockview is always the main editor surface. The header menu opens
   // Explorer / Changes / plugin tabs as a bottom sheet; closing it returns to
@@ -350,13 +383,24 @@ function MobileWorktreeChrome({
       icon: FolderOpen,
       testid: "mobile-worktree__menu-explorer",
     },
-    {
-      view: "changes",
-      label: "Changes",
-      icon: GitCompare,
-      badge: changeCount,
-      testid: "mobile-worktree__menu-changes",
-    },
+    ...(projectId
+      ? PROJECT_SIDE_TABS.map(
+          (t): PanelItem => ({
+            view: `project:${t.id}`,
+            label: t.label,
+            icon: FolderKanban,
+            testid: `mobile-worktree__menu-project-${t.id}`,
+          }),
+        )
+      : [
+          {
+            view: "changes" as const,
+            label: "Changes",
+            icon: GitCompare,
+            badge: changeCount,
+            testid: "mobile-worktree__menu-changes",
+          },
+        ]),
     ...pluginTabs.map(
       ({ key, slug, tab }): PanelItem => ({
         view: `plugin:${key}`,
@@ -572,6 +616,30 @@ function MobileWorktreeChrome({
           worktreePath={worktreePath}
         />
       </MobileSheet>
+      {/* A project's folder view: one sheet per project tab, as the desktop right sidepanel has. */}
+      {projectId
+        ? PROJECT_SIDE_TABS.map((t) => (
+            <MobileSheet
+              key={t.id}
+              open={view === `project:${t.id}`}
+              onOpenChange={sheetOpenChange(`project:${t.id}`)}
+              title={t.label}
+              description={`The ${t.label} tab of this project`}
+              testid={`mobile-worktree__project--${t.id}`}
+            >
+              {t.id === "repos" ? (
+                <ProjectRepoTree
+                  projectId={projectId}
+                  worktreeId={worktreeId}
+                  worktreePath={worktreePath}
+                  onOpenFile={(p) => openFileLeaf(p)}
+                />
+              ) : (
+                <ProjectSideTab projectId={projectId} tab={t.id} />
+              )}
+            </MobileSheet>
+          ))
+        : null}
       {/* One sheet per plugin tab (the desktop right sidepanel's
        *  `worktree.sideTabs` slot), each inside `PluginErrorBoundary`. */}
       {pluginTabs.map(({ key, slug, pluginId, tab }) => {

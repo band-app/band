@@ -74,8 +74,6 @@ export const contextCaptureService = {
    */
   captureChat(chat: ChatRow, repo?: string, projectId?: string): void {
     if (settingsService.get().context?.captureLearnings !== true) return;
-    // A retro chat holds the whole context as its prompt, so capturing it would feed the next retro its own input.
-    if (chat.labels?.["band:retro"]) return;
     try {
       const text = summarize(chat);
       if (!text) return;

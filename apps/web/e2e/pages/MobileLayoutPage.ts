@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { ProjectTab } from "./ProjectsPage";
 
 /** Box edges plus the padding that decides where content stops, in CSS px. */
 export interface LayoutBox {
@@ -147,6 +148,14 @@ export class MobileLayoutPage {
     });
   }
 
+  /** Close the panel menu's bottom drawer without choosing a panel. */
+  async closeMenu(): Promise<void> {
+    await test.step("Close the worktree panel menu", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.menuBody).toBeHidden();
+    });
+  }
+
   /** Open the Explorer or Changes bottom sheet through the panel menu. */
   async openSheet(sheet: "explorer" | "changes"): Promise<void> {
     await test.step(`Open the ${sheet} sheet`, async () => {
@@ -178,6 +187,21 @@ export class MobileLayoutPage {
     await test.step(`Close the ${slug} sheet`, async () => {
       await this.page.keyboard.press("Escape");
       await expect(this.pluginSheetBody(slug)).toBeHidden();
+    });
+  }
+
+  /** The body of a project side tab's bottom sheet (`activity` or `repos`). */
+  projectSheetBody(tab: ProjectTab): Locator {
+    return this.page.getByTestId(`mobile-worktree__project--${tab}-sheet`);
+  }
+
+  /** Open a project side tab's bottom sheet through the panel menu of a project's view. */
+  async openProjectSheet(tab: ProjectTab): Promise<void> {
+    await test.step(`Open the project's ${tab} sheet`, async () => {
+      await this.openMenu();
+      await this.menuItem(`project-${tab}`).click();
+      await expect(this.projectSheetBody(tab)).toBeVisible();
+      await expect(this.menuBody).toBeHidden();
     });
   }
 

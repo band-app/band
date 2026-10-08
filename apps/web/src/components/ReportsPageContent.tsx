@@ -32,9 +32,9 @@ import { trpc } from "../lib/trpc-client";
 /**
  * Reports dialog content (issue #425).
  *
- * Same content-shape as `TasksPageContent` / `CronjobsPageContent` /
- * `ResourcesPage`: a sticky header with filters + a scrollable body. The
- * outer `<Dialog>` shell lives in `ToolbarButtons.tsx`.
+ * Same content-shape as `CronjobsPageContent` / `ResourcesPage`: a sticky
+ * header with filters + a scrollable body. The outer `<Dialog>` shell lives
+ * in `ToolbarButtons.tsx`.
  *
  * Data model: a single `trpc.reports.summary` round-trip returns total +
  * five group-by aggregates. recharts renders the daily cost chart from the

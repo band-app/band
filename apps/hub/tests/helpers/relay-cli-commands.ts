@@ -76,12 +76,6 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "projects remove-repo": "project management is admin only",
   "projects attach-worktree": "project management is admin only",
   "projects detach-worktree": "project management is admin only",
-  "tasks create": "task management is admin only",
-  "tasks list": "task management is admin only",
-  "tasks add-repo": "task management is admin only, and a task's agent has the task_add_repo tool",
-  "tasks remove-repo":
-    "task management is admin only, and a task's agent has the task_remove_repo tool",
-  "tasks remove": "task management is admin only",
   "hosts list": "lists every host, which a worker has no need to see",
   "hosts remove": "admin only, removes a host",
   "runners list": "reads the hub's runner settings, which name its scripts and machines",

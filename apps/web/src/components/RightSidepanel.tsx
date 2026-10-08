@@ -1,4 +1,5 @@
 import { ClientPluginHostProvider } from "@band-app/plugin-api/client";
+import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { useRouterState } from "@tanstack/react-router";
 import {
   ChevronsDownUp,
@@ -6,6 +7,8 @@ import {
   FolderOpen,
   FolderPlus,
   GitCompare,
+  History,
+  Package,
   RefreshCw,
 } from "lucide-react";
 import type React from "react";
@@ -15,12 +18,16 @@ import {
   type ChangeSection,
   FileBrowser,
   type FileBrowserHandle,
+  PROJECT_SIDE_TABS,
+  ProjectRepoTree,
+  ProjectSideTab,
+  type ProjectSideTabId,
   useDiffTarget,
   useWorktreePath,
 } from "@/dashboard";
 import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { clientStorage } from "../lib/client-state";
-import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import { useWorktreeFromPath } from "../lib/parse-worktree";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
 import { useWorktreeSideTabs } from "../plugins/use-plugin-slot";
@@ -35,15 +42,19 @@ import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
 // Active-tab persistence (Explorer | Changes | plugin tabs, one at a time)
 // ---------------------------------------------------------------------------
 
-/** A plugin tab is `plugin:<pluginId>.<tabId>` (see `useWorktreeSideTabs`). */
-type RightTab = "explorer" | "changes" | `plugin:${string}`;
+/**
+ * A plugin tab is `plugin:<pluginId>.<tabId>` (see `useWorktreeSideTabs`). A project's folder view
+ * has `project:<tab>` tabs instead of Changes and the plugin tabs, because the folder is no git
+ * checkout of its own.
+ */
+type RightTab = "explorer" | "changes" | `plugin:${string}` | `project:${ProjectSideTabId}`;
 const TAB_KEY = "band:right-sidepanel-tab";
 
 function isRightTab(value: unknown): value is RightTab {
   return (
     value === "explorer" ||
     value === "changes" ||
-    (typeof value === "string" && value.startsWith("plugin:"))
+    (typeof value === "string" && (value.startsWith("plugin:") || value.startsWith("project:")))
   );
 }
 
@@ -62,6 +73,13 @@ function saveActiveTab(tab: RightTab): void {
   } catch {}
 }
 
+const PROJECT_LOCAL_DIRS = ["repos", "tasks"] as const;
+
+const PROJECT_TAB_ICONS: Record<ProjectSideTabId, React.ComponentType<{ className?: string }>> = {
+  repos: Package,
+  activity: History,
+};
+
 // ---------------------------------------------------------------------------
 // Tab button (label + optional count badge)
 // ---------------------------------------------------------------------------
@@ -73,8 +91,11 @@ function TabButton({
   onClick,
   badge,
   testid,
+  tooltip,
 }: {
   label: string;
+  /** A longer name for the hover hint, when the label is short. */
+  tooltip?: string;
   icon: React.ComponentType<{ className?: string }>;
   active: boolean;
   onClick: () => void;
@@ -87,19 +108,20 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      title={label}
+      title={tooltip ?? label}
+      aria-label={tooltip ?? label}
       data-testid={testid}
       style={NO_DRAG_STYLE}
       // Same pill as the center tab strip (`.dockview-center-tabs` in
       // dockview-theme.css): grey when selected, lighter on hover.
-      className={`flex h-7 min-w-0 max-w-[120px] flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+      className={`flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors ${
         active
           ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground hover:shadow-[inset_0_0_0_1px_var(--border)]"
       }`}
     >
       <Icon className="size-3.5 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className="whitespace-nowrap">{label}</span>
       {badge != null && badge > 0 && (
         <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-medium text-blue-600 dark:text-blue-400">
           {badge}
@@ -201,7 +223,11 @@ function SidepanelHeader({
       data-testid="right-sidepanel__header"
     >
       {children ? (
-        <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 pl-1.5">
+        // Tabs keep their labels; when they don't all fit, the strip scrolls sideways.
+        <div
+          role="tablist"
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto pl-1.5 [scrollbar-width:none]"
+        >
           {children}
         </div>
       ) : (
@@ -225,7 +251,7 @@ export function RightSidepanel({
   headerActions?: React.ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const worktreeId = parseWorktreeFromPath(pathname);
+  const worktreeId = useWorktreeFromPath(pathname);
 
   // Save a tab picked through `band:right-sidepanel-set-tab` here as well as
   // in the inner panel: the sidebar's PR badge picks the Checks tab and then
@@ -276,10 +302,22 @@ function RightSidepanelInner({
   headerActions?: React.ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<RightTab>(() => loadActiveTab());
-  const pluginTabs = useWorktreeSideTabs();
+  const projectId = projectIdOfScope(worktreeId);
+  const allPluginTabs = useWorktreeSideTabs();
+  // A project's folder is no git checkout, so it has no Changes and no plugin tabs (Checks).
+  const pluginTabs = projectId ? [] : allPluginTabs;
   const activePluginTab = pluginTabs.find((t) => `plugin:${t.key}` === activeTab);
-  // A saved plugin tab whose plugin is disabled, or not listed yet, shows Explorer.
-  const shownTab = activeTab.startsWith("plugin:") && !activePluginTab ? "explorer" : activeTab;
+  const projectTab = projectId
+    ? PROJECT_SIDE_TABS.find((t) => `project:${t.id}` === activeTab)
+    : undefined;
+  // A saved tab this view does not have (a disabled plugin's, Changes or a project tab in the
+  // wrong kind of view) shows Explorer.
+  const shownTab =
+    (activeTab.startsWith("plugin:") && !activePluginTab) ||
+    (activeTab.startsWith("project:") && !projectTab) ||
+    (activeTab === "changes" && projectId)
+      ? "explorer"
+      : activeTab;
   useEffect(() => {
     saveActiveTab(activeTab);
   }, [activeTab]);
@@ -314,7 +352,7 @@ function RightSidepanelInner({
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
   const changesQuery = useWorktreeChanges(worktreeId, {
-    enabled: visible,
+    enabled: visible && !projectId,
     refetchInterval: visible ? 15_000 : false,
   });
 
@@ -373,20 +411,36 @@ function RightSidepanelInner({
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
       <SidepanelHeader actions={headerActions}>
         <TabButton
-          label="Explorer"
+          label={projectId ? "Context" : "Explorer"}
+          tooltip={
+            projectId ? "Project context: files every agent of the project shares" : undefined
+          }
           icon={FolderOpen}
           active={shownTab === "explorer"}
           onClick={() => setActiveTab("explorer")}
           testid="right-sidepanel__tab--explorer"
         />
-        <TabButton
-          label="Changes"
-          icon={GitCompare}
-          badge={changeCount}
-          active={activeTab === "changes"}
-          onClick={() => setActiveTab("changes")}
-          testid="right-sidepanel__tab--changes"
-        />
+        {projectId ? (
+          PROJECT_SIDE_TABS.map((t) => (
+            <TabButton
+              key={t.id}
+              label={t.label}
+              icon={PROJECT_TAB_ICONS[t.id]}
+              active={shownTab === `project:${t.id}`}
+              onClick={() => setActiveTab(`project:${t.id}`)}
+              testid={`right-sidepanel__tab--project-${t.id}`}
+            />
+          ))
+        ) : (
+          <TabButton
+            label="Changes"
+            icon={GitCompare}
+            badge={changeCount}
+            active={activeTab === "changes"}
+            onClick={() => setActiveTab("changes")}
+            testid="right-sidepanel__tab--changes"
+          />
+        )}
         {pluginTabs.map(({ key, slug, tab }) => (
           <TabButton
             key={key}
@@ -400,7 +454,29 @@ function RightSidepanelInner({
       </SidepanelHeader>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {activePluginTab ? (
+        {projectId && projectTab ? (
+          <div
+            className="flex h-full flex-col overflow-hidden"
+            data-testid={`right-sidepanel__project--${projectTab.id}`}
+          >
+            {/* Its sections poll the hub, so a collapsed panel unmounts it. */}
+            {visible && projectTab.id === "repos" ? (
+              <ProjectRepoTree
+                projectId={projectId}
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                selectedFile={currentFile}
+                onOpenFile={openFile}
+                onPathRenamed={(oldPath, newPath) =>
+                  getWorktreeLeafActions(worktreeId)?.onPathMoved(oldPath, newPath)
+                }
+                onPathDeleted={(path) => getWorktreeLeafActions(worktreeId)?.onPathRemoved(path)}
+              />
+            ) : visible ? (
+              <ProjectSideTab projectId={projectId} tab={projectTab.id} />
+            ) : null}
+          </div>
+        ) : activePluginTab ? (
           <div
             className="flex h-full flex-col overflow-hidden"
             data-testid={`right-sidepanel__plugin--${activePluginTab.slug}`}
@@ -428,6 +504,9 @@ function RightSidepanelInner({
                   getWorktreeLeafActions(worktreeId)?.onPathMoved(oldPath, newPath)
                 }
                 onPathDeleted={(path) => getWorktreeLeafActions(worktreeId)?.onPathRemoved(path)}
+                // A project's context tree leaves out its repo checkouts (the Repos tab shows
+                // them) and old task folders, neither of which syncs.
+                hiddenRootNames={projectId ? PROJECT_LOCAL_DIRS : undefined}
                 // Match the ChangesFileTree row size (text-[13px] / h-28) so the
                 // Explorer and Changes trees read identically in the sidepanel.
                 compact

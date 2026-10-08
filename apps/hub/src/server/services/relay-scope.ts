@@ -225,11 +225,16 @@ function collect(value: unknown, into: Named, depth = 0): void {
   }
 }
 
-/** Checks that everything `input` names belongs to `workerId`'s host. */
+/**
+ * Checks that everything `input` names belongs to `workerId`'s host. A project folder (or another
+ * folder scope) shares its host with worktrees, so naming one is refused unless `allowFolder` is
+ * set, which only the check of the token's own scope does.
+ */
 function checkNamed(
   input: unknown,
   workerId: string,
   lookups: ScopeLookups,
+  allowFolder = false,
 ): RelayVerdict & {
   named?: number;
 } {
@@ -244,11 +249,14 @@ function checkNamed(
   collect(input, named);
   const outside = deny(403, "That worktree is not on this host");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
+  const folder = deny(403, "A worktree's agent cannot reach a project folder");
   for (const id of named.worktrees) {
+    if (!allowFolder && isFolderScope(id)) return folder;
     if (lookups.hostOfWorktree(id) !== workerId) return outside;
   }
   for (const id of named.chats) {
     const worktree = lookups.worktreeOfChat(id);
+    if (worktree !== null && !allowFolder && isFolderScope(worktree)) return folder;
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const cwd of named.cwds) {
@@ -441,6 +449,7 @@ export function checkRelayRequest(
     { worktreeId: request.scope.worktreeId, chatId: request.scope.chatId },
     workerId,
     lookups,
+    true,
   );
   if (!scope.ok) return scope;
   if (lookups.hostOfWorktree(request.scope.worktreeId) !== workerId) {

@@ -1,7 +1,7 @@
 /**
- * Dispatch approvals and task groups (plan step 6.3). The coordinator's agent is the scripted ACP stub: a
- * message to its chat makes it call `tasks_create` through the MCP entry Band gave the session. The
- * project is in steer mode, so each call waits as a card on the project page until the user decides.
+ * Dispatch from the coordinator. Its agent is the scripted ACP stub: a message to its chat makes it
+ * call `worktree_create` through the MCP entry Band gave the session. The project is autonomous,
+ * so each call creates a worktree of one repo at once, and work in two repos is two calls.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -50,13 +50,18 @@ function seedRepo(name: string) {
   return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
 }
 
-/** A scripted turn in which the coordinator calls `tasks_create` with `args`. */
-const dispatchTurn = (match: string, args: object) => ({
+/** A scripted turn in which the coordinator calls `worktree_create` once per entry of `calls`. */
+const dispatchTurn = (match: string, calls: object[]) => ({
   match,
   steps: [
-    {
-      mcpCall: { name: match, server: "band-coordinator", tool: "tasks_create", args },
-    },
+    ...calls.map((args, i) => ({
+      mcpCall: {
+        name: `${match}-${i}`,
+        server: "band-coordinator",
+        tool: "worktree_create",
+        args,
+      },
+    })),
     { say: "dispatch requested" },
   ],
 });
@@ -80,25 +85,23 @@ test.beforeAll(async () => {
     env: {
       ...acpStubEnv(tmpHome, {
         turns: [
-          dispatchTurn("^dispatch-one", {
-            repos: [{ repo: API }],
-            branch: "feat-one",
-            brief: "Do the first thing.",
-            scenarios: ["it works"],
-          }),
-          dispatchTurn("^dispatch-two", {
-            repos: [{ repo: API }],
-            branch: "feat-two",
-            brief: "Do the second thing.",
-            scenarios: ["it works"],
-          }),
-          dispatchTurn("^dispatch-group", {
-            repos: [{ repo: CLIENT }, { repo: API }],
-            branch: "feat-shared",
-            title: "Shared change",
-            brief: "Change both sides.",
-            scenarios: ["both sides agree"],
-          }),
+          dispatchTurn("^dispatch-one", [
+            {
+              repo: API,
+              branch: "feat-one",
+              brief: "Do the first thing.",
+              scenarios: ["it works"],
+            },
+          ]),
+          dispatchTurn("^dispatch-pair", [
+            {
+              repo: CLIENT,
+              branch: "feat-shared",
+              title: "Shared change",
+              brief: "Change the client side.",
+            },
+            { repo: API, branch: "feat-shared", title: "Shared change", brief: "Change the API." },
+          ]),
           { steps: [{ say: "ok" }] },
         ],
       }),
@@ -122,59 +125,28 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("a steer dispatch waits as a card, approving creates the worktree", async ({ page }) => {
+test("a dispatch creates a worktree in the project at once, with no approval", async ({ page }) => {
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("shop");
+  await projects.gotoProject("shop");
   await expect(projects.coordinator()).toHaveAttribute("data-state", "started");
-  await expect(projects.noDispatches()).toBeVisible();
 
   await ask("dispatch-one");
-  await expect(projects.dispatches()).toHaveCount(1, { timeout: 20_000 });
-  await expect(projects.dispatches().first()).toContainText("feat-one");
-  await expect(projects.worktree(`${API}-feat-one`)).toHaveCount(0);
-
-  await projects.approveDispatch();
-  await expect(projects.noDispatches()).toBeVisible();
-  await expect(projects.worktree(`${API}-feat-one`)).toBeVisible();
+  await expect(projects.worktree(`${API}-feat-one`)).toBeVisible({ timeout: 20_000 });
+  await expect(projects.sidebarWorktrees("shop")).toHaveCount(1);
 });
 
-test("rejecting a dispatch creates nothing", async ({ page }) => {
+test("work in two repos is one worker per repo, each listed under the project", async ({
+  page,
+}) => {
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("shop");
+  await projects.gotoProject("shop");
 
-  await ask("dispatch-two");
-  await expect(projects.dispatches()).toHaveCount(1, { timeout: 20_000 });
-  await expect(projects.dispatches().first()).toContainText("feat-two");
-
-  await projects.rejectDispatch();
-  await expect(projects.noDispatches()).toBeVisible();
-  await expect(projects.worktree(`${API}-feat-two`)).toHaveCount(0);
-});
-
-test("an approved group shows on the project page with its merge order", async ({ page }) => {
-  const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("shop");
-
-  await ask("dispatch-group");
-  await expect(projects.dispatches()).toHaveCount(1, { timeout: 20_000 });
-  await expect(projects.dispatches().first()).toContainText("Shared change");
-  await projects.approveDispatch();
-
-  await expect(projects.group("feat-shared")).toBeVisible();
-  await expect(projects.groupMembers("feat-shared")).toHaveText([
-    new RegExp(`^${CLIENT}, worktree ${CLIENT}-feat-shared`),
-    new RegExp(`^${API}, worktree ${API}-feat-shared`),
-  ]);
-  await expect(projects.worktree(`${API}-feat-shared`)).toBeVisible();
+  await ask("dispatch-pair");
+  await expect(projects.worktree(`${API}-feat-shared`)).toBeVisible({ timeout: 20_000 });
   await expect(projects.worktree(`${CLIENT}-feat-shared`)).toBeVisible();
 
   // The coordinator is subscribed to its workers, and a worker finishing its first turn shows as a wake-up.
+  await projects.showTab("activity");
   await expect(projects.subscriptions()).toHaveCount(1);
   await expect(projects.subscriptions().first()).toHaveAttribute("data-kind", "project");
   await expect(projects.wakeups().filter({ hasText: "finished its turn" }).first()).toBeVisible({

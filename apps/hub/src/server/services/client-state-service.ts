@@ -23,6 +23,7 @@ import {
   type DeviceType,
 } from "@band-app/shared/client-state";
 import { matchKey } from "@band-app/shared/client-state-keys";
+import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   ClientStateKeyError,
@@ -30,6 +31,7 @@ import {
   ClientStateWorktreeNotFoundError,
 } from "../errors";
 import { ClientStateQueries } from "../infra/db/queries/client-state";
+import { ProjectQueries } from "../infra/db/queries/projects";
 import { loadState } from "./state";
 import { emit } from "./watcher-service";
 
@@ -45,14 +47,20 @@ export interface ClientStateSetInput {
 
 export type ClientStateDeleteInput = Omit<ClientStateSetInput, "value">;
 
-function worktreeExists(worktreeId: string): boolean {
-  return loadState().repos.some((p) =>
-    p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId),
-  );
-}
-
 export class ClientStateService {
-  constructor(private readonly queries = new ClientStateQueries()) {}
+  constructor(
+    private readonly queries = new ClientStateQueries(),
+    private readonly projects = new ProjectQueries(),
+  ) {}
+
+  /** A worktree, or a project's folder view (`project:<id>`), whose UI state may be stored. */
+  private worktreeExists(worktreeId: string): boolean {
+    const projectId = projectIdOfScope(worktreeId);
+    if (projectId) return this.projects.find(projectId) !== undefined;
+    return loadState().repos.some((p) =>
+      p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId),
+    );
+  }
 
   /** Live entries of one worktree (or global ones) visible to a device type. */
   list(worktreeId: string | null, deviceType: DeviceType): ClientStateEntry[] {
@@ -93,7 +101,7 @@ export class ClientStateService {
 
   private write(input: ClientStateDeleteInput, value: string | null): ClientStateWriteResult {
     const worktreeId = this.worktreeOf(input.key, input.scope);
-    if (worktreeId !== null && !worktreeExists(worktreeId)) {
+    if (worktreeId !== null && !this.worktreeExists(worktreeId)) {
       throw new ClientStateWorktreeNotFoundError(worktreeId);
     }
     const updatedAt = Date.now();

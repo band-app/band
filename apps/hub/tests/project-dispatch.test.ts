@@ -1,8 +1,8 @@
-// Integration tests for dispatch from a project coordinator (plan step 6.3): the `tasks_create` tool of
-// `/mcp-proxy/band-coordinator` (plan steps 6.3 and T.2). A real hub (production bundle, random port, auth on), real git repos and a real
-// `band-worker` process that carries the label the projects ask for. The coding agent is the scripted ACP stub on
-// the hub and on the worker. The coordinator's tool is called over HTTP with the `mcp_` token the hub gave its
-// session, exactly as the agent would.
+// Integration tests for dispatch from a project coordinator: the `worktree_create` tool of
+// `/mcp-proxy/band-coordinator` (V3 of the projects redesign). A real hub (production bundle, random
+// port, auth on), real git repos and a real `band-worker` process that carries the label the projects
+// ask for. The coding agent is the scripted ACP stub on the hub and on the worker. The coordinator's
+// tool is called over HTTP with the `mcp_` token the hub gave its session, exactly as the agent would.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -85,41 +86,22 @@ const q = async <T>(proc: string, input?: unknown) => {
   expect(res.status, `${proc}: ${await res.clone().text()}`).toBe(200);
   return trpcData<T>(res);
 };
-/** A mutation that must fail: returns the error message. */
-const mFail = async (proc: string, input: unknown) => {
-  const res = await trpcMutate(server.url, proc, input, TEST_TOKEN);
-  expect(res.status).toBeGreaterThanOrEqual(400);
-  return (await res.text()).toString();
-};
 
 interface ProjectView {
   id: string;
   name: string;
 }
-interface Dispatch {
-  id: string;
-  status: string;
-  error: string | null;
-  repos: string[];
-  branch: string;
-}
-interface Group {
-  id: string;
-  title: string;
-  branch: string;
-  mergeOrder: string[];
-  members: Array<{
-    repo: string;
-    worktreeId: string | null;
-    hostId: string | null;
-    mergeOrder: number;
-  }>;
+interface WorktreeRow {
+  name: string;
+  path: string;
+  hostId?: string;
+  projectId?: string;
 }
 
-const createProject = (name: string, policy: Record<string, unknown>) =>
+const createProject = (name: string, policy: Record<string, unknown>, repos = ["api"]) =>
   m<{ project: ProjectView }>("projects.create", {
     name,
-    repos: [{ repo: "api" }, { repo: "client" }],
+    repos: repos.map((repo) => ({ repo })),
     policy,
   }).then((r) => r.project);
 
@@ -164,29 +146,32 @@ async function callTool(bearer: string, name: string, args: Record<string, unkno
   }
 }
 
-/** The folder of a task of a project on the worker: `<worker BAND_HOME>/projects/<project>/tasks/<task>`. */
-const taskFolder = (project: string, task: string) =>
-  join(workerHome, ".band", "projects", project, "tasks", task);
-const briefOf = (project: string, task: string) => join(taskFolder(project, task), "BRIEF.md");
-
-const workerPrompts = (): string[] =>
+const workerLog = () =>
   existsSync(workerStubLog)
-    ? completeLines(readFileSync(workerStubLog, "utf8"))
-        .map((l) => JSON.parse(l) as { method: string; params: unknown })
-        .filter((r) => r.method === "session/prompt")
-        .map((r) => JSON.stringify(r.params))
+    ? completeLines(readFileSync(workerStubLog, "utf8")).map(
+        (l) => JSON.parse(l) as { method: string; params: Record<string, unknown> },
+      )
     : [];
 
-const dispatchesOf = (project: string, status?: string) =>
-  q<{ dispatches: Dispatch[] }>("projects.dispatches", { project, status }).then(
-    (r) => r.dispatches,
-  );
-
-const worktreeExists = async (id: string) => {
-  const { repos } = await q<{ repos: Array<{ name: string; worktrees: Array<{ name: string }> }> }>(
+const worktreeRow = async (repo: string, name: string): Promise<WorktreeRow | undefined> => {
+  const { repos } = await q<{ repos: Array<{ name: string; worktrees: WorktreeRow[] }> }>(
     "repos.list",
   );
-  return repos.some((r) => r.worktrees.some((w) => `${r.name}-${w.name}` === id));
+  return repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === name);
+};
+
+const seedSpend = (worktreeId: string, repo: string, costUsd: number) => {
+  const db = new DatabaseSync(join(home, ".band", "band.db"));
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.prepare(
+      `INSERT INTO usage_events (task_id, session_id, worktree_id, repo, input_tokens, output_tokens,
+         cache_read_tokens, cache_creation_tokens, reasoning_output_tokens, cost_usd, captured_at)
+       VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`,
+    ).run(`t-${worktreeId}`, `s-${worktreeId}`, worktreeId, repo, costUsd, Date.now());
+  } finally {
+    db.close();
+  }
 };
 
 beforeAll(async () => {
@@ -283,22 +268,23 @@ afterAll(async () => {
   if (home) removeTmpHome(home);
 });
 
-describe("an autonomous coordinator dispatches (S1)", () => {
+describe("an autonomous coordinator dispatches (V3)", () => {
   const brief = "# Add the search endpoint\nGoal: GET /search returns matches.\n";
   let bearer: string;
+  let project: ProjectView;
 
   beforeAll(async () => {
-    await createProject("auto", {
-      autonomy: "autonomous",
-      labels: ["zone=home"],
-      models: { worker: "haiku" },
-    });
+    project = await createProject(
+      "auto",
+      { autonomy: "autonomous", labels: ["zone=home"], models: { worker: "haiku" } },
+      ["api", "client"],
+    );
     bearer = await coordinatorOf("auto");
   }, 60_000);
 
-  it("creates the task on the matching host with BRIEF.md, a worktree and a worker chat on the worker model", async () => {
-    const res = await callTool(bearer, "tasks_create", {
-      repos: [{ repo: "api" }],
+  it("creates one worktree of the repo on the matching host, attached to the project, with the brief and a started chat on the worker model", async () => {
+    const res = await callTool(bearer, "worktree_create", {
+      repo: "api",
       branch: "feat-search",
       title: "Search endpoint",
       brief,
@@ -306,176 +292,140 @@ describe("an autonomous coordinator dispatches (S1)", () => {
       placement: { labels: { zone: "home" } },
     });
     expect(res.isError, res.text).toBe(false);
-    expect(res.json()).toMatchObject({
+    const body = res.json() as {
+      status: string;
+      repo: string;
+      branch: string;
+      worktreeId: string;
+      chatId: string;
+      path: string;
+    };
+    expect(body).toMatchObject({
       status: "dispatched",
-      name: "feat-search",
-      hostId: workerHostId,
-      worktrees: [{ repo: "api", worktreeId: "api-feat-search" }],
+      repo: "api",
+      branch: "feat-search",
+      worktreeId: "api-feat-search",
     });
+    expect(body.chatId).toEqual(expect.any(String));
 
-    const { repos } = await q<{
-      repos: Array<{
-        name: string;
-        worktrees: Array<{ name: string; path: string; hostId?: string; projectId?: string }>;
-      }>;
-    }>("repos.list");
-    const worktree = repos
-      .find((r) => r.name === "api")
-      ?.worktrees.find((w) => w.name === "feat-search");
+    const worktree = await worktreeRow("api", "feat-search");
     expect(worktree?.hostId).toBe(workerHostId);
-    // The worktree is a folder of the task.
-    expect(realpathSync(worktree?.path ?? "")).toBe(
-      realpathSync(join(taskFolder("auto", "feat-search"), "api")),
+    expect(worktree?.projectId).toBe(project.id);
+    expect(worktree?.path).toBe(body.path);
+    expect(realpathSync(body.path)).toBe(
+      realpathSync(join(workerRoot, ".band-worktrees", "api", "feat-search")),
     );
+    // Only the named repo got a worktree.
+    expect(await worktreeRow("client", "feat-search")).toBeUndefined();
 
-    const text = readFileSync(briefOf("auto", "feat-search"), "utf8");
-    expect(text).toContain("Search endpoint");
+    const text = readFileSync(join(body.path, ".am", "BRIEF.md"), "utf8");
+    expect(text).toContain("## Task: Search endpoint");
+    expect(text).toContain("Project: auto\nRepo: api\nBranch: feat-search");
     expect(text).toContain("Goal: GET /search returns matches.");
     expect(text).toContain("- S1: GET /search?q=a returns 200");
     expect(text).toContain("- S2: an empty query returns 400");
-    // The brief is in the task folder, so the repository has no change for it.
-    expect(git(join(taskFolder("auto", "feat-search"), "api"), "status", "--porcelain")).toBe("");
+    // `.am/` is excluded, so the brief is no change in the repository.
+    expect(git(body.path, "status", "--porcelain")).toBe("");
+    expect(git(body.path, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("feat-search");
 
-    const { task } = await q<{ task: { id: string; chatIds: string[] } }>("projectTasks.get", {
-      task: "feat-search",
-      project: "auto",
-    });
-    const { chats } = await q<{ chats: Array<{ agent: string; model: string }> }>("chats.list", {
-      worktreeId: `task:${task.id}`,
-    });
+    const { chats } = await q<{ chats: Array<{ id: string; agent: string; model: string }> }>(
+      "chats.list",
+      { worktreeId: "api-feat-search" },
+    );
     expect(chats).toHaveLength(1);
-    expect(chats[0]).toMatchObject({ agent: "claude-code", model: "haiku" });
-    const prompt = await waitFor(() => workerPrompts().find((p) => p.includes("BRIEF.md")), {
-      label: "worker prompt that points at the brief",
-      timeoutMs: 30_000,
-    });
-    expect(prompt).toContain("source of truth");
-    // The agent runs in the task folder.
+    expect(chats[0]).toMatchObject({ id: body.chatId, agent: "claude-code", model: "haiku" });
+
+    // The agent starts on the worker, in the worktree, with a prompt that points at the brief.
     const started = await waitFor(
       () =>
-        completeLines(readFileSync(workerStubLog, "utf8"))
-          .map((l) => JSON.parse(l) as { method: string; params: { cwd?: string } })
-          .find((r) => r.method === "session/new" && r.params.cwd?.endsWith("/tasks/feat-search")),
-      { label: "session/new in the task folder", timeoutMs: 30_000 },
+        workerLog().find(
+          (r) =>
+            r.method === "session/new" &&
+            typeof r.params.cwd === "string" &&
+            r.params.cwd.endsWith("/api/feat-search"),
+        ),
+      { label: "session/new in the worktree", timeoutMs: 30_000 },
     );
-    expect(realpathSync(started.params.cwd as string)).toBe(
-      realpathSync(taskFolder("auto", "feat-search")),
+    expect(realpathSync(started.params.cwd as string)).toBe(realpathSync(body.path));
+    const prompt = await waitFor(
+      () =>
+        workerLog()
+          .filter((r) => r.method === "session/prompt")
+          .map((r) => JSON.stringify(r.params))
+          .find((p) => p.includes(".am/BRIEF.md")),
+      { label: "worker prompt that points at the brief", timeoutMs: 30_000 },
     );
+    expect(prompt).toContain("source of truth");
   });
 
-  it("lists the dispatched task for the coordinator and keeps no approval request", async () => {
-    const list = await callTool(bearer, "tasks_list");
-    expect(JSON.stringify(list.json())).toContain("api-feat-search");
-    expect(await dispatchesOf("auto")).toEqual([]);
+  it("lists the dispatched worktree for the coordinator and on the project", async () => {
+    const list = await callTool(bearer, "worktrees_list");
+    expect(list.isError, list.text).toBe(false);
+    expect(list.text).toContain("api-feat-search");
+    const { project: detail } = await q<{
+      project: { worktrees: Array<{ worktreeId: string }> };
+    }>("projects.get", { project: "auto" });
+    expect(detail.worktrees.map((w) => w.worktreeId)).toEqual(["api-feat-search"]);
   });
-});
 
-describe("a steer project asks the user first (S2)", () => {
-  let bearer: string;
-  const call = (branch: string) =>
-    callTool(bearer, "tasks_create", {
-      repos: [{ repo: "client" }],
-      branch,
-      brief: `Do ${branch}`,
-      scenarios: ["it works"],
-      placement: { labels: { zone: "home" } },
+  it("takes one call per repo for work in two repos", async () => {
+    const res = await callTool(bearer, "worktree_create", {
+      repo: "client",
+      branch: "feat-search",
+      brief: "Call GET /search from the search box.",
     });
-
-  beforeAll(async () => {
-    await createProject("steer", { autonomy: "steer", labels: ["zone=home"] });
-    bearer = await coordinatorOf("steer");
-  }, 60_000);
-
-  it("answers pending approval and creates nothing", async () => {
-    const res = await call("feat-approve");
     expect(res.isError, res.text).toBe(false);
-    expect(res.json()).toMatchObject({ status: "pending approval" });
-    expect(await worktreeExists("client-feat-approve")).toBe(false);
-    const pending = await dispatchesOf("steer", "pending");
-    expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ repos: ["client"], branch: "feat-approve" });
-  });
-
-  it("dispatches on approval, once", async () => {
-    const [request] = await dispatchesOf("steer", "pending");
-    const { result } = await m<{ result: { worktrees: Array<{ worktreeId: string | null }> } }>(
-      "projects.approveDispatch",
-      { requestId: request.id },
-    );
-    expect(result.worktrees.map((w) => w.worktreeId)).toEqual(["client-feat-approve"]);
-    expect(existsSync(briefOf("steer", "feat-approve"))).toBe(true);
-    expect((await dispatchesOf("steer", "approved"))[0].id).toBe(request.id);
-    expect(await mFail("projects.approveDispatch", { requestId: request.id })).toContain(
-      "already approved",
-    );
-  });
-
-  it("drops the call on rejection", async () => {
-    await call("feat-reject");
-    const [request] = await dispatchesOf("steer", "pending");
-    await m("projects.rejectDispatch", { requestId: request.id });
-    expect((await dispatchesOf("steer", "rejected"))[0].id).toBe(request.id);
-    expect(await worktreeExists("client-feat-reject")).toBe(false);
-    expect(await mFail("projects.approveDispatch", { requestId: request.id })).toContain(
-      "already rejected",
-    );
-  });
-});
-
-describe("approval edge cases", () => {
-  let bearer: string;
-
-  beforeAll(async () => {
-    await createProject("edge", { autonomy: "steer", labels: ["zone=home"] });
-    bearer = await coordinatorOf("edge");
+    expect(res.json()).toMatchObject({ status: "dispatched", worktreeId: "client-feat-search" });
+    expect((await worktreeRow("client", "feat-search"))?.projectId).toBe(project.id);
   }, 60_000);
 
-  it("keeps a request pending when the re-check at approval refuses it", async () => {
-    const res = await callTool(bearer, "tasks_create", {
-      repos: [{ repo: "client" }],
-      branch: "feat-late",
-      brief: "x",
-      scenarios: [],
-      placement: { labels: { zone: "home" } },
-    });
-    expect(res.json()).toMatchObject({ status: "pending approval" });
-    const [request] = await dispatchesOf("edge", "pending");
-    // The branch is taken while the request waits.
-    await m("worktrees.create", { repo: "client", branch: "feat-late" });
-    expect(await mFail("projects.approveDispatch", { requestId: request.id })).toContain(
-      "already exists",
-    );
-    expect((await dispatchesOf("edge", "pending")).map((d) => d.id)).toEqual([request.id]);
-    await m("projects.rejectDispatch", { requestId: request.id });
-    expect(await dispatchesOf("edge", "pending")).toEqual([]);
-  }, 60_000);
-
-  it("refuses approval and rejection from a non-admin token", async () => {
-    const res = await callTool(bearer, "tasks_create", {
+  it("refuses a call that names several repos or misses the brief", async () => {
+    const several = await callTool(bearer, "worktree_create", {
       repos: [{ repo: "api" }],
-      branch: "feat-admin",
+      branch: "feat-old",
       brief: "x",
-      scenarios: [],
-      placement: { labels: { zone: "home" } },
     });
-    expect(res.json()).toMatchObject({ status: "pending approval" });
-    const [request] = await dispatchesOf("edge", "pending");
-    const { token } = await m<{ token: string }>("tokens.createDevice", { label: "viewer" });
-    for (const proc of ["projects.approveDispatch", "projects.rejectDispatch"]) {
-      const forbidden = await trpcMutate(server.url, proc, { requestId: request.id }, token);
-      expect(forbidden.status).toBe(403);
-    }
-    expect((await dispatchesOf("edge", "pending")).map((d) => d.id)).toEqual([request.id]);
-    await m("projects.rejectDispatch", { requestId: request.id });
+    expect(several.isError).toBe(true);
+    expect(several.text).toContain("Invalid arguments for tool worktree_create");
+    expect(several.text).toContain('"repo"');
+    const noBrief = await callTool(bearer, "worktree_create", { repo: "api", branch: "feat-nb" });
+    expect(noBrief.isError).toBe(true);
+    expect(noBrief.text).toContain("Invalid arguments for tool worktree_create");
+    expect(noBrief.text).toContain('"brief"');
+    expect(await worktreeRow("api", "feat-old")).toBeUndefined();
+    expect(await worktreeRow("api", "feat-nb")).toBeUndefined();
+  });
+});
+
+describe("a stored steer policy dispatches at once", () => {
+  it("reads steer as autonomous, leaves auto-merge off and creates the worktree without an approval", async () => {
+    await createProject("steer", { autonomy: "steer", autoMerge: true, labels: ["zone=home"] }, [
+      "client",
+    ]);
+    const { project } = await q<{
+      project: { id: string; effectivePolicy: { autonomy: string; autoMerge: boolean } };
+    }>("projects.get", { project: "steer" });
+    expect(project.effectivePolicy.autonomy).toBe("autonomous");
+    expect(project.effectivePolicy.autoMerge).toBe(false);
+    const bearer = await coordinatorOf("steer");
+    const res = await callTool(bearer, "worktree_create", {
+      repo: "client",
+      branch: "feat-now",
+      brief: "Do feat-now",
+      scenarios: ["it works"],
+    });
+    expect(res.isError, res.text).toBe(false);
+    const created = await worktreeRow("client", "feat-now");
+    expect(created?.projectId).toBe(project.id);
+    expect(existsSync(join(created?.path ?? "", ".am", "BRIEF.md"))).toBe(true);
   }, 60_000);
 });
 
-describe("the policy refuses a dispatch (S3)", () => {
+describe("the policy refuses a dispatch", () => {
   const base = (branch: string, extra: Record<string, unknown> = {}) => ({
-    repos: [{ repo: "api" }],
+    repo: "api",
     branch,
     brief: "x",
-    scenarios: [],
     ...extra,
   });
 
@@ -484,13 +434,13 @@ describe("the policy refuses a dispatch (S3)", () => {
     const bearer = await coordinatorOf("floor");
     const res = await callTool(
       bearer,
-      "tasks_create",
+      "worktree_create",
       base("feat-floor", { placement: { isolation: "worktree" } }),
     );
     expect(res.isError).toBe(true);
     expect(res.text).toContain("isolation worktree is below the floor");
     expect(res.text).toContain("container");
-    expect(await worktreeExists("api-feat-floor")).toBe(false);
+    expect(await worktreeRow("api", "feat-floor")).toBeUndefined();
   });
 
   it("refuses labels outside the project's", async () => {
@@ -498,12 +448,12 @@ describe("the policy refuses a dispatch (S3)", () => {
     const bearer = await coordinatorOf("labels");
     const res = await callTool(
       bearer,
-      "tasks_create",
+      "worktree_create",
       base("feat-cloud", { placement: { labels: { zone: "cloud" } } }),
     );
     expect(res.isError).toBe(true);
     expect(res.text).toContain("zone=cloud is not among the labels");
-    expect(await worktreeExists("api-feat-cloud")).toBe(false);
+    expect(await worktreeRow("api", "feat-cloud")).toBeUndefined();
   });
 
   it("refuses a dispatch past maxConcurrent", async () => {
@@ -525,107 +475,48 @@ describe("the policy refuses a dispatch (S3)", () => {
       },
       { label: "one worker running", timeoutMs: 30_000 },
     );
-    const refused = await callTool(bearer, "tasks_create", base("feat-over"));
+    const refused = await callTool(bearer, "worktree_create", base("feat-over"));
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain("1 worker agents are already running");
     expect(refused.text).toContain("allows 1 at once");
-    expect(await worktreeExists("api-feat-over")).toBe(false);
+    expect(await worktreeRow("api", "feat-over")).toBeUndefined();
+    await callTool(bearer, "worktree_stop", { worktreeId: "api-busy" });
   }, 90_000);
+
+  it("refuses a dispatch once the project has spent its budget", async () => {
+    await createProject("spent", { autonomy: "autonomous", budgetUsd: 1 });
+    const bearer = await coordinatorOf("spent");
+    await m("worktrees.create", { repo: "api", branch: "spender", projectId: "spent" });
+    seedSpend("api-spender", "api", 2);
+    const refused = await callTool(bearer, "worktree_create", base("feat-broke"));
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('project "spent" has spent $2.00 of its $1 budget');
+    expect(await worktreeRow("api", "feat-broke")).toBeUndefined();
+  }, 60_000);
 
   it("refuses in observe mode, a repo outside the project and a taken branch", async () => {
     await createProject("watch", { autonomy: "observe" });
-    const observe = await callTool(await coordinatorOf("watch"), "tasks_create", base("feat-w"));
+    const observe = await callTool(await coordinatorOf("watch"), "worktree_create", base("feat-w"));
     expect(observe.isError).toBe(true);
     expect(observe.text).toContain("observe mode");
+    expect(await worktreeRow("api", "feat-w")).toBeUndefined();
 
     // The checks below need an autonomous project and a branch that is already taken, so they
-    // make their own and do not depend on what the S1 tests dispatched.
-    await createProject("strict", { autonomy: "autonomous", labels: ["zone=home"] });
+    // make their own and do not depend on what the other tests dispatched.
+    await createProject("strict", { autonomy: "autonomous" });
     const bearer = await coordinatorOf("strict");
     await m("worktrees.create", { repo: "api", branch: "feat-taken" });
-    const outside = await callTool(
-      bearer,
-      "tasks_create",
-      base("feat-x", { repos: [{ repo: "ghost" }] }),
-    );
+    const outside = await callTool(bearer, "worktree_create", base("feat-x", { repo: "client" }));
     expect(outside.isError).toBe(true);
-    expect(outside.text).toContain('Repo "ghost" is not in project');
-    const taken = await callTool(bearer, "tasks_create", base("feat-taken"));
+    expect(outside.text).toContain('Repo "client" is not in project "strict"');
+    expect(await worktreeRow("client", "feat-x")).toBeUndefined();
+    const ghost = await callTool(bearer, "worktree_create", base("feat-x", { repo: "ghost" }));
+    expect(ghost.isError).toBe(true);
+    expect(ghost.text).toContain('"ghost"');
+    const taken = await callTool(bearer, "worktree_create", base("feat-taken"));
     expect(taken.isError).toBe(true);
-    expect(taken.text).toContain("already exists");
-    const twice = await callTool(bearer, "tasks_create", {
-      ...base("feat-twice"),
-      repos: [{ repo: "api" }, { repo: "api" }],
-    });
-    expect(twice.isError).toBe(true);
-    expect(twice.text).toContain("A repo appears twice");
+    expect(taken.text).toContain("Worktree api-feat-taken already exists");
+    // The taken worktree stays outside the project.
+    expect((await worktreeRow("api", "feat-taken"))?.projectId).toBeUndefined();
   }, 90_000);
-});
-
-describe("a task with two repos (S4)", () => {
-  let bearer: string;
-
-  beforeAll(async () => {
-    await createProject("duo", { autonomy: "autonomous", labels: ["zone=home"] });
-    bearer = await coordinatorOf("duo");
-  }, 60_000);
-
-  it("creates a worktree per repo in one task folder with the repos and the PR order in the brief", async () => {
-    const res = await callTool(bearer, "tasks_create", {
-      repos: [
-        { repo: "api", role: "backend" },
-        { repo: "client", role: "frontend" },
-      ],
-      branch: "feat-checkout",
-      title: "Checkout flow",
-      brief: "Add the checkout flow.\n",
-      scenarios: ["checkout completes"],
-    });
-    expect(res.isError, res.text).toBe(false);
-    const body = res.json() as {
-      taskId: string;
-      folder: string;
-      worktrees: Array<{ worktreeId: string }>;
-    };
-    expect(body.taskId).toMatch(/^tsk-/);
-    expect(body.worktrees.map((w) => w.worktreeId)).toEqual([
-      "api-feat-checkout",
-      "client-feat-checkout",
-    ]);
-
-    const text = readFileSync(briefOf("duo", "feat-checkout"), "utf8");
-    expect(text).toContain("- api (backend)");
-    expect(text).toContain("- client (frontend)");
-    expect(text).toContain("Pull request order: 1. api, 2. client");
-    expect(text).toContain("- S1: checkout completes");
-    for (const repo of ["api", "client"]) {
-      const dir = join(taskFolder("duo", "feat-checkout"), repo);
-      expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("feat-checkout");
-    }
-
-    const { groups } = await q<{ groups: Group[] }>("projects.groups", { project: "duo" });
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toMatchObject({
-      id: body.taskId,
-      branch: "feat-checkout",
-      mergeOrder: ["api", "client"],
-    });
-    expect(groups[0].members.map((x) => [x.repo, x.worktreeId, x.hostId])).toEqual([
-      ["api", "api-feat-checkout", workerHostId],
-      ["client", "client-feat-checkout", workerHostId],
-    ]);
-  });
-
-  it("fails with the reason when no host has the label, and creates nothing", async () => {
-    const res = await callTool(bearer, "tasks_create", {
-      repos: [{ repo: "api" }],
-      branch: "feat-nowhere",
-      brief: "x",
-      scenarios: [],
-      host: "ghost-host",
-    });
-    expect(res.isError).toBe(true);
-    expect(res.text).toContain('Unknown host "ghost-host"');
-    expect(await worktreeExists("api-feat-nowhere")).toBe(false);
-  });
 });

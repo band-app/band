@@ -1,79 +1,322 @@
 /**
- * Page object for the Projects dialog (plan step 6.1), opened from the Projects button in the
- * sidebar's bottom action bar. `data-testid`s are set in `ProjectsDialog.tsx` and
- * `DashboardShell.tsx`. Test bodies call only the methods here.
+ * Page object for a project's view, the projects list in the sidebar (`ProjectTaskList.tsx`) and
+ * the New project flow (`CreateProjectFlow.tsx`). A project opens at `/project/<name>`, in the
+ * worktree view of its folder (scope id `project:<id>`): the coordinator's chat and terminals in
+ * the center, the folder's files in the right panel's Explorer, and the project side tabs Activity and Repos (`ProjectSideTabs.tsx`) in place of Changes. Each section lives in one of those tabs,
+ * so a test switches with `showTab` before it reads it. A project's settings (title, coordinator
+ * host, policy, Delete) live in Settings > Projects, which the "⋮" menu on the project's sidebar
+ * row opens (`openSettings`). Test bodies call only the methods here.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { ContextBrowserPage } from "./ContextBrowserPage";
+import { FILE_VIEWER_ROOT_TESTID, FileViewerPage } from "./FileViewerPage";
+import { TerminalSurface } from "./TerminalSurface";
+
+export type ProjectTab = "activity" | "repos";
 
 export interface NewProject {
   name: string;
   description?: string;
+  /** Repos already registered in Band, added in the flow's repos step. */
   repos: Array<{ repo: string; role?: string }>;
 }
 
 export class ProjectsPage {
-  private readonly dialog: Locator;
-  private readonly detail: Locator;
+  readonly detail: Locator;
+  /** One project's page in Settings > Projects (`ProjectsSettings.tsx`). */
+  private readonly settings: Locator;
+  private readonly sidebar: Locator;
+  private readonly flow: Locator;
 
   constructor(
     private readonly page: Page,
     private readonly baseUrl: string,
     private readonly token: string,
   ) {
-    this.dialog = page.getByTestId("projects");
-    this.detail = page.getByTestId("projects__detail");
+    // The project side tab on screen. Every tab's root carries the project's name and id.
+    this.detail = page
+      .getByTestId("right-sidepanel")
+      .getByTestId(/^project-page__(activity|repos)$/);
+    this.settings = page.getByTestId("project-settings-page");
+    this.sidebar = page.getByTestId("project-tasks");
+    this.flow = page.getByTestId("create-project__flow");
   }
 
-  emptyState(): Locator {
-    return this.dialog.getByTestId("projects__empty");
-  }
-
+  /** Loads the app and waits for the sidebar's projects list. */
   async goto(): Promise<void> {
     await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
-    await expect(this.page.getByTestId("repo-list__projects-button")).toBeVisible();
+    await expect(this.sidebar).toBeVisible();
   }
 
-  async open(): Promise<void> {
-    await test.step("Open the Projects dialog", async () => {
-      await this.page.getByTestId("repo-list__projects-button").click();
-      await expect(this.dialog).toBeVisible();
+  /** Loads `/project/<name>`, which opens the project's folder view, on its Activity tab. */
+  async gotoProject(name: string): Promise<void> {
+    await test.step(`Open /project/${name}`, async () => {
+      await this.page.goto(
+        `${this.baseUrl}/project/${encodeURIComponent(name)}?token=${this.token}`,
+      );
+      await expect(this.page).toHaveURL(new RegExp(`/project/${name}(\\?|$)`));
+      await this.showTab("activity");
+      await expect(this.detail).toHaveAttribute("data-project", name);
     });
   }
 
+  /** Loads `/project/<name>` on a phone, where the side tabs are sheets of the header menu. */
+  async gotoProjectOnPhone(name: string): Promise<void> {
+    await test.step(`Open /project/${name} on a phone`, async () => {
+      await this.page.goto(
+        `${this.baseUrl}/project/${encodeURIComponent(name)}?token=${this.token}`,
+      );
+      await expect(this.page.getByTestId("mobile-worktree__header")).toBeVisible();
+    });
+  }
+
+  /** Loads an older link to a project's view: `/project/<id>` or `/worktree/project:<id>`. */
+  async gotoOldLink(path: string): Promise<void> {
+    await test.step(`Open the older link ${path}`, async () => {
+      await this.page.goto(`${this.baseUrl}${path}?token=${this.token}`);
+    });
+  }
+
+  /** Waits for the URL to name the project's view, `/project/<name>`. */
+  async expectProjectUrl(name: string): Promise<void> {
+    await expect(this.page).toHaveURL(new RegExp(`/project/${name}(\\?|$)`));
+  }
+
+  /** Loads `/project/<name>` for a project that does not exist. */
+  async gotoMissingProject(name: string): Promise<void> {
+    await this.page.goto(`${this.baseUrl}/project/${encodeURIComponent(name)}?token=${this.token}`);
+    await expect(this.missing()).toBeVisible();
+  }
+
+  // ---- sidebar --------------------------------------------------------------------------------
+
+  /** A project's block in the sidebar. */
   item(name: string): Locator {
-    return this.dialog.locator(`[data-testid="projects__item"][data-project="${name}"]`);
+    return this.sidebar.locator(`[data-testid="project-tasks__project"][data-project="${name}"]`);
   }
 
-  async create(project: NewProject): Promise<void> {
-    await test.step(`Create project ${project.name}`, async () => {
-      await this.dialog.getByTestId("projects__new").click();
-      const form = this.page.getByTestId("projects__create");
-      await form.getByTestId("projects__name").fill(project.name);
-      if (project.description) {
-        await form.getByTestId("projects__description").fill(project.description);
-      }
-      for (const { repo, role } of project.repos) {
-        await form.locator(`[data-testid="projects__repo-option"][data-repo="${repo}"]`).check();
-        if (role) {
-          await form.locator(`[data-testid="projects__repo-role"][data-repo="${repo}"]`).fill(role);
-        }
-      }
-      await form.getByTestId("projects__create-submit").click();
-      await expect(this.detail).toBeVisible();
+  /** The projects in the sidebar, in their order. */
+  items(): Locator {
+    return this.sidebar.getByTestId("project-tasks__project");
+  }
+
+  itemName(name: string): Locator {
+    return this.item(name).getByTestId("project-tasks__project-name");
+  }
+
+  /** A project's name button in the sidebar. `aria-current="page"` marks the project shown. */
+  itemOpen(name: string): Locator {
+    return this.item(name).getByTestId("project-tasks__project-open");
+  }
+
+  async toggleItem(name: string): Promise<void> {
+    await this.item(name).getByTestId("project-tasks__toggle").click();
+  }
+
+  /** Opens a project's folder view from the sidebar, on its Activity tab. */
+  async openProject(name: string): Promise<void> {
+    await test.step(`Open project ${name} from the sidebar`, async () => {
+      await this.item(name).getByTestId("project-tasks__project-open").click();
+      await expect(this.page).toHaveURL(new RegExp(`/project/${name}(\\?|$)`));
+      await this.showTab("activity");
+      await expect(this.detail).toHaveAttribute("data-project", name);
     });
   }
 
-  async back(): Promise<void> {
-    await this.detail.getByTestId("projects__back").click();
-    await expect(this.dialog.getByTestId("projects__list")).toBeVisible();
+  /** Opens a project worktree's own worktree view from its sidebar row. */
+  async openSidebarWorktree(name: string, worktreeId: string): Promise<void> {
+    await this.item(name)
+      .locator(`[data-testid="project-tasks__worktree"][data-worktree="${worktreeId}"]`)
+      .click();
+    await expect(this.page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(worktreeId)}`));
   }
 
-  async openProject(name: string): Promise<void> {
-    await this.item(name).click();
+  /** Waits for a worktree's own view, after a create or a click that opens it. */
+  async expectWorktreeView(worktreeId: string): Promise<void> {
+    await expect(this.page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(worktreeId)}`));
+  }
+
+  /** Opens New worktree from a project's sidebar row and waits for its dialog. */
+  async openNewWorktree(name: string): Promise<void> {
+    const row = this.item(name);
+    await row.hover();
+    await row.getByTestId("project-tasks__new-worktree").click();
+    await expect(this.newWorktreeDialog()).toBeVisible();
+  }
+
+  newWorktreeDialog(): Locator {
+    return this.page.getByTestId("new-project-worktree");
+  }
+
+  /** Fills and submits the New worktree dialog. */
+  async createWorktree(input: { repo: string; branch: string; prompt?: string }): Promise<void> {
+    await test.step(`Create worktree ${input.repo} on ${input.branch}`, async () => {
+      const dialog = this.newWorktreeDialog();
+      await dialog.getByTestId("new-project-worktree__repo").selectOption(input.repo);
+      await dialog.getByTestId("new-project-worktree__branch").fill(input.branch);
+      if (input.prompt) await dialog.getByTestId("new-project-worktree__prompt").fill(input.prompt);
+      await dialog.getByTestId("new-project-worktree__submit").click();
+      await expect(dialog).toBeHidden();
+    });
+  }
+
+  /** The worktree rows under a project in the sidebar; an expanded project lists them all. */
+  sidebarWorktrees(name: string): Locator {
+    return this.item(name).getByTestId("project-tasks__worktree");
+  }
+
+  // ---- New project flow -----------------------------------------------------------------------
+
+  async openCreateFlow(): Promise<void> {
+    await test.step("Open New project", async () => {
+      await this.page.getByTestId("projects-header__new-project").click();
+      await expect(this.flow).toHaveAttribute("data-step", "name");
+    });
+  }
+
+  async fillName(name: string, description?: string): Promise<void> {
+    await this.flow.getByTestId("create-project__name").fill(name);
+    if (description) await this.flow.getByTestId("create-project__description").fill(description);
+  }
+
+  createButton(): Locator {
+    return this.flow.getByTestId("create-project__create");
+  }
+
+  /** Submits the name step. The flow moves on to the repos step. */
+  async submitName(): Promise<void> {
+    await this.createButton().click();
+    await expect(this.flow).toHaveAttribute("data-step", "repos");
+  }
+
+  /** Adds a repo Band already has, in the repos step. */
+  async addExistingRepo(repo: string, role?: string): Promise<void> {
+    await test.step(`Add ${repo} to the new project`, async () => {
+      // The previous call waited for its repo to show, so the count has settled.
+      if ((await this.flow.getByTestId("create-project__added-repo").count()) > 0) {
+        await this.flow.getByTestId("create-project__add-another").click();
+      }
+      await this.flow.getByTestId("project-add-repo__mode-existing").click();
+      await this.flow.getByTestId("project-add-repo__existing-select").selectOption(repo);
+      if (role) await this.flow.getByTestId("project-add-repo__existing-role").fill(role);
+      await this.flow.getByTestId("project-add-repo__existing-submit").click();
+      await expect(this.addedRepo(repo)).toBeVisible();
+    });
+  }
+
+  addedRepo(repo: string): Locator {
+    return this.flow.locator(`[data-testid="create-project__added-repo"][data-repo="${repo}"]`);
+  }
+
+  async reposNext(): Promise<void> {
+    await this.flow.getByTestId("create-project__repos-next").click();
+    await expect(this.flow).toHaveAttribute("data-step", "host");
+  }
+
+  /** Finishes the flow, which lands on the new project's folder view. */
+  async finish(name: string): Promise<void> {
+    await this.flow.getByTestId("create-project__finish").click();
+    await expect(this.page).toHaveURL(new RegExp(`/project/${name}(\\?|$)`));
+    await this.showTab("activity");
     await expect(this.detail).toHaveAttribute("data-project", name);
   }
+
+  /** The whole New project flow for repos Band already has. */
+  async create(project: NewProject): Promise<void> {
+    await test.step(`Create project ${project.name}`, async () => {
+      await this.openCreateFlow();
+      await this.fillName(project.name, project.description);
+      await this.submitName();
+      for (const { repo, role } of project.repos) await this.addExistingRepo(repo, role);
+      await this.reposNext();
+      await this.finish(project.name);
+    });
+  }
+
+  // ---- project view -------------------------------------------------------------------------
+
+  /** A side tab button of the project view, by id. A name that is not a tab matches nothing. */
+  tab(id: string): Locator {
+    return this.page.getByTestId(`right-sidepanel__tab--project-${id}`);
+  }
+
+  /** The right panel's Changes tab, which a project's folder view does not have. */
+  changesTab(): Locator {
+    return this.page.getByTestId("right-sidepanel__tab--changes");
+  }
+
+  async showTab(tab: ProjectTab): Promise<void> {
+    const button = this.tab(tab);
+    await button.click();
+    await expect(button).toHaveAttribute("aria-selected", "true");
+    await expect(this.page.getByTestId(`project-page__${tab}`)).toBeVisible();
+  }
+
+  /** Shows the right panel's Explorer, which lists the project folder's files. */
+  async showExplorer(): Promise<void> {
+    const button = this.page.getByTestId("right-sidepanel__tab--explorer");
+    await button.click();
+    await expect(button).toHaveAttribute("aria-selected", "true");
+  }
+
+  /** A file or folder row of the Explorer tree, by its path in the project folder. */
+  explorerEntry(path: string): Locator {
+    return this.page.getByTestId(`file-tree__row--${path}`);
+  }
+
+  missing(): Locator {
+    return this.page.getByTestId("project-route__missing");
+  }
+
+  /** The terminal of the project's folder view (`project:<id>`), shown in its center. */
+  terminal(projectId: string): TerminalSurface {
+    return new TerminalSurface(this.page, `project:${projectId}`);
+  }
+
+  /** Opens a file of the project folder from the Explorer and returns its editor. */
+  async openFile(path: string): Promise<FileViewerPage> {
+    await test.step(`Open ${path} from the Explorer`, async () => {
+      await this.showExplorer();
+      await this.explorerEntry(path).click();
+      await expect(this.page.getByTestId(FILE_VIEWER_ROOT_TESTID)).toBeVisible();
+    });
+    return new FileViewerPage(this.page);
+  }
+
+  error(): Locator {
+    return this.detail.getByTestId("projects__error").first();
+  }
+
+  /** The coordinator's chat pane, a tab of the project view's center. */
+  chat(): Locator {
+    return this.page.getByTestId("prompt-input__form").filter({ visible: true });
+  }
+
+  async openCharter(): Promise<Locator> {
+    await this.showTab("activity");
+    await this.detail.getByTestId("project-page__charter-open").click();
+    const text = this.page.getByTestId("project-page__charter-text");
+    await expect(text).toBeVisible();
+    return text;
+  }
+
+  /** Closes the charter dialog with Escape. */
+  async closeCharter(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.page.getByTestId("project-page__charter-text")).toBeHidden();
+  }
+
+  /** The project's description on the Activity tab. */
+  description(): Locator {
+    return this.detail.getByTestId("project-page__description");
+  }
+
+  /** A worktree of the project, as its card under the project in the sidebar. */
+  worktree(id: string): Locator {
+    return this.sidebar.locator(`[data-testid="project-tasks__worktree"][data-worktree="${id}"]`);
+  }
+
+  // Repos tab
 
   repo(name: string): Locator {
     return this.detail.locator(`[data-testid="projects__repo"][data-repo="${name}"]`);
@@ -87,39 +330,6 @@ export class ProjectsPage {
     await this.detail.locator(`[data-testid="projects__repo-remove"][data-repo="${name}"]`).click();
   }
 
-  worktreeGroup(repo: string): Locator {
-    return this.detail.locator(`[data-testid="projects__worktree-group"][data-repo="${repo}"]`);
-  }
-
-  error(): Locator {
-    return this.detail.getByTestId("projects__error");
-  }
-
-  modelSelect(): Locator {
-    return this.detail.getByTestId("projects__model-select");
-  }
-
-  async chooseModel(model: string): Promise<void> {
-    await this.modelSelect().selectOption(model);
-  }
-
-  async openContext(): Promise<ContextBrowserPage> {
-    await this.detail.getByTestId("projects__context-link").click();
-    const browser = new ContextBrowserPage(this.page, this.baseUrl, this.token);
-    await expect(browser.root).toBeVisible();
-    return browser;
-  }
-
-  /** The coordinator section of the open project. Its `data-state` is `started` once the chat exists. */
-  coordinator(): Locator {
-    return this.detail.getByTestId("projects__coordinator");
-  }
-
-  /** The coordinator chat's id, which stands in for a worktree name: the coordinator has none. */
-  coordinatorChat(): Locator {
-    return this.detail.getByTestId("projects__coordinator-chat");
-  }
-
   /** The project folder section: the coordinator host's checkouts of each repo's default branch. */
   folder(): Locator {
     return this.detail.getByTestId("projects__folder");
@@ -129,105 +339,28 @@ export class ProjectsPage {
     return this.folder().locator(`[data-testid="projects__checkout"][data-repo="${repo}"]`);
   }
 
-  autonomy(): Locator {
-    return this.detail.getByTestId("projects__autonomy");
+  // Activity tab
+
+  /** The coordinator section. Its `data-state` is `started` once the chat exists. */
+  coordinator(): Locator {
+    return this.detail.getByTestId("projects__coordinator");
   }
 
-  async chooseAutonomy(level: "observe" | "steer" | "autonomous"): Promise<void> {
-    await test.step(`Set autonomy to ${level}`, async () => {
-      await this.autonomy().selectOption(level);
-      await expect(this.detail.getByTestId("projects__policy")).toHaveAttribute(
-        "data-autonomy",
-        level,
-      );
-    });
+  /** The coordinator chat's id, which stands in for a worktree name: the coordinator has none. */
+  coordinatorChat(): Locator {
+    return this.detail.getByTestId("projects__coordinator-chat");
   }
 
-  /** The select for one model lane: coordinator, worker or reviewer. */
-  lane(lane: "coordinator" | "worker" | "reviewer"): Locator {
-    return lane === "coordinator"
-      ? this.detail.getByTestId("projects__model-select")
-      : this.detail.getByTestId(`projects__lane-${lane}`);
-  }
-
-  maxConcurrent(): Locator {
-    return this.detail.getByTestId("projects__max-concurrent");
-  }
-
-  budget(): Locator {
-    return this.detail.getByTestId("projects__budget");
-  }
-
-  isolationFloor(): Locator {
-    return this.detail.getByTestId("projects__isolation-floor");
-  }
-
-  async savePolicy(limits: {
-    maxConcurrent?: string;
-    budget?: string;
-    isolationFloor?: "worktree" | "container" | "vm";
-    workerModel?: string;
-  }): Promise<void> {
-    await test.step("Save the policy", async () => {
-      if (limits.maxConcurrent !== undefined) await this.maxConcurrent().fill(limits.maxConcurrent);
-      if (limits.budget !== undefined) await this.budget().fill(limits.budget);
-      if (limits.isolationFloor) await this.isolationFloor().selectOption(limits.isolationFloor);
-      if (limits.workerModel) await this.lane("worker").selectOption(limits.workerModel);
-      // The dialog gives no other sign that the save finished.
-      const saved = this.page.waitForResponse(
-        (res) => res.url().includes("projects.update") && res.ok(),
-      );
-      await this.detail.getByTestId("projects__policy-save").click();
-      await saved;
-    });
-  }
-
-  /** The pending or failed dispatch request cards of the open project. */
-  dispatches(): Locator {
-    return this.detail.getByTestId("projects__dispatch");
-  }
-
-  async approveDispatch(): Promise<void> {
-    await test.step("Approve the dispatch", async () => {
-      await this.detail.getByTestId("projects__dispatch-approve").click();
-    });
-  }
-
-  async rejectDispatch(): Promise<void> {
-    await test.step("Reject the dispatch", async () => {
-      await this.detail.getByTestId("projects__dispatch-reject").click();
-    });
-  }
-
-  noDispatches(): Locator {
-    return this.detail.getByTestId("projects__no-dispatches");
-  }
-
-  worktree(id: string): Locator {
-    return this.detail.locator(`[data-testid="projects__worktree"][data-worktree="${id}"]`);
-  }
-
-  group(branch: string): Locator {
-    return this.detail.locator(`[data-testid="projects__group"][data-branch="${branch}"]`);
-  }
-
-  groupMembers(branch: string): Locator {
-    return this.group(branch).getByTestId("projects__group-member");
-  }
-
-  /** The subscriptions that wake the open project's coordinator. */
+  /** The subscriptions that wake the coordinator. */
   subscriptions(): Locator {
     return this.detail.getByTestId("projects__subscription");
   }
 
-  /** The recent wake-ups the open project page lists. */
+  /** The recent wake-ups. */
   wakeups(): Locator {
     return this.detail.getByTestId("projects__wakeup");
   }
 
-  // ---- dashboard (step 6.6) ---------------------------------------------------------------
-
-  /** The agents the dashboard lists, the coordinator first. */
   dashboardAgents(): Locator {
     return this.detail.getByTestId("dashboard__agent");
   }
@@ -250,63 +383,101 @@ export class ProjectsPage {
     return this.detail.locator(`[data-testid="dashboard__member"][data-repo="${repo}"]`);
   }
 
-  dashboardApprovals(): Locator {
-    return this.detail.getByTestId("dashboard__approval");
-  }
-
-  async approveFromDashboard(): Promise<void> {
-    await test.step("Approve the dispatch from the dashboard", async () => {
-      await this.detail.getByTestId("dashboard__approval-approve").first().click();
-    });
-  }
-
   spend(part: "today" | "week" | "total" | "remaining" | "unattributed"): Locator {
     return this.detail.getByTestId(`dashboard__spend-${part}`);
   }
 
-  async setRetroSchedule(schedule: { enabled: boolean; cron: string }): Promise<void> {
-    await test.step(`Set the retro schedule to ${schedule.enabled ? schedule.cron : "off"}`, async () => {
-      const enabled = this.detail.getByTestId("projects__retro-enabled");
-      if (schedule.enabled) await enabled.check();
-      else await enabled.uncheck();
-      await this.detail.getByTestId("projects__retro-cron").fill(schedule.cron);
+  // The project's page in Settings, opened from its sidebar menu
+
+  /** Opens the shown project's settings from the "⋮" menu of its sidebar row. */
+  async openSettings(): Promise<void> {
+    await test.step("Open the project's settings", async () => {
+      const name = (await this.detail.getAttribute("data-project")) ?? "";
+      const row = this.item(name);
+      await row.hover();
+      await row.getByTestId("project-tasks__menu").click();
+      await this.page.getByTestId("project-tasks__menu-settings").click();
+      await expect(this.settings).toHaveAttribute("data-project", name);
+    });
+  }
+
+  async closeSettings(): Promise<void> {
+    await test.step("Close Settings", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.settings).toBeHidden();
+    });
+  }
+
+  async rename(title: string): Promise<void> {
+    await test.step(`Rename the project to ${title}`, async () => {
+      await this.settings.getByTestId("project-settings__title").fill(title);
       const saved = this.page.waitForResponse(
-        (r) => r.url().includes("projects.update") && r.request().method() === "POST",
+        (res) => res.url().includes("projects.update") && res.ok(),
       );
-      await this.detail.getByTestId("projects__retro-save").click();
+      await this.settings.getByTestId("project-settings__save").click();
       await saved;
     });
   }
 
-  async runRetro(): Promise<void> {
-    await test.step("Run a retro now", async () => {
-      await this.detail.getByTestId("projects__retro-run").click();
+  async deleteProject(): Promise<void> {
+    await test.step("Delete the project", async () => {
+      await this.settings.getByTestId("projects__remove").click();
+      await this.settings.getByTestId("projects__remove-confirm").click();
     });
   }
 
-  /** The proposed edit for `path` in the newest retro proposal. */
-  retroItem(path: string): Locator {
-    return this.detail.getByTestId("projects__retro-item").filter({ hasText: path }).first();
+  /** The select for one model lane: coordinator, worker or reviewer. */
+  lane(lane: "coordinator" | "worker" | "reviewer"): Locator {
+    return lane === "coordinator"
+      ? this.settings.getByTestId("projects__model-select")
+      : this.settings.getByTestId(`projects__lane-${lane}`);
   }
 
-  /** Resolves to the schedule state through `data-scheduled`, not the copy. */
-  retroScheduled(): Locator {
-    return this.detail.getByTestId("projects__retro-next");
+  autonomy(): Locator {
+    return this.settings.getByTestId("projects__autonomy");
   }
 
-  retroItems(): Locator {
-    return this.detail.getByTestId("projects__retro-item");
-  }
-
-  async acceptRetroItem(path: string): Promise<void> {
-    await test.step(`Accept the retro edit of ${path}`, async () => {
-      await this.retroItem(path).getByTestId("projects__retro-accept").click();
+  async chooseAutonomy(level: "observe" | "autonomous"): Promise<void> {
+    await test.step(`Set autonomy to ${level}`, async () => {
+      // The page saves everything with one Save; `savePolicy` sends it.
+      await this.autonomy().selectOption(level);
+      await expect(this.autonomy()).toHaveValue(level);
     });
   }
 
-  async rejectRetroItem(path: string): Promise<void> {
-    await test.step(`Reject the retro edit of ${path}`, async () => {
-      await this.retroItem(path).getByTestId("projects__retro-reject").click();
+  maxConcurrent(): Locator {
+    return this.settings.getByTestId("projects__max-concurrent");
+  }
+
+  budget(): Locator {
+    return this.settings.getByTestId("projects__budget");
+  }
+
+  isolationFloor(): Locator {
+    return this.settings.getByTestId("projects__isolation-floor");
+  }
+
+  async savePolicy(limits: {
+    maxConcurrent?: string;
+    budget?: string;
+    isolationFloor?: "worktree" | "container" | "vm";
+    workerModel?: string;
+    coordinatorModel?: string;
+  }): Promise<void> {
+    await test.step("Save the policy", async () => {
+      if (limits.maxConcurrent !== undefined) await this.maxConcurrent().fill(limits.maxConcurrent);
+      if (limits.budget !== undefined) await this.budget().fill(limits.budget);
+      if (limits.isolationFloor) await this.isolationFloor().selectOption(limits.isolationFloor);
+      if (limits.workerModel) await this.lane("worker").selectOption(limits.workerModel);
+      if (limits.coordinatorModel) {
+        await this.lane("coordinator").selectOption(limits.coordinatorModel);
+      }
+      // The page gives no other sign that the save finished.
+      const saved = this.page.waitForResponse(
+        (res) => res.url().includes("projects.update") && res.ok(),
+      );
+      await this.settings.getByTestId("project-settings__save").click();
+      await saved;
     });
   }
 }
