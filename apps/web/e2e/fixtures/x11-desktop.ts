@@ -50,11 +50,14 @@ async function waitForRfb(port: number, timeoutMs: number): Promise<void> {
   while (Date.now() < deadline) {
     const ok = await new Promise<boolean>((resolve) => {
       const socket = new Socket();
+      // A hard timer, not `socket.setTimeout`: an idle timeout is not sure to end a connect that
+      // a port forwarder accepted but never completed, and one such attempt hung the start.
+      const timer = setTimeout(() => done(false), 1000);
       const done = (value: boolean) => {
+        clearTimeout(timer);
         socket.destroy();
         resolve(value);
       };
-      socket.setTimeout(1000, () => done(false));
       socket.once("data", (data) => done(data.toString("latin1").startsWith("RFB ")));
       socket.once("error", () => done(false));
       socket.connect(port, "127.0.0.1");
@@ -154,6 +157,21 @@ async function startNative(): Promise<X11Desktop> {
   return { port, events: () => log, close };
 }
 
+/** Containers started and not removed yet, so a hook that timed out mid-start leaks none. */
+const startedContainers = new Set<string>();
+
+/** Removes every container this fixture started that is still running. */
+export function removeStartedContainers(): void {
+  for (const id of startedContainers) {
+    try {
+      execFileSync("docker", ["rm", "--force", id], { stdio: "ignore" });
+    } catch {
+      // Already gone.
+    }
+  }
+  startedContainers.clear();
+}
+
 async function startDocker(image: string): Promise<X11Desktop> {
   // x11vnc listens on the container's interfaces, and the port is published on the host's
   // loopback only.
@@ -177,7 +195,9 @@ async function startDocker(image: string): Promise<X11Desktop> {
     ].concat(["--entrypoint", "sh", image, "-c", script]),
     { encoding: "utf8" },
   ).trim();
+  startedContainers.add(id);
   const close = async () => {
+    startedContainers.delete(id);
     try {
       execFileSync("docker", ["rm", "--force", id], { stdio: "ignore" });
     } catch {

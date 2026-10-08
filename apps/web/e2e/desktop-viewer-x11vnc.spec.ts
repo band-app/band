@@ -14,7 +14,7 @@ import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { startX11Desktop, type X11Desktop } from "./fixtures/x11-desktop";
+import { removeStartedContainers, startX11Desktop, type X11Desktop } from "./fixtures/x11-desktop";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -111,6 +111,8 @@ test.afterAll(async () => {
   await worker?.kill();
   await server?.close();
   await desktop?.close();
+  // A start that never returned left no handle to close.
+  removeStartedContainers();
   if (tmpHome) cleanupTmpHome(tmpHome);
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
