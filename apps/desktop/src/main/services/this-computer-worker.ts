@@ -284,7 +284,7 @@ export class ThisComputerWorker {
     return new Promise<string>((resolve, reject) => {
       execFile(this.node, [script, ...args], { env, timeout: 60_000 }, (err, stdout, stderr) => {
         if (!err) return resolve(stdout);
-        let text = `${stderr}${stdout}`.trim().split("\n").slice(-3).join(" ") || err.message;
+        let text = `${stderr}${stdout}`.trim().split("\n").slice(-8).join(" ") || err.message;
         if (token) text = text.split(token).join("[redacted]");
         reject(new Error(text));
       });
