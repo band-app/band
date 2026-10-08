@@ -21,12 +21,18 @@ function readHeader(headers: HeaderBag | undefined, name: string): string | unde
  *
  * `admin` says whether the token that authenticated the call is an admin
  * device token (or auth is off, in dev). The MCP endpoint never sets it.
+ * `tokenId` is that token's id, so the UI can tell which device it is.
  */
-export function createContext(opts?: { req?: { headers: HeaderBag }; admin?: boolean }) {
+export function createContext(opts?: {
+  req?: { headers: HeaderBag };
+  admin?: boolean;
+  tokenId?: string;
+}) {
   return {
     chatId: readHeader(opts?.req?.headers, CHAT_ID_HEADER),
     worktreeId: readHeader(opts?.req?.headers, WORKTREE_ID_HEADER),
     admin: opts?.admin === true,
+    tokenId: opts?.tokenId,
   };
 }
 

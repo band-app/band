@@ -42,6 +42,7 @@ export type SettingsNavId =
   | "browser"
   | "repos"
   | "hosts"
+  | "devices"
   | "credentials"
   | "mcp"
   | "context"
@@ -858,6 +859,67 @@ export class SettingsPage {
   /** Closes the add-worker result panel. */
   async finishAddWorker(): Promise<void> {
     await this.dialog.getByRole("button", { name: "Done" }).click();
+  }
+
+  /** One row per device in the Devices section. */
+  deviceRows(): Locator {
+    return this.dialog.getByTestId("settings__device");
+  }
+
+  /** The row of the device with this label. */
+  deviceRow(label: string): Locator {
+    return this.deviceRows().filter({ hasText: label });
+  }
+
+  /** Opens Add device, fills the form and creates the device. */
+  async addDevice(label: string, opts: { admin?: boolean } = {}): Promise<void> {
+    await test.step(`Add device "${label}"`, async () => {
+      await this.dialog.getByTestId("settings__add-device").click();
+      const addDialog = this.page.getByTestId("settings__add-device-dialog");
+      await addDialog.getByLabel("Device label").fill(label);
+      if (opts.admin) await addDialog.getByRole("switch", { name: "Admin device" }).click();
+      await addDialog.getByRole("button", { name: "Create device" }).click();
+    });
+  }
+
+  /** The result panel of Add device: link, QR code and token. */
+  deviceResult(): Locator {
+    return this.page.getByTestId("settings__device-result");
+  }
+
+  deviceSignInUrl(): Locator {
+    return this.page.getByTestId("settings__device-url");
+  }
+
+  deviceToken(): Locator {
+    return this.page.getByTestId("settings__device-token");
+  }
+
+  /** The QR code; its `data-value` attribute holds the encoded text. */
+  deviceQr(): Locator {
+    return this.page.getByTestId("settings__device-qr");
+  }
+
+  /** Closes the Add device dialog with Done. */
+  async closeDeviceResult(): Promise<void> {
+    await this.page
+      .getByTestId("settings__add-device-dialog")
+      .getByRole("button", { name: "Done" })
+      .click();
+  }
+
+  /** Revoke button of a device row. */
+  revokeDeviceButton(label: string): Locator {
+    return this.dialog.getByRole("button", { name: `Revoke device ${label}` });
+  }
+
+  confirmRevokeDeviceButton(label: string): Locator {
+    return this.dialog.getByRole("button", { name: `Confirm revoke ${label}` });
+  }
+
+  /** The notice shown when the token is not an admin one. */
+  devicesDenied(): Locator {
+    return this.dialog.getByTestId("settings__devices-denied");
   }
 
   /** Clicks Revoke on the token row with this label. */

@@ -116,36 +116,28 @@ test("creates a worker bootstrap token and lists its offline host", async ({ pag
   expect(issued?.state).toBe("active");
 });
 
-test("revokes a device token, which then gets 401", async ({ page }) => {
-  const { token: deviceToken } = await trpcMutateData<{ token: string }>(
-    server.url,
-    TOKEN,
-    "tokens.createDevice",
-    { label: "e2e phone" },
-  );
-  const authed = () =>
-    fetch(`${server.url}/trpc/repos.list`, {
-      headers: { Authorization: `Bearer ${deviceToken}` },
-    });
-  expect((await authed()).status).toBe(200);
+test("revokes a worker bootstrap token, and keeps device tokens out of the list", async ({
+  page,
+}) => {
+  await trpcMutateData(server.url, TOKEN, "tokens.createDevice", { label: "e2e phone" });
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog("hosts");
+  await settingsPage.addWorker("e2e revoke worker", "");
+  const hostToken = await settingsPage.readBootstrapToken();
+  expect(hostToken).toMatch(/^bwb_/);
+  await settingsPage.finishAddWorker();
 
-  const row = settingsPage.tokenRow("e2e phone");
+  const row = settingsPage.tokenRow("e2e revoke worker");
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-state", "active");
-  await settingsPage.revokeToken("e2e phone");
+  await settingsPage.revokeToken("e2e revoke worker");
   await expect(row).toHaveAttribute("data-state", "revoked");
-  await expect(settingsPage.revokeTokenButton("e2e phone")).toBeDisabled();
-
-  expect((await authed()).status).toBe(401);
-  // The token the page itself uses is the shared one, which can't be revoked from here.
-  await expect(settingsPage.revokeTokenButton("Shared token")).toBeDisabled();
+  await expect(settingsPage.tokenRow("e2e phone")).toHaveCount(0);
 });
 
-test("a non-admin device token sees the hosts but is told tokens need an admin token", async ({
+test("a non-admin device token sees the hosts but is told worker tokens need an admin token", async ({
   page,
 }) => {
   const { token: plainToken } = await trpcMutateData<{ token: string }>(

@@ -76,9 +76,11 @@ export function HostsSettings() {
     queryKey: HOSTS_KEY,
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
   });
+  // Device tokens are managed in Settings > Devices; Hosts keeps the workers' tokens.
   const tokens = useQuery<TokenList>({
     queryKey: TOKENS_KEY,
     queryFn: async () => (await trpc.tokens.list.query()).tokens,
+    select: (all) => all.filter((t) => t.kind !== "device"),
   });
 
   const [adding, setAdding] = useState(false);
@@ -341,8 +343,8 @@ export function HostsSettings() {
 
       <SettingsRow
         variant="stacked"
-        label="Tokens"
-        description="Revoking a token signs out whatever uses it. The shared token in settings.json cannot be revoked here."
+        label="Worker tokens"
+        description="Revoking a worker token disconnects that worker. Device tokens are in Settings > Devices."
       >
         {tokens.isError ? (
           <p
@@ -350,7 +352,7 @@ export function HostsSettings() {
             className="text-xs text-muted-foreground"
             data-testid="settings__tokens-denied"
           >
-            Managing tokens needs an admin token.
+            Managing worker tokens needs an admin token.
           </p>
         ) : null}
         <ul className="divide-y divide-border rounded-md border border-border">
@@ -376,7 +378,7 @@ export function HostsSettings() {
                 size="sm"
                 className="shrink-0"
                 aria-label={`Revoke token ${token.label || token.id}`}
-                disabled={token.state !== "active" || token.id === "shared"}
+                disabled={token.state !== "active"}
                 onClick={() => void revoke(token)}
               >
                 Revoke
