@@ -67,56 +67,91 @@ async function waitForRfb(port: number, timeoutMs: number): Promise<void> {
 
 const XEV_ARGS = `-geometry ${DESKTOP_WIDTH}x${DESKTOP_HEIGHT}+0+0 -event keyboard -event button`;
 
-async function startNative(): Promise<X11Desktop> {
-  const display = `:${90 + Math.floor(Math.random() * 100)}`;
-  const port = await freePort();
-  const procs: ChildProcess[] = [];
-  let log = "";
+/** Resolves when the child has exited, or at once when it already has. */
+function exited(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => child.once("exit", () => resolve()));
+}
+
+/**
+ * Starts Xvfb on a display it picks itself (`-displayfd`), so it never shares one with another
+ * X server, and resolves with that display once the server accepts connections.
+ */
+function startXvfb(): Promise<{ xvfb: ChildProcess; display: string }> {
   const xvfb = spawn(
     "Xvfb",
-    [display, "-screen", "0", `${DESKTOP_WIDTH}x${DESKTOP_HEIGHT}x24`, "-nolisten", "tcp"],
-    { stdio: "ignore" },
+    [
+      "-displayfd",
+      "3",
+      "-screen",
+      "0",
+      `${DESKTOP_WIDTH}x${DESKTOP_HEIGHT}x24`,
+      "-nolisten",
+      "tcp",
+    ],
+    { stdio: ["ignore", "ignore", "ignore", "pipe"] },
   );
-  procs.push(xvfb);
-  const env = { ...process.env, DISPLAY: display };
-  for (let i = 0; ; i++) {
-    try {
-      execFileSync("xdpyinfo", ["-display", display], { stdio: "ignore" });
-      break;
-    } catch {
-      if (i > 100) throw new Error(`Xvfb did not start on ${display}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
-  const xev = spawn("xev", XEV_ARGS.split(" "), { env, stdio: ["ignore", "pipe", "ignore"] });
-  xev.stdout?.on("data", (chunk: Buffer) => {
-    log += chunk.toString("utf8");
+  return new Promise((resolve, reject) => {
+    let out = "";
+    const timer = setTimeout(() => {
+      xvfb.kill("SIGKILL");
+      reject(new Error("Xvfb did not report a display within 15s"));
+    }, 15_000);
+    xvfb.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`Xvfb exited with code ${code} before it reported a display`));
+    });
+    (xvfb.stdio[3] as NodeJS.ReadableStream).on("data", (chunk: Buffer) => {
+      out += chunk.toString("utf8");
+      const match = /^(\d+)\n/.exec(out);
+      if (match) {
+        clearTimeout(timer);
+        xvfb.removeAllListeners("exit");
+        resolve({ xvfb, display: `:${match[1]}` });
+      }
+    });
   });
-  procs.push(xev);
-  procs.push(
-    spawn(
-      "x11vnc",
-      [
-        "-display",
-        display,
-        "-localhost",
-        "-rfbport",
-        String(port),
-        "-nopw",
-        "-forever",
-        "-shared",
-      ].concat(["-noxdamage", "-quiet"]),
-      { env, stdio: "ignore" },
-    ),
-  );
-  await waitForRfb(port, 15_000);
-  return {
-    port,
-    events: () => log,
-    close: async () => {
-      for (const p of procs.reverse()) p.kill("SIGKILL");
-    },
+}
+
+async function startNative(): Promise<X11Desktop> {
+  const port = await freePort();
+  const procs: ChildProcess[] = [];
+  const close = async () => {
+    for (const p of procs.reverse()) p.kill("SIGKILL");
+    await Promise.all(procs.map(exited));
   };
+  let log = "";
+  try {
+    const { xvfb, display } = await startXvfb();
+    procs.push(xvfb);
+    const env = { ...process.env, DISPLAY: display };
+    const xev = spawn("xev", XEV_ARGS.split(" "), { env, stdio: ["ignore", "pipe", "ignore"] });
+    xev.stdout?.on("data", (chunk: Buffer) => {
+      log += chunk.toString("utf8");
+    });
+    procs.push(xev);
+    procs.push(
+      spawn(
+        "x11vnc",
+        [
+          "-display",
+          display,
+          "-localhost",
+          "-rfbport",
+          String(port),
+          "-nopw",
+          "-forever",
+          "-shared",
+        ].concat(["-noxdamage", "-quiet"]),
+        { env, stdio: "ignore" },
+      ),
+    );
+    await waitForRfb(port, 15_000);
+  } catch (err) {
+    await close();
+    throw err;
+  }
+  return { port, events: () => log, close };
 }
 
 async function startDocker(image: string): Promise<X11Desktop> {
@@ -174,7 +209,7 @@ async function startDocker(image: string): Promise<X11Desktop> {
 export async function startX11Desktop(): Promise<X11Desktop | null> {
   const image = process.env.BAND_E2E_DESKTOP_IMAGE;
   if (image) return startDocker(image);
-  if (onPath("Xvfb") && onPath("x11vnc") && onPath("xev") && onPath("xdpyinfo")) {
+  if (onPath("Xvfb") && onPath("x11vnc") && onPath("xev")) {
     return startNative();
   }
   return null;

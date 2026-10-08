@@ -203,9 +203,12 @@ export function DesktopViewer({
   }, []);
 
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void rootRef.current?.requestFullscreen();
+    // A refused request (no permission, an iframe without allowfullscreen) changes nothing.
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void rootRef.current?.requestFullscreen().catch(() => undefined);
   }, []);
+  // iPhone Safari has no element fullscreen.
+  const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled === true;
 
   const setMode = useCallback((enabled: boolean) => {
     const ws = wsRef.current;
@@ -285,17 +288,19 @@ export function DesktopViewer({
             <MousePointer2 />
             {control ? "Release" : "Take control"}
           </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-            aria-pressed={fullscreen}
-            data-testid="desktop-viewer__fullscreen"
-            onClick={toggleFullscreen}
-          >
-            {fullscreen ? <Minimize2 /> : <Maximize2 />}
-          </Button>
+          {canFullscreen && (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              aria-pressed={fullscreen}
+              data-testid="desktop-viewer__fullscreen"
+              onClick={toggleFullscreen}
+            >
+              {fullscreen ? <Minimize2 /> : <Maximize2 />}
+            </Button>
+          )}
           {onClose && (
             <Button
               type="button"
@@ -304,7 +309,8 @@ export function DesktopViewer({
               aria-label="Close desktop"
               data-testid="desktop-viewer__close"
               onClick={() => {
-                if (document.fullscreenElement) void document.exitFullscreen();
+                if (document.fullscreenElement)
+                  void document.exitFullscreen().catch(() => undefined);
                 onClose();
               }}
             >

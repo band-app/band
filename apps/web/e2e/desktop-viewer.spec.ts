@@ -5,8 +5,9 @@
  * A real hub, the real `band-worker` binary and a real browser run the whole path. The worker
  * reports the `desktop` capability because the test gives it a `DISPLAY` and an `x11vnc` on its
  * PATH, and `BAND_DESKTOP_VNC_PORT` points it at `fixtures/rfb-stub.ts`, a stand-in RFB server
- * that draws a gradient and records the keys it receives. The real Xvfb and x11vnc run in the CI
- * `docker` job (`apps/hub/tests/desktop-docker.test.ts`). Everything runs in temp dirs.
+ * that draws a gradient and records the keys it receives. Input against a real Xvfb and x11vnc
+ * is `desktop-viewer-x11vnc.spec.ts`, and the real desktop image runs in the CI `docker` job
+ * (`apps/hub/tests/desktop-docker.test.ts`). Everything runs in temp dirs.
  */
 
 import { execFileSync } from "node:child_process";
@@ -167,9 +168,9 @@ test("a desktop smaller than the area is drawn 1:1, not scaled up, and takes no 
 }) => {
   const viewer = await openFromHosts(page);
   await viewer.expectFramebuffer();
-  const canvas = await viewer.canvasBox();
-  expect(canvas.width).toBeCloseTo(64, 0);
-  expect(canvas.height).toBeCloseTo(48, 0);
+  // Polled, because the dialog's open animation scales the box for its first 200 ms.
+  await expect.poll(async () => (await viewer.canvasBox()).width).toBeCloseTo(64, 0);
+  await expect.poll(async () => (await viewer.canvasBox()).height).toBeCloseTo(48, 0);
   expect(await viewer.canvasHasFocus()).toBe(false);
 });
 
@@ -223,9 +224,13 @@ test.describe("a 1600x1000 desktop on a 1440x900 window", () => {
     await viewer.expectFramebuffer();
     await expect(viewer.resolution).toHaveText("1600x1000");
 
-    const dialog = await viewer.dialogBox();
-    expect(dialog.width).toBeGreaterThanOrEqual(1440 * 0.9);
-    expect(dialog.height).toBeGreaterThanOrEqual(900 * 0.9);
+    // Polled, because the dialog's open animation scales it down for its first 200 ms.
+    await expect
+      .poll(async () => (await viewer.dialogBox()).width)
+      .toBeGreaterThanOrEqual(1440 * 0.9);
+    await expect
+      .poll(async () => (await viewer.dialogBox()).height)
+      .toBeGreaterThanOrEqual(900 * 0.9);
 
     await expect
       .poll(async () => {
@@ -271,6 +276,7 @@ test.describe("a 1600x1000 desktop on a 1440x900 window", () => {
   }) => {
     const viewer = await openFromHosts(page);
     await viewer.expectFramebuffer();
+    await viewer.expectFitSettled();
     const windowed = await viewer.canvasBox();
 
     await viewer.enterFullscreen();
@@ -286,6 +292,18 @@ test.describe("a 1600x1000 desktop on a 1440x900 window", () => {
 
     await viewer.pressEscape();
     await expect(viewer.dialog).toBeHidden();
+  });
+
+  test("Close closes the viewer, and leaves fullscreen when it is on", async ({ page }) => {
+    const windowed = await openFromHosts(page);
+    await windowed.expectFramebuffer();
+    await windowed.close();
+
+    const viewer = await openFromHosts(page);
+    await viewer.expectFramebuffer();
+    await viewer.enterFullscreen();
+    await viewer.close();
+    await expect.poll(() => viewer.isAnythingFullscreen()).toBe(false);
   });
 });
 

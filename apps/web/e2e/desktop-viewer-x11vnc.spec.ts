@@ -129,11 +129,17 @@ test("clicks and keys reach the real display only after Take control", async ({
   await viewer.expectFramebuffer();
   await expect(viewer.resolution).toHaveText("1280x800");
 
-  const buttonPresses = () => (x11.events().match(/ButtonPress event/g) ?? []).length;
+  // xev prints one block per event, separated by a blank line.
+  const eventBlocks = () => x11.events().split(/\n\s*\n/);
+  const buttonPresses = () =>
+    eventBlocks().filter((block) => block.trimStart().startsWith("ButtonPress event")).length;
   const keyPresses = (keysym: string) =>
-    (x11.events().match(new RegExp(`KeyPress event[^]*?keysym ${keysym},`, "g")) ?? []).length;
+    eventBlocks().filter(
+      (block) =>
+        block.trimStart().startsWith("KeyPress event") && block.includes(`keysym ${keysym},`),
+    ).length;
 
-  // View only: the hub drops the click and the key.
+  // View only: noVNC sends no click or key. The hub's own dropping is in desktop-host.test.ts.
   await viewer.clickDesktop();
   await viewer.pressKey("q");
 

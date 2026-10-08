@@ -106,6 +106,13 @@ export class DesktopViewerPage {
     });
   }
 
+  async close(): Promise<void> {
+    await test.step("Close the viewer", async () => {
+      await this.closeButton.click();
+      await expect(this.dialog).toBeHidden();
+    });
+  }
+
   async pressEscape(): Promise<void> {
     await this.page.keyboard.press("Escape");
   }
@@ -113,6 +120,11 @@ export class DesktopViewerPage {
   /** Whether the document's fullscreen element is the viewer. */
   isViewerFullscreen(): Promise<boolean> {
     return this.root.evaluate((el) => document.fullscreenElement === el);
+  }
+
+  /** Whether any element is in fullscreen. Works after the viewer has unmounted. */
+  isAnythingFullscreen(): Promise<boolean> {
+    return this.page.evaluate(() => document.fullscreenElement !== null);
   }
 
   /** Whether the canvas holds keyboard focus. */
@@ -132,6 +144,20 @@ export class DesktopViewerPage {
     const box = await this.screen.boundingBox();
     if (!box) throw new Error("the desktop area is not on screen");
     return box;
+  }
+
+  /**
+   * Waits until fit mode has scaled the desktop to touch the area on one axis, so the open
+   * animation no longer shrinks what a test measures.
+   */
+  async expectFitSettled(): Promise<void> {
+    await expect
+      .poll(async () => {
+        const area = await this.screenBox();
+        const canvas = await this.canvasBox();
+        return Math.min(Math.abs(canvas.width - area.width), Math.abs(canvas.height - area.height));
+      })
+      .toBeLessThanOrEqual(1);
   }
 
   async dialogBox(): Promise<{ x: number; y: number; width: number; height: number }> {

@@ -31,10 +31,18 @@ export function DesktopViewerDialog() {
           // for the remote desktop.
           if (document.fullscreenElement) {
             event.preventDefault();
-            void document.exitFullscreen();
+            void document.exitFullscreen().catch(() => undefined);
             return;
           }
-          if (contentRef.current?.querySelector('[data-control="true"]')) event.preventDefault();
+          // Only while the desktop has the keyboard: with focus on a header button, Escape closes.
+          const active = document.activeElement;
+          if (
+            active instanceof HTMLCanvasElement &&
+            active.closest('[data-control="true"]') &&
+            contentRef.current?.contains(active)
+          ) {
+            event.preventDefault();
+          }
         }}
       >
         <DialogTitle className="sr-only">Desktop of {hostName}</DialogTitle>

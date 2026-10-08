@@ -337,4 +337,11 @@ describe("view-only and control", () => {
     const { code } = await v.closed;
     expect(code).toBe(1008);
   });
+
+  it("closes a viewer whose ClientCutText says it is larger than the hub holds", async () => {
+    const v = await session();
+    v.ws.send(Buffer.from("060000007fffffff", "hex"));
+    const { code } = await v.closed;
+    expect(code).toBe(1008);
+  });
 });
