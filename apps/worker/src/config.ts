@@ -51,6 +51,7 @@ Run as a service (systemd user unit on Linux, launchd agent on macOS):
 
   band-worker install-service --hub <url> --token <bootstrap token> [--root <dir> --name <name> --labels k=v]
   band-worker uninstall-service
+  band-worker doctor   (prints which coding agents, gh and git are installed and logged in, with a fix command per gap)
   band-worker status
 `;
 

@@ -79,7 +79,7 @@ The desktop app has its own copy of the UI, so it needs neither setting.
 
 ## Worktrees run on workers
 
-The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The host picker lists only workers, and `worktrees.create` for the `local` host is refused.
+The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a host in Settings > Hosts or in any host picker, and `worktrees.create` for the `local` host is refused. A project's coordinator goes on a worker that has its agent installed and logged in (see [Where a coordinator runs](install.md#where-a-coordinator-runs)).
 
 A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run worktrees in the container again.
 

@@ -126,9 +126,9 @@ afterAll(async () => {
 });
 
 describe("BAND_LOCAL_HOST=off", () => {
-  it("marks the local host as not usable and the worker as usable", async () => {
+  it("leaves the local host out of the list and marks the worker as usable", async () => {
     const { hosts } = await query<{ hosts: HostView[] }>("hosts.list");
-    expect(hosts.find((h) => h.id === "local")?.usable).toBe(false);
+    expect(hosts.find((h) => h.id === "local")).toBeUndefined();
     expect(hosts.find((h) => h.id === hostId)?.usable).toBe(true);
   });
 

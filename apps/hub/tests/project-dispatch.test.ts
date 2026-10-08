@@ -36,6 +36,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { stubClaudeDir, stubClaudeEnv } from "./helpers/stub-agent-cli";
 import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
@@ -235,6 +236,8 @@ beforeAll(async () => {
         ...process.env,
         HOME: workerHome,
         BAND_HOME: join(workerHome, ".band"),
+        // The worker reports claude installed and logged in, which placement requires for the agent.
+        ...stubClaudeEnv(stubClaudeDir()),
         BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
         BAND_TEST_ACP_STATE: join(workerHome, "acp-state"),
         BAND_TEST_ACP_LOG: workerStubLog,

@@ -83,6 +83,13 @@
  *                                           `auth` is "none") and append
  *                                           `{ name, status, body }` to the
  *                                           file in BAND_TEST_ACP_HTTP_LOG.
+ *   { "mcpCall": { name, server, tool, args?, method? } }
+ *                                           call a tool (or, with `method`
+ *                                           "tools/list", list the tools) through the
+ *                                           `mcpServers` entry Band passed, with the
+ *                                           URL and headers it gave, and append one
+ *                                           `{ name, status, body }` line to the
+ *                                           HTTP log.
  *   { "asyncTask": { ...update } }          an AIR `async_task_*` update
  *                                           (`sessionUpdate` defaults to
  *                                           `async_task_spawned`), sent only
@@ -308,7 +315,7 @@ async function runSteps(cx, sessionId, steps, signal, record) {
       // Calls a tool through the `mcpServers` entry Band passed for the
       // session, with exactly the URL and headers it gave. One line goes to
       // the HTTP log: { name, status, body }.
-      const { name, server, tool, args = {} } = step.mcpCall;
+      const { name, server, tool, args = {}, method = "tools/call" } = step.mcpCall;
       const entry = (mcpBySession.get(sessionId) ?? []).find((e) => e.name === server);
       let line;
       if (!entry) {
@@ -323,7 +330,12 @@ async function runSteps(cx, sessionId, steps, signal, record) {
           const res = await fetch(entry.url, {
             method: "POST",
             headers,
-            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method,
+              params: method === "tools/call" ? { name: tool, arguments: args } : {},
+            }),
           });
           line = { name, status: res.status, body: (await res.text()).slice(0, 20000) };
         } catch (err) {

@@ -1614,6 +1614,8 @@ async function main() {
         .finally(() => {
           // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
           projectSubscriptionService.start();
+          // A coordinator waiting for a worker starts when one that can run its agent connects.
+          projectCoordinatorService.start();
           // Each project's folder on its coordinator host, so its view opens on known files.
           void projectFolderService.warmAll();
           // Keeps every host's copy of each project folder in step with the hub, in the background.

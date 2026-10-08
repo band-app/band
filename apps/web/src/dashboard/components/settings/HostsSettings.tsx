@@ -14,6 +14,45 @@ import {
   workerInstallCommand,
 } from "./worker-install-commands";
 
+/** What a host reported per agent (installed, version, logged in), else the configured list from its hello. */
+function agentSummary(host: HostList[number]): string {
+  const report = host.report;
+  if (!report) return host.agents.length > 0 ? host.agents.join(", ") : "none found";
+  if (report.agents.length === 0) return "none found";
+  return report.agents
+    .map((a) => {
+      if (!a.installed) return `${a.type} not installed`;
+      const login =
+        a.loggedIn === false ? "not logged in" : a.loggedIn ? "logged in" : "login unknown";
+      return `${a.type}${a.version ? ` ${a.version}` : ""} ${login}`;
+    })
+    .join(", ");
+}
+
+const CAPABILITY_LABELS: Record<string, string> = {
+  desktop: "Desktop",
+  git: "Git",
+  gh: "GitHub CLI",
+  pty: "Terminals",
+  acp: "Agents",
+  lsp: "Language servers",
+  search: "Search",
+  fsWatch: "File watching",
+};
+
+/** The capabilities a host reported, as words. "Desktop" means it has a display and a VNC server. */
+function capabilitySummary(host: HostList[number]): string {
+  if (host.capabilities.length === 0) return "none reported";
+  return host.capabilities.map((c) => CAPABILITY_LABELS[c] ?? c).join(", ");
+}
+
+/** The operating system and architecture a host reported, or "unknown" before its first connect. */
+function osOf(host: HostList[number]): string {
+  const info = host.info as { os?: unknown; arch?: unknown } | null;
+  if (typeof info?.os !== "string") return "unknown";
+  return typeof info.arch === "string" ? `${info.os} ${info.arch}` : info.os;
+}
+
 type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
 type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
 type TokenView = TokenList[number];
@@ -165,7 +204,7 @@ export function HostsSettings() {
       <SettingsRow
         variant="stacked"
         label="Hosts"
-        description="Machines that run worktrees. Local is this hub's own machine. Workers connect to the hub and appear here."
+        description="Machines that run worktrees. Workers connect to the hub and appear here. On a hub started with BAND_LOCAL_HOST=off the hub itself runs no worktrees and is not listed."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {(hosts.data ?? []).map((host) => (
@@ -186,15 +225,24 @@ export function HostsSettings() {
                   {" · "}
                   Last seen {formatTime(host.lastSeenAt)}
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  <span data-testid="settings__host-agents">
-                    Agents: {host.agents.length > 0 ? host.agents.join(", ") : "none found"}
-                  </span>
-                  {" · "}
-                  <span data-testid="settings__host-roots">
-                    Roots: {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
-                  </span>
-                </div>
+                {host.usable ? (
+                  <div className="text-xs text-muted-foreground">
+                    <span data-testid="settings__host-agents">Agents: {agentSummary(host)}</span>
+                    {" · "}
+                    <span data-testid="settings__host-roots">
+                      Roots: {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
+                    </span>
+                  </div>
+                ) : null}
+                {host.usable ? (
+                  <div className="text-xs text-muted-foreground">
+                    <span data-testid="settings__host-os">OS: {osOf(host)}</span>
+                    {" · "}
+                    <span data-testid="settings__host-capabilities">
+                      Capabilities: {capabilitySummary(host)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">

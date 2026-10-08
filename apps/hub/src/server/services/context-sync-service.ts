@@ -18,6 +18,7 @@ import { createLogger } from "@band-app/logger";
 import { hostRegistry } from "../infra/host/registry";
 import { projectIdOfScope } from "../infra/project-scope";
 import { contextService } from "./context-service";
+import { projectFolderService } from "./project-folder-service";
 import { projectService } from "./project-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
@@ -43,8 +44,10 @@ export class ContextSyncService {
     const project = projectId ? projectService.find(projectId) : undefined;
     const worktree = projectId ? undefined : worktreeService.resolve(scopeId);
     if (projectId ? !project : !worktree) return null;
+    const projectHostId = project ? projectFolderService.hostIdOf(project) : null;
+    if (project && !projectHostId) return null;
     const host = project
-      ? hostRegistry.hostById(project.coordinatorHostId ?? LOCAL_HOST_ID)
+      ? hostRegistry.hostById(projectHostId ?? LOCAL_HOST_ID)
       : (worktree as NonNullable<typeof worktree>).host;
     const labels =
       host.id === LOCAL_HOST_ID

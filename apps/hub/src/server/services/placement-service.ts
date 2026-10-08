@@ -31,6 +31,7 @@ import type { Placement } from "./_utils/placement-input";
 import { parseRunners } from "./_utils/runner-config";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { settingsService } from "./settings-service";
+import { loadSettings } from "./state";
 import { tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { type WorktreeCreateInput, worktreeService } from "./worktree-service";
@@ -82,6 +83,8 @@ export function wakeOf(row: HostRequestRow): WakeInput | null {
 /** What placement knows about a host. */
 interface Candidate {
   id: string;
+  /** Agent types the host reported installed and logged in. */
+  agents: string[];
   labels: string[];
   facts: Record<string, string>;
 }
@@ -173,6 +176,7 @@ export class PlacementService {
       const tools = stringRecord(info?.tools ?? stored.tools);
       out.push({
         id: row.id,
+        agents: row.agents,
         labels: [
           ...new Set([...stringList(row.labels), ...stringList(info?.labels ?? stored.labels)]),
         ],
@@ -198,12 +202,15 @@ export class PlacementService {
    * a host, and a `worktree` worktree never lands on a host that was started
    * for one of those.
    */
-  async place(placement: Placement, onlyHosts?: string[]): Promise<string | null> {
+  async place(placement: Placement, onlyHosts?: string[], agent?: string): Promise<string | null> {
     if (requestedIsolation(placement.environment ?? null) !== "worktree") return null;
     const fits = (await this.candidates()).filter(
       (c) =>
         !isExclusiveHost(c.labels) &&
         (onlyHosts === undefined || onlyHosts.includes(c.id)) &&
+        // A worker must report the agent installed and logged in. The hub's own machine is
+        // described live elsewhere, so it is not held to a report here.
+        (agent === undefined || c.id === LOCAL_HOST_ID || c.agents.includes(agent)) &&
         matches(c, placement),
     );
     if (fits.length === 0) return null;
@@ -234,7 +241,11 @@ export class PlacementService {
     // A repo with no remote URL has nothing a new worker could clone, so it only runs on a host
     // that already holds it, and waiting for a runner would never help.
     const holders = this.holdersOfRemotelessRepo(input.repo);
-    const hostId = await this.place(placement, holders ?? undefined);
+    const agent = input.codingAgentId
+      ? (loadSettings().codingAgents?.find((a) => a.id === input.codingAgentId)?.type ??
+        input.codingAgentId)
+      : undefined;
+    const hostId = await this.place(placement, holders ?? undefined, agent);
     if (hostId) return { kind: "host", hostId };
     if (holders) {
       throw new Error(

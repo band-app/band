@@ -14,6 +14,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -253,7 +254,7 @@ describe("the project folder opens as a worktree (V1)", () => {
     });
     await refused("mutate", "worktree.createFile", { path: "docs/.git/config", content: "x" });
     expect(readFileSync(join(hubFolder(), ".git", "config"), "utf8")).toBe(configBefore);
-    expect(readFileSync(join(hubFolder(), "repos", "api", ".git"), "utf8")).toMatch(/^gitdir: /);
+    expect(statSync(join(hubFolder(), "repos", "api", ".git")).isDirectory()).toBe(true);
     const checkout = await listFiles("repos/api");
     expect(checkout.entries.map((e) => e.name)).toContain("README.md");
     expect(checkout.entries.map((e) => e.name)).not.toContain(".git");

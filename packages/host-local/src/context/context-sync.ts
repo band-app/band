@@ -52,9 +52,8 @@ const NETWORK_TIMEOUT_MS = 30_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 const MAX_PUSH_ATTEMPTS = 5;
 const APPEND_ONLY = ["learnings/**", "inbox/**"];
-// The repo checkouts and old task folders are code, not context. AGENTS.md and CLAUDE.md are the
-// instructions Band writes into each host's copy from the project's settings, so they never sync.
-const LOCAL_ONLY = ["/tasks/", "/repos/", "/AGENTS.md", "/CLAUDE.md"];
+// The repo checkouts and old task folders are code, not context.
+const LOCAL_ONLY = ["/tasks/", "/repos/"];
 
 export interface GitOut {
   stdout: string;
@@ -463,6 +462,34 @@ export class ContextSync {
     await writeFile(join(dir, ".git", "info", "exclude"), `${LOCAL_ONLY.join("\n")}\n`);
     await this.git(dir, ["config", "rebase.autoStash", "false"]);
     await this.git(dir, ["config", "commit.gpgsign", "false"]);
+    await this.dropLegacyInstructions(dir);
+  }
+
+  /**
+   * Older Band wrote a generated AGENTS.md and CLAUDE.md into each host's copy and kept them out of
+   * the context repo. They are synced files now, so an untracked leftover would conflict with the
+   * hub's seeded file or be pushed as the user's own. Remove an untracked one that still carries
+   * Band's generated header.
+   */
+  private async dropLegacyInstructions(dir: string): Promise<void> {
+    const markers: Record<string, string> = {
+      "AGENTS.md": "<!-- Written by Band from the project's settings",
+      "CLAUDE.md": "<!-- Written by Band. Claude Code reads this file",
+    };
+    for (const [file, marker] of Object.entries(markers)) {
+      try {
+        const text = await readFile(join(dir, file), "utf8");
+        if (!text.startsWith(marker)) continue;
+        const tracked = await run(["ls-files", "--error-unmatch", "--", file], {
+          cwd: dir,
+          timeoutMs: LOCAL_TIMEOUT_MS,
+        });
+        if (tracked.code === 0) continue;
+        await rm(join(dir, file), { force: true });
+      } catch {
+        // No such file, or unreadable: nothing to drop.
+      }
+    }
   }
 
   private async branch(dir: string): Promise<string> {

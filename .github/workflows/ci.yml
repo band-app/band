@@ -636,7 +636,9 @@ jobs:
           curl -s -H "$auth" "$base/trpc/repos.list" | grep -q '"result"'
           # Local worktrees are off by default, so there is no sample repo.
           if curl -s -H "$auth" "$base/trpc/repos.list" | grep -q sample; then echo 'sample repo registered'; exit 1; fi
-          curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"usable":false'
+          # The hub's own host takes no worktrees here, so the list leaves it out.
+          curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"result"'
+          if curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"id":"local"'; then echo 'local host listed'; exit 1; fi
 
       - name: Compose keeps data across a recreate
         working-directory: deploy/compose

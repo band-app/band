@@ -1,4 +1,5 @@
 import type { trpc } from "../../../lib/trpc-client";
+import { useHostNames } from "../../hooks/use-host-names";
 
 export type ProjectList = Awaited<ReturnType<typeof trpc.projects.list.query>>;
 export type Project = ProjectList["projects"][number];
@@ -24,6 +25,7 @@ export function RepoLocation({
 }: {
   repo: { remoteUrl?: string; clones?: Array<{ hostId: string }> } | undefined;
 }) {
+  const hostName = useHostNames();
   if (!repo) return null;
   if (repo.remoteUrl) {
     return (
@@ -38,7 +40,8 @@ export function RepoLocation({
   const host = repo.clones?.[0]?.hostId;
   return (
     <span className="block text-xs text-muted-foreground" data-testid="projects__repo-local-only">
-      No remote. Lives on {host ?? "one host"} only, so worktrees can run only there.
+      No remote. Lives on {host ? hostName(host) : "one host"} only, so worktrees can run only
+      there.
     </span>
   );
 }

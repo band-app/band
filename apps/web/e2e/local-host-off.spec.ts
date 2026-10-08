@@ -5,7 +5,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -18,6 +18,8 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { ProjectsPage } from "./pages/ProjectsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -51,6 +53,18 @@ async function trpc<T>(url: string, procedure: string, body?: unknown): Promise<
   return ((await res.json()) as { result: { data: T } }).result.data;
 }
 
+/** A stub `claude` CLI that reports a version and a login, found through BAND_AGENT_BIN_DIRS. */
+function stubClaudeDir(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "band-e2e-claude-")));
+  const file = join(dir, "claude");
+  writeFileSync(
+    file,
+    '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "claude 7.7.7"; exit 0; fi\nexit 0\n',
+  );
+  chmodSync(file, 0o755);
+  return dir;
+}
+
 async function bootHub(localHost: "on" | "off", workerCount: number): Promise<Hub> {
   const home = createTmpHome();
   seedState(home, {
@@ -70,6 +84,8 @@ async function bootHub(localHost: "on" | "off", workerCount: number): Promise<Hu
   const server = await startServer({ tmpHome: home, env: { BAND_LOCAL_HOST: localHost } });
   const hub: Hub = { server, home, workers: [], workerIds: [], dirs: [] };
   hubs.push(hub);
+  const claudeDir = stubClaudeDir();
+  hub.dirs.push(claudeDir);
   for (let i = 0; i < workerCount; i++) {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "band-e2e-worker-")));
     hub.dirs.push(dir);
@@ -93,7 +109,16 @@ async function bootHub(localHost: "on" | "off", workerCount: number): Promise<Hu
           "--state-dir",
           join(dir, "state"),
         ],
-        { env: { ...process.env, HOME: dir, BAND_HOME: join(dir, ".band") }, stdio: "ignore" },
+        {
+          env: {
+            ...process.env,
+            HOME: dir,
+            BAND_HOME: join(dir, ".band"),
+            BAND_AGENT_BIN_DIRS: claudeDir,
+            ANTHROPIC_API_KEY: "",
+          },
+          stdio: "ignore",
+        },
       ),
     );
   }
@@ -143,4 +168,41 @@ test("the host picker does not offer Local when local worktrees are off", async 
   await worktreePage.waitForReady();
   await worktreePage.openNewWorktreeDialog(REPO);
   await expect.poll(() => worktreePage.newWorktreeHostOptionValues()).toEqual(hub.workerIds);
+});
+
+test("Settings > Hosts leaves Local out and shows what each worker reports (S5)", async ({
+  page,
+}) => {
+  const hub = await bootHub("off", 1);
+  resetClientState(hub.home);
+  const settings = new SettingsPage(page, hub.server.url, TOKEN);
+  await settings.goto();
+  await settings.openDialog("hosts");
+  const [worker] = hub.workerIds;
+  await settings.expectRowVisible(settings.hostRow(worker));
+  await expect(settings.hostRow("local")).toHaveCount(0);
+  // The agents are the ones the worker found and checked, not the configured list.
+  await expect(settings.hostAgents(worker)).toContainText("claude-code 7.7.7");
+  await expect(settings.hostRow(worker).getByTestId("settings__host-os")).toContainText(
+    process.platform,
+  );
+  await expect(settings.hostRow(worker).getByTestId("settings__host-capabilities")).toContainText(
+    "Git",
+  );
+});
+
+test("the project page names the coordinator's host, not its id (S6)", async ({ page }) => {
+  const hub = await bootHub("off", 1);
+  resetClientState(hub.home);
+  const [workerId] = hub.workerIds;
+  await trpc(hub.server.url, "projects.create", {
+    name: "named-host",
+    repos: [{ repo: REPO }],
+    coordinatorHostId: workerId,
+  });
+  const projects = new ProjectsPage(page, hub.server.url, TOKEN);
+  await projects.gotoProject("named-host");
+  const meta = await projects.coordinatorMeta();
+  await expect(meta).toContainText("on Worker 1");
+  await expect(meta).not.toContainText(workerId);
 });
