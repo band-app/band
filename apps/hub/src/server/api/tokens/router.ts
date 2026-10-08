@@ -17,11 +17,17 @@ import {
   MAX_LIST_LIMIT,
   tokenService,
 } from "../../services/token-service";
-import { adminProcedure, t } from "../trpc";
+import { adminProcedure, publicProcedure, t } from "../trpc";
 
 const label = z.string().trim().min(1).max(100);
 
 export const tokensRouter = t.router({
+  /** Which token this request uses. Any device token may ask; it returns no secret. */
+  current: publicProcedure.query(({ ctx }) => ({
+    tokenId: ctx.tokenId ?? null,
+    admin: ctx.admin,
+  })),
+
   list: adminProcedure
     .input(
       z

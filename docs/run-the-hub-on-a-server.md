@@ -17,7 +17,7 @@ Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a re
 - With `BAND_ADMIN_TOKEN` empty, the first run creates an admin token and prints it once in the log. Later starts print nothing. If you lose it, set `BAND_ADMIN_TOKEN` in `.env` and run `docker compose up -d`. The hub replaces the stored token with that value.
 - With `BAND_ADMIN_TOKEN` set, the hub uses that value and never prints it.
 
-The admin token can create more tokens (Settings > Hosts, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device.
+The admin token can create more tokens (Settings > Devices, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device. Worker tokens are in Settings > Hosts.
 
 ### Check it works
 
@@ -56,6 +56,17 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
   export BAND_TOKEN=<token>
   band repos list
   ```
+
+### Connect a phone
+
+1. Open Band on a machine that already has an admin token, from the hub's public address (`https://band.example.com/`, not `localhost`).
+2. Go to Settings > Devices and choose Add device. Keep the label `Phone` or change it. Leave Admin device off unless the phone should manage tokens too.
+3. Scan the QR code with the phone, or copy the sign-in link. The link is `<hub URL>/?token=<token>` and signs the phone in on first open.
+4. Choose Done. The dialog shows the link, QR code and token once, because the hub keeps only a hash of the token.
+
+Settings > Devices lists each device with when it was added and last used. Revoke signs a device out at once. Revoking the token you are signed in with asks for confirmation first.
+
+If you lost the admin token and cannot reach Settings, set `BAND_ADMIN_TOKEN` in `.env` to a new value and run `docker compose up -d`. The hub replaces the stored token with that value. Then sign in with it and add the device.
 
 ## Serve the UI from somewhere else
 

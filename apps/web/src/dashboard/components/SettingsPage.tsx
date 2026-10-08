@@ -39,6 +39,7 @@ import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { ContextSettings } from "./settings/ContextSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
+import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
@@ -79,6 +80,7 @@ type SettingsSectionId =
   | "hub"
   | "browser"
   | "hosts"
+  | "devices"
   | "projects"
   | "repos"
   | "credentials"
@@ -100,6 +102,8 @@ interface SettingsSectionMeta {
   group: string;
   /** Only shown in the desktop app. */
   desktopOnly?: boolean;
+  /** Only shown to an admin device token. */
+  adminOnly?: boolean;
 }
 
 /** The pages of the full-screen settings, in nav order. Each shows one section. */
@@ -175,8 +179,15 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "hosts",
     title: "Hosts",
-    subtitle: "Machines that run worktrees, and the tokens that reach the hub.",
+    subtitle: "Machines that run worktrees, and the tokens their workers use.",
     group: "Infrastructure",
+  },
+  {
+    id: "devices",
+    title: "Devices",
+    subtitle: "Phones, tablets and browsers signed in to this hub.",
+    group: "Infrastructure",
+    adminOnly: true,
   },
   {
     id: "repos",
@@ -276,8 +287,9 @@ export function SettingsPage({
   }, [open, initialSection, initialProject]);
   const projects = useSettingsProjects();
   const [navQuery, setNavQuery] = useState("");
+  const isAdmin = useIsAdmin();
   const availableSections = SETTINGS_SECTIONS.filter(
-    (section) => !section.desktopOnly || isDesktop,
+    (section) => (!section.desktopOnly || isDesktop) && (!section.adminOnly || isAdmin),
   );
   const visibleGroups = availableSections
     .filter((section) => section.title.toLowerCase().includes(navQuery.trim().toLowerCase()))
@@ -890,6 +902,13 @@ export function SettingsPage({
                   {active === "hosts" ? (
                     <SettingsSection title="Hosts">
                       <HostsSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Devices ────────────────────────────────────── */}
+                  {active === "devices" && isAdmin ? (
+                    <SettingsSection title="Devices">
+                      <DevicesSettings />
                     </SettingsSection>
                   ) : null}
 

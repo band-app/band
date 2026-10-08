@@ -247,6 +247,21 @@ describe("admin tokens", () => {
     expect(labels).not.toContain("rogue");
   });
 
+  it("tokens.current tells each device token its own id and admin flag, without a secret", async () => {
+    const plain = await createDevice("who-plain");
+    const admin = await createDevice("who-admin", true);
+    for (const [device, isAdmin] of [
+      [plain, false],
+      [admin, true],
+    ] as const) {
+      const res = await trpcQuery(server.url, "tokens.current", undefined, device.token);
+      expect(res.status).toBe(200);
+      const data = await trpcData<{ tokenId: string; admin: boolean }>(res);
+      expect(data).toEqual({ tokenId: device.view.id, admin: isAdmin });
+      expect(JSON.stringify(data)).not.toContain(device.token);
+    }
+  });
+
   it("lets a non-admin device token use the rest of the API, including hosts.list", async () => {
     const { token } = await createDevice("reader");
     expect((await trpcQuery(server.url, "repos.list", undefined, token)).status).toBe(200);

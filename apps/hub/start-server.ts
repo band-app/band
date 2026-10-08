@@ -309,15 +309,15 @@ function allowedOrigins(): string[] {
 const handleCors = createCorsMiddleware(allowedOrigins);
 
 /**
- * Whether the device token that authenticated this request is an admin
- * token. With auth off (dev) every caller is an admin.
+ * The device token that authenticated this request: its id and whether it is
+ * an admin token. With auth off (dev) every caller is an admin and has no id.
  */
-function requestIsAdmin(req: IncomingMessage): boolean {
-  if (!expectedToken) return true;
+function requestDevice(req: IncomingMessage): { admin: boolean; tokenId: string | undefined } {
+  if (!expectedToken) return { admin: true, tokenId: undefined };
   const token = authenticatedCredential(req, (c) => tokenService.resolveDevice(c), {
     allowCookie: req.headers.origin !== "null",
   });
-  return token?.admin === true;
+  return { admin: token?.admin === true, tokenId: token?.id };
 }
 
 // `sirv` calls `totalist` (which calls `readdirSync`) eagerly at construction
@@ -1147,7 +1147,7 @@ async function main() {
         req: request,
         router: appRouter,
         createContext: ({ req: webRequest }) =>
-          createContext({ req: webRequest, admin: requestIsAdmin(req) }),
+          createContext({ req: webRequest, ...requestDevice(req) }),
       });
       pipeWebResponseToNodeRes(response, res);
       return;
@@ -1268,7 +1268,7 @@ async function main() {
   const wssHandler = applyWSSHandler({
     wss,
     router: appRouter,
-    createContext: ({ req }) => createContext({ req, admin: requestIsAdmin(req) }),
+    createContext: ({ req }) => createContext({ req, ...requestDevice(req) }),
   });
 
   // ---------------------------------------------------------------------------
