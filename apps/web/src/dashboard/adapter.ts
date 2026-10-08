@@ -46,11 +46,9 @@ export interface UpdateRelease {
 export interface DashboardAdapter {
   // Repos
   listRepos(): Promise<RepoInfo[]>;
-  addRepo(path: string, label?: string): Promise<void>;
   removeRepo(name: string): Promise<void>;
   reorderRepos(names: string[]): Promise<void>;
   updateRepoLabel(name: string, label: string | null): Promise<void>;
-  checkPath(path: string): Promise<{ isGitRepo: boolean }>;
   gitInit(path: string): Promise<void>;
   /**
    * Promote a "plain" repo to "git": runs `git init` in the repo

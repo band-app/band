@@ -240,17 +240,6 @@ export class RepoService {
   }
 
   /**
-   * Probe whether `path` (any absolute or relative directory) is a git
-   * repo today. Used by the "Add repo" dialog to enable/disable the
-   * `git init` checkbox. Read-only — never touches state.
-   */
-  checkPath(path: string): { isGitRepo: boolean } {
-    const resolvedPath = resolve(path);
-    const isGitRepo = existsSync(join(resolvedPath, ".git"));
-    return { isGitRepo };
-  }
-
-  /**
    * Run `git init` in `path`. The "promote a plain folder to git" hook
    * used by the Add Repo dialog when the user opts in to git
    * features at the same time as registering the repo.

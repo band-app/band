@@ -30,10 +30,6 @@ export const reposRouter = t.router({
     return repoService.list();
   }),
 
-  checkPath: publicProcedure.input(z.object({ path: z.string() })).query(({ input }) => {
-    return repoService.checkPath(input.path);
-  }),
-
   gitInit: publicProcedure.input(z.object({ path: z.string() })).mutation(async ({ input }) => {
     await repoService.gitInit(input.path);
   }),

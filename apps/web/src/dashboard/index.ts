@@ -9,7 +9,6 @@ export { toWorktreeId } from "@band-app/shared/worktree-id";
 // Adapter
 export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
 // Components
-export { AddRepoDialog } from "./components/AddRepoDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
@@ -77,7 +76,6 @@ export {
   useRecordLabelLastWorktree,
 } from "./hooks/use-label-last-worktree";
 export {
-  useAddRepo,
   useCreateWorktree,
   useRemoveRepo,
   useRemoveWorktree,

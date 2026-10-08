@@ -6,22 +6,6 @@ import { queryKeys } from "../query-client";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
 
-export function useAddRepo() {
-  const adapter = useAdapter();
-  const queryClient = useQueryClient();
-  const setError = useDashboardStore((s) => s.setError);
-
-  return useMutation({
-    mutationFn: ({ path, label }: { path: string; label?: string }) => adapter.addRepo(path, label),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.repos });
-    },
-    onError: (err) => {
-      setError(err);
-    },
-  });
-}
-
 export function useRemoveRepo() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();

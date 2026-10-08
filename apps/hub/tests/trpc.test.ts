@@ -246,12 +246,10 @@ describe("tRPC — repos CRUD", () => {
 describe("tRPC — git init repo validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  let gitRepoPath: string;
   let plainDirPath: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
-    gitRepoPath = createGitRepo(tmpHome, "existing-repo");
 
     // Create a plain directory (not a git repo)
     plainDirPath = join(tmpHome, "plain-dir");
@@ -267,30 +265,9 @@ describe("tRPC — git init repo validation", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("repos.checkPath returns isGitRepo true for a git repo", async () => {
-    const res = await trpcQuery(server.url, "repos.checkPath", { path: gitRepoPath });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ isGitRepo: boolean }>(res);
-    expect(data.isGitRepo).toBe(true);
-  });
-
-  it("repos.checkPath returns isGitRepo false for a plain directory", async () => {
-    const res = await trpcQuery(server.url, "repos.checkPath", { path: plainDirPath });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ isGitRepo: boolean }>(res);
-    expect(data.isGitRepo).toBe(false);
-  });
-
   it("repos.gitInit initializes a git repo in a plain directory", async () => {
     const res = await trpcMutate(server.url, "repos.gitInit", { path: plainDirPath });
     expect(res.status).toBe(200);
-  });
-
-  it("repos.checkPath returns isGitRepo true after gitInit", async () => {
-    const res = await trpcQuery(server.url, "repos.checkPath", { path: plainDirPath });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ isGitRepo: boolean }>(res);
-    expect(data.isGitRepo).toBe(true);
   });
 
   it("repos.add succeeds after gitInit on a previously plain directory", async () => {

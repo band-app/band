@@ -11,28 +11,53 @@ import {
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
+import { useCapabilities } from "../context";
 
 const LOCAL_HOST_ID = "local";
 const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** True when the hub runs on this machine, so a folder picked in the desktop app is on its disk. */
+function hubIsOnThisMachine(): boolean {
+  let host: string;
+  try {
+    host = new URL(crossOriginHub()?.origin ?? window.location.origin).hostname;
+  } catch {
+    return false;
+  }
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
 type Mode = "worker" | "url";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The project id the repo is added to. */
-  projectId: string;
+  /** The project id the repo is added to. Without one the hub uses the default project. */
+  projectId?: string;
+  /** The label the new repo gets. */
+  label?: string | null;
+  /** Opens Settings > Hosts, where a worker is added. Shown in the no-worker notice when set. */
+  onOpenHosts?: () => void;
   onAdded?: (repoName: string) => void;
 }
 
 /**
- * Adds a repo to a project, either from a folder on a worker (a picker served by that worker) or by
+ * Adds a repo to the given project (the default project when none is given), either from a folder on a worker (a picker served by that worker) or by
  * its remote URL. A folder outside the worker's roots needs an explicit confirmation first.
  */
-export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }: Props) {
+export function ProjectAddRepoDialog({
+  open,
+  onOpenChange,
+  projectId,
+  label,
+  onOpenHosts,
+  onAdded,
+}: Props) {
+  const capabilities = useCapabilities();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<Mode>("worker");
   const [chosenHost, setChosenHost] = useState<string | null>(null);
@@ -84,7 +109,8 @@ export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }:
       const repo = await trpc.repos.addFromWorker.mutate({
         hostId,
         path,
-        project: projectId,
+        ...(projectId ? { project: projectId } : {}),
+        ...(label ? { label } : {}),
         ...(addRoot ? { addRoot: true } : {}),
       });
       await finish(repo.name);
@@ -107,7 +133,8 @@ export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }:
       const repo = await trpc.repos.addByUrl.mutate({
         remoteUrl: remoteUrl.trim(),
         defaultBranch: defaultBranch.trim() || undefined,
-        project: projectId,
+        ...(projectId ? { project: projectId } : {}),
+        ...(label ? { label } : {}),
       });
       await finish(repo.name);
     } catch (err) {
@@ -118,6 +145,14 @@ export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }:
   };
 
   const data = listing.data;
+  // The native sheet browses this machine's disk, so it only helps when the chosen worker is the
+  // hub's own local host and the hub is on this machine.
+  const canPickNatively =
+    capabilities.pickFolder !== undefined && hostId === LOCAL_HOST_ID && hubIsOnThisMachine();
+  const pickNatively = async () => {
+    const selected = await capabilities.pickFolder?.();
+    if (selected) await addFromFolder(selected, false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -182,9 +217,32 @@ export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }:
         ) : mode === "worker" ? (
           <div className="space-y-2">
             {hostChoices.length === 0 ? (
-              <p className="text-sm text-muted-foreground" data-testid="project-add-repo__no-hosts">
-                No worker is online. Add a worker in Settings, Hosts.
-              </p>
+              <div className="space-y-2" data-testid="project-add-repo__no-hosts">
+                <p className="text-sm text-muted-foreground">
+                  No worker is online. Add one in Settings &gt; Hosts &gt; Add worker, or add the
+                  repo by URL.
+                </p>
+                <div className="flex gap-2">
+                  {onOpenHosts ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="project-add-repo__open-hosts"
+                      onClick={onOpenHosts}
+                    >
+                      Open Settings &gt; Hosts
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="project-add-repo__no-hosts-url"
+                    onClick={() => setMode("url")}
+                  >
+                    Add by URL
+                  </Button>
+                </div>
+              </div>
             ) : (
               <>
                 <Label htmlFor="add-repo-host">Worker</Label>
@@ -204,6 +262,17 @@ export function ProjectAddRepoDialog({ open, onOpenChange, projectId, onAdded }:
                     </option>
                   ))}
                 </select>
+                {canPickNatively ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    data-testid="project-add-repo__pick-native"
+                    onClick={pickNatively}
+                  >
+                    Choose folder on this computer
+                  </Button>
+                ) : null}
                 {listing.error ? (
                   <p role="alert" className="text-xs text-destructive">
                     {errorText(listing.error)}

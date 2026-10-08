@@ -64,7 +64,7 @@ export class DesktopDashboardPage {
     });
   }
 
-  /** Call the folder picker's IPC, the way the "Register Repo" browse button does. */
+  /** Call the folder picker's IPC, the way the Add repo dialog's "Choose folder on this computer" button does. */
   async pickFolderViaIpc(): Promise<string | null> {
     return await this.page.evaluate(async () => {
       const bridge = (

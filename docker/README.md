@@ -101,13 +101,13 @@ Then register it (uid mismatches are already handled — the entrypoint sets
 
 ```sh
 docker compose exec band band repos add /repos/myrepo
-# …or use "Register Repo" in the UI and enter /repos/myrepo
+# …or use "Add repo" in the UI, pick a worker and choose /repos/myrepo
 ```
 
 ### 3. From the UI
 
-Use **Register Repo** and type the container path (e.g. `/repos/myrepo`
-or `/data/repos/sample`).
+Use **Add repo**, pick a worker and browse to the container path (e.g.
+`/repos/myrepo` or `/data/repos/sample`), or add the repo by URL.
 
 > Note: `--label` on `band repos add` refers to a pre-defined grouping
 > label, not a display name — omit it unless you've created labels. Remove a
