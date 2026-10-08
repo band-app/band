@@ -17,7 +17,7 @@ Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a re
 - With `BAND_ADMIN_TOKEN` empty, the first run creates an admin token and prints it once in the log. Later starts print nothing. If you lose it, set `BAND_ADMIN_TOKEN` in `.env` and run `docker compose up -d`. The hub replaces the stored token with that value.
 - With `BAND_ADMIN_TOKEN` set, the hub uses that value and never prints it.
 
-The admin token can create more tokens (Settings > Hosts, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device.
+The admin token can create more tokens (Settings > Devices, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device. Worker tokens are in Settings > Hosts.
 
 ### Check it works
 
@@ -57,6 +57,17 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
   band repos list
   ```
 
+### Connect a phone
+
+1. Open Band on a machine that already has an admin token, from the hub's public address (`https://band.example.com/`, not `localhost`).
+2. Go to Settings > Devices and choose Add device. Keep the label `Phone` or change it. Leave Admin device off unless the phone should manage tokens too.
+3. Scan the QR code with the phone, or copy the sign-in link. The link is `<hub URL>/?token=<token>` and signs the phone in on first open.
+4. Choose Done. The dialog shows the link, QR code and token once, because the hub keeps only a hash of the token.
+
+Settings > Devices lists each device with when it was added and last used. Revoke signs a device out at once. Revoking the token you are signed in with asks for confirmation first.
+
+If you lost the admin token and cannot reach Settings, set `BAND_ADMIN_TOKEN` in `.env` to a new value and run `docker compose up -d`. The hub replaces the stored token with that value. Then sign in with it and add the device.
+
 ## Serve the UI from somewhere else
 
 By default the hub serves the UI at `/`. Two settings change that.
@@ -68,7 +79,7 @@ The desktop app has its own copy of the UI, so it needs neither setting.
 
 ## Worktrees run on workers
 
-The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The host picker lists only workers, and `worktrees.create` for the `local` host is refused.
+The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a host in Settings > Hosts or in any host picker, and `worktrees.create` for the `local` host is refused. A project's coordinator goes on a worker that has its agent installed and logged in (see [Where a coordinator runs](install.md#where-a-coordinator-runs)).
 
 A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run worktrees in the container again.
 

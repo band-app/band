@@ -324,20 +324,21 @@ describe("coordinator model (S5)", () => {
   });
 });
 
-describe("projects.charter", () => {
-  it("returns the coordinator's charter, and 404 for an unknown project", async () => {
-    const { charter } = await q<{ charter: string | null }>("projects.charter", {
-      project: "shop",
+describe("the coordinator's instructions", () => {
+  it("seeds AGENTS.md and a CLAUDE.md that imports it in the project context, and has no charter procedure", async () => {
+    const agents = await q<{ content: string }>("context.file", {
+      name: "shop",
+      path: "AGENTS.md",
     });
-    expect(charter).toContain('coordinator of the Band project "shop"');
-    expect(charter).toContain("- api (role: api)");
-    const missing = await trpcQuery(
-      server.url,
-      "projects.charter",
-      { project: "ghost" },
-      TEST_TOKEN,
-    );
-    expect(missing.status).toBe(404);
+    expect(agents.content).toContain('Coordinator of the Band project "shop"');
+    expect(agents.content).toContain("`api` (role: api)");
+    const claude = await q<{ content: string }>("context.file", {
+      name: "shop",
+      path: "CLAUDE.md",
+    });
+    expect(claude.content.trim()).toBe("@AGENTS.md");
+    const gone = await trpcQuery(server.url, "projects.charter", { project: "shop" }, TEST_TOKEN);
+    expect(gone.status).toBe(404);
   });
 });
 

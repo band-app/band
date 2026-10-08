@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-desktop/
 band
 # The bare `band` ignore above (the compiled CLI binary) also matches this
 # source directory; force it back in. Its SKILL.md is the single source of

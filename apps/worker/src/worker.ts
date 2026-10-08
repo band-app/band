@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Host } from "@band-app/host-api";
@@ -20,6 +19,7 @@ import {
   RpcError,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { CliCache } from "./cli.ts";
@@ -49,8 +49,8 @@ import { createWorkerTerminalBackend } from "./terminals.ts";
 
 const log = createLogger("band-worker");
 
-const require = createRequire(import.meta.url);
-export const WORKER_VERSION: string = require("../package.json").version;
+// Imported, not required at run time, so the desktop app's bundle (no package.json beside it) has it too.
+export const WORKER_VERSION: string = pkg.version;
 
 /**
  * How long an ephemeral worker waits for a hub it has lost before it exits. It
@@ -185,6 +185,8 @@ export class Worker {
       ],
       worktreePaths: async (repo) => (await host.worktree.list(repo)).map((w) => w.path),
     });
+    // The hello carries the capability report, so the first probe finishes before it.
+    await host.awaitReport();
     const info = await host.info();
 
     const client = new LinkClient({

@@ -233,25 +233,25 @@ describe("the coordinator session starts with the project (S1)", () => {
     expect(shop.coordinatorModel).toBe("opus");
   });
 
-  it("writes the charter to AGENTS.md in the project folder, with CLAUDE.md importing it, and no longer injects it", async () => {
+  it("has AGENTS.md in the project folder with CLAUDE.md importing it, and sends no charter system prompt", async () => {
     const folder = join(realpathSync(home), ".band", "projects", "shop");
-    const charter = await waitFor(
+    const agents = await waitFor(
       () =>
         existsSync(join(folder, "AGENTS.md"))
           ? readFileSync(join(folder, "AGENTS.md"), "utf8")
           : undefined,
       { label: "AGENTS.md" },
     );
-    expect(readFileSync(join(folder, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
-    const meta = shopCoordinator.params._meta as { systemPrompt?: { append?: string } };
-    expect(meta.systemPrompt?.append ?? "").not.toContain("coordinator of the Band project");
-    expect(charter).toContain('coordinator of the Band project "shop"');
-    expect(charter).toContain("- api");
-    expect(charter).toContain("- client");
-    expect(charter).toContain("at most 5 worker agents run at once");
-    expect(charter).toContain("Autonomy is autonomous");
-    expect(charter).toContain("project_status");
-    expect(charter).toContain("inbox/<agent>.md");
+    expect(readFileSync(join(folder, "CLAUDE.md"), "utf8").trim()).toBe("@AGENTS.md");
+    const meta = shopCoordinator.params._meta as { systemPrompt?: { append?: string } } | undefined;
+    expect(meta?.systemPrompt?.append ?? "").not.toContain("coordinator of the Band project");
+    expect(agents).toContain('Coordinator of the Band project "shop"');
+    expect(agents).toContain("`api`");
+    expect(agents).toContain("`client`");
+    expect(agents).toContain("at most 5 worker agents run at once");
+    expect(agents).toContain("Autonomy is autonomous");
+    expect(agents).toContain("project_status");
+    expect(agents).toContain("inbox/<agent>.md");
   });
 
   it("gives the session only the coordinator tool set", async () => {

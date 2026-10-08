@@ -23,6 +23,14 @@ export const Channels = {
   hubGetChoice: "hub_get_choice",
   hubSetChoice: "hub_set_choice",
 
+  // This computer as a worker of the remote hub (see services/this-computer-worker.ts).
+  // The bootstrap token never crosses these: main asks the hub for it.
+  workerStatus: "worker_status",
+  workerAdd: "worker_add",
+  workerRemove: "worker_remove",
+  workerSwitchBundled: "worker_switch_bundled",
+  workerDismissPrompt: "worker_dismiss_prompt",
+
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",
   pickFile: "pick_file",

@@ -42,7 +42,10 @@ export const hostsRouter = t.router({
         .default({ limit: DEFAULT_LIST_LIMIT }),
     )
     .query(async ({ input }) => {
-      const hosts = tokenService.listHosts(input.limit);
+      const all = tokenService.listHosts(input.limit);
+      // With `BAND_LOCAL_HOST=off` the hub's own machine takes no work, so the list leaves it out.
+      // It stays a host inside the hub.
+      const hosts = all.filter((h) => h.id !== "local" || h.usable);
       // The local row has no hello, so describe this machine live.
       const local = hosts.find((h) => h.id === "local");
       if (local) {
@@ -52,7 +55,12 @@ export const hostsRouter = t.router({
           local.capabilities = Object.entries(info.capabilities)
             .filter(([, on]) => on)
             .map(([name]) => name);
-          local.agents = await agentTypesOn(hostRegistry.local);
+          local.report = info.report ?? null;
+          local.agents = info.report
+            ? info.report.agents
+                .filter((a) => a.installed && a.loggedIn !== false)
+                .map((a) => a.type)
+            : await agentTypesOn(hostRegistry.local);
           local.tools = info.tools;
         }
       }

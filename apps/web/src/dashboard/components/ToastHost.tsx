@@ -13,6 +13,7 @@ import { subscribeToastObstructions, toastObstructions } from "../../lib/toast-o
 import { INFO_NOTICE_MS, type Notice } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import { ReinstallHomeScreenNotice } from "./ReinstallHomeScreenNotice";
+import { ThisComputerWorkerPrompt } from "./ThisComputerWorkerPrompt";
 import { ToastCard } from "./ToastCard";
 import { UpdateToast } from "./UpdateToast";
 
@@ -41,6 +42,7 @@ export function ToastHost() {
       className="pointer-events-none fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 z-50 flex flex-col-reverse gap-2 sm:left-auto sm:w-80"
     >
       <UpdateToast />
+      <ThisComputerWorkerPrompt />
       <ReinstallHomeScreenNotice />
       {notices.map((notice) => (
         <NoticeToast key={notice.id} notice={notice} />

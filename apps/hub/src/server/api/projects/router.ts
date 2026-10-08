@@ -69,7 +69,11 @@ async function checkout<T>(fn: () => Promise<T> | T): Promise<T> {
 
 /** The view with why the coordinator failed to start, when it did. */
 function present(view: ProjectView) {
-  return { ...view, coordinatorError: projectCoordinatorService.lastError(view.id) };
+  return {
+    ...view,
+    coordinatorError: projectCoordinatorService.lastError(view.id),
+    coordinatorWaiting: projectCoordinatorService.isWaiting(view.id),
+  };
 }
 
 export const projectsRouter = t.router({
@@ -79,13 +83,6 @@ export const projectsRouter = t.router({
   get: publicProcedure
     .input(z.object({ project: ref }))
     .query(({ input }) => guard(() => ({ project: present(projectService.get(input.project)) }))),
-
-  /** The charter the coordinator starts with, for the project's view. */
-  charter: publicProcedure
-    .input(z.object({ project: ref }))
-    .query(({ input }) =>
-      guard(() => ({ charter: projectCoordinatorService.charterFor(input.project) })),
-    ),
 
   create: adminProcedure
     .input(
@@ -138,8 +135,6 @@ export const projectsRouter = t.router({
       guard(async () => {
         const { project, ...patch } = input;
         const updated = await projectCoordinatorService.update(project, patch);
-        // The folder's AGENTS.md is the charter, which names the policy and the models.
-        void projectFolderService.writeInstructions(projectService.row(updated.id));
         return { project: present(updated) };
       }),
     ),
@@ -220,7 +215,6 @@ export const projectsRouter = t.router({
           throw new ProjectConflictError(err instanceof Error ? err.message : String(err));
         }
         const view = projectService.removeRepo(row.id, input.repo);
-        void projectFolderService.writeInstructions(projectService.row(row.id));
         return { project: view };
       }),
     ),

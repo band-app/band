@@ -540,7 +540,7 @@ jobs:
 
           # Desktop: the Electron app, the UI it loads over app://, the hub it
           # spawns or talks to, and what they share.
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/desktop/|apps/web/(src/|e2e-desktop/|public/|scripts/|package\.json$|playwright\.desktop\.config\.ts$)|apps/hub/|packages/|plugins/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/desktop/|apps/worker/|apps/web/(src/|e2e-desktop/|public/|scripts/|package\.json$|playwright\.desktop\.config\.ts$)|apps/hub/|packages/|plugins/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "desktop=true" >> "$GITHUB_OUTPUT"
           else
             echo "desktop=false" >> "$GITHUB_OUTPUT"
@@ -641,7 +641,9 @@ jobs:
           curl -s -H "$auth" "$base/trpc/repos.list" | grep -q '"result"'
           # Local worktrees are off by default, so there is no sample repo.
           if curl -s -H "$auth" "$base/trpc/repos.list" | grep -q sample; then echo 'sample repo registered'; exit 1; fi
-          curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"usable":false'
+          # The hub's own host takes no worktrees here, so the list leaves it out.
+          curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"result"'
+          if curl -s -H "$auth" "$base/trpc/hosts.list" | grep -q '"id":"local"'; then echo 'local host listed'; exit 1; fi
 
       - name: Compose keeps data across a recreate
         working-directory: deploy/compose
@@ -1248,6 +1250,10 @@ jobs:
 
       - name: Build the hub and the UI
         run: pnpm build:web
+
+      # electron-builder ships apps/worker/dist-desktop as Resources/worker.
+      - name: Build the worker for the app
+        run: pnpm --filter @band-app/worker build:desktop
 
       - name: Build desktop (TypeScript main + preload)
         run: pnpm --filter @band-app/desktop build

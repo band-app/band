@@ -38,6 +38,8 @@ const log = createLogger("worker-link");
 const repoQueries = new RepoQueries();
 
 const LOCAL_HOST_ID = "local";
+/** How often the hub reads each online worker's capability report again. */
+const CAPABILITY_REFRESH_MS = 3 * 60_000;
 
 export const WORKER_CONNECT_PATH = "/api/workers/connect";
 export const WORKER_EXCHANGE_PATH = "/api/workers/exchange";
@@ -62,6 +64,7 @@ export class WorkerLinkService {
     handleProtocols: selectWsProtocol,
   });
   private unsubscribeRevoke: (() => void) | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(options: WorkerLinkOptions = {}) {
     this.tokens = options.tokens ?? tokenService;
@@ -96,6 +99,13 @@ export class WorkerLinkService {
         this.queries.setHostStatus(row.id, "offline");
       }
     }
+    // Which agents are installed and logged in changes while a worker runs, so ask again now and then.
+    const every = Number(process.env.BAND_CAPABILITY_REFRESH_MS);
+    this.refreshTimer = setInterval(
+      () => void this.refreshReports(),
+      Number.isFinite(every) && every > 0 ? every : CAPABILITY_REFRESH_MS,
+    );
+    this.refreshTimer.unref();
     this.unsubscribeRevoke = this.tokens.onRevoked((row) => {
       if (row.kind === "worker_session" && row.hostId) {
         if (this.server.drop(row.hostId, "token revoked")) log.info(`cut link of ${row.hostId}`);
@@ -103,7 +113,49 @@ export class WorkerLinkService {
     });
   }
 
+  /**
+   * Reads `host.info` again from every online worker and stores its capability report. The call is
+   * passive, so it does not keep an ephemeral worker awake. A change goes out as a host status
+   * event, which Settings > Hosts follows and a coordinator waiting for a worker listens to.
+   */
+  async refreshReports(): Promise<void> {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    try {
+      await Promise.allSettled(
+        this.queries
+          .listHosts(1000)
+          .filter((row) => row.id !== LOCAL_HOST_ID && row.status === "online")
+          .map((row) => this.refreshReport(row)),
+      );
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  private refreshing = false;
+
+  private async refreshReport(row: {
+    id: string;
+    info?: ({ report?: Parameters<typeof reportKey>[0] } & Record<string, unknown>) | null;
+  }): Promise<void> {
+    try {
+      const info = await this.remoteHost(row.id).info();
+      const { repoMappings: _mappings, ...facts } = info;
+      const stored = { ...(row.info ?? {}), ...facts };
+      const changed = reportKey(stored.report) !== reportKey(row.info?.report);
+      this.queries.setHostInfo(row.id, stored);
+      if (changed) this.publish(row.id, "online");
+    } catch (err) {
+      log.debug(
+        `could not refresh the report of ${row.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
   async close(): Promise<void> {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
     this.unsubscribeRevoke?.();
     for (const ws of this.wss.clients) ws.terminate();
     await this.server.close();
@@ -249,3 +301,9 @@ export class WorkerLinkService {
 }
 
 export const workerLinkService = new WorkerLinkService();
+
+/** A report without its timestamp, so two reads of the same state compare equal. */
+function reportKey(report: unknown): string {
+  const { checkedAt: _at, ...rest } = (report ?? {}) as Record<string, unknown>;
+  return JSON.stringify(rest);
+}

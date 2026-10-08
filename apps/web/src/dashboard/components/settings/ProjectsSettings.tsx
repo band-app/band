@@ -180,7 +180,7 @@ function ProjectSettingsForm({ project, onDeleted }: { project: Project; onDelet
             variant="stacked"
             htmlFor="project-settings-description"
             label="Description"
-            description="What the project is for. The coordinator reads it in its charter."
+            description="What the project is for. The default AGENTS.md of the project repeats it."
           >
             <Textarea
               id="project-settings-description"

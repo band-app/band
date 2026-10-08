@@ -51,7 +51,10 @@ export function defaultServiceEnv(): ServiceEnv {
     node: process.execPath,
     script: realpathSync(process.argv[1] ?? ""),
     run: (cmd, args) =>
-      execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      execFileSync(cmd === "launchctl" ? (process.env.BAND_LAUNCHCTL_BIN ?? cmd) : cmd, args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
     log: (line) => process.stdout.write(`${line}\n`),
   };
 }
@@ -242,6 +245,8 @@ function unsupported(platform: NodeJS.Platform): never {
 export function installService(opts: ServiceOptions, env: ServiceEnv): void {
   const paths = servicePaths(env);
   const vars = serviceVariables(opts);
+  // Inside the desktop app `node` is the Band executable, which only runs a script with this set.
+  if (process.versions.electron) vars.ELECTRON_RUN_AS_NODE = "1";
   ensureDir(join(env.home, ".band"), 0o700);
   ensureDir(paths.serviceDir, 0o700);
 

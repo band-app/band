@@ -4,7 +4,7 @@
  * A project has one long-lived coordinator chat. It is a project-level chat with no
  * worktree: it runs in the project folder on the host the project pins it to (the
  * working copy of the project's context repo, with a checkout of every repo's default
- * branch under `repos/`). The agent gets a charter as its system prompt and a scoped set of hub tools
+ * branch under `repos/`). The agent reads its instructions from AGENTS.md in the project folder and gets a scoped set of hub tools
  * at `/mcp-proxy/band-coordinator`, authenticated by the session's own `mcp_`
  * token. Nothing in a tool call names the project: the hub takes it from the
  * chat the token was issued for, so a coordinator cannot reach another
@@ -17,19 +17,16 @@
 
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { ProjectConflictError } from "../errors";
 import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
+import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { hostRegistry } from "../infra/host/registry";
 import { chatScope, projectScopeId } from "../infra/project-scope";
-import {
-  type Autonomy,
-  COORDINATOR_LABEL,
-  COORDINATOR_SERVER,
-  resolvePolicy,
-} from "./_utils/project-policy";
+import { COORDINATOR_LABEL, resolvePolicy } from "./_utils/project-policy";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { projectFolderService } from "./project-folder-service";
+import { projectFolderService, WaitingForWorkerError } from "./project-folder-service";
 import { type ProjectView, projectService, type UpdateProjectInput } from "./project-service";
 import { projectSubscriptionService } from "./project-subscription-service";
 import { abortTask, hasRunningTask, submitOrQueueTask } from "./task-service";
@@ -79,7 +76,7 @@ export class ProjectCoordinatorService {
 
   /**
    * Creates the coordinator's chat when the project has none, and starts the agent so it
-   * receives the charter. Needs at least one repo. The agent starts in the background (it
+   * starts with it. Needs at least one repo. The agent starts in the background (it
    * prepares the project folder first), so a slow or failing agent never fails the caller.
    * Safe to call again: a running start is shared.
    */
@@ -102,13 +99,47 @@ export class ProjectCoordinatorService {
    */
   async update(ref: string, patch: UpdateProjectInput): Promise<ProjectView> {
     // The host the folder is on, so "hub default" and the hub's own id count as the same host.
-    const before = projectFolderService.hostOf(projectService.row(ref)).id;
+    const row = projectService.row(ref);
+    const before = projectFolderService.hostIdOf(row);
+    const next = patch.coordinatorHostId?.trim() || null;
+    if (before && next && next !== before) await this.assertMovable(row, before);
     const updated = projectService.update(ref, patch);
     this.syncModel(updated.id);
-    if (projectFolderService.hostOf(projectService.row(updated.id)).id !== before) {
+    if (projectFolderService.hostIdOf(projectService.row(updated.id)) !== before) {
       await this.moveHost(updated.id);
     }
     return projectService.get(updated.id);
+  }
+
+  /**
+   * Refuses a move while a default-branch checkout on the old host has changes or commits that
+   * exist nowhere else. A host that cannot be reached (offline, or no checkout there) cannot be
+   * checked, so it does not block the move.
+   */
+  private async assertMovable(row: ProjectRow, hostId: string): Promise<void> {
+    const host = hostRegistry.hostById(hostId);
+    const blockers: string[] = [];
+    for (const { repo } of projectService.get(row.id).repos) {
+      try {
+        const status = await host.project.status({ project: row.name, repo });
+        const reasons: string[] = [];
+        if (status.dirty) reasons.push("uncommitted changes");
+        if (status.ahead > 0) {
+          reasons.push(`${status.ahead} unpushed commit${status.ahead === 1 ? "" : "s"}`);
+        }
+        if (reasons.length > 0) blockers.push(`${repo} has ${reasons.join(" and ")}`);
+      } catch (err) {
+        log.info(
+          { project: row.name, repo, hostId, err },
+          "could not check a checkout before a move",
+        );
+      }
+    }
+    if (blockers.length > 0) {
+      throw new ProjectConflictError(
+        `Cannot move the coordinator off host "${hostId}": ${blockers.join("; ")}. Commit and push or discard them first.`,
+      );
+    }
   }
 
   /**
@@ -132,6 +163,29 @@ export class ProjectCoordinatorService {
     return this.startErrors.get(projectId) ?? null;
   }
 
+  /** Whether the project has no coordinator host yet, because no worker can run the agent. */
+  isWaiting(projectId: string): boolean {
+    return this.waiting.has(projectId) && !this.projectById(projectId)?.coordinatorHostId;
+  }
+
+  private readonly waiting = new Set<string>();
+  private stopListening: (() => void) | null = null;
+
+  /**
+   * Starts the coordinators that wait for a worker when a worker comes online or reports new
+   * capabilities. Called once the server is up.
+   */
+  start(): void {
+    this.stopListening ??= subscribeStatusBus((event) => {
+      if (event.kind !== "host-status-changed" || event.hostStatus !== "online") return;
+      for (const id of [...this.waiting]) {
+        void this.ensureCoordinator(id).catch((err) => {
+          log.warn({ projectId: id, err }, "could not start a waiting coordinator");
+        });
+      }
+    });
+  }
+
   private async create(projectId: string): Promise<void> {
     try {
       const row = projectService.row(projectId);
@@ -147,16 +201,23 @@ export class ProjectCoordinatorService {
         projectService.setCoordinator(row.id, chat.id);
       }
       this.startErrors.delete(row.id);
+      // A project from before AGENTS.md was a context file gets its default now.
+      await projectService.seedInstructions(row.id);
       const chatId = chat.id;
       // Wake-ups for the coordinator: worker chats, member PRs, the context inbox.
       void projectSubscriptionService.reconcile(row.id).catch((err) => {
         log.warn({ projectId: row.id, err }, "could not subscribe the coordinator");
       });
-      // Starting the agent prepares the project folder and attaches the session, which carries the charter and the tools.
-      void agentSessionService.ensureSession(chatId, "prompt").catch((err) => {
-        this.startErrors.set(row.id, err instanceof Error ? err.message : String(err));
-        log.warn({ projectId: row.id, chatId, err }, "coordinator agent did not start");
-      });
+      // Starting the agent prepares the project folder and attaches the session, which carries the tools.
+      void agentSessionService
+        .ensureSession(chatId, "prompt")
+        .then(() => this.waiting.delete(row.id))
+        .catch((err) => {
+          if (err instanceof WaitingForWorkerError) this.waiting.add(row.id);
+          else this.waiting.delete(row.id);
+          this.startErrors.set(row.id, err instanceof Error ? err.message : String(err));
+          log.warn({ projectId: row.id, chatId, err }, "coordinator agent did not start");
+        });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.startErrors.set(projectId, message);
@@ -267,7 +328,7 @@ export class ProjectCoordinatorService {
     }
   }
 
-  // ---- charter and session scope --------------------------------------------------------
+  // ---- session scope --------------------------------------------------------
 
   /** The project a chat coordinates, or undefined for any other chat. */
   projectOfChat(chatId: string): ProjectRow | undefined {
@@ -283,55 +344,6 @@ export class ProjectCoordinatorService {
     } catch {
       return undefined;
     }
-  }
-
-  /** The charter the project page shows. */
-  charterFor(ref: string): string {
-    return this.charter(projectService.row(ref));
-  }
-
-  /** The system prompt appended to a coordinator session. */
-  charter(row: ProjectRow): string {
-    const view = projectService.get(row.id);
-    const p = view.effectivePolicy;
-    const repos = view.repos
-      .map((r) => `- ${r.repo}${r.role ? ` (role: ${r.role})` : ""}`)
-      .join("\n");
-    const limits = [
-      p.maxConcurrent
-        ? `at most ${p.maxConcurrent} worker agents run at once`
-        : "no limit on concurrent worker agents",
-      p.budgetUsd ? `a soft budget of $${p.budgetUsd} for the project` : "no budget limit",
-      `worker agents run at isolation "${p.isolationFloor}" or stronger`,
-      p.labels.length
-        ? `workers go only on hosts labeled ${p.labels.join(", ")}`
-        : "workers may go on any host",
-    ].join("; ");
-    const autonomy: Record<Autonomy, string> = {
-      observe:
-        "Autonomy is observe. You may read project state and worker chats. You may not message, stop or dispatch anything. Report what you find and recommend actions to the user.",
-      autonomous: p.autoMerge
-        ? "Autonomy is autonomous with auto-merge on. You may dispatch workers within the limits and merge pull requests whose CI passed."
-        : "Autonomy is autonomous. You may dispatch workers within the limits. Merging still needs the user's confirmation.",
-    };
-    return [
-      `You are the coordinator of the Band project "${view.name}".`,
-      view.description ? `\nProject description: ${view.description}` : "",
-      "\nYour job is to plan the work across the project's repos, hand it to worker agents, check on them and keep the user informed. Each worker agent works in one git worktree of one repo, with its own chat. Work that spans repos takes one worker per repo, and you keep them in step.",
-      `\nWorking directory. You run in the project folder on the coordinator host. It is the working copy of the project context (notes.md, docs/, learnings/, inbox/, handoffs/) and has a checkout of every project repo's default branch under repos/<repo>/ (the local branch band/${view.name}/<default>, which tracks origin/<default>). Read the current code there, or through repo_read, repo_search and repo_log. Band fetches before your turns and fast-forwards a checkout only when it is clean, so a checkout with local changes can be behind origin. Code changes go through worker agents (worktree_create). Do not edit a default branch checkout unless the user explicitly asks you to. ${p.autonomy === "autonomous" ? "When the user asks for such an edit, you may commit it, and you may push it because autonomy is autonomous." : `When the user asks for such an edit, commit it but do not push without the user's confirmation, because autonomy is ${p.autonomy}.`} The folder repos/ is never synced to the context repo. Everything else in the project folder (notes, docs, inbox, handoffs, learnings and any file you or the user add) syncs to the hub and to every worker of the project on its own, within seconds: write a file and the others see it, with no commit or push.`,
-      `\nRepos in this project:\n${repos || "- none yet"}`,
-      `\nModels: you run on ${p.models.coordinator}, worker agents on ${p.models.worker}, reviewers on ${p.models.reviewer}.`,
-      `\nPolicy: ${limits}.`,
-      `\n${autonomy[p.autonomy]}`,
-      `\nContext. The project context repo "${view.contextName}" is shared by every agent in the project, and the user context holds the user's preferences. Read them before you plan. Layout of the project context: notes.md (running notes), docs/ (design and contracts), media/ (screenshots, recordings), inbox/<agent>.md (pointers to handoffs for an agent), handoffs/ (one file per handoff), learnings/ (what agents learned). Use context_search to find things, context_append_learning to record what future agents should know, and context_handoff to pass work on. Write contracts between repos (API shapes, event formats) to docs/ so the agent on the other side can read them.`,
-      `\nTools. You act on the project only through the ${COORDINATOR_SERVER} tools: project_status (worktrees, agents, pull requests, spend), worktrees_list, worktree_create, chats_read, chats_send and worktree_stop, plus repo_read {repo, path}, repo_search {repo, query} and repo_log {repo, n} for the default branch checkouts. They are limited to this project's worktrees and repos. A refused call names the reason, so tell the user what blocked you instead of retrying.`,
-      "\nDispatching. worktree_create starts a worker agent in a new worktree of one repo of the project, on the branch you name, with your brief in .am/BRIEF.md. Write the brief so the worker can act on it alone: the goal, the constraints, the contracts with other repos and what is out of scope, plus acceptance scenarios it can check. For work across repos, start one worker per repo, usually on the same branch name, put the contract between them in docs/ of the project folder first, and decide the order their pull requests merge in.",
-      `\nWake-ups. Band wakes you with a "Subscription update" message when something needs you: a worker chat ended its turn with an error, is waiting for a permission or an answer, or finished; a pull request of a project worktree has a review comment, a CI result or was merged or closed; or a new file appeared in inbox/ or handoffs/ of the project context. The message names the chat id or the file path. Read the source before you act on it. Events are batched, so one message can carry several. A pull request's subscriptions end when it merges or closes.`,
-      `\nNotes and the inbox. You are the only writer of notes.md in the project context: workers do not edit it, so keep it current with decisions and status. learnings/ is append-only: add entries, never rewrite or delete them. Handoffs from workers land in handoffs/<stamp>-<from>-to-<to>.md and a pointer line in inbox/<to>.md. When you have dealt with an item in inbox/ or handoffs/, move the file into inbox/done/ (a plain move in the project folder, which syncs on its own). A file in inbox/done/ does not wake you again.`,
-      "\nMerging. Never merge a pull request unless the user confirmed it in this conversation or auto-merge is on.",
-    ]
-      .filter(Boolean)
-      .join("\n");
   }
 
   // ---- tool logic ---------------------------------------------------------------------
@@ -549,6 +561,3 @@ export class ProjectCoordinatorService {
 }
 
 export const projectCoordinatorService = new ProjectCoordinatorService();
-// The project folder's AGENTS.md is the coordinator's charter. The folder service writes it, and
-// cannot import this file back.
-projectFolderService.setInstructions((row) => projectCoordinatorService.charter(row));

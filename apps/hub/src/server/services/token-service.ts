@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { CapabilityReport } from "@band-app/host-api";
 import type { AuthResult, Hello } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { SharedTokenRevokeError, TokenNotFoundError } from "../errors";
@@ -68,6 +69,8 @@ export interface HostView {
   info: HostRow["info"];
   /** Coding agents the worker can launch, from its hello. Empty before it has connected. */
   agents: string[];
+  /** What the host reported about each coding agent, `git` and `gh`, or null before it has. */
+  report: CapabilityReport | null;
   /** Directories the worker serves worktrees from. */
   roots: string[];
   /** What the worker can do: `git`, `gh`, `pty`, `acp` and so on. */
@@ -96,6 +99,26 @@ function stringMap(value: unknown): Record<string, string> {
   return Object.fromEntries(
     Object.entries(value).filter((e): e is [string, string] => typeof e[1] === "string"),
   );
+}
+
+/** The capability report a host stored in its info, or null when it has none. */
+function reportOf(info: Record<string, unknown> | null | undefined): CapabilityReport | null {
+  const report = info?.report as Partial<CapabilityReport> | undefined;
+  return report && Array.isArray(report.agents) && Array.isArray(report.tools)
+    ? (report as CapabilityReport)
+    : null;
+}
+
+/**
+ * The agent types a host can run. A host that reported its capabilities is believed over the
+ * hello's launch list, which only says an adapter resolves, not that the agent is installed and
+ * logged in.
+ */
+function usableAgents(info: Record<string, unknown> | null | undefined): string[] {
+  const report = reportOf(info);
+  if (report)
+    return report.agents.filter((a) => a.installed && a.loggedIn !== false).map((a) => a.type);
+  return stringList(info?.agents);
 }
 
 function stringList(value: unknown): string[] {
@@ -402,7 +425,8 @@ export class TokenService {
       version: h.version,
       createdAt: h.createdAt,
       info: h.info,
-      agents: stringList(h.info?.agents),
+      agents: usableAgents(h.info),
+      report: reportOf(h.info),
       roots: stringList(h.info?.roots),
       capabilities: capabilityNames(h.info?.capabilities),
       home: typeof h.info?.home === "string" ? h.info.home : null,

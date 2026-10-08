@@ -20,6 +20,7 @@ import { getUsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
   AgentDescriptor,
+  CapabilityReport,
   ClaudeDefaults,
   ExecOptions,
   ExecResult,
@@ -67,6 +68,7 @@ import { type ContextSource, ContextSync } from "./context/context-sync";
 import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
+import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
 import { probeTools } from "./process/tools";
@@ -80,6 +82,8 @@ import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 
 /** How long `info()` keeps the tool versions it probed. */
 const TOOLS_TTL_MS = 60_000;
+/** How long a capability report stays before the next `info()` refreshes it in the background. */
+const REPORT_TTL_MS = 2 * 60_000;
 
 /** Same cap `execFile` callers in the hub use for command output. */
 const EXEC_MAX_BUFFER = 50 * 1024 * 1024;
@@ -293,7 +297,37 @@ export class LocalHost implements Host {
     return this.cliFacts;
   }
 
+  private reportValue: CapabilityReport | undefined;
+  private reportAt = 0;
+  private reportProbe: Promise<void> | null = null;
+
+  /**
+   * Probing the agent CLIs runs several processes and `claude auth status` can take seconds, so
+   * `info()` never waits for it: it returns the last report and refreshes it in the background once
+   * it is older than `REPORT_TTL_MS`. The first `info()` has no report yet.
+   */
+  private refreshReport(): Promise<void> {
+    if (this.reportProbe) return this.reportProbe;
+    if (this.reportValue && Date.now() - this.reportAt <= REPORT_TTL_MS) return Promise.resolve();
+    this.reportProbe = probeCapabilities()
+      .then((value) => {
+        this.reportValue = value;
+        this.reportAt = Date.now();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.reportProbe = null;
+      });
+    return this.reportProbe;
+  }
+
+  /** Waits for the capability report to exist. A worker calls it once before its hello, which carries it. */
+  async awaitReport(): Promise<void> {
+    await this.refreshReport();
+  }
+
   async info(): Promise<HostInfo> {
+    void this.refreshReport();
     const { versions: probed, gh } = await this.probeCliFacts();
     const versions = { ...probed };
     return {
@@ -306,6 +340,7 @@ export class LocalHost implements Host {
       roots: [],
       versions,
       tools: await this.toolVersions(),
+      report: this.reportValue,
       repoMappings: await this.repos.list(),
       capabilities: {
         git: "git" in versions,

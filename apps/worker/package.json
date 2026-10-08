@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs",
     "start": "node bin/band-worker.mjs",
     "test": "node --import tsx --test --test-concurrency=1 --test-timeout=90000 --test-force-exit tests/*.test.ts",
     "typecheck": "tsc --noEmit -p .",

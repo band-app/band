@@ -20,13 +20,26 @@ import type {
   ProjectSearchMatch,
   ProjectStatus,
 } from "@band-app/host-api";
+import { agentIsUsable } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { ProjectInputError } from "../errors";
 import type { ProjectRow } from "../infra/db/queries/projects";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { projectService } from "./project-service";
-import { loadState } from "./state";
+import { loadSettings, loadState } from "./state";
+import { tokenService } from "./token-service";
+
+const LOCAL_HOST_ID = "local";
+
+/** The project has no host yet: no online worker has its coordinator's agent installed and logged in. */
+export class WaitingForWorkerError extends Error {
+  constructor(agent: string) {
+    super(`Waiting for a worker that can run ${agent}`);
+    this.name = "WaitingForWorkerError";
+  }
+}
 
 const log = createLogger("project-folder");
 
@@ -43,63 +56,49 @@ export interface ProjectFolderState {
   skipped: Array<{ repo: string; reason: string }>;
 }
 
-/** The agent instructions file in a project folder, and the Claude Code file that imports it. */
-export const INSTRUCTIONS_FILE = "AGENTS.md";
-const CLAUDE_FILE = "CLAUDE.md";
-const CLAUDE_TEXT = `<!-- Written by Band. Claude Code reads this file; it imports the project's instructions. -->\n@${INSTRUCTIONS_FILE}\n`;
-
 export class ProjectFolderService {
   private readonly states = new Map<string, ProjectFolderState>();
   private readonly inflight = new Map<string, Promise<ProjectFolderState>>();
-  /** The coordinator's charter of a project. Set by `ProjectCoordinatorService`, which imports this file. */
-  private instructionsOf: ((row: ProjectRow) => string) | null = null;
-
-  setInstructions(fn: (row: ProjectRow) => string): void {
-    this.instructionsOf = fn;
-  }
-
-  /**
-   * Writes the project's agent instructions into its folder: `AGENTS.md` holds the coordinator's
-   * charter (Codex, OpenCode and most agents read it) and `CLAUDE.md` imports it for Claude Code. So
-   * any agent started in the folder, in a chat or a terminal, works from the same text. Band
-   * rewrites both whenever the folder is prepared or the project changes, and the context sync
-   * leaves them out, so each host keeps its own copy and an edit never spreads. A file is only
-   * written when its text changed. Never throws.
-   */
-  async writeInstructions(row: ProjectRow, folder?: string): Promise<void> {
-    const charter = this.instructionsOf?.(row);
-    const dir = folder ?? this.states.get(row.id)?.folder;
-    if (!charter || !dir) return;
-    const host = this.hostOf(row);
-    // Placeholders such as `repos/<repo>/` would read as HTML tags in a markdown view, so each path
-    // that holds one goes in a code span. An agent reads the same words either way.
-    const body = charter.replace(/(?<![`\w])([\w./-]*<[\w-]+>[\w./<>-]*)/g, "`$1`");
-    const agents = `<!-- Written by Band from the project's settings, repos and policy. Edits are overwritten: change the project in Settings > Projects instead. -->\n\n${body}\n`;
-    for (const [name, text] of [
-      [INSTRUCTIONS_FILE, agents],
-      [CLAUDE_FILE, CLAUDE_TEXT],
-    ] as const) {
-      const path = `${dir.replace(/\/+$/, "")}/${name}`;
-      try {
-        const current = await host.fs
-          .readFile(path)
-          .then((b) => new TextDecoder().decode(b))
-          .catch(() => null);
-        if (current !== text) await host.fs.writeFile(path, text);
-      } catch (err) {
-        log.warn(
-          { project: row.name, file: name, err },
-          "could not write the project's agent instructions",
-        );
-      }
-    }
-  }
   /** `project:host` folders a view prepared without checkouts, so the next view asks nothing. */
   private readonly prepared = new Set<string>();
 
-  /** The host the project's folder is on. */
+  /**
+   * The id of the host the project's folder is on, or null while no host can take it. A hub with
+   * `BAND_LOCAL_HOST=off` never uses its own machine: the coordinator goes on the first online
+   * worker that reports the coordinator's agent installed and logged in, and that choice is saved.
+   * With no such worker the project waits, and nothing is placed.
+   */
+  hostIdOf(row: ProjectRow): string | null {
+    const localOn = isLocalHostEnabled();
+    const chosen = row.coordinatorHostId;
+    if (chosen && (localOn || chosen !== LOCAL_HOST_ID)) return chosen;
+    if (localOn) return LOCAL_HOST_ID;
+    const agent = this.coordinatorAgentType(row);
+    const eligible = tokenService
+      .listHosts()
+      .find(
+        (h) =>
+          h.id !== LOCAL_HOST_ID &&
+          h.status === "online" &&
+          agentIsUsable(h.report?.agents.find((a) => a.type === agent)),
+      );
+    if (!eligible) return null;
+    projectService.update(row.id, { coordinatorHostId: eligible.id });
+    log.info({ project: row.name, host: eligible.id, agent }, "placed the coordinator on a worker");
+    return eligible.id;
+  }
+
+  /** The agent type the project's coordinator runs. */
+  coordinatorAgentType(row: ProjectRow): string {
+    const id = row.coordinatorAgent ?? "claude-code";
+    return loadSettings().codingAgents?.find((a) => a.id === id)?.type ?? id;
+  }
+
+  /** The host the project's folder is on. Throws while the project waits for a worker. */
   hostOf(row: ProjectRow): Host {
-    return hostRegistry.hostById(row.coordinatorHostId ?? hostRegistry.local.id);
+    const id = this.hostIdOf(row);
+    if (!id) throw new WaitingForWorkerError(this.coordinatorAgentType(row));
+    return hostRegistry.hostById(id);
   }
 
   /**
@@ -174,7 +173,6 @@ export class ProjectFolderService {
         skipped,
       };
       this.states.set(row.id, state);
-      await this.writeInstructions(row, state.folder);
       return state;
     })().finally(() => {
       if (this.inflight.get(row.id) === work) this.inflight.delete(row.id);

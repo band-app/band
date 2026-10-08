@@ -50,6 +50,7 @@ import {
 } from "./macos-shell.js";
 import { guardedHandler } from "./sender-guard.js";
 import { getAppTitle } from "./window-title.js";
+import { type WorkerIpcDeps, workerHandlers } from "./worker.js";
 
 export interface RegisterOptions {
   mainWindow: BrowserWindow;
@@ -58,6 +59,8 @@ export interface RegisterOptions {
   /** False while a remote hub is selected: there is no local hub to start or stop. */
   isLocalHub: () => boolean;
   hub: HubIpcDeps;
+  /** This computer as a worker of the remote hub. */
+  thisComputer: WorkerIpcDeps;
   /** True only for the main window's top frame, showing the bundled UI. Checked on every channel. */
   isTrustedSender: (event: Electron.IpcMainInvokeEvent) => boolean;
   managed: ManagedProcess;
@@ -108,6 +111,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   // ---- Hub picker ----
   for (const [channel, fn] of hubHandlers(opts.hub)) handle(channel, fn);
+  for (const [channel, fn] of workerHandlers(opts.thisComputer)) handle(channel, fn);
   handle(Channels.getAppTitle, () => getAppTitle());
   handle(Channels.getWindowFullscreen, () => opts.mainWindow.isFullScreen());
   // Per-process Electron/Chromium resource metrics for the Resources page.

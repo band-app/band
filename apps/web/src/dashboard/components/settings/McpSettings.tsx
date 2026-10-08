@@ -435,7 +435,7 @@ export function McpSettings() {
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
                   {server.transport === "stdio"
-                    ? `${server.command ?? ""} ${server.args.join(" ")} on ${server.hostId ?? "no host"}`
+                    ? `${server.command ?? ""} ${server.args.join(" ")} on ${server.hostId ? (hosts.data?.find((h) => h.id === server.hostId)?.name ?? server.hostId) : "no host"}`
                     : server.url}
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -535,11 +535,13 @@ export function McpSettings() {
                   className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
                 >
                   <option value="">Choose a host</option>
-                  {(hosts.data ?? []).map((host) => (
-                    <option key={host.id} value={host.id}>
-                      {host.name} ({host.id}, {host.status})
-                    </option>
-                  ))}
+                  {(hosts.data ?? [])
+                    .filter((h) => h.usable)
+                    .map((host) => (
+                      <option key={host.id} value={host.id}>
+                        {host.name} ({host.id}, {host.status})
+                      </option>
+                    ))}
                 </select>
                 <Input
                   aria-label="MCP command"

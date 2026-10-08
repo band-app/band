@@ -311,8 +311,11 @@ describe("the coordinator on a worker", () => {
     );
     expect(checkout.status).toBe("current");
     expect(readFileSync(join(folder, "repos", "docs", "README.md"), "utf8")).toBe("docs by url\n");
-    // The clone is the worker's own, under its default repos directory, not a path the hub chose.
-    const clone = git(join(folder, "repos", "docs"), "rev-parse", "--git-common-dir");
-    expect(clone).toContain(join(workerHome, "band", "repos"));
+    // The project's checkout is an independent clone of the remote. The worker's own clone sits under its
+    // default repos directory, and nothing in the checkout points back at it.
+    const docsDir = join(folder, "repos", "docs");
+    expect(git(docsDir, "rev-parse", "--git-common-dir")).toBe(".git");
+    expect(existsSync(join(docsDir, ".git", "objects", "info", "alternates"))).toBe(false);
+    expect(git(docsDir, "remote", "get-url", "origin")).toBe(remoteOf("docs"));
   });
 });

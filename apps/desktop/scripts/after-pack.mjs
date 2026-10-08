@@ -88,6 +88,16 @@ export default async function afterPack(context, opts = {}) {
     );
   }
 
+  // 1b. The worker's node-pty and ripgrep binaries live in Resources/worker/node_modules.
+  const workerResources = join(appPath, "Contents", "Resources", "worker");
+  if (existsSync(workerResources)) {
+    deepSignMac({ root: workerResources, entitlements, runner: opts.runner, log: opts.log });
+  } else {
+    (opts.log ?? ((m) => console.log(m)))(
+      `[after-pack] ${workerResources} not found — skipping deep-sign (no bundled worker?)`,
+    );
+  }
+
   // 2. Sign the CLI sidecar (Rust Mach-O at Resources/binaries/band).
   //    Tauri's `externalBin` mechanism signed this automatically; electron-
   //    builder's `extraResources` does not. Without this step notarization
