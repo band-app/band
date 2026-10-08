@@ -9,7 +9,7 @@
     "dev": "pnpm --filter @band-app/server dev",
     "dev:web": "pnpm dev",
     "dev:docs": "pnpm --filter @band-app/docs dev",
-    "build:desktop": "pnpm build:cli:desktop && pnpm build:web && pnpm --filter @band-app/desktop build && pnpm --filter @band-app/desktop package",
+    "build:desktop": "pnpm build:cli:desktop && pnpm build:web && pnpm --filter @band-app/worker build:desktop && pnpm --filter @band-app/desktop build && pnpm --filter @band-app/desktop package",
     "build": "pnpm build:web",
     "build:web": "pnpm --filter @band-app/web build && pnpm --filter @band-app/server build",
     "build:cli": "pnpm --filter @band-app/cli build",

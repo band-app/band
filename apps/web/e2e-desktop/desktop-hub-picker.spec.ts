@@ -123,6 +123,7 @@ async function launchLocal(): Promise<{ app: LaunchedDesktop; hub: HubHome }> {
   const hub = await seedHome("localproj", LOCAL_REPLY, LOCAL_TOKEN);
   homes.push(hub.home);
   const app = await launchDesktop({
+    answeredWorkerPrompt: remote ? [remote.url] : [],
     home: hub.home,
     hubPort: hub.port,
     env: acpStubEnv(hub.home, { turns: [{ steps: [{ say: LOCAL_REPLY }] }] }),
@@ -177,7 +178,11 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
       join(hub.home, ".band", "desktop-hub.json"),
       JSON.stringify({ mode: "remote", url: remote.url, token: REMOTE_TOKEN }),
     );
-    const app = await launchDesktop({ home: hub.home, hubPort: hub.port });
+    const app = await launchDesktop({
+      answeredWorkerPrompt: remote ? [remote.url] : [],
+      home: hub.home,
+      hubPort: hub.port,
+    });
     desktop = app;
     const dashboard = new DesktopDashboardPage(app.window);
 
@@ -206,6 +211,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
       JSON.stringify({ mode: "remote", url: `http://127.0.0.1:${deadPort}`, token: REMOTE_TOKEN }),
     );
     const app = await launchDesktop({
+      answeredWorkerPrompt: remote ? [remote.url] : [],
       home: hub.home,
       hubPort: hub.port,
       firstPage: "unreachable",

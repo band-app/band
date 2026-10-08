@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
@@ -63,6 +63,11 @@ export async function launchDesktop(opts: {
   hubPort?: number;
   /** What the first window shows. `unreachable` is the "hub unreachable" page, a `data:` URL. */
   firstPage?: "app" | "unreachable";
+  /**
+   * Hub URLs whose "Use this Mac as a worker?" prompt counts as answered, so its dialog does not
+   * cover the page when a spec that is not about the prompt connects to that remote hub.
+   */
+  answeredWorkerPrompt?: string[];
 }): Promise<LaunchedDesktop> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -71,6 +76,15 @@ export async function launchDesktop(opts: {
   // Never inherit a dev-server URL: the app would load that instead of `app://`.
   delete env.BAND_DEV_WEB_URL;
   delete env.BAND_CDP_PORT;
+  if (opts.answeredWorkerPrompt?.length) {
+    mkdirSync(join(opts.home, ".band"), { recursive: true });
+    writeFileSync(
+      join(opts.home, ".band", "desktop-worker.json"),
+      JSON.stringify({
+        answered: Object.fromEntries(opts.answeredWorkerPrompt.map((u) => [u, true])),
+      }),
+    );
+  }
   const packaged = packagedExecutable();
   // The hub starts the scripted ACP agent as `process.execPath <script>`. In a
   // packaged app that is the Band binary, which ignores the script and starts a

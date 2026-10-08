@@ -7,6 +7,7 @@ import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
 import { SettingsRow } from "./SettingsRow";
+import { ThisComputerSettings } from "./ThisComputerSettings";
 import {
   WORKER_INSTALL_TABS,
   type WorkerInstallTab,
@@ -160,6 +161,7 @@ export function HostsSettings() {
 
   return (
     <>
+      <ThisComputerSettings />
       <SettingsRow
         variant="stacked"
         label="Hosts"

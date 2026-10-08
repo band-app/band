@@ -43,6 +43,12 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   // Hub picker
   "hub_get_choice",
   "hub_set_choice",
+  // This computer as a worker
+  "worker_status",
+  "worker_add",
+  "worker_remove",
+  "worker_switch_bundled",
+  "worker_dismiss_prompt",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "pick_file",

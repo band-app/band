@@ -55,6 +55,12 @@ extraResources:
   # `client/` next to `start-server.mjs` when `apps/web` is absent.
   - from: ../web/dist/client
     to: web/dist/client
+  # The worker that "Use this Mac as a worker" runs as a launchd service. Built by
+  # `pnpm --filter @band-app/worker build:desktop`; the service's plist points at
+  # Resources/worker/band-worker.mjs, run by the app's own executable with
+  # ELECTRON_RUN_AS_NODE=1, so an app update replaces the worker too.
+  - from: ../worker/dist-desktop
+    to: worker
   # Bundled CLI sidecar. Populated by `apps/desktop/scripts/copy-cli-binary.mjs`
   # before electron-builder runs (see root `build:cli:desktop`). The runtime
   # path resolver expects this exact relative location.
