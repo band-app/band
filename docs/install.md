@@ -94,3 +94,17 @@ A runner starts workers on demand when a worktree asks for a host that does not 
 ## Releases
 
 A release publishes the desktop DMGs, the Homebrew cask, `@band-app/server` and `@band-app/worker` on npm, and the two images `ghcr.io/band-app/band-hub` and `ghcr.io/band-app/band-worker`. Each image is tagged with the release version and `latest`. Pull requests that change `docker/`, `deploy/compose/` or the release workflows build both images for both architectures without pushing them (`.github/workflows/images.yml`).
+
+### How the release workflow runs
+
+`release.yml` is started by hand (Actions > Release > Run workflow) and has three jobs in a chain:
+
+1. **Build (macOS).** Checks the gate, determines the version, builds the UI and hub, then builds, signs and notarizes the DMG. It uploads the DMGs, the zips, `latest-mac.yml`, the hub bundle and the built UI as artifacts.
+2. **Publish (Linux).** Downloads those artifacts, pushes the tag, creates the GitHub release, publishes `@band-app/server` and `@band-app/worker` to npm, and updates the Homebrew cask. The tag is pushed only after the signed build succeeded.
+3. **Images.** Builds the two images from the tag.
+
+Both of the first two jobs use the `production` environment, so the signing, npm and tap secrets stay with the jobs that need them.
+
+Lint and tests do not run in the release. The Build job runs `scripts/check-ci-green.sh <sha>`, which asks the GitHub API for a completed `ci.yml` run on the exact commit being released with conclusion `success` (every job succeeded or was skipped, and a re-run that succeeded counts). Runs of the `pull_request` event are ignored, because they test a merge ref. Without such a run the job fails and names the commit and the state of each `ci.yml` run it found. Start releases only after CI on main has finished.
+
+To release a commit that CI has not passed, run the workflow with `force_tests` set to true. The gate is skipped, and the job builds the CLI, runs lint, and runs the server, web and CLI tests before building the DMG, as releases did before the gate.

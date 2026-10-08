@@ -8,22 +8,30 @@ on:
         required: false
         type: string
       bump:
-        description: "Bump type. Leave empty to auto-detect from commits."
+        description: "Bump type. auto detects it from commits."
         required: false
         type: choice
-        default: ""
+        default: auto
         options:
-          - ""
+          - auto
           - patch
           - minor
           - major
+      force_tests:
+        description: "Run lint and tests here instead of requiring a green ci.yml run on this commit. Use it to release a commit CI has not passed."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  release:
-    name: Release
+  # macOS: gate, build, sign and notarize the DMG. Everything that does not
+  # need macOS runs in `publish` below.
+  build:
+    name: Build (macOS)
     runs-on: macos-latest
     environment: production
     outputs:
@@ -36,6 +44,15 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      # The release only goes ahead for a commit whose ci.yml run passed, so
+      # lint and tests are not repeated here. force_tests=true swaps this gate
+      # for the old lint and test steps below.
+      - name: Require green CI on this commit
+        if: ${{ !inputs.force_tests }}
+        run: scripts/check-ci-green.sh "$GITHUB_SHA" "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -84,11 +101,13 @@ jobs:
         run: |
           if [ -n "${{ inputs.version }}" ]; then
             BUMP_ARGS="--version ${{ inputs.version }}"
-          elif [ -n "${{ inputs.bump }}" ]; then
+          elif [ -n "${{ inputs.bump }}" ] && [ "${{ inputs.bump }}" != "auto" ]; then
             BUMP_ARGS="--bump ${{ inputs.bump }}"
           else
             BUMP_ARGS="--from-commits"
           fi
+          # BUMP_ARGS is two words on purpose.
+          # shellcheck disable=SC2086
           NEW_VERSION=$(node scripts/bump-version.mjs $BUMP_ARGS --dry-run 2>&1 | grep "^Version:" | sed 's/Version: .* → //')
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "bump_args=$BUMP_ARGS" >> "$GITHUB_OUTPUT"
@@ -105,6 +124,7 @@ jobs:
         run: node scripts/bump-version.mjs ${{ steps.version.outputs.bump_args }}
 
       - name: Lint
+        if: ${{ inputs.force_tests }}
         run: |
           pnpm exec biome check .
           pnpm knip
@@ -121,6 +141,7 @@ jobs:
       # workflow already does this before its test step (.github/workflows/ci.yml);
       # mirror it here so release runs aren't tripped up by the same staleness.
       - name: Build CLI
+        if: ${{ inputs.force_tests }}
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
 
       # Pin --test-threads=4 to match ci.yml. Each CLI integration test boots
@@ -131,6 +152,7 @@ jobs:
       # worktrees_list_*/chat_auto_detects_worktree_from_cwd tests flake
       # (see run 28698582656). CI already caps this; mirror it here.
       - name: Test
+        if: ${{ inputs.force_tests }}
         run: |
           pnpm --filter @band-app/server test
           pnpm --filter @band-app/web test
@@ -192,6 +214,80 @@ jobs:
         working-directory: apps/desktop
         run: node scripts/rename-dmgs-by-arch.mjs
 
+      # The Linux `publish` job takes the DMGs and the built hub and UI from
+      # here (the archive root is apps/, the common parent of both paths).
+      # upload-artifact drops file modes, which is fine: the packages' bin
+      # files are executed through node and the postinstall script sets the
+      # node-pty helper's mode.
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          path: |
+            apps/desktop/dist-builder/*.dmg
+            apps/desktop/dist-builder/*-mac.zip
+            apps/desktop/dist-builder/latest-mac.yml
+          if-no-files-found: error
+
+      - name: Upload hub bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-dist
+          path: |
+            apps/hub/dist
+            apps/web/dist/client
+          if-no-files-found: error
+
+  # Linux: tag, GitHub release, npm and the Homebrew tap. Needs the macOS
+  # job's DMGs, so it runs after it. The tag is pushed here, after the signed
+  # build succeeded, so a failed build leaves no tag behind.
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      version: ${{ needs.build.outputs.version }}
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop
+          path: apps/desktop/dist-builder
+
+      - name: Download hub bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-dist
+          path: apps
+
+      # The macOS job bumped its own checkout, so bump this one to the same
+      # version for the package.json files npm publishes.
+      - name: Bump versions
+        run: node scripts/bump-version.mjs --version "$VERSION"
+
       - name: Generate changelog
         id: changelog
         run: |
@@ -209,14 +305,14 @@ jobs:
 
       - name: Create and push tag
         run: |
-          git tag "v${{ steps.version.outputs.new_version }}"
-          git push origin "v${{ steps.version.outputs.new_version }}"
+          git tag "v${{ env.VERSION }}"
+          git push origin "v${{ env.VERSION }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ steps.version.outputs.new_version }}
-          name: v${{ steps.version.outputs.new_version }}
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
           body: ${{ steps.changelog.outputs.changelog }}
           files: |
             apps/desktop/dist-builder/*.dmg
@@ -246,7 +342,6 @@ jobs:
       - name: Update Homebrew tap
         env:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
-          VERSION: ${{ steps.version.outputs.new_version }}
         run: |
           # Defence-in-depth: fail fast if the release version isn't a plain
           # semver before interpolating it into any command below. (new_version
@@ -283,12 +378,12 @@ jobs:
   # job pushed. See images.yml.
   images:
     name: Images
-    needs: release
+    needs: publish
     uses: ./.github/workflows/images.yml
     permissions:
       contents: read
       packages: write
     with:
-      version: ${{ needs.release.outputs.version }}
-      ref: v${{ needs.release.outputs.version }}
+      version: ${{ needs.publish.outputs.version }}
+      ref: v${{ needs.publish.outputs.version }}
       push: true
