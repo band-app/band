@@ -1,4 +1,4 @@
-import type { RepoInfo } from "@band-app/plugin-api";
+import type { ProviderContext, RepoInfo } from "@band-app/plugin-api";
 import { definePlugin } from "@band-app/plugin-api/server";
 import {
   parseBranchChecks,
@@ -39,13 +39,17 @@ export default definePlugin({
     const handoff = new Map<string, { at: number; data: ReviewQueryResponse }>();
     const keyOf = (repo: RepoInfo, branch: string) => `${repoArg(repo)}#${branch}`;
 
-    function query(repo: RepoInfo, branch: string, cwd: string): Promise<ReviewQueryResponse> {
+    function query(
+      repo: RepoInfo,
+      branch: string,
+      ctx: ProviderContext,
+    ): Promise<ReviewQueryResponse> {
       return ghGraphql<ReviewQueryResponse>(
         api,
         repo,
         REVIEW_QUERY,
         { owner: repo.owner, name: repo.repo, branch, ref: `refs/heads/${branch}` },
-        cwd,
+        ctx,
       );
     }
 
@@ -57,7 +61,7 @@ export default definePlugin({
       matches,
       async getReviewForBranch(repo, branch, ctx) {
         const target = normalize(repo);
-        const data = await query(target, branch, ctx.cwd);
+        const data = await query(target, branch, ctx);
         const review = parseReview(data, branch, ctx.defaultBranch);
         if (!review) handoff.set(keyOf(target, branch), { at: Date.now(), data });
         return review;
@@ -66,7 +70,7 @@ export default definePlugin({
         await runGh(
           api,
           ["pr", "merge", String(number), `--${method}`, "--repo", repoArg(normalize(repo))],
-          ctx.cwd,
+          ctx,
         );
       },
     });
@@ -80,7 +84,7 @@ export default definePlugin({
         const left = handoff.get(key);
         handoff.delete(key);
         const fresh = left && Date.now() - left.at < HANDOFF_TTL_MS;
-        return parseBranchChecks(fresh ? left.data : await query(target, ref, ctx.cwd));
+        return parseBranchChecks(fresh ? left.data : await query(target, ref, ctx));
       },
     });
   },
