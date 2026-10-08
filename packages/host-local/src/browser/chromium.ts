@@ -15,10 +15,15 @@ import { join } from "node:path";
 import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-api";
 
 // A Chromium that is alive but never writes its port file is stuck, and a fresh launch usually is not.
-// Each attempt gets a bounded wait. Chromium starts in well under a second, and the attempts together stay
-// inside the 30 s a caller (the hub's CDP test, for one) may wait, so a failure reports its cause instead of a timeout.
-const START_ATTEMPT_TIMEOUT_MS = 7_000;
+// The first attempt gets 20 s: the CI failure of #837 showed a cold start on a loaded runner outlasting the
+// 7 s #830 allowed, and a healthy start takes well under a second, so 20 s only costs time on a real hang.
+// Retries get 60% of that (12 s each, the browser is warm in the page cache by then), so three attempts
+// total 44 s. `BAND_CHROMIUM_START_TIMEOUT_MS` replaces the first attempt's budget (tests shorten it).
+const FIRST_ATTEMPT_TIMEOUT_MS = 20_000;
+const RETRY_TIMEOUT_FRACTION = 0.6;
 const START_ATTEMPTS = 3;
+const SINGLETON_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+const PROCESS_GROUP_GONE_TIMEOUT_MS = 5_000;
 const CLOSE_GRACE_MS = 4_000;
 
 interface Running {
@@ -89,9 +94,10 @@ async function readDevToolsPort(
   profileDir: string,
   proc: ChildProcess,
   logPath: string,
+  timeoutMs: number,
 ): Promise<{ port: number; path: string }> {
   const file = join(profileDir, "DevToolsActivePort");
-  const deadline = Date.now() + START_ATTEMPT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (proc.exitCode !== null || proc.signalCode !== null) {
       throw new Error("Chromium exited before it opened a DevTools port");
@@ -110,6 +116,20 @@ async function readDevToolsPort(
     await sleep(50);
   }
   throw new StartTimeoutError("Chromium did not open a DevTools port in time");
+}
+
+/** The leader exiting does not mean its helper processes have: wait until the whole group is gone. */
+async function waitForGroupExit(pid: number | undefined): Promise<void> {
+  if (pid === undefined) return;
+  const deadline = Date.now() + PROCESS_GROUP_GONE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    await sleep(25);
+  }
 }
 
 const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
@@ -233,9 +253,19 @@ export class ChromiumManager {
     );
     const logPath = join(profileDir, "chromium.log");
     const failures: string[] = [];
+    const envTimeout = Number(process.env.BAND_CHROMIUM_START_TIMEOUT_MS);
+    const firstTimeout =
+      Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : FIRST_ATTEMPT_TIMEOUT_MS;
     for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
-      // A port file from the attempt before would point at a dead browser.
+      const attemptTimeout =
+        attempt === 1 ? firstTimeout : Math.round(firstTimeout * RETRY_TIMEOUT_FRACTION);
+      // A port file from the attempt before would point at a dead browser. So would its Singleton* files:
+      // the previous process is gone by now (waited for below), and a leftover lock makes the new browser
+      // hand off to a process that no longer exists and never open a port. The profile's cookies stay.
       await rm(join(profileDir, "DevToolsActivePort"), { force: true });
+      if (attempt > 1) {
+        await Promise.all(SINGLETON_FILES.map((f) => rm(join(profileDir, f), { force: true })));
+      }
       const logFd = openSync(logPath, "w", 0o600);
       const proc = spawn(bin, args, {
         stdio: ["ignore", "ignore", logFd],
@@ -249,7 +279,7 @@ export class ChromiumManager {
       });
       const startedAt = Date.now();
       try {
-        const { port, path } = await readDevToolsPort(profileDir, proc, logPath);
+        const { port, path } = await readDevToolsPort(profileDir, proc, logPath, attemptTimeout);
         const info: BrowserInfo = { pid: proc.pid, profileDir, headless, port };
         const entry: Running = { proc, info, wsUrl: `ws://127.0.0.1:${port}${path}`, exited };
         this.running.set(spec.worktreeId, entry);
@@ -260,6 +290,7 @@ export class ChromiumManager {
       } catch (err) {
         this.kill(proc, "SIGKILL");
         await exited;
+        await waitForGroupExit(proc.pid);
         const tail = (await readFile(logPath, "utf8").catch(() => ""))
           .trim()
           .split("\n")
@@ -324,7 +355,7 @@ export class ChromiumManager {
 
   /** Signals the browser's process group, so its helper processes go too. */
   private kill(proc: ChildProcess, signal: NodeJS.Signals): void {
-    if (proc.pid === undefined || proc.exitCode !== null) return;
+    if (proc.pid === undefined) return;
     try {
       process.kill(-proc.pid, signal);
     } catch {
