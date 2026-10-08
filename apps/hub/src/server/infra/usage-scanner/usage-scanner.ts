@@ -1,14 +1,11 @@
-import { dirname } from "node:path";
 import type { SessionUsageSnapshot, UsageReader } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { ProjectTaskQueries } from "../db/queries/project-tasks";
 import { RepoQueries } from "../db/queries/repos";
 import { SettingsQueries } from "../db/queries/settings";
 import { UsageEventQueries } from "../db/queries/usage-events";
 import { UsageScanStateQueries } from "../db/queries/usage-scan-state";
 import { hostRegistry } from "../host/registry";
-import { taskScopeId } from "../project-scope";
 
 /** Hour in milliseconds — bucket size for the Reports usage table. */
 const HOUR_MS = 60 * 60 * 1000;
@@ -500,16 +497,6 @@ function defaultListWorktrees(): ReturnType<NonNullable<UsageScannerDeps["listWo
         worktreePath: worktree.path,
       });
     }
-  }
-  // A task's own chat runs in the task folder, which is no worktree. Only a folder on this machine
-  // can be read here, so a task on a worker is not scanned (the same limit as a remote worktree).
-  for (const task of new ProjectTaskQueries().all()) {
-    if (!task.briefPath || (task.hostId !== null && task.hostId !== "local")) continue;
-    out.push({
-      worktreeId: taskScopeId(task.id),
-      repo: "",
-      worktreePath: dirname(task.briefPath),
-    });
   }
   return out;
 }

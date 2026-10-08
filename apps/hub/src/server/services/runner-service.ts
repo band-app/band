@@ -58,7 +58,7 @@ import {
 } from "./_utils/runner-config";
 import { environmentBuildService } from "./environment-build-service";
 import { gitCredentialService } from "./git-credential-service";
-import { HostRequestError, placementService, taskOf, wakeOf } from "./placement-service";
+import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
 import { tokenService } from "./token-service";
@@ -1046,13 +1046,7 @@ export class RunnerService {
       BAND_REQUIRES: JSON.stringify(row?.requires ?? {}),
       BAND_REPO: row?.repo ?? "",
       // The repo's current environment image (plan step 3.2), empty before its first ready build.
-      // For a task, the combined environment's image (the project file's, else the primary member's) wins.
-      BAND_REPO_IMAGE: row
-        ? ((row && taskOf(row) ? environment?.build?.image : undefined) ?? this.repoImage(row.repo))
-        : "",
-      BAND_TASK_NAME: row && taskOf(row) ? String(taskOf(row)?.create.name ?? "") : "",
-      BAND_TASK_BRANCH: row && taskOf(row) ? row.branch : "",
-      BAND_TASK_REPOS: row ? (taskRepoNames(row) ?? []).join(",") : "",
+      BAND_REPO_IMAGE: row ? this.repoImage(row.repo) : "",
       BAND_RUNNER_ID: runner.id,
       BAND_RUNNER_DIR: join(bandHome(), "runners", runner.id),
       BAND_NODE: process.execPath,
@@ -1181,29 +1175,10 @@ function environmentOf(row: HostRequestRow): Environment | null {
  * this machine can use that). The hub needs no checkout of its own to answer.
  */
 async function repoUrls(row: HostRequestRow): Promise<string[]> {
-  const names = taskRepoNames(row) ?? [row.repo];
-  const state = loadState();
-  const urls: string[] = [];
-  for (const name of names) {
-    const repo = state.repos.find((p) => p.name === name);
-    if (!repo) continue;
-    if (repo.remoteUrl) urls.push(repo.remoteUrl);
-    else if (repo.path) urls.push(repo.path);
-  }
-  return urls;
-}
-
-/**
- * The member repos of a task request, the primary first (its URL is the one a hook clones, and
- * `BAND_REPO` names it). Null for a request that is not for a task.
- */
-function taskRepoNames(row: HostRequestRow): string[] | null {
-  const task = taskOf(row);
-  if (!task) return null;
-  const repos = ((task.create.repos as Array<{ repo: string }> | undefined) ?? []).map(
-    (r) => r.repo,
-  );
-  return [row.repo, ...repos.filter((r) => r !== row.repo)].filter(Boolean);
+  const repo = loadState().repos.find((p) => p.name === row.repo);
+  if (!repo) return [];
+  if (repo.remoteUrl) return [repo.remoteUrl];
+  return repo.path ? [repo.path] : [];
 }
 
 function sleep(ms: number): Promise<void> {

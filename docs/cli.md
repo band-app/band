@@ -2,7 +2,7 @@
 
 The CLI is split into seven domain-specific skills, each authored as its own `SKILL.md` with its own command reference:
 
-- [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — worktrees, repos, projects, tasks, cronjobs, tunnel, settings, schema, notify, skills install. The task commands are explained in [`docs/tasks.md`](tasks.md).
+- [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — worktrees, repos, projects, cronjobs, tunnel, settings, schema, notify, skills install.
 - [`apps/cli/skills/band-chat/SKILL.md`](../apps/cli/skills/band-chat/SKILL.md) — chat panes (`band chats ...`), including label management.
 - [`apps/cli/skills/band-terminal/SKILL.md`](../apps/cli/skills/band-terminal/SKILL.md) — terminal sessions (`band terminals ...`).
 - [`apps/cli/skills/band-browser/SKILL.md`](../apps/cli/skills/band-browser/SKILL.md) — browser tabs (`band browsers ...`).

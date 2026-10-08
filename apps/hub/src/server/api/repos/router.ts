@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
+import { projectFolderService } from "../../services/project-folder-service";
 import { projectService } from "../../services/project-service";
 import { repoService } from "../../services/repo-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
@@ -25,6 +26,20 @@ import { repoErrorToTrpc } from "./errors";
  * when subsequent phases lift worktrees, chats, and tasks; see
  * `docs/web-architecture.md` § "Tier 1: API".
  */
+/**
+ * A repo added straight into a project gets its checkout in the project folder now, as
+ * `projects.addRepo` does, not at the coordinator's next turn. A project with no coordinator yet
+ * has no folder, and a failed checkout is reported in the folder state, not as a failed add.
+ */
+async function checkOutInProject(project: string | undefined): Promise<void> {
+  if (!project) return;
+  try {
+    await projectFolderService.addRepo(projectService.row(project));
+  } catch {
+    // The add already succeeded; the folder state names what went wrong.
+  }
+}
+
 export const reposRouter = t.router({
   list: publicProcedure.query(() => {
     return repoService.list();
@@ -59,7 +74,9 @@ export const reposRouter = t.router({
     )
     .mutation(async ({ input }) => {
       try {
-        return await repoService.addFromWorker(input);
+        const repo = await repoService.addFromWorker(input);
+        await checkOutInProject(input.project);
+        return repo;
       } catch (err) {
         throw repoErrorToTrpc(err);
       }
@@ -81,7 +98,31 @@ export const reposRouter = t.router({
     )
     .mutation(async ({ input }) => {
       try {
-        return await repoService.addByUrl(input);
+        const repo = await repoService.addByUrl(input);
+        await checkOutInProject(input.project);
+        return repo;
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
+    }),
+
+  /** Reads a folder on a host the way `addFromWorker` would, without adding it. */
+  inspectFolder: adminProcedure
+    .input(z.object({ hostId: z.string().min(1), path: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        return await repoService.inspectOnHost(input.hostId, input.path);
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
+    }),
+
+  /** Reads a remote URL's name and default branch the way `addByUrl` would, without adding it. */
+  resolveRemote: adminProcedure
+    .input(z.object({ remoteUrl: z.string().trim().min(1).max(500) }))
+    .query(async ({ input }) => {
+      try {
+        return await repoService.resolveRemote(input.remoteUrl);
       } catch (err) {
         throw repoErrorToTrpc(err);
       }

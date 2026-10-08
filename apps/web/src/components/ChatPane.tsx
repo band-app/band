@@ -1,3 +1,4 @@
+import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { consumeChatFresh } from "../lib/leaf-instance-ids";
@@ -269,13 +270,14 @@ interface ChatPaneProps {
 }
 
 export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatPaneProps) {
+  const scopeLabel = useScopeLabel(worktreeId);
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ChatView
         key={state.paneKey}
         worktreeId={worktreeId}
         chatId={chatId}
-        worktreeName={worktreeId}
+        worktreeName={scopeLabel}
         initialSessionId={state.initialSessionId}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}
@@ -288,4 +290,17 @@ export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatP
       />
     </div>
   );
+}
+
+/** What a chat's empty state names: its worktree's id, or the title of a project's folder view. */
+function useScopeLabel(worktreeId: string): string {
+  const projectId = projectIdOfScope(worktreeId);
+  const projects = useQuery({
+    queryKey: ["projects.list"],
+    queryFn: () => trpc.projects.list.query(),
+    enabled: projectId !== undefined,
+  });
+  if (!projectId) return worktreeId;
+  const project = projects.data?.projects.find((p) => p.id === projectId);
+  return project ? project.title || project.name : "";
 }

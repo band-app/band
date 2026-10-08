@@ -13,6 +13,8 @@
  * per device on purpose, #685) and sessionStorage caches.
  */
 
+import { isFolderScope } from "./scope-id.ts";
+
 export type KeyScope = "all" | "device";
 
 export interface KeyPart {
@@ -120,14 +122,18 @@ function perWorktree(prefix: string, parts: KeyPart[]): KeyRule {
   };
 }
 
-/** `<prefix><worktreeId>:<leafId>`. Worktree ids never contain a colon. */
+/**
+ * `<prefix><worktreeId>:<leafId>`. Worktree ids never contain a colon. A project folder's scope id
+ * (`project:<id>`) holds exactly one, so its leaf starts after the second.
+ */
 function perWorktreeLeaf(prefix: string, parts: KeyPart[]): KeyRule {
   return {
     match: (k) => {
       if (!k.startsWith(prefix)) return undefined;
       const rest = k.slice(prefix.length);
-      const colon = rest.indexOf(":");
-      return colon > 0 && colon < rest.length - 1 ? rest.slice(0, colon) : undefined;
+      const from = isFolderScope(rest) ? rest.indexOf(":") + 1 : 0;
+      const colon = rest.indexOf(":", from);
+      return colon > from && colon < rest.length - 1 ? rest.slice(0, colon) : undefined;
     },
     parts,
   };
@@ -163,6 +169,8 @@ const RULES: KeyRule[] = [
   exact("band:right-sidepanel-tab", [rawPart("device")]),
   exact("band:commits-panel-collapsed", [rawPart("device")]),
   exact("band:commits-panel-height", [rawPart("device")]),
+  exact("band:repos-panel-collapsed", [rawPart("device")]),
+  exact("band:repos-panel-height", [rawPart("device")]),
   exact("band:changes-collapsed-sections", [jsonPart("device")]),
   exact("band:diff-view-mode", [rawPart("device")]),
   exact("band:markdown-preview-width", [rawPart("device")]),

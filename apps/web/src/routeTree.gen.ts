@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorktreeWorktreeIdRouteImport } from './routes/worktree.$worktreeId'
-import { Route as TaskTaskIdRouteImport } from './routes/task.$taskId'
+import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,39 +23,39 @@ const WorktreeWorktreeIdRoute = WorktreeWorktreeIdRouteImport.update({
   path: '/worktree/$worktreeId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TaskTaskIdRoute = TaskTaskIdRouteImport.update({
-  id: '/task/$taskId',
-  path: '/task/$taskId',
+const ProjectProjectIdRoute = ProjectProjectIdRouteImport.update({
+  id: '/project/$projectId',
+  path: '/project/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/task/$taskId': typeof TaskTaskIdRoute
+  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/task/$taskId': typeof TaskTaskIdRoute
+  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/task/$taskId': typeof TaskTaskIdRoute
+  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/task/$taskId' | '/worktree/$worktreeId'
+  fullPaths: '/' | '/project/$projectId' | '/worktree/$worktreeId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/task/$taskId' | '/worktree/$worktreeId'
-  id: '__root__' | '/' | '/task/$taskId' | '/worktree/$worktreeId'
+  to: '/' | '/project/$projectId' | '/worktree/$worktreeId'
+  id: '__root__' | '/' | '/project/$projectId' | '/worktree/$worktreeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  TaskTaskIdRoute: typeof TaskTaskIdRoute
+  ProjectProjectIdRoute: typeof ProjectProjectIdRoute
   WorktreeWorktreeIdRoute: typeof WorktreeWorktreeIdRoute
 }
 
@@ -75,11 +75,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorktreeWorktreeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/task/$taskId': {
-      id: '/task/$taskId'
-      path: '/task/$taskId'
-      fullPath: '/task/$taskId'
-      preLoaderRoute: typeof TaskTaskIdRouteImport
+    '/project/$projectId': {
+      id: '/project/$projectId'
+      path: '/project/$projectId'
+      fullPath: '/project/$projectId'
+      preLoaderRoute: typeof ProjectProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -87,7 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  TaskTaskIdRoute: TaskTaskIdRoute,
+  ProjectProjectIdRoute: ProjectProjectIdRoute,
   WorktreeWorktreeIdRoute: WorktreeWorktreeIdRoute,
 }
 export const routeTree = rootRouteImport

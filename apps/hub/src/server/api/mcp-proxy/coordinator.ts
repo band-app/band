@@ -68,7 +68,7 @@ function createServer(projectId: string): McpServer {
   );
   tool(
     "worktrees_list",
-    "The worktrees of this project with their chat ids, branches, hosts and pull requests. Tasks_list shows the same by task.",
+    "The worktrees of this project with their chat ids, branches, hosts and pull requests. Only these chats can be read or messaged.",
     {},
     () => ({ worktrees: projectCoordinatorService.listWorktrees(project()) }),
   );
@@ -109,38 +109,10 @@ function createServer(projectId: string): McpServer {
     (args) => projectCoordinatorService.repoLog(project(), args.repo, args.n),
   );
   tool(
-    "tasks_create",
-    "Dispatch work: create a task in this project and start a worker agent on the project's worker model. A task is a folder on one host with BRIEF.md (your brief) and one git worktree per repo in `repos` (a list of {repo, role}; none is allowed, and the agent then adds the repos it needs itself). The agent runs in the task folder. `branch` is the branch every repo's worktree is made on, from its default branch. `brief` is markdown the worker works from alone, so state the goal, the constraints and what is out of scope. For work across repos, list every repo in the order its pull request should merge. `scenarios` are the acceptance scenarios the worker must check. `placement` takes labels, requires and isolation within the project's policy, and `host` names a host id. A task runs on one host, so the call fails with the reason when no host fits every repo. In steer mode the call answers \"pending approval\" and the user decides on the project page. Returns the task id, folder, chat id and worktree ids.",
+    "worktree_create",
+    "Dispatch work: create a git worktree of one repo of this project and start a worker agent in it on the project's worker model. `repo` is the repo, `branch` the branch to make from its default branch as origin has it now. `brief` is markdown the worker works from alone (it goes in .am/BRIEF.md), so state the goal, the constraints, the contracts with other repos and what is out of scope. `scenarios` are the acceptance scenarios the worker must check. `placement` takes labels, requires and isolation within the project's policy. Work in several repos takes one call per repo. Returns the worktree id, chat id and path, or status provisioning with a request id while a runner starts a machine.",
     dispatchInputShape,
     (args) => projectDispatchService.dispatch(project(), args),
-  );
-  tool(
-    "tasks_list",
-    "The tasks of this project with their repos, worktree ids, hosts, folders, pull requests and chat ids. Only these chats can be read or messaged.",
-    {},
-    () => ({ tasks: projectCoordinatorService.listTasks(project()) }),
-  );
-  tool(
-    "task_stop",
-    "Stop the running turns of every chat of a task of this project, by task id or name. Refused in observe mode.",
-    { task: z.string().min(1).max(300) },
-    (args) => projectCoordinatorService.stopTask(project(), args.task),
-  );
-  tool(
-    "task_add_repo",
-    "Add a repo of this project to an existing task, by task id or name: a git worktree on the task's branch in the task folder, from the repo's default branch. Refused in observe mode, for a repo outside the project, and when the task's host lacks the labels the project requires.",
-    {
-      task: z.string().min(1).max(300),
-      repo: z.string().min(1).max(200),
-      role: z.string().max(100).optional(),
-    },
-    (args) => projectCoordinatorService.addRepoToTask(project(), args.task, args.repo, args.role),
-  );
-  tool(
-    "task_remove_repo",
-    "Remove a repo's worktree from a task, by task id or name. Refused while the worktree has commits that are not on the default branch or uncommitted changes, and in observe mode.",
-    { task: z.string().min(1).max(300), repo: z.string().min(1).max(200) },
-    (args) => projectCoordinatorService.removeRepoFromTask(project(), args.task, args.repo),
   );
   return server;
 }

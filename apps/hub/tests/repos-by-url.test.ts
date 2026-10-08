@@ -41,7 +41,6 @@ interface RepoView {
 interface ProjectView {
   id: string;
   name: string;
-  isDefault: boolean;
   repos: Array<{ repo: string }>;
 }
 
@@ -150,8 +149,10 @@ afterAll(async () => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
 });
 
+const checkoutOfProj = () => join(workerHome, "code", "proj");
+
 describe("adding a repo from a worker (S1)", () => {
-  const checkoutOf = () => join(workerHome, "code", "proj");
+  const checkoutOf = checkoutOfProj;
 
   it("stores the URL and default branch the worker read, and holds no hub path", async () => {
     const remote = makeRemote(remotes, "proj");
@@ -206,13 +207,12 @@ describe("adding a repo from a worker (S1)", () => {
     expect(Object.values(mappings).map((e) => e.path)).toEqual([checkoutOf()]);
   });
 
-  it("puts the repo and its worktree in the default project", async () => {
+  it("puts the repo and its worktree in no project", async () => {
     const { projects } = await q<{ projects: ProjectView[] }>("projects.list");
-    const personal = projects.find((p) => p.isDefault);
-    expect(personal?.name).toBe("personal");
-    expect(personal?.repos.map((r) => r.repo)).toContain("proj");
+    expect(projects.flatMap((p) => p.repos.map((r) => r.repo))).not.toContain("proj");
     const wt = (await repo("proj"))?.worktrees.find((w) => w.name === "feat-a");
-    expect(wt?.projectId).toBe(personal?.id);
+    expect(wt).toBeDefined();
+    expect(wt?.projectId).toBeUndefined();
   });
 });
 
@@ -287,6 +287,117 @@ describe("a repo added by URL (S2)", () => {
     );
     expect(refused.status).toBe(500);
     expect(JSON.stringify(await refused.json())).toContain("no remote URL");
+  });
+});
+
+describe("previewing a repo before adding it", () => {
+  interface FolderPreview {
+    path: string;
+    isGit: boolean;
+    remoteUrl: string | null;
+    defaultBranch: string | null;
+    name: string;
+    cloneable: boolean;
+    insideRoots: boolean;
+    roots: string[];
+    existingRepo: string | null;
+  }
+
+  it("reads a worker folder's remote and branch without adding it", async () => {
+    const remote = makeRemote(remotes, "peek");
+    git(workerRoot, "clone", "-q", remote, "peek");
+    const preview = await q<FolderPreview>("repos.inspectFolder", {
+      hostId,
+      path: join(workerRoot, "peek"),
+    });
+    expect(preview).toMatchObject({
+      path: join(workerRoot, "peek"),
+      isGit: true,
+      remoteUrl: remote,
+      defaultBranch: "main",
+      name: "peek",
+      cloneable: true,
+      insideRoots: true,
+      existingRepo: null,
+    });
+    expect(await repo("peek")).toBeUndefined();
+  });
+
+  it("names the repo that already uses the folder's remote", async () => {
+    const preview = await q<FolderPreview>("repos.inspectFolder", {
+      hostId,
+      path: checkoutOfProj(),
+    });
+    expect(preview.existingRepo).toBe("proj");
+  });
+
+  it("reports a folder with no remote and one outside the roots", async () => {
+    const plain = join(workerHome, "loose");
+    mkdirSync(plain, { recursive: true });
+    const preview = await q<FolderPreview>("repos.inspectFolder", { hostId, path: plain });
+    expect(preview).toMatchObject({ isGit: false, remoteUrl: null, insideRoots: false });
+    expect(preview.roots).toContain(workerRoot);
+  });
+
+  it("answers 400 for an unknown host and for a URL that is not a git remote", async () => {
+    const host = await trpcQuery(
+      server.url,
+      "repos.inspectFolder",
+      { hostId: "h-nope", path: workerRoot },
+      TOKEN,
+    );
+    expect(host.status).toBe(400);
+    const url = await trpcQuery(
+      server.url,
+      "repos.resolveRemote",
+      { remoteUrl: "not a url" },
+      TOKEN,
+    );
+    expect(url.status).toBe(400);
+  });
+
+  it("resolves a URL's default branch without adding it", async () => {
+    const remote = makeRemote(remotes, "resolved");
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/trunk");
+    git(remote, "branch", "trunk", "main");
+    const preview = await q<{ url: string; name: string; defaultBranch: string }>(
+      "repos.resolveRemote",
+      { remoteUrl: remote },
+    );
+    expect(preview).toEqual({ url: remote, name: "resolved", defaultBranch: "trunk" });
+    expect(await repo("resolved")).toBeUndefined();
+  });
+
+  it("refuses a URL a repo already uses and a non-admin token", async () => {
+    const dup = await trpcQuery(
+      server.url,
+      "repos.resolveRemote",
+      { remoteUrl: join(remotes, "other.git") },
+      TOKEN,
+    );
+    expect(dup.status).toBe(409);
+    const device = await m<{ token: string }>("tokens.createDevice", { label: "peek" });
+    const res = await trpcQuery(
+      server.url,
+      "repos.inspectFolder",
+      { hostId, path: workerRoot },
+      device.token,
+    );
+    expect(res.status).toBe(403);
+    const resolve = await trpcQuery(
+      server.url,
+      "repos.resolveRemote",
+      { remoteUrl: "https://example.com/acme/peek.git" },
+      device.token,
+    );
+    expect(resolve.status).toBe(403);
+    const anon = await trpcQuery(
+      server.url,
+      "repos.resolveRemote",
+      { remoteUrl: "https://example.com/acme/peek.git" },
+      "",
+    );
+    expect(anon.status).toBe(401);
   });
 });
 

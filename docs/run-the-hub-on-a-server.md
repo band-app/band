@@ -92,7 +92,7 @@ band repos add --from <host id> /home/me/code/myrepo --add-root
 
 A folder with no git remote is added without a URL and stays on that one worker. A worktree for it can only run there.
 
-`band repos list` shows each repo's URL and the folder it is cloned to on each host. Repos are added to a project, and to the default project (`personal`) when none is named.
+`band repos list` shows each repo's URL and the folder it is cloned to on each host. A repo added with `--project` belongs to that project, and one added without it belongs to no project.
 
 The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, the hub's own machine is a host too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
 

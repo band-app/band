@@ -232,6 +232,43 @@ describe("clientState", () => {
     expect(await listEntries(server.url, "proj-missing", "desktop")).toEqual([]);
   });
 
+  it("keeps a project folder view's keys while the project exists, and drops them with it", async () => {
+    const created = await trpcMutate(server.url, "projects.create", { name: "cs-project" });
+    expect(created.status).toBe(200);
+    const { project } = await trpcData<{ project: { id: string } }>(created);
+    const scope = `project:${project.id}`;
+    const key = `band-draft:${scope}`;
+    const written = await setEntry(server.url, {
+      key,
+      scope: "all",
+      value: "plan",
+      baseVersion: 0,
+    });
+    expect(written.ok).toBe(true);
+    expect((await listEntries(server.url, scope, "desktop")).map((e) => e.value)).toEqual(["plan"]);
+
+    const unknown = await trpcMutate(server.url, "clientState.set", {
+      key: "band-draft:project:prj-missing",
+      scope: "all",
+      value: "x",
+      baseVersion: 0,
+      clientId: "client-a",
+    });
+    expect(unknown.status).toBe(404);
+
+    const removed = await trpcMutate(server.url, "projects.remove", { project: "cs-project" });
+    expect(removed.status).toBe(200);
+    expect(countRows(tmpHome, scope)).toBe(0);
+    const late = await trpcMutate(server.url, "clientState.set", {
+      key,
+      scope: "all",
+      value: "late",
+      baseVersion: 1,
+      clientId: "client-a",
+    });
+    expect(late.status).toBe(404);
+  });
+
   it("stores a value, then refuses a write based on a stale version", async () => {
     const key = `band:center-tabs:${WS_MAIN}`;
     const first = await setEntry(server.url, {

@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlatformCapabilities } from "@/dashboard";
+import { useWorktreeFromPath } from "../lib/parse-worktree";
 
 /**
  * Browser-like worktree history powering the title-bar back/forward buttons.
@@ -19,19 +20,6 @@ import type { PlatformCapabilities } from "@/dashboard";
  * Returns the `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`
  * flags so callers can render UI controls (e.g. arrow buttons in the title bar).
  */
-
-const WS_PREFIX = "/worktree/";
-
-/** Extract the decoded worktree ID from a pathname, or null if not on a worktree route. */
-function extractWorktreeId(pathname: string): string | null {
-  if (!pathname.startsWith(WS_PREFIX)) return null;
-  const rest = pathname.slice(WS_PREFIX.length);
-  // The worktree ID is the first path segment (URL-encoded)
-  const slash = rest.indexOf("/");
-  const encoded = slash === -1 ? rest : rest.slice(0, slash);
-  if (!encoded) return null;
-  return decodeURIComponent(encoded);
-}
 
 export interface NavigationHistoryReturn {
   goBack: () => void;
@@ -52,6 +40,8 @@ export function useNavigationHistory(
   capabilities: PlatformCapabilities,
 ): NavigationHistoryReturn {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // A project's view (`/project/<name>`) counts as a visit to its scope id.
+  const wsId = useWorktreeFromPath(pathname);
 
   // Stack and cursor live in a single state object so consumers re-render
   // when canGoBack/canGoForward flip (used to enable/disable UI buttons).
@@ -60,13 +50,11 @@ export function useNavigationHistory(
 
   // Track worktree changes → push onto the history stack (unless we caused it).
   useEffect(() => {
-    const wsId = extractWorktreeId(pathname);
-    if (!wsId) return;
-
-    if (navigatingRef.current) {
-      navigatingRef.current = false;
-      return;
-    }
+    // Reset first: a back or forward step onto an entry that no longer resolves (a deleted
+    // project) parses to null, and must not swallow the next real visit.
+    const caused = navigatingRef.current;
+    navigatingRef.current = false;
+    if (!wsId || caused) return;
 
     setHistory((prev) => {
       // Don't push if we're already looking at this worktree.
@@ -75,7 +63,7 @@ export function useNavigationHistory(
       const stack = [...prev.stack.slice(0, prev.cursor + 1), wsId];
       return { stack, cursor: stack.length - 1 };
     });
-  }, [pathname]);
+  }, [wsId]);
 
   const goBack = useCallback(() => {
     let didMove = false;

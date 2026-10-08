@@ -13,10 +13,8 @@ import { createLogger } from "@band-app/logger";
 import { toWorktreeId as toWorktreeIdOf } from "@band-app/shared/worktree-id";
 import { ProjectConflictError, ProjectInputError, ProjectNotFoundError } from "../errors";
 import type { ContextRow } from "../infra/db/queries/contexts";
-import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
 import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
-import { taskIdOfScope } from "../infra/project-scope";
 import {
   type ProjectPolicy,
   projectPolicy,
@@ -42,6 +40,8 @@ export interface ProjectRepoInput {
 export interface ProjectView {
   id: string;
   name: string;
+  /** The name the UI shows, set by a rename. Empty means `name`. */
+  title: string;
   description: string;
   contextName: string;
   coordinatorAgent: string | null;
@@ -56,8 +56,6 @@ export interface ProjectView {
   /** The host the coordinator is pinned to. Null means the hub's default. */
   coordinatorHostId: string | null;
   createdAt: number;
-  /** The project that takes repos and worktrees created with no project. It cannot be removed and has no coordinator. */
-  isDefault: boolean;
   repos: Array<{ repo: string; role: string | null }>;
   worktrees: Array<{
     worktreeId: string;
@@ -93,6 +91,8 @@ export interface CreateProjectInput {
 }
 
 export interface UpdateProjectInput {
+  /** Renames the project in the UI. `name` stays, because folders and the context repo use it. */
+  title?: string;
   description?: string;
   coordinatorAgent?: string | null;
   coordinatorModel?: string;
@@ -138,15 +138,10 @@ function labelsOf(labels: string[] | undefined): string[] {
   }
 }
 
-export const DEFAULT_PROJECT_NAME = "personal";
-
 export class ProjectService {
-  private defaultPending: Promise<ProjectRow> | null = null;
-
   constructor(
     private readonly queries = new ProjectQueries(),
     private readonly worktreeQueries = new WorktreeQueries(),
-    private readonly taskQueries = new ProjectTaskQueries(),
   ) {}
 
   list(): ProjectView[] {
@@ -231,6 +226,7 @@ export class ProjectService {
     const row: ProjectRow = {
       id: `prj-${randomBytes(6).toString("hex")}`,
       name,
+      title: "",
       description,
       contextName,
       coordinatorAgent: agent,
@@ -240,6 +236,7 @@ export class ProjectService {
       coordinatorChatId: null,
       coordinatorHostId: input.coordinatorHostId?.trim() || null,
       createdAt: Date.now(),
+      // Legacy column: only older hubs' default project had it set (see `retireLegacy`).
       isDefault: false,
     };
     try {
@@ -258,6 +255,11 @@ export class ProjectService {
   update(ref: string, patch: UpdateProjectInput): ProjectView {
     const row = this.require(ref);
     const set: Partial<ProjectRow> = {};
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (title.length > 100) throw new ProjectInputError("The name is over 100 characters");
+      set.title = title === row.name ? "" : title;
+    }
     if (patch.description !== undefined) {
       const description = patch.description.trim();
       if (description.length > 2000)
@@ -292,11 +294,6 @@ export class ProjectService {
     opts: { removeContext?: boolean; beforeRemove?: (row: ProjectRow) => Promise<void> } = {},
   ): Promise<void> {
     const row = this.require(ref);
-    if (row.isDefault) {
-      throw new ProjectConflictError(
-        `Project "${row.name}" is the default project and cannot be removed`,
-      );
-    }
     const attached = this.workersOf(row);
     if (attached.length > 0) {
       throw new ProjectConflictError(
@@ -313,77 +310,17 @@ export class ProjectService {
   }
 
   /**
-   * The project that takes repos and worktrees created with none ("personal"), made on first use.
-   * It has a context repo like any project but never gets a coordinator.
+   * Retires the default project of older hubs ("personal") and the task links of the removed task
+   * folders, once at boot. The default project's repos and worktrees stay, in no project. Its
+   * context repo stays too, so nothing written there is lost.
    */
-  async ensureDefault(): Promise<ProjectRow> {
-    const existing = this.queries.findDefault();
-    if (existing) return existing;
-    this.defaultPending ??= (async () => {
-      const taken = (name: string) => this.queries.findByName(name) || contextService.find(name);
-      let name = DEFAULT_PROJECT_NAME;
-      for (let n = 2; taken(name); n++) name = `${DEFAULT_PROJECT_NAME}-${n}`;
-      await contextService.create({ name, kind: "project" });
-      const row: ProjectRow = {
-        id: `prj-${randomBytes(6).toString("hex")}`,
-        name,
-        description: "Repos and worktrees you add without choosing a project.",
-        contextName: name,
-        coordinatorAgent: null,
-        coordinatorModel: DEFAULT_COORDINATOR_MODEL,
-        labels: [],
-        policy: {},
-        coordinatorChatId: null,
-        coordinatorHostId: null,
-        createdAt: Date.now(),
-        isDefault: true,
-      };
-      this.queries.insert(row, []);
-      log.info(`created default project ${name}`);
-      return row;
-    })().finally(() => {
-      this.defaultPending = null;
-    });
-    return this.defaultPending;
-  }
-
-  /** The default project's id, or undefined before {@link ensureDefault} has run. */
-  defaultProjectId(): string | undefined {
-    return this.queries.findDefault()?.id;
-  }
-
-  /**
-   * Makes sure the default project exists and puts the repos and worktrees that belong to no
-   * project into it. A repo in another project stays there, and so do its worktrees.
-   */
-  async adoptUnplaced(
-    repos: Array<{ name: string; worktrees: Array<{ name: string }> }>,
-  ): Promise<void> {
-    const row = await this.ensureDefault();
-    for (const repo of repos) {
-      if (this.queries.projectsOfRepo(repo.name).length === 0) {
-        this.queries.upsertRepo(row.id, repo.name, null);
-      }
-      if (!this.queries.projectsOfRepo(repo.name).includes(row.id)) continue;
-      for (const wt of repo.worktrees) {
-        const id = toWorktreeIdOf(repo.name, wt.name);
-        if (this.worktreeQueries.findProjectId(id) === null) {
-          this.worktreeQueries.setProjectId(id, row.id);
-        }
-      }
+  retireLegacy(): void {
+    const legacy = this.queries.retireLegacy();
+    if (legacy) {
+      log.info(
+        `removed the default project ${legacy.name}; its repos and worktrees are now in no project, and its context repo ${legacy.contextName} stays`,
+      );
     }
-  }
-
-  /** The default project's id when it lists the repo, so a worktree made with no project lands there. */
-  defaultProjectOf(repo: string): string | undefined {
-    const id = this.queries.findDefault()?.id;
-    return id && this.queries.projectsOfRepo(repo).includes(id) ? id : undefined;
-  }
-
-  /** Puts a repo in the default project, unless it is in one already. */
-  async placeInDefault(repo: string): Promise<void> {
-    const row = await this.ensureDefault();
-    if (this.queries.projectsOfRepo(repo).length === 0) this.queries.upsertRepo(row.id, repo, null);
   }
 
   addRepo(ref: string, repo: string, role?: string | null): ProjectView {
@@ -452,8 +389,7 @@ export class ProjectService {
     // A worktree being removed has left the database, so its caller passes the project id.
     const projectId = knownProjectId ?? this.worktreeQueries.findProjectId(worktreeId);
     const project = projectId ? this.queries.find(projectId) : undefined;
-    // The default project only holds repos. Its context must not shadow the one a repo is bound to.
-    return project && !project.isDefault ? contextService.find(project.contextName) : undefined;
+    return project ? contextService.find(project.contextName) : undefined;
   }
 
   /** The project's worktrees. The coordinator has none, so every one is a worker's. */
@@ -490,11 +426,7 @@ export class ProjectService {
 
   /** The project a worker worktree belongs to, or undefined for a worktree in no project. */
   projectOfWorker(worktreeId: string): ProjectRow | undefined {
-    // A task chat has no worktree: its scope id names the task, which names the project.
-    const taskId = taskIdOfScope(worktreeId);
-    const projectId = taskId
-      ? this.taskQueries.find(taskId)?.projectId
-      : this.worktreeQueries.findProjectId(worktreeId);
+    const projectId = this.worktreeQueries.findProjectId(worktreeId);
     return projectId ? this.queries.find(projectId) : undefined;
   }
 
@@ -556,6 +488,7 @@ export class ProjectService {
     return {
       id: row.id,
       name: row.name,
+      title: row.title,
       description: row.description,
       contextName: row.contextName,
       coordinatorAgent: row.coordinatorAgent,
@@ -568,7 +501,6 @@ export class ProjectService {
         : null,
       coordinatorHostId: row.coordinatorHostId,
       createdAt: row.createdAt,
-      isDefault: row.isDefault,
       repos: repoRows.map((r) => ({ repo: r.repoName, role: r.role })),
       worktrees: this.workersOf(row).map((w) => ({
         worktreeId: toWorktreeIdOf(w.repoName, w.name),

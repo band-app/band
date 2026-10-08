@@ -44,7 +44,6 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("mcp.") ||
       path.startsWith("context.") ||
       path.startsWith("projects.") ||
-      path.startsWith("projectTasks.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")
@@ -56,6 +55,8 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "repos.addFromWorker") continue;
     // `repos.addByUrl` makes the hub and its workers contact a URL the caller names.
     if (path === "repos.addByUrl") continue;
+    // The add-repo previews read a worker's folders and contact a URL the caller names.
+    if (path === "repos.inspectFolder" || path === "repos.resolveRemote") continue;
     // `environment.build` runs commands from the repository on the builder host.
     if (path === "environment.build") continue;
 

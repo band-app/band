@@ -12,18 +12,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Activity, BarChart3, Globe, ListTodo, MoreVertical, Timer } from "lucide-react";
+import { Activity, BarChart3, Globe, MoreVertical, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
 import { ReportsPageContent } from "./ReportsPageContent";
 import { ResourcesPage } from "./ResourcesPage";
-import { TasksPageContent } from "./TasksPageContent";
 import { TunnelDialog } from "./TunnelDialog";
 
 interface ToolbarOverflowContextValue {
-  openTasks: () => void;
   openCronjobs: () => void;
   openReports: () => void;
   openTunnel: () => void;
@@ -35,7 +33,7 @@ interface ToolbarOverflowContextValue {
 const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>(null);
 
 /**
- * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
+ * Owns the dialog state for the toolbar overflow menu (Cronjobs, Usage, Resources, Mobile access).
  *
  * The dialogs are rendered as siblings to `children`, so they remain mounted even when
  * the parent overflow dropdown closes. The action buttons live in the repo-list
@@ -43,7 +41,6 @@ const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>
  * the dialogs.
  */
 export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
-  const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
   const [showReportsDialog, setShowReportsDialog] = useState(false);
   const [showResourcesDialog, setShowResourcesDialog] = useState(false);
@@ -62,7 +59,6 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
     handleStopped: handleTunnelStopped,
   } = useTunnel();
 
-  const openTasks = useCallback(() => setShowTasksDialog(true), []);
   const openCronjobs = useCallback(() => setShowCronjobsDialog(true), []);
   const openReports = useCallback(() => setShowReportsDialog(true), []);
   const openTunnel = useCallback(() => openTunnelDialog(), [openTunnelDialog]);
@@ -76,14 +72,13 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      openTasks,
       openCronjobs,
       openReports,
       openTunnel,
       openResources,
       tunnelStatus,
     }),
-    [openTasks, openCronjobs, openReports, openTunnel, openResources, tunnelStatus],
+    [openCronjobs, openReports, openTunnel, openResources, tunnelStatus],
   );
 
   return (
@@ -92,15 +87,6 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
       {/* Always-mounted dialogs — siblings of `children` so the dropdown closing
           doesn't tear them down. */}
-      <Dialog open={showTasksDialog} onOpenChange={setShowTasksDialog}>
-        <DialogContent className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
-            <DialogTitle>Tasks</DialogTitle>
-          </DialogHeader>
-          <TasksPageContent />
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={showCronjobsDialog} onOpenChange={setShowCronjobsDialog}>
         <DialogContent className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
@@ -152,7 +138,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
  * Bottom action row cluster for the repo list (right-hand side).
  *
  * Surfaces Resources and Usage as standalone icon buttons and tucks the
- * remaining actions (Tasks, Cronjobs, tunnel) behind a 3-dot overflow menu.
+ * remaining actions (Cronjobs, tunnel) behind a 3-dot overflow menu.
  * Rendered inside `DashboardShell`'s persistent footer; passed in as a
  * `ReactNode` prop because the `dashboard/` module must not import from
  * `components/`. Must be mounted inside a <ToolbarOverflowProvider>.
@@ -183,10 +169,6 @@ export function ToolbarActionBar() {
           <TooltipContent side="top">More</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={ctx.openTasks}>
-            <ListTodo className="size-4" />
-            Tasks
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={ctx.openCronjobs}>
             <Timer className="size-4" />
             Cronjobs

@@ -1,10 +1,21 @@
+import { isFolderScope } from "@band-app/shared/scope-id";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toWorktreeId, useRepos } from "@/dashboard";
-import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import { useWorktreeFromPath } from "../lib/parse-worktree";
 import { reconcileTerminalWorktrees } from "../lib/terminal-cache";
 import { forgetMissingWorktrees } from "../lib/worktree-cold-park";
 import { clearPerWorktreeState } from "./per-worktree-state-store";
+
+/**
+ * The worktree ids the repos list knows. A project's folder view (`project:<id>`) is no repo
+ * worktree, so it counts as known too: it stays mounted and keeps its terminals like a worktree.
+ */
+class WorktreeIds extends Set<string> {
+  override has(id: string): boolean {
+    return super.has(id) || isFolderScope(id);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Keeps every visited worktree's center dockview mounted, so switching back to
@@ -73,7 +84,7 @@ export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePa
   // Derive active worktree synchronously from pathname — no useEffect delay.
   // This ensures the visibility swap happens in the same render as the URL
   // change, eliminating the one-frame flash of the previous worktree.
-  const activeWorktreeId = parseWorktreeFromPath(pathname);
+  const activeWorktreeId = useWorktreeFromPath(pathname);
 
   // Synchronously mount the active worktree so it renders on the very first
   // paint. Calling setState during render (in response to a derived-value
@@ -127,7 +138,7 @@ export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePa
   const { repos, isLoading, error } = useRepos();
   useEffect(() => {
     if (isLoading || error) return;
-    const validIds = new Set<string>();
+    const validIds = new WorktreeIds();
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
         validIds.add(toWorktreeId(repo.name, worktree.name));

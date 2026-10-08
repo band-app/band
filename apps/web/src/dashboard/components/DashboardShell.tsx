@@ -12,9 +12,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, ChevronsDownUp, FolderKanban, FolderPlus, Plus, Settings, Tag } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
+import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
@@ -39,9 +41,9 @@ import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
 import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
-import { ProjectsDialog } from "./ProjectsDialog";
-import { ProjectTaskList } from "./ProjectTaskList";
+import { NewProjectButton, ProjectTaskList } from "./ProjectTaskList";
 import { RepoList } from "./RepoList";
+import { ReposPanel } from "./ReposPanel";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
@@ -92,12 +94,15 @@ export function DashboardShell({
   const { repos, isLoading: loading } = useRepos();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
-  const [showAddDialog, setShowAddDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [showProjects, setShowProjects] = useState(false);
-  const [coordinatorProject, setCoordinatorProject] = useState<string | undefined>(undefined);
-  const [settingsContext, setSettingsContext] = useState<string | undefined>(undefined);
   const [settingsHosts, setSettingsHosts] = useState(false);
+  const [addingRepo, setAddingRepo] = useState(false);
+  // Adding a repo needs an admin token, and so does `context.list`, so it doubles as the probe.
+  const admin = useQuery({
+    queryKey: ["projects.admin"],
+    queryFn: () => trpc.context.list.query(),
+    retry: false,
+  });
   const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
   const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
@@ -120,7 +125,6 @@ export function DashboardShell({
   useSetupStatusWatcher();
 
   const handleSettingsClick = useCallback(() => {
-    setSettingsContext(undefined);
     setSettingsHosts(false);
     setShowSettingsDialog(true);
   }, []);
@@ -310,7 +314,9 @@ export function DashboardShell({
     <div
       ref={rootRef}
       className={cn(
-        "w-full overflow-hidden flex flex-col text-foreground p-0",
+        // `overflow-clip`, not `overflow-hidden`: a clipped box is no scroll container, so a
+        // worktree card's `scrollIntoView` scrolls the repos panel and never shifts the column.
+        "w-full overflow-clip flex flex-col text-foreground p-0",
         // Embedded as the repo-list sidebar (hideTitleBar): paint the
         // `--sidebar` surface so the list reads as a panel distinct from the
         // worktree layout. Under the translucent sidebar (macOS desktop) the
@@ -372,8 +378,46 @@ export function DashboardShell({
           matchMobileHeader ? "h-12" : "h-9",
         )}
       >
-        <div className="flex min-w-0 items-center">
-          <div className="flex items-center gap-1 pl-2">
+        <span className="pl-4 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Projects
+        </span>
+        <div className="pr-2">
+          <NewProjectButton
+            onOpenHosts={() => {
+              setSettingsHosts(true);
+              setShowSettingsDialog(true);
+            }}
+          />
+        </div>
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+        <main className="pb-3">
+          <ProjectTaskList />
+        </main>
+      </ScrollArea>
+
+      <ReposPanel
+        count={loading ? null : repos.length}
+        actions={
+          <div className="flex items-center gap-0.5">
+            {admin.isSuccess ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    aria-label="Add repo"
+                    data-testid="repos-panel__add-repo"
+                    onClick={() => setAddingRepo(true)}
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Add repo</TooltipContent>
+              </Tooltip>
+            ) : null}
             {labels.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -381,7 +425,7 @@ export function DashboardShell({
                     size="sm"
                     variant="ghost"
                     data-testid="dashboard__label-filter-trigger"
-                    className={`min-w-0 text-[13px] h-7 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
+                    className={`min-w-0 text-[11px] h-5 px-1.5 gap-1 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
                   >
                     {activeLabel ? (
                       <>
@@ -433,91 +477,70 @@ export function DashboardShell({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {repos.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    aria-label="Collapse all"
+                    onClick={collapseAll}
+                  >
+                    <ChevronsDownUp className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Collapse all</TooltipContent>
+              </Tooltip>
+            )}
           </div>
-        </div>
-        <div className="flex items-center gap-1 pr-2">
-          {repos.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  aria-label="Collapse all"
-                  onClick={collapseAll}
-                >
-                  <ChevronsDownUp className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Collapse all</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                data-testid="repo-list__add-repo"
-                onClick={() => setShowAddDialog(true)}
-              >
-                <Plus className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Add repo</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
-      <ScrollArea
-        className="flex-1 overflow-hidden"
-        onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+        }
+        onListClick={(e) => {
           const target = e.target as HTMLElement;
           if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
-          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
-            '[tabindex="-1"]',
-          );
-          list?.focus({ preventScroll: true });
+          e.currentTarget
+            .querySelector<HTMLElement>('[tabindex="-1"]')
+            ?.focus({ preventScroll: true });
         }}
       >
-        {/* No overflow-hidden here: when the repo list grows past the
-            viewport, clipping main makes Radix's ScrollArea miss the
-            overflowing content and stop scroll-max early. The list still
-            keeps horizontal text truncation via min-w-0 + truncate on its
-            children. pb-3 gives the last row breathing room. */}
-        <main className="pb-3">
-          <ProjectTaskList
-            onOpenCoordinator={(projectId) => {
-              setCoordinatorProject(projectId);
-              setShowProjects(true);
-            }}
-          />
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Spinner className="size-5 text-muted-foreground" />
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Spinner className="size-5 text-muted-foreground" />
+          </div>
+        ) : repos.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <FolderPlus className="size-8 text-muted-foreground/50" />
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Add a folder from a worker or a repo by its remote URL.
+              </p>
             </div>
-          ) : repos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <FolderPlus className="size-8 text-muted-foreground/50" />
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
-                <p className="text-xs text-muted-foreground/70 mt-1">Add a repo to get started</p>
-              </div>
+            {admin.isSuccess ? (
               <Button
                 variant="outline"
                 size="sm"
-                data-testid="repo-list__add-repo-empty"
-                onClick={() => setShowAddDialog(true)}
+                data-testid="repo-list__add-repo"
+                onClick={() => setAddingRepo(true)}
               >
-                <Plus className="size-3 mr-1" />
                 Add repo
               </Button>
-            </div>
-          ) : (
-            <RepoList labelFilter={labelFilter} />
-          )}
-        </main>
-      </ScrollArea>
+            ) : null}
+          </div>
+        ) : (
+          <RepoList labelFilter={labelFilter} />
+        )}
+      </ReposPanel>
+      <ProjectAddRepoDialog
+        open={addingRepo}
+        onOpenChange={setAddingRepo}
+        label={labelFilter}
+        onOpenHosts={() => {
+          setAddingRepo(false);
+          setSettingsHosts(true);
+          setShowSettingsDialog(true);
+        }}
+      />
 
       {(cliState.status === "manual" || cliState.status === "conflict") && (
         <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
@@ -564,55 +587,15 @@ export function DashboardShell({
             <Settings className="size-4" />
             Settings
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground"
-            data-testid="repo-list__projects-button"
-            onClick={() => {
-              setCoordinatorProject(undefined);
-              setShowProjects(true);
-            }}
-          >
-            <FolderKanban className="size-4" />
-            Projects
-          </Button>
         </div>
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
 
-      <ProjectAddRepoDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        label={labelFilter}
-        onOpenHosts={() => {
-          setSettingsContext(undefined);
-          setSettingsHosts(true);
-          setShowAddDialog(false);
-          setShowSettingsDialog(true);
-        }}
-      />
-
-      <ProjectsDialog
-        open={showProjects}
-        onOpenChange={setShowProjects}
-        initialProject={coordinatorProject}
-        onOpenContext={(name) => {
-          setSettingsContext(name);
-          setSettingsHosts(false);
-          setShowSettingsDialog(true);
-        }}
-        onOpenWorktree={(worktreeId) => {
-          const href = capabilities.getWorktreeHref?.(worktreeId);
-          if (href && capabilities.navigate) capabilities.navigate(href);
-        }}
-      />
       <DesktopViewerDialog />
       <SettingsPage
         open={showSettingsDialog}
         onOpenChange={setShowSettingsDialog}
-        initialSection={settingsContext ? "context" : settingsHosts ? "hosts" : undefined}
-        initialContext={settingsContext}
+        initialSection={settingsHosts ? "hosts" : undefined}
       />
     </div>
   );

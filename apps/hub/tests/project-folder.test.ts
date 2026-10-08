@@ -142,6 +142,19 @@ async function callTool(bearer: string, name: string, args: Record<string, unkno
   }
 }
 
+const bootServer = () =>
+  startServer({
+    remoteHost: false,
+    tmpHome: home,
+    env: {
+      BAND_SERVE_UI: "false",
+      BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
+      BAND_TEST_ACP_LOG: join(home, "acp-stub-log.jsonl"),
+      // Every coordinator turn fetches, so a test sees a commit that lands between two turns.
+      BAND_PROJECT_FETCH_THROTTLE_MS: "0",
+    },
+  });
+
 beforeAll(async () => {
   home = createTmpHome("band-project-folder-");
   const names = ["api", "client", "docs"];
@@ -169,17 +182,7 @@ beforeAll(async () => {
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     defaultCodingAgent: "claude-code",
   });
-  server = await startServer({
-    remoteHost: false,
-    tmpHome: home,
-    env: {
-      BAND_SERVE_UI: "false",
-      BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
-      BAND_TEST_ACP_LOG: join(home, "acp-stub-log.jsonl"),
-      // Every coordinator turn fetches, so a test sees a commit that lands between two turns.
-      BAND_PROJECT_FETCH_THROTTLE_MS: "0",
-    },
-  });
+  server = await bootServer();
   shop = (
     await m<{ project: ProjectView }>("projects.create", {
       name: "shop",
@@ -257,12 +260,26 @@ describe("the coordinator runs in the project folder (S1)", () => {
     expect(session.params.mcpServers).toBeTruthy();
   });
 
-  it("names the project folder and the repo tools in the charter", () => {
-    const meta = session.params._meta as { systemPrompt?: { append?: string } };
-    const charter = meta.systemPrompt?.append ?? "";
+  it("names the project folder and the repo tools in the charter, in AGENTS.md, which never syncs", async () => {
+    const folder = join(realpathSync(home), ".band", "projects", "shop");
+    const charter = readFileSync(join(folder, "AGENTS.md"), "utf8");
     expect(charter).toContain("repos/<repo>/");
     expect(charter).toContain("repo_read");
-    expect(charter).toContain("Code changes go through tasks");
+    expect(charter).toContain("Code changes go through worker agents (worktree_create)");
+    // Each host writes its own copy from the project's settings, so git leaves both files out.
+    const status = git(folder, "status", "--porcelain", "--ignored");
+    expect(status).not.toMatch(/^\?\? (AGENTS|CLAUDE)\.md/m);
+    expect(git(folder, "ls-files", "AGENTS.md", "CLAUDE.md")).toBe("");
+
+    // A policy change rewrites it.
+    await m("projects.update", { project: "shop", policy: { maxConcurrent: 7 } });
+    await waitFor(
+      () =>
+        readFileSync(join(folder, "AGENTS.md"), "utf8").includes("at most 7 worker agents")
+          ? true
+          : undefined,
+      { label: "AGENTS.md after a policy change" },
+    );
   });
 });
 
@@ -355,11 +372,7 @@ describe("repo tools read only the project's repos (S4)", () => {
       "repo_log",
       "repo_read",
       "repo_search",
-      "task_add_repo",
-      "task_remove_repo",
-      "task_stop",
-      "tasks_create",
-      "tasks_list",
+      "worktree_create",
       "worktree_stop",
       "worktrees_list",
     ]);
@@ -452,6 +465,29 @@ describe("repos added to and removed from the project (T.1)", () => {
       "band/shop/main",
     );
   });
+
+  it("checks out a repo added by URL straight into the project, before the call returns", async () => {
+    const folder = join(realpathSync(home), ".band", "projects", "shop");
+    const remote = join(home, "billing.git");
+    const work = join(home, "billing-work");
+    git(home, "init", "-q", "--bare", "-b", "main", remote);
+    git(home, "clone", "-q", remote, work);
+    git(work, "checkout", "-q", "-B", "main");
+    writeFileSync(join(work, "README.md"), "billing readme\n");
+    git(work, "add", ".");
+    git(work, "commit", "-q", "-m", "init");
+    git(work, "push", "-q", "-u", "origin", "main");
+
+    const repo = await m<{ name: string }>("repos.addByUrl", {
+      remoteUrl: remote,
+      defaultBranch: "main",
+      project: "shop",
+    });
+    // No coordinator turn, restart or Fetch and pull ran: the add made the checkout itself.
+    expect(existsSync(join(folder, "repos", repo.name, "README.md"))).toBe(true);
+    const checkout = (await folderState()).checkouts.find((c) => c.repo === repo.name);
+    expect(checkout?.status).not.toBe("error");
+  });
 });
 
 describe("a plain terminal in the project folder", () => {
@@ -474,13 +510,59 @@ describe("a plain terminal in the project folder", () => {
     expect(opened.folder).toBe(join(realpathSync(home), ".band", "projects", "shop"));
   });
 
-  it("is not available through the worktree terminal routes", async () => {
+  it("opens through terminal.create with the project's worktree id, in the folder", async () => {
+    const created = await m<{ terminalId: string; worktreeId: string }>("terminal.create", {
+      worktreeId: `project:${shop.id}`,
+    });
+    expect(created.worktreeId).toBe(`project:${shop.id}`);
+    const out = join(home, "terminal-create-pwd.txt");
+    await m("terminal.send", { terminalId: created.terminalId, data: `pwd > ${out}\n` });
+    const written = await waitFor(
+      () =>
+        existsSync(out) && readFileSync(out, "utf8").trim()
+          ? readFileSync(out, "utf8").trim()
+          : undefined,
+      { label: "pwd output", timeoutMs: 30_000 },
+    );
+    expect(realpathSync(written)).toBe(
+      realpathSync(join(realpathSync(home), ".band", "projects", "shop")),
+    );
+  });
+
+  it("refuses a project id that does not exist", async () => {
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { worktreeId: `project:${shop.id}` },
+      { worktreeId: "project:prj-0000000000" },
       TEST_TOKEN,
     );
     expect(res.status).not.toBe(200);
   });
+});
+
+describe("the project folder's checkouts are no worktrees of their repos", () => {
+  it("leaves them out of repos.list after a sync, which a boot runs", async () => {
+    const checkout = join(realpathSync(home), ".band", "projects", "shop", "repos", "api");
+    await waitFor(async () => (await folderState())?.checkouts.find((c) => c.repo === "api"), {
+      label: "api checkout",
+      timeoutMs: 30_000,
+    });
+    expect(git(checkout, "rev-parse", "--abbrev-ref", "HEAD")).toBe("band/shop/main");
+    // A worktree made outside Band shows that the boot's sync ran: it lists that one and not the
+    // project folder's checkout, which git lists the same way.
+    const outside = join(realpathSync(home), "api-outside");
+    git(cloneOf("api"), "worktree", "add", "-q", "-b", "outside", outside);
+    await server.close();
+    server = await bootServer();
+    type Listed = { repos: Array<{ name: string; worktrees: Array<{ path: string }> }> };
+    const paths = await waitFor(
+      async () => {
+        const { repos } = await q<Listed>("repos.list");
+        const listed = repos.find((r) => r.name === "api")?.worktrees.map((w) => w.path) ?? [];
+        return listed.includes(outside) ? listed : undefined;
+      },
+      { label: "boot sync", timeoutMs: 30_000 },
+    );
+    expect(paths).not.toContain(checkout);
+  }, 120_000);
 });

@@ -14,15 +14,8 @@ import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
 import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
-import { ProjectInputError } from "../errors";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
-import {
-  isFolderScope,
-  projectIdOfScope,
-  projectScopeId,
-  taskIdOfScope,
-  taskScopeId,
-} from "../infra/project-scope";
+import { isFolderScope, projectIdOfScope, projectScopeId } from "../infra/project-scope";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
@@ -31,7 +24,6 @@ import {
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { projectFolderService } from "./project-folder-service";
 import { projectService } from "./project-service";
-import { projectTaskService } from "./project-task-service";
 import { emit } from "./watcher-service";
 import { worktreeService } from "./worktree-service";
 
@@ -252,29 +244,15 @@ export class TerminalService {
     // behavior); only opt-in callers get the auto-prune. The backend stores the
     // flag on the session and reports it back on the exit event (see
     // `handleExit`), so it holds even when the shell outlives this server.
-    // `project` lets the call open a terminal in a project or task folder. Only the admin-only
-    // `projects.openTerminal` and `projectTasks.openTerminal` set it, so the terminal routes and
-    // the WebSocket cannot.
-    opts?: { cleanupOnExit?: boolean; project?: boolean },
+    opts?: { cleanupOnExit?: boolean },
   ): Promise<TerminalListEntry> {
-    // A project terminal opens in the project folder on the coordinator host. It has no worktree,
-    // so it gets no relay grant and no place in a worktree's saved layout.
-    // A task terminal opens in the task folder on the task's host, with the same limits.
-    const taskId = taskIdOfScope(worktreeId);
+    // A project terminal opens in the project folder on the coordinator host, the folder the
+    // project's view shows. It has no worktree, so it gets no relay grant.
     const projectId = projectIdOfScope(worktreeId);
     const folderScope = isFolderScope(worktreeId);
-    if (folderScope && !opts?.project) throw new Error(`Worktree not found: ${worktreeId}`);
     let host: Host;
     let root: string;
-    if (taskId) {
-      const task = projectTaskService.find(taskId);
-      if (!task) throw new Error(`Task not found: ${taskId}`);
-      const folder = projectTaskService.folderOf(task);
-      const taskHost = projectTaskService.hostOf(task);
-      if (!folder || !taskHost) throw new Error(`Task ${task.name} has no folder on a host`);
-      root = folder;
-      host = taskHost;
-    } else if (projectId) {
+    if (projectId) {
       const project = projectService.find(projectId);
       if (!project) throw new Error(`Project not found: ${projectId}`);
       root = await projectFolderService.folder(project);
@@ -353,14 +331,13 @@ export class TerminalService {
     // restart and renders the moment the worktree is opened. Without
     // this, terminals spawned via the WebSocket handler would be
     // invisible in the dashboard. `addPanel` is idempotent, so the tRPC
-    // `create` path doesn't need a separate call.
-    if (!folderScope) {
-      addTerminalToLayout(worktreeId, terminalId, {
-        command: options?.command,
-        cwd: options?.cwd,
-        env: options?.env,
-      });
-    }
+    // `create` path doesn't need a separate call. A project's folder view keeps its layout under
+    // the project's scope id.
+    addTerminalToLayout(worktreeId, terminalId, {
+      command: options?.command,
+      cwd: options?.cwd,
+      env: options?.env,
+    });
 
     return entry;
   }
@@ -371,43 +348,12 @@ export class TerminalService {
   ): Promise<{ terminalId: string; worktreeId: string; pid: number; folder: string }> {
     const terminalId = randomUUID();
     const scope = projectScopeId(row.id);
-    const entry = await this.spawn(scope, terminalId, undefined, { project: true });
+    const entry = await this.spawn(scope, terminalId);
     return {
       terminalId,
       worktreeId: scope,
       pid: entry.pid,
       folder: await projectFolderService.folder(row),
-    };
-  }
-
-  /**
-   * Opens a plain terminal in a task's folder on its host. With `repo` the shell starts in that
-   * member's worktree, which is a folder named after the repo inside the task folder.
-   */
-  async openTaskTerminal(
-    taskId: string,
-    repo?: string,
-  ): Promise<{ terminalId: string; worktreeId: string; pid: number; folder: string; cwd: string }> {
-    const task = projectTaskService.find(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
-    const folder = projectTaskService.folderOf(task);
-    if (!folder) throw new ProjectInputError(`Task ${task.name} has no folder`);
-    const member = repo
-      ? projectTaskService.get(task.id).members.find((m) => m.repo === repo)
-      : undefined;
-    if (repo && !member)
-      throw new ProjectInputError(`Task ${task.name} has no member repo "${repo}"`);
-    const terminalId = randomUUID();
-    const scope = taskScopeId(task.id);
-    // A one-member task's folder is the worktree itself, so the repo folder does not exist below it.
-    const cwd = member && task.briefPath ? member.repo : undefined;
-    const entry = await this.spawn(scope, terminalId, cwd ? { cwd } : undefined, { project: true });
-    return {
-      terminalId,
-      worktreeId: scope,
-      pid: entry.pid,
-      folder,
-      cwd: cwd ? `${folder.replace(/\/$/, "")}/${cwd}` : folder,
     };
   }
 
@@ -502,8 +448,6 @@ export class TerminalService {
         .filter((worktreeId) => {
           const projectId = projectIdOfScope(worktreeId);
           if (projectId) return !projectService.find(projectId);
-          const taskId = taskIdOfScope(worktreeId);
-          if (taskId) return !projectTaskService.find(taskId);
           return !worktreeService.resolve(worktreeId);
         }),
     );

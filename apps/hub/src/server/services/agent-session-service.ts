@@ -55,11 +55,11 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
-import { chatScope, projectIdOfScope, taskIdOfScope } from "../infra/project-scope";
+import { chatScope, projectIdOfScope } from "../infra/project-scope";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
-import { COORDINATOR_SERVER, RETRO_SERVER, TASK_SERVER } from "./_utils/project-policy";
+import { COORDINATOR_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { contextPreambleService } from "./context-preamble-service";
@@ -70,9 +70,7 @@ import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 // Safe because it is only used inside function bodies.
 import { projectCoordinatorService } from "./project-coordinator-service";
 import { projectFolderService } from "./project-folder-service";
-import { projectRetroService } from "./project-retro-service";
 import { projectService } from "./project-service";
-import { projectTaskService } from "./project-task-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -640,18 +638,10 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
 // Where a chat runs
 // ---------------------------------------------------------------------------
 
-/**
- * A worktree chat names its worktree to the agent. A project chat names its project, and a task
- * chat its task and project.
- */
+/** A worktree chat names its worktree to the agent, and a project chat names its project. */
 function projectEnv(scope: string): Record<string, string> {
   const projectId = projectIdOfScope(scope);
   if (projectId) return { BAND_PROJECT_ID: projectId };
-  const taskId = taskIdOfScope(scope);
-  if (taskId) {
-    const task = projectTaskService.find(taskId);
-    return { BAND_TASK_ID: taskId, ...(task ? { BAND_PROJECT_ID: task.projectId } : {}) };
-  }
   return { BAND_WORKTREE_ID: scope };
 }
 
@@ -665,17 +655,30 @@ function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefine
     const worktree = worktreeService.resolve(chat.worktreeId);
     return worktree ? { cwd: worktree.worktree.path, host: worktree.host } : undefined;
   }
-  if (chat.taskId) {
-    const task = projectTaskService.find(chat.taskId);
-    const folder = task ? projectTaskService.folderOf(task) : null;
-    const host = task ? projectTaskService.hostOf(task) : null;
-    return folder && host ? { cwd: folder, host } : undefined;
-  }
   const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
   const folder = project ? projectFolderService.state(project.id)?.folder : undefined;
   return project && folder
     ? { cwd: folder, host: projectFolderService.hostOf(project) }
     : undefined;
+}
+
+/**
+ * The project folder on the host of a project worktree, for its agent's extra directories: the
+ * project's shared files sync there, so the agent can read and write them. Making sure it exists
+ * also lets a worker serve it. Empty for a worktree in no project, a project chat (whose cwd is the
+ * folder) and a host that cannot make it now.
+ */
+async function projectFolderOf(scope: string): Promise<string[]> {
+  if (projectIdOfScope(scope)) return [];
+  const row = projectService.projectOfWorker(scope);
+  const worktree = row ? worktreeService.resolve(scope) : null;
+  if (!row || !worktree) return [];
+  try {
+    return [(await projectFolderService.ensureOn(row, worktree.host)).folder];
+  } catch (err) {
+    log.warn({ scope, err }, "could not prepare the project folder for an agent");
+    return [];
+  }
 }
 
 /**
@@ -860,21 +863,14 @@ function localHubUrl(): string {
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
   try {
     const projectScope = projectIdOfScope(rt.worktreeId);
-    const taskScope = taskIdOfScope(rt.worktreeId);
-    const worktree = projectScope || taskScope ? undefined : worktreeService.resolve(rt.worktreeId);
-    if (!projectScope && !taskScope && !worktree) return [];
+    const worktree = projectScope ? undefined : worktreeService.resolve(rt.worktreeId);
+    if (!projectScope && !worktree) return [];
     // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
     const names = projectCoordinatorService.projectOfChat(rt.chatId)
       ? [COORDINATOR_SERVER]
-      : projectRetroService.projectOfChat(rt.chatId)
-        ? [RETRO_SERVER]
-        : taskScope
-          ? [TASK_SERVER]
-          : worktree
-            ? mcpProxyService
-                .serversForSession(worktree.repo.name, worktree.host.id)
-                .map((s) => s.name)
-            : [];
+      : worktree
+        ? mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name)
+        : [];
     if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -908,39 +904,6 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   }
 }
 
-/**
- * A project's coordinator chat starts with its charter ahead of the context preamble (plan
- * step 6.2), so the charter takes the same way into each agent. Any other chat is unchanged.
- */
-function withCharter(chatId: string, preamble: SessionPreamble | null): SessionPreamble | null {
-  try {
-    const chat = chatService.get(chatId);
-    if (chat?.taskId && !chat.worktreeId) {
-      const task = projectTaskService.find(chat.taskId);
-      if (task) {
-        const charter = projectTaskService.charter(task);
-        return {
-          text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
-          memoryDir: preamble?.memoryDir ?? null,
-        };
-      }
-    }
-    const project = projectCoordinatorService.projectOfChat(chatId);
-    const retro = project ? undefined : projectRetroService.projectOfChat(chatId);
-    if (!project && !retro) return preamble;
-    const charter = project
-      ? projectCoordinatorService.charter(project)
-      : projectRetroService.charter(retro as NonNullable<typeof retro>);
-    return {
-      text: preamble?.text ? `${charter}\n\n${preamble.text}` : charter,
-      memoryDir: preamble?.memoryDir ?? null,
-    };
-  } catch (err) {
-    log.warn({ chatId, err }, "could not prepare the coordinator charter");
-    return preamble;
-  }
-}
-
 /** `_meta` that carries the preamble to agents that take it per session. */
 function preambleMeta(
   rt: Runtime,
@@ -963,7 +926,7 @@ async function attachNew(
   try {
     attached = await proc.newSession(
       cwd,
-      await agentExtraDirs(rt.worktreeId),
+      [...(await agentExtraDirs(rt.worktreeId)), ...(await projectFolderOf(rt.worktreeId))],
       sessionMcpServers(rt, proc),
       preambleMeta(rt, def),
     );
@@ -1149,17 +1112,6 @@ export class AgentSessionService {
       const worktree = worktreeService.resolve(chat.worktreeId);
       if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
       cwd = worktree.worktree.path;
-    } else if (chat.taskId) {
-      // A message to a task on a sleeping worker brings it back first, and the task's folder is the cwd.
-      const task = projectTaskService.find(chat.taskId);
-      if (!task) throw new Error(`Task not found: ${chat.taskId}`);
-      if (purpose === "prompt") {
-        await ephemeralLifecycleService.ensureAwakeTask(task.id);
-        await contextSyncService.pullForWorktree(scope);
-      }
-      const folder = projectTaskService.folderOf(task);
-      if (!folder) throw new Error(`Task ${task.name} has no folder`);
-      cwd = folder;
     } else {
       cwd = await projectChatCwd(chat, purpose);
     }
@@ -1173,7 +1125,9 @@ export class AgentSessionService {
     const viewNeedsNothing =
       purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
     if (!attachedAlready && !viewNeedsNothing) {
-      rt.preamble = withCharter(rt.chatId, await contextPreambleService.forWorktree(scope));
+      // A coordinator's charter is the project folder's AGENTS.md (CLAUDE.md imports it), which
+      // the agent reads from its working directory like any agent in that folder.
+      rt.preamble = await contextPreambleService.forWorktree(scope);
       if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
         log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
       }
@@ -1577,9 +1531,7 @@ export class AgentSessionService {
     const sameAgent = (
       chat.worktreeId
         ? chatService.list(chat.worktreeId)
-        : chat.taskId
-          ? chatService.listForTask(chat.taskId)
-          : chatService.listForProject(chat.projectId ?? "")
+        : chatService.listForProject(chat.projectId ?? "")
     )
       .filter((c) => definitionFor(c).id === def.id)
       .map((c) => c.id);

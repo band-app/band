@@ -1,8 +1,10 @@
+import { join, relative, sep } from "node:path";
 import { gitRunner } from "@band-app/host-api";
 import { getRepoInfo } from "@band-app/host-local/git/git-client";
 import { hostRegistry } from "../infra/host/registry";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import {
+  bandHome,
   loadState,
   type RepoState,
   reconcileKindForRepo,
@@ -135,9 +137,10 @@ async function runSync(): Promise<void> {
   // once (which spiked fork pressure on Macs with many repos).
 
   const gitRepos = state.repos.filter((p) => p.kind !== "plain");
+  const projectRoots = await projectFolderRoots();
   for (let i = 0; i < gitRepos.length; i += REPO_SYNC_BATCH_SIZE) {
     const batch = gitRepos.slice(i, i + REPO_SYNC_BATCH_SIZE);
-    const results = await Promise.all(batch.map(reconcileOneRepo));
+    const results = await Promise.all(batch.map((r) => reconcileOneRepo(r, projectRoots)));
     for (const mutated of results) {
       if (mutated) changed = true;
     }
@@ -159,6 +162,33 @@ async function runSync(): Promise<void> {
 }
 
 /**
+ * A project folder's checkout of a repo's default branch (`<BAND_HOME>/projects/<project>/repos/
+ * <repo>`). It is a git worktree of the repo's clone, but the project's folder owns it, so it is no
+ * worktree of the repo's own.
+ */
+function isProjectCheckout(path: string, roots: readonly string[]): boolean {
+  return roots.some((root) => {
+    const parts = relative(root, path).split(sep);
+    return parts.length === 3 && parts[0] !== ".." && parts[1] === "repos";
+  });
+}
+
+/**
+ * `<BAND_HOME>/projects` as configured and with symlinks resolved, because git lists a worktree by
+ * its real path (a symlinked home, or `/var` on macOS, which is `/private/var`).
+ */
+async function projectFolderRoots(): Promise<string[]> {
+  const root = join(bandHome(), "projects");
+  let real = root;
+  try {
+    real = await hostRegistry.hostById("local").fs.realpath(root);
+  } catch {
+    // No projects folder yet, so no checkout to hide.
+  }
+  return real === root ? [root] : [root, real];
+}
+
+/**
  * Reconcile a single git-kind repo against the on-disk worktrees and
  * the remote's default branch. Returns `true` if anything mutated on
  * the in-memory `repo` object — caller is responsible for the
@@ -169,7 +199,10 @@ async function runSync(): Promise<void> {
  * container. The two outbound git subprocesses are independent across
  * repos, so concurrency is the whole point.
  */
-async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
+async function reconcileOneRepo(
+  repo: RepoState,
+  projectRoots: readonly string[],
+): Promise<boolean> {
   let mutated = false;
 
   // The hub holds no checkout of this repo (it was added by URL or from a worker), so there is
@@ -210,6 +243,7 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
         (wt) =>
           !wt.isBare &&
           !remotePaths.has(wt.path) &&
+          !isProjectCheckout(wt.path, projectRoots) &&
           (!removingWorktrees.has(wt.path) ||
             (existingByPath.has(wt.path) && !removedWorktrees.has(wt.path))),
       )

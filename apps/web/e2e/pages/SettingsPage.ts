@@ -40,6 +40,7 @@ export type SettingsNavId =
   | "general"
   | "hub"
   | "browser"
+  | "repos"
   | "hosts"
   | "credentials"
   | "mcp"
@@ -86,7 +87,7 @@ export class SettingsPage {
       // fires. Wait for the network to settle before any subsequent step
       // tries to click the Settings button — without this, the first click on
       // the button can be silently lost in CI (matches the workaround already
-      // in `tasks-page.spec.ts:openTasksDialog`).
+      // in `CronjobsDialog.ts`).
       await this.page.waitForLoadState("networkidle");
     });
   }
@@ -427,6 +428,58 @@ export class SettingsPage {
   hostRow(hostId: string): Locator {
     return this.hostRows().filter({
       has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+    });
+  }
+
+  /**
+   * Every add-repo control inside the Settings dialog. Each add-repo trigger and form control the
+   * app has carries "add-repo" in its testid (`repos-panel__add-repo`, `projects__add-repo-open`,
+   * `project-add-repo__*`). Settings > Repos has none.
+   */
+  dialogAddRepoButtons(): Locator {
+    return this.dialog.getByTestId(/add-repo/);
+  }
+
+  projectRow(name: string): Locator {
+    return this.dialog.locator(`[data-testid="settings__nav-project"][data-project="${name}"]`);
+  }
+
+  /** The project page the dialog shows, after `openProjectSettings`. */
+  projectSettings(): Locator {
+    return this.dialog.getByTestId("project-settings-page");
+  }
+
+  async openProjectSettings(name: string): Promise<void> {
+    await test.step(`Open the settings of project ${name}`, async () => {
+      await this.projectRow(name).click();
+      await expect(this.projectSettings()).toHaveAttribute("data-project", name);
+    });
+  }
+
+  /** The page title of the open section or project. */
+  title(): Locator {
+    return this.dialog.getByTestId("settings-page__title");
+  }
+
+  /** A repo's row in Settings > Repos. `data-in-use` says whether Remove is allowed. */
+  repoRow(name: string): Locator {
+    return this.dialog.locator(`[data-testid="settings-repos__row"][data-repo="${name}"]`);
+  }
+
+  /** The "Used by" line of a repo row. */
+  repoProjects(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__projects");
+  }
+
+  repoRemoveButton(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__remove");
+  }
+
+  /** Removes a repo that no project uses, through the row's confirmation. */
+  async removeRepo(name: string): Promise<void> {
+    await test.step(`Remove the repo ${name}`, async () => {
+      await this.repoRemoveButton(name).click();
+      await this.repoRow(name).getByTestId("settings-repos__remove-confirm").click();
     });
   }
 

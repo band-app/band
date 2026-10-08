@@ -1,8 +1,8 @@
 /**
  * Page object for the Cronjobs dialog and its nested New Cronjob dialog.
  *
- * Like `TasksDialog`, it has no route: it opens from the overflow menu in the
- * repo-list bottom action bar. `getByRole({ name })` covers the dialogs and
+ * It has no route: it opens from the overflow menu in the repo-list bottom
+ * action bar. `getByRole({ name })` covers the dialogs and
  * the menu item (system-controlled names); owned controls use `cronjobs__*`
  * test IDs set in `CronjobsPageContent.tsx`.
  */

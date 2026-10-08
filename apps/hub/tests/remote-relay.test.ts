@@ -107,6 +107,8 @@ let hubRepo: string;
 let server: ServerHandle;
 let a: Worker;
 let b: Worker;
+// A project whose coordinator host is worker a, so its folder shares a's host.
+let projectScope: string;
 
 const q = <T>(procedure: string, input?: unknown) =>
   trpcQuery(server.url, procedure, input, TEST_TOKEN).then(async (res) => {
@@ -292,6 +294,11 @@ beforeAll(async () => {
     "notes.md": "# Notes\n\nThe othermarker lives in another project.\n",
   });
 
+  const { project } = await m<{ project: { id: string } }>("projects.create", {
+    name: "relayproj",
+  });
+  projectScope = `project:${project.id}`;
+
   const probe = (name: string, path: string, extra: object = {}) => ({
     http: { name, path, ...extra },
   });
@@ -344,6 +351,10 @@ beforeAll(async () => {
             body: { terminalId: "hub-terminal", worktreeId: "proj-relay-a" },
             headers: { "content-type": "application/json" },
           }),
+          // A project folder on this worker is still out of a worktree agent's reach.
+          post("project-terminal", "/trpc/terminal.create", { worktreeId: projectScope }),
+          post("project-chat", "/trpc/chats.create", { worktreeId: projectScope }),
+          probe("project-chats", listChats(projectScope)),
           probe("decoy-repo", "/trpc/worktrees.gitPush", {
             method: "POST",
             body: { repo: "proj", name: "main", worktreeId: "proj-relay-a" },
@@ -428,6 +439,7 @@ beforeAll(async () => {
   };
   a = await addWorker("a", scenario);
   b = await addWorker("b", scenario);
+  await m("projects.update", { project: "relayproj", coordinatorHostId: a.hostId });
 }, 180_000);
 
 afterAll(async () => {
@@ -583,6 +595,9 @@ describe("the worker relay (S2)", () => {
     // A foreign target next to the agent's own worktreeId does not borrow its scope.
     expect(by("decoy-terminal")?.status).toBe(403);
     expect(by("decoy-repo")?.status).toBe(403);
+    expect(by("project-terminal")?.status).toBe(403);
+    expect(by("project-chat")?.status).toBe(403);
+    expect(by("project-chats")?.status).toBe(403);
     // Nothing in a refusal gives away a credential.
     for (const line of httpLog(a)) expect(line.body).not.toContain(TEST_TOKEN);
   });

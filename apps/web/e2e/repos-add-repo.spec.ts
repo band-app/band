@@ -1,11 +1,12 @@
 /**
- * Add repo from the Repos list in the sidebar (not from a project). The dialog is the same one the
- * project screen uses: a worker's folder picker or a remote URL. Real hub, the real `band-worker`
- * binary with a temp HOME, never the real `~/.band`. A second server runs with the hub's local host
- * off and no worker, to cover the "no worker online" notice.
+ * Adding a repo outside a project, from the sidebar's Repos panel: the repo belongs to no project.
+ * Settings > Repos has no Add repo and lists every repo with the projects that use it. A second
+ * server runs with the hub's local host off and no worker, so a project's Add repo shows the
+ * "no worker online" notice and still adds a repo by URL. Real hub, local bare repos as remotes,
+ * never the real `~/.band`. `project-add-repo.spec.ts` covers the worker folder picker.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -18,17 +19,18 @@ import {
   seedSettings,
   startServer,
 } from "./helpers/server";
-import { parseWorkerCommand, startWorker, type WorkerHandle } from "./helpers/worker";
 import { ProjectAddRepoPage } from "./pages/ProjectAddRepoPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
 const TOKEN = "e2e-repos-add-repo-token";
+const LABEL = "work";
 
 let server: ServerHandle;
 let tmpHome: string;
-let worker: WorkerHandle | undefined;
 const dirs: string[] = [];
 
 const tmpDir = (prefix: string) => {
@@ -37,10 +39,31 @@ const tmpDir = (prefix: string) => {
   return dir;
 };
 
+/** An empty bare repository on `main`, to use as a remote. */
+function bareRemote(name: string): string {
+  const parent = tmpDir("band-e2e-reposadd-remotes-");
+  const origin = join(parent, `${name}.git`);
+  git(parent, ["init", "--bare", "-b", "main", origin], parent);
+  return origin;
+}
+
+async function trpc(url: string, path: string, input: unknown): Promise<unknown> {
+  const res = await fetch(`${url}/trpc/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(`${path} failed: ${JSON.stringify(body)}`);
+  return body.result.data;
+}
+
 async function findRepo(
   url: string,
   name: string,
-): Promise<{ name: string; remoteUrl?: string; defaultBranch?: string } | undefined> {
+): Promise<
+  { name: string; remoteUrl?: string; defaultBranch?: string; label?: string } | undefined
+> {
   const res = await fetch(`${url}/trpc/repos.list`, {
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
@@ -50,71 +73,83 @@ async function findRepo(
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    labels: [{ id: LABEL, name: "Work", color: "#3b82f6" }],
+  });
   server = await startServer({ tmpHome });
 });
 
 test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
-  await worker?.kill();
   await server.close();
   cleanupTmpHome(tmpHome);
   for (const dir of dirs) cleanupTmpHome(dir);
 });
 
-test("Repos > Add repo adds a git checkout from a worker with its remote URL and hides the native picker", async ({
+test("the Repos panel adds a repo in no project, and Settings > Repos lists it with no Add repo", async ({
   page,
 }) => {
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await projects.goto();
+  // With no project there is no project list, and the Repos panel still offers Add repo.
+  await expect(projects.items()).toHaveCount(0);
+  const addRepo = new ProjectAddRepoPage(page);
+  await addRepo.openFromReposPanel();
+  const origin = bareRemote("registry-origin");
+  await addRepo.chooseUrl();
+  await addRepo.addByUrl(origin, "main");
+  await expect(addRepo.closed()).toBeHidden();
+  const repo = await findRepo(server.url, "registry-origin");
+  expect(repo?.remoteUrl).toBe(origin);
+
+  await settingsPage.openDialog("repos");
+  await expect(settingsPage.repoRow("registry-origin")).toBeVisible();
+  await expect(settingsPage.repoProjects("registry-origin")).toHaveAttribute("data-projects", "");
+  // The dialog covers the page: the only Add repo buttons left would be Settings', and it has none.
+  await expect(settingsPage.dialogAddRepoButtons()).toHaveCount(0);
+});
+
+test("a repo added from the Repos panel under a label filter gets that label", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.goto();
+  await worktreePage.selectLabelFilter(LABEL);
+  const addRepo = new ProjectAddRepoPage(page);
+  await addRepo.openFromReposPanel();
+  await addRepo.chooseUrl();
+  await addRepo.addByUrl(bareRemote("labelled-origin"), "main");
+  await expect(addRepo.closed()).toBeHidden();
+  // Its label keeps it in the filtered list.
+  expect((await findRepo(server.url, "labelled-origin"))?.label).toBe(LABEL);
+});
+
+test("Settings > Repos removes a repo no project uses and keeps one a project uses", async ({
+  page,
+}) => {
+  await trpc(server.url, "repos.addByUrl", {
+    remoteUrl: bareRemote("registry-loose"),
+    defaultBranch: "main",
+  });
+  await trpc(server.url, "repos.addByUrl", {
+    remoteUrl: bareRemote("registry-shared"),
+    defaultBranch: "main",
+  });
+  await trpc(server.url, "projects.create", { name: "registry-user" });
+  await trpc(server.url, "projects.addRepo", { project: "registry-user", repo: "registry-shared" });
+
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("hosts");
-  await settingsPage.addWorker("repos-box", "");
-  const env = parseWorkerCommand(await settingsPage.readWorkerCommand());
-  const hostId = env.BAND_WORKER_ID;
+  await settingsPage.openDialog("repos");
+  await expect(settingsPage.repoRow("registry-shared")).toHaveAttribute("data-in-use", "true");
+  await expect(settingsPage.repoRemoveButton("registry-shared")).toBeDisabled();
 
-  const workerHome = tmpDir("band-e2e-reposadd-home-");
-  const root = tmpDir("band-e2e-reposadd-root-");
-  const origin = join(workerHome, "listed-origin.git");
-  const checkout = join(workerHome, "listed");
-  mkdirSync(checkout, { recursive: true });
-  git(workerHome, ["init", "--bare", "-b", "main", origin], workerHome);
-  git(checkout, ["init", "-b", "main"], workerHome);
-  writeFileSync(join(checkout, "README.md"), "# listed\n");
-  git(checkout, ["add", "."], workerHome);
-  git(checkout, ["commit", "-m", "seed"], workerHome);
-  git(checkout, ["remote", "add", "origin", origin], workerHome);
-  git(checkout, ["push", "origin", "main"], workerHome);
-  worker = startWorker({
-    env: {
-      BAND_HUB_URL: env.BAND_HUB_URL,
-      BAND_BOOTSTRAP_TOKEN: env.BAND_BOOTSTRAP_TOKEN,
-      BAND_WORKER_ID: hostId,
-    },
-    root,
-    stateDir: tmpDir("band-e2e-reposadd-state-"),
-    home: workerHome,
-  });
-  await expect(settingsPage.hostRow(hostId)).toHaveAttribute("data-status", "online", {
-    timeout: 20_000,
-  });
-
-  await settingsPage.goto();
-  const addRepo = new ProjectAddRepoPage(page);
-  await addRepo.openFromRepoList();
-  await addRepo.chooseWorker(hostId);
-  await expect(addRepo.pickerEntry("listed")).toHaveAttribute("data-git", "true");
-  await expect(addRepo.nativePicker()).toHaveCount(0);
-  await addRepo.openFolder("listed");
-  await addRepo.useCurrentFolder();
-  await expect(addRepo.rootConfirmation()).toBeVisible();
-  await addRepo.confirmRoot();
-  await expect(addRepo.closed()).toBeHidden();
-
-  const repo = await findRepo(server.url, "listed-origin");
-  expect(repo).toBeDefined();
-  expect(repo?.remoteUrl).toBe(origin);
-  expect(repo?.defaultBranch).toBe("main");
+  await expect(settingsPage.repoRow("registry-loose")).toHaveAttribute("data-in-use", "false");
+  await settingsPage.removeRepo("registry-loose");
+  await expect(settingsPage.repoRow("registry-loose")).toHaveCount(0);
+  await expect(settingsPage.repoRow("registry-shared")).toBeVisible();
 });
 
 test.describe("with no worker online", () => {
@@ -125,6 +160,7 @@ test.describe("with no worker online", () => {
     bareHome = createTmpHome();
     seedSettings(bareHome, { tokenSecret: TOKEN });
     bare = await startServer({ tmpHome: bareHome, env: { BAND_LOCAL_HOST: "off" } });
+    await trpc(bare.url, "projects.create", { name: "no-workers" });
   });
 
   test.afterAll(async () => {
@@ -132,21 +168,24 @@ test.describe("with no worker online", () => {
     cleanupTmpHome(bareHome);
   });
 
-  test("the dialog says so and still adds a repo by URL", async ({ page }) => {
+  test("a project's Add repo says so, links to Hosts and still adds a repo by URL", async ({
+    page,
+  }) => {
+    const projects = new ProjectsPage(page, bare.url, TOKEN);
+    await projects.gotoProject("no-workers");
     const addRepo = new ProjectAddRepoPage(page);
-    await addRepo.gotoAndOpenFromRepoList(bare.url, TOKEN);
+    await addRepo.open();
     await expect(addRepo.noHostsNotice()).toBeVisible();
+    await expect(addRepo.openHostsButton()).toBeVisible();
     await expect(addRepo.nativePicker()).toHaveCount(0);
 
-    const remotes = tmpDir("band-e2e-reposadd-remotes-");
-    const urlOrigin = join(remotes, "by-url-origin.git");
-    git(remotes, ["init", "--bare", "-b", "main", urlOrigin], remotes);
+    const origin = bareRemote("by-url-origin");
     await addRepo.chooseUrlFromNotice();
-    await addRepo.addByUrl(urlOrigin, "main");
+    await addRepo.addByUrl(origin, "main");
     await expect(addRepo.closed()).toBeHidden();
+    await expect(addRepo.repoUrl("by-url-origin")).toHaveAttribute("data-url", origin);
     const repo = await findRepo(bare.url, "by-url-origin");
-    expect(repo).toBeDefined();
-    expect(repo?.remoteUrl).toBe(urlOrigin);
+    expect(repo?.remoteUrl).toBe(origin);
     expect(repo?.defaultBranch).toBe("main");
   });
 });

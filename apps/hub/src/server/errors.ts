@@ -223,14 +223,6 @@ export class ProjectConflictError extends Error {
   }
 }
 
-/** Thrown by `ProjectDispatchService` for a dispatch request the caller can fix or must not repeat. Mapped to 400. */
-export class DispatchInputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DispatchInputError";
-  }
-}
-
 /** Thrown by `RepoService` for input the caller can fix, such as a bad URL or a folder with no repo. Mapped to 400. */
 export class RepoInputError extends Error {
   constructor(message: string) {
@@ -260,13 +252,5 @@ export class RepoOutsideRootsError extends Error {
     this.name = "RepoOutsideRootsError";
     this.path = path;
     this.roots = roots;
-  }
-}
-
-/** Thrown by `ProjectTaskService` when no task has the id or name. Mapped to 404. */
-export class ProjectTaskNotFoundError extends Error {
-  constructor(ref: string) {
-    super(`No task "${ref}"`);
-    this.name = "ProjectTaskNotFoundError";
   }
 }

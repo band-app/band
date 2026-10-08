@@ -1,19 +1,17 @@
 /**
  * Read model of the project dashboard (plan step 6.6). It joins what other services already own: the
- * project's chats, its task groups with their branch status, the usage scanner's rows and the pending
- * dispatches. Nothing here writes, and the quick actions call the services that own them.
+ * project's chats, its worktrees with their branch status, and the usage scanner's rows. Nothing
+ * here writes, and the quick actions call the services that own them.
  */
 
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
-import { projectScopeId, taskScopeId } from "../infra/project-scope";
+import { projectScopeId } from "../infra/project-scope";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { projectDispatchService } from "./project-dispatch-service";
 import { projectService } from "./project-service";
 import { projectSubscriptionService } from "./project-subscription-service";
-import { projectTaskService } from "./project-task-service";
 import { abortTask, hasRunningTask } from "./task-service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -56,12 +54,9 @@ export class ProjectDashboardService {
     const view = projectService.get(row.id);
     const worktrees = projectService.allWorktreesOf(row.id);
     // Rows recorded under the project's own scope are the coordinator's, which has no worktree.
-    const tasks = projectTaskService.list(row.id);
     const worktreeIds = [
       projectScopeId(row.id),
       ...worktrees.map((w) => toWorktreeId(w.repoName, w.name)),
-      // A task's own chat runs in the task folder, and its usage is recorded under the task.
-      ...tasks.map((t) => taskScopeId(t.id)),
     ];
     const now = Date.now();
     const today = localDay(now);
@@ -91,13 +86,13 @@ export class ProjectDashboardService {
     }
 
     const agents: DashboardAgent[] = [];
-    // Project-level chats (the coordinator) have no worktree.
+    // Project-level chats (the coordinator, and chats opened in the project's view) have no worktree.
     for (const chat of chatService.listForProject(row.id)) {
       agents.push({
         chatId: chat.id,
         worktreeId: null,
         name: chat.name,
-        role: "coordinator",
+        role: chat.id === row.coordinatorChatId ? "coordinator" : "worker",
         repo: null,
         branch: null,
         hostId: row.coordinatorHostId ?? null,
@@ -107,25 +102,6 @@ export class ProjectDashboardService {
         lastActivityAt: chat.activeSessionLastModified ?? null,
         spendUsd: round(perChat.get(chat.id) ?? 0),
       });
-    }
-    // A task's own chat has no worktree either. It works on every repo of the task.
-    for (const task of tasks) {
-      for (const chat of chatService.listForTask(task.id)) {
-        agents.push({
-          chatId: chat.id,
-          worktreeId: null,
-          name: chat.name,
-          role: "worker",
-          repo: null,
-          branch: task.branch,
-          hostId: task.hostId,
-          agent: chat.agent,
-          model: chat.model ?? null,
-          status: this.isRunning(chat.id) ? "running" : "idle",
-          lastActivityAt: chat.activeSessionLastModified ?? null,
-          spendUsd: round(perChat.get(chat.id) ?? 0),
-        });
-      }
     }
     for (const w of worktrees) {
       const worktreeId = toWorktreeId(w.repoName, w.name);
@@ -160,25 +136,10 @@ export class ProjectDashboardService {
     }
     const budgetUsd = view.effectivePolicy.budgetUsd;
 
-    const groups = projectDispatchService.groupsOf(row).map((g) => ({
-      ...g,
-      members: g.members.map((m) => {
-        const status = m.worktreeId ? projectService.branchStatus(m.worktreeId) : undefined;
-        const pr = status?.ciPr ?? null;
-        return {
-          ...m,
-          pr: pr
-            ? { number: pr.number, url: pr.url ?? null, state: pr.state, isDraft: pr.isDraft }
-            : null,
-          ci: status?.ciState ?? null,
-        };
-      }),
-    }));
-
     const { wakeups } = projectSubscriptionService.describe(row);
     return {
       agents,
-      groups,
+      worktrees: this.worktrees(row, worktrees),
       spend: {
         totalUsd: round(total),
         todayUsd: round(todayUsd),
@@ -188,9 +149,27 @@ export class ProjectDashboardService {
         budgetUsd,
         remainingUsd: budgetUsd === null ? null : round(Math.max(0, budgetUsd - total)),
       },
-      pendingDispatches: projectDispatchService.requestsOf(row, "pending"),
       wakeups: wakeups.slice(0, 10),
     };
+  }
+
+  /** The project's worktrees, each with its PR and CI state from the branch status poller. */
+  worktrees(row: ProjectRow, rows = projectService.allWorktreesOf(row.id)) {
+    return rows.map((w) => {
+      const worktreeId = toWorktreeId(w.repoName, w.name);
+      const status = projectService.branchStatus(worktreeId);
+      const pr = status?.ciPr ?? null;
+      return {
+        worktreeId,
+        repo: w.repoName,
+        branch: w.branch,
+        hostId: w.hostId,
+        pr: pr
+          ? { number: pr.number, url: pr.url ?? null, state: pr.state, isDraft: pr.isDraft }
+          : null,
+        ci: status?.ciState ?? null,
+      };
+    });
   }
 
   /** Stops the running turn of one chat of the project, the coordinator's included. Returns whether a turn was stopped. */

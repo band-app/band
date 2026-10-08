@@ -1,10 +1,13 @@
 /**
- * Projects (plan step 6.1): the Projects dialog opened from the sidebar. The hub is the
- * production bundle with a temp BAND_HOME, and the two repos are real git repositories.
- * The context repo is checked through the context browser the project's detail links to.
+ * Projects: the sidebar's projects list with each project's worktrees under it, the New project
+ * flow, the project's folder view (`/project/<name>`: the coordinator chat in the center, the
+ * folder's files in the Explorer and editor, a terminal in the folder, the Activity and Repos side
+ * tabs and no Changes),
+ * and project settings in the Settings dialog. The hub is the production bundle with a temp
+ * BAND_HOME, and the two repos are real git repositories.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
@@ -18,7 +21,11 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { ChatPanePage } from "./pages/ChatPanePage";
+import { MobileLayoutPage } from "./pages/MobileLayoutPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { ToolbarPage } from "./pages/ToolbarPage";
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -86,15 +93,13 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("creates a project with two repos, lists it and gives it a scaffolded context repo", async ({
+test("creates a project with two repos and opens its folder view with the context files", async ({
   page,
 }) => {
   const projects = new ProjectsPage(page, server.url, TOKEN);
   await projects.goto();
-  await projects.open();
-  // The only project so far is the default one, which takes repos added without a project.
-  await expect(projects.item("personal")).toContainText("Personal");
-  await expect(projects.item("personal")).toHaveAttribute("data-repo-count", "2");
+  // There is no default project: the sidebar starts empty.
+  await expect(projects.items()).toHaveCount(0);
 
   await projects.create({
     name: "checkout",
@@ -104,32 +109,59 @@ test("creates a project with two repos, lists it and gives it a scaffolded conte
       { repo: CLIENT, role: "client" },
     ],
   });
+  await expect(projects.itemOpen("checkout")).toHaveAttribute("aria-current", "page");
+  await expect(projects.description()).toHaveText("Rework the checkout flow");
+  // The folder is no git checkout of its own: no Changes tab.
+  await expect(projects.changesTab()).toHaveCount(0);
+  await projects.showTab("repos");
   await expect(projects.repos()).toHaveCount(2);
   await expect(projects.repo(API)).toHaveAttribute("data-role", "api");
   await expect(projects.repo(CLIENT)).toHaveAttribute("data-role", "client");
 
-  await projects.back();
-  await expect(projects.item("checkout")).toHaveAttribute("data-repo-count", "2");
-  await expect(projects.item("checkout")).toContainText("Rework the checkout flow");
+  // The Explorer lists the project folder: the scaffold of its context repo.
+  await projects.showExplorer();
+  await expect(projects.explorerEntry("notes.md")).toBeVisible();
+  await expect(projects.explorerEntry("inbox")).toBeVisible();
+});
 
-  await projects.openProject("checkout");
-  const context = await projects.openContext();
-  await context.selectContext("checkout");
-  await expect(context.treeFile("notes.md")).toBeVisible();
+test("opens a terminal in the project folder and edits a project file in the editor", async ({
+  page,
+}) => {
+  const { project } = await trpc<{ project: { id: string } }>("projects.create", {
+    name: "workbench",
+  });
+  const { folder } = await trpc<{ folder: { folder: string } }>("projects.prepareFolder", {
+    project: "workbench",
+  });
+  writeFileSync(join(folder.folder, "plan.txt"), "draft\n");
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.gotoProject("workbench");
+
+  const terminal = projects.terminal(project.id);
+  await expect(terminal.wrapper).toBeVisible();
+  await terminal.typeLine('echo "cwd=$(basename "$(dirname "$PWD")")/$(basename "$PWD")"');
+  await expect.poll(() => terminal.readScreenText()).toContain("cwd=projects/workbench");
+
+  const editor = await projects.openFile("plan.txt");
+  await editor.typeAtStart("reviewed ");
+  await editor.saveWithShortcut();
+  await editor.expectSaved();
+  await expect
+    .poll(() => readFileSync(join(folder.folder, "plan.txt"), "utf8"))
+    .toBe("reviewed draft\n");
 });
 
 test("the coordinator model defaults to opus and can be changed", async ({ page }) => {
   await trpc("projects.create", { name: "billing", repos: [{ repo: API }] });
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("billing");
-  await expect(projects.modelSelect()).toHaveValue("opus");
+  await projects.gotoProject("billing");
+  await projects.openSettings();
+  await expect(projects.lane("coordinator")).toHaveValue("opus");
 
-  await projects.chooseModel("sonnet");
-  await expect(projects.modelSelect()).toHaveValue("sonnet");
-  await projects.back();
-  await expect(projects.item("billing")).toHaveAttribute("data-model", "sonnet");
+  await projects.savePolicy({ coordinatorModel: "sonnet" });
+  await projects.gotoProject("billing");
+  await projects.openSettings();
+  await expect(projects.lane("coordinator")).toHaveValue("sonnet");
 });
 
 test("refuses to remove a repo that still has a worktree in the project", async ({ page }) => {
@@ -140,9 +172,9 @@ test("refuses to remove a repo that still has a worktree in the project", async 
   });
   const projects = new ProjectsPage(page, server.url, TOKEN);
   await projects.goto();
-  await projects.open();
   await projects.openProject("search");
-  await expect(projects.worktreeGroup(API)).toContainText(BRANCH);
+  await projects.showTab("repos");
+  await expect(projects.repos()).toHaveCount(2);
 
   await projects.removeRepo(API);
   await expect(projects.error()).toContainText(BRANCH);
@@ -152,20 +184,26 @@ test("refuses to remove a repo that still has a worktree in the project", async 
   await expect(projects.repo(CLIENT)).toHaveCount(0);
 });
 
-test("a new project starts its coordinator and shows the default policy and model lanes", async ({
+test("a new project starts its coordinator, shows its chat in the center and the default policy", async ({
   page,
 }) => {
   await trpc("projects.create", { name: "ledger", repos: [{ repo: CLIENT }] });
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("ledger");
+  await projects.gotoProject("ledger");
 
+  await expect(projects.chat()).toBeVisible();
+  // The charter names the project and its repos.
+  const charter = await projects.openCharter();
+  await expect(charter).toContainText("ledger");
+  await expect(charter).toContainText(CLIENT);
+  await projects.closeCharter();
   await expect(projects.coordinator()).toHaveAttribute("data-state", "started");
   await expect(projects.coordinatorChat()).not.toBeEmpty();
   // The folder section lists the project's repo as a checkout of its default branch.
+  await projects.showTab("repos");
   await expect(projects.folder()).toBeVisible();
-  await expect(projects.autonomy()).toHaveValue("steer");
+  await projects.openSettings();
+  await expect(projects.autonomy()).toHaveValue("autonomous");
   await expect(projects.lane("coordinator")).toHaveValue("opus");
   await expect(projects.lane("worker")).toHaveValue("sonnet");
   await expect(projects.lane("reviewer")).toHaveValue("sonnet");
@@ -176,9 +214,8 @@ test("a new project starts its coordinator and shows the default policy and mode
 test("edits the autonomy and the policy limits and keeps them after a reload", async ({ page }) => {
   await trpc("projects.create", { name: "payments", repos: [{ repo: API }] });
   const projects = new ProjectsPage(page, server.url, TOKEN);
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("payments");
+  await projects.gotoProject("payments");
+  await projects.openSettings();
 
   await projects.chooseAutonomy("observe");
   await projects.savePolicy({
@@ -189,13 +226,135 @@ test("edits the autonomy and the policy limits and keeps them after a reload", a
   });
   await expect(projects.maxConcurrent()).toHaveValue("2");
 
-  await projects.goto();
-  await projects.open();
-  await projects.openProject("payments");
+  await projects.gotoProject("payments");
+  await projects.openSettings();
   await expect(projects.autonomy()).toHaveValue("observe");
   await expect(projects.maxConcurrent()).toHaveValue("2");
   await expect(projects.budget()).toHaveValue("25");
   await expect(projects.isolationFloor()).toHaveValue("container");
   await expect(projects.lane("worker")).toHaveValue("haiku");
   await expect(projects.lane("reviewer")).toHaveValue("sonnet");
+});
+
+test("renames a project from Settings, keeps its name as the id, and deletes it", async ({
+  page,
+}) => {
+  await trpc("projects.create", { name: "inventory" });
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.gotoProject("inventory");
+  await projects.openSettings();
+
+  await projects.rename("Stock and inventory");
+  await projects.closeSettings();
+  await expect(projects.itemName("inventory")).toHaveText("Stock and inventory");
+  // The URL still takes the name.
+  await projects.gotoProject("inventory");
+  await expect(projects.itemOpen("inventory")).toHaveAttribute("aria-current", "page");
+  await expect(projects.itemName("inventory")).toHaveText("Stock and inventory");
+
+  await projects.openSettings();
+  await projects.deleteProject();
+  await expect(projects.item("inventory")).toHaveCount(0);
+});
+
+test("lists a project's worktrees under it, opens each in its worktree view, and keeps a collapsed project collapsed", async ({
+  page,
+}) => {
+  await trpc("projects.create", { name: "sidebar-nav", repos: [{ repo: CLIENT }] });
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.gotoProject("sidebar-nav");
+  await expect(projects.sidebarWorktrees("sidebar-nav")).toHaveCount(0);
+
+  // A worktree made from the project's row belongs to the project.
+  await projects.openNewWorktree("sidebar-nav");
+  await projects.createWorktree({ repo: CLIENT, branch: "sidebar-side" });
+  const worktreeId = toWorktreeId(CLIENT, "sidebar-side");
+  await projects.expectWorktreeView(worktreeId);
+  await expect(projects.sidebarWorktrees("sidebar-nav")).toHaveCount(1);
+  // The worktree view is the normal one, with Changes.
+  await expect(projects.changesTab()).toBeVisible();
+
+  await projects.openProject("sidebar-nav");
+  await expect(projects.worktree(worktreeId)).toBeVisible();
+  await projects.openSidebarWorktree("sidebar-nav", worktreeId);
+
+  await projects.toggleItem("sidebar-nav");
+  await expect(projects.sidebarWorktrees("sidebar-nav")).toHaveCount(0);
+  await projects.gotoProject("sidebar-nav");
+  await expect(projects.item("sidebar-nav")).toHaveAttribute("data-expanded", "false");
+  await expect(projects.sidebarWorktrees("sidebar-nav")).toHaveCount(0);
+
+  await projects.toggleItem("sidebar-nav");
+  await expect(projects.sidebarWorktrees("sidebar-nav")).toHaveCount(1);
+});
+
+test("older links to a project's view land on /project/<name>, and its empty chat names the project", async ({
+  page,
+}) => {
+  const { project } = await trpc<{ project: { id: string } }>("projects.create", {
+    name: "atlas",
+  });
+  await trpc("projects.update", { project: project.id, title: "Atlas maps" });
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+
+  await projects.gotoOldLink(`/project/${project.id}`);
+  await projects.expectProjectUrl("atlas");
+  await expect(projects.itemOpen("atlas")).toHaveAttribute("aria-current", "page");
+
+  await projects.gotoOldLink(`/worktree/${encodeURIComponent(`project:${project.id}`)}`);
+  await projects.expectProjectUrl("atlas");
+  // A project with no repo has no coordinator, so open a chat of the project's view.
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  await chat.waitForReady();
+  await expect(chat.emptyConversation).toContainText("Atlas maps");
+  await expect(chat.emptyConversation).not.toContainText("project:");
+});
+
+test("an unknown project says so", async ({ page }) => {
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await projects.gotoMissingProject("nope");
+});
+
+test("Settings lists every project under Projects and opens one's settings", async ({ page }) => {
+  await trpc("projects.create", { name: "warehouse", repos: [{ repo: API }] });
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.goto();
+  await settings.openDialog();
+  await expect(settings.projectRow("warehouse")).toBeVisible();
+
+  await settings.openProjectSettings("warehouse");
+  await expect(settings.title()).toHaveText("warehouse");
+  const projects = new ProjectsPage(page, server.url, TOKEN);
+  await expect(projects.autonomy()).toHaveValue("autonomous");
+  await expect(projects.lane("worker")).toHaveValue("sonnet");
+});
+
+test("the toolbar's overflow menu has no Tasks entry", async ({ page }) => {
+  const toolbar = new ToolbarPage(page, server.url, TOKEN);
+  await toolbar.goto();
+  await toolbar.openOverflowMenu();
+  await expect(toolbar.overflowMenuItem("Cronjobs")).toBeVisible();
+  await expect(toolbar.overflowMenuItem("Tasks")).toHaveCount(0);
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("a project's view offers its side tabs as sheets and no Changes", async ({ page }) => {
+    await trpc("projects.create", { name: "pocket", description: "Phone-sized project" });
+    const projects = new ProjectsPage(page, server.url, TOKEN);
+    await projects.gotoProjectOnPhone("pocket");
+    const mobile = new MobileLayoutPage(page, server.url, TOKEN);
+    await expect(mobile.headerWorktreeName).toHaveText("pocket");
+
+    await mobile.openMenu();
+    await expect(mobile.menuItem("explorer")).toBeVisible();
+    await expect(mobile.menuItem("project-activity")).toBeVisible();
+    await expect(mobile.menuItem("project-repos")).toBeVisible();
+    await expect(mobile.menuItem("changes")).toHaveCount(0);
+    await mobile.closeMenu();
+
+    await mobile.openProjectSheet("activity");
+    await expect(mobile.projectSheetBody("activity")).toContainText("Phone-sized project");
+  });
 });

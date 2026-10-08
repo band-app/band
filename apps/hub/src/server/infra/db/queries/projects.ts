@@ -1,10 +1,11 @@
 /** Persistence for `projects`, `project_repos` and the worktrees that belong to a project. Only `ProjectService` calls this. */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../connection";
 import {
   branchStatuses,
   legacyCoordinatorWorktrees,
+  panelStates,
   projectRepos,
   projects,
   worktrees,
@@ -30,8 +31,25 @@ export class ProjectQueries {
     return getDb().select().from(projects).where(eq(projects.id, id)).get();
   }
 
-  findDefault(): ProjectRow | undefined {
-    return getDb().select().from(projects).where(eq(projects.isDefault, true)).get();
+  /**
+   * Retires what older hubs left behind, in one transaction: the default project (`is_default`),
+   * and the task links of the removed multi-repo task folders. `worktrees.task_id` and
+   * `panel_states.task_id` have no foreign key, so they are cleared by hand. Deleting the default
+   * project cascades to its repo list and its tasks, and detaches its worktrees. Returns the
+   * removed default project, if there was one.
+   */
+  retireLegacy(): ProjectRow | undefined {
+    const db = getDb();
+    return db.transaction((tx) => {
+      tx.update(worktrees).set({ taskId: null }).where(isNotNull(worktrees.taskId)).run();
+      tx.update(panelStates)
+        .set({ taskId: null })
+        .where(and(isNotNull(panelStates.taskId), isNotNull(panelStates.worktreeId)))
+        .run();
+      const legacy = tx.select().from(projects).where(eq(projects.isDefault, true)).get();
+      if (legacy) tx.delete(projects).where(eq(projects.id, legacy.id)).run();
+      return legacy;
+    });
   }
 
   /** Ids of the projects that list the repo. */

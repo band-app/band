@@ -18,8 +18,18 @@ export const DEFAULT_PREAMBLE_LINES = 200;
 const INDEX_RESERVE_LINES = 40;
 const MAX_INDEX_DEPTH = 3;
 const MAX_FILE_BYTES = 64 * 1024;
-const SKIPPED_DIRS = new Set([".git", "media", "memory", "node_modules"]);
-const SKIPPED_FILES = new Set([".gitkeep", ".gitattributes", "preferences.md", "notes.md"]);
+// A project folder also holds the repo checkouts (`repos/`) and the folders of old task folders
+// (`tasks/`). Neither is part of the context, so neither goes in the index.
+const SKIPPED_DIRS = new Set([".git", "media", "memory", "node_modules", "repos", "tasks"]);
+// AGENTS.md and CLAUDE.md are the instructions Band writes into a project folder, not context.
+const SKIPPED_FILES = new Set([
+  ".gitkeep",
+  ".gitattributes",
+  "preferences.md",
+  "notes.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+]);
 
 interface Loaded {
   title: string;

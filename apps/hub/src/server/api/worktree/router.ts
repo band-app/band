@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { isFolderScope } from "../../infra/project-scope";
 import { diffService } from "../../services/diff-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
@@ -69,6 +70,14 @@ const changeSectionSchema = z.enum(["conflicts", "unstaged", "staged", "untracke
  * stays inside the worktree.
  */
 const filePathSchema = z.string().min(1).regex(/^[^-]/, "path must not start with '-'");
+
+/**
+ * The worktree of a git write (stage, discard, commit, push, pull). A project's folder syncs on its
+ * own through the context sync, which scans for credentials, so git calls never write it.
+ */
+const gitWorktreeIdSchema = z
+  .string()
+  .refine((id) => !isFolderScope(id), "A project's folder syncs on its own and has no git actions");
 
 /** Paths for the stage / unstage / discard mutations. A header action sends
  *  every file of its section; the service hands them to git in batches. */
@@ -336,17 +345,17 @@ export const worktreeRouter = t.router({
     ),
 
   stageFiles: publicProcedure
-    .input(z.object({ worktreeId: z.string(), paths: pathListSchema }))
+    .input(z.object({ worktreeId: gitWorktreeIdSchema, paths: pathListSchema }))
     .mutation(({ input }) => diffService.stageFiles(input.worktreeId, input.paths)),
 
   unstageFiles: publicProcedure
-    .input(z.object({ worktreeId: z.string(), paths: pathListSchema }))
+    .input(z.object({ worktreeId: gitWorktreeIdSchema, paths: pathListSchema }))
     .mutation(({ input }) => diffService.unstageFiles(input.worktreeId, input.paths)),
 
   discardChanges: publicProcedure
     .input(
       z.object({
-        worktreeId: z.string(),
+        worktreeId: gitWorktreeIdSchema,
         paths: pathListSchema,
         section: z.enum(["unstaged", "staged", "untracked"]),
       }),
@@ -359,17 +368,17 @@ export const worktreeRouter = t.router({
     ),
 
   gitPull: publicProcedure
-    .input(z.object({ worktreeId: z.string() }))
+    .input(z.object({ worktreeId: gitWorktreeIdSchema }))
     .mutation(({ input }) => worktreeService.gitPullByWorktreeId(input.worktreeId)),
 
   gitPush: publicProcedure
-    .input(z.object({ worktreeId: z.string() }))
+    .input(z.object({ worktreeId: gitWorktreeIdSchema }))
     .mutation(({ input }) => worktreeService.gitPushByWorktreeId(input.worktreeId)),
 
   gitCommit: publicProcedure
     .input(
       z.object({
-        worktreeId: z.string(),
+        worktreeId: gitWorktreeIdSchema,
         message: z.string().min(1, "commit message is required"),
         body: z.string().optional(),
       }),
@@ -382,7 +391,7 @@ export const worktreeRouter = t.router({
     ),
 
   generateCommitMessage: publicProcedure
-    .input(z.object({ worktreeId: z.string() }))
+    .input(z.object({ worktreeId: gitWorktreeIdSchema }))
     .mutation(({ input }) => worktreeService.generateCommitMessage(input.worktreeId)),
 
   listFiles: publicProcedure

@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { ProjectTaskQueries } from "../src/server/infra/db/queries/project-tasks";
 import { emit } from "../src/server/infra/events/status-event-bus";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
@@ -92,7 +91,7 @@ const promptsAbout = (chatId: string, needle: string) =>
 const wakeups = (f: Fixture) =>
   prompts(f.coordinatorChatId).filter((p) => p.startsWith("Subscription update"));
 
-/** A project with a coordinator, one worker worktree with a chat, and a task group naming it. */
+/** A project with a coordinator and one worker worktree of the project with a chat. */
 async function newProject(): Promise<Fixture> {
   seq += 1;
   const repoName = `api${seq}`;
@@ -119,33 +118,6 @@ async function newProject(): Promise<Fixture> {
   await worktreeService.create({ repo: repoName, branch, projectId: project.id });
   const workerWorktreeId = toWorktreeId(repoName, branch);
   const workerChat = chatService.getOrCreateDefault(workerWorktreeId);
-  // A task with a folder is one the coordinator tracks. This one has a brief path and the worker's worktree.
-  const tasks = new ProjectTaskQueries();
-  // The create above made the worktree a one-member task of its own. The worker moves into the tracked task.
-  tasks.forgetWorktree(workerWorktreeId);
-  tasks.insert(
-    {
-      id: `grp-${seq}`,
-      projectId: project.id,
-      name: `group-${seq}`,
-      branch,
-      briefPath: join(home, `group-${seq}`, "BRIEF.md"),
-      hostId: "local",
-      status: "active",
-      createdAt: Date.now(),
-    },
-    [
-      {
-        taskId: `grp-${seq}`,
-        repoName,
-        worktreeId: workerWorktreeId,
-        role: null,
-        mergeOrder: 0,
-        prNumber: null,
-      },
-    ],
-  );
-  tasks.setWorktreeTask(repoName, branch, `grp-${seq}`);
   await projectSubscriptionService.reconcile(project.id);
   stoppable.add(workerChat.id);
   stoppable.add(row.coordinatorChatId as string);
@@ -262,7 +234,7 @@ afterEach(() => {
 });
 
 describe("project subscriptions", () => {
-  it("S1: a review comment on a member's PR wakes the coordinator once, coalesced", async () => {
+  it("S1: a review comment on a project worktree's PR wakes the coordinator once, coalesced", async () => {
     const f = await newProject();
     expect(projectSubs(f)).toHaveLength(0);
     let comments: { id: string; body: string; createdAt: string }[] = [];
@@ -284,11 +256,6 @@ describe("project subscriptions", () => {
     emitPr(f, 7, "open");
     await new Promise((r) => setTimeout(r, 200));
     expect(projectSubs(f)).toHaveLength(2);
-    expect(
-      new ProjectTaskQueries()
-        .membersOfProject(f.projectId)
-        .find((m) => m.worktreeId === f.workerWorktreeId)?.prNumber,
-    ).toBe(7);
 
     await githubPollService.poll();
     comments = [

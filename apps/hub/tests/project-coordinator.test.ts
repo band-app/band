@@ -4,7 +4,7 @@
 // HTTP with the `mcp_` token the hub gave that session, exactly as the agent would.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -233,14 +233,23 @@ describe("the coordinator session starts with the project (S1)", () => {
     expect(shop.coordinatorModel).toBe("opus");
   });
 
-  it("sends the charter in the system prompt, with the repos, policy and autonomy", () => {
+  it("writes the charter to AGENTS.md in the project folder, with CLAUDE.md importing it, and no longer injects it", async () => {
+    const folder = join(realpathSync(home), ".band", "projects", "shop");
+    const charter = await waitFor(
+      () =>
+        existsSync(join(folder, "AGENTS.md"))
+          ? readFileSync(join(folder, "AGENTS.md"), "utf8")
+          : undefined,
+      { label: "AGENTS.md" },
+    );
+    expect(readFileSync(join(folder, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     const meta = shopCoordinator.params._meta as { systemPrompt?: { append?: string } };
-    const charter = meta.systemPrompt?.append ?? "";
+    expect(meta.systemPrompt?.append ?? "").not.toContain("coordinator of the Band project");
     expect(charter).toContain('coordinator of the Band project "shop"');
     expect(charter).toContain("- api");
     expect(charter).toContain("- client");
     expect(charter).toContain("at most 5 worker agents run at once");
-    expect(charter).toContain("Autonomy is steer");
+    expect(charter).toContain("Autonomy is autonomous");
     expect(charter).toContain("project_status");
     expect(charter).toContain("inbox/<agent>.md");
   });
@@ -257,23 +266,19 @@ describe("the coordinator session starts with the project (S1)", () => {
       "repo_log",
       "repo_read",
       "repo_search",
-      "task_add_repo",
-      "task_remove_repo",
-      "task_stop",
-      "tasks_create",
-      "tasks_list",
+      "worktree_create",
       "worktree_stop",
       "worktrees_list",
     ]);
   });
 
-  it("defaults the model lanes to opus, sonnet and sonnet and autonomy to steer", () => {
+  it("defaults the model lanes to opus, sonnet and sonnet and autonomy to autonomous", () => {
     expect(shop.effectivePolicy.models).toEqual({
       coordinator: "opus",
       worker: "sonnet",
       reviewer: "sonnet",
     });
-    expect(shop.effectivePolicy).toMatchObject({ autonomy: "steer", autoMerge: false });
+    expect(shop.effectivePolicy).toMatchObject({ autonomy: "autonomous", autoMerge: false });
   });
 
   it("keeps the coordinator's worktree out of the project's worker list", async () => {
@@ -298,10 +303,10 @@ describe("the tools are scoped to the project (S2)", () => {
   it("refuses to read or message a chat of another project's worktree", async () => {
     const read = await callTool(bearer, "chats_read", { chatId: c.chatId });
     expect(read.isError).toBe(true);
-    expect(read.text).toContain('not a chat of a task or worktree in project "shop"');
+    expect(read.text).toContain('not a chat of a worktree in project "shop"');
     const send = await callTool(bearer, "chats_send", { chatId: c.chatId, message: "hello" });
     expect(send.isError).toBe(true);
-    expect(send.text).toContain('not a chat of a task or worktree in project "shop"');
+    expect(send.text).toContain('not a chat of a worktree in project "shop"');
     const stop = await callTool(bearer, "worktree_stop", { worktreeId: c.worktreeId });
     expect(stop.isError).toBe(true);
     expect(stop.text).toContain('not in project "shop"');
@@ -387,7 +392,7 @@ describe("policy limits and autonomy (S3)", () => {
     };
 
   it("refuses a dispatch past maxConcurrent with a clear error, then allows it after a stop", async () => {
-    await setPolicy("shop", { maxConcurrent: 1, autonomy: "steer" });
+    await setPolicy("shop", { maxConcurrent: 1, autonomy: "autonomous" });
     const first = await callTool(bearer, "chats_send", { chatId: a.chatId, message: "hold a" });
     expect(first.isError).toBe(false);
     await waitFor(async () => ((await status()).running === 1 ? true : undefined), {

@@ -159,8 +159,8 @@ export const worktrees = sqliteTable("worktrees", {
   projectId: text("project_id").references((): AnySQLiteColumn => projects.id, {
     onDelete: "set null",
   }),
-  // The task this worktree is a member of (plan step T.2), or null before the boot backfill
-  // has made its one-member task. No foreign key: the whole-tree repo save rewrites this table.
+  // Legacy: the multi-repo task this worktree was a member of on older hubs. `retireLegacy`
+  // clears it at boot and nothing sets it now. No foreign key: the whole-tree repo save rewrites this table.
   taskId: text("task_id"),
 });
 
@@ -860,8 +860,11 @@ export const projects = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
+    // The name the UI shows. Empty means `name`. `name` stays fixed, because the context repo and
+    // the project folder on each host are named after it.
+    title: text("title").notNull().default(""),
     contextName: text("context_name").notNull(),
-    // The project that takes repos and worktrees created with no project ("Personal").
+    // Legacy: set only on older hubs' default project ("Personal"), which `retireLegacy` deletes at boot.
     isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     coordinatorAgent: text("coordinator_agent"),
     coordinatorModel: text("coordinator_model").notNull().default("opus"),
@@ -940,9 +943,9 @@ export const legacyCoordinatorWorktrees = sqliteTable("legacy_coordinator_worktr
   projectId: text("project_id").notNull(),
 });
 
-// A dispatch the coordinator of a `steer` project asked for and the user has yet to decide
-// (plan step 6.3). `input` is the validated `worktrees_create` call. A decided row stays as a
-// record: `status` is `pending`, `approved` (dispatched), `rejected` or `failed` (approved,
+// A dispatch the coordinator of a `steer` project asked for and the user had yet to decide
+// (plan step 6.3). The `steer` level is gone and nothing writes here any more; old rows stay.
+// `input` is the validated `worktrees_create` call. A decided row stays as a record: `status` is `pending`, `approved` (dispatched), `rejected` or `failed` (approved,
 // but the dispatch threw, with the message in `error`).
 export const dispatchRequests = sqliteTable(
   "dispatch_requests",
@@ -962,10 +965,8 @@ export const dispatchRequests = sqliteTable(
   (t) => [index("dispatch_requests_project_idx").on(t.projectId, t.status)],
 );
 
-// A retro of a project (plan step 6.5): the edits its retro agent proposed, kept for the user to
-// accept or reject one by one. `status` is `running` (the agent is working), `pending` (items wait
-// for a decision), `reviewed` (every item decided) or `failed` (`error` says why). `items` is the
-// list of `RetroItem` (`services/_utils/retro-items.ts`), each with its own status.
+// A retro of a project (plan step 6.5): the edits its retro agent proposed. The scheduled retro is
+// gone (a user who wants one makes a cronjob) and nothing writes here any more; old rows stay.
 export const retroProposals = sqliteTable(
   "retro_proposals",
   {

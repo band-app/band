@@ -1,8 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { useDashboardStore } from "@/dashboard";
-import { trpc } from "../lib/trpc-client";
+import { worktreeHref } from "../lib/project-slugs";
+import { useWorktreeRoute } from "../lib/use-worktree-route";
 
 export const Route = createFileRoute("/worktree/$worktreeId")({
   component: WorktreeLayout,
@@ -32,48 +31,10 @@ function WorktreeNotFoundRedirect() {
 function WorktreeLayout() {
   const { worktreeId } = Route.useParams();
   const decoded = decodeURIComponent(worktreeId);
-
-  // Sync zustand active worktree from URL. We set on param change but never
-  // clear on unmount: on mobile the repo-list "menu" lives on a *separate*
-  // route (`/`) from the worktree (`/worktree/$id`), so unmounting this route
-  // to show the menu would wipe `activeWorktreeId` and leave the menu unable
-  // to bold the worktree the user just came from. Keeping the last-opened id
-  // lets the menu mark it active on every viewport. The title bar reads the
-  // active id from the pathname (`parseWorktreeFromPath` in __root), not this
-  // store, so it still clears correctly when no worktree route is mounted.
-  const setActiveWorktree = useDashboardStore((s) => s.setActiveWorktree);
-  useEffect(() => {
-    setActiveWorktree(decoded);
-  }, [decoded, setActiveWorktree]);
-
-  // Re-read this worktree's git status when it is selected, and when the
-  // window comes back into view, instead of waiting for the next poll tick.
-  const refreshBranchStatus = useDashboardStore((s) => s.refreshBranchStatus);
-  useEffect(() => {
-    refreshBranchStatus(decoded);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") refreshBranchStatus(decoded);
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [decoded, refreshBranchStatus]);
-
-  // Clear needs_attention status when viewing this worktree
-  const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
-  useEffect(() => {
-    clearNeedsAttention(decoded);
-  }, [decoded, clearNeedsAttention]);
-
-  // A worktree inside a task folder belongs to its task, so an old link to it opens the task view.
-  // A worktree that predates task folders is its own task and keeps this view.
-  const owner = useQuery({
-    queryKey: ["projectTasks.forWorktree", decoded],
-    queryFn: async () => (await trpc.projectTasks.forWorktree.query({ worktreeId: decoded })).task,
-    staleTime: 30_000,
-  });
-  if (owner.data?.briefPath) {
-    return <Navigate to="/task/$taskId" params={{ taskId: owner.data.id }} replace />;
-  }
+  // A project's view lives at `/project/<name>`; an older `/worktree/project:<id>` link goes there.
+  const projectId = projectIdOfScope(decoded);
+  useWorktreeRoute(projectId ? null : decoded);
+  if (projectId) return <Navigate to={worktreeHref(decoded)} replace />;
 
   // Both layouts render every worktree from AppShell: the desktop
   // `SharedDockviewLayout` and the mobile `MobileWorktreeShell` keep each

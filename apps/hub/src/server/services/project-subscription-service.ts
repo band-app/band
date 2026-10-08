@@ -4,9 +4,9 @@
  *
  * Three kinds of event reach the coordinator:
  *
- * - GitHub. When a task group member's worktree gets a pull request (the branch-status poller
+ * - GitHub. When a worktree of the project gets a pull request (the branch-status poller
  *   stores it), this service subscribes the coordinator to the PR (comments, reviews, lifecycle)
- *   and to CI on the member's branch. Both go away when the PR merges or closes, after one event
+ *   and to CI on the worktree's branch. Both go away when the PR merges or closes, after one event
  *   that tells the coordinator which.
  * - Worker chats. A chat of a project worktree whose turn ends with an error, which asks the
  *   user a question, or which finishes with nothing queued, becomes an event with the chat id.
@@ -21,7 +21,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
-import { ProjectTaskQueries } from "../infra/db/queries/project-tasks";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import type { ProjectRow } from "../infra/db/queries/projects";
 import {
   type ChatLifecycleEvent,
@@ -31,7 +31,7 @@ import {
   type StatusEvent,
   subscribe as subscribeStatusBus,
 } from "../infra/events/status-event-bus";
-import { projectScopeId, taskIdOfScope } from "../infra/project-scope";
+import { projectScopeId } from "../infra/project-scope";
 import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
 import { redactSecrets } from "./_utils/context-redaction";
 import { chatService } from "./chat-service";
@@ -122,13 +122,12 @@ export interface ProjectWakeupView {
 }
 
 export class ProjectSubscriptionService {
-  private readonly tasks = new ProjectTaskQueries();
   private readonly lastWorkerEvent = new Map<string, number>();
   /** The commit of each project context the last time this service looked at it. */
   private readonly seenHeads = new Map<string, string>();
   /** One pass per context at a time, so two quick pushes are diffed in order. */
   private readonly contextLanes = new Map<string, Promise<void>>();
-  /** One subscribe per member worktree at a time, so two polls never create the same PR subscription twice. */
+  /** One subscribe per worktree at a time, so two polls never create the same PR subscription twice. */
   private readonly memberLanes = new Map<string, Promise<void>>();
   private stops: Array<() => void> = [];
   private started = false;
@@ -170,17 +169,11 @@ export class ProjectSubscriptionService {
     if (!row?.coordinatorChatId) return;
     this.ensureProjectSubscription(row);
     await this.baseline(row.contextName);
-    for (const member of this.tasks.membersOfProject(row.id)) {
-      if (!member.worktreeId || !this.isRealTask(member.taskId)) continue;
-      const pr = projectService.branchStatus(member.worktreeId)?.ciPr;
-      if (pr) await this.syncMemberPr(member.worktreeId, pr);
+    for (const w of projectService.allWorktreesOf(row.id)) {
+      const worktreeId = toWorktreeId(w.repoName, w.name);
+      const pr = projectService.branchStatus(worktreeId)?.ciPr;
+      if (pr) await this.syncMemberPr(worktreeId, pr);
     }
-  }
-
-  /** A task the coordinator tracks: it has its own folder, or several repos. A worktree that predates tasks does not. */
-  private isRealTask(taskId: string): boolean {
-    const task = this.tasks.find(taskId);
-    return Boolean(task && (task.briefPath || this.tasks.membersOf(taskId).length > 1));
   }
 
   // ---- views ---------------------------------------------------------------------------
@@ -282,11 +275,7 @@ export class ProjectSubscriptionService {
 
       const rawName = chatService.get(event.chatId)?.name;
       const chatName = rawName ? oneLine(rawName, 80) : undefined;
-      const taskId = taskIdOfScope(event.worktreeId);
-      const where = taskId
-        ? `task ${this.tasks.find(taskId)?.name ?? taskId}`
-        : `worktree ${event.worktreeId}`;
-      const who = `Worker chat ${event.chatId}${chatName ? ` ("${chatName}")` : ""} in ${where}`;
+      const who = `Worker chat ${event.chatId}${chatName ? ` ("${chatName}")` : ""} in worktree ${event.worktreeId}`;
       const summary =
         event.kind === "failed"
           ? `${who} ended its turn with an error: ${oneLine(redactSecrets(event.error ?? "unknown error"), MAX_ERROR_CHARS)}`
@@ -334,18 +323,16 @@ export class ProjectSubscriptionService {
     worktreeId: string,
     pr: { number: number; url: string; state: "open" | "merged" | "closed" },
   ): Promise<void> {
-    const found = this.tasks.memberOfWorktree(worktreeId);
-    // A worktree that is only its own one-member task is not a project task, so the coordinator is not woken for it.
-    if (!found || !this.isRealTask(found.task.id)) return;
-    const row = projectService.find(found.task.projectId);
+    const row = projectService.projectOfWorker(worktreeId);
     if (!row?.coordinatorChatId) return;
-    if (found.member.prNumber !== pr.number) {
-      this.tasks.setMemberPr(found.task.id, found.member.repoName, pr.number);
-    }
+    const worktree = projectService
+      .allWorktreesOf(row.id)
+      .find((w) => toWorktreeId(w.repoName, w.name) === worktreeId);
+    if (!worktree) return;
     const parsed = parsePrUrl(pr.url);
     if (!parsed) return;
     const prKey = githubPrKey(parsed.repo, pr.number);
-    const ciKey = githubCiKey(parsed.repo, found.task.branch);
+    const ciKey = githubCiKey(parsed.repo, worktree.branch);
     const coordinatorChatId = row.coordinatorChatId;
     const mine = () =>
       subscriptionService
@@ -365,7 +352,7 @@ export class ProjectSubscriptionService {
       this.emitProjectEvent(row, {
         id: `pr:${parsed.repo}#${pr.number}:${pr.state}`,
         kind: pr.state === "merged" ? "pr_merged" : "pr_closed",
-        summary: `Pull request ${parsed.repo}#${pr.number} of task "${found.task.name}" (${found.member.repoName}) was ${pr.state}.`,
+        summary: `Pull request ${parsed.repo}#${pr.number} of worktree ${worktreeId} (${worktree.repoName}) was ${pr.state}.`,
         url: pr.url,
       });
       for (const sub of existing) subscriptionService.remove(sub.id);
@@ -394,7 +381,7 @@ export class ProjectSubscriptionService {
       );
     }
     if (!have.has(ciKey)) {
-      created.push(subscriptionService.createGithubCi({ ...base, branch: found.task.branch }));
+      created.push(subscriptionService.createGithubCi({ ...base, branch: worktree.branch }));
     }
     // Registers the repo webhook, or records that it waits for a public URL (the poller serves it meanwhile).
     for (const sub of created) await githubWebhookService.ensureRegistered(sub);
