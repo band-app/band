@@ -49,6 +49,18 @@ In the desktop app, choose the remote hub in Settings > Hub. A hub with no local
 
 A worker dials the hub, so it needs no inbound port. Open Settings > Hosts, choose Add worker, give it a name and copy the command from the tab you want. The token in it works once and expires in an hour.
 
+### This Mac, from the desktop app
+
+On a Mac the desktop app is the main way to add a worker. When the app connects to a remote hub (Settings > Hub), it asks "Use this Mac as a worker?" once for that hub. Yes asks the hub for a one-time token, installs the launchd agent `app.band.worker` and waits until the host shows online. The name defaults to the macOS computer name and can be changed. Folders the worker may use start empty, and a repo added later through the folder picker adds its folder. Not now is remembered for that hub. The app with its own local hub never asks, because the hub's local host already covers the machine.
+
+The same action stays in Settings > Hosts under This computer. It shows the host's status and the worker version, which is the app version. Remove this computer uninstalls the service, ends the terminals' daemon and removes the host from the hub once it is offline. A host that still has worktrees stays on the hub, and the section says so.
+
+The service runs the worker inside the app (`Band.app/Contents/Resources/worker`) with the app's own executable (`ELECTRON_RUN_AS_NODE=1`), so the Mac needs no Node or npm. An app update replaces the files and the app restarts the service with `launchctl kickstart -k` the first time it starts after the update. The service keeps running when you quit the app. The token never appears in the UI or the logs. It is in the plist (mode 0600), as with the npm install.
+
+When `app.band.worker` was installed from npm, Settings > Hosts offers Switch to the worker in this app. The switch keeps the worker id, name, roots and state directory, so the host and its worktrees stay.
+
+The npm path below stays for Linux and servers.
+
 ### npm with a service
 
 ```sh

@@ -43,6 +43,7 @@ import {
 import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
+import { resolveWorkerLocation, ThisComputerWorker } from "./services/this-computer-worker.js";
 import { resolveUiDir } from "./services/ui-paths.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
@@ -115,6 +116,16 @@ const updates = new UpdateController({
       win.webContents.send(Events.updaterStatusChanged, status);
     }
   },
+});
+
+/** The worker this Mac may run for a remote hub, from the bundle in this app. */
+const thisComputer = new ThisComputerWorker({
+  location: resolveWorkerLocation({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  }),
+  appVersion: app.getVersion(),
 });
 
 /** "Check for Updates…": bring the dashboard forward so its toast is seen. */
@@ -584,6 +595,13 @@ async function bootstrap(): Promise<void> {
     isLocalHub: () => state.hubChoice.mode === "local",
     isTrustedSender: (event) =>
       state.mainWindow !== null && isTrustedSender(event, state.mainWindow, trustedUiOrigins()),
+    thisComputer: {
+      worker: thisComputer,
+      getHub: () =>
+        state.hubChoice.mode === "remote"
+          ? { url: state.hubChoice.url, token: state.hubChoice.token }
+          : null,
+    },
     hub: {
       getChoice: () => state.hubChoice,
       // The reload replaces the page that asked, so it runs after the reply.
@@ -602,6 +620,9 @@ async function bootstrap(): Promise<void> {
     unregisterIpc();
     unregisterHubConfig();
   };
+
+  // An app update replaces the bundled worker on disk. The service keeps running the old one until it restarts.
+  if (thisComputer.restartAfterUpdate()) log.info("restarted the worker service after an update");
 
   // Background update checks: 10s after launch so the dashboard has loaded,
   // then hourly. They surface in the toast only when they find an update.

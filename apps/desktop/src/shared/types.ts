@@ -199,3 +199,38 @@ export interface PickSaveFileArgs {
   defaultName?: string;
   defaultPath?: string;
 }
+
+// ---------- this computer as a worker ----------
+
+/** What Settings > Hosts and the first-run prompt show about the worker on this Mac. */
+export interface ThisComputerStatus {
+  /** macOS with a worker bundled in this build. */
+  supported: boolean;
+  /** The app talks to a remote hub, the only case where this Mac is not already covered. */
+  remoteHub: boolean;
+  /** A worker service (`app.band.worker`) is installed, whoever installed it. */
+  installed: boolean;
+  /** The installed service runs the worker bundled in this app. False for one installed from npm. */
+  bundled: boolean;
+  running: boolean;
+  /** The installed service points at the hub the app is connected to. */
+  forThisHub: boolean;
+  hostId: string | null;
+  name: string | null;
+  roots: string[];
+  /** The hub's status for the host: online, offline, lost, or removed. Null when unknown. */
+  hostStatus: string | null;
+  /** The app version, which is also the bundled worker's version. */
+  version: string;
+  /** The macOS computer name. */
+  defaultName: string;
+  /** Show "Use this Mac as a worker?" now. */
+  promptPending: boolean;
+}
+
+export type ThisComputerResult = { ok: true; note?: string } | { ok: false; error: string };
+
+export interface ThisComputerAddArgs {
+  name?: string;
+  roots?: string[];
+}
