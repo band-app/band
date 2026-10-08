@@ -21,6 +21,12 @@ const MSG_CLIENT_CUT_TEXT = 6;
 /** Most bytes of one held message. ClientCutText is the only one with a length from the viewer. */
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 
+/** A ClientCutText that says it is larger than the filter holds ends the session at once. */
+function cutTextSize(payload: number): number {
+  if (8 + payload > MAX_MESSAGE_BYTES) throw new RfbFilterError("RFB message too large");
+  return 8 + payload;
+}
+
 type Phase = "version" | "security" | "init" | "messages";
 
 export class RfbFilterError extends Error {}
@@ -76,7 +82,10 @@ export class RfbClientFilter {
       case MSG_POINTER_EVENT:
         return 6;
       case MSG_CLIENT_CUT_TEXT:
-        return buf.length < 8 ? null : 8 + buf.readUInt32BE(4);
+        // A negative length is the ExtendedClipboard format, with a payload of its absolute
+        // value. noVNC sends one as soon as x11vnc offers that extension. Read as unsigned it
+        // looked like a 4 GiB message, which held every later message, keys and clicks included.
+        return buf.length < 8 ? null : cutTextSize(Math.abs(buf.readInt32BE(4)));
       default:
         throw new RfbFilterError(`Unsupported RFB message type ${buf[0]}`);
     }

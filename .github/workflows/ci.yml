@@ -222,6 +222,11 @@ jobs:
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 
+      # A real Xvfb and x11vnc for `e2e/desktop-viewer-x11vnc.spec.ts`, which fails on Linux CI
+      # without them. Installed after the unit and hub tests so nothing else sees them.
+      - name: Install Xvfb and x11vnc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc x11-utils
+
       - name: Test e2e (web)
         run: pnpm --filter @band-app/web test:e2e
 
