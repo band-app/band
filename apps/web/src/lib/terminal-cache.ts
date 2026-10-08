@@ -769,6 +769,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         lastPongAt = Date.now();
         // Replay state is per-connection: a reconnect must ask again.
         attachSent = false;
+        lastSentCols = 0;
+        lastSentRows = 0;
         clearReplayGuard();
         if (isReconnect) {
           // The replay reconstructs the whole screen; output queued from the
@@ -799,6 +801,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           if (dims) {
             initMsg.cols = dims.cols;
             initMsg.rows = dims.rows;
+            lastSentCols = dims.cols;
+            lastSentRows = dims.rows;
             attachSent = true;
             awaitingReplay = true;
             replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
@@ -1021,10 +1025,26 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Resize / DPR / zoom handling ---
     let lastDpr = window.devicePixelRatio;
+    // The size the server last got on this connection (from `init`, `attach`
+    // or `resize`). A resize that repeats it is dropped: the kernel signals the
+    // app only on a real change, so a repeat can't do anything useful.
+    let lastSentCols = 0;
+    let lastSentRows = 0;
+    let resizeRafId: number | null = null;
+    // Sends the latest fitted size at most once per animation frame, so a fit
+    // that the layout undoes within the same frame never reaches the PTY (each
+    // size change that does reach it makes a TUI redraw).
     const sendPtyResize = () => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (term.cols <= 0 || term.rows <= 0) return;
-      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      if (resizeRafId !== null) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (term.cols <= 0 || term.rows <= 0) return;
+        if (term.cols === lastSentCols && term.rows === lastSentRows) return;
+        lastSentCols = term.cols;
+        lastSentRows = term.rows;
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      });
     };
 
     // --- Request-driven replay (reconnect width-sync) ---
@@ -1055,6 +1075,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       const dims = fittedDims();
       if (!dims) return;
       attachSent = true;
+      lastSentCols = dims.cols;
+      lastSentRows = dims.rows;
       awaitingReplay = true;
       sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows, flow: true }));
       if (replayGuardTimer !== null) clearTimeout(replayGuardTimer);
@@ -1224,6 +1246,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       output.dispose();
       if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
       if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
+      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
       webglContextLossDisposable?.dispose();
       dprMql?.removeEventListener("change", onDprMediaChange);
       unsubscribeZoom();

@@ -8,7 +8,16 @@ import {
 } from "dockview";
 import { Columns2, Rows2, X } from "lucide-react";
 import type React from "react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { isMacPlatform } from "@/dashboard";
 import {
   cycleGridGroups,
@@ -638,11 +647,23 @@ export function TerminalSplitLeaf({
   // / resizes (dockview-core defers its own ResizeObserver by one rAF, which
   // otherwise paints the inner splitview at a stale width). Ported verbatim from
   // the pre-#643 DockviewTerminalContainer.
+  //
+  // The panes are told they are visible only after this effect has applied the
+  // layout for the reveal. Otherwise a pane's own layout effect (children run
+  // first) attaches against the stale hidden-box size, fits xterm to it and
+  // sends the PTY a transient size that the layout then undoes.
+  const [layoutApplied, setLayoutApplied] = useState(false);
   useLayoutEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setLayoutApplied(false);
+      return;
+    }
     const api = apiRef.current;
     const container = containerRef.current;
-    if (!api || !container) return;
+    if (!api || !container) {
+      setLayoutApplied(true);
+      return;
+    }
     let lastWidth = 0;
     let lastHeight = 0;
     const applyLayout = (width: number, height: number) => {
@@ -656,6 +677,7 @@ export function TerminalSplitLeaf({
     };
     const rect = container.getBoundingClientRect();
     applyLayout(rect.width, rect.height);
+    setLayoutApplied(true);
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
@@ -665,7 +687,12 @@ export function TerminalSplitLeaf({
     return () => ro.disconnect();
   }, [visible]);
 
-  const visibilityValue = useMemo(() => ({ visible, wsActive: visible }), [visible]);
+  // Hiding propagates at once (`visible` false); showing waits for the layout.
+  const panesVisible = visible && layoutApplied;
+  const visibilityValue = useMemo(
+    () => ({ visible: panesVisible, wsActive: panesVisible }),
+    [panesVisible],
+  );
 
   return (
     <div

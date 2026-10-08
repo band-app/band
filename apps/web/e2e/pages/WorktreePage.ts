@@ -2780,6 +2780,50 @@ export class WorktreePage {
     return () => count;
   }
 
+  /** Wait two animation frames, so a fit and the once-per-frame terminal
+   *  resize flush that follows it have run. */
+  async settleFrames(): Promise<void> {
+    await this.page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  }
+
+  /** Record every `resize` message the page sends on a terminal WebSocket.
+   *  Call BEFORE `goto`. `reset()` drops what was recorded so far, so a test
+   *  can measure only the steps after its setup. */
+  trackTerminalResizeMessages(): {
+    sizes: () => { cols: number; rows: number; terminalId: string | null }[];
+    reset: () => void;
+  } {
+    let sizes: { cols: number; rows: number; terminalId: string | null }[] = [];
+    this.page.on("websocket", (ws) => {
+      if (!ws.url().includes("/terminal?")) return;
+      ws.on("framesent", ({ payload }) => {
+        if (typeof payload !== "string" || !payload.startsWith("{")) return;
+        try {
+          const msg = JSON.parse(payload);
+          if (msg.type === "resize")
+            sizes.push({
+              cols: msg.cols,
+              rows: msg.rows,
+              terminalId: new URL(ws.url()).searchParams.get("terminalId"),
+            });
+        } catch {
+          // Not a control message.
+        }
+      });
+    });
+    return {
+      sizes: () => [...sizes],
+      reset: () => {
+        sizes = [];
+      },
+    };
+  }
+
   /** Start counting terminal WebSocket opens per terminal (matched on the
    *  `terminalId=` query param). Returns a getter taking the terminal id, so
    *  the ids can be learned after the terminals open. Call BEFORE `goto`.
