@@ -37,8 +37,8 @@ import {
 } from "../hooks/use-status";
 import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
-import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
+import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
 import { ProjectsDialog } from "./ProjectsDialog";
 import { ProjectTaskList } from "./ProjectTaskList";
 import { RepoList } from "./RepoList";
@@ -97,6 +97,7 @@ export function DashboardShell({
   const [showProjects, setShowProjects] = useState(false);
   const [coordinatorProject, setCoordinatorProject] = useState<string | undefined>(undefined);
   const [settingsContext, setSettingsContext] = useState<string | undefined>(undefined);
+  const [settingsHosts, setSettingsHosts] = useState(false);
   const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
   const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
@@ -120,6 +121,7 @@ export function DashboardShell({
 
   const handleSettingsClick = useCallback(() => {
     setSettingsContext(undefined);
+    setSettingsHosts(false);
     setShowSettingsDialog(true);
   }, []);
 
@@ -456,6 +458,7 @@ export function DashboardShell({
                 size="icon-xs"
                 variant="ghost"
                 className="text-muted-foreground"
+                data-testid="repo-list__add-repo"
                 onClick={() => setShowAddDialog(true)}
               >
                 <Plus className="size-4" />
@@ -500,7 +503,12 @@ export function DashboardShell({
                 <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
                 <p className="text-xs text-muted-foreground/70 mt-1">Add a repo to get started</p>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="repo-list__add-repo-empty"
+                onClick={() => setShowAddDialog(true)}
+              >
                 <Plus className="size-3 mr-1" />
                 Add repo
               </Button>
@@ -573,10 +581,16 @@ export function DashboardShell({
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
 
-      <AddRepoDialog
+      <ProjectAddRepoDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
-        defaultLabel={labelFilter}
+        label={labelFilter}
+        onOpenHosts={() => {
+          setSettingsContext(undefined);
+          setSettingsHosts(true);
+          setShowAddDialog(false);
+          setShowSettingsDialog(true);
+        }}
       />
 
       <ProjectsDialog
@@ -585,6 +599,7 @@ export function DashboardShell({
         initialProject={coordinatorProject}
         onOpenContext={(name) => {
           setSettingsContext(name);
+          setSettingsHosts(false);
           setShowSettingsDialog(true);
         }}
         onOpenWorktree={(worktreeId) => {
@@ -596,7 +611,7 @@ export function DashboardShell({
       <SettingsPage
         open={showSettingsDialog}
         onOpenChange={setShowSettingsDialog}
-        initialSection={settingsContext ? "context" : undefined}
+        initialSection={settingsContext ? "context" : settingsHosts ? "hosts" : undefined}
         initialContext={settingsContext}
       />
     </div>

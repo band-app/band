@@ -8,8 +8,10 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 export class ProjectAddRepoPage {
   private readonly detail: Locator;
   private readonly dialog: Locator;
+  private readonly page: Page;
 
   constructor(page: Page) {
+    this.page = page;
     this.detail = page.getByTestId("projects__detail");
     this.dialog = page.getByTestId("project-add-repo__dialog");
   }
@@ -19,6 +21,32 @@ export class ProjectAddRepoPage {
       await this.detail.getByTestId("projects__add-repo-open").click();
       await expect(this.dialog).toBeVisible();
     });
+  }
+
+  /** Loads the app on `baseUrl` with the token and opens the dialog from the Repos list. */
+  async gotoAndOpenFromRepoList(baseUrl: string, token: string): Promise<void> {
+    await this.page.goto(`${baseUrl}/?token=${token}`);
+    await this.openFromRepoList();
+  }
+
+  /** Opens the dialog from the Repos list in the sidebar. */
+  async openFromRepoList(): Promise<void> {
+    await test.step("Open Add repo from the Repos list", async () => {
+      await this.page
+        .getByTestId("repo-list__add-repo")
+        .or(this.page.getByTestId("repo-list__add-repo-empty"))
+        .first()
+        .click();
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
+  noHostsNotice(): Locator {
+    return this.dialog.getByTestId("project-add-repo__no-hosts");
+  }
+
+  nativePicker(): Locator {
+    return this.dialog.getByTestId("project-add-repo__pick-native");
   }
 
   async chooseWorker(hostId: string): Promise<void> {
@@ -57,6 +85,11 @@ export class ProjectAddRepoPage {
 
   async chooseUrl(): Promise<void> {
     await this.dialog.getByTestId("project-add-repo__mode-url").click();
+  }
+
+  /** Switches to By URL with the button in the no-worker notice. */
+  async chooseUrlFromNotice(): Promise<void> {
+    await this.dialog.getByTestId("project-add-repo__no-hosts-url").click();
   }
 
   async addByUrl(remoteUrl: string, defaultBranch: string): Promise<void> {

@@ -9,8 +9,8 @@
 # exercises the cross-platform shell/PATH fallbacks. State (SQLite DB,
 # settings, installed skills) lives in the `band-data` volume.
 #
-# To register a repo: in the web UI use "Register Repo" and enter the
-# container path of a repo you've mounted below (e.g. /repos/myrepo).
+# To register a repo: in the web UI use "Add repo", pick a worker and browse
+# to the container path of a repo you've mounted below (e.g. /repos/myrepo).
 services:
   band:
     build:

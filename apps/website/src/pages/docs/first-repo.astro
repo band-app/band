@@ -23,28 +23,14 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ol>
     <li>Open the Band dashboard.</li>
-    <li>Click the <strong>"Add Repo"</strong> button in the sidebar.</li>
+    <li>Click the <strong>Add repo</strong> button (the plus) in the sidebar.</li>
     <li>
-      In the <strong>Register Repo</strong> dialog, type the path to your
-      git repository, or click the folder icon to browse for it.
+      In the <strong>Add repo</strong> dialog, choose <strong>From a worker</strong>,
+      pick the worker, and browse its folders to the git checkout. Or choose
+      <strong>By URL</strong> and enter the remote URL.
     </li>
-    <li>Click <strong>Add Repo</strong>.</li>
+    <li>Click <strong>Use this folder</strong> (or <strong>Add repo</strong> for a URL).</li>
   </ol>
-
-  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
-    <img
-      src="/screenshot-register-repo.png"
-      alt="The Register Repo dialog in the Band dashboard, with a Repository path field and a folder-picker icon."
-      width="430"
-      height="239"
-      loading="lazy"
-      decoding="async"
-      class="block h-auto w-full"
-    />
-    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
-      The Register Repo dialog &mdash; type the repository path or click the folder icon to browse.
-    </figcaption>
-  </figure>
 
   <p>
     The repo appears in the sidebar immediately. Band detects the repo

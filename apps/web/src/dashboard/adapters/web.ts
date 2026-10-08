@@ -61,10 +61,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
     }));
   }
 
-  async addRepo(path: string, label?: string): Promise<void> {
-    await this.trpc.repos.add.mutate({ path, label });
-  }
-
   async removeRepo(name: string): Promise<void> {
     await this.trpc.repos.remove.mutate({ name });
   }
@@ -75,10 +71,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async updateRepoLabel(name: string, label: string | null): Promise<void> {
     await this.trpc.repos.updateLabel.mutate({ name, label });
-  }
-
-  async checkPath(path: string): Promise<{ isGitRepo: boolean }> {
-    return await this.trpc.repos.checkPath.query({ path });
   }
 
   async gitInit(path: string): Promise<void> {
