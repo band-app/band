@@ -310,6 +310,27 @@ describe("view-only and control", () => {
     await v.closed;
   });
 
+  it("follows an ExtendedClipboard ClientCutText, whose length is negative, and keeps forwarding input after it", async () => {
+    const v = await session();
+    // noVNC answers x11vnc's ExtendedClipboard offer with its capabilities: a ClientCutText whose
+    // length is -8, followed by 8 bytes. Read as unsigned that length held every later message.
+    const clipboardCaps = Buffer.from("06000000fffffff81000000700001000", "hex");
+    v.ws.send(Buffer.concat([clipboardCaps, updateRequest]));
+    await waitFor(() => (seen(updateRequest) ? true : undefined), {
+      label: "the update request after the clipboard capabilities",
+    });
+    expect(seen(clipboardCaps)).toBe(false);
+
+    v.ws.send(JSON.stringify({ type: "control", enabled: true }));
+    v.ws.send(Buffer.concat([clipboardCaps, keyEvent, pointerEvent]));
+    await waitFor(() => (seen(pointerEvent) ? true : undefined), {
+      label: "input to reach x11vnc",
+    });
+    expect(seen(Buffer.concat([clipboardCaps, keyEvent]))).toBe(true);
+    v.ws.close();
+    await v.closed;
+  });
+
   it("closes a viewer that sends a message type the hub cannot follow", async () => {
     const v = await session();
     v.ws.send(Buffer.from([250, 0, 0, 0]));

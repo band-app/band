@@ -76,7 +76,10 @@ export class RfbClientFilter {
       case MSG_POINTER_EVENT:
         return 6;
       case MSG_CLIENT_CUT_TEXT:
-        return buf.length < 8 ? null : 8 + buf.readUInt32BE(4);
+        // A negative length is the ExtendedClipboard format, with a payload of its absolute
+        // value. noVNC sends one as soon as x11vnc offers that extension. Read as unsigned it
+        // looked like a 4 GiB message, which held every later message, keys and clicks included.
+        return buf.length < 8 ? null : 8 + Math.abs(buf.readInt32BE(4));
       default:
         throw new RfbFilterError(`Unsupported RFB message type ${buf[0]}`);
     }

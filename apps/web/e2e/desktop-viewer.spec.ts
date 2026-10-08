@@ -129,7 +129,10 @@ test.beforeAll(async () => {
     .toBe(true);
 });
 
-test.beforeEach(() => resetClientState(tmpHome));
+test.beforeEach(() => {
+  resetClientState(tmpHome);
+  stub.setSize(64, 48);
+});
 
 test.afterAll(async () => {
   await worker?.kill();
@@ -159,6 +162,17 @@ test("the Hosts screen opens the worker's desktop and the canvas shows its frame
   await expect(viewer.mode).toHaveAttribute("data-mode", "view");
 });
 
+test("a desktop smaller than the area is drawn 1:1, not scaled up, and takes no focus in view only", async ({
+  page,
+}) => {
+  const viewer = await openFromHosts(page);
+  await viewer.expectFramebuffer();
+  const canvas = await viewer.canvasBox();
+  expect(canvas.width).toBeCloseTo(64, 0);
+  expect(canvas.height).toBeCloseTo(48, 0);
+  expect(await viewer.canvasHasFocus()).toBe(false);
+});
+
 test("a key press is not forwarded in view-only mode, and is after Take control", async ({
   page,
 }) => {
@@ -172,6 +186,107 @@ test("a key press is not forwarded in view-only mode, and is after Take control"
   // Keys travel one socket in order, so once `b` has arrived an `a` that was sent has too.
   await expect.poll(() => stub.keys()).toContain(KEY_B);
   expect(stub.keys()).not.toContain(KEY_A);
+});
+
+test("Release returns to view only, and keys stop reaching the desktop", async ({ page }) => {
+  const viewer = await openFromHosts(page);
+  await viewer.expectFramebuffer();
+  const before = stub.keys().length;
+
+  await viewer.takeControl();
+  expect(await viewer.canvasHasFocus()).toBe(true);
+  await viewer.pressKey("b");
+  await expect.poll(() => stub.keys().length).toBe(before + 1);
+
+  // Escape is a key for the remote desktop in control mode, so the viewer stays open.
+  await viewer.pressEscape();
+  await expect(viewer.dialog).toBeVisible();
+  await expect.poll(() => stub.keys().length).toBe(before + 2);
+
+  await viewer.releaseControl();
+  expect(await viewer.canvasHasFocus()).toBe(false);
+  await viewer.pressKey("a");
+  await viewer.takeControl();
+  await viewer.pressKey("b");
+  await expect.poll(() => stub.keys().length).toBe(before + 3);
+  expect(stub.keys().slice(before)).not.toContain(KEY_A);
+});
+
+test.describe("a 1600x1000 desktop on a 1440x900 window", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test.beforeEach(() => stub.setSize(1600, 1000));
+
+  test("the viewer uses most of the window and fit fills the area at the desktop's aspect ratio", async ({
+    page,
+  }, testInfo) => {
+    const viewer = await openFromHosts(page);
+    await viewer.expectFramebuffer();
+    await expect(viewer.resolution).toHaveText("1600x1000");
+
+    const dialog = await viewer.dialogBox();
+    expect(dialog.width).toBeGreaterThanOrEqual(1440 * 0.9);
+    expect(dialog.height).toBeGreaterThanOrEqual(900 * 0.9);
+
+    await expect
+      .poll(async () => {
+        const area = await viewer.screenBox();
+        const canvas = await viewer.canvasBox();
+        // Scaled down to touch the area on one axis, so at most one pair of bars is left.
+        return Math.min(Math.abs(canvas.width - area.width), Math.abs(canvas.height - area.height));
+      })
+      .toBeLessThanOrEqual(1);
+    const area = await viewer.screenBox();
+    const canvas = await viewer.canvasBox();
+    expect(canvas.width / canvas.height).toBeCloseTo(1.6, 2);
+    expect(canvas.width).toBeLessThanOrEqual(area.width + 1);
+    expect(canvas.height).toBeLessThanOrEqual(area.height + 1);
+    await testInfo.attach("viewer-fit", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+
+  test("1:1 draws the desktop at its own size and scrolls, and Fit scales it back", async ({
+    page,
+  }) => {
+    const viewer = await openFromHosts(page);
+    await viewer.expectFramebuffer();
+
+    await viewer.actualSize();
+    await expect.poll(async () => (await viewer.canvasBox()).width).toBeCloseTo(1600, 0);
+    expect((await viewer.canvasBox()).height).toBeCloseTo(1000, 0);
+    const scrolled = await viewer.scrollToEnd();
+    expect(scrolled.left).toBeGreaterThan(0);
+    expect(scrolled.top).toBeGreaterThan(0);
+
+    await viewer.fit();
+    const area = await viewer.screenBox();
+    await expect
+      .poll(async () => (await viewer.canvasBox()).width)
+      .toBeLessThanOrEqual(area.width + 1);
+  });
+
+  test("fullscreen grows the desktop, and Escape leaves fullscreen before it closes the viewer", async ({
+    page,
+  }) => {
+    const viewer = await openFromHosts(page);
+    await viewer.expectFramebuffer();
+    const windowed = await viewer.canvasBox();
+
+    await viewer.enterFullscreen();
+    expect(await viewer.isViewerFullscreen()).toBe(true);
+    await expect
+      .poll(async () => (await viewer.canvasBox()).height)
+      .toBeGreaterThan(windowed.height);
+
+    await viewer.pressEscape();
+    await expect(viewer.root).toHaveAttribute("data-fullscreen", "false");
+    expect(await viewer.isViewerFullscreen()).toBe(false);
+    await expect(viewer.dialog).toBeVisible();
+
+    await viewer.pressEscape();
+    await expect(viewer.dialog).toBeHidden();
+  });
 });
 
 test("the worktree header opens the desktop of the worktree's host", async ({ page }) => {
