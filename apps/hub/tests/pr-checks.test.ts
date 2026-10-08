@@ -9,8 +9,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,14 +44,13 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@test.com",
 };
 
-/**
- * Where the plugin's `gh` runs. For a worktree on a worker the hub has no
- * checkout to run in, and the calls name the repository, so it uses a dir of
- * its own. Locally it is the worktree.
- */
+/** Where the plugin's `gh` runs: the worktree, on the hub or on the worker that holds it. */
 function ghCwd(worktree: string): string {
-  return isRemoteLoopback ? realpathSync(tmpdir()) : worktree;
+  return worktree;
 }
+
+/** The hub's gh runs with prompts off; a worker's own gh has no terminal and never prompts. */
+const ghPromptDisabled = isRemoteLoopback ? null : "1";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
@@ -303,7 +301,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     });
     expect(requests[0].flags).toEqual({});
     expect(requests[0].cwd).toBe(ghCwd(prWorktree));
-    expect(requests[0].env).toEqual({ GH_PROMPT_DISABLED: "1" });
+    expect(requests[0].env).toEqual({ GH_PROMPT_DISABLED: ghPromptDisabled });
     expect(stub.requests).toContainEqual(requests[0]);
   });
 
@@ -410,7 +408,17 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     const data = await forWorktree(server, toWorktreeId(REPO, FAILING_BRANCH));
 
-    expect(data).toEqual({ status: "error", message: "HTTP 401: Bad credentials" });
+    if (isRemoteLoopback) {
+      // S3: the worker's gh and the hub's fallback both fail, so the error names both and the fix.
+      expect(data).toMatchObject({ status: "error" });
+      const message = (data as { message: string }).message;
+      expect(message).toContain("Worker h-");
+      expect(message).toContain("Hub: HTTP 401: Bad credentials");
+      expect(message).toContain("gh auth login on h-");
+      expect(message).toContain("band vault put --kind git --host github.com");
+    } else {
+      expect(data).toEqual({ status: "error", message: "HTTP 401: Bad credentials" });
+    }
   });
 
   it("reports repos the plugin can't serve as unavailable", async () => {
@@ -451,7 +459,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
         fields: {},
         flags: { squash: true, repo: "github.com/acme/widgets" },
         cwd: ghCwd(mergeWorktree),
-        env: { GH_PROMPT_DISABLED: "1" },
+        env: { GH_PROMPT_DISABLED: ghPromptDisabled },
       },
     ]);
   });

@@ -1,4 +1,4 @@
-import type { RepoInfo } from "@band-app/plugin-api";
+import type { ProviderContext, RepoInfo } from "@band-app/plugin-api";
 import type { BandServerApi } from "@band-app/plugin-api/server";
 
 const GH_TIMEOUT_MS = 30_000;
@@ -13,7 +13,13 @@ function ghBin(): string {
 }
 
 /** `gh` without prompts: a prompt would hang a server-side call forever. */
-export async function runGh(api: BandServerApi, args: string[], cwd: string): Promise<string> {
+export async function runGh(
+  api: BandServerApi,
+  args: string[],
+  ctx: Pick<ProviderContext, "cwd" | "gh">,
+): Promise<string> {
+  if (ctx.gh) return ctx.gh(args);
+  const cwd = ctx.cwd;
   const { stdout } = await api.exec(ghBin(), args, {
     cwd,
     timeoutMs: GH_TIMEOUT_MS,
@@ -28,14 +34,14 @@ export async function ghGraphql<T>(
   repo: RepoInfo,
   query: string,
   variables: Record<string, string>,
-  cwd: string,
+  ctx: Pick<ProviderContext, "cwd" | "gh">,
 ): Promise<T> {
   const args = ["api", "graphql", "-f", `query=${query}`];
   for (const [key, value] of Object.entries(variables)) {
     args.push("-f", `${key}=${value}`);
   }
   if (repo.host !== "github.com") args.push("--hostname", repo.host);
-  const output = await runGh(api, args, cwd);
+  const output = await runGh(api, args, ctx);
   const parsed = JSON.parse(output) as { data?: T; errors?: Array<{ message: string }> };
   if (parsed.errors?.length) {
     throw new Error(parsed.errors.map((e) => e.message).join("; "));

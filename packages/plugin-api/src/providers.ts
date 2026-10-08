@@ -16,6 +16,11 @@ export interface RepoInfo {
 export interface ProviderContext {
   cwd: string;
   defaultBranch: string;
+  /**
+   * Runs `gh ARGS` where the core decides (the worktree's host, then the hub)
+   * and returns stdout. A provider that shells out to `gh` uses it when set.
+   */
+  gh?: (args: string[]) => Promise<string>;
 }
 
 /** The state of one check or CI job. */

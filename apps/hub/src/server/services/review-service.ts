@@ -12,6 +12,7 @@ import type {
 } from "@band-app/plugin-api";
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
+import { worktreeGh } from "./_utils/worktree-gh";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
 import { type WorktreeService, worktreeService } from "./worktree-service";
 
@@ -113,7 +114,12 @@ export class ReviewService {
     }
     // A remote worktree's repository is the worker's checkout, not the hub's copy.
     const checkout = hostRegistry.repoPathOn(repo.name, host.id, repo.path);
-    const repoInfo = await getRepoInfo(checkout ?? worktree.path, gitRunner(host));
+    let repoInfo = await getRepoInfo(checkout ?? worktree.path, gitRunner(host));
+    // With the worker offline its checkout cannot answer. The hub's own copy of the repo names
+    // the same origin, so the hub's `gh` can still serve the panel.
+    if (!repoInfo && host.id !== hostRegistry.local.id && repo.path) {
+      repoInfo = await getRepoInfo(repo.path, gitRunner(hostRegistry.local));
+    }
     if (!repoInfo) {
       return unavailable("no-remote", "The repo has no origin remote.");
     }
@@ -125,11 +131,12 @@ export class ReviewService {
       ok: true,
       repo: repoInfo,
       branch: worktree.branch,
-      // The provider's `gh` calls name the repository, so they need no checkout. They
-      // run on the hub, where a remote worktree's path does not exist.
+      // The provider's `gh` calls run on the worktree's host, falling back to the hub's
+      // `gh`. They name the repository, so the fallback needs no checkout.
       ctx: {
         cwd: host.id === hostRegistry.local.id ? worktree.path : tmpdir(),
         defaultBranch: repo.defaultBranch,
+        gh: worktreeGh(host, hostRegistry.local.id, worktree.path),
       },
       provider,
     };
