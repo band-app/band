@@ -205,7 +205,9 @@ export class ContextAutosyncService {
     for (const project of projectService.rows()) {
       const context = contextService.find(project.contextName);
       if (!context) continue;
-      const hostIds = new Set<string>([projectFolderService.hostOf(project).id]);
+      const hostIds = new Set<string>();
+      const folderHost = projectFolderService.hostIdOf(project);
+      if (folderHost) hostIds.add(folderHost);
       for (const w of projectService.allWorktreesOf(project.id)) {
         const id = toWorktreeId(w.repoName, w.name);
         // A sleeping worktree's worker is gone; waking it is not this loop's business.

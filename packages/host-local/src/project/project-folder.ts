@@ -3,17 +3,19 @@
  *
  * `<bandHome>/projects/<project>` is the working copy of the project's context repo (the context
  * sync owns it). Under `repos/<repo>/` each project repo has a checkout of its default branch:
- * a git worktree of the repo's clone on the local branch `band/<project>/<default>`, which tracks
- * `origin/<default>` and has `push.default=upstream`, so `git pull` and `git push` work by hand.
- * A project's own branch avoids git's one-checkout-per-branch rule when the clone or another
- * project on the host has the default branch checked out.
+ * an independent clone (`git clone --reference <the repo's clone> --dissociate`) on the default
+ * branch, tracking `origin/<default>`, so `git pull` and `git push` work by hand. It is not a git
+ * worktree, so it never shows in the user's own clone: not in `git worktree list`, and with no
+ * branch of Band's in it. Older Band versions made worktrees with a `band/<project>/<default>`
+ * branch. A clean one is converted when the folder is next prepared, a dirty or ahead one stays and
+ * is reported with `legacyWorktree`.
  *
  * Freshness never costs local work: a checkout is fast-forwarded only when it is clean and has no
  * local commits, and is otherwise reported as behind or ahead with its dirty flag.
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
+import { mkdir, open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type {
   ProjectChangedFile,
@@ -40,6 +42,7 @@ const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const DEFAULT_FETCH_THROTTLE_MS = 60_000;
 const FETCH_TIMEOUT_MS = 30_000;
+const CLONE_TIMEOUT_MS = 10 * 60_000;
 const LOCAL_TIMEOUT_MS = 30_000;
 const DEFAULT_READ_BYTES = 200_000;
 const MAX_READ_BYTES = 1_000_000;
@@ -186,7 +189,8 @@ export class ProjectFolder {
     repo: ProjectRepoSpec,
     fetchMode: "throttled" | "force" | "never",
   ): Promise<ProjectCheckout> {
-    const branch = (() => {
+    const branch = repo.defaultBranch;
+    const legacyBranch = (() => {
       try {
         checkRepo(repo);
         return projectBranch(project, repo.defaultBranch);
@@ -209,8 +213,21 @@ export class ProjectFolder {
       checkRepo(repo);
       let fetchError: string | undefined;
       if (fetchMode !== "never") fetchError = await this.fetchClone(repo.clonePath, fetchMode);
+      let legacyWorktree = false;
+      let created = false;
       if (!(await exists(join(path, ".git")))) {
-        await this.createCheckout(project, repo, path, branch);
+        await this.createCheckout(project, repo, path);
+        created = true;
+      } else if (await isWorktreeCheckout(path)) {
+        legacyWorktree = !(await this.convertWorktree(repo, path, legacyBranch));
+        if (!legacyWorktree) {
+          await this.createCheckout(project, repo, path);
+          created = true;
+        }
+      }
+      // A worktree shared its clone's refs. An independent clone fetches its own.
+      if (fetchMode !== "never" && !created && !legacyWorktree) {
+        fetchError ??= await this.fetchClone(path, fetchMode);
       }
       let state = await this.state(path);
       let updated = false;
@@ -229,10 +246,14 @@ export class ProjectFolder {
             : "current";
       return {
         ...base,
+        branch: legacyWorktree
+          ? (await repoGit(path, ["symbolic-ref", "--short", "HEAD"])).stdout.trim() || legacyBranch
+          : branch,
         status,
         ahead: state.ahead,
         behind: state.behind,
         dirty: state.dirty,
+        ...(legacyWorktree ? { legacyWorktree } : {}),
         ...(fetchError ? { fetchError } : {}),
       };
     } catch (err) {
@@ -265,14 +286,34 @@ export class ProjectFolder {
     return undefined;
   }
 
+  /**
+   * Removes a worktree an older Band made, with its local branch, when it has nothing the remote
+   * lacks. Returns false and changes nothing when it is dirty or ahead.
+   */
+  private async convertWorktree(
+    repo: ProjectRepoSpec,
+    path: string,
+    legacyBranch: string,
+  ): Promise<boolean> {
+    const state = await this.state(path);
+    if (state.dirty || state.ahead > 0) return false;
+    const removed = await repoGit(repo.clonePath, ["worktree", "remove", path]);
+    if (removed.code !== 0) throw new Error(brief(removed));
+    await repoGit(repo.clonePath, ["branch", "-D", legacyBranch]);
+    return true;
+  }
+
+  /**
+   * Clones the repo's origin into `path`, borrowing the objects of the repo's own clone and then
+   * copying them (`--reference --dissociate`), so the checkout depends on nothing in that clone.
+   * Without a usable reference it is a plain clone.
+   */
   private async createCheckout(
     project: string,
     repo: ProjectRepoSpec,
     path: string,
-    branch: string,
   ): Promise<void> {
     await mkdir(join(this.folderOf(project), "repos"), { recursive: true });
-    await repoGit(repo.clonePath, ["worktree", "prune"]);
     const upstream = `origin/${repo.defaultBranch}`;
     const hasUpstream = await repoGit(repo.clonePath, [
       "rev-parse",
@@ -283,22 +324,33 @@ export class ProjectFolder {
     if (hasUpstream.code !== 0) {
       throw new Error(`${repo.name} has no ${upstream}. Fetch the repository first.`);
     }
-    const hasBranch =
-      (await repoGit(repo.clonePath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]))
-        .code === 0;
-    // An existing branch keeps its commits: it is checked out again, never reset.
-    const added = hasBranch
-      ? await repoGit(repo.clonePath, ["worktree", "add", path, branch])
-      : await repoGit(repo.clonePath, ["worktree", "add", "--track", "-b", branch, path, upstream]);
-    if (added.code !== 0) throw new Error(brief(added));
-    // Per-worktree config, so `git push` goes to the tracked default branch whatever its local name.
-    const ext = await repoGit(repo.clonePath, ["config", "extensions.worktreeConfig", "true"]);
-    if (ext.code !== 0) throw new Error(brief(ext));
-    const pushDefault = await repoGit(path, ["config", "--worktree", "push.default", "upstream"]);
-    if (pushDefault.code !== 0) throw new Error(brief(pushDefault));
-    if (hasBranch) {
-      await repoGit(path, ["branch", "--set-upstream-to", upstream, branch]);
+    const origin = (await repoGit(repo.clonePath, ["remote", "get-url", "origin"])).stdout.trim();
+    if (!origin) throw new Error(`${repo.name} has no origin remote`);
+    if (origin.startsWith("-")) throw new Error(`${repo.name} has an invalid origin remote`);
+    const existedBefore = await stat(path).then(
+      () => true,
+      () => false,
+    );
+    const common = ["clone", "--quiet", "--branch", repo.defaultBranch, "--no-tags"];
+    let cloned = await repoGit(
+      join(this.folderOf(project), "repos"),
+      [...common, "--reference", repo.clonePath, "--dissociate", "--", origin, path],
+      CLONE_TIMEOUT_MS,
+    );
+    if (cloned.code !== 0) {
+      // Remove only what the failed clone created, never a folder that was already there.
+      if (existedBefore) throw new Error(brief(cloned));
+      await rm(path, { recursive: true, force: true });
+      cloned = await repoGit(
+        join(this.folderOf(project), "repos"),
+        [...common, "--", origin, path],
+        CLONE_TIMEOUT_MS,
+      );
     }
+    if (cloned.code !== 0) throw new Error(brief(cloned));
+    // The clone's origin is the repo's remote, so a plain `git push` goes to the default branch.
+    const pushDefault = await repoGit(path, ["config", "push.default", "upstream"]);
+    if (pushDefault.code !== 0) throw new Error(brief(pushDefault));
   }
 
   private async state(path: string): Promise<{ ahead: number; behind: number; dirty: boolean }> {
@@ -662,10 +714,14 @@ export class ProjectFolder {
           `The checkout of "${req.repo}" in ${path} has ${reasons.join(" and ")}. Commit and push or discard them first.`,
         );
       }
-      const removed = await repoGit(req.clonePath, ["worktree", "remove", path]);
-      if (removed.code !== 0) throw new Error(brief(removed));
-      if (branch.startsWith(`band/${req.project}/`)) {
-        await repoGit(req.clonePath, ["branch", "-D", branch]);
+      if (await isWorktreeCheckout(path)) {
+        const removed = await repoGit(req.clonePath, ["worktree", "remove", path]);
+        if (removed.code !== 0) throw new Error(brief(removed));
+        if (branch.startsWith(`band/${req.project}/`)) {
+          await repoGit(req.clonePath, ["branch", "-D", branch]);
+        }
+      } else {
+        await rm(path, { recursive: true, force: true });
       }
     });
   }
@@ -679,6 +735,15 @@ export class ProjectFolder {
     } finally {
       if (this.locks.get(key) === next) this.locks.delete(key);
     }
+  }
+}
+
+/** A git worktree has a `.git` file that points at its clone, an independent clone has a `.git` directory. */
+async function isWorktreeCheckout(path: string): Promise<boolean> {
+  try {
+    return (await stat(join(path, ".git"))).isFile();
+  } catch {
+    return false;
   }
 }
 

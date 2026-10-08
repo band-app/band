@@ -1,8 +1,9 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@band-app/ui";
+import { projectScopeId } from "@band-app/shared/scope-id";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useCapabilities } from "../../context";
+import { useWorktreePath } from "../../hooks/use-worktree-path";
 import { SettingsPage } from "../SettingsPage";
 import { ProjectActivity } from "./ProjectActivity";
 import { errorText, PROJECTS_KEY, type Project, type ProjectList } from "./project-sections";
@@ -78,64 +79,28 @@ function useOpenWorktree() {
   };
 }
 
-function CharterDialog({
-  project,
-  open,
-  onOpenChange,
-}: {
-  project: Project;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const charter = useQuery({
-    queryKey: ["projects.charter", project.id],
-    queryFn: () => trpc.projects.charter.query({ project: project.id }),
-    enabled: open,
-  });
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[720px]" data-testid="project-page__charter">
-        <DialogHeader>
-          <DialogTitle>Coordinator charter</DialogTitle>
-          <DialogDescription>
-            What the coordinator is told about this project before the context preamble.
-          </DialogDescription>
-        </DialogHeader>
-        {charter.error ? (
-          <p role="alert" className="text-xs text-destructive">
-            {errorText(charter.error)}
-          </p>
-        ) : charter.data ? (
-          <pre
-            className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap"
-            data-testid="project-page__charter-text"
-          >
-            {charter.data.charter}
-          </pre>
-        ) : (
-          <p className="text-xs text-muted-foreground">Loading…</p>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ---- Repos --------------------------------------------------------------------------------------
 
 // ---- Activity -----------------------------------------------------------------------------------
 
 function ActivityTab({ project, canEdit }: { project: Project; canEdit: boolean }) {
   const openWorktree = useOpenWorktree();
-  const [charterOpen, setCharterOpen] = useState(false);
+  const folder = useWorktreePath(projectScopeId(project.id));
   return (
-    <>
-      <ProjectActivity
-        project={project}
-        canEdit={canEdit}
-        onOpenWorktree={openWorktree}
-        onOpenCharter={() => setCharterOpen(true)}
-      />
-      <CharterDialog project={project} open={charterOpen} onOpenChange={setCharterOpen} />
-    </>
+    <ProjectActivity
+      project={project}
+      canEdit={canEdit}
+      onOpenWorktree={openWorktree}
+      onOpenInstructions={() => {
+        // The same window event a file link in a chat fires, scoped to the project's folder view.
+        if (folder) {
+          window.dispatchEvent(
+            new CustomEvent("band:open-file", {
+              detail: { filename: `${folder}/AGENTS.md`, worktreeId: projectScopeId(project.id) },
+            }),
+          );
+        }
+      }}
+    />
   );
 }

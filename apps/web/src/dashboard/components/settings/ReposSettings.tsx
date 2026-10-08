@@ -2,6 +2,7 @@ import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -13,6 +14,7 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
  * once no project lists it and it has no worktrees, and removing it leaves every folder alone.
  */
 export function ReposSettings() {
+  const hostName = useHostNames();
   const queryClient = useQueryClient();
   const { repos } = useRepos();
   const projects = useQuery({
@@ -131,7 +133,7 @@ export function ReposSettings() {
                 ) : null}
                 {(repo.clones ?? []).map((c) => (
                   <li key={c.hostId} data-host={c.hostId}>
-                    {c.hostId}: <span className="font-mono">{c.path}</span>
+                    {hostName(c.hostId)}: <span className="font-mono">{c.path}</span>
                   </li>
                 ))}
               </ul>

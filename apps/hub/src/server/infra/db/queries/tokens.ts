@@ -105,6 +105,11 @@ export class TokenQueries {
       .run();
   }
 
+  /** Replaces what a host reported about itself, without touching its status. */
+  setHostInfo(id: string, info: Record<string, unknown>): void {
+    this.db().update(hosts).set({ info }).where(eq(hosts.id, id)).run();
+  }
+
   /** Sets a host's status and, when the worker was last heard from, its last-seen time. */
   setHostStatus(id: string, status: HostRow["status"], lastSeenAt?: number): void {
     this.db()

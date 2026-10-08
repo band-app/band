@@ -71,6 +71,34 @@ export interface HostCapabilities {
   desktop: boolean;
 }
 
+/** One coding agent as a host sees it: is its CLI installed, and is it logged in. */
+export interface AgentCapability {
+  /** Agent type: `claude-code`, `codex`, ... */
+  type: string;
+  installed: boolean;
+  version: string | null;
+  /** True or false when the host can tell, null when the agent has no login check. */
+  loggedIn: boolean | null;
+  /** What to run to fix the first gap, empty when there is none. */
+  fix: string;
+}
+
+/** One support tool (`git`, `gh`) as a host sees it. */
+export interface ToolCapability {
+  tool: string;
+  installed: boolean;
+  version: string | null;
+  loggedIn: boolean | null;
+  fix: string;
+}
+
+/** What a host reports about the agents and tools that work needs, refreshed every few minutes. */
+export interface CapabilityReport {
+  agents: AgentCapability[];
+  tools: ToolCapability[];
+  checkedAt: number;
+}
+
 export interface HostInfo {
   id: string;
   /** Operating system, as `process.platform` reports it. */
@@ -93,6 +121,8 @@ export interface HostInfo {
    */
   tools: Record<string, string>;
   capabilities: HostCapabilities;
+  /** Installed and logged-in state of each coding agent, `gh` and `git`. */
+  report?: CapabilityReport;
   /**
    * Directories the host keeps for hub files that belong to worktrees
    * (chat uploads, files an agent shares). A remote host declares them, under
@@ -838,7 +868,7 @@ export type ProjectCheckoutStatus =
 export interface ProjectCheckout {
   repo: string;
   path: string;
-  /** The local branch, `band/<project>/<default>`. */
+  /** The local branch: the repo's default branch. */
   branch: string;
   /** The remote branch it tracks, `origin/<default>`. */
   upstream: string;
@@ -851,6 +881,11 @@ export interface ProjectCheckout {
   dirty: boolean;
   /** The fetch of the clone failed, so ahead and behind may be out of date. */
   fetchError?: string;
+  /**
+   * The checkout is still a git worktree of the repo's clone, made by an older Band. It has changes
+   * or commits of its own, so it was not converted to an independent clone yet.
+   */
+  legacyWorktree?: boolean;
   error?: string;
 }
 

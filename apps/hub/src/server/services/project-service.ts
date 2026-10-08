@@ -16,11 +16,18 @@ import type { ContextRow } from "../infra/db/queries/contexts";
 import { ProjectQueries, type ProjectRow } from "../infra/db/queries/projects";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import {
+  CLAUDE_FILE,
+  CLAUDE_TEXT,
+  defaultInstructions,
+  INSTRUCTIONS_FILE,
+} from "./_utils/project-instructions";
+import {
   type ProjectPolicy,
   projectPolicy,
   type ResolvedPolicy,
   resolvePolicy,
 } from "./_utils/project-policy";
+import { contextBrowserService } from "./context-browser-service";
 import { CONTEXT_NAME, contextService, validateLabels } from "./context-service";
 import { loadState } from "./state";
 
@@ -249,7 +256,41 @@ export class ProjectService {
       throw err;
     }
     log.info(`created project ${name} with ${repos.length} repos`);
+    await this.seedInstructions(row.id);
     return this.get(row.id);
+  }
+
+  /**
+   * Gives the project's context repo a default `AGENTS.md` and a `CLAUDE.md` that imports it, when
+   * it has none. The files then belong to the user and are never rewritten. Never throws, so a
+   * failure leaves a project without them and the coordinator without instructions.
+   */
+  async seedInstructions(ref: string): Promise<void> {
+    try {
+      const view = this.get(ref);
+      const have = new Set(
+        (await contextBrowserService.tree(view.contextName)).entries.map((e) => e.path),
+      );
+      const files: Array<[string, string]> = [
+        [
+          INSTRUCTIONS_FILE,
+          defaultInstructions({
+            name: view.name,
+            description: view.description,
+            contextName: view.contextName,
+            repos: view.repos,
+            policy: view.effectivePolicy,
+          }),
+        ],
+        [CLAUDE_FILE, CLAUDE_TEXT],
+      ];
+      for (const [path, content] of files) {
+        if (have.has(path)) continue;
+        await contextBrowserService.write(view.contextName, path, content, `Add ${path}`);
+      }
+    } catch (err) {
+      log.warn({ project: ref, err }, "could not add the default AGENTS.md to the project context");
+    }
   }
 
   update(ref: string, patch: UpdateProjectInput): ProjectView {

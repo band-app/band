@@ -192,11 +192,8 @@ test("a new project starts its coordinator, shows its chat in the center and the
   await projects.gotoProject("ledger");
 
   await expect(projects.chat()).toBeVisible();
-  // The charter names the project and its repos.
-  const charter = await projects.openCharter();
-  await expect(charter).toContainText("ledger");
-  await expect(charter).toContainText(CLIENT);
-  await projects.closeCharter();
+  // The coordinator's instructions are the AGENTS.md of the project folder, linked from Activity.
+  await expect(await projects.instructionsButton()).toBeVisible();
   await expect(projects.coordinator()).toHaveAttribute("data-state", "started");
   await expect(projects.coordinatorChat()).not.toBeEmpty();
   // The folder section lists the project's repo as a checkout of its default branch.

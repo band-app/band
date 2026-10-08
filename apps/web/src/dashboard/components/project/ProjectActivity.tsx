@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
+import { useHostNames } from "../../hooks/use-host-names";
 import { ErrorLine, errorText, PROJECTS_KEY, type Project } from "./project-sections";
 
 type Dashboard = Awaited<ReturnType<typeof trpc.projects.dashboard.query>>;
@@ -78,7 +79,7 @@ function StatusDot({ running }: { running: boolean }) {
 
 /**
  * The Activity tab of a project's view, sized for the right panel: the coordinator first (state,
- * start, stop, charter), then the other agents, spend, the project's pull requests, what wakes the
+ * start, stop, link to AGENTS.md), then the other agents, spend, the project's pull requests, what wakes the
  * coordinator, and the recent wake-ups once. It reads `projects.dashboard` and
  * `projects.subscriptions`, refreshed by the status stream with a slow poll as the fallback.
  */
@@ -86,12 +87,12 @@ export function ProjectActivity({
   project,
   canEdit,
   onOpenWorktree,
-  onOpenCharter,
+  onOpenInstructions,
 }: {
   project: Project;
   canEdit: boolean;
   onOpenWorktree: (worktreeId: string) => void;
-  onOpenCharter: () => void;
+  onOpenInstructions: () => void;
 }) {
   const queryClient = useQueryClient();
   const adapter = useAdapter();
@@ -162,7 +163,7 @@ export function ProjectActivity({
         canEdit={canEdit}
         onStart={() => act(() => trpc.projects.startCoordinator.mutate({ project: project.id }))}
         onStop={stop}
-        onOpenCharter={onOpenCharter}
+        onOpenInstructions={onOpenInstructions}
       />
 
       {others.length > 0 ? (
@@ -367,15 +368,16 @@ function CoordinatorCard({
   canEdit,
   onStart,
   onStop,
-  onOpenCharter,
+  onOpenInstructions,
 }: {
   project: Project;
   agent: Agent | undefined;
   canEdit: boolean;
   onStart: () => void;
   onStop: (chatId: string) => void;
-  onOpenCharter: () => void;
+  onOpenInstructions: () => void;
 }) {
+  const hostName = useHostNames();
   const coordinator = project.coordinator;
   const running = agent?.status === "running";
   return (
@@ -416,11 +418,11 @@ function CoordinatorCard({
         ) : null}
       </div>
       {coordinator ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground" data-testid="project-page__coordinator-meta">
           {[
             agent?.agent,
             agent?.model,
-            `on ${coordinator.hostId ?? "the hub"}`,
+            `on ${hostName(coordinator.hostId)}`,
             agent && agent.spendUsd > 0 ? usd(agent.spendUsd) : null,
             agent?.lastActivityAt ? `active ${ago(agent.lastActivityAt)}` : null,
           ]
@@ -434,7 +436,14 @@ function CoordinatorCard({
             : "Start it to plan and dispatch work across the project's repos."}
         </p>
       )}
-      {project.coordinatorError ? (
+      {project.coordinatorWaiting ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="project-page__coordinator-waiting"
+        >
+          {project.coordinatorError ?? "Waiting for a worker that can run the coordinator's agent"}
+        </p>
+      ) : project.coordinatorError ? (
         <p
           role="alert"
           data-testid="projects__coordinator-error"
@@ -458,10 +467,10 @@ function CoordinatorCard({
           size="sm"
           variant="ghost"
           className="-ml-2"
-          data-testid="project-page__charter-open"
-          onClick={onOpenCharter}
+          data-testid="project-page__instructions-open"
+          onClick={onOpenInstructions}
         >
-          View charter
+          Open AGENTS.md
         </Button>
       </div>
     </section>

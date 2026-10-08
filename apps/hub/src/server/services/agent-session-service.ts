@@ -299,6 +299,7 @@ function stopRuntime(rt: Runtime): void {
   rt.process = null;
   rt.sessionId = null;
   runtimes.delete(rt.chatId);
+  mcpProxyService.revokeSession(rt.chatId);
 }
 
 function idleTimeoutMs(): number {
@@ -741,7 +742,11 @@ async function ensureProcess(
     const exited = handlers.onExit;
     handlers.onExit = (code, stderr) => {
       void grant?.revoke();
-      mcpProxyService.revokeSession(rt.chatId);
+      // A process stopped for a restart or a host move exits after its replacement issued a token
+      // for the same chat id, so only the runtime that is still current may revoke by chat id.
+      if (runtimes.get(rt.chatId) === rt && rt.generation === generation) {
+        mcpProxyService.revokeSession(rt.chatId);
+      }
       exited?.(code, stderr);
     };
     let proc: AcpAgentProcess;
@@ -879,6 +884,14 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
       );
       return [];
     }
+    if (!rt.relayEnv && hostRegistry.hostFor(rt.worktreeId).id !== hostRegistry.local.id) {
+      // The hub's loopback address means nothing on a worker, so no relay grant means no tools.
+      log.warn(
+        { chatId: rt.chatId, scope: rt.worktreeId },
+        "the agent runs on a worker but has no relay grant, so no MCP servers are passed",
+      );
+      return [];
+    }
     // A resume or reload gets a new token, and the old one stops working.
     mcpProxyService.revokeSession(rt.chatId);
     const { token } = mcpProxyService.issueSessionToken(
@@ -892,6 +905,16 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
     if (rt.relayEnv?.BAND_TOKEN) {
       headers.push({ name: "X-Band-Relay-Token", value: rt.relayEnv.BAND_TOKEN });
     }
+    log.info(
+      {
+        chatId: rt.chatId,
+        scope: rt.worktreeId,
+        servers: names,
+        baseUrl: base,
+        viaRelay: Boolean(rt.relayEnv?.BAND_TOKEN),
+      },
+      "MCP servers for the session",
+    );
     return names.map((name) => ({
       type: "http" as const,
       name,

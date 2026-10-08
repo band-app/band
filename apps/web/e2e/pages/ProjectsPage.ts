@@ -292,18 +292,16 @@ export class ProjectsPage {
     return this.page.getByTestId("prompt-input__form").filter({ visible: true });
   }
 
-  async openCharter(): Promise<Locator> {
+  /** The coordinator's agent, model and host line on the Activity tab. */
+  async coordinatorMeta(): Promise<Locator> {
     await this.showTab("activity");
-    await this.detail.getByTestId("project-page__charter-open").click();
-    const text = this.page.getByTestId("project-page__charter-text");
-    await expect(text).toBeVisible();
-    return text;
+    return this.detail.getByTestId("project-page__coordinator-meta");
   }
 
-  /** Closes the charter dialog with Escape. */
-  async closeCharter(): Promise<void> {
-    await this.page.keyboard.press("Escape");
-    await expect(this.page.getByTestId("project-page__charter-text")).toBeHidden();
+  /** The Activity tab's button that opens the project folder's AGENTS.md. */
+  async instructionsButton(): Promise<Locator> {
+    await this.showTab("activity");
+    return this.detail.getByTestId("project-page__instructions-open");
   }
 
   /** The project's description on the Activity tab. */

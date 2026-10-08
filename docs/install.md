@@ -83,6 +83,37 @@ docker run -d --name band-worker --restart unless-stopped \
 
 The worker takes plain `http` only for a loopback hub. A hub on the same machine is reached with `--network host` and `http://127.0.0.1:3456`. Add worker shows the same command as a compose file in its Docker compose tab.
 
+### What a static worker must have
+
+A worker runs the coding agents. Band does not install or log in an agent for you, so before a worker can take a coordinator or a task, each agent it should run must be installed and logged in for the user the worker runs as. Run `band-worker doctor` on the machine to check:
+
+```
+ok   claude-code  2.4.1  installed, logged in
+FAIL codex        0.9.0  installed, not logged in
+       fix: codex login
+FAIL gh           -      not installed
+       fix: install the GitHub CLI from https://cli.github.com
+```
+
+It checks `claude`, `codex`, `opencode`, `gemini` and `cursor-agent`, then `git` and `gh`, and prints the command that fixes each gap. It exits 1 when `git` is missing or no agent is usable. `BAND_AGENT_BIN_DIRS` (a PATH-style list) names extra directories to search first, for CLIs that sit outside the service's PATH.
+
+A connected worker sends the same report to the hub on connect and every few minutes (`BAND_CAPABILITY_REFRESH_MS`, default 3 minutes). Settings > Hosts shows it for each worker (installed, version, logged in), instead of the agents in your settings.
+
+### Where a coordinator runs
+
+A project's coordinator and its project folder go on the host named in the project's settings. With no host named:
+
+- On a hub with `BAND_LOCAL_HOST=on`, the hub's own machine.
+- On a hub with `BAND_LOCAL_HOST=off` (the Docker image default), the first online worker that reports the coordinator's agent installed and logged in. Band saves that choice.
+
+With `BAND_LOCAL_HOST=off` and no such worker, nothing is placed. The project shows "Waiting for a worker that can run <agent>" and starts the coordinator when a capable worker connects. Worker agents that the coordinator starts follow the same rule: placement skips a worker that does not report the agent logged in.
+
+Changing the coordinator host moves the project folder. Band refuses the move while a default-branch checkout on the old host has uncommitted changes or unpushed commits, and names the repo. After the move it clones the context and the checkouts on the new host and starts the coordinator chat there on a fresh session.
+
+The coordinator reads its instructions from `AGENTS.md` in the project folder. Band writes a default one into the project's context repo when the project is created, and `CLAUDE.md` next to it holds only `@AGENTS.md` for Claude Code. Both sync like any other context file, so edit them in the project folder. The limits in the project's policy (autonomy, concurrency, budget) are enforced by the hub in the coordinator's tools, whatever `AGENTS.md` says.
+
+The project's checkouts under `repos/<repo>/` are independent clones (`git clone --reference <the worker's clone> --dissociate`), not git worktrees, so they never appear in the worker's own `git worktree list` or add a branch to it.
+
 ### Repos on a worker
 
 A worker owns a table from remote URL to folder (`repos.json` in its state directory). The first worktree of a repo on a worker clones it to `~/band/repos/<owner>/<name>`. Run the worker with `--repos-dir <dir>` (or `BAND_REPOS_DIR`) to clone elsewhere, and the worker serves that directory as a root. To use a checkout that already exists, add the repo from the worker's folder picker or with `band repos add --from <host id> <path>`. See [Add a repo](run-the-hub-on-a-server.md#add-a-repo).

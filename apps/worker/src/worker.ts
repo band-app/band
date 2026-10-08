@@ -185,6 +185,8 @@ export class Worker {
       ],
       worktreePaths: async (repo) => (await host.worktree.list(repo)).map((w) => w.path),
     });
+    // The hello carries the capability report, so the first probe finishes before it.
+    await host.awaitReport();
     const info = await host.info();
 
     const client = new LinkClient({

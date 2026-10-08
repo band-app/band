@@ -4,7 +4,15 @@
 // with a checkout of each repo's default branch in `repos/<repo>`.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -157,7 +165,7 @@ const bootServer = () =>
 
 beforeAll(async () => {
   home = createTmpHome("band-project-folder-");
-  const names = ["api", "client", "docs"];
+  const names = ["api", "client", "docs", "old-clean", "old-dirty"];
   const repos = names.map((name) => {
     git(home, "init", "-q", "--bare", "-b", "main", remoteOf(name));
     mkdirSync(join(home, "repos"), { recursive: true });
@@ -241,9 +249,9 @@ describe("the coordinator runs in the project folder (S1)", () => {
     for (const repo of ["api", "client"]) {
       const dir = join(folder, "repos", repo);
       expect(readFileSync(join(dir, "README.md"), "utf8")).toBe(`${repo} readme\n`);
-      expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("band/shop/main");
+      expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
       expect(git(dir, "rev-parse", "--abbrev-ref", "@{u}")).toBe("origin/main");
-      expect(git(dir, "config", "--worktree", "push.default")).toBe("upstream");
+      expect(git(dir, "config", "push.default")).toBe("upstream");
     }
     expect(state.checkouts.map((c) => c.status)).toEqual(["current", "current"]);
   });
@@ -260,26 +268,20 @@ describe("the coordinator runs in the project folder (S1)", () => {
     expect(session.params.mcpServers).toBeTruthy();
   });
 
-  it("names the project folder and the repo tools in the charter, in AGENTS.md, which never syncs", async () => {
+  it("names the project folder and the repo tools in AGENTS.md, which syncs and is not rewritten on a policy change", async () => {
     const folder = join(realpathSync(home), ".band", "projects", "shop");
-    const charter = readFileSync(join(folder, "AGENTS.md"), "utf8");
-    expect(charter).toContain("repos/<repo>/");
-    expect(charter).toContain("repo_read");
-    expect(charter).toContain("Code changes go through worker agents (worktree_create)");
-    // Each host writes its own copy from the project's settings, so git leaves both files out.
-    const status = git(folder, "status", "--porcelain", "--ignored");
-    expect(status).not.toMatch(/^\?\? (AGENTS|CLAUDE)\.md/m);
-    expect(git(folder, "ls-files", "AGENTS.md", "CLAUDE.md")).toBe("");
-
-    // A policy change rewrites it.
+    const agents = readFileSync(join(folder, "AGENTS.md"), "utf8");
+    expect(agents).toContain("repos/<repo>/");
+    expect(agents).toContain("repo_read");
+    expect(agents).toContain("Code changes go through worker agents (worktree_create)");
+    // It is a context file: git tracks it, and a user's edit stays.
+    expect(git(folder, "ls-files", "AGENTS.md", "CLAUDE.md")).toContain("AGENTS.md");
+    const edited = `${agents}\nA line the user added.\n`;
+    writeFileSync(join(folder, "AGENTS.md"), edited);
     await m("projects.update", { project: "shop", policy: { maxConcurrent: 7 } });
-    await waitFor(
-      () =>
-        readFileSync(join(folder, "AGENTS.md"), "utf8").includes("at most 7 worker agents")
-          ? true
-          : undefined,
-      { label: "AGENTS.md after a policy change" },
-    );
+    // A forced folder sync runs the ensure that once rewrote the file.
+    await m("projects.syncFolder", { project: "shop" });
+    expect(readFileSync(join(folder, "AGENTS.md"), "utf8")).toBe(edited);
   });
 });
 
@@ -461,9 +463,7 @@ describe("repos added to and removed from the project (T.1)", () => {
         timeoutMs: 30_000,
       },
     );
-    expect(git(join(folder, "repos", "docs"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
-      "band/shop/main",
-    );
+    expect(git(join(folder, "repos", "docs"), "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
   });
 
   it("checks out a repo added by URL straight into the project, before the call returns", async () => {
@@ -547,7 +547,7 @@ describe("the project folder's checkouts are no worktrees of their repos", () =>
       label: "api checkout",
       timeoutMs: 30_000,
     });
-    expect(git(checkout, "rev-parse", "--abbrev-ref", "HEAD")).toBe("band/shop/main");
+    expect(git(checkout, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     // A worktree made outside Band shows that the boot's sync ran: it lists that one and not the
     // project folder's checkout, which git lists the same way.
     const outside = join(realpathSync(home), "api-outside");
@@ -565,4 +565,71 @@ describe("the project folder's checkouts are no worktrees of their repos", () =>
     );
     expect(paths).not.toContain(checkout);
   }, 120_000);
+});
+
+describe("checkouts made by an older Band are converted (S12) and stay out of the lists (S13)", () => {
+  const folder = () => join(realpathSync(home), ".band", "projects", "retro");
+  const legacyBranch = "band/retro/main";
+
+  it("converts a clean worktree checkout to an independent clone and leaves a dirty one", async () => {
+    await m("projects.create", {
+      name: "retro",
+      repos: [{ repo: "old-clean" }, { repo: "old-dirty" }],
+    });
+    const checkoutsReady = async () => {
+      const f = (await q<{ folder: FolderState }>("projects.folder", { project: "retro" })).folder;
+      return f?.checkouts.length === 2 && f.checkouts.every((c) => c.status === "current")
+        ? f
+        : undefined;
+    };
+    await waitFor(checkoutsReady, { label: "retro checkouts", timeoutMs: 60_000 });
+
+    // Turn both checkouts into what an older Band made: a worktree of the repo's clone on a project branch.
+    for (const repo of ["old-clean", "old-dirty"]) {
+      rmSync(join(folder(), "repos", repo), { recursive: true, force: true });
+      git(
+        cloneOf(repo),
+        "worktree",
+        "add",
+        "-q",
+        "--track",
+        "-b",
+        legacyBranch,
+        join(folder(), "repos", repo),
+        "origin/main",
+      );
+      expect(git(cloneOf(repo), "worktree", "list")).toContain("projects/retro");
+    }
+    writeFileSync(join(folder(), "repos", "old-dirty", "wip.txt"), "not committed\n");
+
+    await m("projects.syncFolder", { project: "retro" });
+    const state = (await q<{ folder: FolderState }>("projects.folder", { project: "retro" }))
+      .folder;
+
+    const clean = join(folder(), "repos", "old-clean");
+    expect(statSync(join(clean, ".git")).isDirectory()).toBe(true);
+    expect(git(clean, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(git(cloneOf("old-clean"), "worktree", "list")).not.toContain("projects/retro");
+    expect(git(cloneOf("old-clean"), "branch", "--list", legacyBranch)).toBe("");
+    expect(state.checkouts.find((c) => c.repo === "old-clean")?.legacyWorktree).toBeUndefined();
+
+    const dirty = join(folder(), "repos", "old-dirty");
+    expect(statSync(join(dirty, ".git")).isFile()).toBe(true);
+    expect(readFileSync(join(dirty, "wip.txt"), "utf8")).toBe("not committed\n");
+    expect(git(cloneOf("old-dirty"), "branch", "--list", legacyBranch)).toContain(legacyBranch);
+    const left = state.checkouts.find((c) => c.repo === "old-dirty");
+    expect(left?.legacyWorktree).toBe(true);
+    expect(left?.dirty).toBe(true);
+  });
+
+  it("lists no project checkout among the worktrees of any repo (S13)", async () => {
+    const { repos } = await q<{
+      repos: Array<{ name: string; worktrees: Array<{ path: string }> }>;
+    }>("repos.list");
+    for (const repo of repos) {
+      for (const wt of repo.worktrees) {
+        expect(wt.path, `${repo.name}: ${wt.path}`).not.toContain("/projects/");
+      }
+    }
+  });
 });

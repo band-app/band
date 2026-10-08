@@ -16,6 +16,7 @@ import { slugifyBranchName } from "@band-app/shared/branch-name";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { ProjectInputError } from "../errors";
 import type { ProjectRow } from "../infra/db/queries/projects";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { renderBrief, workerPrompt } from "./_utils/dispatch-brief";
 import { type DispatchInput, parseDispatchInput } from "./_utils/dispatch-input";
 import { isIsolationLevel, offers } from "./_utils/isolation";
@@ -143,7 +144,9 @@ export class ProjectDispatchService {
         repo: input.repo,
         branch,
         projectId: row.id,
-        ...(Object.keys(placement).length > 0 ? { placement } : {}),
+        // With the hub's own machine off there is no default host, so a call that names no
+        // placement still goes through placement and gets the least loaded capable worker.
+        ...(Object.keys(placement).length > 0 || !isLocalHostEnabled() ? { placement } : {}),
         brief: renderBrief({
           title: input.title?.trim() || undefined,
           project: row.name,
