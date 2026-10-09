@@ -41,6 +41,8 @@ export class PathPolicy {
   private readonly roots: string[];
   /** Private directories the worker made itself. Usable like a root, and removable. */
   private readonly tempDirs = new Set<string>();
+  /** Folders the worker creates and manages itself (project folders, its clone directory). Served whatever the roots. */
+  private readonly managedDirs = new Set<string>();
   private worktrees: WorktreeSource | null = null;
   private readonly worktreeCache = new Map<string, { at: number; paths: string[] }>();
 
@@ -68,6 +70,19 @@ export class PathPolicy {
     if (!this.roots.some((r) => canonical === r || canonical.startsWith(r + sep))) {
       this.roots.push(canonical);
     }
+    return canonical;
+  }
+
+  /**
+   * Serves a directory the worker creates and manages itself, so its contents are
+   * usable before the worker has made anything in it. The directory is created if it
+   * is missing and kept by canonical path, so a symlink inside it that leads
+   * elsewhere is still refused. The directory itself is not reported as a root.
+   */
+  async allowManaged(dir: string): Promise<string> {
+    await mkdir(dir, { recursive: true });
+    const canonical = await realpath(dir);
+    this.managedDirs.add(canonical);
     return canonical;
   }
 
@@ -101,7 +116,8 @@ export class PathPolicy {
    */
   async resolveEntry(path: string): Promise<string> {
     const canonical = await this.resolve(path, false);
-    if (this.roots.includes(canonical)) throw new PathDeniedError(path, "is a root of the worker");
+    if (this.roots.includes(canonical) || this.managedDirs.has(canonical))
+      throw new PathDeniedError(path, "is a root of the worker");
     return canonical;
   }
 
@@ -181,22 +197,28 @@ export class PathPolicy {
       if (up === dir) return "";
       dir = up;
     }
-    const common = await new Promise<string>((done) => {
-      execFile(
-        "git",
-        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        { cwd: dir, timeout: 3000 },
-        (err, stdout) => done(err ? "" : stdout.trim()),
-      );
-    });
-    if (!common) return "";
+    const rev = (flag: string) =>
+      new Promise<string>((done) => {
+        execFile(
+          "git",
+          ["rev-parse", "--path-format=absolute", flag],
+          { cwd: dir, timeout: 3000 },
+          (err, stdout) => done(err ? "" : stdout.trim()),
+        );
+      });
+    const [common, own] = await Promise.all([rev("--git-common-dir"), rev("--absolute-git-dir")]);
+    if (!common || !own) return "";
+    // A plain checkout has its own git dir. Only a linked worktree points at another repo's.
+    if ((await realpath(common).catch(() => common)) === (await realpath(own).catch(() => own))) {
+      return "";
+    }
     const repo = basename(common) === ".git" ? dirname(common) : common;
     if (this.contains(await realpath(repo).catch(() => repo))) return "";
     return `. It is a worktree of ${repo}, which is not inside a root, so add that repo's folder as a root`;
   }
 
   private contains(canonical: string): boolean {
-    for (const root of [...this.roots, ...this.tempDirs]) {
+    for (const root of [...this.roots, ...this.tempDirs, ...this.managedDirs]) {
       if (canonical === root || canonical.startsWith(root + sep)) return true;
     }
     return false;

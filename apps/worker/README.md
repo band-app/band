@@ -65,6 +65,16 @@ pnpm --filter @band-app/worker start -- \
 
 Exit codes: 0 after a signal or an idle exit, 1 when the hub rejects the worker or a bootstrap fails, 2 for a bad command line.
 
+## Path policy
+
+A hub call may name a path only when it resolves, with `..` folded and symlinks followed, to one of these:
+
+- A root (`--root`, a root added through the repo picker, or the default `<state dir>/worktrees`).
+- A folder the worker manages itself: `<BAND_HOME>/projects` (project folders and their `repos/<repo>` clones) and the clone directory (`--repos-dir`, default `~/band/repos`). They are served from startup, whatever the roots, because the worker creates them. The managed directory itself cannot be removed or moved.
+- A git worktree registered by a repo that sits inside a root.
+
+Anything else is refused with "is outside the worker's roots". The message adds "It is a worktree of <repo>, which is not inside a root" only for a linked worktree whose main repo is outside the roots. A plain checkout never gets the hint. A symlink inside a managed folder that leads elsewhere is refused like any other.
+
 ## State and tokens
 
 The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/exchange` with `{ token, workerId?, name? }`, answered by `{ sessionToken, workerId }`. The hub binds the token to the host id it issued it for, and the worker adopts that id and saves it as `worker-id`. A session token lives until it is revoked. Restarting with the same bootstrap token reuses the saved one. Tokens are never logged.

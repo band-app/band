@@ -154,6 +154,9 @@ export class Worker {
     );
     const backend = terminals.backend;
     const bandHome = config.bandHome ?? process.env.BAND_HOME ?? join(homedir(), ".band");
+    // Folders the worker creates itself are served whatever the roots, from the first call on.
+    await policy.allowManaged(join(bandHome, "projects"));
+    if (config.reposDir) await policy.allowManaged(config.reposDir);
     const host = new LocalHost({
       terminalBackend: () => backend,
       repos: {
