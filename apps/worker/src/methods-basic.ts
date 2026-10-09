@@ -274,8 +274,9 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     });
   });
 
-  // Project folders (plan step T.1). The folder is outside the worker's roots like a context copy,
-  // so a successful ensure lets later calls (the agent's cwd) use it.
+  // Project folders (plan step T.1). The projects directory is a managed directory, served from
+  // startup (see PathPolicy.allowManaged), so the folder needs no root. The allow below also
+  // covers a project folder in a BAND_HOME the policy was not given.
   r.json("project.ensure", async (a) => {
     const list = a.repos;
     if (!Array.isArray(list)) throw invalid("repos must be an array");
