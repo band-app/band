@@ -75,13 +75,13 @@ export class PathPolicy {
 
   /**
    * Serves a directory the worker creates and manages itself, so its contents are
-   * usable before the worker has made anything in it. The directory is created if it
-   * is missing and kept by canonical path, so a symlink inside it that leads
-   * elsewhere is still refused. The directory itself is not reported as a root.
+   * usable before the worker has made anything in it. The directory is not created
+   * here. Its canonical path is kept with a missing tail as written, so a symlink put
+   * there later resolves elsewhere and is refused. The directory itself is not
+   * reported as a root.
    */
   async allowManaged(dir: string): Promise<string> {
-    await mkdir(dir, { recursive: true });
-    const canonical = await realpath(dir);
+    const canonical = await this.canonical(resolve(dir), 0);
     this.managedDirs.add(canonical);
     return canonical;
   }
