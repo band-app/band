@@ -193,7 +193,8 @@ describe("MCP servers in session/new", () => {
   });
 
   it("gives a server limited to repo alpha to alpha's sessions only (S3)", async () => {
-    expect(alphaEntries.map((e) => e.name).sort()).toEqual(["alpha-only", "notes"]);
+    // Every chat also gets the built-in `band` server.
+    expect(alphaEntries.map((e) => e.name).sort()).toEqual(["alpha-only", "band", "notes"]);
     expect(httpLog(b.httpFile).find((l) => l.name === "alpha-call")?.status).toBe(200);
 
     await send(b.server, "chat-beta", "beta-main", "use-mcp");
@@ -206,7 +207,11 @@ describe("MCP servers in session/new", () => {
       },
     );
     const beta = newSessions(b.home).find((r) => r.cwd.endsWith("repo-beta"));
-    expect(mcpOf(beta as NonNullable<typeof beta>).map((e) => e.name)).toEqual(["notes"]);
+    expect(
+      mcpOf(beta as NonNullable<typeof beta>)
+        .map((e) => e.name)
+        .sort(),
+    ).toEqual(["band", "notes"]);
     const betaAlphaCall = httpLog(b.httpFile).filter((l) => l.name === "alpha-call")[1];
     expect(betaAlphaCall?.status).toBe(-1);
   });

@@ -512,6 +512,131 @@ fn repos_remove_unregisters_repo() {
     );
 }
 
+#[test]
+fn repos_set_meta_persists_and_lists() {
+    let env = TestEnv::new();
+
+    let output = env.band(&["repos", "set", "my-repo", "--meta", "true"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    let repo = listed["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "my-repo")
+        .expect("my-repo in list");
+    assert_eq!(repo["meta"], true);
+    let text = stdout(&env.band(&["repos", "list"]));
+    assert!(text.contains("META") && text.contains("yes"), "{text}");
+
+    // Another change that rewrites the repo tree keeps the flag.
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/meta-check"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    assert_eq!(listed["repos"][0]["meta"], true);
+
+    let output = env.band(&["repos", "set", "my-repo", "--meta", "false"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    assert_eq!(listed["repos"][0]["meta"], false);
+
+    // Nothing to change, and an unknown repo, both fail.
+    assert!(!env.band(&["repos", "set", "my-repo"]).status.success());
+    assert!(!env
+        .band(&["repos", "set", "nope", "--meta", "true"])
+        .status
+        .success());
+}
+
+#[test]
+fn worktrees_create_records_the_origin_and_list_shows_it() {
+    let env = TestEnv::new();
+    for branch in ["feat/parent", "feat/other"] {
+        let output = env.band(&["worktrees", "create", "my-repo", branch]);
+        assert!(output.status.success(), "stderr: {}", stderr(&output));
+    }
+
+    // `--origin` names the parent. Inside a Band terminal `$BAND_WORKTREE_ID` does.
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/child",
+        "--origin",
+        "my-repo-feat-parent",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let output = env.band_with_env(
+        &["worktrees", "create", "my-repo", "feat/from-env"],
+        &[("BAND_WORKTREE_ID", "my-repo-feat-parent")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    // `--no-origin` clears what the environment would give.
+    let output = env.band_with_env(
+        &["worktrees", "create", "my-repo", "feat/free", "--no-origin"],
+        &[("BAND_WORKTREE_ID", "my-repo-feat-parent")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    let by_id = |id: &str| {
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap_or_else(|| panic!("{id} in {listed}"))
+            .clone()
+    };
+    assert_eq!(
+        by_id("my-repo-feat-child")["origin"]["worktreeId"],
+        "my-repo-feat-parent"
+    );
+    assert_eq!(
+        by_id("my-repo-feat-from-env")["origin"]["worktreeId"],
+        "my-repo-feat-parent"
+    );
+    assert!(by_id("my-repo-feat-free")["origin"].is_null());
+    assert!(by_id("my-repo-feat-other")["origin"].is_null());
+    let mut children: Vec<String> = by_id("my-repo-feat-parent")["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_string())
+        .collect();
+    children.sort();
+    assert_eq!(children, ["my-repo-feat-child", "my-repo-feat-from-env"]);
+
+    let text = stdout(&env.band(&["worktrees", "list"]));
+    assert!(text.contains("ORIGIN"), "{text}");
+
+    // Removing the parent leaves the children, with the origin marked removed.
+    let output = env.band(&["worktrees", "remove", "my-repo", "feat/parent"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let text = stdout(&env.band(&["worktrees", "list"]));
+    assert!(text.contains("my-repo-feat-parent (removed)"), "{text}");
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    let child = listed["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["worktreeId"] == "my-repo-feat-child")
+        .unwrap();
+    assert_eq!(child["origin"]["removed"], true);
+
+    // An origin that does not exist is refused.
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/lost",
+        "--origin",
+        "my-repo-missing",
+    ]);
+    assert!(!output.status.success());
+}
+
 // --- Worktrees tests ---
 
 #[test]

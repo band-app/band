@@ -22,6 +22,14 @@ For a git repo a worktree is a git worktree created with `git worktree add`, and
 
 In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an agent's environment `BAND_WORKTREE_ID`.
 
+## Origin link
+
+The record on a worktree of where it was started from: the origin worktree, and the chat or terminal in it. The origin can be on any repo and host. A worktree started from the UI has no origin unless the user picks one. A worktree whose origin was deleted keeps the ids and reports its origin as removed. See `docs/origin-links.md`.
+
+## Meta repo
+
+A repo flagged with `repos.update { meta }` or `band repos set <repo> --meta true`, such as a repo of notes or specs that work in other repos is started from. The flag groups and defaults. It changes no other behaviour.
+
 ## Projects (removed)
 
 Band had projects: a cross-repo body of work with a context repo, a project folder on each host and a coordinator chat. They were removed in favour of origin links, where a chat started from another chat records where it came from (see the implementation plan, section 15). There is no `projects.*` API, `band projects` command or project settings. Claude Code's own `~/.claude/projects` directory is unrelated.

@@ -435,8 +435,20 @@ describe("chat over ACP", () => {
 
     await trpc(server.url, "chats.setConfigOption", { chatId, configId: "effort", value: "high" });
 
+    // The only MCP server is the built-in `band` one, which every chat gets.
     expect(stubRequests(server.home, "session/resume").map((r) => r.params)).toEqual([
-      { sessionId: chat.activeSessionId, cwd: `${server.home}/repo`, mcpServers: [] },
+      {
+        sessionId: chat.activeSessionId,
+        cwd: `${server.home}/repo`,
+        mcpServers: [
+          {
+            type: "http",
+            name: "band",
+            url: `${server.url}/mcp-proxy/band`,
+            headers: [{ name: "Authorization", value: expect.stringMatching(/^Bearer mcp_/) }],
+          },
+        ],
+      },
     ]);
     expect(stubRequests(server.home, "session/set_config_option").map((r) => r.params)).toEqual([
       { sessionId: chat.activeSessionId, configId: "effort", value: "high" },

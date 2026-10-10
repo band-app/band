@@ -60,7 +60,7 @@ import { rowsToEvents } from "./_utils/chat-log-replay";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
-import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
+import { BUILTIN_BAND_SERVER, MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -792,10 +792,11 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   try {
     const worktree = worktreeService.resolve(rt.worktreeId);
     if (!worktree) return [];
-    const names = mcpProxyService
-      .serversForSession(worktree.repo.name, worktree.host.id)
-      .map((s) => s.name);
-    if (names.length === 0) return [];
+    // Every chat gets the built-in `band` server, so any chat can start linked work.
+    const names = [
+      BUILTIN_BAND_SERVER,
+      ...mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name),
+    ];
     if (!proc.supportsHttpMcp) {
       log.info(
         { chatId: rt.chatId, agent: proc.agentName, servers: names },

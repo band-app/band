@@ -687,6 +687,8 @@ export interface RelayScope {
   worktreeId: string;
   /** The chat the process belongs to, when it is an agent behind a chat. */
   chatId?: string;
+  /** The terminal the process is the shell of, when it is one. */
+  terminalId?: string;
 }
 
 /** A credential for one process, with the environment that hands it over. */

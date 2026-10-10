@@ -95,6 +95,8 @@ export class RepoService {
       defaultBranch: string;
       label: string | undefined;
       kind: RepoKind;
+      /** Whether the repo is a meta repo, where work in other repos is started from. */
+      meta: boolean;
       /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
       avatar: RepoAvatarInfo | null;
       worktrees: Array<{
@@ -115,6 +117,10 @@ export class RepoService {
         // null` — `NonNullable` isn't needed because the source type is
         // already non-undefined, but `| null` matches the null fallback.
         agent: WorktreeAgentInfo | null;
+        /** Where the worktree was started from, or null for top-level work. */
+        origin: WorktreeOriginInfo | null;
+        /** Ids of the worktrees started from this one, on any repo and host. */
+        children: string[];
       }>;
     }>;
     labels: NonNullable<ReturnType<SettingsService["get"]>["labels"]>;
@@ -125,6 +131,7 @@ export class RepoService {
     const statusMap = new Map(statuses.map((s) => [s.worktreeId, s]));
     const lifecycles = ephemeralLifecycleService.states();
     const hostPaths = this.queries.allHostPaths();
+    const links = originLinks(repos);
 
     // Inline, read-only kind re-detection via the shared helper.
     // Persistence lives in `syncWorktrees` (called on every branch-
@@ -225,6 +232,7 @@ export class RepoService {
         defaultBranch: repo.defaultBranch,
         label: repo.label,
         kind: repo.kind,
+        meta: repo.meta ?? false,
         avatar: await avatar,
         worktrees: worktrees.map((wt) => {
           // Identity is by the immutable `name`, not the live branch.
@@ -236,6 +244,8 @@ export class RepoService {
             worktreeId,
             ...(lifecycle ? { lifecycle } : {}),
             agent: status?.agent ?? null,
+            origin: links.origins.get(worktreeId) ?? null,
+            children: links.children.get(worktreeId) ?? [],
           };
         }),
       };
@@ -757,6 +767,11 @@ export class RepoService {
     this.queries.saveAll(repos);
   }
 
+  /** Marks or unmarks `name` as a meta repo. */
+  setMeta(name: string, meta: boolean): void {
+    if (!this.queries.setMeta(name, meta)) throw new RepoInputError(`Unknown repo "${name}"`);
+  }
+
   /**
    * Set (or clear, when `label` is `null`) the dashboard label for
    * `name`. Throws if the repo is missing — the dashboard sends
@@ -841,4 +856,46 @@ async function currentBranch(host: Host, cwd: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Where a worktree was started from, as `repos.list` reports it. */
+export interface WorktreeOriginInfo {
+  worktreeId: string;
+  chatId?: string;
+  terminalId?: string;
+  /** True when the origin worktree no longer exists. The ids stay so a view can say "parent removed". */
+  removed: boolean;
+  /** The origin worktree's repo and branch while it exists. */
+  repo?: string;
+  branch?: string;
+}
+
+/** Each worktree's origin, and the worktrees that were started from each one, over every repo and host. */
+function originLinks(repos: RepoState[]): {
+  origins: Map<string, WorktreeOriginInfo>;
+  children: Map<string, string[]>;
+} {
+  const known = new Map<string, { repo: string; branch: string }>();
+  for (const repo of repos) {
+    for (const wt of repo.worktrees) {
+      known.set(toWorktreeId(repo.name, wt.name), { repo: repo.name, branch: wt.branch });
+    }
+  }
+  const origins = new Map<string, WorktreeOriginInfo>();
+  const children = new Map<string, string[]>();
+  for (const repo of repos) {
+    for (const wt of repo.worktrees) {
+      if (!wt.origin) continue;
+      const id = toWorktreeId(repo.name, wt.name);
+      const parent = known.get(wt.origin.worktreeId);
+      origins.set(id, {
+        ...wt.origin,
+        removed: parent === undefined,
+        ...(parent ? { repo: parent.repo, branch: parent.branch } : {}),
+      });
+      if (parent)
+        children.set(wt.origin.worktreeId, [...(children.get(wt.origin.worktreeId) ?? []), id]);
+    }
+  }
+  return { origins, children };
 }

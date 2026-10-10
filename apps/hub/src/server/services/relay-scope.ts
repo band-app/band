@@ -311,9 +311,16 @@ function checkCall(
     }
   }
   if (procedure === "worktrees.create") {
-    const { repo, branch, hostId } = (input ?? {}) as Record<string, unknown>;
+    const { repo, branch, hostId, origin } = (input ?? {}) as Record<string, unknown>;
     if (typeof repo !== "string" || typeof branch !== "string") {
       return deny(400, `${procedure} needs a repo and a branch`);
+    }
+    // An origin names a parent worktree, so it must be one on this host like any other target.
+    if (
+      origin !== undefined &&
+      (typeof origin !== "string" || lookups.hostOfWorktree(origin) !== workerId)
+    ) {
+      return deny(403, `${procedure}: The origin is not a worktree on this host`);
     }
     if (hostId !== undefined && hostId !== workerId) {
       return deny(403, `${procedure}: A worktree made from a worker is created on that worker`);

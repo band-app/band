@@ -21,7 +21,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { rewriteSse, SseEventTooLargeError, sseDataOf } from "../../services/_utils/mcp-sse";
-import { type McpServerView, mcpProxyService } from "../../services/mcp-proxy-service";
+import {
+  BUILTIN_BAND_SERVER,
+  type McpServerView,
+  mcpProxyService,
+} from "../../services/mcp-proxy-service";
+import { handleBandTools } from "./band-tools";
 import {
   auditUnanswered,
   BodyTooLargeError,
@@ -189,6 +194,8 @@ export async function handleMcpProxy(req: IncomingMessage, res: ServerResponse):
       auth.status === 401 ? { "WWW-Authenticate": 'Bearer realm="band-mcp-proxy"' } : {},
     );
   }
+  // The built-in server answers here. Its token's session is the chat the call comes from.
+  if (name === BUILTIN_BAND_SERVER) return handleBandTools(req, res, auth.sessionId);
   const server = mcpProxyService.getEnabledServer(name);
   if (!server) return sendJson(res, 404, { error: "No such MCP server" });
 

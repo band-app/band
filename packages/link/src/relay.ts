@@ -21,6 +21,7 @@ export const RELAY_MAX_BODY_BYTES = 512 * 1024;
 export interface RelayScopeParams {
   worktreeId: string;
   chatId?: string;
+  terminalId?: string;
 }
 
 export interface RelayRegisterParams extends RelayScopeParams {

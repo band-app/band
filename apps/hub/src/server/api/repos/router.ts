@@ -142,6 +142,18 @@ export const reposRouter = t.router({
     return { ok: true };
   }),
 
+  /** Changes a repo's settings. Only `meta` so far: whether the repo is a meta repo. */
+  update: publicProcedure
+    .input(z.object({ name: z.string(), meta: z.boolean().optional() }))
+    .mutation(({ input }) => {
+      try {
+        if (input.meta !== undefined) repoService.setMeta(input.name, input.meta);
+        return { ok: true };
+      } catch (err) {
+        throw repoErrorToTrpc(err);
+      }
+    }),
+
   updateLabel: publicProcedure
     .input(z.object({ name: z.string(), label: z.string().nullable() }))
     .mutation(({ input }) => {

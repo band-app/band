@@ -67,6 +67,15 @@ export interface RepoState {
    * next sync pass and sticks until the remote configuration changes.
    */
   hasOrigin: boolean;
+  /** Whether the repo is a meta repo. Read-only here: `RepoQueries.setMeta` changes it. */
+  meta?: boolean;
+}
+
+/** Where a worktree was started from. Ids only, since the origin may be on any repo and host. */
+export interface WorktreeOrigin {
+  worktreeId: string;
+  chatId?: string;
+  terminalId?: string;
 }
 
 /**
@@ -87,6 +96,12 @@ export interface WorktreeState {
   pinned: boolean;
   /** Host the worktree lives on. Absent means `local`. */
   hostId?: string;
+  /**
+   * Where the worktree was started from. Read-only here: `saveAll` keeps what the
+   * database holds, so the many paths that rebuild a worktree row cannot drop it.
+   * `RepoQueries.setOrigin` writes it.
+   */
+  origin?: WorktreeOrigin;
 }
 
 /**
@@ -175,6 +190,15 @@ export class RepoQueries {
         head: row.head ?? undefined,
         pinned: row.pinned,
         hostId: row.hostId,
+        ...(row.originWorktreeId
+          ? {
+              origin: {
+                worktreeId: row.originWorktreeId,
+                ...(row.originChatId ? { chatId: row.originChatId } : {}),
+                ...(row.originTerminalId ? { terminalId: row.originTerminalId } : {}),
+              },
+            }
+          : {}),
       });
       wtByRepo.set(row.repoName, list);
     }
@@ -188,6 +212,7 @@ export class RepoQueries {
       label: row.label ?? undefined,
       kind: (row.kind ?? "git") as RepoKind,
       hasOrigin: row.hasOrigin,
+      meta: row.meta,
       worktrees: wtByRepo.get(row.name) ?? [],
     }));
   }
@@ -215,6 +240,28 @@ export class RepoQueries {
         .from(repoHostsTable)
         .where(ne(repoHostsTable.hostId, "local"))
         .all();
+      // Origins and the meta flag are written by their own calls, so the rewrite keeps what
+      // the database holds instead of what a possibly stale snapshot says.
+      const metaByRepo = new Map(
+        tx
+          .select({ name: reposTable.name, meta: reposTable.meta })
+          .from(reposTable)
+          .all()
+          .map((r) => [r.name, r.meta]),
+      );
+      const originByWorktree = new Map(
+        tx
+          .select({
+            repoName: worktreesTable.repoName,
+            name: worktreesTable.name,
+            originWorktreeId: worktreesTable.originWorktreeId,
+            originChatId: worktreesTable.originChatId,
+            originTerminalId: worktreesTable.originTerminalId,
+          })
+          .from(worktreesTable)
+          .all()
+          .map((w) => [`${w.repoName}\0${w.name}`, w]),
+      );
       tx.delete(worktreesTable).run();
       tx.delete(reposTable).run();
 
@@ -231,12 +278,17 @@ export class RepoQueries {
             sortOrder: i,
             kind: repo.kind,
             hasOrigin: repo.hasOrigin,
+            meta: metaByRepo.get(repo.name) ?? false,
           })
           .run();
 
         for (const wt of repo.worktrees) {
+          const kept = originByWorktree.get(`${repo.name}\0${wt.name}`);
           tx.insert(worktreesTable)
             .values({
+              originWorktreeId: kept?.originWorktreeId ?? null,
+              originChatId: kept?.originChatId ?? null,
+              originTerminalId: kept?.originTerminalId ?? null,
               repoName: repo.name,
               name: wt.name,
               branch: wt.branch,
@@ -381,6 +433,29 @@ export class RepoQueries {
   setHasOrigin(name: string, hasOrigin: boolean): void {
     const db = getDb();
     db.update(reposTable).set({ hasOrigin }).where(eq(reposTable.name, name)).run();
+  }
+
+  /** Marks or unmarks a repo as a meta repo. Returns false when no repo has that name. */
+  setMeta(name: string, meta: boolean): boolean {
+    return (
+      getDb().update(reposTable).set({ meta }).where(eq(reposTable.name, name)).run().changes > 0
+    );
+  }
+
+  /**
+   * Records where a worktree was started from, or clears it with `null`. Focused UPDATE, because
+   * `saveAll` keeps the stored origin and never writes the one in its snapshot.
+   */
+  setOrigin(repoName: string, name: string, origin: WorktreeOrigin | null): void {
+    getDb()
+      .update(worktreesTable)
+      .set({
+        originWorktreeId: origin?.worktreeId ?? null,
+        originChatId: origin?.chatId ?? null,
+        originTerminalId: origin?.terminalId ?? null,
+      })
+      .where(and(eq(worktreesTable.repoName, repoName), eq(worktreesTable.name, name)))
+      .run();
   }
 
   /**

@@ -64,6 +64,14 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 
 A folder with no remote is registered without a URL and can only run on the host that holds it.
 
+### Change a repo's settings
+
+```sh
+band repos set <name> --meta true|false
+```
+
+`--meta true` marks the repo as a meta repo, one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults. `band repos list` shows it in the `META` column.
+
 ### Unregister a repo
 
 ```sh
@@ -78,16 +86,18 @@ Removes the repo from Band's registry (does not delete the repository).
 band worktrees list [repo]
 ```
 
-Text output: `repo\tbranch\tpath` (tab-separated, one per line).
-JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "path": "..."}]}`
+Text output is a table whose last column, `ORIGIN`, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).
+JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...", "path": "...", "origin": {"worktreeId": "...", "chatId": "...", "removed": false} | null, "children": ["<worktree id>"]}]}`
 
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--origin <worktree id> | --no-origin]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
+
+**Origin.** A worktree records the worktree it was started from. Inside a Band chat or terminal the new worktree's origin is the current one (`$BAND_WORKTREE_ID`), and on a worker the hub also records the chat or terminal. `--origin <worktree id>` names another parent. `--no-origin` records none. A chat can do the same through the `worktrees_create` tool of its built-in `band` MCP server.
 
 **Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.
 
@@ -422,6 +432,9 @@ band repos add --from w-1a2b3c4d5e6f /home/me/code/my-app
 
 # List all repos
 band repos list
+
+# Mark a repo as a meta repo
+band repos set my-notes --meta true
 
 # Remove a repo
 band repos remove my-app

@@ -213,9 +213,11 @@ export function registerRelayMethods(r: Registrar, ctx: WorkerContext): () => Pr
   const relay = new Relay(ctx);
   r.json("relay.register", async (a) => {
     const chatId = optStr(a, "chatId");
+    const terminalId = optStr(a, "terminalId");
     relay.register(str(a, "token"), {
       worktreeId: str(a, "worktreeId"),
       ...(chatId !== undefined && { chatId }),
+      ...(terminalId !== undefined && { terminalId }),
     });
     return {
       url: await relay.url(),
