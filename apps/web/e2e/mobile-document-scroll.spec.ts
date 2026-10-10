@@ -35,7 +35,7 @@ import { MobileLayoutPage } from "./pages/MobileLayoutPage";
 
 const TOKEN = "e2e-mobile-document-scroll-token";
 const REPO = "docscroll";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const LONG_ANSWER = Array.from(
   { length: 60 },
   (_, i) => `Paragraph ${i + 1} of a long answer that the transcript has to scroll through.`,

@@ -1,3 +1,4 @@
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 // A worktree that git registered for a repo inside a worker root may live outside the roots
 // (another tool made it). The hub imports it with the repo, and a terminal opens there through the
 // hub API. A folder that is not a registered worktree stays refused. Real hub, real `band-worker`
@@ -144,7 +145,7 @@ afterAll(async () => {
 describe("a registered worktree outside the worker's roots", () => {
   it("opens a terminal in it through the hub", async () => {
     await trpcM("repos.addFromWorker", { hostId, path: repoPath });
-    const worktreeId = "proj-outside-feat";
+    const worktreeId = toWorktreeId("proj", "outside-feat", hostId);
     const { repos } = await trpcQ<{
       repos: Array<{ name: string; worktrees: Array<{ name: string; path: string }> }>;
     }>("repos.list");

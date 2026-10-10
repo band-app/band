@@ -42,7 +42,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-continue-terminal-token";
 const REPO = "continueproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so the desktop dockview layout (with the outer Terminal tab)
 // renders.

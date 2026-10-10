@@ -57,8 +57,8 @@ const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-a";
 const BRANCH_B = "feature-b";
 
-const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
-const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
 // A file unique to A (so A is a real, mounted sibling worktree). Its name
 // can't collide with B's file-tree rows.

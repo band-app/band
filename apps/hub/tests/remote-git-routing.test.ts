@@ -30,7 +30,7 @@ import { waitFor } from "./helpers/wait-for";
 const TOKEN = "remote-git-routing-token";
 const REPO = "routed";
 const WORKTREE = "test";
-const WORKTREE_ID = toWorktreeId(REPO, WORKTREE);
+const WORKTREE_ID = toWorktreeId(REPO, WORKTREE, "local");
 const LIVE_BRANCH = "feature/live";
 
 const gitEnv = {

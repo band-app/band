@@ -29,7 +29,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-markdown-preview-editing-token";
 const REPO = "md-editing-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 const ORIGINAL = [
   "---",

@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -66,6 +67,8 @@ let workerChild: ChildProcess;
 let workerHome: string;
 let hostId: string;
 let httpLogFile: string;
+// A worktree on the worker is named after its host.
+const wt = (repo: string, branch: string) => toWorktreeId(repo, branch, hostId);
 
 const m = <T>(procedure: string, input: unknown) =>
   trpcMutate(server.url, procedure, input, TEST_TOKEN).then(async (res) => {
@@ -248,15 +251,17 @@ afterAll(async () => {
 
 describe("origin links through a worker", () => {
   it("records the worktree and chat a chat started work from, across repos (S1)", async () => {
-    await say("origin-chat", "borko-start", "start-svc");
+    await say("origin-chat", wt("borko", "start"), "start-svc");
     const line = httpLog().find((l) => l.name === "svc-call");
     expect(line?.status).toBe(200);
-    expect(line?.body).toContain("svc-from-chat");
+    expect(line?.body).toContain(wt("svc", "from-chat"));
 
-    const child = await waitFor(() => worktreeOf("svc-from-chat"), { label: "child listed" });
+    const child = await waitFor(() => worktreeOf(wt("svc", "from-chat")), {
+      label: "child listed",
+    });
     expect(child?.hostId).toBe(hostId);
     expect(child?.origin).toMatchObject({
-      worktreeId: "borko-start",
+      worktreeId: wt("borko", "start"),
       chatId: "origin-chat",
       removed: false,
       repo: "borko",
@@ -266,37 +271,37 @@ describe("origin links through a worker", () => {
   });
 
   it("builds a tree when the child's own chat starts work (S3)", async () => {
-    await say("child-chat", "svc-from-chat", "start-grandchild");
+    await say("child-chat", wt("svc", "from-chat"), "start-grandchild");
     expect(httpLog().find((l) => l.name === "grandchild-call")?.status).toBe(200);
 
-    const grandchild = await worktreeOf("borko-grandchild");
+    const grandchild = await worktreeOf(wt("borko", "grandchild"));
     expect(grandchild?.origin).toMatchObject({
-      worktreeId: "svc-from-chat",
+      worktreeId: wt("svc", "from-chat"),
       chatId: "child-chat",
     });
-    const child = await worktreeOf("svc-from-chat");
-    expect(child?.children).toEqual(["borko-grandchild"]);
-    expect((await worktreeOf("borko-start"))?.children).toContain("svc-from-chat");
-    expect((await worktreeOf("borko-start"))?.origin).toBeNull();
+    const child = await worktreeOf(wt("svc", "from-chat"));
+    expect(child?.children).toEqual([wt("borko", "grandchild")]);
+    expect((await worktreeOf(wt("borko", "start")))?.children).toContain(wt("svc", "from-chat"));
+    expect((await worktreeOf(wt("borko", "start")))?.origin).toBeNull();
   });
 
   it("keeps a chat on a worker on that worker, and honours noOrigin", async () => {
-    await say("elsewhere-chat", "borko-start", "start-elsewhere");
+    await say("elsewhere-chat", wt("borko", "start"), "start-elsewhere");
     const refused = httpLog().find((l) => l.name === "elsewhere-call");
     expect(refused?.body).toContain("on that worker only");
     expect(await worktreeOf("svc-elsewhere")).toBeUndefined();
 
-    await say("none-chat", "borko-start", "start-none");
+    await say("none-chat", wt("borko", "start"), "start-none");
     expect(httpLog().find((l) => l.name === "none-call")?.status).toBe(200);
-    expect((await worktreeOf("svc-no-origin"))?.origin).toBeNull();
+    expect((await worktreeOf(wt("svc", "no-origin")))?.origin).toBeNull();
   });
 
   it("sets the origin from a shell on the worker, with its terminal, and ignores forged identity (S2)", async () => {
     const created = await m<{ terminalId: string }>("terminal.create", {
-      worktreeId: "borko-start",
+      worktreeId: wt("borko", "start"),
     });
     const socket = await TerminalSocket.open(server, {
-      worktreeId: "borko-start",
+      worktreeId: wt("borko", "start"),
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -313,26 +318,26 @@ describe("origin links through a worker", () => {
     } finally {
       await socket.close();
     }
-    const child = await waitFor(() => worktreeOf("svc-from-shell"), {
+    const child = await waitFor(() => worktreeOf(wt("svc", "from-shell")), {
       label: "shell child listed",
     });
     expect(child?.origin).toMatchObject({
-      worktreeId: "borko-start",
+      worktreeId: wt("borko", "start"),
       terminalId: created.terminalId,
     });
     expect(child?.origin?.chatId).toBeUndefined();
-    expect(await worktreeOf("svc-from-foreign")).toBeUndefined();
+    expect(await worktreeOf(wt("svc", "from-foreign"))).toBeUndefined();
   });
 
   it("reports the origin as removed once the parent is gone (S4)", async () => {
     await m("worktrees.remove", { repo: "borko", name: "grandchild" });
     await m("worktrees.remove", { repo: "svc", name: "from-chat" });
-    const gone = await worktreeOf("svc-from-chat");
+    const gone = await worktreeOf(wt("svc", "from-chat"));
     expect(gone).toBeUndefined();
     // `from-shell` still points at `borko-start`, which exists. Remove that to see the flag.
     await m("worktrees.remove", { repo: "borko", name: "start" });
-    const orphan = await worktreeOf("svc-from-shell");
-    expect(orphan?.origin).toMatchObject({ worktreeId: "borko-start", removed: true });
+    const orphan = await worktreeOf(wt("svc", "from-shell"));
+    expect(orphan?.origin).toMatchObject({ worktreeId: wt("borko", "start"), removed: true });
     expect(orphan?.origin?.repo).toBeUndefined();
   });
 });

@@ -83,7 +83,7 @@ class LspSocket {
   static async open(cookie?: string, idBase = 0): Promise<LspSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(toWorktreeId(REPO, "main"))}&lang=typescript`,
+      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(toWorktreeId(REPO, "main", "local"))}&lang=typescript`,
       cookie ? { headers: { Cookie: cookie } } : {},
     );
     await new Promise<void>((resolve, reject) => {

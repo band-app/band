@@ -24,7 +24,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-center-leaf-header-actions-token";
 const REPO = "center-leaf-header-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

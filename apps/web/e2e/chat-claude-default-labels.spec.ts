@@ -145,7 +145,7 @@ test.describe("Claude Code default model and effort labels", () => {
       "the host has managed Claude Code settings",
     );
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("claudedefaults", "main"));
+    await chatPane.goto(toWorktreeId("claudedefaults", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -183,7 +183,7 @@ test.describe("Claude Code default model and effort labels", () => {
 
   test("other agents keep the labels their agent sends", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("codexdefaults", "main"));
+    await chatPane.goto(toWorktreeId("codexdefaults", "main", "local"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("codex");

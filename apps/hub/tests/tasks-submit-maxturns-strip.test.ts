@@ -97,7 +97,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
   const TOKEN = "strip-tasks-submit-token";
   let server: ServerHandle;
   let tmpHome: string;
-  const WORKTREE_ID = toWorktreeId("stripproj", "main");
+  const WORKTREE_ID = toWorktreeId("stripproj", "main", "local");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-strip-tasks-");
@@ -291,7 +291,7 @@ describe("worktrees.create — legacy maxTurns is silently stripped", () => {
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
-    const worktreeId = toWorktreeId("wsproj", "feat/strip-baseline");
+    const worktreeId = toWorktreeId("wsproj", "feat/strip-baseline", "local");
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
@@ -324,7 +324,7 @@ describe("worktrees.create — legacy maxTurns is silently stripped", () => {
     expect(data.ok).toBe(true);
 
     // Positive anchor: the dispatched task matches the baseline shape.
-    const worktreeId = toWorktreeId("wsproj", "feat/strip-legacy");
+    const worktreeId = toWorktreeId("wsproj", "feat/strip-legacy", "local");
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);

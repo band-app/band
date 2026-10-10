@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "@band-app/link";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -158,7 +159,8 @@ async function exchange(token: string, workerId?: string): Promise<Response> {
   });
 }
 
-const worktreeId = "proj-remote-feat";
+// Set once the worker has a host id: a worktree on a worker is named after its host.
+let worktreeId = "";
 
 beforeAll(async () => {
   hubHome = createTmpHome("band-remote-hub-");
@@ -186,6 +188,7 @@ beforeAll(async () => {
 
   const issued = await issueBootstrap("Test worker");
   hostId = issued.hostId;
+  worktreeId = toWorktreeId("proj", "remote-feat", hostId);
   bootstrapToken = issued.token;
   worker = startWorkerProcess(issued.token);
   await waitForStatus("online");

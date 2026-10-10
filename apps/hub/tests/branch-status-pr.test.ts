@@ -202,7 +202,7 @@ describe("branch-status events carry the branch's pull request", () => {
   let stub: GhStub;
   let stream: Awaited<ReturnType<typeof openStatusStream>>;
 
-  const wsId = (branch: string) => toWorktreeId(REPO, branch);
+  const wsId = (branch: string) => toWorktreeId(REPO, branch, "local");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-");
@@ -360,7 +360,7 @@ describe("with the GitHub plugin disabled", () => {
   });
 
   it("the poller never runs gh, and the branch reports no PR and no CI state", async () => {
-    expect(await stream.latestCI(toWorktreeId(REPO, CASES.failing))).toEqual({
+    expect(await stream.latestCI(toWorktreeId(REPO, CASES.failing, "local"))).toEqual({
       state: "none",
       url: null,
       pr: null,

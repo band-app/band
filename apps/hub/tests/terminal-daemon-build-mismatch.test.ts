@@ -42,7 +42,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-build-token";
 const REPO = "buildproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {

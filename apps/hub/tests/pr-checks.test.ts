@@ -267,7 +267,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
       ],
     };
 
-    const data = await forWorktree(server, toWorktreeId(REPO, PR_BRANCH));
+    const data = await forWorktree(server, toWorktreeId(REPO, PR_BRANCH, "local"));
 
     expect(data).toEqual({
       status: "ok",
@@ -334,7 +334,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
       }),
     );
 
-    const data = await forWorktree(server, toWorktreeId(REPO, BRANCH_ONLY));
+    const data = await forWorktree(server, toWorktreeId(REPO, BRANCH_ONLY, "local"));
 
     expect(data).toEqual({
       status: "ok",
@@ -382,7 +382,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
       }),
     );
 
-    const data = await forWorktree(server, toWorktreeId(REPO, "main"));
+    const data = await forWorktree(server, toWorktreeId(REPO, "main", "local"));
 
     expect(data.review).toBeNull();
     expect(data.checks).toEqual({
@@ -406,7 +406,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   it("reports a gh failure as an error result with gh's message", async () => {
     stub.setReviewQueryError(FAKE_REPO, FAILING_BRANCH, "HTTP 401: Bad credentials\n");
 
-    const data = await forWorktree(server, toWorktreeId(REPO, FAILING_BRANCH));
+    const data = await forWorktree(server, toWorktreeId(REPO, FAILING_BRANCH, "local"));
 
     if (isRemoteLoopback) {
       // S3: the worker's gh and the hub's fallback both fail, so the error names both and the fix.
@@ -422,12 +422,12 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   });
 
   it("reports repos the plugin can't serve as unavailable", async () => {
-    expect(await forWorktree(server, toWorktreeId("local-only", "main"))).toEqual({
+    expect(await forWorktree(server, toWorktreeId("local-only", "main", "local"))).toEqual({
       status: "unavailable",
       reason: "no-remote",
       message: "The repo has no origin remote.",
     });
-    expect(await forWorktree(server, toWorktreeId("on-gitlab", "main"))).toEqual({
+    expect(await forWorktree(server, toWorktreeId("on-gitlab", "main", "local"))).toEqual({
       status: "unavailable",
       reason: "no-provider",
       message: "No enabled plugin handles gitlab.com.",
@@ -446,7 +446,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { worktreeId: toWorktreeId(REPO, MERGE_BRANCH), method: "squash" },
+      { worktreeId: toWorktreeId(REPO, MERGE_BRANCH, "local"), method: "squash" },
       TOKEN,
     );
 
@@ -478,7 +478,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { worktreeId: toWorktreeId(REPO, MERGE_FAIL_BRANCH), method: "merge" },
+      { worktreeId: toWorktreeId(REPO, MERGE_FAIL_BRANCH, "local"), method: "merge" },
       TOKEN,
     );
 
@@ -502,7 +502,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const res = await trpcMutate(
       server.url,
       "reviews.merge",
-      { worktreeId: toWorktreeId(REPO, BRANCH_ONLY), method: "merge" },
+      { worktreeId: toWorktreeId(REPO, BRANCH_ONLY, "local"), method: "merge" },
       TOKEN,
     );
 
@@ -521,7 +521,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     const anonymous = await fetch(
       `${server.url}/trpc/reviews.forWorktree?input=${encodeURIComponent(
-        JSON.stringify({ worktreeId: toWorktreeId(REPO, PR_BRANCH) }),
+        JSON.stringify({ worktreeId: toWorktreeId(REPO, PR_BRANCH, "local") }),
       )}`,
     );
     expect(anonymous.status).toBe(401);
@@ -530,7 +530,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   it("lists the GitHub plugin as active once a github.com repo used it", async () => {
     // Any review lookup on a github.com repo activates the plugin, whether
     // or not gh then answers.
-    await forWorktree(server, toWorktreeId(REPO, "main"));
+    await forWorktree(server, toWorktreeId(REPO, "main", "local"));
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
     expect(res.status).toBe(200);
@@ -583,7 +583,7 @@ describe("a disabled GitHub plugin", () => {
   });
 
   it("never activates and never runs gh", async () => {
-    expect(await forWorktree(server, toWorktreeId(REPO, "main"))).toEqual({
+    expect(await forWorktree(server, toWorktreeId(REPO, "main", "local"))).toEqual({
       status: "unavailable",
       reason: "no-provider",
       message: "No enabled plugin handles github.com.",

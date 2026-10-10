@@ -62,7 +62,7 @@ async function createWorktree(repo: string, branch: string): Promise<string> {
   const res = await trpcMutate(server.url, "worktrees.create", { repo, branch }, TOKEN);
   const body = await res.text();
   expect(res.status, body).toBe(200);
-  return toWorktreeId(repo, branch);
+  return toWorktreeId(repo, branch, "local");
 }
 
 async function terminalOutputs(worktreeId: string): Promise<string[]> {

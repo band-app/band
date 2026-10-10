@@ -812,6 +812,49 @@ fn worktrees_remove_unknown_repo_fails() {
 }
 
 #[test]
+fn worktrees_remove_with_host_removes_only_that_hosts_worktree() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/rm-host"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // A host that has no such worktree finds nothing, and the local one stays.
+    let wrong = env.band(&[
+        "worktrees",
+        "remove",
+        "my-repo",
+        "feat/rm-host",
+        "--host",
+        "h-nothere",
+    ]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr(&wrong).contains("not found"),
+        "stderr: {}",
+        stderr(&wrong)
+    );
+    let state = env.state_json();
+    assert_eq!(state["repos"][0]["worktrees"].as_array().unwrap().len(), 2);
+
+    let output = env.band(&[
+        "worktrees",
+        "remove",
+        "my-repo",
+        "feat/rm-host",
+        "--host",
+        "local",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let state = env.state_json();
+    let worktrees = state["repos"][0]["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1);
+    assert_eq!(worktrees[0]["branch"], "main");
+}
+
+#[test]
 fn setup_script_runs_on_create() {
     let env = TestEnv::new();
 

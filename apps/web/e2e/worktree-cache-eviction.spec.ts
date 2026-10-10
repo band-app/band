@@ -51,8 +51,8 @@ const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-cache-a";
 const BRANCH_B = "feature-cache-b";
 
-const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
-const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders (matches >= 1024px in `apps/web/src/hooks/useIsDesktop.ts`).

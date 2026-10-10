@@ -29,7 +29,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-restart-daemon-token";
 const REPO = "restartproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {

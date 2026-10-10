@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -317,7 +318,7 @@ describe("a runner with snapshot hooks", () => {
     const taken = await snapshotTaken(hostId);
     expect(field(taken as string, "worker")).toBe(hostId);
     expect(field(taken as string, "handle")).toBe(handle);
-    expect(field(taken as string, "worktrees")).toBe("proja-snap-a");
+    expect(field(taken as string, "worktrees")).toBe(toWorktreeId("proja", "snap-a", hostId));
     // The hub records the snapshot once the hook has exited, which is after the hook's own log line.
     const recorded = await waitFor(
       async () => {
@@ -330,7 +331,7 @@ describe("a runner with snapshot hooks", () => {
     expect(recorded[0]).toMatchObject({
       runnerId: "hib",
       hostId,
-      worktreeIds: ["proja-snap-a"],
+      worktreeIds: [toWorktreeId("proja", "snap-a", hostId)],
       snapshotId: field(taken as string, "id"),
       sizeBytes: 1234,
       restoredAt: null,
@@ -349,7 +350,7 @@ describe("a runner with snapshot hooks", () => {
 
     // A file read wakes the worktree. The restore hook gets the snapshot, with a new bootstrap token.
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: "proja-snap-a",
+      worktreeId: toWorktreeId("proja", "snap-a", hostId),
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited a\n");
@@ -390,7 +391,7 @@ describe("a runner with snapshot hooks", () => {
     writeFileSync(failRestore, "");
     try {
       const file = await q<{ content: string }>("worktree.getFile", {
-        worktreeId: "proja-snap-b",
+        worktreeId: toWorktreeId("proja", "snap-b", hostId),
         path: "hello.txt",
       });
       expect(file.content).toBe("hello\nedited b\n");
@@ -460,7 +461,7 @@ describe("a runner with snapshot hooks", () => {
     // The worktree whose snapshot is gone still wakes, from the git state sleep stored.
     const lost = field(older, "worker") === one.hostId ? "snap-c" : "snap-d";
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: `proja-${lost}`,
+      worktreeId: toWorktreeId("proja", lost, (lost === "snap-c" ? one : two).hostId as string),
       path: "hello.txt",
     });
     expect(file.content).toBe(`hello\nedited ${lost === "snap-c" ? "c" : "d"}\n`);

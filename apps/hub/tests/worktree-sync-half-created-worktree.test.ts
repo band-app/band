@@ -117,7 +117,7 @@ describe("worktree sync during git worktree add", () => {
     timeout: 60_000,
   }, async () => {
     if (!server) throw new Error("server not started");
-    await syncThroughPoller(server, toWorktreeId(REPO, "main"));
+    await syncThroughPoller(server, toWorktreeId(REPO, "main", "local"));
 
     expect(listWorktreeNames(tmpHome, REPO)).toEqual(["main"]);
     expect(await listedWorktreeNames(server)).toEqual(["main"]);
@@ -128,7 +128,7 @@ describe("worktree sync during git worktree add", () => {
     // A restart runs the poller's first tick, and its sync, again.
     await server.close();
     server = await startServer({ remoteHost: false, tmpHome });
-    await syncThroughPoller(server, toWorktreeId(REPO, "feat/half"));
+    await syncThroughPoller(server, toWorktreeId(REPO, "feat/half", "local"));
 
     expect(listWorktreeNames(tmpHome, REPO)).toEqual(["feat/half", "main"]);
     expect(await listedWorktreeNames(server)).toEqual(["feat/half", "main"]);

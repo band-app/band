@@ -134,7 +134,7 @@ describe("branch status git fields", () => {
 
   it("reports dirty, conflict, ahead/behind and sync state for each worktree", async () => {
     const stream = await StatusStream.open(server.url, TOKEN);
-    const status = (branch: string) => stream.latest(toWorktreeId(REPO, branch));
+    const status = (branch: string) => stream.latest(toWorktreeId(REPO, branch, "local"));
     try {
       // The first tick's worktree sync also finds the `conflict-other` helper
       // worktree, so wait for these worktrees by name, not by count.

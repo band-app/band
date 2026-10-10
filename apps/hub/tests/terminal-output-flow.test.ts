@@ -18,7 +18,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-output-flow-token";
 const REPO = "flowproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 const FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; print $l while 1'\r`;
 /** A flood that also records how many lines it has printed, in `count` in its cwd. */
 const COUNTING_FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; for (my $i = 1; ; $i++) { print $l; if ($i % 1000 == 0) { open(my $f, ">", "count.tmp"); print $f $i; close $f; rename "count.tmp", "count" } }'\r`;

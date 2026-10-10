@@ -52,8 +52,8 @@ const TOKEN = "e2e-terminal-touch-scroll-token";
 // One repo per test: the probe keeps the first terminal in raw mode.
 const MOUSE_REPO = "alpha-touch-mouse";
 const SHELL_REPO = "alpha-touch-shell";
-const MOUSE_WORKTREE = toWorktreeId(MOUSE_REPO, "main");
-const SHELL_WORKTREE = toWorktreeId(SHELL_REPO, "main");
+const MOUSE_WORKTREE = toWorktreeId(MOUSE_REPO, "main", "local");
+const SHELL_WORKTREE = toWorktreeId(SHELL_REPO, "main", "local");
 // The input log shows ESC as `^[`, so a failure prints readable input.
 const SGR_WHEEL_REPORT = /\^\[\[<(64|65);(\d+);(\d+)M/g;
 

@@ -29,10 +29,10 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-worktree-git-pull-notice-token";
 const REPO = "pull-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 /** A repo whose origin no longer exists, so a pull really fails. */
 const BROKEN_REPO = "broken-repo";
-const BROKEN_WORKTREE = toWorktreeId(BROKEN_REPO, BRANCH);
+const BROKEN_WORKTREE = toWorktreeId(BROKEN_REPO, BRANCH, "local");
 /** `ToastHost`'s `right-4` / `bottom-4` gutter, in CSS px. */
 const GUTTER = 16;
 

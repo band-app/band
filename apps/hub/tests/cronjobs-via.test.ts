@@ -246,7 +246,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     // Self-close: the command ended with `exit`, so the pane closes when the
     // (fast) stub finishes, and the `cleanupOnExit` hook prunes it from the
     // pool. No terminal should remain for the worktree.
-    const worktreeId = toWorktreeId("viacron", "main");
+    const worktreeId = toWorktreeId("viacron", "main", "local");
     const remaining = await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -331,7 +331,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
 
     // Wait until the PTY is registered so the overlap check has something to
     // observe, then fire the second trigger while the stub is still sleeping.
-    const worktreeId = toWorktreeId("overlapcron", "main");
+    const worktreeId = toWorktreeId("overlapcron", "main", "local");
     await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -427,7 +427,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     expect(data.worktreeId).toBe("chatcron-main");
     expect(typeof data.chatId).toBe("string");
 
-    const worktreeId = toWorktreeId("chatcron", "main");
+    const worktreeId = toWorktreeId("chatcron", "main", "local");
 
     // Positive anchor: the chat task actually landed.
     const tasks = await waitFor(
@@ -605,7 +605,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const triggerData = await trpcData<TriggerResponse>(trigger);
     expect(triggerData.via).toBe("terminal");
 
-    const worktreeId = toWorktreeId("delcron", "main");
+    const worktreeId = toWorktreeId("delcron", "main", "local");
 
     // Positive anchor: the PTY is live (the stub is still sleeping).
     await waitFor(
@@ -760,7 +760,7 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
     expect(statuses).toEqual([200, 409]);
 
     // And the worktree holds exactly one terminal — no orphan.
-    const worktreeId = toWorktreeId("racecron", "main");
+    const worktreeId = toWorktreeId("racecron", "main", "local");
     const terminals = await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -786,7 +786,7 @@ describe("cronjobs.trigger via=terminal on a worktree-scoped job", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let jobId: string;
-  const FEATURE_WS = toWorktreeId("wsscron", "feature");
+  const FEATURE_WS = toWorktreeId("wsscron", "feature", "local");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cron-via-wsscope-");

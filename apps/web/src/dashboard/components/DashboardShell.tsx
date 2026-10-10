@@ -156,7 +156,9 @@ export function DashboardShell({
   // is dominated by render cost anyway.
   const findRepoForWorktree = useCallback(
     (worktreeId: string): RepoInfo | undefined =>
-      repos.find((p) => p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId)),
+      repos.find((p) =>
+        p.worktrees.some((wt) => toWorktreeId(p.name, wt.name, wt.hostId) === worktreeId),
+      ),
     [repos],
   );
 

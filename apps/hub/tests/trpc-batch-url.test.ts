@@ -153,7 +153,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
     // Derive the worktreeId via the canonical helper so a future naming
     // convention change doesn't silently fail this test with a misleading
     // "worktree not found" error instead of the batch-URL assertion.
-    worktreeId = toWorktreeId(repo, branch);
+    worktreeId = toWorktreeId(repo, branch, "local");
     // `getChanges` is what the Changes view reads to discover the merge-base
     // + per-file entries before fanning out a `getFileDiff` query per file
     // (the "View all" tab does exactly that), so use it here too.

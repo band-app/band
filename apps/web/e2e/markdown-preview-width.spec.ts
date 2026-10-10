@@ -29,7 +29,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-markdown-preview-width-token";
 const REPO = "md-width-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 const FILE = "LONG.md";
 const WIDTH_KEY = "band:markdown-preview-width";
 /** 61.25rem, the narrow column cap in `markdownPreviewWidthTheme`. */

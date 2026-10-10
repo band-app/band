@@ -25,7 +25,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-echo-branch-poll-token";
 const REPO = "echoproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 /** Enough worktrees that one tick's work used to block the loop for ~300 ms+. */
 const EXTRA_WORKTREES = 72;
 /** macOS key auto-repeat is ~30 keys/s. */

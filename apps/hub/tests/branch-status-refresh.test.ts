@@ -20,7 +20,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "branch-status-refresh-token";
 const REPO = "refreshproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 
 const gitEnv = {
   ...process.env,

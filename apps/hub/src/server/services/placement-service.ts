@@ -235,7 +235,8 @@ export class PlacementService {
    * for a worktree that already has an open request returns that request.
    */
   async placeWorktree(input: WorktreeCreateInput, placement: Placement): Promise<PlaceResult> {
-    const worktreeId = toWorktreeId(input.repo, input.branch);
+    // The request exists because no host is chosen yet, so it is keyed by the host-less id.
+    const worktreeId = toWorktreeId(input.repo, input.branch, undefined);
     const open = this.queries.findOpenForWorktree(worktreeId);
     if (open) return { kind: "request", requestId: open.id };
     // A repo with no remote URL has nothing a new worker could clone, so it only runs on a host
@@ -512,7 +513,7 @@ export class PlacementService {
       } else {
         // Cancelled while the checkout was being made: don't leave an orphan.
         await worktreeService
-          .remove({ repo: row.repo, name: row.branch })
+          .remove({ repo: row.repo, name: row.branch, hostId: row.hostId })
           .catch((err) => log.warn(`could not remove cancelled ${row.worktreeId}: ${err}`));
       }
     } catch (err) {

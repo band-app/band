@@ -95,7 +95,7 @@ test.afterAll(async () => {
 test("file editor: a selection shows no popup, and right-click offers the file actions", async ({
   page,
 }) => {
-  const worktreeId = toWorktreeId("sel-menu-editor", BRANCH);
+  const worktreeId = toWorktreeId("sel-menu-editor", BRANCH, "local");
   const worktree = new WorktreePage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
@@ -162,7 +162,7 @@ test("file editor: a selection shows no popup, and right-click offers the file a
 });
 
 test("split diff: each side's reference uses that side's line numbers", async ({ page }) => {
-  const worktreeId = toWorktreeId("sel-menu-split", BRANCH);
+  const worktreeId = toWorktreeId("sel-menu-split", BRANCH, "local");
   const worktree = new WorktreePage(page, server.url, TOKEN);
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
@@ -198,7 +198,7 @@ test("split diff: each side's reference uses that side's line numbers", async ({
 });
 
 test("unified diff: Add to Chat appends the reference to the chat input", async ({ page }) => {
-  const worktreeId = toWorktreeId("sel-menu-unified", BRANCH);
+  const worktreeId = toWorktreeId("sel-menu-unified", BRANCH, "local");
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   const chat = new ChatPanePage(page, server.url, TOKEN);
   const menu = new SelectionMenu(page);
@@ -220,7 +220,7 @@ test("unified diff: Add to Chat appends the reference to the chat input", async 
 });
 
 test("terminal: right-click offers Add to Chat, Copy, Paste and Select All", async ({ page }) => {
-  const worktreeId = toWorktreeId("sel-menu-terminal", BRANCH);
+  const worktreeId = toWorktreeId("sel-menu-terminal", BRANCH, "local");
   const worktree = new WorktreePage(page, server.url, TOKEN);
   const terminal = new TerminalInputSurface(page, worktreeId);
   const chat = new ChatPanePage(page, server.url, TOKEN);

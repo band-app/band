@@ -58,7 +58,7 @@ const CLOSED = "feat/closed";
 const NO_PR = "feat/no-pr";
 const FAILING_TITLE = "fix(web): stop terminal input stalls";
 
-const wsId = (branch: string) => toWorktreeId(REPO, branch);
+const wsId = (branch: string) => toWorktreeId(REPO, branch, "local");
 
 let server: ServerHandle;
 let stub: GhStub;

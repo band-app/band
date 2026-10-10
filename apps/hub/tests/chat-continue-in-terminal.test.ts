@@ -157,7 +157,7 @@ interface ContinueResponse {
 describe("chats.continueInTerminal — claude-code", () => {
   const TOKEN = "continue-terminal-claude-token";
   const REPO = "cont-proj";
-  const WORKTREE_ID = toWorktreeId(REPO, "main");
+  const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -249,7 +249,7 @@ describe("chats.continueInTerminal — claude-code", () => {
 describe("chats.continueInTerminal — unsupported agent", () => {
   const TOKEN = "continue-terminal-gemini-token";
   const REPO = "cont-gem-proj";
-  const WORKTREE_ID = toWorktreeId(REPO, "main");
+  const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
   let server: ServerHandle;
   let tmpHome: string;
 

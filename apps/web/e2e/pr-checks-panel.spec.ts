@@ -252,7 +252,7 @@ test("shows the pull request, its merge state and each check linking to its job"
   page,
 }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, PR_BRANCH));
+  await panel.goto(toWorktreeId(REPO, PR_BRANCH, "local"));
 
   await expect(panel.number).toHaveText("#697");
   await expect(panel.state).toHaveAttribute("data-review-state", "open");
@@ -303,7 +303,7 @@ test("shows the pull request, its merge state and each check linking to its job"
 
 test("Fix starts a coding agent with the failing checks and their job links", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, PR_BRANCH));
+  await panel.goto(toWorktreeId(REPO, PR_BRANCH, "local"));
   await expect(panel.failingBanner).toBeVisible();
 
   await panel.startFix();
@@ -318,7 +318,7 @@ test("Fix starts a coding agent with the failing checks and their job links", as
 
 test("merging from the menu runs gh pr merge with the chosen method", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, READY_BRANCH));
+  await panel.goto(toWorktreeId(REPO, READY_BRANCH, "local"));
   await expect(panel.number).toHaveText("#700");
   await expect(panel.mergeButton).toBeEnabled();
 
@@ -331,7 +331,7 @@ test("merging from the menu runs gh pr merge with the chosen method", async ({ p
 
 test("a branch without a pull request lists its GitHub Actions jobs", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, "main"));
+  await panel.goto(toWorktreeId(REPO, "main", "local"));
 
   await expect(panel.branch).toHaveText("main");
   await expect(panel.noReview).toContainText("4444444");
@@ -344,7 +344,7 @@ test("a branch without a pull request lists its GitHub Actions jobs", async ({ p
 
 test("a failed merge shows gh's message", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, MERGE_FAIL_BRANCH));
+  await panel.goto(toWorktreeId(REPO, MERGE_FAIL_BRANCH, "local"));
   await expect(panel.number).toHaveText("#702");
 
   await panel.merge("merge");
@@ -354,7 +354,7 @@ test("a failed merge shows gh's message", async ({ page }) => {
 
 test("Refresh runs the lookup again and shows the new checks", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, REFRESH_BRANCH));
+  await panel.goto(toWorktreeId(REPO, REFRESH_BRANCH, "local"));
   await expect(panel.checkNames).toHaveText(["Build"]);
 
   refreshAnswer = reviewQueryData({
@@ -377,7 +377,7 @@ test("a running check counts up from its start time and a queued one says so", a
   runningAnswer = runningChecks({ completedAt: null });
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.setTime("2026-01-01T10:04:12Z");
-  await panel.goto(toWorktreeId(REPO, RUNNING_BRANCH));
+  await panel.goto(toWorktreeId(REPO, RUNNING_BRANCH, "local"));
 
   await panel.expandCheck("Release");
   await expect(panel.checkDuration("Release")).toHaveText("Running for 4m 12s");
@@ -396,7 +396,7 @@ test("a running check counts up from its start time and a queued one says so", a
 
 test("the summary row collapses and expands the check list", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, PR_BRANCH));
+  await panel.goto(toWorktreeId(REPO, PR_BRANCH, "local"));
   await expect(panel.list).toBeVisible();
 
   await panel.toggleSummary();
@@ -410,7 +410,7 @@ test("the summary row collapses and expands the check list", async ({ page }) =>
 
 test("the overflow menu offers opening and copying the pull request link", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, PR_BRANCH));
+  await panel.goto(toWorktreeId(REPO, PR_BRANCH, "local"));
   await expect(panel.number).toHaveText("#697");
 
   await panel.openMenu();
@@ -421,7 +421,7 @@ test("the overflow menu offers opening and copying the pull request link", async
 
 test("a gh failure shows the error with a retry button", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId(REPO, GH_DOWN_BRANCH));
+  await panel.goto(toWorktreeId(REPO, GH_DOWN_BRANCH, "local"));
 
   await expect(panel.error).toContainText("HTTP 401: Bad credentials");
   await expect(panel.errorRetry).toBeVisible();
@@ -430,7 +430,7 @@ test("a gh failure shows the error with a retry button", async ({ page }) => {
 
 test("a repo without an origin remote shows why the tab is empty", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId("local-only", "main"));
+  await panel.goto(toWorktreeId("local-only", "main", "local"));
 
   await expect(panel.unavailable).toBeVisible();
   await expect(panel.root).toHaveCount(0);

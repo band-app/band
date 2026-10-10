@@ -56,8 +56,8 @@ export interface DashboardState {
   removeStatus: (worktreeId: string) => void;
   setActiveWorktree: (worktreeId: string | null) => void;
   runScript: (path: string, scriptType: string) => Promise<void>;
-  gitPull: (repo: string, name: string) => Promise<void>;
-  gitPush: (repo: string, name: string) => Promise<void>;
+  gitPull: (repo: string, name: string, hostId?: string) => Promise<void>;
+  gitPush: (repo: string, name: string, hostId?: string) => Promise<void>;
   updateGitStatus: (worktreeId: string, git: GitStatus) => void;
   updateCIStatus: (worktreeId: string, ci: CIStatus) => void;
   updateSetupStatus: (worktreeId: string, status: SetupStatus) => void;
@@ -166,17 +166,17 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       }
     },
 
-    gitPull: async (repo: string, name: string) => {
+    gitPull: async (repo: string, name: string, hostId?: string) => {
       try {
-        reportRefusal(await adapter.gitPull(repo, name), get().notify);
+        reportRefusal(await adapter.gitPull(repo, name, hostId), get().notify);
       } catch (e) {
         get().setError(e);
       }
     },
 
-    gitPush: async (repo: string, name: string) => {
+    gitPush: async (repo: string, name: string, hostId?: string) => {
       try {
-        reportRefusal(await adapter.gitPush(repo, name), get().notify);
+        reportRefusal(await adapter.gitPush(repo, name, hostId), get().notify);
       } catch (e) {
         get().setError(e);
       }

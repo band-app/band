@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GitHttpAuthStub, startGitHttpAuthStub } from "./fixtures/git-http-auth-stub";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -215,7 +216,7 @@ describe("GH_TOKEN on a worker the runner starts", () => {
       { label: "worktree on the worker", timeoutMs: 90_000, intervalMs: 250 },
     );
     hostId = wt.hostId ?? "";
-    worktreeId = "proj-gh-feat";
+    worktreeId = toWorktreeId("proj", "gh-feat", hostId);
 
     // Length and prefix, so the token is not in the echo of the typed command.
     const out = await inWorkerShell(

@@ -27,7 +27,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-restart-token";
 const REPO = "restartproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 
 interface TerminalEntry {
   terminalId: string;
@@ -145,7 +145,7 @@ describe("terminal daemon — shells survive a server restart", () => {
 // when the worktree went away while none was.
 describe("terminal daemon — a deleted worktree's shells end", () => {
   const PROJ = "gonerproj";
-  const MAIN_ID = toWorktreeId(PROJ, "main");
+  const MAIN_ID = toWorktreeId(PROJ, "main", "local");
   let tmpHome: string;
   let repo: string;
   let port: number;
@@ -207,7 +207,7 @@ describe("terminal daemon — a deleted worktree's shells end", () => {
   });
 
   it("worktrees.remove on a running server ends the worktree's shells", async () => {
-    const worktreeId = toWorktreeId(PROJ, "live-delete");
+    const worktreeId = toWorktreeId(PROJ, "live-delete", "local");
     const pid = await createTerminal(server, worktreeId);
     expect(isAlive(pid)).toBe(true);
 
@@ -224,7 +224,7 @@ describe("terminal daemon — a deleted worktree's shells end", () => {
   });
 
   it("the next boot ends shells of a worktree deleted while no server ran", async () => {
-    const worktreeId = toWorktreeId(PROJ, "offline-delete");
+    const worktreeId = toWorktreeId(PROJ, "offline-delete", "local");
     const keptPid = await createTerminal(server, MAIN_ID);
     const gonePid = await createTerminal(server, worktreeId);
 

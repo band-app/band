@@ -47,7 +47,7 @@ const TOKEN = "e2e-search-files-select-first-token";
 const REPO = "search-files-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH = "feature";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 const HAYSTACK = "haystack.txt";
 const LINE_COUNT = 40;

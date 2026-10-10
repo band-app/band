@@ -24,7 +24,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-cold-restore-token";
 const REPO = "coldrestoreproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 
 interface TerminalEntry {
   terminalId: string;

@@ -161,7 +161,7 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
   });
 
   it("delivers the prompt while setup is still running in its own terminal", async () => {
-    const worktreeId = toWorktreeId(REPO, "feat/slow-setup");
+    const worktreeId = toWorktreeId(REPO, "feat/slow-setup", "local");
     await createWorktree(server, "feat/slow-setup", "prompt during slow setup");
 
     const { terminalId: setupTerminal, output } = await waitForTerminalOutput(
@@ -201,7 +201,7 @@ describe("a failing setup does not drop the prompt", () => {
   });
 
   it("shows the exit code in the setup terminal and still delivers the prompt", async () => {
-    const worktreeId = toWorktreeId(REPO, "feat/bad-setup");
+    const worktreeId = toWorktreeId(REPO, "feat/bad-setup", "local");
     await createWorktree(server, "feat/bad-setup", "prompt despite failing setup");
 
     const { output } = await waitForTerminalOutput(
@@ -262,7 +262,7 @@ describe("teardown runs in a terminal before the worktree is removed", () => {
     // command ran in a worktree terminal rather than a hidden subprocess.
     expect(readFileSync(markerPath, "utf-8")).toBe(`dispatch=terminal cwd=${realWorktreePath}`);
 
-    const worktreeId = toWorktreeId(REPO, "feat/teardown");
+    const worktreeId = toWorktreeId(REPO, "feat/teardown", "local");
     const remaining = await waitFor(
       async () => {
         const ids = await listTerminalIds(server, worktreeId);

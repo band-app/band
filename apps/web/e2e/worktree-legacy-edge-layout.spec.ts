@@ -38,7 +38,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-worktree-legacy-edge-layout-token";
 const REPO = "alpha-legacy-edge";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 const GRID_FILE = "README.md";
 const BOTTOM_EDGE_FILE = "notes.md";

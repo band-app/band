@@ -35,7 +35,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-slash-ranking-token";
 const REPO = "slashproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Skills first and built-ins last, as Claude Code advertises them.
 const COMMANDS = [

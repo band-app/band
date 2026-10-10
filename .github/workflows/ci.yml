@@ -159,6 +159,9 @@ jobs:
       - name: Lint (Biome)
         run: pnpm exec biome check .
 
+      - name: Check worktree ids are built by toWorktreeId
+        run: ./scripts/check-worktree-ids.sh
+
       - name: Check unused exports & dependencies (knip)
         run: pnpm knip
 

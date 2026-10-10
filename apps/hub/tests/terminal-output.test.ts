@@ -22,7 +22,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-output-token";
 const REPO = "outputproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 const MAX_OUTPUT_CHARS = 100_000;
 
 let tmpHome: string;

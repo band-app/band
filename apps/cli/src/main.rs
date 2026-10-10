@@ -259,6 +259,10 @@ enum WorktreesCmd {
         repo: String,
         /// Worktree name (the branch it was created on — its stable identity)
         name: String,
+        /// Host the worktree lives on (see `band hosts`). Needed when the same
+        /// repo and name exist on more than one host.
+        #[arg(long)]
+        host: Option<String>,
     },
 }
 
@@ -878,7 +882,9 @@ fn main() {
                 origin.as_deref(),
                 no_origin,
             ),
-            WorktreesCmd::Remove { repo, name } => cmd_worktrees_remove(&repo, &name),
+            WorktreesCmd::Remove { repo, name, host } => {
+                cmd_worktrees_remove(&repo, &name, host.as_deref())
+            }
         },
         Commands::Agents { cmd } => match cmd {
             AgentsCmd::List { worktree_id } => cmd_agents_list(worktree_id.as_deref()),
@@ -1695,7 +1701,11 @@ fn user_default_via(settings: &state::Settings) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-fn cmd_worktrees_remove(repo: &str, name: &str) -> Result<CommandResult, String> {
+fn cmd_worktrees_remove(
+    repo: &str,
+    name: &str,
+    host: Option<&str>,
+) -> Result<CommandResult, String> {
     validate::validate_name(repo, "Repo name")?;
     validate::validate_name(name, "Worktree name")?;
 
@@ -1703,13 +1713,15 @@ fn cmd_worktrees_remove(repo: &str, name: &str) -> Result<CommandResult, String>
     // The server identifies a worktree by its immutable `name` — the branch
     // it was created on, which stays stable even after the git branch is
     // switched (see the `worktrees.name` column).
-    client.trpc_mutate(
-        "worktrees.remove",
-        &serde_json::json!({
-            "repo": repo,
-            "name": name,
-        }),
-    )?;
+    let mut input = serde_json::json!({
+        "repo": repo,
+        "name": name,
+    });
+    if let Some(host) = host {
+        validate::validate_name(host, "Host id")?;
+        input["hostId"] = serde_json::json!(host);
+    }
+    client.trpc_mutate("worktrees.remove", &input)?;
 
     Ok(CommandResult {
         text: String::new(),
@@ -4650,6 +4662,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name (the branch it was created on — its stable identity)"},
+                {"name": "--host", "type": "string", "required": false, "description": "Host the worktree lives on (see `band hosts`). Needed when the same repo and name exist on more than one host."},
             ],
             "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
         }),

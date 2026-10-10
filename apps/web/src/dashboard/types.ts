@@ -104,6 +104,8 @@ export interface WorktreeInfo {
   lifecycle?: "sleeping" | "waking";
   /** The host the worktree lives on. Absent or `local` for this machine. */
   hostId?: string;
+  /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
+  missing?: boolean;
   /** Where the worktree was started from, or null for top-level work. */
   origin?: WorktreeOrigin | null;
   /** Ids of the worktrees started from this one, on any repo and host. */
@@ -305,6 +307,8 @@ export interface DeleteDialogInfo {
   /** Worktree identity (immutable `name`), used both as the delete target
    *  and as the label shown in the confirmation dialog. */
   name: string;
+  /** The host the worktree is on, so the same branch on two hosts is told apart. */
+  hostId?: string;
   isUnmerged: boolean;
   isDirty: boolean;
   hasUnpushedCommits: boolean;

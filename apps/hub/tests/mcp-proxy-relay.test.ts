@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type McpStub, startMcpStub } from "./fixtures/mcp-stub";
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
@@ -308,7 +309,10 @@ beforeAll(async () => {
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-    body: JSON.stringify({ worktreeId: "proj-mcp", text: "mcp-probe" }),
+    body: JSON.stringify({
+      worktreeId: toWorktreeId("proj", "mcp", issued.hostId),
+      text: "mcp-probe",
+    }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   await stream.events;

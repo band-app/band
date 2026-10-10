@@ -26,7 +26,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-flood-token";
 const REPO = "floodproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 /** Well past the daemon's 64 MB drop threshold. */
 const FLOOD_BYTES = 200_000_000;
 

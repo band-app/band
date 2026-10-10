@@ -157,7 +157,7 @@ test.describe("More models submenu on a short desktop window", () => {
 
   test("stays inside the window and scrolls to its last model", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("submenudesktop", "main"));
+    await chatPane.goto(toWorktreeId("submenudesktop", "main", "local"));
     await chatPane.waitForReady();
     await expectEveryModelReachable(chatPane, viewport);
   });
@@ -169,7 +169,7 @@ test.describe("More models submenu on a phone", () => {
 
   test("stays inside the screen and scrolls to its last model", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("submenumobile", "main"));
+    await chatPane.goto(toWorktreeId("submenumobile", "main", "local"));
     await chatPane.waitForReady();
     await expectEveryModelReachable(chatPane, viewport);
   });
@@ -184,7 +184,7 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("submenuzoom", "main"));
+    await chatPane.goto(toWorktreeId("submenuzoom", "main", "local"));
     await chatPane.waitForReady();
     await worktreePage.zoomInBy(3);
     await expectEveryModelReachable(chatPane, viewport);
@@ -195,7 +195,7 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("submenuopencode", "main"));
+    await chatPane.goto(toWorktreeId("submenuopencode", "main", "local"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("opencode");

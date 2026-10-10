@@ -97,6 +97,11 @@ export interface WorktreeState {
   /** Host the worktree lives on. Absent means `local`. */
   hostId?: string;
   /**
+   * Set by a scan of the worktree's host when its folder no longer exists there. Never stored:
+   * the next scan sets it again, and `repos.list` passes it on so the UI offers Remove.
+   */
+  missing?: boolean;
+  /**
    * Where the worktree was started from. Read-only here: `saveAll` keeps what the
    * database holds, so the many paths that rebuild a worktree row cannot drop it.
    * `RepoQueries.setOrigin` writes it.
@@ -378,6 +383,38 @@ export class RepoQueries {
       .delete(repoHostsTable)
       .where(and(eq(repoHostsTable.repoName, repoName), eq(repoHostsTable.hostId, hostId)))
       .run();
+  }
+
+  /**
+   * For a hub with its own machine turned off: forgets the records of git worktrees on the local
+   * host, and the hub's checkout of each git repo. Files are not touched. Plain folders stay,
+   * since they exist only on the hub. Returns the forgotten worktrees.
+   */
+  forgetLocalHost(): { repo: string; name: string; path: string }[] {
+    return getDb().transaction((tx) => {
+      const gitRepos = tx
+        .select({ name: reposTable.name })
+        .from(reposTable)
+        .where(eq(reposTable.kind, "git"))
+        .all();
+      const forgotten: { repo: string; name: string; path: string }[] = [];
+      for (const { name } of gitRepos) {
+        const rows = tx
+          .select()
+          .from(worktreesTable)
+          .where(and(eq(worktreesTable.repoName, name), eq(worktreesTable.hostId, "local")))
+          .all();
+        for (const row of rows) forgotten.push({ repo: name, name: row.name, path: row.path });
+        tx.delete(worktreesTable)
+          .where(and(eq(worktreesTable.repoName, name), eq(worktreesTable.hostId, "local")))
+          .run();
+        tx.update(reposTable).set({ path: "" }).where(eq(reposTable.name, name)).run();
+        tx.delete(repoHostsTable)
+          .where(and(eq(repoHostsTable.repoName, name), eq(repoHostsTable.hostId, "local")))
+          .run();
+      }
+      return forgotten;
+    });
   }
 
   /** Every host's recorded folder for each repo: `repo name -> host id -> path`. */

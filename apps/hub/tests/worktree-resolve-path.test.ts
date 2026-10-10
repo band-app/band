@@ -28,7 +28,7 @@ import {
 const DEFAULT_TOKEN = "worktree-resolve-path-test-token";
 const REPO = "resolve-path-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 interface ResolvePathResult {
   exists: boolean;

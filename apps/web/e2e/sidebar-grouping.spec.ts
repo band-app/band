@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
 import {
   cleanupTmpHome,
@@ -35,6 +36,8 @@ let server: ServerHandle;
 let tmpHome: string;
 let worker: WorkerHandle | undefined;
 let hostId = "";
+// The worktree on the worker is named after its host.
+let remote1 = "";
 const dirs: string[] = [];
 
 const tmpDir = (prefix: string) => {
@@ -140,6 +143,7 @@ test.beforeAll(async () => {
       { timeout: 20_000 },
     )
     .toBe("online");
+  remote1 = toWorktreeId("svc", "remote1", hostId);
   await createFrom({
     repo: "svc",
     branch: "remote1",
@@ -177,7 +181,7 @@ test("Origin mode nests what started what across repos, with the repo name on ev
     .toEqual(["0:borko-main", "1:svc-alpha", "2:lib-gamma", "1:svc-beta", "2:lib-orphan"]);
   const rest = (await sidebar.rowOrder()).slice(5);
   expect(rest.every((r) => r.depth === 0)).toBe(true);
-  expect(rest.map((r) => r.id).sort()).toEqual(["lib-main", "svc-main", "svc-remote1"]);
+  expect(rest.map((r) => r.id).sort()).toEqual(["lib-main", "svc-main", remote1]);
   await expect(sidebar.row("lib-gamma")).toContainText("lib");
   await expect(sidebar.row("svc-alpha")).toContainText("svc");
   await expect(sidebar.row("borko-main")).toContainText("borko");
@@ -203,10 +207,10 @@ test("Repo mode lists each worktree under its repo, and Host mode groups by work
   await expect(sidebar.hostHeader(hostId)).toContainText("e2e-box");
   await expect(sidebar.hostHeader(hostId)).toHaveAttribute("data-status", "online");
   await expect(sidebar.hostRepoHeader(hostId, "svc")).toBeVisible();
-  await expect(sidebar.row("svc-remote1")).toBeVisible();
+  await expect(sidebar.row(remote1)).toBeVisible();
   await expect(sidebar.row("svc-alpha")).toBeVisible();
   const order = (await sidebar.rowOrder()).map((r) => r.id);
-  expect(order.indexOf("svc-remote1")).toBeGreaterThan(order.indexOf("svc-alpha"));
+  expect(order.indexOf(remote1)).toBeGreaterThan(order.indexOf("svc-alpha"));
 });
 
 test("the switch survives a reload (S3)", async ({ page }) => {

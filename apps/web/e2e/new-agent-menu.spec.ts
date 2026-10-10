@@ -31,7 +31,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-new-agent-menu-token";
 const REPO = "agentproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
