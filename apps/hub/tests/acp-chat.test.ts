@@ -27,6 +27,7 @@ import {
   WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
+import { isRemoteLoopback } from "./helpers/test-host";
 
 let servers: ServerHandle[] = [];
 /** Homes a test seeded itself; removed even when the test fails. */
@@ -444,8 +445,17 @@ describe("chat over ACP", () => {
           {
             type: "http",
             name: "band",
-            url: `${server.url}/mcp-proxy/band`,
-            headers: [{ name: "Authorization", value: expect.stringMatching(/^Bearer mcp_/) }],
+            // With the agent on the loopback worker, the entry points at the worker's relay and
+            // carries the relay token as well.
+            url: isRemoteLoopback
+              ? expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-proxy\/band$/)
+              : `${server.url}/mcp-proxy/band`,
+            headers: [
+              { name: "Authorization", value: expect.stringMatching(/^Bearer mcp_/) },
+              ...(isRemoteLoopback
+                ? [{ name: "X-Band-Relay-Token", value: expect.stringMatching(/^brt_/) }]
+                : []),
+            ],
           },
         ],
       },
