@@ -86,9 +86,16 @@ test.beforeAll(async () => {
   const repos = ["borko", "svc", "lib"].map((name) => {
     const path = join(root, name);
     makeRepo(path);
-    return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
+    const label = name === "svc" ? "team-a" : name === "lib" ? "team-b" : undefined;
+    return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    labels: [
+      { id: "team-a", name: "Team A", color: "#8b5cf6" },
+      { id: "team-b", name: "Team B", color: "#3b82f6" },
+    ],
+  });
   seedState(tmpHome, { repos });
   server = await startServer({ tmpHome });
 
@@ -213,9 +220,41 @@ test("the switch survives a reload (S3)", async ({ page }) => {
   const sidebar = await open(page, "borko-main");
   await sidebar.selectMode("origin");
   await sidebar.reload();
-  await expect(sidebar.modeButton("origin")).toHaveAttribute("aria-pressed", "true");
+  await expect(sidebar.groupByTrigger).toHaveAccessibleName(/Group by: Origin/);
   await expect(sidebar.row("svc-alpha")).toBeVisible();
 });
+
+test("the header has the label filter and the Group by dropdown, and no switch row (S1, S2)", async ({
+  page,
+}) => {
+  const sidebar = await open(page, "borko-main");
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  await expect(worktreePage.labelFilterTrigger()).toBeVisible();
+  await expect(sidebar.groupByTrigger).toBeVisible();
+  await sidebar.expectHeaderFits();
+  // The old always-visible switch row is gone: the modes exist only inside the open menu.
+  await expect(page.getByTestId("repos-panel__group-by--repo")).toHaveCount(0);
+  await sidebar.groupByTrigger.click();
+  await expect(sidebar.modeItem("host")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+for (const mode of ["repo", "origin", "host"] as const) {
+  test(`the label filter hides other repos in ${mode} mode (S1)`, async ({ page }) => {
+    const sidebar = await open(page, "borko-main");
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await sidebar.selectMode(mode);
+    await worktreePage.selectLabelFilter("team-b");
+    if (mode === "repo") {
+      await expect(sidebar.repoModeCard("lib-main")).toBeVisible();
+      await expect(sidebar.repoModeCard("svc-alpha")).toHaveCount(0);
+    } else {
+      await expect(sidebar.row("lib-gamma")).toBeVisible();
+      await expect(sidebar.row("svc-alpha")).toHaveCount(0);
+    }
+    await worktreePage.selectLabelFilter(null);
+  });
+}
 
 test("keyboard navigation steps through the rows of the Origin view", async ({ page }) => {
   const sidebar = await open(page, "borko-main");

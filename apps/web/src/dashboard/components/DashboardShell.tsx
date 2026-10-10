@@ -372,16 +372,15 @@ export function DashboardShell({
       <ReposPanel
         tall={matchMobileHeader}
         count={loading ? null : repos.length}
-        groupBy={repos.length > 0 ? <GroupBySwitch /> : undefined}
         actions={
-          <div className="flex items-center gap-0.5">
+          <div className="flex min-w-0 items-center gap-0.5">
             {admin.data?.admin ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    className="text-muted-foreground"
+                    className="w-6 text-muted-foreground"
                     aria-label="Add repo"
                     data-testid="repos-panel__add-repo"
                     onClick={() => setAddingRepo(true)}
@@ -399,7 +398,7 @@ export function DashboardShell({
                     size="sm"
                     variant="ghost"
                     data-testid="dashboard__label-filter-trigger"
-                    className={`min-w-0 text-[11px] h-5 px-1.5 gap-1 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
+                    className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
                   >
                     {activeLabel ? (
                       <>
@@ -451,13 +450,14 @@ export function DashboardShell({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {repos.length > 0 && <GroupBySwitch />}
             {repos.length > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    className="text-muted-foreground"
+                    className="w-6 text-muted-foreground"
                     aria-label="Collapse all"
                     onClick={collapseAll}
                   >
