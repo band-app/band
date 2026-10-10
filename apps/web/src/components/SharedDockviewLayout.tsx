@@ -22,6 +22,7 @@ import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
 import { getPerWorktreeState, subscribePerWorktreeState } from "./per-worktree-state-store";
+import { StartedFromBar } from "./StartedFromBar";
 import {
   firstLeafOfKind,
   getWorktreeDockviewApi,
@@ -741,11 +742,16 @@ export function SharedDockviewLayout() {
           {(worktreeId, wsActive) => (
             // Only the shown worktree puts app-regions on the page.
             <WindowDragContext.Provider value={wsActive}>
-              <WorktreeCenterDockview
-                worktreeId={worktreeId}
-                visible={wsActive}
-                wsActive={wsActive}
-              />
+              <div className="flex h-full w-full flex-col">
+                <StartedFromBar worktreeId={worktreeId} />
+                <div className="relative min-h-0 flex-1">
+                  <WorktreeCenterDockview
+                    worktreeId={worktreeId}
+                    visible={wsActive}
+                    wsActive={wsActive}
+                  />
+                </div>
+              </div>
             </WindowDragContext.Provider>
           )}
         </MultiWorktreePanelHost>

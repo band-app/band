@@ -40,6 +40,7 @@ import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
+import { GroupBySwitch } from "./GroupBySwitch";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
 import { SettingsPage } from "./SettingsPage";
@@ -371,6 +372,7 @@ export function DashboardShell({
       <ReposPanel
         tall={matchMobileHeader}
         count={loading ? null : repos.length}
+        groupBy={repos.length > 0 ? <GroupBySwitch /> : undefined}
         actions={
           <div className="flex items-center gap-0.5">
             {admin.data?.admin ? (

@@ -8,12 +8,15 @@ import type React from "react";
 export function ReposPanel({
   count,
   actions,
+  groupBy,
   onListClick,
   tall,
   children,
 }: {
   count: number | null;
   actions?: React.ReactNode;
+  /** The Group by switch, shown under the header. */
+  groupBy?: React.ReactNode;
   onListClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** Make the header as tall as the mobile worktree header, so the two line up. */
   tall?: boolean;
@@ -35,6 +38,7 @@ export function ReposPanel({
         </div>
         {actions}
       </div>
+      {groupBy}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the list itself handles the keys */}
       <div
         className="min-h-0 flex-1 overflow-y-auto pb-3"

@@ -52,4 +52,13 @@ band repos list                # META column
 
 `apps/hub/tests/origin-links.test.ts` (explicit origins, the tree, removal, meta), `origin-links-relay.test.ts` (a real worker: a chat through the `band` MCP server, a shell through the relay, forged identity), and `worktrees_create_records_the_origin_and_list_shows_it` and `repos_set_meta_persists_and_lists` in `apps/cli/tests/integration.rs`.
 
-The sidebar grouping that uses these links is a later step.
+## Sidebar
+
+The sidebar has a Group by switch: Repo, Origin or Host. The choice is kept per device in localStorage (`band.sidebar.group-by`) and defaults to Repo.
+
+- Repo is the list by repo. A meta repo shows a "meta" badge.
+- Origin lists worktrees with no origin at the top level and nests each worktree under the one that started it, across repos. Every row shows its repo name. A chevron collapses a subtree. A worktree whose parent was removed moves to the top level with a "parent removed" hint.
+- Host groups by worker (the hub's own machine first) with its online state, then by repo. Pinned worktrees stay in place in Origin and Host.
+- A worktree started from another one has a "Started from <repo · branch>" bar above its tabs. The link opens the origin worktree on the chat (or terminal) that started it, when that tab is open there.
+
+Test: `apps/web/e2e/sidebar-grouping.spec.ts`.

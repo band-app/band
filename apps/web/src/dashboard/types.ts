@@ -72,6 +72,8 @@ export interface RepoInfo {
    * GitHub has no avatar for; the UI then shows its folder icon.
    */
   avatar?: RepoAvatarInfo | null;
+  /** True for a meta repo, where work in other repos is started from. */
+  meta?: boolean;
 }
 
 export interface RepoAvatarInfo {
@@ -102,6 +104,21 @@ export interface WorktreeInfo {
   lifecycle?: "sleeping" | "waking";
   /** The host the worktree lives on. Absent or `local` for this machine. */
   hostId?: string;
+  /** Where the worktree was started from, or null for top-level work. */
+  origin?: WorktreeOrigin | null;
+  /** Ids of the worktrees started from this one, on any repo and host. */
+  children?: string[];
+}
+
+export interface WorktreeOrigin {
+  worktreeId: string;
+  chatId?: string;
+  terminalId?: string;
+  /** True when the origin worktree no longer exists. */
+  removed: boolean;
+  /** The origin worktree's repo and branch while it exists. */
+  repo?: string;
+  branch?: string;
 }
 
 export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";
