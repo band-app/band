@@ -1,32 +1,44 @@
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@band-app/ui";
+import { Check, ChevronDown, Layers } from "lucide-react";
 import { GROUP_BY_OPTIONS, useGroupBy } from "../lib/sidebar-grouping";
 
-/** The sidebar's Group by switch: Repo, Origin or Host. Remembered per device. */
+/** The Repos header's Group by dropdown: Repo, Origin or Host. Remembered per device. */
 export function GroupBySwitch() {
   const [groupBy, setGroupBy] = useGroupBy();
+  const current = GROUP_BY_OPTIONS.find((option) => option.value === groupBy);
   return (
-    <div
-      data-testid="repos-panel__group-by"
-      className="mx-3 mb-1 flex shrink-0 items-center gap-0.5 rounded-md bg-muted/60 p-0.5"
-    >
-      <span className="px-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Group by
-      </span>
-      {GROUP_BY_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={groupBy === option.value}
-          data-testid={`repos-panel__group-by--${option.value}`}
-          onClick={() => setGroupBy(option.value)}
-          className={`h-5 flex-1 rounded px-1.5 text-[11px] font-medium transition-colors ${
-            groupBy === option.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={`Group by: ${current?.label ?? groupBy}`}
+          data-testid="repos-panel__group-by"
+          className="h-5 shrink-0 gap-0.5 px-1 text-[11px] text-foreground/75"
         >
-          {option.label}
-        </button>
-      ))}
-    </div>
+          <Layers className="size-3.5 shrink-0" />
+          <span className="truncate">{current?.label}</span>
+          <ChevronDown className="size-3 shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {GROUP_BY_OPTIONS.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            data-testid={`repos-panel__group-by--${option.value}`}
+            onClick={() => setGroupBy(option.value)}
+          >
+            <span>{option.label}</span>
+            {groupBy === option.value && <Check className="ml-auto size-3 shrink-0" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

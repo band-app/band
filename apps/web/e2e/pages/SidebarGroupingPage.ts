@@ -1,5 +1,5 @@
 /**
- * Page object for the sidebar's Group by switch (Repo | Origin | Host) and the "Started from"
+ * Page object for the sidebar's Group by dropdown (Repo | Origin | Host) and the "Started from"
  * link above a worktree that another worktree started.
  */
 
@@ -16,14 +16,43 @@ export class SidebarGroupingPage {
     this.startedFromLink = page.getByTestId("started-from__link").filter({ visible: true });
   }
 
-  modeButton(mode: GroupByMode): Locator {
+  /** The header's Group by dropdown trigger. */
+  get groupByTrigger(): Locator {
+    return this.page.getByTestId("repos-panel__group-by");
+  }
+
+  /** Asserts that no header control overlaps the title or sticks out of the header. */
+  async expectHeaderFits(): Promise<void> {
+    await test.step("The Repos header controls fit beside the title", async () => {
+      const header = this.page.getByTestId("repos-panel__header").filter({ visible: true });
+      const headerBox = await header.boundingBox();
+      const titleBox = await header.locator("span").first().boundingBox();
+      expect(headerBox).not.toBeNull();
+      expect(titleBox).not.toBeNull();
+      const buttons = header.getByRole("button");
+      const count = await buttons.count();
+      expect(count).toBeGreaterThan(0);
+      for (let i = 0; i < count; i++) {
+        const box = await buttons.nth(i).boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(titleBox!.x + titleBox!.width);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 0.5);
+      }
+      // The current mode stays readable: its label is not squeezed to nothing.
+      const modeText = await this.groupByTrigger.locator("span").boundingBox();
+      expect(modeText?.width ?? 0).toBeGreaterThan(10);
+    });
+  }
+
+  modeItem(mode: GroupByMode): Locator {
     return this.page.getByTestId(`repos-panel__group-by--${mode}`);
   }
 
   async selectMode(mode: GroupByMode): Promise<void> {
     await test.step(`Group the sidebar by ${mode}`, async () => {
-      await this.modeButton(mode).click();
-      await expect(this.modeButton(mode)).toHaveAttribute("aria-pressed", "true");
+      await this.groupByTrigger.click();
+      await this.modeItem(mode).click();
+      await expect(this.groupByTrigger).toHaveAccessibleName(new RegExp(`Group by: ${mode}`, "i"));
     });
   }
 
