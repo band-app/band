@@ -41,6 +41,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useQuery } from "@tanstack/react-query";
 import {
   Check,
   ChevronRight,
@@ -64,6 +65,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
@@ -84,6 +86,14 @@ import {
 } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import {
+  buildHostRows,
+  buildOriginRows,
+  HOST_COLLAPSE_KEY,
+  navigableIds,
+  ORIGIN_COLLAPSE_KEY,
+  useGroupBy,
+} from "../lib/sidebar-grouping";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {
@@ -96,6 +106,7 @@ import type {
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
+import { GroupedWorktrees, MetaBadge } from "./GroupedWorktrees";
 import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
@@ -438,6 +449,7 @@ function SortableRepo({
                     treatment on `WorktreeCard`'s label tooltip. */}
                 <TooltipContent side="right">{repo.name}</TooltipContent>
               </Tooltip>
+              {repo.meta && <MetaBadge repoName={repo.name} />}
             </div>
             {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
                 focus) to keep the header uncluttered while scanning the list;
@@ -617,6 +629,18 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
   );
 }
 
+function findWorktree(
+  repos: RepoInfo[],
+  worktreeId: string,
+): { wt: RepoInfo["worktrees"][number]; repo: RepoInfo } | undefined {
+  for (const repo of repos) {
+    for (const wt of repo.worktrees) {
+      if (toWorktreeId(repo.name, wt.name) === worktreeId) return { wt, repo };
+    }
+  }
+  return undefined;
+}
+
 interface RepoListProps {
   labelFilter: string | null;
 }
@@ -650,6 +674,15 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
+  const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
+  const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
+  const [groupBy] = useGroupBy();
+  const grouped = groupBy !== "repo";
+  const hostsQuery = useQuery({
+    queryKey: ["hosts.list"],
+    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    enabled: groupBy === "host",
+  });
   const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorktrees();
   // Plain (non-git) repos have no separate worktree card to pull up
   // to a Pinned section — they're already flat at the repo level. Drop
@@ -737,12 +770,26 @@ export function RepoList({ labelFilter }: RepoListProps) {
     return groups.filter((g) => g.labelId === labelFilter);
   }, [groups, labelFilter]);
 
+  // The Origin and Host views list every worktree of the repos the label filter lets through,
+  // pinned ones included, in one flat list of rows.
+  const groupedRepos = useMemo(
+    () => (labelFilter ? repos.filter((r) => r.label === labelFilter) : repos),
+    [repos, labelFilter],
+  );
+  const groupedRows = useMemo(() => {
+    if (groupBy === "origin") return buildOriginRows(groupedRepos, originCollapse.isCollapsed);
+    if (groupBy === "host")
+      return buildHostRows(groupedRepos, hostsQuery.data ?? [], hostCollapse.isCollapsed);
+    return [];
+  }, [groupBy, groupedRepos, hostsQuery.data, originCollapse, hostCollapse]);
+
   // Only count worktrees that are actually rendered — collapsed
   // repos/labels hide their worktrees entirely, and keyboard arrow
   // navigation must skip over them so focus never lands on something the
   // user can't see. Pinned worktrees are always at the top of the list
   // (independent of label filter), then the regular tree follows.
   const allWorktreeIds = useMemo(() => {
+    if (grouped) return navigableIds(groupedRows);
     const headerVisible = labels.length > 0 && !labelFilter;
     const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.worktreeId) : [];
     const rest = visibleGroups.flatMap((g) => {
@@ -755,6 +802,8 @@ export function RepoList({ labelFilter }: RepoListProps) {
     });
     return [...pinnedPart, ...rest];
   }, [
+    grouped,
+    groupedRows,
     visibleGroups,
     labels.length,
     labelFilter,
@@ -832,6 +881,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // a chance to run.
   const revealedWorktreeRef = useRef<string | null>(null);
   const revealedAsPinnedRef = useRef<boolean>(false);
+  const revealedGroupByRef = useRef(groupBy);
   useEffect(() => {
     if (!activeWorktreeId) {
       revealedWorktreeRef.current = null;
@@ -841,12 +891,33 @@ export function RepoList({ labelFilter }: RepoListProps) {
     const isActivePinned = pinnedEntries.some((e) => e.worktreeId === activeWorktreeId);
     if (
       revealedWorktreeRef.current === activeWorktreeId &&
-      revealedAsPinnedRef.current === isActivePinned
+      revealedAsPinnedRef.current === isActivePinned &&
+      revealedGroupByRef.current === groupBy
     ) {
       return;
     }
+    revealedGroupByRef.current = groupBy;
     revealedWorktreeRef.current = activeWorktreeId;
     revealedAsPinnedRef.current = isActivePinned;
+    if (grouped) {
+      // Open what hides the active worktree: its origin ancestors, or its host and repo group.
+      let id: string | undefined = activeWorktreeId;
+      const seen = new Set<string>();
+      while (id && !seen.has(id)) {
+        seen.add(id);
+        const entry: { wt: RepoInfo["worktrees"][number]; repo: RepoInfo } | undefined =
+          findWorktree(repos, id);
+        if (!entry) break;
+        const parent = entry.wt.origin;
+        if (parent && !parent.removed) originCollapse.expand(parent.worktreeId);
+        const hostKey = `host:${entry.wt.hostId || "local"}`;
+        hostCollapse.expand(hostKey);
+        hostCollapse.expand(`${hostKey}/${entry.repo.name}`);
+        id = parent && !parent.removed ? parent.worktreeId : undefined;
+      }
+      keyboardNavRef.current = false;
+      return;
+    }
     if (isActivePinned) {
       pinnedCollapse.expand(PINNED_SECTION_ID);
       keyboardNavRef.current = false;
@@ -870,6 +941,11 @@ export function RepoList({ labelFilter }: RepoListProps) {
     }
   }, [
     activeWorktreeId,
+    grouped,
+    groupBy,
+    repos,
+    originCollapse,
+    hostCollapse,
     groups,
     labelFilter,
     labels.length,
@@ -1017,132 +1093,151 @@ export function RepoList({ labelFilter }: RepoListProps) {
         }}
         className="flex flex-col gap-0.5 outline-none min-w-0"
       >
-        {/* Pinned section — rendered outside DndContext/SortableContext so
+        {grouped ? (
+          <GroupedWorktrees
+            mode={groupBy as "origin" | "host"}
+            rows={groupedRows}
+            originCollapse={originCollapse}
+            hostCollapse={hostCollapse}
+            statuses={statuses}
+            branchStatuses={branchStatuses}
+            setupStatuses={setupStatuses}
+            focusedIndex={focusedIndex}
+            onShowDeleteDialog={setDeleteDialog}
+            onTogglePinned={togglePinned}
+          />
+        ) : (
+          <>
+            {/* Pinned section — rendered outside DndContext/SortableContext so
             pinned worktrees cannot be touched by repo drag-and-drop. It
             also ignores the label filter (pinned ws should always be
             visible) and is the *only* place pinned worktrees render. */}
-        {showPinnedSection && (
-          <div key="__pinned">
-            <button
-              type="button"
-              onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
-              aria-expanded={!pinnedSectionCollapsed}
-              className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
-            >
-              <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
-              <span className="text-[13px] font-semibold text-foreground/90">Pinned</span>
-              <ChevronRight
-                className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
-                  pinnedSectionCollapsed ? "" : "rotate-90"
-                }`}
-              />
-            </button>
-            <CollapsibleSection
-              collapsed={pinnedSectionCollapsed}
-              className="flex flex-col gap-0.5 px-2"
-            >
-              {pinnedEntries.map(({ repo, worktree, worktreeId }, i) => (
-                <WorktreeCard
-                  key={worktreeId}
-                  worktree={worktree}
-                  repoName={repo.name}
-                  defaultBranch={repo.defaultBranch}
-                  repoKind={repo.kind}
-                  status={statuses.get(worktreeId)}
-                  branchStatus={branchStatuses.get(worktreeId)}
-                  setupStatus={setupStatuses.get(worktreeId)}
-                  isFocused={!pinnedSectionCollapsed && i === focusedIndex}
-                  onShowDeleteDialog={setDeleteDialog}
-                  showRepoName
-                  onTogglePinned={togglePinned}
-                />
-              ))}
-            </CollapsibleSection>
-          </div>
-        )}
+            {showPinnedSection && (
+              <div key="__pinned">
+                <button
+                  type="button"
+                  onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
+                  aria-expanded={!pinnedSectionCollapsed}
+                  className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
+                >
+                  <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
+                  <span className="text-[13px] font-semibold text-foreground/90">Pinned</span>
+                  <ChevronRight
+                    className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+                      pinnedSectionCollapsed ? "" : "rotate-90"
+                    }`}
+                  />
+                </button>
+                <CollapsibleSection
+                  collapsed={pinnedSectionCollapsed}
+                  className="flex flex-col gap-0.5 px-2"
+                >
+                  {pinnedEntries.map(({ repo, worktree, worktreeId }, i) => (
+                    <WorktreeCard
+                      key={worktreeId}
+                      worktree={worktree}
+                      repoName={repo.name}
+                      defaultBranch={repo.defaultBranch}
+                      repoKind={repo.kind}
+                      status={statuses.get(worktreeId)}
+                      branchStatus={branchStatuses.get(worktreeId)}
+                      setupStatus={setupStatuses.get(worktreeId)}
+                      isFocused={!pinnedSectionCollapsed && i === focusedIndex}
+                      onShowDeleteDialog={setDeleteDialog}
+                      showRepoName
+                      onTogglePinned={togglePinned}
+                    />
+                  ))}
+                </CollapsibleSection>
+              </div>
+            )}
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={allRepoNames} strategy={verticalListSortingStrategy}>
-            {visibleGroups.map((group) => {
-              const groupKey = group.labelId ?? UNLABELED_KEY;
-              // When a label filter is active we render a single group without
-              // a header, so honour the group's collapsed state only when the
-              // header is visible (otherwise users would have no way to expand
-              // it again). Same for the no-labels mode.
-              const headerVisible = labels.length > 0 && !labelFilter;
-              const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
-              return (
-                <div key={groupKey}>
-                  {headerVisible &&
-                    (group.label ? (
-                      <DroppableLabelHeader
-                        labelId={group.labelId!}
-                        label={group.label}
-                        collapsed={groupCollapsed}
-                        onToggle={() => labelCollapse.toggle(groupKey)}
-                      />
-                    ) : (
-                      <DroppableUnlabeledHeader
-                        collapsed={groupCollapsed}
-                        onToggle={() => labelCollapse.toggle(groupKey)}
-                      />
-                    ))}
-                  <CollapsibleSection collapsed={groupCollapsed}>
-                    {group.repos.map((repo) => (
-                      // Consecutive repos in a label group are separated by
-                      // spacing alone (no divider line); the first row sits
-                      // flush under the label header.
-                      <div key={repo.name} className="pt-1 first:pt-0">
-                        <SortableRepo
-                          repo={repo}
-                          statuses={statuses}
-                          branchStatuses={branchStatuses}
-                          setupStatuses={setupStatuses}
-                          removeRepo={(name) => removeRepoMutation.mutate(name)}
-                          updateRepoLabel={(name, label) =>
-                            updateRepoLabelMutation.mutate({ name, label })
-                          }
-                          onPromoteToGit={setPromoteDialog}
-                          labels={labels}
-                          setWorktreeDialog={setWorktreeDialog}
-                          onShowDeleteDialog={setDeleteDialog}
-                          focusedIndex={focusedIndex}
-                          worktreeIndexStart={worktreeIndexMap.get(repo.name) ?? 0}
-                          collapsed={repoCollapse.isCollapsed(repo.name)}
-                          onToggleCollapse={repoCollapse.toggle}
-                          hasPinnedSiblings={reposWithPinned.has(repo.name)}
-                          onTogglePinned={togglePinned}
-                        />
-                      </div>
-                    ))}
-                  </CollapsibleSection>
-                </div>
-              );
-            })}
-          </SortableContext>
-          {/* dropAnimation={null} disables dnd-kit's default snap-back. The
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={allRepoNames} strategy={verticalListSortingStrategy}>
+                {visibleGroups.map((group) => {
+                  const groupKey = group.labelId ?? UNLABELED_KEY;
+                  // When a label filter is active we render a single group without
+                  // a header, so honour the group's collapsed state only when the
+                  // header is visible (otherwise users would have no way to expand
+                  // it again). Same for the no-labels mode.
+                  const headerVisible = labels.length > 0 && !labelFilter;
+                  const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
+                  return (
+                    <div key={groupKey}>
+                      {headerVisible &&
+                        (group.label ? (
+                          <DroppableLabelHeader
+                            labelId={group.labelId!}
+                            label={group.label}
+                            collapsed={groupCollapsed}
+                            onToggle={() => labelCollapse.toggle(groupKey)}
+                          />
+                        ) : (
+                          <DroppableUnlabeledHeader
+                            collapsed={groupCollapsed}
+                            onToggle={() => labelCollapse.toggle(groupKey)}
+                          />
+                        ))}
+                      <CollapsibleSection collapsed={groupCollapsed}>
+                        {group.repos.map((repo) => (
+                          // Consecutive repos in a label group are separated by
+                          // spacing alone (no divider line); the first row sits
+                          // flush under the label header.
+                          <div key={repo.name} className="pt-1 first:pt-0">
+                            <SortableRepo
+                              repo={repo}
+                              statuses={statuses}
+                              branchStatuses={branchStatuses}
+                              setupStatuses={setupStatuses}
+                              removeRepo={(name) => removeRepoMutation.mutate(name)}
+                              updateRepoLabel={(name, label) =>
+                                updateRepoLabelMutation.mutate({ name, label })
+                              }
+                              onPromoteToGit={setPromoteDialog}
+                              labels={labels}
+                              setWorktreeDialog={setWorktreeDialog}
+                              onShowDeleteDialog={setDeleteDialog}
+                              focusedIndex={focusedIndex}
+                              worktreeIndexStart={worktreeIndexMap.get(repo.name) ?? 0}
+                              collapsed={repoCollapse.isCollapsed(repo.name)}
+                              onToggleCollapse={repoCollapse.toggle}
+                              hasPinnedSiblings={reposWithPinned.has(repo.name)}
+                              onTogglePinned={togglePinned}
+                            />
+                          </div>
+                        ))}
+                      </CollapsibleSection>
+                    </div>
+                  );
+                })}
+              </SortableContext>
+              {/* dropAnimation={null} disables dnd-kit's default snap-back. The
               reorder mutation runs an optimistic update in onMutate, so when
               the user releases we want the overlay to disappear instantly
               and the list to look like the new order — not animate back to
               the original drop position before re-rendering. */}
-          <DragOverlay dropAnimation={null}>
-            {activeDragId ? (
-              <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
-                <RepoAvatar
-                  avatar={repos.find((p) => p.name === activeDragId)?.avatar}
-                  className="size-3.5"
-                  fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
-                />
-                <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+              <DragOverlay dropAnimation={null}>
+                {activeDragId ? (
+                  <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
+                    <RepoAvatar
+                      avatar={repos.find((p) => p.name === activeDragId)?.avatar}
+                      className="size-3.5"
+                      fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
+                    />
+                    <span className="text-[13px] font-semibold text-foreground">
+                      {activeDragId}
+                    </span>
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </>
+        )}
       </div>
 
       <NewWorktreeDialog

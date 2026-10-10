@@ -335,7 +335,8 @@ A worktree records where it was started from (plan section 15, guide: `docs/orig
 - Every chat session gets the built-in `band` MCP server at `/mcp-proxy/band` (`api/mcp-proxy/band-tools.ts`, `BUILTIN_BAND_SERVER`), with the tool `worktrees_create`. A chat on a worker creates only on that worker. A saved MCP server cannot take the name `band`.
 - `repos.list` returns `origin` (with `removed` once the parent is gone) and `children` per worktree, and `meta` per repo. `repos.update { name, meta }` sets the flag. The CLI is `band worktrees create --origin | --no-origin` and `band repos set --meta`.
 - Tests: `apps/hub/tests/origin-links.test.ts`, `origin-links-relay.test.ts` (real worker), `worktrees_create_records_the_origin_and_list_shows_it` and `repos_set_meta_persists_and_lists` in `apps/cli/tests/integration.rs`.
-- Not done yet: the sidebar grouping (O.3), and chat or terminal identity for a local CLI call (it records the worktree from `$BAND_WORKTREE_ID` only).
+- Sidebar: Group by Repo | Origin | Host (`dashboard/lib/sidebar-grouping.ts`, `GroupedWorktrees.tsx`, `GroupBySwitch.tsx`) and the "Started from" bar (`components/StartedFromBar.tsx`). Test: `apps/web/e2e/sidebar-grouping.spec.ts`.
+- Not done yet: chat or terminal identity for a local CLI call (it records the worktree from `$BAND_WORKTREE_ID` only).
 
 ## Architecture: agent sessions
 
