@@ -31,14 +31,12 @@ import type {
   HostAcp,
   HostAgentEnv,
   HostBrowser,
-  HostContext,
   HostDesktop,
   HostFs,
   HostGit,
   HostInfo,
   HostLsp,
   HostMcp,
-  HostProject,
   HostScripts,
   HostSearch,
   HostWorktree,
@@ -64,7 +62,6 @@ import { checkHooks, installHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
-import { type ContextSource, ContextSync } from "./context/context-sync";
 import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
@@ -72,7 +69,6 @@ import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
 import { probeTools } from "./process/tools";
-import { ProjectFolder } from "./project/project-folder";
 import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
@@ -96,11 +92,6 @@ export interface LocalHostOptions {
    * its backend at boot (and can replace it), after the host exists.
    */
   terminalBackend: () => TerminalBackend;
-  /**
-   * Where this host's context working copies live and how to reach the hub's
-   * repos. Without it `host.context` reports every context as unreachable.
-   */
-  context?: ContextSource;
   /**
    * Whether this host should look for `gh`. `gh` belongs to the GitHub plugin, so the hub says
    * no when that plugin is disabled, and the host then runs no `gh` process and reports `gh` as
@@ -158,8 +149,6 @@ export class LocalHost implements Host {
     close: (worktreeId) => this.chromium.close(worktreeId),
   };
   readonly desktop: HostDesktop = { open: () => openDesktop() };
-  readonly context: HostContext;
-  readonly project: HostProject;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
@@ -196,42 +185,6 @@ export class LocalHost implements Host {
       mappingsFile: options.repos?.mappingsFile ?? (() => join(bandHome(), "repo-mappings.json")),
       reposDir: options.repos?.reposDir ?? defaultReposDir,
     });
-    const source = options.context;
-    const sync = source ? new ContextSync(source) : null;
-    this.context = {
-      preamble: async (request) => (sync ? sync.preamble(request) : { text: "", memoryDir: null }),
-      pull: async (request) =>
-        sync
-          ? sync.pull(request)
-          : request.contexts.map((c) => ({
-              name: c.name,
-              status: "missing" as const,
-              error: "this host has no context source",
-            })),
-      push: async (request) =>
-        sync
-          ? sync.push(request)
-          : request.contexts.map((c) => ({
-              name: c.name,
-              status: "failed" as const,
-              conflicts: [],
-              blocked: [],
-              error: "this host has no context source",
-            })),
-    };
-    const folders = new ProjectFolder(() => (source ? source.bandHome() : ""), sync);
-    this.project = {
-      ensure: (request) => folders.ensure(request),
-      read: (request) => folders.read(request),
-      search: (request) => folders.search(request),
-      log: (request) => folders.log(request),
-      status: (request) => folders.status(request),
-      diff: (request) => folders.diff(request),
-      commit: (request) => folders.commit(request),
-      push: (request) => folders.push(request),
-      pull: (request) => folders.pull(request),
-      removeRepo: (request) => folders.removeRepo(request),
-    };
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
     void this.toolVersions();

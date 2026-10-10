@@ -50,10 +50,6 @@ const PASSIVE_METHODS = new Set([
   "fs.glob",
   "fs.du",
   "search.listFiles",
-  // The hub's background sync of project folders runs every few seconds, so on its own it must not
-  // keep an idle worker awake. An agent's turn, which the pulls and pushes serve, counts already.
-  "context.pull",
-  "context.push",
 ]);
 
 type Handler<T> = (params: Params, call: { signal: AbortSignal }) => T | Promise<T>;

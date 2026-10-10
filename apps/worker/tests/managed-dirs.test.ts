@@ -23,9 +23,6 @@ describe("folders the worker manages itself", () => {
   let hub: TestHub;
   let w: TestWorker;
   let outside: string;
-  let projectsDir: string;
-  let projectFolder: string;
-  let clone: string;
   let reposDir: string;
   const pids = new Set<number>();
 
@@ -60,13 +57,6 @@ describe("folders the worker manages itself", () => {
     w = await startWorker(hub, { args: ["--repos-dir", reposDir] });
     outside = tmpDir("band-worker-outside-");
     assert.ok(!BAND_HOME.startsWith(w.root), "the roots must not hold the worker's home");
-    projectsDir = join(BAND_HOME, ".band", "projects");
-    projectFolder = join(projectsDir, "demo");
-    clone = join(projectFolder, "repos", "app");
-    mkdirSync(clone, { recursive: true });
-    git(clone, "init", "-q", "-b", "main");
-    git(clone, "commit", "-q", "--allow-empty", "-m", "init");
-    writeFileSync(join(projectFolder, "AGENTS.md"), "hello");
   });
   after(async () => {
     for (const pid of pids) {
@@ -78,24 +68,7 @@ describe("folders the worker manages itself", () => {
     }
     await w.worker.stop();
     await hub.close();
-    cleanup(w.root, w.stateDir, outside, reposDir, projectsDir);
-  });
-
-  it("opens a terminal in a project folder before any ensure call", async () => {
-    await spawn("project-term", projectFolder);
-    const text = await call<Buffer>(w.session, "fs.readFile", {
-      path: join(projectFolder, "AGENTS.md"),
-    });
-    assert.equal(text.toString(), "hello");
-  });
-
-  it("opens a terminal in a project default-branch clone", async () => {
-    await spawn("clone-term", clone);
-    const out = await call<{ stdout: string }>(w.session, "git.exec", {
-      args: ["rev-parse", "--abbrev-ref", "HEAD"],
-      cwd: clone,
-    });
-    assert.equal(out.stdout.trim(), "main");
+    cleanup(w.root, w.stateDir, outside, reposDir);
   });
 
   it("serves the worker's clone directory", async () => {
@@ -125,13 +98,13 @@ describe("folders the worker manages itself", () => {
     const secret = join(outside, "secret");
     mkdirSync(secret);
     writeFileSync(join(secret, "key"), "x");
-    symlinkSync(secret, join(projectFolder, "escape"));
-    await denied("fs.readFile", { path: join(projectFolder, "escape", "key") });
-    await denied("fs.list", { path: join(projectFolder, "escape") });
+    symlinkSync(secret, join(reposDir, "escape"));
+    await denied("fs.readFile", { path: join(reposDir, "escape", "key") });
+    await denied("fs.list", { path: join(reposDir, "escape") });
   });
 
   it("does not treat a sibling with a shared prefix as managed", async () => {
-    const sibling = `${projectsDir}-evil`;
+    const sibling = `${reposDir}-evil`;
     mkdirSync(sibling);
     try {
       await denied("fs.list", { path: sibling });
@@ -141,6 +114,6 @@ describe("folders the worker manages itself", () => {
   });
 
   it("refuses to remove a managed directory itself", async () => {
-    await denied("fs.rm", { path: projectsDir, recursive: true });
+    await denied("fs.rm", { path: reposDir, recursive: true });
   });
 });

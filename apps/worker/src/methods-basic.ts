@@ -3,18 +3,11 @@ import type { Dirent } from "node:fs";
 import { readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
-import type {
-  ClaudeCliArgs,
-  ContextSpec,
-  ExecOptions,
-  ScriptLabel,
-  ScriptPlan,
-} from "@band-app/host-api";
+import type { ClaudeCliArgs, ExecOptions, ScriptLabel, ScriptPlan } from "@band-app/host-api";
 import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import { PathDeniedError } from "./path-policy.ts";
 import {
-  asParams,
   compact,
   num,
   optBool,
@@ -240,132 +233,6 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     repoPath: await path(a, "repoPath"),
     worktreePath: await path(a, "worktreePath"),
   });
-
-  // Working copies of the hub's context repos (plan step 5.2).
-  const contexts = (a: Params): ContextSpec[] => {
-    const list = a.contexts;
-    if (!Array.isArray(list)) throw invalid("contexts must be an array");
-    return list.map((c) => {
-      const spec = asParams(c);
-      const kind = str(spec, "kind");
-      const name = str(spec, "name");
-      if (kind !== "user" && kind !== "project") throw invalid("kind must be user or project");
-      if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(name)) throw invalid("not a context name");
-      return { name, kind };
-    });
-  };
-  r.json("context.preamble", async (a) =>
-    host.context.preamble({ contexts: contexts(a), maxLines: optNum(a, "maxLines") }),
-  );
-  r.json("context.pull", async (a) =>
-    host.context.pull({ contexts: contexts(a), timeoutMs: optNum(a, "timeoutMs") }),
-  );
-  r.json("context.push", async (a) => {
-    const secrets = Array.isArray(a.secrets) ? a.secrets.map(asParams) : [];
-    return host.context.push({
-      contexts: contexts(a),
-      message: str(a, "message"),
-      hostLabel: str(a, "hostLabel"),
-      secrets: secrets.map((s) => ({
-        length: num(s, "length"),
-        prefix: str(s, "prefix"),
-        sha256: str(s, "sha256"),
-      })),
-    });
-  });
-
-  // Project folders (plan step T.1). The projects directory is a managed directory, served from
-  // startup (see PathPolicy.allowManaged), so the folder needs no root. The allow below also
-  // covers a project folder in a BAND_HOME the policy was not given.
-  r.json("project.ensure", async (a) => {
-    const list = a.repos;
-    if (!Array.isArray(list)) throw invalid("repos must be an array");
-    const repos = await Promise.all(
-      list.map(async (item) => {
-        const spec = asParams(item);
-        return {
-          name: str(spec, "name"),
-          // The clone is where the checkout's git data lives, so it must be inside a root.
-          clonePath: await path(spec, "clonePath"),
-          defaultBranch: str(spec, "defaultBranch"),
-        };
-      }),
-    );
-    const fetch = optStr(a, "fetch");
-    if (fetch !== undefined && fetch !== "throttled" && fetch !== "force" && fetch !== "never") {
-      throw invalid("fetch must be throttled, force or never");
-    }
-    const result = await host.project.ensure({
-      project: str(a, "project"),
-      repos,
-      ...(fetch ? { fetch } : {}),
-      contextTimeoutMs: optNum(a, "contextTimeoutMs"),
-    });
-    policy.allow(await host.fs.realpath(result.folder));
-    return result;
-  });
-  r.json("project.read", async (a) =>
-    host.project.read({
-      project: str(a, "project"),
-      repo: str(a, "repo"),
-      path: typeof a.path === "string" ? a.path : "",
-      maxBytes: optNum(a, "maxBytes"),
-    }),
-  );
-  r.json("project.search", async (a) =>
-    host.project.search({
-      project: str(a, "project"),
-      repo: str(a, "repo"),
-      query: str(a, "query"),
-      maxResults: optNum(a, "maxResults"),
-    }),
-  );
-  r.json("project.log", async (a) =>
-    host.project.log({ project: str(a, "project"), repo: str(a, "repo"), n: num(a, "n") }),
-  );
-  r.json("project.status", async (a) =>
-    host.project.status({ project: str(a, "project"), repo: str(a, "repo") }),
-  );
-  r.json("project.diff", async (a) => {
-    const target = asParams(a.target);
-    const kind = str(target, "kind");
-    if (kind !== "working" && kind !== "commit")
-      throw invalid("target.kind must be working or commit");
-    return host.project.diff({
-      project: str(a, "project"),
-      repo: str(a, "repo"),
-      target: kind === "commit" ? { kind, sha: str(target, "sha") } : { kind },
-      ...(optStr(a, "path") ? { path: optStr(a, "path") as string } : {}),
-    });
-  });
-  r.json("project.commit", async (a) => {
-    const paths = a.paths;
-    if (
-      paths !== undefined &&
-      (!Array.isArray(paths) || paths.some((p) => typeof p !== "string"))
-    ) {
-      throw invalid("paths must be an array of strings");
-    }
-    return host.project.commit({
-      project: str(a, "project"),
-      repo: str(a, "repo"),
-      message: str(a, "message"),
-      ...(paths ? { paths: paths as string[] } : {}),
-    });
-  });
-  r.json("project.push", async (a) =>
-    host.project.push({ project: str(a, "project"), repo: str(a, "repo") }),
-  );
-  r.json("project.pull", async (a) =>
-    host.project.pull({ project: str(a, "project"), repo: str(a, "repo") }),
-  );
-  r.json("project.removeRepo", async (a) =>
-    host.project.removeRepo({
-      project: str(a, "project"),
-      repo: str(a, "repo"),
-      clonePath: await path(a, "clonePath"),
-    }),
-  );
 
   r.json("scripts.command", async (a) =>
     host.scripts.command({ ...(await worktreePaths(a)), label: label(a) }),

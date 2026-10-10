@@ -70,7 +70,7 @@ Exit codes: 0 after a signal or an idle exit, 1 when the hub rejects the worker 
 A hub call may name a path only when it resolves, with `..` folded and symlinks followed, to one of these:
 
 - A root (`--root`, a root added through the repo picker, or the default `<state dir>/worktrees`).
-- A folder the worker manages itself: `<BAND_HOME>/projects` (project folders and their `repos/<repo>` clones) and the clone directory (`--repos-dir`, default `~/band/repos`). They are served from startup, whatever the roots, because the worker creates them. The managed directory itself cannot be removed or moved.
+- A folder the worker manages itself: the clone directory (`--repos-dir`, default `~/band/repos`). It is served from startup, whatever the roots, because the worker creates it. The managed directory itself cannot be removed or moved.
 - A git worktree registered by a repo that sits inside a root.
 
 Anything else is refused with "is outside the worker's roots". The message adds "It is a worktree of <repo>, which is not inside a root" only for a linked worktree whose main repo is outside the roots. A plain checkout never gets the hint. A symlink inside a managed folder that leads elsewhere is refused like any other.
