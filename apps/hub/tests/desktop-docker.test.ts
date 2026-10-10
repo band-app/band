@@ -14,6 +14,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -207,7 +208,7 @@ describe.skipIf(!IMAGE)("the desktop worker image", () => {
       { label: "the worktree exists on the desktop worker", timeoutMs: 180_000, intervalMs: 500 },
     );
     hostId = wt.hostId as string;
-    worktreeId = `proj-${wt.name}`;
+    worktreeId = toWorktreeId("proj", wt.name, hostId);
   }, 400_000);
 
   afterAll(async () => {
