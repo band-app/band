@@ -20,10 +20,11 @@ import {
   trpcData,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const TOKEN = "worktree-commit-history-token";
-const WORKTREE = "alpha-main";
-const EMPTY_WORKTREE = "empty-main";
+const WORKTREE = testWorktreeId("alpha", "main");
+const EMPTY_WORKTREE = testWorktreeId("empty", "main");
 const LONG_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
 
 const gitEnv = {
@@ -180,7 +181,7 @@ describe("tRPC — worktree commit history", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.getCommitHistory",
-      { worktreeId: "nope-main" },
+      { worktreeId: testWorktreeId("nope", "main") },
       TOKEN,
     );
     expect(res.status).toBe(500);

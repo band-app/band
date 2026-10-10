@@ -25,11 +25,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, trpcMutate, trpcQuery } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "worktree-setup-teardown-token";
@@ -161,7 +161,7 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
   });
 
   it("delivers the prompt while setup is still running in its own terminal", async () => {
-    const worktreeId = toWorktreeId(REPO, "feat/slow-setup", "local");
+    const worktreeId = testWorktreeId(REPO, "feat/slow-setup", false);
     await createWorktree(server, "feat/slow-setup", "prompt during slow setup");
 
     const { terminalId: setupTerminal, output } = await waitForTerminalOutput(
@@ -201,7 +201,7 @@ describe("a failing setup does not drop the prompt", () => {
   });
 
   it("shows the exit code in the setup terminal and still delivers the prompt", async () => {
-    const worktreeId = toWorktreeId(REPO, "feat/bad-setup", "local");
+    const worktreeId = testWorktreeId(REPO, "feat/bad-setup", false);
     await createWorktree(server, "feat/bad-setup", "prompt despite failing setup");
 
     const { output } = await waitForTerminalOutput(
@@ -262,7 +262,7 @@ describe("teardown runs in a terminal before the worktree is removed", () => {
     // command ran in a worktree terminal rather than a hidden subprocess.
     expect(readFileSync(markerPath, "utf-8")).toBe(`dispatch=terminal cwd=${realWorktreePath}`);
 
-    const worktreeId = toWorktreeId(REPO, "feat/teardown", "local");
+    const worktreeId = testWorktreeId(REPO, "feat/teardown", false);
     const remaining = await waitFor(
       async () => {
         const ids = await listTerminalIds(server, worktreeId);

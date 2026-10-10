@@ -435,7 +435,10 @@ test("removing the worktree on A leaves B selectable with its chat and files (it
   await app.open(b.same);
   // A clean worktree is removed without the confirmation dialog for unsaved work.
   git(a.checkout, "checkout", "--", FILE);
-  await expect(app.worktree.gitDirtyMark(a.same)).toHaveCount(0);
+  // The card's dirty mark follows the branch status, which the hub reads on a poll. Ask for a
+  // fresh read instead of waiting for the next tick.
+  await trpcMutate(server.url, TOKEN, "statuses.refreshBranchStatus", { worktreeId: a.same });
+  await expect(app.worktree.gitDirtyMark(a.same)).toHaveCount(0, { timeout: 20_000 });
   await app.worktree.deleteWorktreeFromSidebar(a.same);
 
   await expect.poll(listedIds).not.toContain(a.same);

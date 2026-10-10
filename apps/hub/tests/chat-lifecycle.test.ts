@@ -13,6 +13,7 @@ import {
   startServer,
   trpcData,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 // Integration tests for the remaining `chats.*` tRPC procedures that Phase 5
 // of issue #316 migrated out of the legacy router without dedicated coverage
@@ -123,7 +124,7 @@ interface ChatRecord {
 describe("chatLayout — populated by chats.create", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const worktreeId = "createproj-main";
+  const worktreeId = testWorktreeId("createproj", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-layout-create-");
@@ -192,7 +193,7 @@ describe("chats — stop/resume status transitions", () => {
 
   let server: ServerHandle;
   let tmpHome: string;
-  const worktreeId = "stopproj-main";
+  const worktreeId = testWorktreeId("stopproj", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-stop-");

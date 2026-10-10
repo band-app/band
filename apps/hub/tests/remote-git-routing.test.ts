@@ -13,7 +13,6 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -25,12 +24,13 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { StatusStream } from "./helpers/status-stream";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "remote-git-routing-token";
 const REPO = "routed";
 const WORKTREE = "test";
-const WORKTREE_ID = toWorktreeId(REPO, WORKTREE, "local");
+const WORKTREE_ID = testWorktreeId(REPO, WORKTREE);
 const LIVE_BRANCH = "feature/live";
 
 const gitEnv = {

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -13,6 +12,7 @@ import {
 } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // Cold restore: a terminal reopened after its daemon died or was restarted
@@ -24,7 +24,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-cold-restore-token";
 const REPO = "coldrestoreproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
+const WORKTREE_ID = testWorktreeId(REPO, "main", false);
 
 interface TerminalEntry {
   terminalId: string;

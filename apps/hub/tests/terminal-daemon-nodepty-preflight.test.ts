@@ -3,7 +3,6 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { launchDaemon } from "@band-app/host-local/terminals/daemon/launch";
 import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -14,6 +13,7 @@ import {
   trpcMutate,
 } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
+import { testWorktreeId } from "./helpers/test-host";
 
 // A daemon that fails to load node-pty must exit fast instead of staying up
 // to serve spawn requests that would all fail the same way (Node's ESM
@@ -29,7 +29,7 @@ import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 
 const TOKEN = "terminal-daemon-nodepty-token";
 const REPO = "noptyproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 describe("terminal daemon — node-pty fails to load", () => {

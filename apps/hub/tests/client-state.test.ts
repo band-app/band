@@ -25,11 +25,12 @@ import {
   startServer,
   trpcData,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "client-state-test-token";
-const WS_MAIN = "proj-main";
-const WS_FEATURE = "proj-feature";
+const WS_MAIN = testWorktreeId("proj", "main");
+const WS_FEATURE = testWorktreeId("proj", "feature");
 
 function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
   return sharedTrpcMutate(serverUrl, procedure, input, TOKEN);

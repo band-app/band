@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // Parse-acknowledged backpressure (`api/terminals/output-flow.ts`). A browser
@@ -18,7 +18,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-output-flow-token";
 const REPO = "flowproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 const FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; print $l while 1'\r`;
 /** A flood that also records how many lines it has printed, in `count` in its cwd. */
 const COUNTING_FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; for (my $i = 1; ; $i++) { print $l; if ($i % 1000 == 0) { open(my $f, ">", "count.tmp"); print $f $i; close $f; rename "count.tmp", "count" } }'\r`;

@@ -30,6 +30,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const SHARED_TOKEN = "remote-host-shared-secret";
@@ -304,7 +305,7 @@ describe("a worktree on the remote host", () => {
     expect(names).toEqual(expect.arrayContaining(["main", "remote-feat"]));
     // Local worktrees still read their files from the hub's disk.
     const local = await trpcQ<{ entries: Array<{ name: string }> }>("worktree.listFiles", {
-      worktreeId: "proj-main",
+      worktreeId: testWorktreeId("proj", "main"),
       path: "",
     });
     expect(local.entries.map((e) => e.name)).toContain("hello.txt");
@@ -346,7 +347,7 @@ describe("losing and regaining the worker", () => {
     expect(res.status).not.toBe(200);
     expect(await res.text()).toMatch(/offline/);
     const local = await trpcQ<{ entries: unknown[] }>("worktree.listFiles", {
-      worktreeId: "proj-main",
+      worktreeId: testWorktreeId("proj", "main"),
       path: "",
     });
     expect(local.entries.length).toBeGreaterThan(0);

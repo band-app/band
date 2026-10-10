@@ -38,7 +38,6 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -50,6 +49,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { listTasksForWorktree } from "./helpers/tasks";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const gitEnv = {
@@ -232,7 +232,7 @@ describe("worktrees.create via=terminal happy path", () => {
     expect(data.terminalId!.length).toBeGreaterThan(0);
     expect(data.path.endsWith("/feat/term")).toBe(true);
 
-    const worktreeId = toWorktreeId("viaproj", "feat/term", "local");
+    const worktreeId = testWorktreeId("viaproj", "feat/term", false);
 
     const terminals = await waitFor(
       async () => {
@@ -389,7 +389,7 @@ describe("worktrees.create via=chat path", () => {
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
 
-    const worktreeId = toWorktreeId("chatproj", "feat/chatpath", "local");
+    const worktreeId = testWorktreeId("chatproj", "feat/chatpath", false);
 
     // Positive anchor: prove the chat path actually dispatched.
     // `taskService.submitTask` persists a task row before the agent
@@ -439,7 +439,7 @@ describe("worktrees.create via=chat path", () => {
     // Same positive anchor as above — the schema makes `via` optional
     // and the server defaults to chat so the web UI continues working
     // without sending the field.
-    const worktreeId = toWorktreeId("chatproj", "feat/default", "local");
+    const worktreeId = testWorktreeId("chatproj", "feat/default", false);
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
@@ -616,7 +616,7 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     // It also learns which chat and worktree it runs in.
     expect(prompt.env).toMatchObject({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
     expect(prompt.env.BAND_CHAT_ID).toBeTruthy();
-    expect(prompt.env.BAND_WORKTREE_ID).toBe(toWorktreeId("dispproj", "feat/nested", "local"));
+    expect(prompt.env.BAND_WORKTREE_ID).toBe(testWorktreeId("dispproj", "feat/nested", false));
   });
 });
 
@@ -726,7 +726,7 @@ describe("worktrees.create via=terminal — long UTF-8 prompt", () => {
       server.url,
       "terminal.create",
       {
-        worktreeId: toWorktreeId("longproj", "main", "local"),
+        worktreeId: testWorktreeId("longproj", "main"),
         id: "../../../../tmp/band-evil",
         command: "echo pwned",
       },
@@ -826,7 +826,7 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     // The terminal learns its worktree, so an agent there can omit
     // `worktreeId` when it creates a subscription.
     expect(output).toContain(
-      `ENV_BAND_WORKTREE_ID:${toWorktreeId("termenvproj", "feat/termenv", "local")}|`,
+      `ENV_BAND_WORKTREE_ID:${testWorktreeId("termenvproj", "feat/termenv", false)}|`,
     );
   });
 });
@@ -913,7 +913,7 @@ describe("worktrees.create agentMode", () => {
       hostId: "local",
       via: "chat",
     });
-    const worktreeId = toWorktreeId("modeproj", "feat/mode-gui", "local");
+    const worktreeId = testWorktreeId("modeproj", "feat/mode-gui", false);
     expect(await listTerminals(server.url, worktreeId, TOKEN)).toEqual([]);
     await waitFor(() => promptTexts(tmpHome).includes("prompt for feat/mode-gui"), {
       label: "prompt reached the chat agent",

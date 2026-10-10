@@ -9,7 +9,6 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -29,6 +28,7 @@ import {
   terminalDaemons,
 } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // Issue #652: a terminal daemon outlives the build that launched it, so a
@@ -42,7 +42,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-build-token";
 const REPO = "buildproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
+const WORKTREE_ID = testWorktreeId(REPO, "main", false);
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {

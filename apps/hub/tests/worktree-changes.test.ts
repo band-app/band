@@ -19,6 +19,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const TOKEN = "worktree-changes-token";
 
@@ -198,14 +199,14 @@ describe("worktree.getChanges", () => {
   it("returns 401 without a token", async () => {
     const res = await fetch(
       `${server.url}/trpc/worktree.getChanges?input=${encodeURIComponent(
-        JSON.stringify({ worktreeId: "sections-feature" }),
+        JSON.stringify({ worktreeId: testWorktreeId("sections", "feature") }),
       )}`,
     );
     expect(res.status).toBe(401);
   });
 
   it("groups the worktree's changes into sections, keeping uncommitted work out of the branch section", async () => {
-    const changes = await getChanges("sections-feature");
+    const changes = await getChanges(testWorktreeId("sections", "feature"));
     const mergeBase = git(sectionsRepo, ["merge-base", "main", "HEAD"]).trim();
     expect(changes).toEqual({
       headBranch: "feature",
@@ -240,7 +241,7 @@ describe("worktree.getChanges", () => {
   });
 
   it("reports invalid-base with an empty branch section for an unknown compare branch", async () => {
-    const changes = await getChanges("sections-feature", "no-such-branch");
+    const changes = await getChanges(testWorktreeId("sections", "feature"), "no-such-branch");
     expect(changes.compareBranch).toBe("no-such-branch");
     expect(changes.branchStatus).toBe("invalid-base");
     expect(changes.mergeBase).toBeNull();
@@ -250,19 +251,19 @@ describe("worktree.getChanges", () => {
   });
 
   it("reports no-merge-base for a compare branch with no history in common", async () => {
-    const changes = await getChanges("sections-feature", "unrelated");
+    const changes = await getChanges(testWorktreeId("sections", "feature"), "unrelated");
     expect(changes.branchStatus).toBe("no-merge-base");
     expect(changes.mergeBase).toBeNull();
     expect(changes.branch).toEqual([]);
   });
 
   it("lists only the commits since the fork from the picked compare branch", async () => {
-    const changes = await getChanges("sections-feature", "mid");
+    const changes = await getChanges(testWorktreeId("sections", "feature"), "mid");
     expect(changes.branch.map((e) => e.path)).toEqual(["README.md"]);
   });
 
   it("lists an unmerged file under conflicts only", async () => {
-    const changes = await getChanges("conflict-feature");
+    const changes = await getChanges(testWorktreeId("conflict", "feature"));
     expect(changes.conflicts).toEqual([{ path: "c.txt", status: "M", conflict: "both_modified" }]);
     expect(changes.unstaged).toEqual([]);
     expect(changes.staged).toEqual([]);
@@ -272,7 +273,7 @@ describe("worktree.getChanges", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.getChanges",
-      { worktreeId: "nope-main" },
+      { worktreeId: testWorktreeId("nope", "main") },
       TOKEN,
     );
     expect(res.status).toBe(500);
@@ -282,7 +283,7 @@ describe("worktree.getChanges", () => {
 describe("worktree.getFileDiff per section", () => {
   it("shows only the staged edit for the staged section", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "keep.txt",
       section: "staged",
     });
@@ -294,7 +295,7 @@ describe("worktree.getFileDiff per section", () => {
 
   it("shows only the unstaged edit for the unstaged section", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "keep.txt",
       section: "unstaged",
     });
@@ -305,7 +306,7 @@ describe("worktree.getFileDiff per section", () => {
 
   it("pairs both sides of a staged rename", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "renamed.txt",
       oldPath: "rename-me.txt",
       section: "staged",
@@ -317,7 +318,7 @@ describe("worktree.getFileDiff per section", () => {
 
   it("shows an untracked file as all added lines", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "notes/todo.md",
       section: "untracked",
     });
@@ -326,9 +327,9 @@ describe("worktree.getFileDiff per section", () => {
   });
 
   it("shows the committed change against the merge base for the branch section", async () => {
-    const { mergeBase } = await getChanges("sections-feature");
+    const { mergeBase } = await getChanges(testWorktreeId("sections", "feature"));
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "README.md",
       section: "branch",
       mergeBase,
@@ -339,7 +340,7 @@ describe("worktree.getFileDiff per section", () => {
 
   it("fails the branch section without a merge base", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "README.md",
       section: "branch",
     });
@@ -348,7 +349,7 @@ describe("worktree.getFileDiff per section", () => {
 
   it("rejects a path outside the worktree", async () => {
     const res = await getFileDiff({
-      worktreeId: "sections-feature",
+      worktreeId: testWorktreeId("sections", "feature"),
       filePath: "../ops/a.txt",
       section: "unstaged",
     });
@@ -362,12 +363,12 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "new.txt"), "new\n");
 
     const res = await mutate("stageFiles", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       paths: ["a.txt", "new.txt"],
     });
     expect(res.status).toBe(200);
 
-    const changes = await getChanges("ops-main");
+    const changes = await getChanges(testWorktreeId("ops", "main"));
     expect(changes.staged).toEqual([
       { path: "a.txt", status: "M", additions: 1, deletions: 0 },
       { path: "new.txt", status: "A", additions: 1, deletions: 0 },
@@ -377,10 +378,13 @@ describe("stage, unstage and discard", () => {
   });
 
   it("unstages a file back into the working tree", async () => {
-    const res = await mutate("unstageFiles", { worktreeId: "ops-main", paths: ["a.txt"] });
+    const res = await mutate("unstageFiles", {
+      worktreeId: testWorktreeId("ops", "main"),
+      paths: ["a.txt"],
+    });
     expect(res.status).toBe(200);
 
-    const changes = await getChanges("ops-main");
+    const changes = await getChanges(testWorktreeId("ops", "main"));
     expect(changes.unstaged).toEqual([{ path: "a.txt", status: "M", additions: 1, deletions: 0 }]);
     expect(changes.staged.map((e) => e.path)).toEqual(["new.txt"]);
     expect(readFileSync(join(opsRepo, "a.txt"), "utf-8")).toBe("a\nedited\n");
@@ -388,33 +392,33 @@ describe("stage, unstage and discard", () => {
 
   it("discards an unstaged edit, restoring the file", async () => {
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "unstaged",
       paths: ["a.txt"],
     });
     expect(res.status).toBe(200);
 
     expect(readFileSync(join(opsRepo, "a.txt"), "utf-8")).toBe("a\n");
-    expect((await getChanges("ops-main")).unstaged).toEqual([]);
+    expect((await getChanges(testWorktreeId("ops", "main"))).unstaged).toEqual([]);
   });
 
   it("discards a staged new file, deleting it", async () => {
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "staged",
       paths: ["new.txt"],
     });
     expect(res.status).toBe(200);
 
     expect(existsSync(join(opsRepo, "new.txt"))).toBe(false);
-    expect((await getChanges("ops-main")).staged).toEqual([]);
+    expect((await getChanges(testWorktreeId("ops", "main"))).staged).toEqual([]);
   });
 
   it("deletes untracked files but never a tracked one passed along with them", async () => {
     writeFileSync(join(opsRepo, "junk.txt"), "junk\n");
 
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "untracked",
       paths: ["junk.txt", "b.txt"],
     });
@@ -422,7 +426,7 @@ describe("stage, unstage and discard", () => {
 
     expect(existsSync(join(opsRepo, "junk.txt"))).toBe(false);
     expect(readFileSync(join(opsRepo, "b.txt"), "utf-8")).toBe("b\n");
-    expect((await getChanges("ops-main")).untracked).toEqual([]);
+    expect((await getChanges(testWorktreeId("ops", "main"))).untracked).toEqual([]);
   });
 
   it("discards a staged edit and the unstaged edit on top of it", async () => {
@@ -431,14 +435,14 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "b.txt"), "b\nstaged\nunstaged\n");
 
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "staged",
       paths: ["b.txt"],
     });
     expect(res.status).toBe(200);
 
     expect(readFileSync(join(opsRepo, "b.txt"), "utf-8")).toBe("b\n");
-    const changes = await getChanges("ops-main");
+    const changes = await getChanges(testWorktreeId("ops", "main"));
     expect(changes.staged).toEqual([]);
     expect(changes.unstaged).toEqual([]);
   });
@@ -449,7 +453,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "a.txt"), "a\nkept\n");
 
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "unstaged",
       paths: ["[a].txt"],
     });
@@ -464,7 +468,7 @@ describe("stage, unstage and discard", () => {
     writeFileSync(join(opsRepo, "stray.txt"), "stray\n");
 
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "untracked",
       paths: ["*"],
     });
@@ -476,23 +480,23 @@ describe("stage, unstage and discard", () => {
 
   it("unstages and discards a staged file in a repo with no commits yet", async () => {
     const unstage = await mutate("unstageFiles", {
-      worktreeId: "fresh-main",
+      worktreeId: testWorktreeId("fresh", "main"),
       paths: ["first.txt"],
     });
     expect(unstage.status).toBe(200);
-    let changes = await getChanges("fresh-main");
+    let changes = await getChanges(testWorktreeId("fresh", "main"));
     expect(changes.staged).toEqual([]);
     expect(changes.untracked.map((e) => e.path)).toEqual(["first.txt"]);
 
     git(freshRepo, ["add", "first.txt"]);
     const discard = await mutate("discardChanges", {
-      worktreeId: "fresh-main",
+      worktreeId: testWorktreeId("fresh", "main"),
       section: "staged",
       paths: ["first.txt"],
     });
     expect(discard.status).toBe(200);
     expect(existsSync(join(freshRepo, "first.txt"))).toBe(false);
-    changes = await getChanges("fresh-main");
+    changes = await getChanges(testWorktreeId("fresh", "main"));
     expect(changes.staged).toEqual([]);
     expect(changes.untracked).toEqual([]);
   });
@@ -500,27 +504,36 @@ describe("stage, unstage and discard", () => {
   it("marks a conflict resolved by staging it", async () => {
     writeFileSync(join(conflictRepo, "c.txt"), "resolved\n");
 
-    const res = await mutate("stageFiles", { worktreeId: "conflict-feature", paths: ["c.txt"] });
+    const res = await mutate("stageFiles", {
+      worktreeId: testWorktreeId("conflict", "feature"),
+      paths: ["c.txt"],
+    });
     expect(res.status).toBe(200);
 
-    const changes = await getChanges("conflict-feature");
+    const changes = await getChanges(testWorktreeId("conflict", "feature"));
     expect(changes.conflicts).toEqual([]);
     expect(changes.staged.map((e) => [e.path, e.status])).toEqual([["c.txt", "M"]]);
   });
 
   it("rejects an empty path list", async () => {
-    const res = await mutate("stageFiles", { worktreeId: "ops-main", paths: [] });
+    const res = await mutate("stageFiles", {
+      worktreeId: testWorktreeId("ops", "main"),
+      paths: [],
+    });
     expect(res.status).toBe(400);
   });
 
   it("rejects a path starting with '-'", async () => {
-    const res = await mutate("stageFiles", { worktreeId: "ops-main", paths: ["--all"] });
+    const res = await mutate("stageFiles", {
+      worktreeId: testWorktreeId("ops", "main"),
+      paths: ["--all"],
+    });
     expect(res.status).toBe(400);
   });
 
   it("rejects a path outside the worktree", async () => {
     const res = await mutate("discardChanges", {
-      worktreeId: "ops-main",
+      worktreeId: testWorktreeId("ops", "main"),
       section: "unstaged",
       paths: ["../sections/keep.txt"],
     });

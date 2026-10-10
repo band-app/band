@@ -259,9 +259,14 @@ export class TokenService {
     hostName: string,
     labels: string[] = [],
     ttlMs: number = DEFAULT_BOOTSTRAP_TTL_MS,
+    fixedHostId?: string,
   ): { token: string; hostId: string; view: TokenView } {
     const ttl = Math.min(Math.max(ttlMs, 1000), MAX_BOOTSTRAP_TTL_MS);
-    const hostId = `h-${randomBytes(6).toString("hex")}`;
+    if (fixedHostId && this.queries.findHost(fixedHostId)) {
+      // An offline host takes a new worker, as a woken ephemeral host does. Another is refused.
+      return this.issueWorkerBootstrapFor(fixedHostId, ttlMs);
+    }
+    const hostId = fixedHostId ?? `h-${randomBytes(6).toString("hex")}`;
     const at = this.now();
     this.queries.insertHost({
       id: hostId,

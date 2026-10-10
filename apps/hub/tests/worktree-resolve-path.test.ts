@@ -14,7 +14,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -24,11 +23,12 @@ import {
   trpcData,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const DEFAULT_TOKEN = "worktree-resolve-path-test-token";
 const REPO = "resolve-path-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
+const WORKTREE = testWorktreeId(REPO, BRANCH);
 
 interface ResolvePathResult {
   exists: boolean;

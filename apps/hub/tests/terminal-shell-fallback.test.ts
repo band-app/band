@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const TOKEN = "terminal-shell-fallback-token";
 
@@ -67,7 +68,7 @@ describe("terminal spawns with no $SHELL set (shell fallback)", () => {
 
   it("attaches a live PTY and streams output instead of a shell-not-found error", async () => {
     const port = new URL(server.url).port;
-    const worktreeId = "worktree-main";
+    const worktreeId = testWorktreeId("worktree", "main");
     const terminalId = "shell-fallback-terminal";
     const wsUrl = `ws://127.0.0.1:${port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
 

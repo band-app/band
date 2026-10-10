@@ -10,6 +10,7 @@ import {
   trpcData,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const DEFAULT_TOKEN = "search-files-test-token";
 
@@ -109,7 +110,7 @@ describe("tRPC — worktree.searchFiles", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "outer-main", query: "" },
+      { worktreeId: testWorktreeId("outer", "main"), query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -127,7 +128,7 @@ describe("tRPC — worktree.searchFiles", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "outer-main", query: "" },
+      { worktreeId: testWorktreeId("outer", "main"), query: "" },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -146,7 +147,7 @@ describe("tRPC — worktree.searchFiles", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "outer-main", query: "composite" },
+      { worktreeId: testWorktreeId("outer", "main"), query: "composite" },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -157,7 +158,7 @@ describe("tRPC — worktree.searchFiles", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "outer-main", query: "", limit: 2 },
+      { worktreeId: testWorktreeId("outer", "main"), query: "", limit: 2 },
       DEFAULT_TOKEN,
     );
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -168,7 +169,7 @@ describe("tRPC — worktree.searchFiles", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "nonexistent-main", query: "" },
+      { worktreeId: testWorktreeId("nonexistent", "main"), query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -181,7 +182,7 @@ describe("tRPC — worktree.searchFiles", () => {
     // call `fetch` directly here rather than going through `trpcQuery`
     // because the helper unconditionally attaches the Cookie header.
     const url = `${server.url}/trpc/worktree.searchFiles?input=${encodeURIComponent(
-      JSON.stringify({ worktreeId: "outer-main", query: "" }),
+      JSON.stringify({ worktreeId: testWorktreeId("outer", "main"), query: "" }),
     )}`;
     const res = await fetch(url);
     expect(res.status).toBe(401);
@@ -231,7 +232,7 @@ describe("tRPC — worktree.searchFiles in non-git directories", () => {
     const res = await trpcQuery(
       server.url,
       "worktree.searchFiles",
-      { worktreeId: "plain-main", query: "" },
+      { worktreeId: testWorktreeId("plain", "main"), query: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -245,7 +246,7 @@ describe("tRPC — worktree.searchFiles in non-git directories", () => {
     // an auditor reading just the non-git block would otherwise see no
     // auth coverage in this suite — explicit is better than implicit.
     const url = `${server.url}/trpc/worktree.searchFiles?input=${encodeURIComponent(
-      JSON.stringify({ worktreeId: "plain-main", query: "" }),
+      JSON.stringify({ worktreeId: testWorktreeId("plain", "main"), query: "" }),
     )}`;
     const res = await fetch(url);
     expect(res.status).toBe(401);

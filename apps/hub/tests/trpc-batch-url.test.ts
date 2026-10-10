@@ -29,7 +29,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AppRouter } from "../src/server/api/router";
@@ -39,6 +38,7 @@ import {
   type ServerHandle,
   startServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "trpc-batch-url-token";
@@ -153,7 +153,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
     // Derive the worktreeId via the canonical helper so a future naming
     // convention change doesn't silently fail this test with a misleading
     // "worktree not found" error instead of the batch-URL assertion.
-    worktreeId = toWorktreeId(repo, branch, "local");
+    worktreeId = testWorktreeId(repo, branch, false);
     // `getChanges` is what the Changes view reads to discover the merge-base
     // + per-file entries before fanning out a `getFileDiff` query per file
     // (the "View all" tab does exactly that), so use it here too.

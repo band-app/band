@@ -27,7 +27,7 @@ import {
   WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
-import { isRemoteLoopback } from "./helpers/test-host";
+import { isRemoteLoopback, testWorktreeId } from "./helpers/test-host";
 
 let servers: ServerHandle[] = [];
 /** Homes a test seeded itself; removed even when the test fails. */
@@ -289,7 +289,12 @@ describe("chat over ACP", () => {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "permission") {
-          answers.push(trpc(server.url, "tasks.abort", { worktreeId: "testrepo-main", chatId }));
+          answers.push(
+            trpc(server.url, "tasks.abort", {
+              worktreeId: testWorktreeId("testrepo", "main"),
+              chatId,
+            }),
+          );
         }
       },
     });
@@ -584,16 +589,19 @@ describe("chat over ACP: sessions", () => {
     await trpc(server.url, "chats.remove", { chatId: chatA });
 
     const chatB = newChatId();
-    await trpc(server.url, "chats.create", { worktreeId: "testrepo-main", id: chatB });
+    await trpc(server.url, "chats.create", {
+      worktreeId: testWorktreeId("testrepo", "main"),
+      id: chatB,
+    });
     const listed = await trpc<{ sessions: { sessionId: string; summary: string }[] }>(
       server.url,
       "sessions.list",
-      { worktreeId: "testrepo-main", chatId: chatB },
+      { worktreeId: testWorktreeId("testrepo", "main"), chatId: chatB },
       "query",
     );
     expect(listed.sessions.map((s) => s.sessionId)).toContain(sessionId);
     await trpc(server.url, "chats.setActiveSession", {
-      worktreeId: "testrepo-main",
+      worktreeId: testWorktreeId("testrepo", "main"),
       chatId: chatB,
       sessionId,
     });
@@ -657,7 +665,7 @@ describe("chat over ACP: sessions", () => {
     const listed = await trpc<{ supported: boolean; sessions: { summary: string }[] }>(
       server.url,
       "sessions.list",
-      { worktreeId: "testrepo-main", chatId },
+      { worktreeId: testWorktreeId("testrepo", "main"), chatId },
       "query",
     );
     expect(listed.supported).toBe(true);

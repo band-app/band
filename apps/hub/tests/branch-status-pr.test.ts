@@ -13,7 +13,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { branchRepository, prNode, prUrl, workflowSuite } from "./fixtures/branch-status-data";
@@ -21,6 +20,7 @@ import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { FAKE_REPO } from "./fixtures/github-review-data";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "branch-status-pr-test-token";
@@ -202,7 +202,7 @@ describe("branch-status events carry the branch's pull request", () => {
   let stub: GhStub;
   let stream: Awaited<ReturnType<typeof openStatusStream>>;
 
-  const wsId = (branch: string) => toWorktreeId(REPO, branch, "local");
+  const wsId = (branch: string) => testWorktreeId(REPO, branch);
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-");
@@ -360,7 +360,7 @@ describe("with the GitHub plugin disabled", () => {
   });
 
   it("the poller never runs gh, and the branch reports no PR and no CI state", async () => {
-    expect(await stream.latestCI(toWorktreeId(REPO, CASES.failing, "local"))).toEqual({
+    expect(await stream.latestCI(testWorktreeId(REPO, CASES.failing, false))).toEqual({
       state: "none",
       url: null,
       pr: null,

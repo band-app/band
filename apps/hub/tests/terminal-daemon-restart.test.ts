@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deleteWorktree, seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -16,6 +15,7 @@ import {
 } from "./helpers/server";
 import { isAlive, terminalDaemonLog, terminalDaemons } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // Terminals live in a detached terminal daemon, so restarting the web server
@@ -27,7 +27,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-restart-token";
 const REPO = "restartproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
+const WORKTREE_ID = testWorktreeId(REPO, "main", false);
 
 interface TerminalEntry {
   terminalId: string;
@@ -145,7 +145,7 @@ describe("terminal daemon — shells survive a server restart", () => {
 // when the worktree went away while none was.
 describe("terminal daemon — a deleted worktree's shells end", () => {
   const PROJ = "gonerproj";
-  const MAIN_ID = toWorktreeId(PROJ, "main", "local");
+  const MAIN_ID = testWorktreeId(PROJ, "main", false);
   let tmpHome: string;
   let repo: string;
   let port: number;
@@ -207,7 +207,7 @@ describe("terminal daemon — a deleted worktree's shells end", () => {
   });
 
   it("worktrees.remove on a running server ends the worktree's shells", async () => {
-    const worktreeId = toWorktreeId(PROJ, "live-delete", "local");
+    const worktreeId = testWorktreeId(PROJ, "live-delete", false);
     const pid = await createTerminal(server, worktreeId);
     expect(isAlive(pid)).toBe(true);
 
@@ -224,7 +224,7 @@ describe("terminal daemon — a deleted worktree's shells end", () => {
   });
 
   it("the next boot ends shells of a worktree deleted while no server ran", async () => {
-    const worktreeId = toWorktreeId(PROJ, "offline-delete", "local");
+    const worktreeId = testWorktreeId(PROJ, "offline-delete", false);
     const keptPid = await createTerminal(server, MAIN_ID);
     const gonePid = await createTerminal(server, worktreeId);
 
