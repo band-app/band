@@ -79,7 +79,7 @@ The desktop app has its own copy of the UI, so it needs neither setting.
 
 ## Worktrees run on workers
 
-The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a host in Settings > Hosts or in any host picker, and `worktrees.create` for the `local` host is refused. A project's coordinator goes on a worker that has its agent installed and logged in (see [Where a coordinator runs](install.md#where-a-coordinator-runs)).
+The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a host in Settings > Hosts or in any host picker, and `worktrees.create` for the `local` host is refused.
 
 A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run worktrees in the container again.
 
@@ -95,7 +95,7 @@ docker compose exec band band repos add --url https://github.com/owner/repo.git
 
 Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API when the vault holds a git credential for github.com. The clone uses the worker's own git credentials, or the vault's git credential on a runner worker (see [Runner hooks](runner-hooks.md)).
 
-**From a worker.** When a worker already has a checkout, pick it on that worker. In the UI, open a project, choose Add repo and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
+**From a worker.** When a worker already has a checkout, pick it on that worker. In the UI, choose Add repo in the sidebar's Repos panel and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
 
 ```sh
 band repos add --from <host id> /home/me/code/myrepo --add-root
@@ -103,7 +103,7 @@ band repos add --from <host id> /home/me/code/myrepo --add-root
 
 A folder with no git remote is added without a URL and stays on that one worker. A worktree for it can only run there.
 
-`band repos list` shows each repo's URL and the folder it is cloned to on each host. A repo added with `--project` belongs to that project, and one added without it belongs to no project.
+`band repos list` shows each repo's URL and the folder it is cloned to on each host.
 
 The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, the hub's own machine is a host too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
 

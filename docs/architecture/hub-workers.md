@@ -10,7 +10,6 @@ Today one Band server per machine owns everything: the database, the API, chat, 
 
 Several planned features need a place that is always on and reachable from every device and every machine:
 
-- a coordinator chat that outlives any one laptop
 - subscriptions that react to GitHub webhooks and timers
 - an OAuth credential vault and an MCP proxy
 - runners that start machines on demand and dispose of them when idle
@@ -30,7 +29,7 @@ A laptop that sleeps cannot host these. A mesh of peers has no natural owner for
 
 Positive:
 
-- The coordinator, subscriptions, vault and runners get one always-on home.
+- Subscriptions, the vault and runners get one always-on home.
 - One authoritative database and event log. No state exchange between peers, no settings replication, no conflict handling.
 - Workers need no inbound networking, so Tailscale is no longer a requirement.
 - The `Host` interface gives a clean boundary. A single contract test suite can run against `LocalHost` and a remote host.
@@ -77,7 +76,9 @@ Dropped:
 - **2.** Link, worker and remote host: the WebSocket protocol, attached workers, device and worker tokens, a headless hub deploy.
 - **3.** Runners, environments and ephemeral workers: spawn hooks, `.band/environment.json`, placement, reaper.
 - **4.** MCP proxy and credential vault.
-- **5.** Context: hub-held git repos synced to workers.
-- **6.** Missions: a coordinator chat with context, subscriptions and hub MCP tools.
 - **7.** Desktop and browser: a desktop worker image and a remote viewer.
-- **8.** Bunny convergence: its channels become subscription sources and its investigator becomes a mission.
+- **8.** Bunny convergence: its channels become subscription sources.
+
+## Projects were removed
+
+Band once had projects (a cross-repo meta repo with a context repo, a project folder on each host and a coordinator chat). They were removed in favour of origin links, where a chat started from another chat records where it came from. See section 15 of the implementation plan. The hub has no `projects.*` API, context repos, git context endpoint or coordinator tools.
