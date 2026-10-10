@@ -658,7 +658,8 @@ jobs:
           auth='Authorization: Bearer ci-compose-token'
           # Add a repo the entrypoint knows nothing about.
           docker compose exec -T band sh -c 'mkdir -p /data/repos/persisted && cd /data/repos/persisted && git init -q && git commit -q --allow-empty -m init'
-          docker compose exec -T band band repos add /data/repos/persisted
+          # The image runs with BAND_LOCAL_HOST=off, which has no repo by path; a file URL needs no worker.
+          docker compose exec -T band band repos add --url file:///data/repos/persisted --branch main
           curl -s -H "$auth" http://127.0.0.1:3466/trpc/repos.list | grep -q persisted
           docker compose down
           docker compose up -d --no-build
