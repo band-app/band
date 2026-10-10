@@ -20,12 +20,7 @@ import { panelStates } from "../schema";
 
 export interface PanelStateRow {
   id: string;
-  /** Null for a project-level chat. */
   worktreeId: string | null;
-  /** Set for a project-level chat. */
-  projectId?: string | null;
-  /** Set for a task chat, and for the chats of a worktree that is a member of a task. */
-  taskId?: string | null;
   panelType: string;
   state: string; // raw JSON string
   /**
@@ -135,9 +130,4 @@ export function resetPanelStatesToIdle(panelType: string, updatedAt: number): vo
       ),
     )
     .run();
-}
-
-/** Points every chat of a worktree at its task. */
-export function setPanelStatesTask(worktreeId: string, taskId: string | null): void {
-  getDb().update(panelStates).set({ taskId }).where(eq(panelStates.worktreeId, worktreeId)).run();
 }

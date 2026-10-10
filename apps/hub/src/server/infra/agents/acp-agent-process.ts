@@ -339,14 +339,12 @@ export class AcpAgentProcess {
     cwd: string,
     additionalDirectories?: string[],
     mcpServers: acp.McpServer[] = [],
-    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
         this.connection.agent.request(acp.methods.agent.session.new, {
           cwd,
           mcpServers,
-          ...(meta ? { _meta: meta } : {}),
           ...(additionalDirectories?.length && this.supportsAdditionalDirectories
             ? { additionalDirectories }
             : {}),
@@ -362,7 +360,6 @@ export class AcpAgentProcess {
     sessionId: string,
     cwd: string,
     mcpServers: acp.McpServer[] = [],
-    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
@@ -370,7 +367,6 @@ export class AcpAgentProcess {
           sessionId,
           cwd,
           mcpServers,
-          ...(meta ? { _meta: meta } : {}),
         }),
         this.label,
         LOAD_TIMEOUT_MS,
@@ -384,7 +380,6 @@ export class AcpAgentProcess {
     sessionId: string,
     cwd: string,
     mcpServers: acp.McpServer[] = [],
-    meta?: Record<string, unknown>,
   ): Promise<AttachedSession> {
     const res = await this.guard(
       withTimeout(
@@ -392,7 +387,6 @@ export class AcpAgentProcess {
           sessionId,
           cwd,
           mcpServers,
-          ...(meta ? { _meta: meta } : {}),
         }),
         this.label,
       ),

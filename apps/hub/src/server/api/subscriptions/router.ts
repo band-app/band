@@ -37,7 +37,7 @@ const createInput = z.object({
   maxWakeups: z.number().int().min(1).optional(),
   /** Epoch milliseconds. Defaults to, and is capped at, 180 days from now. */
   expiresAt: z.number().int().optional(),
-  createdBy: z.enum(["agent", "coordinator", "user"]).optional(),
+  createdBy: z.enum(["agent", "user"]).optional(),
   /** Timer only: fire once at this time, in epoch milliseconds. */
   at: z.number().int().optional(),
   /**

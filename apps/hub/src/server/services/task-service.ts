@@ -3,11 +3,8 @@ import { computeCost } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
 import { WorktreeNotFoundError } from "../errors";
-import { ProjectQueries } from "../infra/db/queries/projects";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
-import { emitChatLifecycle } from "../infra/events/chat-lifecycle-bus";
 import { hostRegistry } from "../infra/host/registry";
-import { isFolderScope, projectIdOfScope } from "../infra/project-scope";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
   hasQueuedMessages,
@@ -126,15 +123,12 @@ function observePending(): void {
   agentSessionService.observePending((chatId, worktreeId) => {
     if (tasks.get(chatId)?.status !== "running") return;
     const waiting = agentSessionService.hasPendingRequest(chatId);
-    if (waiting) emitChatLifecycle({ chatId, worktreeId, kind: "waiting" });
     setScopeStatus(worktreeId, chatId, waiting ? "needs_attention" : "working");
   });
 }
 
 function persistTask(task: InternalTask): void {
-  const worktree = isFolderScope(task.worktreeId)
-    ? undefined
-    : worktreeService.resolve(task.worktreeId);
+  const worktree = worktreeService.resolve(task.worktreeId);
   try {
     taskQueries.save({
       id: task.id,
@@ -267,32 +261,16 @@ function turnUsage(
 // Turn lifecycle
 // ---------------------------------------------------------------------------
 
-const projects = new ProjectQueries();
-
-/**
- * Records a chat's status on its worktree and broadcasts the worktree's new status. A project
- * chat has no worktree to show it on, so nothing is recorded.
- */
+/** Records a chat's status on its worktree and broadcasts the worktree's new status. */
 function setScopeStatus(scope: string, chatId: string, status: string): void {
-  if (isFolderScope(scope)) return;
   const updated = setWorktreeSourceStatus(scope, chatStatusSource(chatId), { status });
   emitStatusEvent({ kind: "update", status: updated });
-}
-
-/**
- * Whether a turn can run in this scope: a worktree, or a project (the scope of a project chat,
- * whose folder the agent session prepares itself).
- */
-function scopeExists(scope: string): boolean {
-  const projectId = projectIdOfScope(scope);
-  if (projectId) return projects.find(projectId) !== undefined;
-  return worktreeService.resolve(scope) !== null;
 }
 
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
   const { worktreeId, chatId, prompt, sessionId, mode, model, codingAgentId } = options;
 
-  if (!scopeExists(worktreeId)) {
+  if (worktreeService.resolve(worktreeId) === null) {
     throw new WorktreeNotFoundError(worktreeId);
   }
 
@@ -340,7 +318,7 @@ export type SubmitOrQueueResult =
  */
 export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResult {
   const { worktreeId, chatId } = options;
-  if (!scopeExists(worktreeId)) {
+  if (worktreeService.resolve(worktreeId) === null) {
     throw new WorktreeNotFoundError(worktreeId);
   }
 
@@ -392,7 +370,7 @@ async function runTask(task: InternalTask): Promise<void> {
       taskId: task.id,
       error: message,
     });
-    finishTask(task, "failed", message);
+    finishTask(task, "failed");
     return;
   }
   if (!sessionId) {
@@ -494,7 +472,7 @@ async function runTask(task: InternalTask): Promise<void> {
       error: message,
       durationMs: Date.now() - task.startedAt,
     });
-    finishTask(task, "failed", message);
+    finishTask(task, "failed");
   } finally {
     unsubscribe();
   }
@@ -518,11 +496,7 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
  * failed asks for the user's attention; one the user stopped (or that ended
  * while a stop was pending) doesn't, since the user already knows.
  */
-function finishTask(
-  task: InternalTask,
-  outcome: "completed" | "failed" | "cancelled",
-  error?: string,
-): void {
+function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cancelled"): void {
   if (task.status !== "running") return;
   const status = outcome === "completed" ? "completed" : "failed";
   task.status = status;
@@ -534,14 +508,6 @@ function finishTask(
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
-  if (!stopped) {
-    emitChatLifecycle({
-      chatId: task.chatId,
-      worktreeId: task.worktreeId,
-      kind: status === "completed" ? "finished" : "failed",
-      ...(status === "failed" && { error: error ?? "The turn failed" }),
-    });
-  }
   setScopeStatus(task.worktreeId, task.chatId, stopped ? "waiting" : "needs_attention");
 }
 

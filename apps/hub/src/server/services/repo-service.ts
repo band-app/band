@@ -19,7 +19,6 @@ import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
-import { projectService } from "./project-service";
 import {
   type RepoAvatarInfo,
   type RepoAvatarService,
@@ -106,8 +105,6 @@ export class RepoService {
         pinned: boolean;
         /** The remote host the worktree lives on. Absent for the hub's own machine. */
         hostId?: string;
-        /** The project the worktree belongs to (plan step 6.1). Absent when it has none. */
-        projectId?: string;
         /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is coming back (`waking`). */
         lifecycle?: WorktreeLifecycle;
         worktreeId: string;
@@ -207,7 +204,6 @@ export class RepoService {
                 path: wt.path,
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
-                ...(tracked?.projectId ? { projectId: tracked.projectId } : {}),
               };
             });
           worktrees = [
@@ -391,8 +387,6 @@ export class RepoService {
     label?: string;
     name?: string;
     addRoot?: boolean;
-    /** The project to put the repo in. Without it the repo is in no project. */
-    project?: string;
   }): Promise<RepoState> {
     if (input.hostId === "local" && !isLocalHostEnabled()) {
       throw new RepoInputError("This hub does not use its own machine. Choose a worker.");
@@ -474,7 +468,6 @@ export class RepoService {
     }
     this.queries.setHostPath(repo.name, input.hostId, inspected.path);
     if (remote) await host.repos.map(remote.url, inspected.path);
-    await this.placeInProject(repo.name, input.project);
     return this.queries.loadAll().find((r) => r.name === repo?.name) ?? repo;
   }
 
@@ -489,7 +482,6 @@ export class RepoService {
     defaultBranch?: string;
     name?: string;
     label?: string;
-    project?: string;
   }): Promise<RepoState> {
     const remote = parseRemoteUrl(input.remoteUrl);
     if (!remote) {
@@ -521,7 +513,6 @@ export class RepoService {
     }
     fresh.push(repo);
     this.queries.saveAll(fresh);
-    await this.placeInProject(repo.name, input.project);
     return repo;
   }
 
@@ -621,10 +612,6 @@ export class RepoService {
       throw new RepoInputError(`Unknown host "${hostId}"`);
     }
     return host.fs.browse(path);
-  }
-
-  private async placeInProject(repo: string, project: string | undefined): Promise<void> {
-    if (project) projectService.addRepo(projectService.row(project).id, repo);
   }
 
   private checkLabel(label: string | undefined): void {

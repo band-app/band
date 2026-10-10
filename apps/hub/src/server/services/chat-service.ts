@@ -24,13 +24,11 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { projectIdOfScope, projectScopeId } from "../infra/project-scope";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
 import { agentSessionService } from "./agent-session-service";
-import { contextCaptureService } from "./context-capture-service";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 
@@ -254,8 +252,6 @@ export class ChatService {
   private readonly chatSessions = new Map<string, ChatSession>();
   // Reverse index: worktreeId → Set<chatId>
   private readonly worktreeChats = new Map<string, Set<string>>();
-  // Reverse index for project-level chats: projectId → Set<chatId>
-  private readonly projectChats = new Map<string, Set<string>>();
 
   /**
    * Lazy initialization flag. In dev mode (vite dev) the service may be
@@ -278,13 +274,9 @@ export class ChatService {
     this.loadFromDb();
   }
 
-  /** The reverse index a chat belongs in: its worktree's, or its project's when it has no worktree. */
+  /** The reverse index a chat belongs in: its worktree's. */
   private indexFor(session: ChatSession): { map: Map<string, Set<string>>; key: string } | null {
     if (session.worktreeId) return { map: this.worktreeChats, key: session.worktreeId };
-    // A chat of a removed multi-repo task folder (a task id and no worktree) has nowhere to run,
-    // so it stays in the table and out of every list.
-    if (session.taskId) return null;
-    if (session.projectId) return { map: this.projectChats, key: session.projectId };
     return null;
   }
 
@@ -334,9 +326,6 @@ export class ChatService {
    * still observes the reset before the first read.
    */
   create(worktreeId: string, options?: CreateChatOptions): ChatSession {
-    // A project's scope id opens the project's folder view, whose chats belong to the project.
-    const projectId = projectIdOfScope(worktreeId);
-    if (projectId) return this.createForProject(projectId, options);
     const defaultAgent = settingsService.getAgentDefinition();
     const now = Date.now();
 
@@ -382,65 +371,15 @@ export class ChatService {
     return session;
   }
 
-  /**
-   * Create a project-level chat: it belongs to a project and has no worktree, and runs in the
-   * project folder. The coordinator is one. It shows in the project's folder view, whose layout is
-   * keyed by the project's scope id.
-   */
-  createForProject(projectId: string, options?: CreateChatOptions): ChatSession {
-    const defaultAgent = settingsService.getAgentDefinition();
-    const now = Date.now();
-    const labels = options?.labels
-      ? validateLabels(options.labels, { rejectReservedPrefix: !options.allowReservedLabels })
-      : {};
-    const session: ChatSession = {
-      id: options?.id ?? this.generateChatId(),
-      worktreeId: null,
-      projectId,
-      name: options?.name ?? "Chat",
-      agent: options?.agent ?? defaultAgent.id,
-      model: options?.model,
-      mode: options?.mode,
-      activeSessionId: undefined,
-      activeSessionSummary: undefined,
-      activeSessionLastModified: undefined,
-      status: "idle",
-      labels,
-    };
-    this.queries.insert({ ...session, createdAt: now, updatedAt: now });
-    this.addToIndex(session);
-    const scope = projectScopeId(projectId);
-    this.addToLayout(scope, session.id, { title: session.name });
-    emit({ kind: "chat-created", worktreeId: scope, chatId: session.id });
-    log.info({ chatId: session.id, projectId, agent: session.agent }, "project chat created");
-    return session;
-  }
-
-  /** The chats of a project that have no worktree. */
-  listForProject(projectId: string): ChatSession[] {
-    this.ensureInitialized();
-    const ids = this.projectChats.get(projectId);
-    if (!ids) return [];
-    return [...ids].flatMap((id) => {
-      const session = this.chatSessions.get(id);
-      return session ? [session] : [];
-    });
-  }
-
   /** Get a chat session by ID. */
   get(chatId: string): ChatSession | undefined {
     this.ensureInitialized();
     return this.chatSessions.get(chatId);
   }
 
-  /**
-   * List all chat sessions for a worktree. A project's scope id (`project:<id>`) lists the
-   * project's own chats, the ones with no worktree.
-   */
+  /** List all chat sessions for a worktree. */
   list(worktreeId: string): ChatSession[] {
     this.ensureInitialized();
-    const projectId = projectIdOfScope(worktreeId);
-    if (projectId) return this.listForProject(projectId);
     const ids = this.worktreeChats.get(worktreeId);
     if (!ids) return [];
     const sessions: ChatSession[] = [];
@@ -607,9 +546,6 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
-    // Capture reads the log, so it runs before the log is dropped.
-    contextCaptureService.captureChat(session);
-
     // Stop the agent process and drop the chat's event log
     agentSessionService.stop(chatId);
     agentSessionService.deleteLog(chatId);
@@ -621,10 +557,7 @@ export class ChatService {
     // `terminal.kill` and `browsers.remove` do via their respective
     // `remove*FromLayout` helpers — keeps the layout in sync with
     // the registry so an open dashboard doesn't show a ghost tab.
-    // A project chat's layout is the project folder view's, keyed by
-    // its scope id. A legacy task chat has neither and no layout.
-    const scope =
-      session.worktreeId ?? (session.projectId ? projectScopeId(session.projectId) : null);
+    const scope = session.worktreeId;
     if (scope) this.removeFromLayout(scope, chatId);
 
     // Remove from in-memory maps
@@ -634,10 +567,7 @@ export class ChatService {
     // `terminal-killed`.
     if (scope) emit({ kind: "chat-removed", worktreeId: scope, chatId });
 
-    log.info(
-      { chatId, worktreeId: session.worktreeId, projectId: session.projectId },
-      "chat pane removed",
-    );
+    log.info({ chatId, worktreeId: session.worktreeId }, "chat pane removed");
     return true;
   }
 
@@ -658,7 +588,7 @@ export class ChatService {
    * skip the DB delete and leak the rows (and the agents would never be
    * killed).
    */
-  removeAllForWorktree(worktreeId: string, repo?: string, projectId?: string): void {
+  removeAllForWorktree(worktreeId: string): void {
     this.ensureInitialized();
 
     const ids = this.worktreeChats.get(worktreeId);
@@ -673,8 +603,6 @@ export class ChatService {
       // needed and a future refactor of the loop can't desync the two
       // indexes.
       for (const chatId of [...ids]) {
-        const chat = this.chatSessions.get(chatId);
-        if (chat) contextCaptureService.captureChat(chat, repo, projectId);
         agentSessionService.stop(chatId);
         agentSessionService.deleteLog(chatId);
         this.removeFromIndex(chatId);

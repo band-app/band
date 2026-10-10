@@ -11,7 +11,6 @@
 import path from "node:path";
 import type { RelayHttpRequest } from "@band-app/link";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { isFolderScope } from "../infra/project-scope";
 
 /**
  * The tRPC procedures an agent may call, by exact name. A procedure missing
@@ -225,16 +224,11 @@ function collect(value: unknown, into: Named, depth = 0): void {
   }
 }
 
-/**
- * Checks that everything `input` names belongs to `workerId`'s host. A project folder (or another
- * folder scope) shares its host with worktrees, so naming one is refused unless `allowFolder` is
- * set, which only the check of the token's own scope does.
- */
+/** Checks that everything `input` names belongs to `workerId`'s host. */
 function checkNamed(
   input: unknown,
   workerId: string,
   lookups: ScopeLookups,
-  allowFolder = false,
 ): RelayVerdict & {
   named?: number;
 } {
@@ -249,14 +243,11 @@ function checkNamed(
   collect(input, named);
   const outside = deny(403, "That worktree is not on this host");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
-  const folder = deny(403, "A worktree's agent cannot reach a project folder");
   for (const id of named.worktrees) {
-    if (!allowFolder && isFolderScope(id)) return folder;
     if (lookups.hostOfWorktree(id) !== workerId) return outside;
   }
   for (const id of named.chats) {
     const worktree = lookups.worktreeOfChat(id);
-    if (worktree !== null && !allowFolder && isFolderScope(worktree)) return folder;
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const cwd of named.cwds) {
@@ -320,10 +311,7 @@ function checkCall(
     }
   }
   if (procedure === "worktrees.create") {
-    const { repo, branch, hostId, projectId } = (input ?? {}) as Record<string, unknown>;
-    if (projectId !== undefined) {
-      return deny(403, `${procedure}: An agent on a worker cannot put a worktree in a project`);
-    }
+    const { repo, branch, hostId } = (input ?? {}) as Record<string, unknown>;
     if (typeof repo !== "string" || typeof branch !== "string") {
       return deny(400, `${procedure} needs a repo and a branch`);
     }
@@ -394,12 +382,6 @@ function bodyText(body: string | undefined): string {
   return body ? Buffer.from(body, "base64").toString("utf8") : "";
 }
 
-const CONTEXT_TOOLS: ReadonlySet<string> = new Set([
-  "context_search",
-  "context_append_learning",
-  "context_handoff",
-]);
-
 function checkMcp(
   request: RelayHttpRequest,
   workerId: string,
@@ -415,9 +397,6 @@ function checkMcp(
     const { method, params } = message as { method?: unknown; params?: Record<string, unknown> };
     if (method !== "tools/call") continue;
     const name = typeof params?.name === "string" ? params.name : "";
-    // The context tools name no worktree or context. The hub takes the session from
-    // the headers the relay sets from the token's scope, so a caller cannot widen them.
-    if (CONTEXT_TOOLS.has(name)) continue;
     if (!name.startsWith("band_")) return deny(403, "Unknown tool");
     const procedure = name.slice("band_".length).replace(/_/g, ".");
     const verdict = checkCall(procedure, params?.arguments, workerId, lookups);
@@ -449,7 +428,6 @@ export function checkRelayRequest(
     { worktreeId: request.scope.worktreeId, chatId: request.scope.chatId },
     workerId,
     lookups,
-    true,
   );
   if (!scope.ok) return scope;
   if (lookups.hostOfWorktree(request.scope.worktreeId) !== workerId) {
@@ -464,13 +442,6 @@ export function checkRelayRequest(
   }
   const { pathname } = url;
   if (pathname === "/api/health" && request.method === "GET") return { ok: true };
-  // A project chat (the coordinator) and a task chat have no worktree. Their only route is the MCP
-  // proxy, where the per-session token and the project or task it was issued for decide what they can do.
-  if (isFolderScope(request.scope.worktreeId)) {
-    return MCP_PROXY_ROUTE.test(pathname)
-      ? { ok: true }
-      : deny(403, "A project or task chat may call the MCP proxy only");
-  }
   if (pathname === "/mcp") return checkMcp(request, workerId, lookups);
   // The MCP proxy checks its own per-session token, so the relay only has to
   // let the call through. The worktree was checked above.

@@ -1,6 +1,5 @@
 import type { PullRequestSummary } from "@band-app/host-local/git/git-client";
 import {
-  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -154,14 +153,6 @@ export const worktrees = sqliteTable("worktrees", {
   head: text("head"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   hostId: hostId(),
-  // The project this worktree belongs to (plan step 6.1), or null. A project
-  // removed while worktrees still point at it is refused, so the SET NULL is a backstop.
-  projectId: text("project_id").references((): AnySQLiteColumn => projects.id, {
-    onDelete: "set null",
-  }),
-  // Legacy: the multi-repo task this worktree was a member of on older hubs. `retireLegacy`
-  // clears it at boot and nothing sets it now. No foreign key: the whole-tree repo save rewrites this table.
-  taskId: text("task_id"),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was
@@ -391,13 +382,7 @@ export const chatEvents = sqliteTable(
 
 export const panelStates = sqliteTable("panel_states", {
   id: text("id").primaryKey(),
-  // Null for a project-level chat (the coordinator), which has no worktree.
   worktreeId: text("worktree_id"),
-  // The project a project-level chat belongs to. Null for a worktree's chat.
-  projectId: text("project_id"),
-  // The task a task chat belongs to (plan step T.2). A task's own chat has no worktree and
-  // runs in the task folder. The chat of a migrated one-member task keeps its worktree.
-  taskId: text("task_id"),
   panelType: text("panel_type").notNull(),
   state: text("state").notNull(), // JSON blob — panel-type-specific
   // Free-form labels for taxonomy and dispatch lookups (issue #520). JSON-encoded
@@ -626,7 +611,7 @@ export const subscriptions = sqliteTable(
     maxWakeups: integer("max_wakeups").notNull(),
     wakeups: integer("wakeups").notNull(),
     expiresAt: integer("expires_at").notNull(),
-    createdBy: text("created_by", { enum: ["agent", "coordinator", "user"] }).notNull(),
+    createdBy: text("created_by", { enum: ["agent", "user"] }).notNull(),
     createdAt: integer("created_at").notNull(),
     // Source settings as JSON: a webhook's `secretHash`, a timer's `at` or `cron`.
     config: text("config").notNull().default("{}"),
@@ -802,184 +787,4 @@ export const mcpProxyAudit = sqliteTable(
     error: text("error"),
   },
   (t) => [index("mcp_proxy_audit_at_idx").on(t.at)],
-);
-
-// Context git repos the hub holds (plan step 5.1). The bare repo lives at
-// `<BAND_HOME>/context/<name>.git`. `labels` are `k=v` host labels: a worker
-// may pull only when its host carries all of them (empty means any worker).
-// `worker_access` is what a worker may do over the git endpoint. A linked
-// remote is mirrored both ways, with its credential in the vault
-// (`remote_vault_item_id`), never stored here.
-export const contexts = sqliteTable(
-  "contexts",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    kind: text("kind", { enum: ["user", "project"] }).notNull(),
-    remoteUrl: text("remote_url"),
-    remoteVaultItemId: text("remote_vault_item_id"),
-    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
-    // Repos whose agents use this context as their project context (a repo is in at
-    // most one). Phase 6 replaces this with projects. Always empty for the user context.
-    repos: text("repos", { mode: "json" }).$type<string[]>().notNull().default([]),
-    workerAccess: text("worker_access", { enum: ["read-write", "read-only"] })
-      .notNull()
-      .default("read-write"),
-    // Whether sessions get this context's files in their instructions (plan step 5.3). Off on a
-    // project context turns the whole preamble off for that project's sessions.
-    preamble: integer("preamble", { mode: "boolean" }).notNull().default(true),
-    // Outcome of the last mirror run with the remote: null when it was clean.
-    syncError: text("sync_error"),
-    lastSyncAt: integer("last_sync_at"),
-    createdAt: integer("created_at").notNull(),
-  },
-  (t) => [uniqueIndex("contexts_name_idx").on(t.name)],
-);
-
-// What the worker sync (plan step 5.2) reported to the hub: a conflict whose two versions were
-// kept, or files the redaction scan held back. `detail` never holds a matched secret.
-export const contextEvents = sqliteTable(
-  "context_events",
-  {
-    id: text("id").primaryKey(),
-    context: text("context").notNull(),
-    hostId: text("host_id").notNull(),
-    kind: text("kind", { enum: ["conflict", "blocked"] }).notNull(),
-    detail: text("detail", { mode: "json" }).$type<unknown>().notNull(),
-    at: integer("at").notNull(),
-  },
-  (t) => [index("context_events_at_idx").on(t.at)],
-);
-
-// A project is the cross-repo body of work (plan step 6.1). `context_name` is its
-// context repo (`contexts.name`, kind `project`). `labels` are `k=v` host labels and
-// `policy` holds placement defaults for the coordinator of step 6.2.
-export const projects = sqliteTable(
-  "projects",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    description: text("description").notNull().default(""),
-    // The name the UI shows. Empty means `name`. `name` stays fixed, because the context repo and
-    // the project folder on each host are named after it.
-    title: text("title").notNull().default(""),
-    contextName: text("context_name").notNull(),
-    // Legacy: set only on older hubs' default project ("Personal"), which `retireLegacy` deletes at boot.
-    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
-    coordinatorAgent: text("coordinator_agent"),
-    coordinatorModel: text("coordinator_model").notNull().default("opus"),
-    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
-    policy: text("policy", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
-    // The coordinator session of step 6.2: its worktree (in one of the project's
-    // repos), its chat, and the host it is pinned to (null means the local host).
-    coordinatorChatId: text("coordinator_chat_id"),
-    coordinatorHostId: text("coordinator_host_id"),
-    createdAt: integer("created_at").notNull(),
-  },
-  (t) => [uniqueIndex("projects_name_idx").on(t.name)],
-);
-
-// The repos a project may touch. `repo_name` has no foreign key on purpose: the
-// whole-tree save of `repos` deletes and reinserts every repo row, which would
-// cascade-delete these rows. `ProjectService` checks the repo exists instead.
-export const projectRepos = sqliteTable(
-  "project_repos",
-  {
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    repoName: text("repo_name").notNull(),
-    role: text("role"),
-  },
-  (t) => [primaryKey({ columns: [t.projectId, t.repoName] })],
-);
-
-// A task is one piece of work in one project (plan step T.2, section 14): a folder on one host
-// that holds a BRIEF.md and one git worktree per member repo. `brief_path` is the BRIEF.md on the
-// host, `host_id` the host the folder is on (null while a host is still being provisioned),
-// `status` is `active` or `removed`.
-export const projectTasks = sqliteTable(
-  "project_tasks",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    branch: text("branch").notNull(),
-    briefPath: text("brief_path"),
-    hostId: text("host_id"),
-    status: text("status").notNull().default("active"),
-    createdAt: integer("created_at").notNull(),
-  },
-  (t) => [
-    index("project_tasks_project_idx").on(t.projectId),
-    uniqueIndex("project_tasks_project_name_idx").on(t.projectId, t.name),
-  ],
-);
-
-// The repos of a task. `worktree_id` is null while a member waits for a host. `merge_order` is
-// the order the members' pull requests merge.
-export const taskMembers = sqliteTable(
-  "task_members",
-  {
-    taskId: text("task_id")
-      .notNull()
-      .references(() => projectTasks.id, { onDelete: "cascade" }),
-    repoName: text("repo_name").notNull(),
-    worktreeId: text("worktree_id"),
-    role: text("role"),
-    mergeOrder: integer("merge_order").notNull().default(0),
-    prNumber: integer("pr_number"),
-  },
-  (t) => [primaryKey({ columns: [t.taskId, t.repoName] })],
-);
-
-// Worktrees that held a project's coordinator before it moved into the project folder (step T.1).
-// The migration fills it from `projects.coordinator_worktree_id`, and the hub removes each
-// worktree on boot and then the row.
-export const legacyCoordinatorWorktrees = sqliteTable("legacy_coordinator_worktrees", {
-  worktreeId: text("worktree_id").primaryKey(),
-  projectId: text("project_id").notNull(),
-});
-
-// A dispatch the coordinator of a `steer` project asked for and the user had yet to decide
-// (plan step 6.3). The `steer` level is gone and nothing writes here any more; old rows stay.
-// `input` is the validated `worktrees_create` call. A decided row stays as a record: `status` is `pending`, `approved` (dispatched), `rejected` or `failed` (approved,
-// but the dispatch threw, with the message in `error`).
-export const dispatchRequests = sqliteTable(
-  "dispatch_requests",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
-    input: text("input", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
-    status: text("status").notNull().default("pending"),
-    error: text("error"),
-    result: text("result", { mode: "json" }).$type<Record<string, unknown>>(),
-    createdAt: integer("created_at").notNull(),
-    decidedAt: integer("decided_at"),
-  },
-  (t) => [index("dispatch_requests_project_idx").on(t.projectId, t.status)],
-);
-
-// A retro of a project (plan step 6.5): the edits its retro agent proposed. The scheduled retro is
-// gone (a user who wants one makes a cronjob) and nothing writes here any more; old rows stay.
-export const retroProposals = sqliteTable(
-  "retro_proposals",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at").notNull(),
-    status: text("status").notNull(),
-    summary: text("summary"),
-    error: text("error"),
-    chatId: text("chat_id"),
-    items: text("items", { mode: "json" }).$type<unknown[]>().notNull(),
-  },
-  (t) => [index("retro_proposals_project_idx").on(t.projectId, t.createdAt)],
 );

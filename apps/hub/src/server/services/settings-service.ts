@@ -115,13 +115,6 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
-    // Context settings (plan step 5.4).
-    context: z
-      .object({
-        captureLearnings: z.boolean().optional(),
-      })
-      .passthrough()
-      .optional(),
     // Where environment images are built (plan step 3.2).
     environmentBuilder: z
       .object({

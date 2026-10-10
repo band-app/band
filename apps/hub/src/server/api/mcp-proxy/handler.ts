@@ -21,9 +21,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { rewriteSse, SseEventTooLargeError, sseDataOf } from "../../services/_utils/mcp-sse";
-import { COORDINATOR_SERVER } from "../../services/_utils/project-policy";
 import { type McpServerView, mcpProxyService } from "../../services/mcp-proxy-service";
-import { handleCoordinatorMcp } from "./coordinator";
 import {
   auditUnanswered,
   BodyTooLargeError,
@@ -191,8 +189,6 @@ export async function handleMcpProxy(req: IncomingMessage, res: ServerResponse):
       auth.status === 401 ? { "WWW-Authenticate": 'Bearer realm="band-mcp-proxy"' } : {},
     );
   }
-  // The hub's own coordinator tools, not an upstream.
-  if (name === COORDINATOR_SERVER) return handleCoordinatorMcp(req, res, auth);
   const server = mcpProxyService.getEnabledServer(name);
   if (!server) return sendJson(res, 404, { error: "No such MCP server" });
 

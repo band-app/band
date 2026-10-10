@@ -117,37 +117,6 @@ export class WorktreeQueries {
     return row && toWorktreeId(row.repo, row.name) === worktreeId ? row.hostId : null;
   }
 
-  /** The project a worktree belongs to, or null when it has none or no row matches. */
-  findProjectId(worktreeId: string): string | null {
-    const row = getDb()
-      .select({
-        repo: worktreesTable.repoName,
-        name: worktreesTable.name,
-        projectId: worktreesTable.projectId,
-      })
-      .from(worktreesTable)
-      .where(
-        sql`${worktreesTable.repoName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${worktreeId}`,
-      )
-      .get();
-    return row && toWorktreeId(row.repo, row.name) === worktreeId ? row.projectId : null;
-  }
-
-  /** Points a worktree at a project, or at none with a null id. Returns false when no worktree matches. */
-  setProjectId(worktreeId: string, projectId: string | null): boolean {
-    const db = getDb();
-    const row = db
-      .select({ id: worktreesTable.id, repo: worktreesTable.repoName, name: worktreesTable.name })
-      .from(worktreesTable)
-      .where(
-        sql`${worktreesTable.repoName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${worktreeId}`,
-      )
-      .get();
-    if (!row || toWorktreeId(row.repo, row.name) !== worktreeId) return false;
-    db.update(worktreesTable).set({ projectId }).where(eq(worktreesTable.id, row.id)).run();
-    return true;
-  }
-
   /**
    * Delete the `branch_statuses` row for the given worktree.
    *

@@ -19,7 +19,6 @@ import {
 import { createLogger } from "@band-app/logger";
 import { CHAT_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
 import { hostRegistry } from "../infra/host/registry";
-import { chatScope } from "../infra/project-scope";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 import {
@@ -53,7 +52,7 @@ const defaultLookups: ScopeLookups = {
   hostOfWorktree: (id) => hostRegistry.hostIdOfScope(id),
   worktreeOfChat: (id) => {
     const chat = chatService.get(id);
-    return chat ? chatScope(chat) : null;
+    return chat?.worktreeId ?? null;
   },
   worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),

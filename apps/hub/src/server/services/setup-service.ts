@@ -66,8 +66,8 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  */
 export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
-  // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs and
-  // project membership with focused writes that it must not overwrite from a stale snapshot.
+  // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs
+  // with focused writes that it must not overwrite from a stale snapshot.
   const repoSync = ensureRepoStateInSync().then(() => ensureRepoRemotes());
 
   await ensureCliInstalled();

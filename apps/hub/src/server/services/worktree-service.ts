@@ -25,10 +25,8 @@ import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
-import { projectIdOfScope } from "../infra/project-scope";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
-import { writeBrief } from "./_utils/write-brief";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `worktreeService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
@@ -59,8 +57,6 @@ import { panelFocusService } from "./panel-focus-service";
 // FRAGILE: ESM cycle leg — `./placement-service` imports `worktreeService` from
 // this file. Keep every `placementService` reference inside a function body.
 import { placementService } from "./placement-service";
-import { projectFolderService } from "./project-folder-service";
-import { projectService } from "./project-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
@@ -162,12 +158,6 @@ export const worktreeCreateInput = z.object({
   // online host that fits, or waits as `provisioning` while a runner starts one
   // (plan step 3.3). `placement: {}` means any host. Excludes `hostId`.
   placement: placementInput.optional(),
-  // The project (id or name) the worktree belongs to (plan step 6.1). The repo must be one
-  // of the project's. The agents in the worktree use that project's context.
-  projectId: z.string().min(1).optional(),
-  // Markdown written to `.am/BRIEF.md` in the new worktree, which git ignores (plan step 6.3).
-  // It rides in the stored create call, so a worktree placed after provisioning gets it too.
-  brief: z.string().max(100_000).optional(),
 });
 export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
 
@@ -379,8 +369,6 @@ export class WorktreeService {
    * interim.
    */
   resolve(worktreeId: string): ResolvedWorktree | null {
-    const projectId = projectIdOfScope(worktreeId);
-    if (projectId) return this.resolveProjectFolder(projectId);
     const state = loadState();
     for (const repo of state.repos) {
       for (const worktree of repo.worktrees) {
@@ -392,42 +380,6 @@ export class WorktreeService {
       }
     }
     return null;
-  }
-
-  /**
-   * A project's folder as a plain (non-git) worktree, so the worktree view's files, editor,
-   * terminals and chats work on it unchanged and show no git UI. The folder is on the project's
-   * coordinator host. On the hub's own host its path is known; on a worker it is known once the
-   * folder was ensured (at boot, when the view opens, or before a coordinator turn).
-   */
-  private resolveProjectFolder(projectId: string): ResolvedWorktree | null {
-    const project = projectService.find(projectId);
-    if (!project) return null;
-    const host = projectFolderService.hostOf(project);
-    const folder =
-      projectFolderService.state(project.id)?.folder ??
-      (host.id === hostRegistry.local.id ? join(bandHome(), "projects", project.name) : undefined);
-    if (!folder) return null;
-    const worktree: WorktreeState = {
-      name: project.name,
-      branch: "main",
-      path: folder,
-      pinned: false,
-      ...(host.id === hostRegistry.local.id ? {} : { hostId: host.id }),
-      projectId: project.id,
-    };
-    return {
-      repo: {
-        name: project.name,
-        path: folder,
-        kind: "plain",
-        defaultBranch: "main",
-        worktrees: [worktree],
-        hasOrigin: false,
-      },
-      worktree,
-      host,
-    };
   }
 
   /**
@@ -589,12 +541,6 @@ export class WorktreeService {
     );
     if (existing) return { ok: true, path: existing.path };
 
-    // Check the project before anything is created, so a bad request leaves no trace.
-    const projectId = input.projectId
-      ? projectService.resolveForWorktree(input.projectId, input.repo)
-      : undefined;
-    if (projectId) input = { ...input, projectId };
-
     const worktreeId = toWorktreeId(input.repo, input.branch);
     if (input.placement) {
       if (input.hostId) {
@@ -631,26 +577,6 @@ export class WorktreeService {
     await host.fs.mkdir(remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo), {
       recursive: true,
     });
-    // A project's worktrees start from the repo's default branch as the remote has it now, so
-    // the coordinator's agents never build on a stale checkout.
-    let base = input.base;
-    if (projectId && !base && repo.defaultBranch) {
-      await host.git.exec(["fetch", "--quiet", "--no-tags", "origin"], repoPath).catch(() => null);
-      // A repo with no origin (a local folder) starts from its default branch as it is.
-      for (const candidate of [`origin/${repo.defaultBranch}`, repo.defaultBranch]) {
-        const found = await host.git
-          .exec(["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`], repoPath)
-          .then(
-            () => true,
-            () => false,
-          );
-        if (found) {
-          base = candidate;
-          break;
-        }
-      }
-    }
-
     try {
       // Async — `git worktree add` on a large repo can take 200–500 ms
       // and the surrounding `create` is already async, so blocking the
@@ -661,7 +587,7 @@ export class WorktreeService {
         repoPath,
         path: worktreePath,
         branch: input.branch,
-        base,
+        base: input.base,
       });
     } catch (e) {
       throw new Error(e instanceof Error ? e.message : String(e));
@@ -675,7 +601,6 @@ export class WorktreeService {
       path: worktreePath,
       pinned: false,
       ...(remote ? { hostId } : {}),
-      ...(projectId ? { projectId } : {}),
     };
     // Re-read state: `git worktree add` took a while, and a sync or another
     // create may have saved since `state` was loaded.
@@ -709,17 +634,6 @@ export class WorktreeService {
       log.warn({ err, worktreeId }, "copyWorktreeFiles raised — continuing");
     }
 
-    if (input.brief) {
-      try {
-        await writeBrief(host, worktreePath, input.brief, remote);
-      } catch (err) {
-        // A worker that starts without its brief would work blind, so fail the create.
-        throw new Error(
-          `The worktree was created, but its brief could not be written: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
     // How the prompt's agent is displayed (issue #682): the caller's
     // `agentMode`, else its legacy `via`, else `agents.defaultMode`.
     const agentMode =
@@ -728,12 +642,7 @@ export class WorktreeService {
     // Materialize the default chat pane so the worktree surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt. A `gui`
     // prompt runs in it.
-    let defaultChat = chatService.getOrCreateDefault(worktreeId);
-    // A dispatched worker runs on the model of its lane from its first session, which the chat's
-    // own model decides (plan step 6.3).
-    if (input.brief && input.model && agentMode === "gui") {
-      defaultChat = chatService.update(defaultChat.id, { model: input.model }) ?? defaultChat;
-    }
+    const defaultChat = chatService.getOrCreateDefault(worktreeId);
 
     // The setup command runs in its own terminal tab, in parallel with the
     // agent: the prompt goes out now rather than after setup, so a slow or
@@ -984,9 +893,6 @@ export class WorktreeService {
     }
     const host = hostRegistry.hostFor(worktreeId);
 
-    // The row is gone once saved, so read the project now for the chat capture below.
-    const projectId = repo.worktrees.find((wt) => wt.name === input.name)?.projectId;
-
     // ── Fast path: update state and emit immediately ──
     repo.worktrees = repo.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
@@ -1005,7 +911,7 @@ export class WorktreeService {
     // tears down the saved layout as part of the same call (see
     // `ChatService.removeAllForWorktree`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    chatService.removeAllForWorktree(worktreeId, input.repo, projectId);
+    chatService.removeAllForWorktree(worktreeId);
     agentSessionRegistry.removeAllForWorktree(worktreeId);
 
     // Clean up all browser tabs + layout. Same contract as chats —

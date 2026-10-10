@@ -36,12 +36,7 @@ interface RepoView {
   remoteUrl?: string;
   defaultBranch: string;
   clones: Array<{ hostId: string; path: string }>;
-  worktrees: Array<{ name: string; path: string; hostId?: string; projectId?: string }>;
-}
-interface ProjectView {
-  id: string;
-  name: string;
-  repos: Array<{ repo: string }>;
+  worktrees: Array<{ name: string; path: string; hostId?: string }>;
 }
 
 const scratch: string[] = [];
@@ -205,14 +200,6 @@ describe("adding a repo from a worker (S1)", () => {
       { path: string }
     >;
     expect(Object.values(mappings).map((e) => e.path)).toEqual([checkoutOf()]);
-  });
-
-  it("puts the repo and its worktree in no project", async () => {
-    const { projects } = await q<{ projects: ProjectView[] }>("projects.list");
-    expect(projects.flatMap((p) => p.repos.map((r) => r.repo))).not.toContain("proj");
-    const wt = (await repo("proj"))?.worktrees.find((w) => w.name === "feat-a");
-    expect(wt).toBeDefined();
-    expect(wt?.projectId).toBeUndefined();
   });
 });
 
