@@ -45,8 +45,7 @@ import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/cli
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
-import { useWorktreeFromPath } from "../lib/parse-worktree";
-import { worktreeHref } from "../lib/project-slugs";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import {
   loadRightPanelCollapsed,
   loadRightPanelWidth,
@@ -65,7 +64,6 @@ import {
   applyTranslucentSidebar,
   TRANSLUCENT_SIDEBAR_INIT_SCRIPT,
 } from "../lib/translucent-sidebar";
-import { trpc } from "../lib/trpc-client";
 import { setActiveWorktree } from "../lib/worktree-cold-park";
 import {
   applyZoomLevel,
@@ -345,11 +343,6 @@ function ClientStateGate({ children }: { children: ReactNode }) {
     const repos = queryClient
       .fetchQuery({ queryKey: queryKeys.repos, queryFn: () => adapter.listRepos() })
       .catch(() => null);
-    // The projects tell whether a last project folder view still exists.
-    const projects = queryClient
-      .fetchQuery({ queryKey: ["projects.list"], queryFn: () => trpc.projects.list.query() })
-      .then((r) => new Set(r.projects.map((p) => p.id)))
-      .catch(() => null);
     void (async () => {
       await hydrateGlobal();
       // A load on `/` (every desktop launch) reopens the worktree this
@@ -357,11 +350,13 @@ function ClientStateGate({ children }: { children: ReactNode }) {
       if (router.state.location.pathname === "/") {
         const list = await withTimeout(repos, HYDRATE_WAIT_MS);
         if (!list) keepLastWorktreeOnce();
-        const projectIds = list ? await withTimeout(projects, HYDRATE_WAIT_MS) : null;
-        const target = list ? pickStartWorktree(list, projectIds) : null;
+        const target = list ? pickStartWorktree(list) : null;
         if (target && !cancelled) {
-          // A project's scope id opens at `/project/<name>`.
-          await router.navigate({ to: worktreeHref(target), replace: true });
+          await router.navigate({
+            to: "/worktree/$worktreeId",
+            params: { worktreeId: target },
+            replace: true,
+          });
         }
       }
       if (!cancelled) setReady(true);
@@ -434,7 +429,7 @@ function AppShell() {
   useZoom();
 
   // Derive active worktree from pathname for title bar display
-  const activeWorktreeId = useWorktreeFromPath(pathname);
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
 
   // Tell the memory policies which worktree is on screen, on both layouts:
   // `worktree-cold-park.ts` stamps when each worktree was hidden (terminals,

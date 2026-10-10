@@ -17,7 +17,7 @@ import {
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
-import { useWorktreeFromPath } from "../lib/parse-worktree";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
@@ -154,7 +154,7 @@ function NoWorktreeMessage() {
  */
 export function SharedDockviewLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeWorktreeId = useWorktreeFromPath(pathname);
+  const activeWorktreeId = parseWorktreeFromPath(pathname);
 
   const activeWorktreeIdRef = useRef<string | null>(activeWorktreeId);
   activeWorktreeIdRef.current = activeWorktreeId;

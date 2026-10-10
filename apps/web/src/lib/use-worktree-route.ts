@@ -1,13 +1,7 @@
-import { projectIdOfScope } from "@band-app/shared/scope-id";
-import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useDashboardStore } from "@/dashboard";
-import { trpc } from "./trpc-client";
 
-/**
- * What opening a worktree's view does, shared by `/worktree/<id>` and a project's
- * `/project/<name>` (whose view is the worktree view of its scope id).
- */
+/** What opening a worktree's view does. */
 export function useWorktreeRoute(decoded: string | null): void {
   // Sync zustand active worktree from URL. We set on param change but never
   // clear on unmount: on mobile the repo-list "menu" lives on a *separate*
@@ -15,7 +9,7 @@ export function useWorktreeRoute(decoded: string | null): void {
   // to show the menu would wipe `activeWorktreeId` and leave the menu unable
   // to bold the worktree the user just came from. Keeping the last-opened id
   // lets the menu mark it active on every viewport. The title bar reads the
-  // active id from the pathname (`useWorktreeFromPath` in __root), not this
+  // active id from the pathname (`parseWorktreeFromPath` in __root), not this
   // store, so it still clears correctly when no worktree route is mounted.
   const setActiveWorktree = useDashboardStore((s) => s.setActiveWorktree);
   useEffect(() => {
@@ -34,18 +28,6 @@ export function useWorktreeRoute(decoded: string | null): void {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [decoded, refreshBranchStatus]);
-
-  // A project's folder view: make sure the folder exists on the coordinator host, so its files,
-  // terminals and chats resolve after a hub restart. A folder that is ready returns at once.
-  const projectId = decoded ? projectIdOfScope(decoded) : undefined;
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    if (!projectId) return;
-    void trpc.projects.prepareFolder
-      .mutate({ project: projectId })
-      .then(() => queryClient.invalidateQueries({ queryKey: ["projects.folder", projectId] }))
-      .catch(() => {});
-  }, [projectId, queryClient]);
 
   // Clear needs_attention status when viewing this worktree
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);

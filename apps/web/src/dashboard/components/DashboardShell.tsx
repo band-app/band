@@ -6,7 +6,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  ScrollArea,
   Spinner,
   Tooltip,
   TooltipContent,
@@ -39,9 +38,8 @@ import {
 } from "../hooks/use-status";
 import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
+import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
-import { ProjectAddRepoDialog } from "./ProjectAddRepoDialog";
-import { NewProjectButton, ProjectTaskList } from "./ProjectTaskList";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
 import { SettingsPage } from "./SettingsPage";
@@ -58,7 +56,7 @@ interface DashboardShellProps {
    *  `hideTitleBar`. Set by the mobile repo-list fly-out, which reaches the
    *  bottom screen edge with no AppShell below it to pad the inset. */
   padBottomInset?: boolean;
-  /** Make the top row (label filter, collapse all, add repo) as tall as
+  /** Make the Repos header (label filter, collapse all, add repo) as tall as
    *  the mobile worktree header, so the two line up. Set by the mobile
    *  repo-list fly-out. */
   matchMobileHeader?: boolean;
@@ -97,10 +95,10 @@ export function DashboardShell({
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [settingsHosts, setSettingsHosts] = useState(false);
   const [addingRepo, setAddingRepo] = useState(false);
-  // Adding a repo needs an admin token, and so does `context.list`, so it doubles as the probe.
+  // Adding a repo needs an admin token.
   const admin = useQuery({
-    queryKey: ["projects.admin"],
-    queryFn: () => trpc.context.list.query(),
+    queryKey: ["tokens.current"],
+    queryFn: () => trpc.tokens.current.query(),
     retry: false,
   });
   const actionBarObstructionRef = useToastObstruction();
@@ -370,38 +368,12 @@ export function DashboardShell({
         </div>
       )}
 
-      {/* sync-with: the `h-12` of `mobile-worktree__header` in MobileWorktreeShell. */}
-      <div
-        data-testid="repo-list__top-bar"
-        className={cn(
-          "flex shrink-0 items-center justify-between border-b border-border",
-          matchMobileHeader ? "h-12" : "h-9",
-        )}
-      >
-        <span className="pl-4 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-          Projects
-        </span>
-        <div className="pr-2">
-          <NewProjectButton
-            onOpenHosts={() => {
-              setSettingsHosts(true);
-              setShowSettingsDialog(true);
-            }}
-          />
-        </div>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
-        <main className="pb-3">
-          <ProjectTaskList />
-        </main>
-      </ScrollArea>
-
       <ReposPanel
+        tall={matchMobileHeader}
         count={loading ? null : repos.length}
         actions={
           <div className="flex items-center gap-0.5">
-            {admin.isSuccess ? (
+            {admin.data?.admin ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -516,7 +488,7 @@ export function DashboardShell({
                 Add a folder from a worker or a repo by its remote URL.
               </p>
             </div>
-            {admin.isSuccess ? (
+            {admin.data?.admin ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -531,7 +503,7 @@ export function DashboardShell({
           <RepoList labelFilter={labelFilter} />
         )}
       </ReposPanel>
-      <ProjectAddRepoDialog
+      <AddRepoDialog
         open={addingRepo}
         onOpenChange={setAddingRepo}
         label={labelFilter}

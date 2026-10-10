@@ -34,13 +34,6 @@ export {
 } from "./components/LanguagePickerDialog";
 export { NewWorktreeDialog } from "./components/NewWorktreeForm";
 export { PdfPreview } from "./components/PdfPreview";
-export { CreateProjectFlow } from "./components/project/CreateProjectFlow";
-export { ProjectRepoTree } from "./components/project/ProjectRepoTree";
-export {
-  PROJECT_SIDE_TABS,
-  ProjectSideTab,
-  type ProjectSideTabId,
-} from "./components/project/ProjectSideTabs";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export { RepoAvatar } from "./components/RepoAvatar";
 export { RepoList } from "./components/RepoList";

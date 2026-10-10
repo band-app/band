@@ -205,7 +205,7 @@ test("a sheet opened in one worktree does not carry over to the next", async ({ 
   await expect(layout.pluginSheetBody(CHECKS)).toBeHidden();
 });
 
-test("the repo-list fly-out's top row is as tall as the header", async ({ page }) => {
+test("the repo-list fly-out's Repos header is as tall as the header", async ({ page }) => {
   const worktree = new WorktreePage(page, server.url, TOKEN);
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
 

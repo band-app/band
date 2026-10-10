@@ -2,7 +2,6 @@ import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
-import { worktreeHref } from "../../lib/project-slugs";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
@@ -582,8 +581,7 @@ export class WebCapabilities implements PlatformCapabilities {
   // See issue #467 for the refactor that removed the `band-tab:` session
   // store and the `/changes` / `/code` / `/terminal` child routes.
   getWorktreeHref(worktreeId: string): string {
-    // A project's view lives at `/project/<name>`.
-    return worktreeHref(worktreeId);
+    return `/worktree/${encodeURIComponent(worktreeId)}`;
   }
 
   async openUrl(url: string): Promise<void> {

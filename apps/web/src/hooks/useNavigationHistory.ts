@@ -1,7 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlatformCapabilities } from "@/dashboard";
-import { useWorktreeFromPath } from "../lib/parse-worktree";
+import { parseWorktreeFromPath } from "../lib/parse-worktree";
 
 /**
  * Browser-like worktree history powering the title-bar back/forward buttons.
@@ -40,8 +40,7 @@ export function useNavigationHistory(
   capabilities: PlatformCapabilities,
 ): NavigationHistoryReturn {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // A project's view (`/project/<name>`) counts as a visit to its scope id.
-  const wsId = useWorktreeFromPath(pathname);
+  const wsId = parseWorktreeFromPath(pathname);
 
   // Stack and cursor live in a single state object so consumers re-render
   // when canGoBack/canGoForward flip (used to enable/disable UI buttons).
@@ -51,7 +50,7 @@ export function useNavigationHistory(
   // Track worktree changes → push onto the history stack (unless we caused it).
   useEffect(() => {
     // Reset first: a back or forward step onto an entry that no longer resolves (a deleted
-    // project) parses to null, and must not swallow the next real visit.
+    // worktree) parses to null, and must not swallow the next real visit.
     const caused = navigatingRef.current;
     navigatingRef.current = false;
     if (!wsId || caused) return;

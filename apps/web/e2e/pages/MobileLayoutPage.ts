@@ -1,5 +1,4 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { ProjectTab } from "./ProjectsPage";
 
 /** Box edges plus the padding that decides where content stops, in CSS px. */
 export interface LayoutBox {
@@ -92,7 +91,7 @@ export class MobileLayoutPage {
     this.headerWorktreeName = this.worktreeSwitcher.getByTestId("worktree-label__name");
     this.headerRepoName = this.worktreeSwitcher.getByTestId("worktree-label__repo");
     this.headerLabel = this.worktreeSwitcher.getByTestId("worktree-label");
-    this.flyoutTopBar = page.getByTestId("repo-list-flyout").getByTestId("repo-list__top-bar");
+    this.flyoutTopBar = page.getByTestId("repo-list-flyout").getByTestId("repos-panel__header");
     this.menuButton = page.getByTestId("mobile-worktree__header-menu");
     this.menuBody = page.getByTestId("mobile-worktree__menu-body");
     this.changesItemBadge = page.getByTestId("mobile-worktree__menu-changes-badge");
@@ -187,21 +186,6 @@ export class MobileLayoutPage {
     await test.step(`Close the ${slug} sheet`, async () => {
       await this.page.keyboard.press("Escape");
       await expect(this.pluginSheetBody(slug)).toBeHidden();
-    });
-  }
-
-  /** The body of a project side tab's bottom sheet (`activity` or `repos`). */
-  projectSheetBody(tab: ProjectTab): Locator {
-    return this.page.getByTestId(`mobile-worktree__project--${tab}-sheet`);
-  }
-
-  /** Open a project side tab's bottom sheet through the panel menu of a project's view. */
-  async openProjectSheet(tab: ProjectTab): Promise<void> {
-    await test.step(`Open the project's ${tab} sheet`, async () => {
-      await this.openMenu();
-      await this.menuItem(`project-${tab}`).click();
-      await expect(this.projectSheetBody(tab)).toBeVisible();
-      await expect(this.menuBody).toBeHidden();
     });
   }
 

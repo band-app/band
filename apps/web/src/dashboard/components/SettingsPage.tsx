@@ -34,17 +34,14 @@ import { useAgentMode } from "../lib/agent-mode";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
-import { projectTitle } from "./project/project-sections";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
-import { ContextSettings } from "./settings/ContextSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { McpSettings } from "./settings/McpSettings";
-import { ProjectSettings, useSettingsProjects } from "./settings/ProjectsSettings";
 import { ReposSettings } from "./settings/ReposSettings";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
@@ -81,11 +78,9 @@ type SettingsSectionId =
   | "browser"
   | "hosts"
   | "devices"
-  | "projects"
   | "repos"
   | "credentials"
   | "mcp"
-  | "context"
   | "runners"
   | "environment"
   | "labels"
@@ -165,12 +160,6 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     group: "AI capabilities",
   },
   {
-    id: "context",
-    title: "Context",
-    subtitle: "Preferences, notes and learnings the hub keeps for you and each project.",
-    group: "AI capabilities",
-  },
-  {
     id: "credentials",
     title: "Credentials",
     subtitle: "Keys and OAuth connections the hub stores encrypted.",
@@ -229,10 +218,6 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Section to show each time the dialog opens, instead of the one last used. */
   initialSection?: SettingsSectionId;
-  /** With `initialSection` "context", the context to select. */
-  initialContext?: string;
-  /** With `initialSection` "projects", the project to open (id or name). */
-  initialProject?: string;
 }
 
 /** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
@@ -266,26 +251,16 @@ function formatLastRefreshed(epochMs: number): string {
   }
 }
 
-export function SettingsPage({
-  open,
-  onOpenChange,
-  initialSection,
-  initialContext,
-  initialProject,
-}: Props) {
+export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
   const restartTerminalDaemonMutation = useRestartTerminalDaemon();
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const capabilities = useCapabilities();
   const [active, setActive] = useState<SettingsSectionId>(initialSection ?? "general");
-  // With `active` "projects", the project whose page is shown (id or name).
-  const [activeProject, setActiveProject] = useState<string | null>(initialProject ?? null);
   useEffect(() => {
     if (open && initialSection) setActive(initialSection);
-    if (open && initialProject) setActiveProject(initialProject);
-  }, [open, initialSection, initialProject]);
-  const projects = useSettingsProjects();
+  }, [open, initialSection]);
   const [navQuery, setNavQuery] = useState("");
   const isAdmin = useIsAdmin();
   const availableSections = SETTINGS_SECTIONS.filter(
@@ -299,52 +274,8 @@ export function SettingsPage({
       else groups.push({ name: section.group, sections: [section] });
       return groups;
     }, []);
-  const visibleProjects = projects.filter((p) =>
-    `${projectTitle(p)} ${p.name}`.toLowerCase().includes(navQuery.trim().toLowerCase()),
-  );
-  const shownProject =
-    active === "projects"
-      ? projects.find((p) => p.id === activeProject || p.name === activeProject)
-      : undefined;
-  const activeMeta = shownProject
-    ? {
-        title: projectTitle(shownProject),
-        subtitle: shownProject.description || `Settings of the project ${shownProject.name}`,
-      }
-    : active === "projects"
-      ? { title: "Project", subtitle: "The project is loading or no longer exists." }
-      : (availableSections.find((section) => section.id === active) ?? availableSections[0]);
-  const projectsGroup =
-    visibleProjects.length > 0 ? (
-      <div
-        key="projects"
-        className="flex flex-col gap-0.5 max-lg:flex-row max-lg:items-center"
-        data-testid="settings__nav-projects"
-      >
-        <div className="px-2 pt-2 pb-1 text-[10px] max-lg:hidden font-medium tracking-widest text-muted-foreground uppercase">
-          Projects
-        </div>
-        {visibleProjects.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            data-testid="settings__nav-project"
-            data-project={p.name}
-            aria-current={shownProject?.id === p.id ? "page" : undefined}
-            onClick={() => {
-              setActive("projects");
-              setActiveProject(p.id);
-            }}
-            className={cn(
-              "truncate rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent/60",
-              shownProject?.id === p.id && "bg-accent font-medium text-accent-foreground",
-            )}
-          >
-            {projectTitle(p)}
-          </button>
-        ))}
-      </div>
-    ) : null;
+  const activeMeta =
+    availableSections.find((section) => section.id === active) ?? availableSections[0];
 
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
   const [codingAgents, setCodingAgents] = useState<CodingAgentDefinition[]>(
@@ -743,7 +674,6 @@ export function SettingsPage({
             />
             {visibleGroups.map((group) => (
               <Fragment key={group.name}>
-                {group.name === "Infrastructure" ? projectsGroup : null}
                 <div className="flex flex-col gap-0.5 max-lg:flex-row max-lg:items-center">
                   <div className="px-2 pt-2 pb-1 text-[10px] max-lg:hidden font-medium tracking-widest text-muted-foreground uppercase">
                     {group.name}
@@ -766,7 +696,6 @@ export function SettingsPage({
                 </div>
               </Fragment>
             ))}
-            {visibleGroups.some((g) => g.name === "Infrastructure") ? null : projectsGroup}
           </nav>
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -912,18 +841,6 @@ export function SettingsPage({
                     </SettingsSection>
                   ) : null}
 
-                  {/* ── Projects ───────────────────────────────────── */}
-                  {shownProject ? (
-                    <ProjectSettings
-                      key={shownProject.id}
-                      project={shownProject}
-                      onDeleted={() => {
-                        setActive("general");
-                        setActiveProject(null);
-                      }}
-                    />
-                  ) : null}
-
                   {/* ── Repos ──────────────────────────────────────── */}
                   {active === "repos" ? (
                     <SettingsSection title="Repos">
@@ -942,13 +859,6 @@ export function SettingsPage({
                   {active === "mcp" ? (
                     <SettingsSection title="MCP">
                       <McpSettings />
-                    </SettingsSection>
-                  ) : null}
-
-                  {/* ── Context ────────────────────────────────────── */}
-                  {active === "context" ? (
-                    <SettingsSection title="Context">
-                      <ContextSettings initialContext={initialContext} />
                     </SettingsSection>
                   ) : null}
 
@@ -1561,24 +1471,20 @@ export function SettingsPage({
               </div>
             </div>
             {/* The footer sits on the bottom screen edge, so it clears the home indicator. */}
-            {/* A project's page saves through its own Save, so the dialog's footer would be a
-                second, inert Save. */}
-            {shownProject ? null : (
-              <DialogFooter
-                data-testid="settings-page__footer"
-                className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end"
+            <DialogFooter
+              data-testid="settings-page__footer"
+              className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end"
+            >
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveAndClose}
+                disabled={!isDirty}
+                aria-label="Save"
               >
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSaveAndClose}
-                  disabled={!isDirty}
-                  aria-label="Save"
-                >
-                  Save
-                </Button>
-              </DialogFooter>
-            )}
+                Save
+              </Button>
+            </DialogFooter>
           </main>
         </div>
         <RestartTerminalDaemonDialog

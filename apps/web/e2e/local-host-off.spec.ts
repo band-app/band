@@ -18,7 +18,6 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
@@ -189,20 +188,4 @@ test("Settings > Hosts leaves Local out and shows what each worker reports (S5)"
   await expect(settings.hostRow(worker).getByTestId("settings__host-capabilities")).toContainText(
     "Git",
   );
-});
-
-test("the project page names the coordinator's host, not its id (S6)", async ({ page }) => {
-  const hub = await bootHub("off", 1);
-  resetClientState(hub.home);
-  const [workerId] = hub.workerIds;
-  await trpc(hub.server.url, "projects.create", {
-    name: "named-host",
-    repos: [{ repo: REPO }],
-    coordinatorHostId: workerId,
-  });
-  const projects = new ProjectsPage(page, hub.server.url, TOKEN);
-  await projects.gotoProject("named-host");
-  const meta = await projects.coordinatorMeta();
-  await expect(meta).toContainText("on Worker 1");
-  await expect(meta).not.toContainText(workerId);
 });
