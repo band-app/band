@@ -1,16 +1,10 @@
-import { join } from "node:path";
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
-import { ProjectQueries } from "../db/queries/projects";
 import { RepoQueries } from "../db/queries/repos";
-import { bandHome } from "../db/queries/settings";
 import { WorktreeQueries } from "../db/queries/worktrees";
-import { projectIdOfScope } from "../project-scope";
-import { isLocalHostEnabled } from "./local-host-enabled";
 
 const worktreeQueries = new WorktreeQueries();
 const repoQueries = new RepoQueries();
-const projectQueries = new ProjectQueries();
 
 /**
  * Finds the host a worktree or repo lives on. A worktree's host is the
@@ -41,26 +35,13 @@ export class HostRegistry {
   }
 
   hostFor(worktreeId: string): Host {
-    // A project scope never falls back to the hub's own machine when that host is off.
-    if (projectIdOfScope(worktreeId)) {
-      const id = this.hostIdOfScope(worktreeId);
-      if (!id) throw new Error("The project has no host yet: it is waiting for a worker");
-      return this.hostById(id);
-    }
     // With only the local host there is nothing to look up.
     if (this.hosts.size === 1) return this.local;
     return this.hostById(this.hostIdOfScope(worktreeId) ?? this.local.id);
   }
 
-  /** The host id of a worktree, or of a project chat's scope (the project's coordinator host). */
+  /** The host id of a worktree, or null when it has no row (local). */
   hostIdOfScope(scopeId: string): string | null {
-    const projectId = projectIdOfScope(scopeId);
-    if (projectId) {
-      const placed = projectQueries.find(projectId)?.coordinatorHostId;
-      if (placed && (placed !== this.local.id || isLocalHostEnabled())) return placed;
-      // With the hub's own host off, an unplaced project has no host: it waits for a worker.
-      return isLocalHostEnabled() ? this.local.id : null;
-    }
     return worktreeQueries.findHostId(scopeId);
   }
 
@@ -110,11 +91,6 @@ export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBacke
 
 export const hostRegistry = new HostRegistry(
   new LocalHost({
-    // The hub is a host too. Its working copies sit in its own BAND_HOME and read the bare repos by path.
-    context: {
-      bandHome: () => bandHome(),
-      remote: async (name) => ({ url: join(bandHome(), "context", `${name}.git`) }),
-    },
     // `gh` is the GitHub plugin's tool: with that plugin disabled the host never runs it. The
     // import is dynamic because the services import this registry.
     ghEnabled: async () => {

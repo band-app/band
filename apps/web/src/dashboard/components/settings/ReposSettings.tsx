@@ -1,5 +1,5 @@
 import { Button } from "@band-app/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useHostNames } from "../../hooks/use-host-names";
@@ -9,33 +9,23 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
 
 /**
  * The Settings dialog's Repos section, a registry with no add: every repo the hub knows with its
- * remote URL, default branch, the folder each host keeps it in, and the projects that use it.
- * Adding a repo happens in the sidebar's Repos panel or in a project. A repo can be removed here
- * once no project lists it and it has no worktrees, and removing it leaves every folder alone.
+ * remote URL, default branch, the folder each host keeps it in,.
+ * Adding a repo happens in the sidebar's Repos panel. A repo can be removed here once it has no
+ * worktrees, and removing it leaves every folder alone.
  */
 export function ReposSettings() {
   const hostName = useHostNames();
   const queryClient = useQueryClient();
   const { repos } = useRepos();
-  const projects = useQuery({
-    queryKey: ["projects.list"],
-    queryFn: () => trpc.projects.list.query(),
-  });
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-
-  const projectsOf = (repo: string) =>
-    (projects.data?.projects ?? []).filter((p) => p.repos.some((r) => r.repo === repo));
 
   const remove = async (name: string) => {
     setError(null);
     try {
       await trpc.repos.remove.mutate({ name });
       setConfirming(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["repos"] }),
-        queryClient.invalidateQueries({ queryKey: ["projects.list"] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["repos"] });
     } catch (err) {
       setError(errorText(err));
     }
@@ -44,8 +34,8 @@ export function ReposSettings() {
   return (
     <div className="space-y-3" data-testid="settings-repos">
       <p className="text-xs text-muted-foreground">
-        Add a repo from the Repos panel in the sidebar, or from a project's Repos tab. A repo is its
-        remote URL and default branch, and each worker keeps its own folder for it.
+        Add a repo from the Repos panel in the sidebar. A repo is its remote URL and default branch,
+        and each worker keeps its own folder for it.
       </p>
       {repos.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="settings-repos__empty">
@@ -54,10 +44,8 @@ export function ReposSettings() {
       ) : null}
       <ul className="space-y-2">
         {repos.map((repo) => {
-          const usedBy = projectsOf(repo.name);
-          const blockers = usedBy.map((p) => p.title || p.name);
           const worktrees = repo.worktrees.filter((w) => w.path !== repo.path).length;
-          const inUse = blockers.length > 0 || worktrees > 0;
+          const inUse = worktrees > 0;
           return (
             <li
               key={repo.name}
@@ -89,18 +77,7 @@ export function ReposSettings() {
                     aria-label={`Remove ${repo.name}`}
                     data-testid="settings-repos__remove"
                     disabled={inUse}
-                    title={
-                      inUse
-                        ? [
-                            blockers.length > 0 ? `Used by ${blockers.join(", ")}` : "",
-                            worktrees > 0
-                              ? `${worktrees} worktree${worktrees === 1 ? "" : "s"}`
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(". ")
-                        : undefined
-                    }
+                    title={inUse ? `${worktrees} worktree${worktrees === 1 ? "" : "s"}` : undefined}
                     onClick={() => setConfirming(repo.name)}
                   >
                     Remove
@@ -117,16 +94,6 @@ export function ReposSettings() {
                 Default branch {repo.defaultBranch}
                 {repo.label ? ` · label ${repo.label}` : ""}
               </p>
-              <p
-                className="text-xs text-muted-foreground"
-                data-testid="settings-repos__projects"
-                data-projects={usedBy.map((p) => p.name).join(",")}
-              >
-                {usedBy.length === 0
-                  ? "In no project."
-                  : `Used by ${usedBy.map((p) => p.title || p.name).join(", ")}`}
-                {worktrees > 0 ? ` · ${worktrees} worktree${worktrees === 1 ? "" : "s"}` : ""}
-              </p>
               <ul className="text-xs text-muted-foreground" data-testid="settings-repos__clones">
                 {(repo.clones ?? []).length === 0 ? (
                   <li>Not cloned anywhere yet. The first worktree on a worker clones it.</li>
@@ -139,9 +106,7 @@ export function ReposSettings() {
               </ul>
               {inUse ? (
                 <p className="text-xs text-muted-foreground" data-testid="settings-repos__in-use">
-                  {blockers.length > 0 ? "Remove it from its projects" : "Remove its worktrees"}
-                  {blockers.length > 0 && worktrees > 0 ? " and remove its worktrees" : ""} before
-                  removing it here.
+                  Remove its worktrees before removing it here.
                 </p>
               ) : null}
             </li>

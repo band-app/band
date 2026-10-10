@@ -1,6 +1,4 @@
-import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { worktreeHref } from "../lib/project-slugs";
 import { useWorktreeRoute } from "../lib/use-worktree-route";
 
 export const Route = createFileRoute("/worktree/$worktreeId")({
@@ -31,10 +29,7 @@ function WorktreeNotFoundRedirect() {
 function WorktreeLayout() {
   const { worktreeId } = Route.useParams();
   const decoded = decodeURIComponent(worktreeId);
-  // A project's view lives at `/project/<name>`; an older `/worktree/project:<id>` link goes there.
-  const projectId = projectIdOfScope(decoded);
-  useWorktreeRoute(projectId ? null : decoded);
-  if (projectId) return <Navigate to={worktreeHref(decoded)} replace />;
+  useWorktreeRoute(decoded);
 
   // Both layouts render every worktree from AppShell: the desktop
   // `SharedDockviewLayout` and the mobile `MobileWorktreeShell` keep each

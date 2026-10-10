@@ -9,7 +9,6 @@ import {
   type SubscriptionRecord,
 } from "../infra/db/queries/subscriptions";
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
-import { chatScope } from "../infra/project-scope";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
 import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
 import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
@@ -56,7 +55,7 @@ export const subscriptionCreateInput = z.object({
   maxWakeups: z.number().int().min(1).optional(),
   /** Epoch milliseconds. Defaults to, and is capped at, 180 days from now. */
   expiresAt: z.number().int().optional(),
-  createdBy: z.enum(["agent", "coordinator", "user"]).default("agent"),
+  createdBy: z.enum(["agent", "user"]).default("agent"),
 });
 
 export type SubscriptionCreateInput = z.input<typeof subscriptionCreateInput>;
@@ -352,7 +351,7 @@ export class SubscriptionService {
     source: { source: string; filterKey: string; config: SubscriptionConfig },
   ): Subscription {
     const chat = chatService.get(parsed.chatId);
-    if (!chat || chatScope(chat) !== parsed.worktreeId) {
+    if (!chat || chat.worktreeId !== parsed.worktreeId) {
       throw new SubscriptionChatNotFoundError(parsed.chatId, parsed.worktreeId);
     }
     const now = Date.now();

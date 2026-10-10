@@ -135,8 +135,6 @@ function logRequest(method, params) {
         BAND_TOKEN: env.BAND_TOKEN,
         BAND_CHAT_ID: env.BAND_CHAT_ID,
         BAND_WORKTREE_ID: env.BAND_WORKTREE_ID,
-        BAND_PROJECT_ID: env.BAND_PROJECT_ID,
-        CODEX_CONFIG: env.CODEX_CONFIG,
         PATH: env.PATH,
         LEAK: Object.values(env).some((v) => typeof v === "string" && v.includes("bws_")),
       },

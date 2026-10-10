@@ -116,7 +116,7 @@ export class WorkerLinkService {
   /**
    * Reads `host.info` again from every online worker and stores its capability report. The call is
    * passive, so it does not keep an ephemeral worker awake. A change goes out as a host status
-   * event, which Settings > Hosts follows and a coordinator waiting for a worker listens to.
+   * event, which Settings > Hosts follows.
    */
   async refreshReports(): Promise<void> {
     if (this.refreshing) return;

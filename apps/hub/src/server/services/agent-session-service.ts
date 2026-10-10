@@ -55,22 +55,12 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
-import { chatScope, projectIdOfScope } from "../infra/project-scope";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
-import { injectionFor, type SessionPreamble } from "./_utils/preamble-injection";
-import { COORDINATOR_SERVER } from "./_utils/project-policy";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
-import { contextPreambleService } from "./context-preamble-service";
-import { contextSyncService } from "./context-sync-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
-// FRAGILE: ESM cycle leg, `project-coordinator-service` imports this file back.
-// Safe because it is only used inside function bodies.
-import { projectCoordinatorService } from "./project-coordinator-service";
-import { projectFolderService } from "./project-folder-service";
-import { projectService } from "./project-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
@@ -147,8 +137,6 @@ interface Runtime {
   claudeCli: ClaudeCliArgs | null;
   /** `BAND_SERVER_URL` and `BAND_TOKEN` of the host's relay, for an agent on a worker. */
   relayEnv: Record<string, string> | null;
-  /** The context preamble this chat's agent starts with, or null when off or empty. */
-  preamble: SessionPreamble | null;
 }
 
 /** What an agent offers before a chat has a session: gathered from probes
@@ -266,7 +254,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
   if (!rt) {
     rt = {
       chatId: chat.id,
-      worktreeId: chatScope(chat),
+      worktreeId: chat.worktreeId,
       agentDefId: def.id,
       process: null,
       generation: 0,
@@ -285,7 +273,6 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       idleTimer: null,
       claudeCli: null,
       relayEnv: null,
-      preamble: null,
     };
     runtimes.set(chat.id, rt);
   }
@@ -639,70 +626,10 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
 // Where a chat runs
 // ---------------------------------------------------------------------------
 
-/** A worktree chat names its worktree to the agent, and a project chat names its project. */
-function projectEnv(scope: string): Record<string, string> {
-  const projectId = projectIdOfScope(scope);
-  if (projectId) return { BAND_PROJECT_ID: projectId };
-  return { BAND_WORKTREE_ID: scope };
-}
-
-/**
- * The directory and host a chat runs on: its worktree, or the project folder for a project
- * chat. A project chat's folder is known after the first `projectChatCwd`, so this is undefined
- * for one that has not started yet.
- */
+/** The directory and host a chat runs on: its worktree. */
 function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefined {
-  if (chat.worktreeId) {
-    const worktree = worktreeService.resolve(chat.worktreeId);
-    return worktree ? { cwd: worktree.worktree.path, host: worktree.host } : undefined;
-  }
-  const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
-  const folder = project ? projectFolderService.state(project.id)?.folder : undefined;
-  return project && folder
-    ? { cwd: folder, host: projectFolderService.hostOf(project) }
-    : undefined;
-}
-
-/**
- * The project folder on the host of a project worktree, for its agent's extra directories: the
- * project's shared files sync there, so the agent can read and write them. Making sure it exists
- * also lets a worker serve it. Empty for a worktree in no project, a project chat (whose cwd is the
- * folder) and a host that cannot make it now.
- */
-async function projectFolderOf(scope: string): Promise<string[]> {
-  if (projectIdOfScope(scope)) return [];
-  const row = projectService.projectOfWorker(scope);
-  const worktree = row ? worktreeService.resolve(scope) : null;
-  if (!row || !worktree) return [];
-  try {
-    return [(await projectFolderService.ensureOn(row, worktree.host)).folder];
-  } catch (err) {
-    log.warn({ scope, err }, "could not prepare the project folder for an agent");
-    return [];
-  }
-}
-
-/**
- * The project folder a project chat runs in. A prompt brings the folder up to date first
- * (the context, then each repo's checkout, fetched at most once a minute). A failure stops the
- * turn and says why. A view reuses the folder the last prompt prepared, and prepares it when
- * the hub has restarted since.
- */
-async function projectChatCwd(chat: ChatSession, purpose: "prompt" | "view"): Promise<string> {
-  const project = chat.projectId ? projectService.find(chat.projectId) : undefined;
-  if (!project) throw new Error(`Project not found for chat ${chat.id}`);
-  const known = projectFolderService.state(project.id);
-  if (purpose === "view" && known) return known.folder;
-  const state = await projectFolderService.ensure(project, "throttled");
-  for (const checkout of state.checkouts) {
-    if (checkout.error) {
-      log.warn(
-        { projectId: project.id, repo: checkout.repo, error: checkout.error },
-        "a project checkout is not ready",
-      );
-    }
-  }
-  return state.folder;
+  const worktree = worktreeService.resolve(chat.worktreeId);
+  return worktree ? { cwd: worktree.worktree.path, host: worktree.host } : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -731,11 +658,7 @@ async function ensureProcess(
         ...launch.env,
         ...grant?.env,
         BAND_CHAT_ID: rt.chatId,
-        // A project chat has no worktree, so it names its project instead.
-        ...projectEnv(rt.worktreeId),
-        ...(rt.preamble
-          ? injectionFor(def.type, rt.preamble, { ...process.env, ...launch.env })?.env
-          : undefined),
+        BAND_WORKTREE_ID: rt.worktreeId,
       },
     };
     const handlers = handlersFor(rt, generation);
@@ -867,15 +790,11 @@ function localHubUrl(): string {
  */
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
   try {
-    const projectScope = projectIdOfScope(rt.worktreeId);
-    const worktree = projectScope ? undefined : worktreeService.resolve(rt.worktreeId);
-    if (!projectScope && !worktree) return [];
-    // A project's coordinator gets only the hub's coordinator tools (plan step 6.2).
-    const names = projectCoordinatorService.projectOfChat(rt.chatId)
-      ? [COORDINATOR_SERVER]
-      : worktree
-        ? mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name)
-        : [];
+    const worktree = worktreeService.resolve(rt.worktreeId);
+    if (!worktree) return [];
+    const names = mcpProxyService
+      .serversForSession(worktree.repo.name, worktree.host.id)
+      .map((s) => s.name);
     if (names.length === 0) return [];
     if (!proc.supportsHttpMcp) {
       log.info(
@@ -927,15 +846,6 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
   }
 }
 
-/** `_meta` that carries the preamble to agents that take it per session. */
-function preambleMeta(
-  rt: Runtime,
-  def: CodingAgentDefinition,
-): Record<string, unknown> | undefined {
-  if (!rt.preamble) return undefined;
-  return injectionFor(def.type, rt.preamble)?.sessionMeta;
-}
-
 async function attachNew(
   rt: Runtime,
   proc: AcpAgentProcess,
@@ -949,9 +859,8 @@ async function attachNew(
   try {
     attached = await proc.newSession(
       cwd,
-      [...(await agentExtraDirs(rt.worktreeId)), ...(await projectFolderOf(rt.worktreeId))],
+      await agentExtraDirs(rt.worktreeId),
       sessionMcpServers(rt, proc),
-      preambleMeta(rt, def),
     );
   } catch (err) {
     rt.routing = "log";
@@ -992,13 +901,8 @@ async function attachExisting(
   try {
     const attached =
       how === "load"
-        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc), preambleMeta(rt, def))
-        : await proc.resumeSession(
-            sessionId,
-            cwd,
-            sessionMcpServers(rt, proc),
-            preambleMeta(rt, def),
-          );
+        ? await proc.loadSession(sessionId, cwd, sessionMcpServers(rt, proc))
+        : await proc.resumeSession(sessionId, cwd, sessionMcpServers(rt, proc));
     rt.routing = "log";
     setLive(rt, def, attached);
     logAttached(rt, proc, how, attached);
@@ -1123,38 +1027,14 @@ export class AgentSessionService {
   async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const scope = chatScope(chat);
-    let cwd: string;
-    if (chat.worktreeId) {
-      // A message to a sleeping worktree brings its worker back first.
-      if (purpose === "prompt") {
-        await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
-        // Fresh context files before the agent reads them. A slow or unreachable hub never blocks it.
-        await contextSyncService.pullForWorktree(chat.worktreeId);
-      }
-      const worktree = worktreeService.resolve(chat.worktreeId);
-      if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
-      cwd = worktree.worktree.path;
-    } else {
-      cwd = await projectChatCwd(chat, purpose);
-    }
+    // A message to a sleeping worktree brings its worker back first.
+    if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
+    const worktree = worktreeService.resolve(chat.worktreeId);
+    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
+    const cwd = worktree.worktree.path;
     const def = definitionFor(chat);
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
-    // Read after the pull, so the agent starts on the newest files the host has.
-    // Only a call that starts a process or attaches a session uses it, so skip the host call otherwise.
-    const target = chat.activeSessionId;
-    const attachedAlready = Boolean(target && rt.sessionId === target && rt.process?.alive);
-    const viewNeedsNothing =
-      purpose === "view" && (!target || events.currentRevision(target) > 0 || sessionBusy(target));
-    if (!attachedAlready && !viewNeedsNothing) {
-      // A coordinator's charter is the project folder's AGENTS.md (CLAUDE.md imports it), which
-      // the agent reads from its working directory like any agent in that folder.
-      rt.preamble = await contextPreambleService.forWorktree(scope);
-      if (rt.preamble?.text && injectionFor(def.type, rt.preamble) === null) {
-        log.info({ chatId, agent: def.type }, "this agent has no way to take the context preamble");
-      }
-    }
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;
     rt.attaching = attach(rt, fresh, def, cwd, purpose);
@@ -1216,8 +1096,6 @@ export class AgentSessionService {
     } finally {
       rt.inTurn = false;
       if (rt.process) scheduleIdle(rt);
-      // What the agent wrote to its context files goes to the hub without holding the turn's result.
-      void contextSyncService.pushAfterTurn(rt.worktreeId, chatId, rt.turnSeq);
       // Never let a failed push replace the turn's result.
       try {
         await this.pushClaudeDefaults(chatId, true);
@@ -1551,11 +1429,8 @@ export class AgentSessionService {
     const location = chatLocation(chat);
     if (!location) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
-    const sameAgent = (
-      chat.worktreeId
-        ? chatService.list(chat.worktreeId)
-        : chatService.listForProject(chat.projectId ?? "")
-    )
+    const sameAgent = chatService
+      .list(chat.worktreeId)
       .filter((c) => definitionFor(c).id === def.id)
       .map((c) => c.id);
     const logged = events.listSessions(sameAgent);

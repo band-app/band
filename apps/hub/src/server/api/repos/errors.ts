@@ -1,13 +1,6 @@
 import { HostOfflineError, HostPathDeniedError } from "@band-app/host-api";
 import { TRPCError } from "@trpc/server";
-import {
-  ProjectConflictError,
-  ProjectInputError,
-  ProjectNotFoundError,
-  RepoConflictError,
-  RepoInputError,
-  RepoOutsideRootsError,
-} from "../../errors";
+import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../../errors";
 
 /** Maps what `RepoService` throws for the caller to fix onto tRPC codes. Anything else is rethrown as it came. */
 export function repoErrorToTrpc(err: unknown): unknown {
@@ -18,14 +11,11 @@ export function repoErrorToTrpc(err: unknown): unknown {
       cause: err,
     });
   }
-  if (err instanceof RepoConflictError || err instanceof ProjectConflictError) {
+  if (err instanceof RepoConflictError) {
     return new TRPCError({ code: "CONFLICT", message: err.message });
   }
-  if (err instanceof RepoInputError || err instanceof ProjectInputError) {
+  if (err instanceof RepoInputError) {
     return new TRPCError({ code: "BAD_REQUEST", message: err.message });
-  }
-  if (err instanceof ProjectNotFoundError) {
-    return new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
   if (err instanceof HostOfflineError) {
     return new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });

@@ -19,11 +19,9 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { chatScope } from "../../infra/project-scope";
 import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
-import { projectService } from "../../services/project-service";
 import { taskService } from "../../services/task-service";
 import { worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
@@ -188,13 +186,6 @@ export const chatsRouter = t.router({
     }),
 
   remove: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
-    // Closing the coordinator's tab in the project view must not delete the coordinator.
-    if (projectService.findByCoordinatorChat(input.chatId)) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "This is the project's coordinator chat; it cannot be removed",
-      });
-    }
     chatService.remove(input.chatId);
     return { ok: true };
   }),
@@ -256,7 +247,7 @@ export const chatsRouter = t.router({
       }
       // A busy chat queues the message; it runs once the turns ahead finish.
       const result = taskService.submitOrQueueTask({
-        worktreeId: chat.worktreeId || chat.projectId ? chatScope(chat) : input.worktreeId,
+        worktreeId: chat.worktreeId,
         chatId: chat.id,
         prompt: input.message,
         sessionId: input.sessionId,

@@ -126,8 +126,6 @@ export interface StubRequest {
     BAND_SERVER_URL?: string;
     BAND_CHAT_ID?: string;
     BAND_WORKTREE_ID?: string;
-    BAND_PROJECT_ID?: string;
-    CODEX_CONFIG?: string;
   };
 }
 

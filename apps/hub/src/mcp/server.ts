@@ -1,10 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { z } from "zod";
 import { createContext } from "../server/api/context.ts";
 import { appRouter } from "../server/api/router.ts";
-import { contextToolsService, type ToolCaller } from "../server/services/context-tools-service.ts";
 
 // ---------------------------------------------------------------------------
 // Discover tRPC procedures and extract metadata
@@ -42,8 +40,6 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("tokens.") ||
       path.startsWith("vault.") ||
       path.startsWith("mcp.") ||
-      path.startsWith("context.") ||
-      path.startsWith("projects.") ||
       path.startsWith("hosts.") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.")
@@ -86,7 +82,6 @@ function createMcpServer(req: IncomingMessage): McpServer {
   const procedures = discoverProcedures();
   const ctx = createContext({ req });
   const caller = appRouter.createCaller(ctx);
-  registerContextTools(server, { chatId: ctx.chatId, worktreeId: ctx.worktreeId });
 
   for (const proc of procedures) {
     const description = `${proc.type === "mutation" ? "Mutation" : "Query"}: ${proc.path}`;
@@ -136,70 +131,6 @@ function createMcpServer(req: IncomingMessage): McpServer {
   }
 
   return server;
-}
-
-// ---------------------------------------------------------------------------
-// Context tools (plan step 5.4). They are scoped to the calling session's
-// project context, so none of them takes a context name.
-// ---------------------------------------------------------------------------
-
-function registerContextTools(server: McpServer, caller: ToolCaller): void {
-  const run = async (fn: () => Promise<unknown>) => {
-    try {
-      return { content: [{ type: "text" as const, text: JSON.stringify(await fn(), null, 2) }] };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-    }
-  };
-
-  server.registerTool(
-    "context_search",
-    {
-      description:
-        "Search the project context and the user context by file name and text. Returns ranked files with matching lines. scope is project, user or all (default).",
-      inputSchema: z.object({
-        query: z.string().min(1).max(200),
-        scope: z.enum(["project", "user", "all"]).optional(),
-        limit: z.number().int().min(1).max(25).optional(),
-      }),
-      // biome-ignore lint/suspicious/noExplicitAny: MCP SDK accepts Zod schemas as AnySchema
-    } as any,
-    // biome-ignore lint/suspicious/noExplicitAny: handler args follow the schema above
-    (args: any) =>
-      run(() => contextToolsService.search(caller, args.query, args.scope, args.limit)),
-  );
-
-  server.registerTool(
-    "context_append_learning",
-    {
-      description:
-        "Record something future agents should know (how to run a test, a pitfall, a decision) in the project context. Appends to learnings/<date>-<agent>.md.",
-      inputSchema: z.object({
-        text: z.string().min(1).max(8000),
-        tags: z.array(z.string().max(40)).max(10).optional(),
-      }),
-      // biome-ignore lint/suspicious/noExplicitAny: MCP SDK accepts Zod schemas as AnySchema
-    } as any,
-    // biome-ignore lint/suspicious/noExplicitAny: handler args follow the schema above
-    (args: any) => run(() => contextToolsService.appendLearning(caller, args)),
-  );
-
-  server.registerTool(
-    "context_handoff",
-    {
-      description:
-        "Hand work over to another agent or the coordinator. Writes handoffs/<stamp>-<you>-to-<to>.md and adds a line to inbox/<to>.md in the project context.",
-      inputSchema: z.object({
-        to: z.string().min(1).max(63),
-        summary: z.string().min(1).max(8000),
-        links: z.array(z.string().max(500)).max(20).optional(),
-      }),
-      // biome-ignore lint/suspicious/noExplicitAny: MCP SDK accepts Zod schemas as AnySchema
-    } as any,
-    // biome-ignore lint/suspicious/noExplicitAny: handler args follow the schema above
-    (args: any) => run(() => contextToolsService.handoff(caller, args)),
-  );
 }
 
 // ---------------------------------------------------------------------------

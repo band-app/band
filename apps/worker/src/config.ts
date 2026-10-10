@@ -21,8 +21,6 @@ export interface WorkerConfig {
   stateDir: string;
   /** Where repos the worker clones go, as `<dir>/<owner>/<name>`. Defaults to `BAND_REPOS_DIR` or `~/band/repos`. */
   reposDir?: string;
-  /** The machine's `BAND_HOME`, where context working copies go. Defaults to `BAND_HOME` or `~/.band`. */
-  bandHome?: string;
   ephemeral: boolean;
   idleExitMs: number;
 }
@@ -165,7 +163,6 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
     reposDir: resolve(
       values["repos-dir"] ?? env.BAND_REPOS_DIR ?? join(homedir(), "band", "repos"),
     ),
-    bandHome: resolve(env.BAND_HOME ?? join(homedir(), ".band")),
     ephemeral,
     idleExitMs: idleText === undefined ? DEFAULT_IDLE_EXIT_MS : parseDuration(idleText),
   };

@@ -18,23 +18,13 @@ Adding a repo from a worker's folder picker records that folder in the worker's 
 
 One working copy of a repo that an agent and a user work in. Its id is `<repo>-<branch>`, for example `band-feat-login`. A worktree has chats, terminals, browser tabs and a git status.
 
-For a git repo a worktree is a git worktree created with `git worktree add`, and the id's branch is the branch it was created on. Two cases use the word without being a git worktree:
-
-- A plain (non-git) repo has one implicit worktree, the folder itself. It has no branch isolation and no git features.
-- The combined multi-repo root planned for Phase 6 is one directory that holds several repos side by side. Its single agent works with that directory as its worktree.
+For a git repo a worktree is a git worktree created with `git worktree add`, and the id's branch is the branch it was created on. A plain (non-git) repo uses the word without a git worktree: it has one implicit worktree, the folder itself, with no branch isolation and no git features.
 
 In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an agent's environment `BAND_WORKTREE_ID`.
 
-## Project
+## Projects (removed)
 
-A body of work across several repos. A project is a meta repo that lives on the hub: its context repo, which every agent of the project reads from and writes to. The hub holds the master copy, and a linked remote such as GitHub is an optional backup. A repo may belong to a project or to none, and a hub has no default project.
-
-- The **project folder** is `<BAND_HOME>/projects/<project>/`, the working copy of the context repo. It exists on the hub and on every host doing the project's work: the coordinator's host and each host running an agent of the project. Its files sync in the background, so an edit from an agent, the UI or a terminal reaches the hub and the other hosts without anyone pushing or pulling.
-- The coordinator is a project-level chat. It runs in the project folder on a host that has every repo of the project cloned. In the API its chats have a `projectId` and no `worktreeId`, and in an agent's environment it gets `BAND_PROJECT_ID` instead of `BAND_WORKTREE_ID`.
-
-## Task
-
-A worktree in a project that the coordinator started for one piece of work. A task covers one repo and runs one agent. Work that spans several repos is several worktrees, each with its own agent, which the coordinator manages. A task needs no API of its own: it is a worktree with a `projectId` (`worktrees.*`, `band worktrees create --project`).
+Band had projects: a cross-repo body of work with a context repo, a project folder on each host and a coordinator chat. They were removed in favour of origin links, where a chat started from another chat records where it came from (see the implementation plan, section 15). There is no `projects.*` API, `band projects` command or project settings. Claude Code's own `~/.claude/projects` directory is unrelated.
 
 ## Terms that kept their names
 

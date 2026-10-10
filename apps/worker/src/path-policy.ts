@@ -41,7 +41,7 @@ export class PathPolicy {
   private readonly roots: string[];
   /** Private directories the worker made itself. Usable like a root, and removable. */
   private readonly tempDirs = new Set<string>();
-  /** Folders the worker creates and manages itself (project folders, its clone directory). Served whatever the roots. */
+  /** Folders the worker creates and manages itself (its clone directory). Served whatever the roots. */
   private readonly managedDirs = new Set<string>();
   private worktrees: WorktreeSource | null = null;
   private readonly worktreeCache = new Map<string, { at: number; paths: string[] }>();

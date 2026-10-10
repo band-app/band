@@ -92,16 +92,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: McpCmd,
     },
-    /// Manage the context repos the hub holds (user and named contexts)
-    Context {
-        #[command(subcommand)]
-        cmd: ContextCmd,
-    },
-    /// Manage projects: cross-repo bodies of work with their own context repo
-    Projects {
-        #[command(subcommand)]
-        cmd: ProjectsCmd,
-    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -179,9 +169,6 @@ enum ReposCmd {
         /// With `--from`: serve a folder outside the worker's roots after confirming it
         #[arg(long, requires = "from")]
         add_root: bool,
-        /// Project to put the repo in (none leaves it in no project)
-        #[arg(long)]
-        project: Option<String>,
     },
     /// Unregister a repo
     Remove {
@@ -249,10 +236,6 @@ enum WorktreesCmd {
         /// first time the repo is used there).
         #[arg(long)]
         host_repo_path: Option<String>,
-        /// Put the worktree in this project (name or ID from `band projects list`).
-        /// The repo must be one of the project's.
-        #[arg(long)]
-        project: Option<String>,
     },
     /// Remove a worktree (git worktree + state cleanup)
     Remove {
@@ -748,140 +731,6 @@ enum McpCmd {
 }
 
 #[derive(Subcommand)]
-enum ContextCmd {
-    /// List the contexts
-    List,
-    /// Create a context. `user` is the user context; any other name is a named (project) context.
-    Create {
-        /// Context name: lowercase letters, digits, hyphens and underscores
-        name: String,
-        /// Existing repo to mirror both ways (https, ssh or scp-style URL)
-        #[arg(long)]
-        remote: Option<String>,
-        /// Credential ID from `band vault list` for an https remote
-        #[arg(long)]
-        vault_item: Option<String>,
-        /// Comma-separated `key=value` host labels a worker needs to pull this context
-        #[arg(long)]
-        labels: Option<String>,
-        /// Workers may pull but not push
-        #[arg(long)]
-        read_only: bool,
-    },
-    /// Remove a context and its repo on the hub
-    Remove {
-        /// Context name (from `band context list`)
-        name: String,
-    },
-    /// Link a context to a remote repo and mirror it now. Pass `--unlink` to drop the link.
-    LinkRemote {
-        /// Context name
-        name: String,
-        /// Remote URL (https, ssh or scp-style)
-        remote: Option<String>,
-        /// Credential ID from `band vault list` for an https remote
-        #[arg(long)]
-        vault_item: Option<String>,
-        /// Drop the remote link
-        #[arg(long)]
-        unlink: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum ProjectsCmd {
-    /// List the projects
-    List,
-    /// Show one project with its repos, context and worktrees
-    Get {
-        /// Project name or ID
-        project: String,
-    },
-    /// Create a project and its context repo
-    Create {
-        /// Project name: lowercase letters, digits, hyphens and underscores
-        name: String,
-        /// What the project is for
-        #[arg(long)]
-        description: Option<String>,
-        /// A repo the project may touch, as `name` or `name:role` (repeatable)
-        #[arg(long = "repo")]
-        repos: Vec<String>,
-        /// Use this existing project context instead of creating one
-        #[arg(long)]
-        context: Option<String>,
-        /// Mirror the new context repo with this remote (https, ssh or scp-style URL)
-        #[arg(long)]
-        remote_url: Option<String>,
-        /// Credential ID from `band vault list` for an https remote
-        #[arg(long)]
-        remote_vault_item: Option<String>,
-        /// Model of the project's coordinator (default: opus)
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID of the coordinator
-        #[arg(long)]
-        agent: Option<String>,
-        /// Comma-separated `key=value` host labels for the project's worktrees
-        #[arg(long)]
-        labels: Option<String>,
-    },
-    /// Change a project's description, coordinator or labels
-    Update {
-        /// Project name or ID
-        project: String,
-        #[arg(long)]
-        description: Option<String>,
-        /// Model of the project's coordinator
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID of the coordinator
-        #[arg(long)]
-        agent: Option<String>,
-        /// Comma-separated `key=value` host labels (replaces the list)
-        #[arg(long)]
-        labels: Option<String>,
-    },
-    /// Remove a project. Refused while worktrees belong to it.
-    Remove {
-        /// Project name or ID
-        project: String,
-        /// Also delete the project's context repo
-        #[arg(long)]
-        remove_context: bool,
-    },
-    /// Add a repo to a project, or change its role
-    AddRepo {
-        /// Project name or ID
-        project: String,
-        /// Repo name (from `band repos list`)
-        repo: String,
-        /// Role of the repo in the project, such as `api` or `client`
-        #[arg(long)]
-        role: Option<String>,
-    },
-    /// Remove a repo from a project. Refused while its worktrees belong to the project.
-    RemoveRepo {
-        /// Project name or ID
-        project: String,
-        /// Repo name
-        repo: String,
-    },
-    /// Put an existing worktree in a project
-    AttachWorktree {
-        /// Project name or ID
-        project: String,
-        /// Worktree ID (from `band worktrees list`)
-        worktree_id: String,
-    },
-    /// Take a worktree out of its project
-    DetachWorktree {
-        /// Worktree ID
-        worktree_id: String,
-    },
-}
-
-#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -965,7 +814,6 @@ fn main() {
                 branch,
                 from,
                 add_root,
-                project,
             } => cmd_repos_add(&ReposAddArgs {
                 path: path.as_deref(),
                 label: label.as_deref(),
@@ -973,7 +821,6 @@ fn main() {
                 branch: branch.as_deref(),
                 from: from.as_deref(),
                 add_root,
-                project: project.as_deref(),
             }),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
@@ -993,7 +840,6 @@ fn main() {
                 any_host,
                 isolation,
                 host_repo_path,
-                project,
             } => cmd_worktrees_create(
                 &repo,
                 &branch,
@@ -1009,7 +855,6 @@ fn main() {
                     any_host,
                     isolation: isolation.as_deref(),
                     host_repo_path: host_repo_path.as_deref(),
-                    project: project.as_deref(),
                 },
             ),
             WorktreesCmd::Remove { repo, name } => cmd_worktrees_remove(&repo, &name),
@@ -1239,84 +1084,6 @@ fn main() {
             ),
             McpCmd::Remove { name } => cmd_mcp_remove(&name),
         },
-        Commands::Context { cmd } => match cmd {
-            ContextCmd::List => cmd_context_list(),
-            ContextCmd::Create {
-                name,
-                remote,
-                vault_item,
-                labels,
-                read_only,
-            } => cmd_context_create(
-                &name,
-                remote.as_deref(),
-                vault_item.as_deref(),
-                labels.as_deref(),
-                read_only,
-            ),
-            ContextCmd::Remove { name } => cmd_context_remove(&name),
-            ContextCmd::LinkRemote {
-                name,
-                remote,
-                vault_item,
-                unlink,
-            } => cmd_context_link_remote(&name, remote.as_deref(), vault_item.as_deref(), unlink),
-        },
-        Commands::Projects { cmd } => match cmd {
-            ProjectsCmd::List => cmd_projects_list(),
-            ProjectsCmd::Get { project } => cmd_projects_get(&project),
-            ProjectsCmd::Create {
-                name,
-                description,
-                repos,
-                context,
-                remote_url,
-                remote_vault_item,
-                model,
-                agent,
-                labels,
-            } => cmd_projects_create(
-                &name,
-                description.as_deref(),
-                &repos,
-                context.as_deref(),
-                remote_url.as_deref(),
-                remote_vault_item.as_deref(),
-                model.as_deref(),
-                agent.as_deref(),
-                labels.as_deref(),
-            ),
-            ProjectsCmd::Update {
-                project,
-                description,
-                model,
-                agent,
-                labels,
-            } => cmd_projects_update(
-                &project,
-                description.as_deref(),
-                model.as_deref(),
-                agent.as_deref(),
-                labels.as_deref(),
-            ),
-            ProjectsCmd::Remove {
-                project,
-                remove_context,
-            } => cmd_projects_remove(&project, remove_context),
-            ProjectsCmd::AddRepo {
-                project,
-                repo,
-                role,
-            } => cmd_projects_add_repo(&project, &repo, role.as_deref()),
-            ProjectsCmd::RemoveRepo { project, repo } => cmd_projects_remove_repo(&project, &repo),
-            ProjectsCmd::AttachWorktree {
-                project,
-                worktree_id,
-            } => cmd_projects_attach_worktree(&project, &worktree_id),
-            ProjectsCmd::DetachWorktree { worktree_id } => {
-                cmd_projects_detach_worktree(&worktree_id)
-            }
-        },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
             TunnelCmd::Status => cmd_tunnel_status(),
@@ -1457,7 +1224,6 @@ struct ReposAddArgs<'a> {
     branch: Option<&'a str>,
     from: Option<&'a str>,
     add_root: bool,
-    project: Option<&'a str>,
 }
 
 fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
@@ -1474,9 +1240,6 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
         if let Some(label) = args.label {
             input["label"] = serde_json::json!(label);
         }
-        if let Some(project) = args.project {
-            input["project"] = serde_json::json!(project);
-        }
         client.trpc_mutate("repos.addByUrl", &input)?
     } else if let Some(host) = args.from {
         let path = args
@@ -1489,9 +1252,6 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
         }
         if let Some(label) = args.label {
             input["label"] = serde_json::json!(label);
-        }
-        if let Some(project) = args.project {
-            input["project"] = serde_json::json!(project);
         }
         client
             .trpc_mutate("repos.addFromWorker", &input)
@@ -1608,7 +1368,6 @@ struct Placement<'a> {
     any_host: bool,
     isolation: Option<&'a str>,
     host_repo_path: Option<&'a str>,
-    project: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1701,9 +1460,6 @@ fn cmd_worktrees_create(
     }
     if let Some(path) = placement.host_repo_path {
         input["hostRepoPath"] = serde_json::json!(path);
-    }
-    if let Some(project) = placement.project {
-        input["projectId"] = serde_json::json!(project);
     }
     let data = client.trpc_mutate("worktrees.create", &input)?;
     // No host fits yet: the hub recorded a host request and creates the
@@ -4294,363 +4050,6 @@ fn cmd_mcp_add(
     })
 }
 
-fn cmd_context_list() -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query("context.list", &serde_json::json!({}))?;
-    let contexts = data
-        .get("contexts")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let rows: Vec<[String; 5]> = contexts
-        .iter()
-        .map(|c| {
-            let text = |key: &str| c.get(key).and_then(|v| v.as_str()).unwrap_or("");
-            let labels = c
-                .get("labels")
-                .and_then(|v| v.as_array())
-                .map(|l| {
-                    l.iter()
-                        .filter_map(|v| v.as_str())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .unwrap_or_default();
-            let sync = match c.get("syncError").and_then(|v| v.as_str()) {
-                Some(e) => format!("error: {e}"),
-                None if c.get("remoteUrl").is_some_and(|v| !v.is_null()) => "ok".to_string(),
-                None => "-".to_string(),
-            };
-            [
-                text("name").to_string(),
-                text("kind").to_string(),
-                if text("remoteUrl").is_empty() {
-                    "-".to_string()
-                } else {
-                    text("remoteUrl").to_string()
-                },
-                if labels.is_empty() {
-                    "any".to_string()
-                } else {
-                    labels
-                },
-                sync,
-            ]
-        })
-        .collect();
-    Ok(CommandResult {
-        text: format_table(&["NAME", "KIND", "REMOTE", "LABELS", "SYNC"], &rows),
-        json: serde_json::json!({"contexts": contexts}),
-    })
-}
-
-fn cmd_context_create(
-    name: &str,
-    remote: Option<&str>,
-    vault_item: Option<&str>,
-    labels: Option<&str>,
-    read_only: bool,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"name": name});
-    if let Some(v) = remote {
-        body["remoteUrl"] = serde_json::json!(v);
-    }
-    if let Some(v) = vault_item {
-        body["remoteVaultItemId"] = serde_json::json!(v);
-    }
-    if let Some(v) = labels {
-        body["labels"] = serde_json::json!(split_list(v));
-    }
-    if read_only {
-        body["workerAccess"] = serde_json::json!("read-only");
-    }
-    let data = client.trpc_mutate("context.create", &body)?;
-    Ok(CommandResult {
-        text: format!("Created context {name}, served at /git/context/{name}.git\n"),
-        json: serde_json::json!({"context": data.get("context")}),
-    })
-}
-
-fn cmd_context_remove(name: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("context.remove", &serde_json::json!({"name": name}))?;
-    Ok(CommandResult {
-        text: format!("Removed context {name}\n"),
-        json: serde_json::json!({"removed": true, "name": name}),
-    })
-}
-
-fn cmd_context_link_remote(
-    name: &str,
-    remote: Option<&str>,
-    vault_item: Option<&str>,
-    unlink: bool,
-) -> Result<CommandResult, String> {
-    if unlink == remote.is_some() {
-        return Err("Pass either a remote URL or --unlink".to_string());
-    }
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"name": name, "remoteUrl": remote});
-    if let Some(v) = vault_item {
-        body["vaultItemId"] = serde_json::json!(v);
-    }
-    let data = client.trpc_mutate("context.linkRemote", &body)?;
-    let text = match remote {
-        Some(url) => format!("Linked context {name} to {url} and mirrored it\n"),
-        None => format!("Unlinked context {name} from its remote\n"),
-    };
-    Ok(CommandResult {
-        text,
-        json: serde_json::json!({"context": data.get("context")}),
-    })
-}
-
-fn project_repos_text(project: &serde_json::Value) -> String {
-    project
-        .get("repos")
-        .and_then(|v| v.as_array())
-        .map(|repos| {
-            repos
-                .iter()
-                .filter_map(|r| {
-                    let name = r.get("repo")?.as_str()?;
-                    match r.get("role").and_then(|v| v.as_str()) {
-                        Some(role) => Some(format!("{name}:{role}")),
-                        None => Some(name.to_string()),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default()
-}
-
-fn cmd_projects_list() -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query_no_input("projects.list")?;
-    let projects = data
-        .get("projects")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let rows: Vec<[String; 5]> = projects
-        .iter()
-        .map(|p| {
-            let text = |key: &str| p.get(key).and_then(|v| v.as_str()).unwrap_or("");
-            let repos = project_repos_text(p);
-            let worktrees = p
-                .get("worktrees")
-                .and_then(|v| v.as_array())
-                .map_or(0, Vec::len);
-            [
-                text("name").to_string(),
-                if repos.is_empty() {
-                    "-".to_string()
-                } else {
-                    repos
-                },
-                text("coordinatorModel").to_string(),
-                text("contextName").to_string(),
-                worktrees.to_string(),
-            ]
-        })
-        .collect();
-    Ok(CommandResult {
-        text: format_table(&["NAME", "REPOS", "MODEL", "CONTEXT", "WORKTREES"], &rows),
-        json: serde_json::json!({"projects": projects}),
-    })
-}
-
-fn cmd_projects_get(project: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query("projects.get", &serde_json::json!({"project": project}))?;
-    let p = data.get("project").cloned().unwrap_or_default();
-    let text = |key: &str| p.get(key).and_then(|v| v.as_str()).unwrap_or("");
-    let mut out = format!(
-        "{}\n  id: {}\n  context: {}\n  coordinator: {}{}\n  repos: {}\n",
-        text("name"),
-        text("id"),
-        text("contextName"),
-        text("coordinatorModel"),
-        match p.get("coordinatorAgent").and_then(|v| v.as_str()) {
-            Some(a) => format!(" ({a})"),
-            None => String::new(),
-        },
-        project_repos_text(&p),
-    );
-    if !text("description").is_empty() {
-        out.push_str("  description: ");
-        out.push_str(text("description"));
-        out.push('\n');
-    }
-    for w in p
-        .get("worktrees")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-    {
-        out.push_str("  worktree: ");
-        out.push_str(w.get("worktreeId").and_then(|v| v.as_str()).unwrap_or(""));
-        out.push('\n');
-    }
-    Ok(CommandResult {
-        text: out,
-        json: serde_json::json!({"project": p}),
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn cmd_projects_create(
-    name: &str,
-    description: Option<&str>,
-    repos: &[String],
-    context: Option<&str>,
-    remote_url: Option<&str>,
-    remote_vault_item: Option<&str>,
-    model: Option<&str>,
-    agent: Option<&str>,
-    labels: Option<&str>,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"name": name});
-    if let Some(v) = description {
-        body["description"] = serde_json::json!(v);
-    }
-    if !repos.is_empty() {
-        let list: Vec<serde_json::Value> = repos
-            .iter()
-            .map(|spec| match spec.split_once(':') {
-                Some((repo, role)) => serde_json::json!({"repo": repo, "role": role}),
-                None => serde_json::json!({"repo": spec}),
-            })
-            .collect();
-        body["repos"] = serde_json::json!(list);
-    }
-    if let Some(v) = context {
-        body["contextName"] = serde_json::json!(v);
-    }
-    if let Some(v) = remote_url {
-        body["remoteUrl"] = serde_json::json!(v);
-    }
-    if let Some(v) = remote_vault_item {
-        body["remoteVaultItemId"] = serde_json::json!(v);
-    }
-    if let Some(v) = model {
-        body["coordinatorModel"] = serde_json::json!(v);
-    }
-    if let Some(v) = agent {
-        body["coordinatorAgent"] = serde_json::json!(v);
-    }
-    if let Some(v) = labels {
-        body["labels"] = serde_json::json!(split_list(v));
-    }
-    let data = client.trpc_mutate("projects.create", &body)?;
-    let context_name = data
-        .get("project")
-        .and_then(|p| p.get("contextName"))
-        .and_then(|v| v.as_str())
-        .unwrap_or(name);
-    Ok(CommandResult {
-        text: format!("Created project {name} with context {context_name}\n"),
-        json: serde_json::json!({"project": data.get("project")}),
-    })
-}
-
-fn cmd_projects_update(
-    project: &str,
-    description: Option<&str>,
-    model: Option<&str>,
-    agent: Option<&str>,
-    labels: Option<&str>,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"project": project});
-    if let Some(v) = description {
-        body["description"] = serde_json::json!(v);
-    }
-    if let Some(v) = model {
-        body["coordinatorModel"] = serde_json::json!(v);
-    }
-    if let Some(v) = agent {
-        body["coordinatorAgent"] = serde_json::json!(v);
-    }
-    if let Some(v) = labels {
-        body["labels"] = serde_json::json!(split_list(v));
-    }
-    let data = client.trpc_mutate("projects.update", &body)?;
-    Ok(CommandResult {
-        text: format!("Updated project {project}\n"),
-        json: serde_json::json!({"project": data.get("project")}),
-    })
-}
-
-fn cmd_projects_remove(project: &str, remove_context: bool) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"project": project});
-    if remove_context {
-        body["removeContext"] = serde_json::json!(true);
-    }
-    client.trpc_mutate("projects.remove", &body)?;
-    Ok(CommandResult {
-        text: format!("Removed project {project}\n"),
-        json: serde_json::json!({"removed": true, "project": project}),
-    })
-}
-
-fn cmd_projects_add_repo(
-    project: &str,
-    repo: &str,
-    role: Option<&str>,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut body = serde_json::json!({"project": project, "repo": repo});
-    if let Some(v) = role {
-        body["role"] = serde_json::json!(v);
-    }
-    let data = client.trpc_mutate("projects.addRepo", &body)?;
-    Ok(CommandResult {
-        text: format!("Added repo {repo} to project {project}\n"),
-        json: serde_json::json!({"project": data.get("project")}),
-    })
-}
-
-fn cmd_projects_remove_repo(project: &str, repo: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate(
-        "projects.removeRepo",
-        &serde_json::json!({"project": project, "repo": repo}),
-    )?;
-    Ok(CommandResult {
-        text: format!("Removed repo {repo} from project {project}\n"),
-        json: serde_json::json!({"project": data.get("project")}),
-    })
-}
-
-fn cmd_projects_attach_worktree(project: &str, worktree_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate(
-        "projects.attachWorktree",
-        &serde_json::json!({"project": project, "worktreeId": worktree_id}),
-    )?;
-    Ok(CommandResult {
-        text: format!("Put worktree {worktree_id} in project {project}\n"),
-        json: serde_json::json!({"project": data.get("project")}),
-    })
-}
-
-fn cmd_projects_detach_worktree(worktree_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate(
-        "projects.detachWorktree",
-        &serde_json::json!({"worktreeId": worktree_id}),
-    )?;
-    Ok(CommandResult {
-        text: format!("Took worktree {worktree_id} out of its project\n"),
-        json: serde_json::json!({"detached": true, "worktreeId": worktree_id}),
-    })
-}
-
 fn cmd_mcp_remove(name: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("mcp.remove", &serde_json::json!({"name": name}))?;
@@ -5146,7 +4545,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides worktree default)"},
                 {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
-                {"name": "--project", "type": "string", "required": false, "description": "Put the worktree in this project (name or ID). The repo must be one of the project's."},
             ],
             "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
@@ -5371,130 +4769,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Remove a proxied MCP server",
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Server name (from `band mcp list`)"},
-            ],
-            "notes": "Needs an admin token."
-        }),
-        serde_json::json!({
-            "name": "context list",
-            "description": "List the context repos the hub holds",
-            "parameters": [],
-            "notes": "Needs an admin token. Text output: `NAME  KIND  REMOTE  LABELS  SYNC`.\nJSON output: `{\"contexts\": [{\"id\": \"ctx-...\", \"name\": \"...\", \"kind\": \"user|project\", \"remoteUrl\": null, \"labels\": [], \"workerAccess\": \"read-write\", \"syncError\": null}]}`."
-        }),
-        serde_json::json!({
-            "name": "context create",
-            "description": "Create a context repo on the hub, with a scaffold or mirroring an existing remote repo",
-            "parameters": [
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name. `user` is the user context."},
-                {"name": "remote", "type": "string", "required": false, "description": "Existing repo to mirror both ways (https, ssh or scp-style URL)"},
-                {"name": "vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` for an https remote"},
-                {"name": "labels", "type": "string", "required": false, "description": "Comma-separated key=value host labels a worker needs to pull this context (default: any worker)"},
-                {"name": "read-only", "type": "boolean", "required": false, "description": "Workers may pull but not push"},
-            ],
-            "notes": "Needs an admin token. Clients clone `<hub>/git/context/<name>.git` with a Bearer token."
-        }),
-        serde_json::json!({
-            "name": "context remove",
-            "description": "Remove a context and its repo on the hub",
-            "parameters": [
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name (from `band context list`)"},
-            ],
-            "notes": "Needs an admin token. A linked remote is left as it is."
-        }),
-        serde_json::json!({
-            "name": "context link-remote",
-            "description": "Link a context to a remote repo and mirror it now, or drop the link",
-            "parameters": [
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Context name"},
-                {"name": "remote", "type": "string", "required": false, "positional": true, "description": "Remote URL (https, ssh or scp-style)"},
-                {"name": "vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` for an https remote"},
-                {"name": "unlink", "type": "boolean", "required": false, "description": "Drop the remote link"},
-            ],
-            "notes": "Needs an admin token. The hub fetches the remote's branches and pushes its own, never forcing. A branch that moved on both sides is left alone and shown in the SYNC column."
-        }),
-        serde_json::json!({
-            "name": "projects list",
-            "description": "List the projects (cross-repo bodies of work)",
-            "parameters": [],
-            "notes": "Text output: `NAME  REPOS  MODEL  CONTEXT  WORKTREES`.\nJSON output: `{\"projects\": [{\"id\": \"prj-...\", \"name\": \"...\", \"description\": \"\", \"contextName\": \"...\", \"coordinatorAgent\": null, \"coordinatorModel\": \"opus\", \"labels\": [], \"policy\": {}, \"repos\": [{\"repo\": \"api\", \"role\": \"api\"}], \"worktrees\": []}]}`."
-        }),
-        serde_json::json!({
-            "name": "projects get",
-            "description": "Show one project with its repos, context and worktrees",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-            ],
-            "notes": "JSON output: `{\"project\": {...}}` with the same fields as `projects list` plus `context`."
-        }),
-        serde_json::json!({
-            "name": "projects create",
-            "description": "Create a project and its context repo",
-            "parameters": [
-                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Project name: lowercase letters, digits, hyphens and underscores"},
-                {"name": "description", "type": "string", "required": false, "description": "What the project is for"},
-                {"name": "repo", "type": "string", "required": false, "description": "A repo the project may touch, as `name` or `name:role` (repeatable)"},
-                {"name": "context", "type": "string", "required": false, "description": "Use this existing project context instead of creating one"},
-                {"name": "remote-url", "type": "string", "required": false, "description": "Mirror the new context repo with this remote"},
-                {"name": "remote-vault-item", "type": "string", "required": false, "description": "Credential ID from `band vault list` for an https remote"},
-                {"name": "model", "type": "string", "required": false, "description": "Model of the project's coordinator (default: opus)"},
-                {"name": "agent", "type": "string", "required": false, "description": "Coding agent ID of the coordinator"},
-                {"name": "labels", "type": "string", "required": false, "description": "Comma-separated key=value host labels for the project's worktrees"},
-            ],
-            "notes": "Needs an admin token. Without `--context` the hub creates a context repo named like the project, with the project scaffold."
-        }),
-        serde_json::json!({
-            "name": "projects update",
-            "description": "Change a project's description, coordinator or labels",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-                {"name": "description", "type": "string", "required": false, "description": "New description"},
-                {"name": "model", "type": "string", "required": false, "description": "Coordinator model"},
-                {"name": "agent", "type": "string", "required": false, "description": "Coordinator coding agent ID"},
-                {"name": "labels", "type": "string", "required": false, "description": "Comma-separated key=value host labels (replaces the list)"},
-            ],
-            "notes": "Needs an admin token."
-        }),
-        serde_json::json!({
-            "name": "projects remove",
-            "description": "Remove a project",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-                {"name": "remove-context", "type": "boolean", "required": false, "description": "Also delete the project's context repo"},
-            ],
-            "notes": "Needs an admin token. Refused while worktrees belong to the project."
-        }),
-        serde_json::json!({
-            "name": "projects add-repo",
-            "description": "Add a repo to a project, or change its role",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
-                {"name": "role", "type": "string", "required": false, "description": "Role of the repo, such as `api` or `client`"},
-            ],
-            "notes": "Needs an admin token."
-        }),
-        serde_json::json!({
-            "name": "projects remove-repo",
-            "description": "Remove a repo from a project",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
-            ],
-            "notes": "Needs an admin token. Refused while worktrees of that repo belong to the project."
-        }),
-        serde_json::json!({
-            "name": "projects attach-worktree",
-            "description": "Put an existing worktree in a project",
-            "parameters": [
-                {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name or ID"},
-                {"name": "worktree_id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
-            ],
-            "notes": "Needs an admin token. The worktree's repo must be one of the project's."
-        }),
-        serde_json::json!({
-            "name": "projects detach-worktree",
-            "description": "Take a worktree out of its project",
-            "parameters": [
-                {"name": "worktree_id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
             ],
             "notes": "Needs an admin token."
         }),

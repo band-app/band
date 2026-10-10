@@ -79,18 +79,6 @@ interface FileBrowserProps {
    * For directories, the caller should also drop any descendant tabs.
    */
   onPathDeleted?: (path: string, kind: "file" | "directory") => void;
-  /**
-   * The folder the tree shows as its root, relative to the worktree (default: the worktree root).
-   * A project's Repos tab roots it at `repos`, so each repo checkout is a top-level node.
-   */
-  rootPath?: string;
-  /** Entries of the root to leave out, e.g. `repos` in a project's context tree. */
-  hiddenRootNames?: readonly string[];
-  /**
-   * A tree nested in a list (a repo root of a project's Repos tab): it takes the height of its
-   * rows, with no padding, no filler below them and a one-line empty state.
-   */
-  inline?: boolean;
 }
 
 /**
@@ -830,9 +818,6 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     selectedFile,
     onPathRenamed,
     onPathDeleted,
-    rootPath = "",
-    hiddenRootNames,
-    inline = false,
   },
   handleRef,
 ) {
@@ -971,8 +956,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
 
   // Load root on mount / worktree change
   useEffect(() => {
-    fetchDir(rootPath);
-  }, [fetchDir, rootPath]);
+    fetchDir("");
+  }, [fetchDir]);
 
   // ------- External file-change invalidation -------
   //
@@ -1012,11 +997,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     }
     prevSelectedRef.current = selectedFile;
 
-    // A file outside this tree's root (another tab's tree of the same folder) expands nothing.
-    if (rootPath && !selectedFile.startsWith(`${rootPath}/`)) return;
     // Compute all parent directories that need to be expanded
     const parts = selectedFile.split("/");
-    const dirsToExpand: string[] = [rootPath];
+    const dirsToExpand: string[] = [""];
     for (let i = 0; i < parts.length - 1; i++) {
       dirsToExpand.push(parts.slice(0, i + 1).join("/"));
     }
@@ -1039,7 +1022,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     for (const dir of dirsToExpand) {
       fetchDir(dir);
     }
-  }, [selectedFile, worktreeId, fetchDir, rootPath]);
+  }, [selectedFile, worktreeId, fetchDir]);
 
   // Scroll to selected file after tree updates
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll after tree settles for new selection
@@ -1299,10 +1282,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     if (treeSelection?.kind === "directory") return treeSelection.path;
     if (treeSelection?.kind === "file") {
       const idx = treeSelection.path.lastIndexOf("/");
-      return idx === -1 ? rootPath : treeSelection.path.slice(0, idx);
+      return idx === -1 ? "" : treeSelection.path.slice(0, idx);
     }
-    return rootPath;
-  }, [treeSelection, rootPath]);
+    return "";
+  }, [treeSelection]);
 
   // ------- Cut / Copy / Paste -------
   const canCutCopy = Boolean(adapter.renameWorktreePath);
@@ -1545,10 +1528,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   }, [fetchDir, worktreeId]);
 
   const collapseAll = useCallback(() => {
-    const root = new Set([rootPath]);
+    const root = new Set([""]);
     expandedStateCache.set(worktreeId, root);
     setExpandedPaths(new Set(root));
-  }, [worktreeId, rootPath]);
+  }, [worktreeId]);
 
   // ------- Reveal in Finder (desktop shell only) -------
   const revealInFinder = capabilities.revealInFinder;
@@ -1591,12 +1574,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     );
   }
 
-  const rootEntries = (dirContents.get(rootPath) ?? []).filter(
-    (e) => !hiddenRootNames?.includes(e.name),
-  );
-  const rootLoading = loadingPaths.has(rootPath);
+  const rootEntries = dirContents.get("") ?? [];
+  const rootLoading = loadingPaths.has("");
   const rootSiblings = new Set(rootEntries.map((e) => e.name));
-  const showRootInput = newEntry?.parentPath === rootPath;
+  const showRootInput = newEntry?.parentPath === "";
 
   // Keyboard shortcuts. We attach to the outer div so they only fire
   // when focus is somewhere inside the file tree — the editor's own
@@ -1709,11 +1690,11 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         <ContextMenuTrigger asChild>
           <div
             data-testid="file-tree__root"
-            data-drop-target={dropTarget === rootPath ? "true" : undefined}
+            data-drop-target={dropTarget === "" ? "true" : undefined}
             // Rows stop propagation of the drag events they handle, so what
             // reaches here is a drag over empty space: it targets the root.
-            onDragOver={(e) => dnd.onDragOver(rootPath, e)}
-            onDrop={(e) => dnd.onDrop(rootPath, e)}
+            onDragOver={(e) => dnd.onDragOver("", e)}
+            onDrop={(e) => dnd.onDrop("", e)}
             onDragLeave={(e) => {
               // Leaving the tree entirely (not just moving between rows)
               // clears the highlight; the drag itself may still end elsewhere.
@@ -1722,8 +1703,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                 clearExpandTimer();
               }
             }}
-            className={`${inline ? "" : "min-h-0 flex-1 overflow-y-auto py-1"} pl-px ${
-              dropTarget === rootPath
+            className={`min-h-0 flex-1 overflow-y-auto py-1 pl-px ${
+              dropTarget === ""
                 ? "bg-blue-500/10 outline outline-1 -outline-offset-1 outline-blue-400/60"
                 : ""
             }`}
@@ -1743,7 +1724,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                 <TreeNode
                   key={entry.name}
                   entry={entry}
-                  parentPath={rootPath}
+                  parentPath=""
                   depth={0}
                   expandedPaths={expandedPaths}
                   dirContents={dirContents}
@@ -1798,13 +1779,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                     </div>
                   )}
                   {!rootLoading && rootEntries.length === 0 && !showRootInput && (
-                    <div
-                      className={
-                        inline
-                          ? "py-1 pl-5 text-xs text-muted-foreground"
-                          : "flex h-32 items-center justify-center text-sm text-muted-foreground"
-                      }
-                    >
+                    <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
                       Empty directory
                     </div>
                   )}
@@ -1815,7 +1790,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
               );
             })()}
             {/* Filler so the right-click area extends to the bottom of the panel */}
-            {inline ? null : <div className="min-h-[40px] flex-1" />}
+            <div className="min-h-[40px] flex-1" />
           </div>
         </ContextMenuTrigger>
         {/* Each item queues its action; `rootMenu.flush` runs it once
@@ -1823,14 +1798,14 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         <ContextMenuContent onCloseAutoFocus={rootMenu.flush}>
           <ContextMenuItem
             data-testid="file-tree__new-file"
-            onSelect={() => rootMenu.queue(() => requestNewEntry(rootPath, "file"))}
+            onSelect={() => rootMenu.queue(() => requestNewEntry("", "file"))}
           >
             <FileIconLucide className="size-4" />
             New File
           </ContextMenuItem>
           <ContextMenuItem
             data-testid="file-tree__new-folder"
-            onSelect={() => rootMenu.queue(() => requestNewEntry(rootPath, "directory"))}
+            onSelect={() => rootMenu.queue(() => requestNewEntry("", "directory"))}
           >
             <FolderPlus className="size-4" />
             New Folder
@@ -1840,7 +1815,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
               <ContextMenuSeparator />
               <ContextMenuItem
                 data-testid="file-tree__paste"
-                onSelect={() => rootMenu.queue(() => void pasteInto(rootPath))}
+                onSelect={() => rootMenu.queue(() => void pasteInto(""))}
               >
                 <ClipboardPaste className="size-4" />
                 Paste

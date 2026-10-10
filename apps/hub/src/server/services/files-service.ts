@@ -18,7 +18,6 @@
 import { dirname, extname, join, resolve, sep } from "node:path";
 import type { FsStat, HostFs } from "@band-app/host-api";
 import { WorktreeNotFoundError } from "../errors";
-import { isFolderScope } from "../infra/project-scope";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import {
   worktreeService as defaultWorktreeService,
@@ -132,15 +131,6 @@ export class FilesService {
     if (!opts.allowRoot && target === root) {
       throw new Error("Invalid path");
     }
-    // A project's folder holds git data at any depth (the context copy's `.git` and each
-    // `repos/<repo>/.git`) that the hub runs git against in the background, so no file call
-    // reaches any of it, read or write.
-    if (isFolderScope(worktreeId) && target !== root) {
-      const segments = target.slice(root.length + 1).split(/[\\/]/);
-      if (segments.some((s) => s.toLowerCase() === ".git")) {
-        throw new Error("Refusing to touch .git internals");
-      }
-    }
     return { root, target, fs: worktree.host.fs };
   }
 
@@ -167,11 +157,7 @@ export class FilesService {
     await ephemeralLifecycleService.ensureAwake(worktreeId);
     const { target, fs } = this.resolveInside(worktreeId, path, { allowRoot: true });
     const dirents = await fs.list(target);
-    // A project's folder syncs on its own and no file call reaches its git data (the copy's
-    // `.git`, each checkout's `repos/<repo>/.git`), so no listing shows it.
-    const hideGit = isFolderScope(worktreeId);
     const entries: FileEntry[] = dirents
-      .filter((d) => !(hideGit && d.name.toLowerCase() === ".git"))
       .map((d) => ({
         name: d.name,
         type: d.kind === "directory" ? ("directory" as const) : ("file" as const),

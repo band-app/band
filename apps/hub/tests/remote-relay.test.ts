@@ -58,29 +58,6 @@ function git(cwd: string, ...args: string[]): string {
   });
 }
 
-/** Seeds a context with files, pushing through the hub's git endpoint with the admin token. */
-function seedContext(name: string, files: Record<string, string>): void {
-  const dir = tmp(`band-relay-ctx-${name}-`);
-  const auth = ["-c", `http.extraHeader=Authorization: Bearer ${TEST_TOKEN}`];
-  git(dir, ...auth, "clone", "-q", `${server.url}/git/context/${name}.git`, "wc");
-  const wc = join(dir, "wc");
-  for (const [path, body] of Object.entries(files)) {
-    mkdirSync(join(wc, path, ".."), { recursive: true });
-    writeFileSync(join(wc, path), body);
-  }
-  git(wc, "add", "-A");
-  git(wc, "commit", "-q", "-m", "seed");
-  git(wc, ...auth, "push", "-q", "origin", "HEAD");
-}
-
-/** A fresh clone of a context, fetched with the admin token. */
-function cloneContext(name: string): string {
-  const dir = tmp(`band-relay-ctxread-${name}-`);
-  const auth = ["-c", `http.extraHeader=Authorization: Bearer ${TEST_TOKEN}`];
-  git(dir, ...auth, "clone", "-q", `${server.url}/git/context/${name}.git`, "wc");
-  return join(dir, "wc");
-}
-
 function makeRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
@@ -107,8 +84,6 @@ let hubRepo: string;
 let server: ServerHandle;
 let a: Worker;
 let b: Worker;
-// A project whose coordinator host is worker a, so its folder shares a's host.
-let projectScope: string;
 
 const q = <T>(procedure: string, input?: unknown) =>
   trpcQuery(server.url, procedure, input, TEST_TOKEN).then(async (res) => {
@@ -235,18 +210,6 @@ const mcpChatsList = (worktreeId: string) => ({
   params: { name: "band_chats_list", arguments: { worktreeId } },
 });
 const MCP_HEADERS = { accept: "application/json, text/event-stream" };
-const mcpContextCall = (id: number, name: string, args: object) => ({
-  jsonrpc: "2.0",
-  id,
-  method: "tools/call",
-  params: { name, arguments: args },
-});
-// An agent on a worker naming a worktree and chat of the hub's other repo in headers.
-const FORGED_HEADERS = {
-  ...MCP_HEADERS,
-  "x-band-worktree-id": "other-main",
-  "x-band-chat-id": "other-chat",
-};
 
 beforeAll(async () => {
   hubHome = createTmpHome("band-relay-hub-");
@@ -286,18 +249,6 @@ beforeAll(async () => {
       BAND_TEST_ACP_STATE: join(hubHome, "acp-state"),
     },
   });
-
-  await m("context.create", { name: "proj-ctx", repos: ["proj"] });
-  await m("context.create", { name: "other-ctx", repos: ["other"] });
-  seedContext("proj-ctx", { "notes.md": "# Notes\n\nThe relaymarker lives in this project.\n" });
-  seedContext("other-ctx", {
-    "notes.md": "# Notes\n\nThe othermarker lives in another project.\n",
-  });
-
-  const { project } = await m<{ project: { id: string } }>("projects.create", {
-    name: "relayproj",
-  });
-  projectScope = `project:${project.id}`;
 
   const probe = (name: string, path: string, extra: object = {}) => ({
     http: { name, path, ...extra },
@@ -351,10 +302,6 @@ beforeAll(async () => {
             body: { terminalId: "hub-terminal", worktreeId: "proj-relay-a" },
             headers: { "content-type": "application/json" },
           }),
-          // A project folder on this worker is still out of a worktree agent's reach.
-          post("project-terminal", "/trpc/terminal.create", { worktreeId: projectScope }),
-          post("project-chat", "/trpc/chats.create", { worktreeId: projectScope }),
-          probe("project-chats", listChats(projectScope)),
           probe("decoy-repo", "/trpc/worktrees.gitPush", {
             method: "POST",
             body: { repo: "proj", name: "main", worktreeId: "proj-relay-a" },
@@ -366,27 +313,6 @@ beforeAll(async () => {
           probe("desktop-local", "/api/hosts/local/desktop"),
           probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
           { say: "probed" },
-        ],
-      },
-      {
-        match: "^context-probe",
-        steps: [
-          probe("ctx-own", "/mcp", {
-            method: "POST",
-            body: mcpContextCall(1, "context_search", { query: "relaymarker" }),
-            headers: MCP_HEADERS,
-          }),
-          probe("ctx-forged-read", "/mcp", {
-            method: "POST",
-            body: mcpContextCall(2, "context_search", { query: "othermarker" }),
-            headers: FORGED_HEADERS,
-          }),
-          probe("ctx-forged-write", "/mcp", {
-            method: "POST",
-            body: mcpContextCall(3, "context_append_learning", { text: "forged-learning-text" }),
-            headers: FORGED_HEADERS,
-          }),
-          { say: "probed context" },
         ],
       },
       {
@@ -439,7 +365,6 @@ beforeAll(async () => {
   };
   a = await addWorker("a", scenario);
   b = await addWorker("b", scenario);
-  await m("projects.update", { project: "relayproj", coordinatorHostId: a.hostId });
 }, 180_000);
 
 afterAll(async () => {
@@ -545,32 +470,6 @@ describe("the worker relay (S2)", () => {
     expect(by("mcp-own")?.body).toContain("chats");
   });
 
-  it("scopes the context tools to the caller's own project, whatever its headers name", async () => {
-    await submit("proj-relay-a", "context-probe");
-    const by = (name: string) => httpLog(a).find((l) => l.name === name);
-
-    expect(by("ctx-own")?.status).toBe(200);
-    expect(by("ctx-own")?.body).toContain("relaymarker");
-
-    // The relay sets the session headers from the token's scope and drops the agent's own,
-    // so naming the other repo's worktree and chat reaches nothing of that project.
-    const forgedRead = by("ctx-forged-read");
-    expect(forgedRead?.status).toBe(200);
-    expect(forgedRead?.body).not.toContain("othermarker");
-    expect(forgedRead?.body).toContain("proj-ctx");
-    expect(forgedRead?.body).not.toContain("other-ctx");
-
-    expect(by("ctx-forged-write")?.status).toBe(200);
-    const learned = (name: string) => {
-      const dir = join(cloneContext(name), "learnings");
-      return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".md")) : [];
-    };
-    await waitFor(async () => (learned("proj-ctx").length > 0 ? true : undefined), {
-      label: "learning lands in the caller's own project context",
-    });
-    expect(learned("other-ctx")).toEqual([]);
-  });
-
   it("refuses a call for another worker's worktree, or the hub's", async () => {
     const by = (name: string) => httpLog(a).find((l) => l.name === name);
     expect(by("other-worker-chats")?.status).toBe(403);
@@ -595,9 +494,6 @@ describe("the worker relay (S2)", () => {
     // A foreign target next to the agent's own worktreeId does not borrow its scope.
     expect(by("decoy-terminal")?.status).toBe(403);
     expect(by("decoy-repo")?.status).toBe(403);
-    expect(by("project-terminal")?.status).toBe(403);
-    expect(by("project-chat")?.status).toBe(403);
-    expect(by("project-chats")?.status).toBe(403);
     // Nothing in a refusal gives away a credential.
     for (const line of httpLog(a)) expect(line.body).not.toContain(TEST_TOKEN);
   });

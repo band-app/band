@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorktreeWorktreeIdRouteImport } from './routes/worktree.$worktreeId'
-import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,39 +22,30 @@ const WorktreeWorktreeIdRoute = WorktreeWorktreeIdRouteImport.update({
   path: '/worktree/$worktreeId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjectProjectIdRoute = ProjectProjectIdRouteImport.update({
-  id: '/project/$projectId',
-  path: '/project/$projectId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/project/$projectId': typeof ProjectProjectIdRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/project/$projectId' | '/worktree/$worktreeId'
+  fullPaths: '/' | '/worktree/$worktreeId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/project/$projectId' | '/worktree/$worktreeId'
-  id: '__root__' | '/' | '/project/$projectId' | '/worktree/$worktreeId'
+  to: '/' | '/worktree/$worktreeId'
+  id: '__root__' | '/' | '/worktree/$worktreeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ProjectProjectIdRoute: typeof ProjectProjectIdRoute
   WorktreeWorktreeIdRoute: typeof WorktreeWorktreeIdRoute
 }
 
@@ -75,19 +65,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorktreeWorktreeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/project/$projectId': {
-      id: '/project/$projectId'
-      path: '/project/$projectId'
-      fullPath: '/project/$projectId'
-      preLoaderRoute: typeof ProjectProjectIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ProjectProjectIdRoute: ProjectProjectIdRoute,
   WorktreeWorktreeIdRoute: WorktreeWorktreeIdRoute,
 }
 export const routeTree = rootRouteImport

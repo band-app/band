@@ -18,14 +18,12 @@ import type {
   HostAcp,
   HostAgentEnv,
   HostBrowser,
-  HostContext,
   HostDesktop,
   HostFs,
   HostGit,
   HostInfo,
   HostLsp,
   HostMcp,
-  HostProject,
   HostRelay,
   HostRepos,
   HostScripts,
@@ -253,30 +251,6 @@ export class RemoteHost implements Host {
       };
     },
     close: (worktreeId) => this.rpc.call("browser.close", { worktreeId }, { timeoutMs: 30_000 }),
-  };
-
-  readonly project: HostProject = {
-    ensure: (request) =>
-      this.rpc.call("project.ensure", request, {
-        timeoutMs: (request.contextTimeoutMs ?? 10_000) + 2 * 60_000,
-      }),
-    read: (request) => this.rpc.call("project.read", request),
-    search: (request) => this.rpc.call("project.search", request),
-    log: (request) => this.rpc.call("project.log", request),
-    status: (request) => this.rpc.call("project.status", request),
-    diff: (request) => this.rpc.call("project.diff", request),
-    commit: (request) => this.rpc.call("project.commit", request),
-    push: (request) => this.rpc.call("project.push", request, { timeoutMs: 2 * 60_000 }),
-    pull: (request) => this.rpc.call("project.pull", request, { timeoutMs: 2 * 60_000 }),
-    removeRepo: (request) => this.rpc.call("project.removeRepo", request),
-  };
-
-  readonly context: HostContext = {
-    preamble: (request) => this.rpc.call("context.preamble", request),
-    // The worker pulls its contexts in parallel and bounds each by `timeoutMs`.
-    pull: (request) =>
-      this.rpc.call("context.pull", request, { timeoutMs: (request.timeoutMs ?? 10_000) + 10_000 }),
-    push: (request) => this.rpc.call("context.push", request, { timeoutMs: 5 * 60_000 }),
   };
 
   readonly scripts: HostScripts = {

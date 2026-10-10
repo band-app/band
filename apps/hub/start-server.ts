@@ -27,10 +27,8 @@ import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatHistory } from "./src/api/chat-history.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
-import { CONTEXT_GIT_PREFIX, handleContextGit } from "./src/server/api/context/git-http.ts";
 import { createContext } from "./src/server/api/context.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
-import { handleMedia, MEDIA_PREFIX } from "./src/server/api/media/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
@@ -68,18 +66,12 @@ import { agentSessionRegistry } from "./src/server/services/agent-session-regist
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
-import { contextAutosyncService } from "./src/server/services/context-autosync-service.ts";
-import { contextService } from "./src/server/services/context-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
 import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
-import { projectCoordinatorService } from "./src/server/services/project-coordinator-service.ts";
-import { projectFolderService } from "./src/server/services/project-folder-service.ts";
-import { projectService } from "./src/server/services/project-service.ts";
-import { projectSubscriptionService } from "./src/server/services/project-subscription-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
@@ -754,7 +746,6 @@ async function main() {
   runnerReaperService.start();
   vaultService.start();
   mcpProxyService.start();
-  contextService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -865,18 +856,6 @@ async function main() {
     // is its credential, and it only reaches the servers that token names.
     if (req.url?.startsWith(MCP_PROXY_PREFIX)) {
       await handleMcpProxy(req, res);
-      return;
-    }
-
-    // Context repos over git smart HTTP and the media store. Before the
-    // device-token check: a worker holds a session token, which that check
-    // refuses on purpose, and both routes do their own authentication.
-    if (req.url?.startsWith(CONTEXT_GIT_PREFIX)) {
-      await handleContextGit(req, res, { authRequired: Boolean(expectedToken) });
-      return;
-    }
-    if (req.url === MEDIA_PREFIX || req.url?.match(/^\/media(?:\/|\?)/)) {
-      await handleMedia(req, res, { authRequired: Boolean(expectedToken) });
       return;
     }
 
@@ -1409,16 +1388,6 @@ async function main() {
     phaseBStarted = resolve;
   });
 
-  // Older hubs left a default project and multi-repo task links behind. They go before the server
-  // answers its first request, so no client sees them. It is plain DB work.
-  try {
-    projectService.retireLegacy();
-  } catch (err) {
-    console.warn(
-      `Could not retire the old default project: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
   // Bind the http server, scanning upward from `initialPort` until we
   // find a free port. Surfaces a clear error to stderr if every port
   // in the scan range is taken — much friendlier than the silent
@@ -1606,22 +1575,6 @@ async function main() {
       // Rebuild the subscription index from the database. Events that were
       // waiting out a coalesce window when the last server stopped are gone.
       subscriptionService.start();
-      // A 6.2 coordinator worktree goes away before the coordinators are subscribed again, so the
-      // old subscriptions (keyed to that worktree) are dropped first and the project's replace them.
-      void projectCoordinatorService
-        .removeLegacyWorktrees()
-        .catch((err) => console.error("Failed to remove legacy coordinator worktrees:", err))
-        .finally(() => {
-          // Project-wide wake-ups of each coordinator (worker chats, member PRs, the context inbox).
-          projectSubscriptionService.start();
-          // A coordinator waiting for a worker starts when one that can run its agent connects.
-          projectCoordinatorService.start();
-          // Each project's folder on its coordinator host, so its view opens on known files.
-          void projectFolderService.warmAll();
-          // Keeps every host's copy of each project folder in step with the hub, in the background.
-          contextAutosyncService.start();
-        });
-
       // Activate the bundled plugins that ask for `onStartup`. The rest
       // activate lazily, e.g. the GitHub plugin on the first review lookup
       // for a github.com repo.
@@ -1646,8 +1599,6 @@ async function main() {
   const shutdown = async () => {
     branchStatusPoller.stop();
     cronjobService.stop();
-    projectSubscriptionService.stop();
-    contextAutosyncService.stop();
     subscriptionService.stop();
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
@@ -1664,7 +1615,6 @@ async function main() {
     runnerReaperService.stop();
     vaultService.stop();
     mcpProxyService.stop();
-    contextService.stop();
     placementService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});

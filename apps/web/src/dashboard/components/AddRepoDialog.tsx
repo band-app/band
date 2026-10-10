@@ -17,7 +17,6 @@ import { useEffect, useMemo, useState } from "react";
 import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
-import { useRepos } from "../hooks/use-repos";
 
 const LOCAL_HOST_ID = "local";
 const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
@@ -47,11 +46,9 @@ function crumbsOf(path: string): Array<{ name: string; path: string }> {
   return crumbs;
 }
 
-type Mode = "worker" | "url" | "existing";
+type Mode = "worker" | "url";
 
 export interface AddRepoFormProps {
-  /** The project id the repo is added to. Without one the repo belongs to no project. */
-  projectId?: string;
   /** The label the new repo gets: the sidebar's label filter, so the repo stays in view. */
   label?: string | null;
   /** Opens Settings > Hosts, where a worker is added. Shown in the no-worker notice when set. */
@@ -62,21 +59,14 @@ export interface AddRepoFormProps {
 }
 
 /**
- * Adds a repo, to a project when one is given, either from a folder on a worker (a picker served by that worker,
- * then a preview of the remote and default branch the worker reads) or by its remote URL (with the
- * default branch the hub resolves). A folder outside the worker's roots needs an explicit
- * confirmation in the preview. Used by the Add repo dialog and the create project flow.
+ * Adds a repo, either from a folder on a worker (a picker served by that worker, then a preview of
+ * the remote and default branch the worker reads) or by its remote URL (with the default branch the
+ * hub resolves). A folder outside the worker's roots needs an explicit confirmation in the preview.
  */
-export function AddRepoForm({
-  projectId,
-  label,
-  onOpenHosts,
-  onAdded,
-  active = true,
-}: AddRepoFormProps) {
+export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddRepoFormProps) {
   const capabilities = useCapabilities();
   const queryClient = useQueryClient();
-  const [chosenMode, setMode] = useState<Mode>("worker");
+  const [mode, setMode] = useState<Mode>("worker");
   const [chosenHost, setChosenHost] = useState<string | null>(null);
   const [browsePath, setBrowsePath] = useState<string | undefined>(undefined);
   const [filter, setFilter] = useState("");
@@ -87,22 +77,6 @@ export function AddRepoForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [outsideRoots, setOutsideRoots] = useState<string | null>(null);
-  const [existingRepo, setExistingRepo] = useState("");
-  const [role, setRole] = useState("");
-  const { repos } = useRepos();
-  const projects = useQuery({
-    queryKey: ["projects.list"],
-    queryFn: () => trpc.projects.list.query(),
-    enabled: active && projectId !== undefined,
-  });
-  const inProject = new Set(
-    (projects.data?.projects.find((p) => p.id === projectId)?.repos ?? []).map((r) => r.repo),
-  );
-  // "Already in Band" adds a known repo to the project, so it needs one.
-  const addable = projectId ? repos.filter((r) => !inProject.has(r.name)) : [];
-  // The "Already in Band" tab goes away once every repo is in the project.
-  const mode: Mode = chosenMode === "existing" && addable.length === 0 ? "worker" : chosenMode;
-
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
@@ -159,14 +133,11 @@ export function AddRepoForm({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
       queryClient.invalidateQueries({ queryKey: ["repos"] }),
-      queryClient.invalidateQueries({ queryKey: ["projects.list"] }),
     ]);
     setSelected(null);
     setOutsideRoots(null);
     setRemoteUrl("");
     setDefaultBranch("");
-    setExistingRepo("");
-    setRole("");
     onAdded?.(name);
   };
 
@@ -178,7 +149,6 @@ export function AddRepoForm({
       const repo = await trpc.repos.addFromWorker.mutate({
         hostId,
         path,
-        ...(projectId ? { project: projectId } : {}),
         ...(label ? { label } : {}),
         ...(addRoot ? { addRoot: true } : {}),
       });
@@ -203,28 +173,9 @@ export function AddRepoForm({
       const repo = await trpc.repos.addByUrl.mutate({
         remoteUrl: remoteUrl.trim(),
         defaultBranch: defaultBranch.trim() || undefined,
-        ...(projectId ? { project: projectId } : {}),
         ...(label ? { label } : {}),
       });
       await finish(repo.name);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addExisting = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      if (!projectId) return;
-      await trpc.projects.addRepo.mutate({
-        project: projectId,
-        repo: existingRepo,
-        role: role.trim() || null,
-      });
-      await finish(existingRepo);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -248,13 +199,12 @@ export function AddRepoForm({
   const uncloneable = info?.cloneable === false;
 
   return (
-    <div className="space-y-4" data-testid="project-add-repo__form">
+    <div className="space-y-4" data-testid="add-repo__form">
       <div className="flex gap-2" role="tablist" aria-label="How to add the repo">
         {(
           [
             ["worker", "From a worker"],
             ["url", "By URL"],
-            ...(addable.length > 0 ? ([["existing", "Already in Band"]] as const) : []),
           ] as const
         ).map(([value, label]) => (
           <Button
@@ -263,7 +213,7 @@ export function AddRepoForm({
             role="tab"
             aria-selected={mode === value}
             variant={mode === value ? "default" : "outline"}
-            data-testid={`project-add-repo__mode-${value}`}
+            data-testid={`add-repo__mode-${value}`}
             onClick={() => {
               setMode(value);
               setError(null);
@@ -282,7 +232,7 @@ export function AddRepoForm({
         ) : hostChoices.length === 0 ? (
           <div
             className="flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
-            data-testid="project-add-repo__no-hosts"
+            data-testid="add-repo__no-hosts"
           >
             <Server className="size-6 text-muted-foreground" aria-hidden />
             <div className="space-y-1">
@@ -297,23 +247,19 @@ export function AddRepoForm({
                 <Button
                   size="sm"
                   variant="outline"
-                  data-testid="project-add-repo__open-hosts"
+                  data-testid="add-repo__open-hosts"
                   onClick={onOpenHosts}
                 >
                   Add a worker
                 </Button>
               ) : null}
-              <Button
-                size="sm"
-                data-testid="project-add-repo__no-hosts-url"
-                onClick={() => setMode("url")}
-              >
+              <Button size="sm" data-testid="add-repo__no-hosts-url" onClick={() => setMode("url")}>
                 Add by URL
               </Button>
             </div>
           </div>
         ) : selected !== null ? (
-          <div className="space-y-3" data-testid="project-add-repo__preview">
+          <div className="space-y-3" data-testid="add-repo__preview">
             <p className="break-all font-mono text-xs text-muted-foreground">
               {hostName}: {selected}
             </p>
@@ -328,24 +274,17 @@ export function AddRepoForm({
             ) : info ? (
               <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 rounded-lg border p-3 text-sm">
                 <dt className="text-muted-foreground">Repo name</dt>
-                <dd data-testid="project-add-repo__preview-name">
-                  {info.existingRepo ?? info.name}
-                </dd>
+                <dd data-testid="add-repo__preview-name">{info.existingRepo ?? info.name}</dd>
                 <dt className="text-muted-foreground">Remote URL</dt>
-                <dd className="break-all" data-testid="project-add-repo__preview-url">
+                <dd className="break-all" data-testid="add-repo__preview-url">
                   {info.remoteUrl ?? "None"}
                 </dd>
                 <dt className="text-muted-foreground">Default branch</dt>
-                <dd data-testid="project-add-repo__preview-branch">
-                  {info.defaultBranch ?? "Unknown"}
-                </dd>
+                <dd data-testid="add-repo__preview-branch">{info.defaultBranch ?? "Unknown"}</dd>
               </dl>
             ) : null}
             {info && !info.isGit ? (
-              <p
-                className="text-sm text-muted-foreground"
-                data-testid="project-add-repo__preview-plain"
-              >
+              <p className="text-sm text-muted-foreground" data-testid="add-repo__preview-plain">
                 This folder is not a git repository. It is added as a plain folder that lives on{" "}
                 {hostName} only.
               </p>
@@ -353,7 +292,7 @@ export function AddRepoForm({
               <p
                 role="alert"
                 className="text-sm text-destructive"
-                data-testid="project-add-repo__preview-uncloneable"
+                data-testid="add-repo__preview-uncloneable"
               >
                 The origin URL of this folder is not one Band can clone, so it cannot be added. Fix
                 the folder's origin remote and try again.
@@ -361,17 +300,14 @@ export function AddRepoForm({
             ) : info && !info.remoteUrl ? (
               <p
                 className="rounded-md bg-muted px-3 py-2 text-sm"
-                data-testid="project-add-repo__preview-local-only"
+                data-testid="add-repo__preview-local-only"
               >
                 This repo has no remote, so it stays on {hostName} only. Its worktrees can run only
                 there, and other workers cannot clone it.
               </p>
             ) : null}
             {info?.existingRepo ? (
-              <p
-                className="text-sm text-muted-foreground"
-                data-testid="project-add-repo__preview-existing"
-              >
+              <p className="text-sm text-muted-foreground" data-testid="add-repo__preview-existing">
                 Band already has the repo {info.existingRepo} with this remote. This folder becomes
                 its clone on {hostName}.
               </p>
@@ -379,7 +315,7 @@ export function AddRepoForm({
             {needsRoot ? (
               <div
                 className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
-                data-testid="project-add-repo__confirm-root"
+                data-testid="add-repo__confirm-root"
               >
                 <p>
                   This folder is outside the directories {hostName} serves. Adding the repo also
@@ -396,7 +332,7 @@ export function AddRepoForm({
               <Button
                 variant="ghost"
                 size="sm"
-                data-testid="project-add-repo__preview-back"
+                data-testid="add-repo__preview-back"
                 onClick={() => {
                   setSelected(null);
                   setOutsideRoots(null);
@@ -408,9 +344,7 @@ export function AddRepoForm({
               <Button
                 size="sm"
                 disabled={busy || preview.isLoading || preview.isError || uncloneable}
-                data-testid={
-                  needsRoot ? "project-add-repo__confirm-root-accept" : "project-add-repo__confirm"
-                }
+                data-testid={needsRoot ? "add-repo__confirm-root-accept" : "add-repo__confirm"}
                 onClick={() => addFromFolder(selected, needsRoot)}
               >
                 {busy ? <Spinner className="size-4" /> : null}
@@ -425,7 +359,7 @@ export function AddRepoForm({
                 <Label htmlFor="add-repo-host">Worker</Label>
                 <select
                   id="add-repo-host"
-                  data-testid="project-add-repo__host"
+                  data-testid="add-repo__host"
                   value={hostId ?? ""}
                   onChange={(e) => {
                     setChosenHost(e.target.value);
@@ -444,7 +378,7 @@ export function AddRepoForm({
                 <Button
                   variant="outline"
                   disabled={busy}
-                  data-testid="project-add-repo__pick-native"
+                  data-testid="add-repo__pick-native"
                   onClick={pickNatively}
                 >
                   Choose on this computer
@@ -462,11 +396,11 @@ export function AddRepoForm({
               </div>
             ) : null}
             {data ? (
-              <div className="space-y-2" data-testid="project-add-repo__picker">
+              <div className="space-y-2" data-testid="add-repo__picker">
                 <nav
                   aria-label="Folder path"
                   className="flex flex-wrap items-center gap-0.5 text-xs"
-                  data-testid="project-add-repo__picker-path"
+                  data-testid="add-repo__picker-path"
                   data-path={data.path}
                 >
                   {crumbsOf(data.path).map((c, i, all) => (
@@ -476,7 +410,7 @@ export function AddRepoForm({
                       ) : null}
                       <button
                         type="button"
-                        data-testid="project-add-repo__crumb"
+                        data-testid="add-repo__crumb"
                         data-path={c.path}
                         aria-current={i === all.length - 1 ? "location" : undefined}
                         onClick={() => browse(c.path)}
@@ -492,7 +426,7 @@ export function AddRepoForm({
                   {data.home !== data.path ? (
                     <button
                       type="button"
-                      data-testid="project-add-repo__picker-home"
+                      data-testid="add-repo__picker-home"
                       onClick={() => browse(data.home)}
                       className="ml-auto rounded px-1 py-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
@@ -502,7 +436,7 @@ export function AddRepoForm({
                 </nav>
                 <Input
                   aria-label="Filter folders"
-                  data-testid="project-add-repo__filter"
+                  data-testid="add-repo__filter"
                   placeholder="Filter folders"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
@@ -515,7 +449,7 @@ export function AddRepoForm({
                     <li>
                       <button
                         type="button"
-                        data-testid="project-add-repo__picker-up"
+                        data-testid="add-repo__picker-up"
                         onClick={() => browse(data.parent ?? undefined)}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                       >
@@ -532,7 +466,7 @@ export function AddRepoForm({
                     <li key={entry.path}>
                       <button
                         type="button"
-                        data-testid="project-add-repo__picker-entry"
+                        data-testid="add-repo__picker-entry"
                         data-name={entry.name}
                         data-git={entry.isGit ? "true" : "false"}
                         onClick={() => browse(entry.path)}
@@ -555,7 +489,7 @@ export function AddRepoForm({
                   <Button
                     size="sm"
                     disabled={busy}
-                    data-testid="project-add-repo__picker-select"
+                    data-testid="add-repo__picker-select"
                     onClick={() => setSelected(data.path)}
                   >
                     Use this folder
@@ -565,57 +499,13 @@ export function AddRepoForm({
             ) : null}
           </div>
         )
-      ) : mode === "existing" ? (
-        <div className="space-y-3" data-testid="project-add-repo__existing">
-          <div className="space-y-1">
-            <Label htmlFor="add-repo-existing">Repo</Label>
-            <select
-              id="add-repo-existing"
-              data-testid="project-add-repo__existing-select"
-              value={existingRepo}
-              onChange={(e) => setExistingRepo(e.target.value)}
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">Choose a repo</option>
-              {addable.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Repos Band already knows. A repo can belong to several projects.
-            </p>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="add-repo-role">Role</Label>
-            <Input
-              id="add-repo-role"
-              data-testid="project-add-repo__existing-role"
-              placeholder="Optional, for example backend"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              disabled={busy || existingRepo === ""}
-              data-testid="project-add-repo__existing-submit"
-              onClick={addExisting}
-            >
-              {busy ? <Spinner className="size-4" /> : null}
-              Add repo
-            </Button>
-          </div>
-        </div>
       ) : (
         <div className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="add-repo-url">Remote URL</Label>
             <Input
               id="add-repo-url"
-              data-testid="project-add-repo__url"
+              data-testid="add-repo__url"
               placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git"
               value={remoteUrl}
               onChange={(e) => setRemoteUrl(e.target.value)}
@@ -629,30 +519,25 @@ export function AddRepoForm({
               <Spinner className="size-4" /> Asking the remote for its default branch
             </div>
           ) : resolved.error && lookupUrl !== "" ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="project-add-repo__url-unresolved"
-            >
+            <p className="text-sm text-muted-foreground" data-testid="add-repo__url-unresolved">
               {errorText(resolved.error)}
             </p>
           ) : resolved.data && lookupUrl === remoteUrl.trim() ? (
             <dl
               className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 rounded-lg border p-3 text-sm"
-              data-testid="project-add-repo__url-preview"
+              data-testid="add-repo__url-preview"
             >
               <dt className="text-muted-foreground">Repo name</dt>
               <dd>{resolved.data.name}</dd>
               <dt className="text-muted-foreground">Default branch</dt>
-              <dd data-testid="project-add-repo__url-resolved-branch">
-                {resolved.data.defaultBranch}
-              </dd>
+              <dd data-testid="add-repo__url-resolved-branch">{resolved.data.defaultBranch}</dd>
             </dl>
           ) : null}
           <div className="space-y-1">
             <Label htmlFor="add-repo-branch">Default branch</Label>
             <Input
               id="add-repo-branch"
-              data-testid="project-add-repo__branch"
+              data-testid="add-repo__branch"
               placeholder={
                 resolved.data?.defaultBranch
                   ? `${resolved.data.defaultBranch} (from the remote)`
@@ -669,7 +554,7 @@ export function AddRepoForm({
             <Button
               size="sm"
               disabled={busy || remoteUrl.trim() === ""}
-              data-testid="project-add-repo__url-submit"
+              data-testid="add-repo__url-submit"
               onClick={addByUrl}
             >
               {busy ? <Spinner className="size-4" /> : null}
@@ -679,7 +564,7 @@ export function AddRepoForm({
         </div>
       )}
       {error ? (
-        <p role="alert" data-testid="project-add-repo__error" className="text-sm text-destructive">
+        <p role="alert" data-testid="add-repo__error" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -692,11 +577,11 @@ interface Props extends Omit<AddRepoFormProps, "active"> {
   onOpenChange: (open: boolean) => void;
 }
 
-/** The Add repo dialog: of a project's Repos tab, or of the sidebar's Repos panel with no project. */
-export function ProjectAddRepoDialog({ open, onOpenChange, onAdded, ...form }: Props) {
+/** The Add repo dialog of the sidebar's Repos panel. */
+export function AddRepoDialog({ open, onOpenChange, onAdded, ...form }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]" data-testid="project-add-repo__dialog">
+      <DialogContent className="sm:max-w-[560px]" data-testid="add-repo__dialog">
         <DialogHeader>
           <DialogTitle>Add repo</DialogTitle>
           <DialogDescription>

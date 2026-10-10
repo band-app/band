@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
@@ -23,13 +22,7 @@ import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { CliCache } from "./cli.ts";
-import {
-  BOOTSTRAP_TOKEN_PREFIX,
-  ConfigError,
-  httpUrl,
-  linkUrl,
-  type WorkerConfig,
-} from "./config.ts";
+import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
@@ -153,32 +146,13 @@ export class Worker {
       options.persistentTerminals === true,
     );
     const backend = terminals.backend;
-    const bandHome = config.bandHome ?? process.env.BAND_HOME ?? join(homedir(), ".band");
     // Folders the worker creates itself are served whatever the roots, from the first call on.
-    await policy.allowManaged(join(bandHome, "projects"));
     if (config.reposDir) await policy.allowManaged(config.reposDir);
     const host = new LocalHost({
       terminalBackend: () => backend,
       repos: {
         mappingsFile: () => join(config.stateDir, "repos.json"),
         ...(config.reposDir ? { reposDir: () => config.reposDir as string } : {}),
-      },
-      context: {
-        bandHome: () => bandHome,
-        // The hub rotates the session token on every handshake, so read the newest one each time.
-        remote: async (name) => {
-          const current = (await readSessionToken(config.stateDir)) ?? token;
-          const url = httpUrl(config.hubUrl, `/git/context/${name}.git`);
-          const basic = Buffer.from(`worker:${current}`).toString("base64");
-          return {
-            url,
-            env: {
-              GIT_CONFIG_COUNT: "1",
-              GIT_CONFIG_KEY_0: `http.${url}.extraHeader`,
-              GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
-            },
-          };
-        },
       },
     });
     policy.useWorktrees({

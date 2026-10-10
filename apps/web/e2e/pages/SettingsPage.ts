@@ -434,30 +434,13 @@ export class SettingsPage {
 
   /**
    * Every add-repo control inside the Settings dialog. Each add-repo trigger and form control the
-   * app has carries "add-repo" in its testid (`repos-panel__add-repo`, `projects__add-repo-open`,
-   * `project-add-repo__*`). Settings > Repos has none.
+   * app has carries "add-repo" in its testid (`repos-panel__add-repo`, `add-repo__*`). Settings > Repos has none.
    */
   dialogAddRepoButtons(): Locator {
     return this.dialog.getByTestId(/add-repo/);
   }
 
-  projectRow(name: string): Locator {
-    return this.dialog.locator(`[data-testid="settings__nav-project"][data-project="${name}"]`);
-  }
-
-  /** The project page the dialog shows, after `openProjectSettings`. */
-  projectSettings(): Locator {
-    return this.dialog.getByTestId("project-settings-page");
-  }
-
-  async openProjectSettings(name: string): Promise<void> {
-    await test.step(`Open the settings of project ${name}`, async () => {
-      await this.projectRow(name).click();
-      await expect(this.projectSettings()).toHaveAttribute("data-project", name);
-    });
-  }
-
-  /** The page title of the open section or project. */
+  /** The page title of the open section. */
   title(): Locator {
     return this.dialog.getByTestId("settings-page__title");
   }
@@ -467,16 +450,21 @@ export class SettingsPage {
     return this.dialog.locator(`[data-testid="settings-repos__row"][data-repo="${name}"]`);
   }
 
-  /** The "Used by" line of a repo row. */
-  repoProjects(name: string): Locator {
-    return this.repoRow(name).getByTestId("settings-repos__projects");
+  /** The remote URL line of a repo row. */
+  repoUrl(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__url");
+  }
+
+  /** The default branch line of a repo row. */
+  repoBranch(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__branch");
   }
 
   repoRemoveButton(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__remove");
   }
 
-  /** Removes a repo that no project uses, through the row's confirmation. */
+  /** Removes a repo that has no worktrees, through the row's confirmation. */
   async removeRepo(name: string): Promise<void> {
     await test.step(`Remove the repo ${name}`, async () => {
       await this.repoRemoveButton(name).click();

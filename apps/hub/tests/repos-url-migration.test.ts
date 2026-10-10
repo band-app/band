@@ -38,7 +38,7 @@ interface RepoView {
   name: string;
   path: string;
   remoteUrl?: string;
-  worktrees: Array<{ name: string; path: string; projectId?: string }>;
+  worktrees: Array<{ name: string; path: string }>;
 }
 
 const scratch: string[] = [];
@@ -154,15 +154,9 @@ describe("upgrading a path-based install", () => {
     expect(repos.find((r) => r.name === "scratch")?.path).toBe(withoutOrigin);
   });
 
-  it("makes no default project and leaves the repos and their worktrees in none", async () => {
-    const { projects } = await q<{ projects: Array<{ name: string }> }>("projects.list");
-    expect(projects).toEqual([]);
+  it("lists the migrated repos and their worktrees", async () => {
     const { repos } = await q<{ repos: RepoView[] }>("repos.list");
     expect(repos.map((r) => r.name).sort()).toEqual(["app", "scratch"]);
-    for (const repo of repos) {
-      for (const wt of repo.worktrees)
-        expect(wt.projectId, `${repo.name}/${wt.name}`).toBeUndefined();
-    }
   });
 
   it("still creates a worktree on the hub's own checkout", async () => {

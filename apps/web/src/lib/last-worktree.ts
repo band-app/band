@@ -9,7 +9,6 @@
  * it, so a device that was last on `/` stays there.
  */
 
-import { projectIdOfScope } from "@band-app/shared/scope-id";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { LABEL_FILTER_KEY } from "../dashboard/hooks/use-label-filter";
 import { readLabelLastWorktrees } from "../dashboard/hooks/use-label-last-worktree";
@@ -52,14 +51,9 @@ export function recordLastWorktree(worktreeId: string | null): void {
  * worktree isn't under it (the label filter is shared between devices, so
  * another device may have changed it), the label's own last worktree wins,
  * the same one switching to that label would open; it also stands in when
- * the last worktree was deleted. A device last on `/` stays there. A project's
- * folder view is reopened while `projectIds` lists its project (or when the
- * project list could not be read).
+ * the last worktree was deleted. A device last on `/` stays there.
  */
-export function pickStartWorktree(
-  repos: readonly RepoInfo[],
-  projectIds: ReadonlySet<string> | null = null,
-): string | null {
+export function pickStartWorktree(repos: readonly RepoInfo[]): string | null {
   const labelOf = new Map<string, string | undefined>();
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
@@ -70,9 +64,6 @@ export function pickStartWorktree(
   const last = clientStorage.getItem(LAST_WORKTREE_KEY);
   const label = clientStorage.getItem(LABEL_FILTER_KEY);
   if (!last) return null;
-  // A project's folder view has no label and is not in the repos list.
-  const projectId = projectIdOfScope(last);
-  if (projectId !== undefined) return !projectIds || projectIds.has(projectId) ? last : null;
   if (label && labelOf.get(last) !== label) {
     const labelled = readLabelLastWorktrees()[label];
     if (labelled && labelOf.get(labelled) === label) return labelled;

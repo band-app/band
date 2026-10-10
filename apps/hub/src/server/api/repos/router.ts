@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
-import { projectFolderService } from "../../services/project-folder-service";
-import { projectService } from "../../services/project-service";
 import { repoService } from "../../services/repo-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 import { repoErrorToTrpc } from "./errors";
@@ -26,20 +24,6 @@ import { repoErrorToTrpc } from "./errors";
  * when subsequent phases lift worktrees, chats, and tasks; see
  * `docs/web-architecture.md` § "Tier 1: API".
  */
-/**
- * A repo added straight into a project gets its checkout in the project folder now, as
- * `projects.addRepo` does, not at the coordinator's next turn. A project with no coordinator yet
- * has no folder, and a failed checkout is reported in the folder state, not as a failed add.
- */
-async function checkOutInProject(project: string | undefined): Promise<void> {
-  if (!project) return;
-  try {
-    await projectFolderService.addRepo(projectService.row(project));
-  } catch {
-    // The add already succeeded; the folder state names what went wrong.
-  }
-}
-
 export const reposRouter = t.router({
   list: publicProcedure.query(() => {
     return repoService.list();
@@ -69,13 +53,11 @@ export const reposRouter = t.router({
         name: z.string().min(1).max(100).optional(),
         label: z.string().optional(),
         addRoot: z.boolean().optional(),
-        project: z.string().min(1).max(200).optional(),
       }),
     )
     .mutation(async ({ input }) => {
       try {
         const repo = await repoService.addFromWorker(input);
-        await checkOutInProject(input.project);
         return repo;
       } catch (err) {
         throw repoErrorToTrpc(err);
@@ -93,13 +75,11 @@ export const reposRouter = t.router({
         defaultBranch: z.string().trim().min(1).max(200).optional(),
         name: z.string().min(1).max(100).optional(),
         label: z.string().optional(),
-        project: z.string().min(1).max(200).optional(),
       }),
     )
     .mutation(async ({ input }) => {
       try {
         const repo = await repoService.addByUrl(input);
-        await checkOutInProject(input.project);
         return repo;
       } catch (err) {
         throw repoErrorToTrpc(err);
@@ -153,8 +133,6 @@ export const reposRouter = t.router({
     cronjobService.removeForKey(input.name);
     // Same for the repo's default browser profile mapping.
     browserProfileService.forgetRepo(input.name);
-    // And its place in any project.
-    projectService.forgetRepo(input.name);
 
     return { ok: true };
   }),
