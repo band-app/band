@@ -38,6 +38,12 @@ const AUDIT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const TOOL_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+/**
+ * The server every chat gets with no row of its own: `/mcp-proxy/band` answers in the hub
+ * (`api/mcp-proxy/band-tools.ts`). A saved server cannot take the name.
+ */
+export const BUILTIN_BAND_SERVER = "band";
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MAX_ENV_ENTRIES = 50;
 const MAX_ARGS = 100;
@@ -306,7 +312,7 @@ export class McpProxyService {
         "The name must be lowercase letters, digits, hyphens and underscores, starting with a letter or digit.",
       );
     }
-    if (this.queries.findServer(name)) {
+    if (name === BUILTIN_BAND_SERVER || this.queries.findServer(name)) {
       throw new McpProxyInputError(`An MCP server named "${name}" already exists.`);
     }
     const now = Date.now();
@@ -543,7 +549,7 @@ export class McpProxyService {
       throw new McpProxyInputError(`Name between 1 and ${MAX_SERVERS_PER_TOKEN} servers.`);
     }
     for (const name of names) {
-      if (!this.queries.findServer(name)) {
+      if (name !== BUILTIN_BAND_SERVER && !this.queries.findServer(name)) {
         throw new McpServerNotFoundError(name);
       }
     }

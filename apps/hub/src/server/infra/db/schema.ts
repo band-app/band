@@ -114,6 +114,10 @@ export const repos = sqliteTable("repos", {
   // Defaults to 1 (true) so existing rows behave the same after migration.
   // See issue #458.
   hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
+  // A meta repo (borko, epic-veda) is where work in other repos is started from. The flag
+  // only groups and defaults; it changes no behaviour. Set by `repos.update` and kept across
+  // the whole-tree rewrite by `RepoQueries.saveAll`.
+  meta: integer("meta", { mode: "boolean" }).notNull().default(false),
 });
 
 // A repo's checkout path on each host. `repos.path` stays the source
@@ -153,6 +157,12 @@ export const worktrees = sqliteTable("worktrees", {
   head: text("head"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   hostId: hostId(),
+  // Where the worktree was started from: the worktree (id as `toWorktreeId` makes it) and the
+  // chat or terminal in it. Plain ids with no foreign key, because the origin may live on any
+  // repo and host, and a removed parent leaves the id behind so the API can say it was removed.
+  originWorktreeId: text("origin_worktree_id"),
+  originChatId: text("origin_chat_id"),
+  originTerminalId: text("origin_terminal_id"),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was

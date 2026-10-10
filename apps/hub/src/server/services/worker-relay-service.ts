@@ -17,7 +17,7 @@ import {
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
-import { CHAT_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
+import { CHAT_ID_HEADER, TERMINAL_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
 import { hostRegistry } from "../infra/host/registry";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
@@ -98,6 +98,7 @@ export class WorkerRelayService {
       if (typeof value === "string") headers[name] = value;
     }
     if (request.scope.chatId) headers[CHAT_ID_HEADER] = request.scope.chatId;
+    if (request.scope.terminalId) headers[TERMINAL_ID_HEADER] = request.scope.terminalId;
     if (/^\/mcp-proxy\/[^/]+\/?$/.test(request.path.split("?")[0])) {
       // The MCP proxy answers to the agent's own `mcp_` token, so that goes up
       // as it came and the hub's token stays out of the call.
@@ -197,6 +198,7 @@ function parseRequest(params: unknown): RelayHttpRequest {
     typeof p.path !== "string" ||
     typeof scope?.worktreeId !== "string" ||
     (scope.chatId !== undefined && typeof scope.chatId !== "string") ||
+    (scope.terminalId !== undefined && typeof scope.terminalId !== "string") ||
     !/^\/(?![/\\])/.test(p.path) ||
     !["GET", "POST", "DELETE", "OPTIONS", "HEAD"].includes(p.method) ||
     typeof p.headers !== "object" ||

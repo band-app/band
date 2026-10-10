@@ -1,5 +1,6 @@
 export const CHAT_ID_HEADER = "x-band-chat-id";
 export const WORKTREE_ID_HEADER = "x-band-worktree-id";
+export const TERMINAL_ID_HEADER = "x-band-terminal-id";
 
 type HeaderBag = Headers | Record<string, string | string[] | undefined>;
 
@@ -31,6 +32,7 @@ export function createContext(opts?: {
   return {
     chatId: readHeader(opts?.req?.headers, CHAT_ID_HEADER),
     worktreeId: readHeader(opts?.req?.headers, WORKTREE_ID_HEADER),
+    terminalId: readHeader(opts?.req?.headers, TERMINAL_ID_HEADER),
     admin: opts?.admin === true,
     tokenId: opts?.tokenId,
   };

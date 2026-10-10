@@ -19,7 +19,7 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
-import { RepoQueries } from "../infra/db/queries/repos";
+import { RepoQueries, type WorktreeOrigin } from "../infra/db/queries/repos";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
@@ -158,8 +158,30 @@ export const worktreeCreateInput = z.object({
   // online host that fits, or waits as `provisioning` while a runner starts one
   // (plan step 3.3). `placement: {}` means any host. Excludes `hostId`.
   placement: placementInput.optional(),
+  // The worktree this one is started from, overriding what the caller's identity gives.
+  // The chat or terminal comes only from that identity, never from the request.
+  origin: z.string().min(1).optional(),
+  // Start the worktree with no origin, even when the caller is inside a chat or terminal.
+  noOrigin: z.boolean().optional(),
 });
 export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
+
+/**
+ * `WorktreeCreateInput` plus the origin the service settled on. `originLink` is not part of the
+ * public input, so a client cannot set it; the service adds it and a stored placement request
+ * keeps it for the replay. `null` means no origin.
+ */
+type WorktreeCreateCall = WorktreeCreateInput & { originLink?: WorktreeOrigin | null };
+
+/**
+ * The agent or shell that makes a create call, as the hub knows it: from a relay token's scope
+ * or an MCP session token, never from what the caller says about itself.
+ */
+export interface WorktreeCaller {
+  worktreeId?: string;
+  chatId?: string;
+  terminalId?: string;
+}
 
 export const worktreeRemoveInput = z.object({
   repo: z.string(),
@@ -494,7 +516,10 @@ export class WorktreeService {
    * distinguish "newly created + dispatched" from "already existed,
    * no dispatch."
    */
-  async create(input: WorktreeCreateInput): Promise<{
+  async create(
+    input: WorktreeCreateCall,
+    caller?: WorktreeCaller,
+  ): Promise<{
     ok: true;
     path: string;
     via?: WorktreeVia;
@@ -502,6 +527,10 @@ export class WorktreeService {
     /** Set when no host fits yet: the worktree is created once the request is fulfilled. */
     provisioning?: { requestId: string };
   }> {
+    if (input.originLink === undefined) {
+      input = { ...input, originLink: this.resolveOrigin(input, caller) };
+    }
+    const originLink = input.originLink ?? null;
     const sanitizedBranch = slugifyBranchName(input.branch);
     if (!sanitizedBranch) {
       throw new Error(
@@ -610,6 +639,7 @@ export class WorktreeService {
       freshRepo.worktrees.push(row);
       saveState(fresh);
     }
+    if (originLink) this.repoQueries.setOrigin(input.repo, input.branch, originLink);
     syncService.commitWorktreeAdd(input.repo, row);
 
     // Copy declared worktree files from the main checkout into the new
@@ -672,6 +702,35 @@ export class WorktreeService {
       path: worktreePath,
       via: launched.mode === "tui" ? "terminal" : "chat",
       terminalId: launched.terminalId,
+    };
+  }
+
+  /**
+   * Where a new worktree was started from. An explicit `origin` names the parent worktree and
+   * keeps the caller's chat or terminal only when the caller is inside that worktree. With none,
+   * the caller's own worktree, chat and terminal are the origin. `noOrigin` and a caller outside
+   * Band give none.
+   */
+  private resolveOrigin(
+    input: WorktreeCreateInput,
+    caller?: WorktreeCaller,
+  ): WorktreeOrigin | null {
+    if (input.noOrigin) {
+      if (input.origin) throw new Error("Pass either origin or noOrigin, not both.");
+      return null;
+    }
+    const inside = caller?.worktreeId && this.resolve(caller.worktreeId) ? caller : undefined;
+    const parentId = input.origin ?? inside?.worktreeId;
+    if (!parentId) return null;
+    if (!this.resolve(parentId)) throw new Error(`Unknown origin worktree: ${parentId}`);
+    // Headers on a local call are client-supplied, so keep a chat id only when that chat is in the origin worktree.
+    const same = inside?.worktreeId === parentId;
+    const chatOk =
+      same && inside?.chatId && chatService.get(inside.chatId)?.worktreeId === parentId;
+    return {
+      worktreeId: parentId,
+      ...(chatOk && inside?.chatId ? { chatId: inside.chatId } : {}),
+      ...(same && inside?.terminalId ? { terminalId: inside.terminalId } : {}),
     };
   }
 

@@ -170,6 +170,14 @@ enum ReposCmd {
         #[arg(long, requires = "from")]
         add_root: bool,
     },
+    /// Change a repo's settings
+    Set {
+        /// Repo name
+        name: String,
+        /// Mark the repo as a meta repo (where work in other repos is started from), or unmark it
+        #[arg(long, action = clap::ArgAction::Set, value_name = "true|false")]
+        meta: Option<bool>,
+    },
     /// Unregister a repo
     Remove {
         /// Repo name
@@ -236,6 +244,14 @@ enum WorktreesCmd {
         /// first time the repo is used there).
         #[arg(long)]
         host_repo_path: Option<String>,
+        /// Worktree id to record as the origin (where this work was started
+        /// from). Inside a Band chat or terminal the origin defaults to that
+        /// worktree, and through a worker's relay also to the chat or terminal.
+        #[arg(long, conflicts_with = "no_origin")]
+        origin: Option<String>,
+        /// Record no origin, even inside a Band chat or terminal
+        #[arg(long)]
+        no_origin: bool,
     },
     /// Remove a worktree (git worktree + state cleanup)
     Remove {
@@ -822,6 +838,7 @@ fn main() {
                 from: from.as_deref(),
                 add_root,
             }),
+            ReposCmd::Set { name, meta } => cmd_repos_set(&name, meta),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
         Commands::Worktrees { cmd } => match cmd {
@@ -840,6 +857,8 @@ fn main() {
                 any_host,
                 isolation,
                 host_repo_path,
+                origin,
+                no_origin,
             } => cmd_worktrees_create(
                 &repo,
                 &branch,
@@ -856,6 +875,8 @@ fn main() {
                     isolation: isolation.as_deref(),
                     host_repo_path: host_repo_path.as_deref(),
                 },
+                origin.as_deref(),
+                no_origin,
             ),
             WorktreesCmd::Remove { repo, name } => cmd_worktrees_remove(&repo, &name),
         },
@@ -1146,7 +1167,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_repos = Vec::new();
-    let mut rows: Vec<[String; 6]> = Vec::new();
+    let mut rows: Vec<[String; 7]> = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -1163,6 +1184,10 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         // path — keep working. The JSON output is keyed and order-
         // insensitive, so the field placement there doesn't matter.
         let remote_url = proj.get("remoteUrl").and_then(|u| u.as_str());
+        let meta = proj
+            .get("meta")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         let clones = proj
             .get("clones")
             .and_then(|c| c.as_array())
@@ -1195,6 +1220,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             kind.to_string(),
             remote_url.unwrap_or("-").to_string(),
             clones_text,
+            if meta { "yes" } else { "-" }.to_string(),
         ]);
         json_repos.push(serde_json::json!({
             "name": name,
@@ -1203,11 +1229,12 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "worktreeCount": wt_count,
             "remoteUrl": remote_url,
             "clones": clones,
+            "meta": meta,
         }));
     }
 
     let text = format_table(
-        &["NAME", "PATH", "WORKTREES", "KIND", "URL", "CLONES"],
+        &["NAME", "PATH", "WORKTREES", "KIND", "URL", "CLONES", "META"],
         &rows,
     );
 
@@ -1283,6 +1310,27 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
     })
 }
 
+fn cmd_repos_set(name: &str, meta: Option<bool>) -> Result<CommandResult, String> {
+    validate::validate_name(name, "Repo name")?;
+    let Some(meta) = meta else {
+        return Err("Nothing to change. Pass --meta true or --meta false".to_string());
+    };
+
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "repos.update",
+        &serde_json::json!({"name": name, "meta": meta}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!(
+            "{name} is {} a meta repo\n",
+            if meta { "now" } else { "no longer" }
+        ),
+        json: serde_json::json!({"ok": true, "name": name, "meta": meta}),
+    })
+}
+
 fn cmd_repos_remove(name: &str) -> Result<CommandResult, String> {
     validate::validate_name(name, "Repo name")?;
 
@@ -1312,7 +1360,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
         .unwrap_or_default();
 
     let mut found_any = false;
-    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut rows: Vec<[String; 5]> = Vec::new();
     let mut listed = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1330,17 +1378,37 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
             let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
             let worktree_id = wt.get("worktreeId").and_then(|w| w.as_str()).unwrap_or("");
+            // Where the worktree was started from: the origin's id, marked
+            // when that worktree is gone, or "-" for top-level work.
+            let origin = wt.get("origin").filter(|o| !o.is_null());
+            let origin_text = match origin {
+                Some(o) => {
+                    let id = o.get("worktreeId").and_then(|i| i.as_str()).unwrap_or("");
+                    if o.get("removed")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        format!("{id} (removed)")
+                    } else {
+                        id.to_string()
+                    }
+                }
+                None => "-".to_string(),
+            };
             rows.push([
                 name.to_string(),
                 branch.to_string(),
                 worktree_id.to_string(),
                 path.to_string(),
+                origin_text,
             ]);
             listed.push(serde_json::json!({
                 "repo": name,
                 "branch": branch,
                 "worktreeId": worktree_id,
                 "path": path,
+                "origin": origin,
+                "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
             found_any = true;
         }
@@ -1352,7 +1420,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
         }
     }
 
-    let text = format_table(&["REPO", "BRANCH", "WORKTREE ID", "PATH"], &rows);
+    let text = format_table(&["REPO", "BRANCH", "WORKTREE ID", "PATH", "ORIGIN"], &rows);
 
     Ok(CommandResult {
         text,
@@ -1381,6 +1449,8 @@ fn cmd_worktrees_create(
     agent: Option<&str>,
     via: Option<&str>,
     placement: &Placement,
+    origin: Option<&str>,
+    no_origin: bool,
 ) -> Result<CommandResult, String> {
     validate::validate_name(repo, "Repo name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -1460,6 +1530,21 @@ fn cmd_worktrees_create(
     }
     if let Some(path) = placement.host_repo_path {
         input["hostRepoPath"] = serde_json::json!(path);
+    }
+    // The origin is the worktree this one is started from. An explicit
+    // `--origin` wins, `--no-origin` clears it, and otherwise a command run
+    // inside a Band chat or terminal names that worktree (`BAND_WORKTREE_ID`).
+    // The chat or terminal is never sent: the hub takes it from the relay
+    // token or the MCP session, not from the caller.
+    if no_origin {
+        input["noOrigin"] = serde_json::json!(true);
+    } else if let Some(origin) = origin {
+        input["origin"] = serde_json::json!(origin);
+    } else if let Some(current) = std::env::var("BAND_WORKTREE_ID")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
+        input["origin"] = serde_json::json!(current);
     }
     let data = client.trpc_mutate("worktrees.create", &input)?;
     // No host fits yet: the hub recorded a host request and creates the
@@ -4518,6 +4603,15 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the repo name."
         }),
         serde_json::json!({
+            "name": "repos set",
+            "description": "Change a repo's settings",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "--meta", "type": "boolean", "required": false, "description": "Mark the repo as a meta repo (true) or unmark it (false)"},
+            ],
+            "notes": "A meta repo is one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults; it changes no behaviour. `band repos list` shows it in the META column."
+        }),
+        serde_json::json!({
             "name": "repos remove",
             "description": "Unregister a repo",
             "parameters": [
@@ -4531,7 +4625,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "repo", "type": "string", "required": false, "positional": true, "description": "Repo name (optional filter)"},
             ],
-            "notes": "Text output: `repo\\tbranch\\tpath` (tab-separated, one per line).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"path\": \"...\"}]}`"
+            "notes": "Text output is a table whose last column, ORIGIN, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`"
         }),
         serde_json::json!({
             "name": "worktrees create",
@@ -4545,6 +4639,8 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides worktree default)"},
                 {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
+                {"name": "--origin", "type": "string", "required": false, "description": "Worktree id to record as the origin (where this work was started from). Defaults to the current worktree ($BAND_WORKTREE_ID)."},
+                {"name": "--no-origin", "type": "boolean", "required": false, "description": "Record no origin, even inside a Band chat or terminal"},
             ],
             "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),

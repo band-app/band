@@ -27,9 +27,13 @@ import { publicProcedure, t } from "../trpc";
  * there.
  */
 export const worktreesRouter = t.router({
-  create: publicProcedure.input(worktreeCreateInput).mutation(async ({ input }) => {
+  create: publicProcedure.input(worktreeCreateInput).mutation(async ({ input, ctx }) => {
     try {
-      return await worktreeService.create(input);
+      return await worktreeService.create(input, {
+        worktreeId: ctx.worktreeId,
+        chatId: ctx.chatId,
+        terminalId: ctx.terminalId,
+      });
     } catch (err) {
       throwAsTrpcError(err);
     }

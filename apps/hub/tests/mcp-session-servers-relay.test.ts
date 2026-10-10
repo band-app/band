@@ -260,11 +260,13 @@ describe("MCP servers in session/new on a worker (S2)", () => {
       headers: Array<{ name: string; value: string }>;
     }>;
     // Host scope: `hub-only` is limited to the local host, so the worker's session lacks it.
-    expect(entries.map((e) => e.name)).toEqual(["notes"]);
-    expect(entries[0].type).toBe("http");
-    expect(entries[0].url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp-proxy\/notes$/);
-    expect(entries[0].url.startsWith(server.url)).toBe(false);
-    const byName = Object.fromEntries(entries[0].headers.map((h) => [h.name, h.value]));
+    // The built-in `band` server comes with every session.
+    expect(entries.map((e) => e.name).sort()).toEqual(["band", "notes"]);
+    const notes = entries.find((e) => e.name === "notes") as (typeof entries)[number];
+    expect(notes.type).toBe("http");
+    expect(notes.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp-proxy\/notes$/);
+    expect(notes.url.startsWith(server.url)).toBe(false);
+    const byName = Object.fromEntries(notes.headers.map((h) => [h.name, h.value]));
     expect(byName.Authorization).toMatch(/^Bearer mcp_/);
     expect(byName["X-Band-Relay-Token"]).toMatch(/^brt_/);
   });

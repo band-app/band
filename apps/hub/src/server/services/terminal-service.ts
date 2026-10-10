@@ -256,7 +256,7 @@ export class TerminalService {
     }
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.
-    const grant = await host.relay?.issue({ worktreeId });
+    const grant = await host.relay?.issue({ worktreeId, terminalId });
     const request = {
       worktreeId,
       terminalId,

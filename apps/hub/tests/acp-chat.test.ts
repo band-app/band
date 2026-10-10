@@ -27,6 +27,7 @@ import {
   WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
+import { isRemoteLoopback } from "./helpers/test-host";
 
 let servers: ServerHandle[] = [];
 /** Homes a test seeded itself; removed even when the test fails. */
@@ -435,8 +436,29 @@ describe("chat over ACP", () => {
 
     await trpc(server.url, "chats.setConfigOption", { chatId, configId: "effort", value: "high" });
 
+    // The only MCP server is the built-in `band` one, which every chat gets.
     expect(stubRequests(server.home, "session/resume").map((r) => r.params)).toEqual([
-      { sessionId: chat.activeSessionId, cwd: `${server.home}/repo`, mcpServers: [] },
+      {
+        sessionId: chat.activeSessionId,
+        cwd: `${server.home}/repo`,
+        mcpServers: [
+          {
+            type: "http",
+            name: "band",
+            // With the agent on the loopback worker, the entry points at the worker's relay and
+            // carries the relay token as well.
+            url: isRemoteLoopback
+              ? expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-proxy\/band$/)
+              : `${server.url}/mcp-proxy/band`,
+            headers: [
+              { name: "Authorization", value: expect.stringMatching(/^Bearer mcp_/) },
+              ...(isRemoteLoopback
+                ? [{ name: "X-Band-Relay-Token", value: expect.stringMatching(/^brt_/) }]
+                : []),
+            ],
+          },
+        ],
+      },
     ]);
     expect(stubRequests(server.home, "session/set_config_option").map((r) => r.params)).toEqual([
       { sessionId: chat.activeSessionId, configId: "effort", value: "high" },
