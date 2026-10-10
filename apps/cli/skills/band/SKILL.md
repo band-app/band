@@ -52,8 +52,8 @@ JSON output: `{"repos": [{"name": "...", "path": "...", "kind": "git", "worktree
 
 ```sh
 band repos add <path> [--label <string>]
-band repos add --url <url> [--branch <branch>] [--label <string>] [--project <name>]
-band repos add --from <host> <path> [--add-root] [--label <string>] [--project <name>]
+band repos add --url <url> [--branch <branch>] [--label <string>]
+band repos add --from <host> <path> [--add-root] [--label <string>]
 ```
 
 A repo is identified by its remote URL and default branch. The hub keeps no path of its own for a repo, and each worker maps the URL to a folder.
@@ -61,7 +61,6 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
 - `--from <host> <path>` registers the repo that a folder on a host holds (host ids are in `band hosts list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
-- `--project` puts the repo in that project. Without `--project` the repo is in no project.
 
 A folder with no remote is registered without a URL and can only run on the host that holds it.
 
@@ -85,7 +84,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "path": "..."}]}`
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--project <name-or-id>]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -257,43 +256,6 @@ band mcp remove <name>
 ```
 
 The hub proxies HTTP MCP servers at `/mcp-proxy/<name>` and adds the credential from the vault, so an agent never holds it. Each agent session gets its own short-lived token for the servers it may use. `--allow-tools` limits the tools an agent sees and can call. `--read-only` keeps only tools the server marks `readOnlyHint` plus those named in `--read-only-tools`. An API key goes in `--header` (default `Authorization`) after `--prefix` (default `Bearer `). An OAuth connection from Settings > Credentials always goes as a Bearer token. These commands need an admin token. Run them only when the user asks.
-
-### Hold context repos on the hub
-
-```sh
-band context list
-band context create <name> [--remote <url>] [--vault-item <id>] [--labels k=v,k=v] [--read-only]
-band context remove <name>
-band context link-remote <name> <url> [--vault-item <id>]   (or --unlink)
-```
-
-The hub keeps the user context (`user`) and named contexts as bare git repos and serves them at `<hub>/git/context/<name>.git`. `--remote` mirrors an existing repo both ways without forcing, and a branch that moved on both sides is left alone and shown under SYNC. `--labels` limits which workers may pull a context to hosts carrying every label. Media for contexts lives in the hub's media store as `band://media/<id>` links. These commands need an admin token. Run them only when the user asks.
-
-### Group repos into projects
-
-```sh
-band projects list
-band projects get <project>
-band projects create <name> [--description <text>] [--repo <name[:role]>...] [--context <existing>] [--remote-url <url>] [--remote-vault-item <id>] [--model <model>] [--agent <id>] [--labels k=v,k=v]
-band projects update <project> [--description <text>] [--model <model>] [--agent <id>] [--labels k=v,k=v]
-band projects remove <project> [--remove-context]
-band projects add-repo <project> <repo> [--role <role>]
-band projects remove-repo <project> <repo>
-band projects attach-worktree <project> <worktree-id>
-band projects detach-worktree <worktree-id>
-```
-
-A project is a body of work across several repos. It lists the repos it may touch, each with an optional role such as `api` or `client`, and it owns a context repo that the hub creates with the project scaffold (or takes from `--context` or `--remote-url`). `--model` sets the coordinator's model and defaults to `opus`. `band worktrees create <repo> <branch> --project <name>` puts the new worktree in a project, and its agents then use that project's context. The repo must be one of the project's. The hub refuses `remove-repo` and `remove` while worktrees still belong to the project, and `remove-repo` also refuses while the repo's checkout in the project folder (`<BAND_HOME>/projects/<project>/repos/<repo>`) has uncommitted changes or unpushed commits. The coordinator runs in that project folder, not in a worktree. Changes need an admin token. Run them only when the user asks.
-
-### Work on a project
-
-A project's work is worktrees that belong to the project, one repo per worktree and one agent per worktree. Start one with a prompt:
-
-```sh
-band worktrees create <repo> <branch> --project <project> --prompt "<brief>"
-```
-
-Work that spans several repos is several worktrees, one per repo, each with its own agent. The project's coordinator starts them the same way. Changes need an admin token. Run them only when the user asks.
 
 ### Store credentials in the hub's vault
 
