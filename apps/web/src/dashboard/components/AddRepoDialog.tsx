@@ -13,7 +13,7 @@ import {
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderGit2, Server } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
@@ -198,8 +198,17 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
   const needsRoot = outsideRoots !== null || (info ? !info.insideRoots : false);
   const uncloneable = info?.cloneable === false;
 
+  // A long path scrolls inside the breadcrumbs; keep the current folder in view.
+  const crumbsRef = useRef<HTMLElement>(null);
+  const listedPath = data?.path;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the listed path changes
+  useEffect(() => {
+    const el = crumbsRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [listedPath]);
+
   return (
-    <div className="space-y-4" data-testid="add-repo__form">
+    <div className="min-w-0 space-y-4" data-testid="add-repo__form">
       <div className="flex gap-2" role="tablist" aria-label="How to add the repo">
         {(
           [
@@ -398,8 +407,9 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
             {data ? (
               <div className="space-y-2" data-testid="add-repo__picker">
                 <nav
+                  ref={crumbsRef}
                   aria-label="Folder path"
-                  className="flex flex-wrap items-center gap-0.5 text-xs"
+                  className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap pb-1 text-xs"
                   data-testid="add-repo__picker-path"
                   data-path={data.path}
                 >
@@ -473,13 +483,15 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                       >
                         {entry.isGit ? (
-                          <FolderGit2 className="size-4 text-primary" aria-hidden />
+                          <FolderGit2 className="size-4 shrink-0 text-primary" aria-hidden />
                         ) : (
-                          <Folder className="size-4 text-muted-foreground" aria-hidden />
+                          <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                         )}
                         <span className="truncate">{entry.name}</span>
                         {entry.isGit ? (
-                          <span className="ml-auto text-xs text-muted-foreground">git</span>
+                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                            git
+                          </span>
                         ) : null}
                       </button>
                     </li>
