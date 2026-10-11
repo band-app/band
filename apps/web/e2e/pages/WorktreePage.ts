@@ -3440,6 +3440,47 @@ export class WorktreePage {
     }, worktreeId);
   }
 
+  /** Wait until a worktree terminal's xterm row count has not changed for
+   *  `frames` animation frames, then return it. A zoom change refits the
+   *  terminal over a few frames (font re-measure, then the refit), so this
+   *  is the signal that the fit finished. Same one-terminal-per-worktree
+   *  assumption as `terminalCols`. */
+  async waitForTerminalRowsStable(worktreeId: string, frames = 20): Promise<number> {
+    return await this.page.evaluate(
+      ([id, needed]) =>
+        new Promise<number>((resolve, reject) => {
+          const cache = (
+            globalThis as unknown as {
+              __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
+            }
+          ).__bandTerminalCache__;
+          const readRows = (): number => {
+            for (const entry of cache?.values() ?? []) {
+              if (entry.worktreeId === id) {
+                const term = entry.getTerminal() as { rows?: number } | null;
+                if (term && typeof term.rows === "number") return term.rows;
+              }
+            }
+            return 0;
+          };
+          const deadline = performance.now() + 10_000;
+          let last = -1;
+          let stable = 0;
+          const tick = () => {
+            const rows = readRows();
+            stable = rows > 0 && rows === last ? stable + 1 : 0;
+            last = rows;
+            if (stable >= needed) return resolve(rows);
+            if (performance.now() > deadline)
+              return reject(new Error("terminal rows never settled"));
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }),
+      [worktreeId, frames] as const,
+    );
+  }
+
   /** Read the first `cols` cells of the top `rows` rows of a worktree
    *  terminal's active xterm buffer, plus the cursor position. Each entry is
    *  the cell's chars; the right half of a wide character (and an unwritten

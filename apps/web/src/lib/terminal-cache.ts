@@ -1163,6 +1163,11 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     });
     resizeObserver.observe(wrapper);
 
+    // The fit in `handleZoomChange` can run before xterm has re-measured its
+    // cells for the new font size, and the ResizeObserver skips the refit
+    // because the live box keeps its visual size under zoom. One more fit a
+    // frame later picks up the settled metrics.
+    let zoomRefitRafId: number | null = null;
     const handleZoomChange = (zoom: number) => {
       const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
       if (term.options.fontSize === target) return;
@@ -1170,6 +1175,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // Don't push a resize mid-replay: the pending snapshot is bound to the
       // dims we already sent (see the ResizeObserver guard).
       if (attached && hostIsVisible() && !awaitingReplay) sendPtyResize();
+      if (zoomRefitRafId !== null) cancelAnimationFrame(zoomRefitRafId);
+      zoomRefitRafId = requestAnimationFrame(() => {
+        zoomRefitRafId = null;
+        if (!attached || !hostIsVisible() || awaitingReplay) return;
+        fitToBox();
+        sendPtyResize();
+      });
     };
     const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
 
@@ -1247,6 +1259,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
       if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
       if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
+      if (zoomRefitRafId !== null) cancelAnimationFrame(zoomRefitRafId);
       webglContextLossDisposable?.dispose();
       dprMql?.removeEventListener("change", onDprMediaChange);
       unsubscribeZoom();
