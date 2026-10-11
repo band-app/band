@@ -1,4 +1,6 @@
 import { slugifyBranchName } from "@band-app/shared/branch-name";
+import { isHostAllowed } from "@band-app/shared/repo-hosts";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Button,
   Dialog,
@@ -14,8 +16,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
+import { useHostNames } from "../hooks/use-host-names";
 import { useCreateWorktree } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
+import { useDashboardStore } from "../stores/index";
 
 interface Props {
   repoName: string;
@@ -24,6 +28,13 @@ interface Props {
 }
 
 const LOCAL_HOST_ID = "local";
+
+/** The worktree the hub names when it refuses a branch that is already on another host. */
+function conflictedWorktreeId(error: unknown): string | undefined {
+  const id = (error as { data?: { existingWorktreeId?: unknown } } | null)?.data
+    ?.existingWorktreeId;
+  return typeof id === "string" ? id : undefined;
+}
 
 export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
   const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
@@ -38,25 +49,41 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
     enabled: open,
   });
-  // Only machines that are connected can take a new worktree. Local is there unless the hub turned it off.
+  const hostName = useHostNames();
+  const openWorktree = useDashboardStore((s) => s.openWorktree);
+  const repoInfo = repos.find((p) => p.name === repoName);
+  // Only machines that are connected can take a new worktree, and only those the repo may run on.
+  // Local is there unless the hub turned it off.
   const hostChoices = (hosts.data ?? []).filter(
-    (h) => h.usable && (h.id === LOCAL_HOST_ID || h.status === "online"),
+    (h) =>
+      h.usable &&
+      (h.id === LOCAL_HOST_ID || h.status === "online") &&
+      isHostAllowed(repoInfo?.allowedHostIds, h.id),
   );
   // A host that went offline since it was picked falls back to local, or to the first host left.
   const hostId = hostChoices.some((h) => h.id === chosenHostId)
     ? chosenHostId
     : (hostChoices[0]?.id ?? LOCAL_HOST_ID);
   const remote = hostId !== LOCAL_HOST_ID;
-  const repoInfo = repos.find((p) => p.name === repoName);
   const hostRoots = hostChoices.find((h) => h.id === hostId)?.roots ?? [];
 
   const slug = slugifyBranchName(branch);
 
+  // A branch lives on one host only: the same name on another host is that worktree, to open.
+  const onOtherHost = slug
+    ? repoInfo?.worktrees.find(
+        (wt) => (wt.name === slug || wt.branch === slug) && (wt.hostId || LOCAL_HOST_ID) !== hostId,
+      )
+    : undefined;
+  const existingId = onOtherHost
+    ? toWorktreeId(repoName, onOtherHost.name, onOtherHost.hostId)
+    : (conflictedWorktreeId(createWorktreeMutation.error) ?? null);
+
   const slugError: string | null = (() => {
     if (branch && !slug) return "Branch name contains no valid characters.";
+    if (onOtherHost) return `${slug} is already on ${hostName(onOtherHost.hostId)}`;
     if (slug) {
-      const repo = repos.find((p) => p.name === repoName);
-      if (repo?.worktrees.some((wt) => wt.branch === slug)) {
+      if (repoInfo?.worktrees.some((wt) => wt.branch === slug)) {
         return `A worktree named "${slug}" already exists.`;
       }
     }
@@ -161,7 +188,11 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
                 Will be created as: <code>{slug}</code>
               </p>
             )}
-            {slugError && <p className="text-xs text-destructive">{slugError}</p>}
+            {slugError && (
+              <p className="text-xs text-destructive" data-testid="new-worktree-form__slug-error">
+                {slugError}
+              </p>
+            )}
             {createWorktreeMutation.error && (
               <p
                 role="alert"
@@ -170,6 +201,20 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
               >
                 {createWorktreeMutation.error.message}
               </p>
+            )}
+            {existingId && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="new-worktree-form__open-existing"
+                onClick={() => {
+                  openWorktree(existingId);
+                  onOpenChange(false);
+                }}
+              >
+                Open it
+              </Button>
             )}
             <Label htmlFor="base-branch">Base branch (optional)</Label>
             <Input

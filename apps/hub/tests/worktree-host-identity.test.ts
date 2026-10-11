@@ -177,35 +177,38 @@ describe("auth", () => {
   });
 });
 
-describe("the same branch on two hosts", () => {
-  it("is two worktrees with their own ids", async () => {
+describe("worktrees on two hosts", () => {
+  it("carry their host in the id, and a branch lives on one host only", async () => {
     const [a, b] = workers;
-    expect((await createOn(a, "feat")).status).toBe(200);
-    expect((await createOn(b, "feat")).status).toBe(200);
+    expect((await createOn(a, "feat-a")).status).toBe(200);
+    expect((await createOn(b, "feat-b")).status).toBe(200);
     const proj = await listProj();
-    const feats = proj?.worktrees.filter((w) => w.name === "feat") ?? [];
-    expect(feats.map((w) => w.worktreeId).sort()).toEqual(
-      [`proj-feat@${a.hostId}`, `proj-feat@${b.hostId}`].sort(),
-    );
+    const ids = (proj?.worktrees ?? []).map((w) => w.worktreeId);
+    expect(ids).toContain(`proj-feat-a@${a.hostId}`);
+    expect(ids).toContain(`proj-feat-b@${b.hostId}`);
+    // The branch that is on A cannot also be created on B.
+    const again = await createOn(b, "feat-a");
+    expect(again.status).toBe(409);
+    expect(await again.text()).toContain("feat-a is already on");
   });
 
   it("opens a terminal on the host of the worktree that was picked", async () => {
     const [a, b] = workers;
     const created = await trpcData<{ terminalId: string }>(
-      await mutate("terminal.create", { worktreeId: `proj-feat@${b.hostId}` }),
+      await mutate("terminal.create", { worktreeId: `proj-feat-b@${b.hostId}` }),
     );
     const socket = await TerminalSocket.open(server, {
-      worktreeId: `proj-feat@${b.hostId}`,
+      worktreeId: `proj-feat-b@${b.hostId}`,
       terminalId: created.terminalId,
       token: TOKEN,
     });
     try {
       socket.type("echo where=$PWD\r");
-      await socket.waitForOutput(`where=${checkoutOf(b, "feat")}`);
+      await socket.waitForOutput(`where=${checkoutOf(b, "feat-b")}`);
     } finally {
       await socket.close();
     }
-    expect(checkoutOf(a, "feat")).not.toBe(checkoutOf(b, "feat"));
+    expect(checkoutOf(a, "feat-a")).not.toBe(checkoutOf(b, "feat-b"));
   });
 });
 
@@ -251,6 +254,10 @@ describe("BAND_LOCAL_HOST=off leaves the hub's own machine empty", () => {
     git(extra, "push", "-q", "origin", "main");
     git(extra, "remote", "set-head", "origin", "main");
     expect((await mutate("repos.addFromWorker", { hostId: a.hostId, path: extra })).status).toBe(
+      200,
+    );
+    // A repo found on one worker is limited to it; widen it so the other worker may take a worktree.
+    expect((await mutate("repos.update", { name: "extra", allowedHostIds: null })).status).toBe(
       200,
     );
     // A repo added by URL.

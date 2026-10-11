@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
 import { gitRunner, type Host } from "@band-app/host-api";
 import { parseRemoteUrl } from "@band-app/shared/remote-url";
+import { isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
 import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../errors";
@@ -18,6 +19,7 @@ import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
+import { assertHostAllowed, listedWorktrees, primaryHostOf } from "./_utils/repo-host-policy";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
 import {
   type RepoAvatarInfo,
@@ -98,6 +100,10 @@ export class RepoService {
       kind: RepoKind;
       /** Whether the repo is a meta repo, where work in other repos is started from. */
       meta: boolean;
+      /** The hosts the repo may run on, or null for every host. */
+      allowedHostIds: string[] | null;
+      /** The host whose default-branch checkout is listed as a worktree, once one is known. */
+      primaryHostId: string | null;
       /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
       avatar: RepoAvatarInfo | null;
       worktrees: Array<{
@@ -108,6 +114,8 @@ export class RepoService {
         pinned: boolean;
         /** The remote host the worktree lives on. Absent for the hub's own machine. */
         hostId?: string;
+        /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */
+        hostNotAllowed?: boolean;
         /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is coming back (`waking`). */
         lifecycle?: WorktreeLifecycle;
         worktreeId: string;
@@ -237,8 +245,11 @@ export class RepoService {
         label: repo.label,
         kind: repo.kind,
         meta: repo.meta ?? false,
+        allowedHostIds: repo.allowedHostIds ?? null,
+        primaryHostId: primaryHostOf({ ...repo, worktrees }),
         avatar: await avatar,
-        worktrees: worktrees.map((wt) => {
+        // The default-branch checkout of every host but the primary one is a hidden cache.
+        worktrees: listedWorktrees({ ...repo, worktrees }).map((wt) => {
           // Identity is by the immutable `name`, not the live branch.
           const worktreeId = toWorktreeId(repo.name, wt.name, wt.hostId);
           const status = statusMap.get(worktreeId);
@@ -246,6 +257,7 @@ export class RepoService {
           return {
             ...wt,
             worktreeId,
+            ...(isHostAllowed(repo.allowedHostIds, wt.hostId) ? {} : { hostNotAllowed: true }),
             ...(lifecycle ? { lifecycle } : {}),
             agent: status?.agent ?? null,
             origin: links.origins.get(worktreeId) ?? null,
@@ -406,6 +418,10 @@ export class RepoService {
     label?: string;
     name?: string;
     addRoot?: boolean;
+    /** Hosts the repo is limited to. Default: only the host the folder is on. `null` means every host. */
+    allowedHostIds?: string[] | null;
+    /** The host that lists the default branch. Default: the host the folder is on. */
+    primaryHostId?: string;
   }): Promise<RepoState> {
     if (input.hostId === "local" && !isLocalHostEnabled()) {
       throw new RepoInputError("This hub does not use its own machine. Choose a worker.");
@@ -433,6 +449,8 @@ export class RepoService {
 
     const repos = this.queries.loadAll();
     const existing = remote ? repos.find((r) => r.remoteKey === remote.key) : undefined;
+    // A folder on a host the repo is not allowed on is not recorded as a place the repo lives.
+    if (existing) assertHostAllowed(existing.name, input.hostId);
     let repo = existing;
     if (!repo) {
       const name = this.pickName(
@@ -476,6 +494,7 @@ export class RepoService {
         label: input.label,
         kind,
         hasOrigin: kind === "git" && remote !== null,
+        ...this.initialHostPolicy(input.hostId, input.allowedHostIds, input.primaryHostId),
       };
       // The awaits above may have let another change reach the database, so save a fresh tree.
       const fresh = this.queries.loadAll();
@@ -501,6 +520,10 @@ export class RepoService {
     defaultBranch?: string;
     name?: string;
     label?: string;
+    /** Hosts the repo is limited to. Default: every host. */
+    allowedHostIds?: string[] | null;
+    /** The host that lists the default branch. Default: the first host that clones the repo. */
+    primaryHostId?: string;
   }): Promise<RepoState> {
     const remote = parseRemoteUrl(input.remoteUrl);
     if (!remote) {
@@ -524,6 +547,7 @@ export class RepoService {
       label: input.label,
       kind: "git",
       hasOrigin: true,
+      ...this.initialHostPolicy(undefined, input.allowedHostIds, input.primaryHostId),
     };
     // Resolving the branch can take a while, so save a fresh tree.
     const fresh = this.queries.loadAll();
@@ -775,6 +799,68 @@ export class RepoService {
       return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
     });
     this.queries.saveAll(repos);
+  }
+
+  /**
+   * The host policy a new repo starts with. A repo added from a worker is limited to that worker
+   * and it is the primary. A repo added by URL runs anywhere, and its primary is set when the
+   * first host clones it. A caller's choice wins and is checked like `setHostPolicy` checks it.
+   */
+  private initialHostPolicy(
+    fromHostId: string | undefined,
+    allowed: string[] | null | undefined,
+    primary: string | undefined,
+  ): Pick<RepoState, "allowedHostIds" | "primaryHostId"> {
+    const allowedHostIds = allowed === undefined ? (fromHostId ? [fromHostId] : null) : allowed;
+    const primaryHostId = primary ?? fromHostId;
+    this.checkHostPolicy(allowedHostIds, primaryHostId);
+    return {
+      ...(allowedHostIds ? { allowedHostIds } : {}),
+      ...(primaryHostId && isHostAllowed(allowedHostIds, primaryHostId) ? { primaryHostId } : {}),
+    };
+  }
+
+  /** Throws `RepoInputError` unless the hosts exist, the list is not empty and the primary is on it. */
+  private checkHostPolicy(
+    allowed: readonly string[] | null | undefined,
+    primary: string | null | undefined,
+  ): void {
+    const known = new Set(tokenService.listHosts(1000).map((h) => h.id));
+    if (allowed) {
+      if (allowed.length === 0) {
+        throw new RepoInputError("Choose at least one host, or all hosts.");
+      }
+      const unknown = allowed.find((id) => !known.has(id));
+      if (unknown) throw new RepoInputError(`Unknown host "${unknown}"`);
+    }
+    if (primary) {
+      if (!known.has(primary)) throw new RepoInputError(`Unknown host "${primary}"`);
+      if (!isHostAllowed(allowed, primary)) {
+        throw new RepoInputError(`The primary host "${primary}" must be one of the allowed hosts.`);
+      }
+    }
+  }
+
+  /**
+   * Limits a repo to some hosts (`null` for all) and/or names the host that lists its
+   * default-branch checkout (`null` to let the hub pick). A field left out is unchanged.
+   * Worktrees already on a host that is no longer allowed stay and are flagged in `list`.
+   */
+  setHostPolicy(
+    name: string,
+    policy: { allowedHostIds?: string[] | null; primaryHostId?: string | null },
+  ): void {
+    const current = this.queries.findHostPolicy(name);
+    if (!current) throw new RepoInputError(`Unknown repo "${name}"`);
+    const allowed =
+      policy.allowedHostIds === undefined ? current.allowedHostIds : policy.allowedHostIds;
+    let primary = policy.primaryHostId === undefined ? current.primaryHostId : policy.primaryHostId;
+    // Narrowing the hosts drops a stored primary that is no longer allowed, unless the caller named a new one.
+    if (policy.primaryHostId === undefined && primary && !isHostAllowed(allowed, primary)) {
+      primary = null;
+    }
+    this.checkHostPolicy(allowed, primary);
+    this.queries.setHostPolicy(name, { allowedHostIds: allowed, primaryHostId: primary });
   }
 
   /** Marks or unmarks `name` as a meta repo. */

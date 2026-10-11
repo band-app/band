@@ -19,6 +19,8 @@ interface WorktreeData {
   path: string;
   head?: string;
   pinned?: boolean;
+  /** The host the worktree lives on. Omitted means the hub's own machine. The host must be in `hosts`. */
+  hostId?: string;
 }
 
 interface RepoData {
@@ -35,10 +37,16 @@ interface RepoData {
    * issue #458).
    */
   hasOrigin?: boolean;
+  /** The hosts the repo may run on. Omitted means every host. */
+  allowedHostIds?: string[];
+  /** The host that lists the repo's default-branch worktree. */
+  primaryHostId?: string;
 }
 
 interface StateData {
   repos: RepoData[];
+  /** Worker hosts to put in the `hosts` table (offline, no worker behind them). */
+  hosts?: { id: string; name: string }[];
 }
 
 export function seedState(tmpHome: string, state: StateData): void {
@@ -53,6 +61,11 @@ export function seedState(tmpHome: string, state: StateData): void {
   migrate(db, { migrationsFolder });
 
   db.transaction((tx) => {
+    for (const host of state.hosts ?? []) {
+      tx.insert(schema.hosts)
+        .values({ id: host.id, name: host.name, status: "offline", createdAt: Date.now() })
+        .run();
+    }
     for (let i = 0; i < state.repos.length; i++) {
       const repo = state.repos[i];
       tx.insert(schema.repos)
@@ -64,6 +77,8 @@ export function seedState(tmpHome: string, state: StateData): void {
           sortOrder: i,
           kind: repo.kind ?? "git",
           hasOrigin: repo.hasOrigin ?? true,
+          allowedHostIds: repo.allowedHostIds ?? null,
+          primaryHostId: repo.primaryHostId ?? null,
         })
         .run();
 
@@ -76,6 +91,7 @@ export function seedState(tmpHome: string, state: StateData): void {
             path: wt.path,
             head: wt.head ?? null,
             pinned: wt.pinned ?? false,
+            hostId: wt.hostId ?? "local",
           })
           .run();
       }

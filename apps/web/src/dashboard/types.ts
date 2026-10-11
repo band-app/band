@@ -74,6 +74,10 @@ export interface RepoInfo {
   avatar?: RepoAvatarInfo | null;
   /** True for a meta repo, where work in other repos is started from. */
   meta?: boolean;
+  /** The hosts the repo may run on, or null for every host. */
+  allowedHostIds?: string[] | null;
+  /** The host whose default-branch checkout is listed as a worktree. */
+  primaryHostId?: string | null;
 }
 
 export interface RepoAvatarInfo {
@@ -106,6 +110,8 @@ export interface WorktreeInfo {
   hostId?: string;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
+  /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */
+  hostNotAllowed?: boolean;
   /** Where the worktree was started from, or null for top-level work. */
   origin?: WorktreeOrigin | null;
   /** Ids of the worktrees started from this one, on any repo and host. */

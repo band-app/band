@@ -1,11 +1,87 @@
 import { Button } from "@band-app/ui";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
+import type { RepoInfo } from "../../types";
+import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "../RepoHostsFields";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Where a repo may run and which host lists its default branch, with a Save button. */
+function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
+  const queryClient = useQueryClient();
+  const hosts = useQuery({
+    queryKey: ["hosts.list"],
+    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+  });
+  const stored: RepoHostsValue = {
+    allowedHostIds: repo.allowedHostIds ?? null,
+    primaryHostId: repo.primaryHostId ?? "",
+  };
+  const [edit, setEdit] = useState<RepoHostsValue | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const value = edit ?? stored;
+  const options = (hosts.data ?? [])
+    .filter((h) => h.usable)
+    .map((h) => ({ id: h.id, name: h.name }));
+
+  const save = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      await trpc.repos.update.mutate({
+        name: repo.name,
+        allowedHostIds: value.allowedHostIds,
+        primaryHostId: value.primaryHostId || null,
+      });
+      setEdit(null);
+      await queryClient.invalidateQueries({ queryKey: ["repos"] });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2" data-testid="settings-repos__hosts">
+      <RepoHostsFields
+        hosts={options}
+        value={value}
+        onChange={setEdit}
+        idPrefix={`settings-repo-${repo.name}`}
+        disabled={saving}
+      />
+      {edit ? (
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
+            Reset
+          </Button>
+          <Button
+            size="sm"
+            data-testid="settings-repos__hosts-save"
+            disabled={saving || !repoHostsValid(value)}
+            onClick={save}
+          >
+            Save hosts
+          </Button>
+        </div>
+      ) : null}
+      {error ? (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="settings-repos__hosts-error"
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * The Settings dialog's Repos section, a registry with no add: every repo the hub knows with its
@@ -104,6 +180,7 @@ export function ReposSettings() {
                   </li>
                 ))}
               </ul>
+              <RepoHostsEditor repo={repo} />
               {inUse ? (
                 <p className="text-xs text-muted-foreground" data-testid="settings-repos__in-use">
                   Remove its worktrees before removing it here.

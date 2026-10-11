@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
+import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "./RepoHostsFields";
 
 const LOCAL_HOST_ID = "local";
 const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
@@ -90,6 +91,27 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
     : (hostChoices[0]?.id ?? null);
   const hostName = hostChoices.find((h) => h.id === hostId)?.name ?? hostId ?? "the worker";
 
+  // Where the repo may run. The default follows the add mode: a repo added from a worker is limited
+  // to that worker and it is the primary host; one added by URL runs anywhere. Editing replaces it.
+  const [hostsEdit, setHostsEdit] = useState<{ key: string; value: RepoHostsValue } | null>(null);
+  const hostsKey = mode === "worker" ? `worker:${hostId}` : "url";
+  const defaultHosts: RepoHostsValue =
+    mode === "worker" && hostId
+      ? { allowedHostIds: [hostId], primaryHostId: hostId }
+      : { allowedHostIds: null, primaryHostId: "" };
+  const hostsValue = hostsEdit?.key === hostsKey ? hostsEdit.value : defaultHosts;
+  const hostOptions = (hosts.data ?? [])
+    .filter((h) => h.usable)
+    .map((h) => ({ id: h.id, name: h.name }));
+  const hostsFields = (
+    <RepoHostsFields
+      hosts={hostOptions}
+      value={hostsValue}
+      onChange={(value) => setHostsEdit({ key: hostsKey, value })}
+      idPrefix="add-repo"
+    />
+  );
+
   const listing = useQuery({
     queryKey: ["hosts.browse", hostId, browsePath],
     queryFn: () => trpc.hosts.browse.query({ hostId: hostId as string, path: browsePath }),
@@ -151,6 +173,8 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         path,
         ...(label ? { label } : {}),
         ...(addRoot ? { addRoot: true } : {}),
+        allowedHostIds: hostsValue.allowedHostIds,
+        ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });
       await finish(repo.name);
     } catch (err) {
@@ -174,6 +198,8 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         remoteUrl: remoteUrl.trim(),
         defaultBranch: defaultBranch.trim() || undefined,
         ...(label ? { label } : {}),
+        allowedHostIds: hostsValue.allowedHostIds,
+        ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });
       await finish(repo.name);
     } catch (err) {
@@ -312,6 +338,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                 its clone on {hostName}.
               </p>
             ) : null}
+            {hostsFields}
             {needsRoot ? (
               <div
                 className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
@@ -343,7 +370,13 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
               </Button>
               <Button
                 size="sm"
-                disabled={busy || preview.isLoading || preview.isError || uncloneable}
+                disabled={
+                  busy ||
+                  preview.isLoading ||
+                  preview.isError ||
+                  uncloneable ||
+                  !repoHostsValid(hostsValue)
+                }
                 data-testid={needsRoot ? "add-repo__confirm-root-accept" : "add-repo__confirm"}
                 onClick={() => addFromFolder(selected, needsRoot)}
               >
@@ -550,10 +583,11 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
               spellCheck={false}
             />
           </div>
+          {hostsFields}
           <div className="flex justify-end">
             <Button
               size="sm"
-              disabled={busy || remoteUrl.trim() === ""}
+              disabled={busy || remoteUrl.trim() === "" || !repoHostsValid(hostsValue)}
               data-testid="add-repo__url-submit"
               onClick={addByUrl}
             >

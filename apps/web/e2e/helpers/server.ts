@@ -104,6 +104,30 @@ export function seedState(tmpHome: string, state: { repos: SeedRepo[] }): void {
 }
 
 /**
+ * Records a worktree row on a worker host, the way an install from before one-branch-per-host
+ * holds a branch on two hosts. `worktrees.create` refuses that now, so a spec about such
+ * data adds the row itself. The checkout must already exist on the host. Safe while the server
+ * runs, which reads the table on every request.
+ */
+export function seedHostWorktree(
+  tmpHome: string,
+  row: { repo: string; name: string; branch: string; path: string; hostId: string },
+): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite
+      .prepare(
+        `INSERT INTO worktrees (repo_name, name, branch, path, host_id)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(row.repo, row.name, row.branch, row.path, row.hostId);
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
  * Marks a seeded worktree as asleep (an ephemeral worker stored it and exited, plan step 3.5),
  * or waking when `waking` is set. The UI only reads the row, so no worker is involved.
  */

@@ -550,6 +550,105 @@ fn repos_set_meta_persists_and_lists() {
 }
 
 #[test]
+fn repos_set_hosts_limits_the_repo_and_refuses_other_hosts() {
+    let env = TestEnv::new();
+
+    // A host name or id, `all`, and a primary all resolve against `band hosts list`.
+    let output = env.band(&[
+        "repos",
+        "set",
+        "my-repo",
+        "--hosts",
+        "local",
+        "--primary",
+        "local",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    let repo = &listed["repos"][0];
+    assert_eq!(repo["allowedHostIds"], serde_json::json!(["local"]));
+    assert_eq!(repo["primaryHostId"], "local");
+    let text = stdout(&env.band(&["repos", "list"]));
+    assert!(text.contains("HOSTS"), "{text}");
+
+    let output = env.band(&[
+        "repos",
+        "set",
+        "my-repo",
+        "--hosts",
+        "all",
+        "--primary",
+        "auto",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+    assert!(listed["repos"][0]["allowedHostIds"].is_null());
+
+    // An unknown host, and an empty list, are refused.
+    let output = env.band(&["repos", "set", "my-repo", "--hosts", "nowhere"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown host"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!env
+        .band(&["repos", "set", "my-repo", "--hosts", ","])
+        .status
+        .success());
+}
+
+#[test]
+fn worktrees_create_refuses_a_host_the_repo_is_not_allowed_on() {
+    let env = TestEnv::new();
+
+    // The CLI cannot register a worker, so the test asks the hub as the UI does.
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
+    )
+    .expect("settings json");
+    let port = settings["webServerPort"].as_u64().expect("port");
+    let token = settings["tokenSecret"].as_str().expect("token");
+    ureq::post(format!(
+        "http://127.0.0.1:{port}/trpc/tokens.issueWorkerBootstrap"
+    ))
+    .header("Authorization", format!("Bearer {token}"))
+    .send_json(serde_json::json!({"hostName": "Mac box", "labels": []}))
+    .expect("issue bootstrap");
+
+    // Limit the repo to that host, so the hub's own machine is the host that is not allowed.
+    let set = env.band(&["repos", "set", "my-repo", "--hosts", "Mac box"]);
+    assert!(set.status.success(), "stderr: {}", stderr(&set));
+
+    // The default host is the hub's machine, and automatic placement finds no allowed host online.
+    for extra in [&[][..], &["--any-host"][..]] {
+        let mut args = vec!["worktrees", "create", "my-repo", "feat/refused"];
+        args.extend_from_slice(extra);
+        let out = env.band(&args);
+        assert!(!out.status.success(), "args: {args:?}");
+        assert!(
+            stderr(&out).contains("my-repo is only available on Mac box"),
+            "stderr: {}",
+            stderr(&out)
+        );
+    }
+
+    // Nothing was created: no worktree record, no folder, no waiting request.
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    assert!(
+        !listed.to_string().contains("feat-refused"),
+        "listed: {listed}"
+    );
+    assert!(!env.band_dir.join("worktrees").join("my-repo").exists());
+
+    // Allowing every host again lets the same call through.
+    let reset = env.band(&["repos", "set", "my-repo", "--hosts", "all"]);
+    assert!(reset.status.success(), "stderr: {}", stderr(&reset));
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/refused"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+}
+
+#[test]
 fn worktrees_create_records_the_origin_and_list_shows_it() {
     let env = TestEnv::new();
     for branch in ["feat/parent", "feat/other"] {

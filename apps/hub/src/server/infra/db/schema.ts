@@ -118,6 +118,12 @@ export const repos = sqliteTable("repos", {
   // only groups and defaults; it changes no behaviour. Set by `repos.update` and kept across
   // the whole-tree rewrite by `RepoQueries.saveAll`.
   meta: integer("meta", { mode: "boolean" }).notNull().default(false),
+  // The hosts the repo may run on, as JSON host ids; null means every host. A hard rule:
+  // worktree creation, placement and cloning refuse any other host.
+  allowedHostIds: text("allowed_host_ids", { mode: "json" }).$type<string[]>(),
+  // The one host whose default-branch checkout is listed as a worktree. Null means the
+  // host picks itself (`effectivePrimaryHost` in `@band-app/shared/repo-hosts`).
+  primaryHostId: text("primary_host_id"),
 });
 
 // A repo's checkout path on each host. `repos.path` stays the source

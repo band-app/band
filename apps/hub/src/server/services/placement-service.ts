@@ -15,8 +15,10 @@
 import { randomUUID } from "node:crypto";
 import { extractVersion, satisfies as inRange, rangeError } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
+import { onlyAvailableOnMessage } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
+import { RepoHostNotAllowedError } from "../errors";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { hostRegistry } from "../infra/host/registry";
@@ -28,6 +30,7 @@ import {
   runnerLevel,
 } from "./_utils/isolation";
 import type { Placement } from "./_utils/placement-input";
+import { allowedHostsOf, hostNamesOf } from "./_utils/repo-host-policy";
 import { parseRunners } from "./_utils/runner-config";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { settingsService } from "./settings-service";
@@ -246,13 +249,28 @@ export class PlacementService {
       ? (loadSettings().codingAgents?.find((a) => a.id === input.codingAgentId)?.type ??
         input.codingAgentId)
       : undefined;
-    const hostId = await this.place(placement, holders ?? undefined, agent);
+    // A repo limited to some hosts is placed among those only, and no runner is asked for a new
+    // machine, because that host could not be allowed.
+    const allowed = allowedHostsOf(input.repo);
+    const only = allowed
+      ? holders
+        ? holders.filter((h) => allowed.includes(h))
+        : allowed
+      : holders;
+    const hostId = await this.place(placement, only ?? undefined, agent);
     if (hostId) return { kind: "host", hostId };
     if (holders) {
       throw new Error(
         `Repo "${input.repo}" has no remote URL, so it can only run on the host that holds it (${
           holders.join(", ") || "none recorded"
         }), and none of them is online and fits the placement.`,
+      );
+    }
+    if (allowed) {
+      throw new RepoHostNotAllowedError(
+        `${onlyAvailableOnMessage(input.repo, hostNamesOf(allowed))}, and none of them is online and fits the placement.`,
+        input.repo,
+        allowed,
       );
     }
     // A concurrent create for the same worktree may have recorded a request

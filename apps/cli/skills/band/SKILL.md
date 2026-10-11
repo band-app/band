@@ -68,9 +68,12 @@ A folder with no remote is registered without a URL and can only run on the host
 
 ```sh
 band repos set <name> --meta true|false
+band repos set <name> --hosts mac,contabo|all --primary mac
 ```
 
 `--meta true` marks the repo as a meta repo, one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults. `band repos list` shows it in the `META` column.
+
+`--hosts` limits the repo to those hosts (ids or names from `band hosts list`, or `all`). It is a hard rule: a worktree, clone or placement on another host fails with `<repo> is only available on <hosts>`, whether it comes from the CLI, the UI, the `worktrees_create` MCP tool or automatic placement. `--primary` names the host that lists the repo's default-branch worktree (`auto` lets the hub pick). A branch has a Band worktree on one host only: creating it on a second host fails with `<branch> is already on <host>` and the existing worktree id. Both flags need an admin token.
 
 ### Unregister a repo
 
@@ -435,6 +438,9 @@ band repos list
 
 # Mark a repo as a meta repo
 band repos set my-notes --meta true
+
+# Build a repo on one machine only
+band repos set epic --hosts mac --primary mac
 
 # Remove a repo
 band repos remove my-app
