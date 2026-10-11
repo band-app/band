@@ -160,11 +160,13 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
   await wp.clickChatSplitRight(WORKTREE_B);
   await expect(wp.centerToolbars).toHaveCount(2);
 
+  expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 
   await wp.maximizePanel(0);
   await expect(wp.restoreButton).toBeVisible();
 
+  expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
   expect(await wp.appRegionsInHiddenWorktrees()).toEqual([]);
 });

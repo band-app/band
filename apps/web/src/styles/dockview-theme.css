@@ -589,8 +589,9 @@
  * their buttons doesn't drag) and every strip button are `no-drag`. They are
  * descendants of the strip, so they come after its `drag` box in document
  * order and cut themselves out of it, and out of every drag box before the
- * strip (the sidebar's title bar and gutter), whatever geometry Chromium
- * computes for those. */
+ * strip (the sidebar's title bar and gutter), even one that reaches past its
+ * drawn place, as long as Chromium puts the `no-drag` box where the control
+ * is drawn. */
 .band-worktree-entry:not([inert]) .dockview-center-desktop
   [data-band-top-row]
   > .dv-tabs-and-actions-container

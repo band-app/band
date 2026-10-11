@@ -994,9 +994,11 @@ export class WorktreePage {
    *  the drag region, as a label each. A control passes when a `no-drag` box
    *  (its own or an ancestor's) contains its shown part and no `drag` box
    *  after that one in document order overlaps it. Such a control stays
-   *  clickable whatever geometry Chromium computes for the drag boxes before
-   *  it (the sidebar's title bar and gutter, its own strip), so this is the
-   *  defensive rule itself, not only the result at the current layout. */
+   *  clickable even when a drag box before it (the sidebar's title bar and
+   *  gutter, its own strip) reaches past its drawn place, so this checks the
+   *  defensive rule itself, not only the result at the current layout.
+   *  Throws when no top-row strip has a visible control, so it can't pass
+   *  vacuously. */
   async topRowControlsWithoutOwnNoDrag(): Promise<string[]> {
     const { ops, controls } = await this.readTopRowDragGeometry();
     const EPS = 0.5;
@@ -1010,8 +1012,11 @@ export class WorktreePage {
       o.right > c.left + EPS &&
       o.top < c.bottom - EPS &&
       o.bottom > c.top + EPS;
-    return controls
-      .filter((c) => c.inTopRowStrip && c.right - c.left > 1 && c.bottom - c.top > 1)
+    const stripControls = controls.filter(
+      (c) => c.inTopRowStrip && c.right - c.left > 1 && c.bottom - c.top > 1,
+    );
+    if (stripControls.length === 0) throw new Error("no visible control in a top-row tab strip");
+    return stripControls
       .filter((c) => {
         let cut = -1;
         ops.forEach((op, i) => {
