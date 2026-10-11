@@ -33,6 +33,32 @@ export interface SavedActiveState {
   maximizedGroup?: string;
 }
 
+interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** What the desktop window's drag region is built from, read by
+ *  `WorktreePage.readTopRowDragGeometry`. */
+interface TopRowDragGeometry {
+  ops: (Rect & { drag: boolean; visible: boolean })[];
+  controls: (Rect & { label: string; inTopRowStrip: boolean })[];
+  sidebarTitleBar: Rect | null;
+  stripVoids: Rect[];
+}
+
+/** Whether (x, y) is in the drag region Chromium builds from `ops`: walking
+ *  them in document order, the last box that contains the point decides. */
+function inDragRegion(ops: TopRowDragGeometry["ops"], x: number, y: number): boolean {
+  let drag = false;
+  for (const op of ops) {
+    if (x >= op.left && x < op.right && y >= op.top && y < op.bottom) drag = op.drag;
+  }
+  return drag;
+}
+
 export class WorktreePage {
   /** All "Maximize" buttons in the dockview. Multiple groups expose
    *  their own button; tests use `.first()` / `.nth()` when they need a
@@ -486,12 +512,16 @@ export class WorktreePage {
     await expect.poll(() => this.readAppZoom()).toBeCloseTo(1 + steps / 10, 5);
   }
 
-  /** Reset the app zoom to 100% via the real Ctrl+Shift+0 shortcut (caught
-   *  by a window listener in `useZoom`, so focus doesn't matter). */
+  /** Reset the app zoom to 100% via the real Ctrl+Shift+0 shortcut, routed
+   *  through the repo-list root like `zoomInViaShortcut`, then wait until the
+   *  zoom is 1. */
   async zoomResetViaShortcut(): Promise<void> {
     await test.step("Reset zoom via Ctrl+Shift+0", async () => {
-      await this.page.keyboard.press("Control+Shift+Digit0");
+      const root = this.repoListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press("Control+Shift+Digit0");
     });
+    await expect.poll(() => this.readAppZoom()).toBeCloseTo(1, 5);
   }
 
   /** Zoom the app out by one step via the real Ctrl/Cmd+- shortcut. Mirror
@@ -848,44 +878,35 @@ export class WorktreePage {
     });
   }
 
-  /** The controls a user can see in the top row (center tabs, their close
-   *  buttons, the tab strips' header buttons, the nav cluster's buttons)
-   *  that the desktop window's drag region covers. A covered control never
-   *  gets its click in the desktop app: the mousedown starts a window drag.
-   *  Replays Chromium's computation: walk every element in document order,
-   *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
-   *  z-index, `inert` and `pointer-events` irrelevant. Unlike Chromium it
-   *  also counts rects whose `visibility` is `hidden`, on purpose: a hidden
-   *  but still laid-out worktree's strip must stay out of the region by
-   *  setting no app-region at all, not only through its visibility.
-   *  Only Electron hit-tests that region, so this is the DOM-level
-   *  projection of it; each control is sampled on a 3px grid, over the part
-   *  its overflow-clipping ancestors show. Returns a
-   *  label per covered control (testid, aria-label, title or text), and
-   *  throws when there is no drag rect or no tab, so a renamed class can't
+  /** One read of everything the desktop window's drag region is built from,
+   *  for the checks below. `ops` is every box with a computed `app-region` of
+   *  `drag` or `no-drag`, in document order (the order Chromium walks), with
+   *  whether its `visibility` is `visible`. `controls` is every control a user
+   *  can see in the top row (center tabs, their close buttons, the tab strips'
+   *  header buttons, the nav cluster's buttons), each with the part of it its
+   *  overflow-clipping ancestors show: a tab scrolled (or, mid-layout, pushed)
+   *  past its strip's viewport can't be clicked there, whatever covers it.
+   *  Throws when there is no drag rect or no tab, so a renamed class can't
    *  pass vacuously. */
-  async controlsUnderWindowDragRegion(): Promise<string[]> {
+  private async readTopRowDragGeometry(): Promise<TopRowDragGeometry> {
     return await this.page.evaluate(() => {
-      const regionOf = (el: Element) => {
-        const style = getComputedStyle(el);
-        return style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
-      };
-      const ops: { drag: boolean; rect: DOMRect }[] = [];
+      const box = (r: DOMRect) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+      const ops: TopRowDragGeometry["ops"] = [];
       for (const el of document.querySelectorAll("*")) {
-        const region = regionOf(el);
+        const style = getComputedStyle(el);
+        const region =
+          style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
         if (region !== "drag" && region !== "no-drag") continue;
         const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) ops.push({ drag: region === "drag", rect });
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        ops.push({
+          drag: region === "drag",
+          visible: style.visibility === "visible",
+          ...box(rect),
+        });
       }
       if (!ops.some((op) => op.drag)) throw new Error("no app-region: drag rect on the page");
-      const inDragRegion = (x: number, y: number) => {
-        let drag = false;
-        for (const { drag: isDrag, rect } of ops) {
-          if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) drag = isDrag;
-        }
-        return drag;
-      };
-      const controls = Array.from(
+      const elements = Array.from(
         document.querySelectorAll(
           '.dv-tab, .dv-tabs-and-actions-container button, [data-testid="app-shell__nav-overlay"] button',
         ),
@@ -898,12 +919,9 @@ export class WorktreePage {
           !el.closest("[inert]")
         );
       });
-      if (!controls.some((el) => el.classList.contains("dv-tab"))) {
+      if (!elements.some((el) => el.classList.contains("dv-tab"))) {
         throw new Error("no visible .dv-tab on the page");
       }
-      // The part of a control that its overflow-clipping ancestors show: a
-      // tab scrolled (or, mid-layout, pushed) past its strip's viewport can't
-      // be clicked there, whatever covers it.
       const shownRect = (el: Element) => {
         let { left, top, right, bottom } = el.getBoundingClientRect();
         for (let a = el.parentElement; a; a = a.parentElement) {
@@ -917,71 +935,118 @@ export class WorktreePage {
         }
         return { left, top, right, bottom };
       };
-      const covered: string[] = [];
-      for (const el of controls) {
-        const rect = shownRect(el);
-        let hit = false;
-        for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
-          for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
-            hit = inDragRegion(x, y);
-          }
-        }
-        if (!hit) continue;
+      const controls = elements.map((el) => {
         const named = el.matches("[data-testid]") ? el : el.querySelector("[data-testid]");
-        covered.push(
-          named?.getAttribute("data-testid") ??
+        return {
+          label:
+            named?.getAttribute("data-testid") ??
             el.getAttribute("aria-label") ??
             el.getAttribute("title") ??
             (el.textContent ?? "").trim(),
-        );
-      }
-      return covered;
-    });
-  }
-
-  /** Whether the empty top-row spots that should move the desktop window
-   *  are inside its drag region, with the same document-order walk as
-   *  {@link controlsUnderWindowDragRegion}: the middle of the sidebar title
-   *  bar's right half (clear of the nav cluster), `null` while the sidebar is
-   *  collapsed, and the middle of the empty space in each top-row tab strip of
-   *  the shown worktree. Throws when no strip has empty space, so it can't
-   *  pass vacuously. */
-  async emptyTopRowSpotsInDragRegion(): Promise<{
-    sidebarTitleBar: boolean | null;
-    strips: boolean[];
-  }> {
-    return await this.page.evaluate(() => {
-      const ops: { drag: boolean; rect: DOMRect }[] = [];
-      for (const el of document.querySelectorAll("*")) {
-        const style = getComputedStyle(el);
-        const region =
-          style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
-        if (region !== "drag" && region !== "no-drag") continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) ops.push({ drag: region === "drag", rect });
-      }
-      const inDragRegion = (x: number, y: number) => {
-        let drag = false;
-        for (const { drag: isDrag, rect } of ops) {
-          if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) drag = isDrag;
-        }
-        return drag;
-      };
-      const middleOf = (rect: DOMRect, from = 0) =>
-        inDragRegion(rect.left + (from + (1 - from) / 2) * rect.width, rect.top + rect.height / 2);
+          inTopRowStrip:
+            el.closest("[data-band-top-row] > .dv-tabs-and-actions-container") !== null,
+          ...shownRect(el),
+        };
+      });
       const titleBar = document.querySelector('[data-testid="desktop-title-bar__sidebar-surface"]');
       const titleRect = titleBar?.getBoundingClientRect();
-      const sidebarTitleBar = titleRect && titleRect.width > 50 ? middleOf(titleRect, 0.5) : null;
-      const voids = Array.from(
+      const sidebarTitleBar = titleRect && titleRect.width > 50 ? box(titleRect) : null;
+      const stripVoids = Array.from(
         document.querySelectorAll(
           ".band-worktree-entry:not([inert]) [data-band-top-row] > .dv-tabs-and-actions-container > .dv-void-container",
         ),
       )
         .map((el) => el.getBoundingClientRect())
-        .filter((rect) => rect.width > 4 && rect.height > 0);
-      if (voids.length === 0) throw new Error("no top-row tab strip has empty space");
-      return { sidebarTitleBar, strips: voids.map((rect) => middleOf(rect)) };
+        .filter((rect) => rect.width > 4 && rect.height > 0)
+        .map(box);
+      return { ops, controls, sidebarTitleBar, stripVoids };
     });
+  }
+
+  /** The controls a user can see in the top row that the desktop window's
+   *  drag region covers, as a label each (testid, aria-label, title or text).
+   *  A covered control never gets its click in the desktop app: the mousedown
+   *  starts a window drag. Replays Chromium's computation over
+   *  {@link readTopRowDragGeometry}: add each `drag` rect and subtract each
+   *  `no-drag` rect in document order, with z-index, `inert` and
+   *  `pointer-events` irrelevant. Unlike Chromium it also counts rects whose
+   *  `visibility` is `hidden`, on purpose: a hidden but still laid-out
+   *  worktree's strip must stay out of the region by setting no app-region at
+   *  all, not only through its visibility. Only Electron hit-tests that
+   *  region, so this is the DOM-level projection of it; each control's shown
+   *  part is sampled on a 3px grid. */
+  async controlsUnderWindowDragRegion(): Promise<string[]> {
+    const { ops, controls } = await this.readTopRowDragGeometry();
+    const covered: string[] = [];
+    for (const rect of controls) {
+      let hit = false;
+      for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
+        for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
+          hit = inDragRegion(ops, x, y);
+        }
+      }
+      if (hit) covered.push(rect.label);
+    }
+    return covered;
+  }
+
+  /** The center strip's tabs and buttons that don't cut themselves out of
+   *  the drag region, as a label each. A control passes when a `no-drag` box
+   *  (its own or an ancestor's) contains its shown part and no `drag` box
+   *  after that one in document order overlaps it. Such a control stays
+   *  clickable whatever geometry Chromium computes for the drag boxes before
+   *  it (the sidebar's title bar and gutter, its own strip), so this is the
+   *  defensive rule itself, not only the result at the current layout. */
+  async topRowControlsWithoutOwnNoDrag(): Promise<string[]> {
+    const { ops, controls } = await this.readTopRowDragGeometry();
+    const EPS = 0.5;
+    const contains = (o: Rect, c: Rect) =>
+      o.left <= c.left + EPS &&
+      o.top <= c.top + EPS &&
+      o.right >= c.right - EPS &&
+      o.bottom >= c.bottom - EPS;
+    const overlaps = (o: Rect, c: Rect) =>
+      o.left < c.right - EPS &&
+      o.right > c.left + EPS &&
+      o.top < c.bottom - EPS &&
+      o.bottom > c.top + EPS;
+    return controls
+      .filter((c) => c.inTopRowStrip && c.right - c.left > 1 && c.bottom - c.top > 1)
+      .filter((c) => {
+        let cut = -1;
+        ops.forEach((op, i) => {
+          if (!op.drag && contains(op, c)) cut = i;
+        });
+        return cut === -1 || ops.slice(cut + 1).some((op) => op.drag && overlaps(op, c));
+      })
+      .map((c) => c.label);
+  }
+
+  /** Whether the empty top-row spots that should move the desktop window
+   *  are inside its drag region: the middle of the sidebar title bar's right
+   *  half (clear of the nav cluster), `null` while the sidebar is collapsed,
+   *  and the middle of the empty space in each top-row tab strip of the shown
+   *  worktree. Same walk as {@link controlsUnderWindowDragRegion}, except that
+   *  a `drag` box counts only when its `visibility` is `visible`, as in
+   *  Chromium, so a hidden box can't make a spot pass. Throws when no strip
+   *  has empty space, so it can't pass vacuously. */
+  async emptyTopRowSpotsInDragRegion(): Promise<{
+    sidebarTitleBar: boolean | null;
+    strips: boolean[];
+  }> {
+    const geometry = await this.readTopRowDragGeometry();
+    const ops = geometry.ops.filter((op) => !op.drag || op.visible);
+    const middleOf = (rect: Rect, from = 0) =>
+      inDragRegion(
+        ops,
+        rect.left + (from + (1 - from) / 2) * (rect.right - rect.left),
+        (rect.top + rect.bottom) / 2,
+      );
+    if (geometry.stripVoids.length === 0) throw new Error("no top-row tab strip has empty space");
+    return {
+      sidebarTitleBar: geometry.sidebarTitleBar ? middleOf(geometry.sidebarTitleBar, 0.5) : null,
+      strips: geometry.stripVoids.map((rect) => middleOf(rect)),
+    };
   }
 
   /** Persist an app zoom level the way the zoom setting does, for the next

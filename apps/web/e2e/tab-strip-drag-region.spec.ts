@@ -173,9 +173,10 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
 // 110%) had clicks on center-strip tabs start a window drag while no drag box
 // covered them in the DOM. The tab viewport and strip buttons now carry their
 // own `no-drag`, after every drag box that could cover them in document order;
-// this checks the DOM-level region at the zoom levels people use, with the
-// sidebar open and collapsed. 125% comes from the persisted setting on a
-// reload, 100% and 110% from the real shortcuts.
+// this checks that rule and the DOM-level region at the zoom levels people
+// use, with the sidebar open and collapsed. 125% comes from a persisted
+// setting on a reload, 100% and 110% from the real shortcuts, and 110% again
+// from the app's own persistence after a reload.
 test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% zoom", async ({
   page,
 }) => {
@@ -191,6 +192,7 @@ test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% 
       await expect.poll(() => wp.readAppZoom()).toBeCloseTo(zoom, 5);
       // Sidebar open: its title bar and the strip's empty space drag.
       await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(100);
+      expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
       expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
       expect(await wp.emptyTopRowSpotsInDragRegion()).toEqual({
         sidebarTitleBar: true,
@@ -200,6 +202,7 @@ test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% 
       await wp.toggleSidebarViaButton();
       await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
       await expect(wp.sidebarGutter).toHaveCount(1);
+      expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
       expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
       expect(await wp.emptyTopRowSpotsInDragRegion()).toEqual({
         sidebarTitleBar: null,
@@ -219,5 +222,9 @@ test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% 
   await expectTopRowAtZoom(1);
 
   await wp.zoomInBy(1);
+  await expectTopRowAtZoom(1.1);
+
+  await wp.reload();
+  await wp.waitForReady();
   await expectTopRowAtZoom(1.1);
 });
