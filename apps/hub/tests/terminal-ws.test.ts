@@ -32,6 +32,7 @@ import {
   type ServerHandle as ServerHandleBase,
   startServer as startServerBase,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "terminal-ws-test-token";
@@ -121,9 +122,9 @@ describe("terminal WebSocket — close-reason byte cap", () => {
   });
 
   it("clamps close reason to ≤123 bytes and ships the full message in a JSON frame", async () => {
-    const worktreeId = "journoo_app-feat-journaling-promptkey";
+    const worktreeId = testWorktreeId("journoo_app", "feat-journaling-promptkey");
     const terminalId = "test-terminal-1";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${terminalId}`;
 
     const ws = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
@@ -225,9 +226,9 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
   });
 
   it("responds with a {type:'pong'} frame to a client {type:'ping'}", async () => {
-    const worktreeId = "worktree-main";
+    const worktreeId = testWorktreeId("worktree", "main");
     const terminalId = "ping-pong-terminal";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${worktreeId}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${terminalId}`;
 
     const ws = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
@@ -321,7 +322,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
   const COMMAND =
     "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007\\033]12;?\\007'; echo DONE\"\"MARKER\r";
 
-  const WORKTREE_ID = "worktree-main";
+  const WORKTREE_ID = testWorktreeId("worktree", "main");
 
   // Spawn a PTY over the `/terminal` WebSocket, run the OSC-emitting command,
   // and resolve only once BOTH the raw OSC bytes AND the trailing marker have
@@ -332,7 +333,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
   // before the marker reaches scrollback and make the replay assertions flake.
   // Then close the socket; the pool keeps the PTY alive for reconnect/replay.
   async function seedOscScrollback(terminalId: string): Promise<void> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let live = Buffer.alloc(0);
@@ -387,7 +388,7 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     // sends an `attach` carrying its fitted dims, and the server serializes the
     // mirror at those dims and replays it through stripTerminalQueries on the
     // `/terminal` WS path.
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${terminalId}`;
     const ws2 = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
     });
@@ -610,7 +611,7 @@ describe("terminal WebSocket — authentication", () => {
     // No cookie → the upgrade handler destroys the socket before the 101
     // handshake, so the client never opens. Assert we observe a failure
     // (error / unexpected-response / close) and never an `open`.
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=noauth`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(testWorktreeId("worktree", "main"))}&terminalId=noauth`;
     const ws = new WebSocket(wsUrl); // deliberately no Cookie header
 
     const opened = await new Promise<boolean>((resolve, reject) => {
@@ -650,7 +651,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
-  const WORKTREE_ID = "worktree-main";
+  const WORKTREE_ID = testWorktreeId("worktree", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
@@ -687,7 +688,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     until: string,
     resize?: { cols: number; rows: number },
   ): Promise<void> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let live = Buffer.alloc(0);
@@ -735,7 +736,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     terminalId: string,
     dims: { cols: number; rows: number } = { cols: 80, rows: 24 },
   ): Promise<Buffer> {
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${WORKTREE_ID}&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(WORKTREE_ID)}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let replay: Buffer | null = null;
@@ -1022,7 +1023,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
   it("spawns the pane shell without NO_COLOR / FORCE_COLOR / CLICOLOR", async () => {
     const terminalId = "color-env-strip";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(testWorktreeId("worktree", "main"))}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     // Markers are split with `""` in the typed command so the shell's echo
@@ -1066,7 +1067,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
   // TERM_PROGRAM. Without this, it repaints the whole screen per wheel tick.
   it("tells Claude Code the pane supports synchronized output", async () => {
     const terminalId = "claude-sync-output-env";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=worktree-main&terminalId=${terminalId}`;
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?worktreeId=${encodeURIComponent(testWorktreeId("worktree", "main"))}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
     // `""` keeps the shell's echo of the typed line from matching.
     const COMMAND = `echo "CFS""=\${CLAUDE_CODE_FORCE_SYNC_OUTPUT:-unset}"\r`;

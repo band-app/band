@@ -156,7 +156,7 @@ describe("listWorktrees", () => {
     // all sharing the empty-string branch. Asserting uniqueness here pins
     // down the property that fixed it: two detached worktrees at
     // different SHAs map to different `branch` values, so
-    // `toWorktreeId(repoName, branch)` no longer collides.
+    // `toWorktreeId(repoName, branch, "local")` no longer collides.
     const { repoPath, tmp } = createRepo();
 
     const firstSha = git(repoPath, ["rev-parse", "HEAD"]).trim();

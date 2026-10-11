@@ -47,6 +47,12 @@ export const tokensRouter = t.router({
     .input(
       z.object({
         hostName: label,
+        // A fixed id for the host, for a harness that must know it before the worker starts.
+        // Without one the hub makes `h-<12 hex>`. A used id is refused.
+        hostId: z
+          .string()
+          .regex(/^h-[a-z0-9][a-z0-9-]{0,39}$/)
+          .optional(),
         labels: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
         ttlMinutes: z
           .number()
@@ -61,6 +67,7 @@ export const tokensRouter = t.router({
         input.hostName,
         input.labels,
         input.ttlMinutes * 60_000,
+        input.hostId,
       );
       return { token, hostId, view };
     }),

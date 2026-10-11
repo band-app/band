@@ -13,13 +13,20 @@ import {
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderGit2, Server } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
+import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "./RepoHostsFields";
 
 const LOCAL_HOST_ID = "local";
 const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
+
+/**
+ * The action row of each step. The dialog scrolls, so the row sticks to its bottom edge (the
+ * negative margins cancel the dialog's p-6) and the button stays visible above the fields.
+ */
+const ACTION_ROW = "sticky bottom-0 -mx-6 -mb-6 border-t border-border bg-background px-6 py-3";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -90,6 +97,27 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
     : (hostChoices[0]?.id ?? null);
   const hostName = hostChoices.find((h) => h.id === hostId)?.name ?? hostId ?? "the worker";
 
+  // Where the repo may run. The default follows the add mode: a repo added from a worker is limited
+  // to that worker and it is the primary host; one added by URL runs anywhere. Editing replaces it.
+  const [hostsEdit, setHostsEdit] = useState<{ key: string; value: RepoHostsValue } | null>(null);
+  const hostsKey = mode === "worker" ? `worker:${hostId}` : "url";
+  const defaultHosts: RepoHostsValue =
+    mode === "worker" && hostId
+      ? { allowedHostIds: [hostId], primaryHostId: hostId }
+      : { allowedHostIds: null, primaryHostId: "" };
+  const hostsValue = hostsEdit?.key === hostsKey ? hostsEdit.value : defaultHosts;
+  const hostOptions = (hosts.data ?? [])
+    .filter((h) => h.usable)
+    .map((h) => ({ id: h.id, name: h.name }));
+  const hostsFields = (
+    <RepoHostsFields
+      hosts={hostOptions}
+      value={hostsValue}
+      onChange={(value) => setHostsEdit({ key: hostsKey, value })}
+      idPrefix="add-repo"
+    />
+  );
+
   const listing = useQuery({
     queryKey: ["hosts.browse", hostId, browsePath],
     queryFn: () => trpc.hosts.browse.query({ hostId: hostId as string, path: browsePath }),
@@ -151,6 +179,8 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         path,
         ...(label ? { label } : {}),
         ...(addRoot ? { addRoot: true } : {}),
+        allowedHostIds: hostsValue.allowedHostIds,
+        ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });
       await finish(repo.name);
     } catch (err) {
@@ -174,6 +204,8 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         remoteUrl: remoteUrl.trim(),
         defaultBranch: defaultBranch.trim() || undefined,
         ...(label ? { label } : {}),
+        allowedHostIds: hostsValue.allowedHostIds,
+        ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });
       await finish(repo.name);
     } catch (err) {
@@ -198,8 +230,17 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
   const needsRoot = outsideRoots !== null || (info ? !info.insideRoots : false);
   const uncloneable = info?.cloneable === false;
 
+  // A long path scrolls inside the breadcrumbs; keep the current folder in view.
+  const crumbsRef = useRef<HTMLElement>(null);
+  const listedPath = data?.path;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the listed path changes
+  useEffect(() => {
+    const el = crumbsRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [listedPath]);
+
   return (
-    <div className="space-y-4" data-testid="add-repo__form">
+    <div className="min-w-0 space-y-4" data-testid="add-repo__form">
       <div className="flex gap-2" role="tablist" aria-label="How to add the repo">
         {(
           [
@@ -312,6 +353,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                 its clone on {hostName}.
               </p>
             ) : null}
+            {hostsFields}
             {needsRoot ? (
               <div
                 className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
@@ -328,7 +370,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                 ) : null}
               </div>
             ) : null}
-            <div className="flex justify-between gap-2">
+            <div className={`flex justify-between gap-2 ${ACTION_ROW}`}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -343,7 +385,13 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
               </Button>
               <Button
                 size="sm"
-                disabled={busy || preview.isLoading || preview.isError || uncloneable}
+                disabled={
+                  busy ||
+                  preview.isLoading ||
+                  preview.isError ||
+                  uncloneable ||
+                  !repoHostsValid(hostsValue)
+                }
                 data-testid={needsRoot ? "add-repo__confirm-root-accept" : "add-repo__confirm"}
                 onClick={() => addFromFolder(selected, needsRoot)}
               >
@@ -398,8 +446,9 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
             {data ? (
               <div className="space-y-2" data-testid="add-repo__picker">
                 <nav
+                  ref={crumbsRef}
                   aria-label="Folder path"
-                  className="flex flex-wrap items-center gap-0.5 text-xs"
+                  className="flex items-center gap-0.5 overflow-x-auto whitespace-nowrap pb-1 text-xs"
                   data-testid="add-repo__picker-path"
                   data-path={data.path}
                 >
@@ -473,19 +522,21 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                       >
                         {entry.isGit ? (
-                          <FolderGit2 className="size-4 text-primary" aria-hidden />
+                          <FolderGit2 className="size-4 shrink-0 text-primary" aria-hidden />
                         ) : (
-                          <Folder className="size-4 text-muted-foreground" aria-hidden />
+                          <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                         )}
                         <span className="truncate">{entry.name}</span>
                         {entry.isGit ? (
-                          <span className="ml-auto text-xs text-muted-foreground">git</span>
+                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                            git
+                          </span>
                         ) : null}
                       </button>
                     </li>
                   ))}
                 </ul>
-                <div className="flex justify-end">
+                <div className={`flex justify-end ${ACTION_ROW}`}>
                   <Button
                     size="sm"
                     disabled={busy}
@@ -550,10 +601,11 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
               spellCheck={false}
             />
           </div>
-          <div className="flex justify-end">
+          {hostsFields}
+          <div className={`flex justify-end ${ACTION_ROW}`}>
             <Button
               size="sm"
-              disabled={busy || remoteUrl.trim() === ""}
+              disabled={busy || remoteUrl.trim() === "" || !repoHostsValid(hostsValue)}
               data-testid="add-repo__url-submit"
               onClick={addByUrl}
             >

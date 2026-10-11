@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { BranchOnOtherHostError, RepoHostNotAllowedError } from "../../errors";
 import {
   PlainRepoError,
   worktreeCreateInput,
@@ -110,6 +111,12 @@ export type WorktreesRouter = typeof worktreesRouter;
 function throwAsTrpcError(err: unknown): never {
   if (err instanceof PlainRepoError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+  }
+  if (err instanceof RepoHostNotAllowedError) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message, cause: err });
+  }
+  if (err instanceof BranchOnOtherHostError) {
+    throw new TRPCError({ code: "CONFLICT", message: err.message, cause: err });
   }
   // `RepoNotFoundError` and `WorktreeNotFoundError` (and every other
   // throw — `Error`, `TRPCError`, etc.) are rethrown unchanged: tRPC

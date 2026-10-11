@@ -70,15 +70,15 @@ const TOKEN = "e2e-panel-visibility-context-token";
 
 const REPO_A = "alpha-visibility";
 const REPO_B = "bravo-visibility";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 // The terminal test gets its own pair. The chat test's chats are saved on
 // the server, and a worktree with a saved chat no longer boots into the
 // single-terminal default layout.
 const REPO_C = "charlie-visibility";
 const REPO_D = "delta-visibility";
-const WORKTREE_C = toWorktreeId(REPO_C, "main");
-const WORKTREE_D = toWorktreeId(REPO_D, "main");
+const WORKTREE_C = toWorktreeId(REPO_C, "main", "local");
+const WORKTREE_D = toWorktreeId(REPO_D, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders (>= 1024px in `apps/web/src/hooks/useIsDesktop.ts`). The chat

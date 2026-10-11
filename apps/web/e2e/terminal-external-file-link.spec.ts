@@ -41,7 +41,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-external-file-link-token";
 const REPO = "alpha-terminal-external-link";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // (which hosts the terminal container) renders.

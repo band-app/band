@@ -130,7 +130,7 @@ export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePa
     const validIds = new Set<string>();
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
-        validIds.add(toWorktreeId(repo.name, worktree.name));
+        validIds.add(toWorktreeId(repo.name, worktree.name, worktree.hostId));
       }
     }
     // Dispose cached terminals for worktrees that no longer exist (deleted /

@@ -57,7 +57,7 @@ export function pickStartWorktree(repos: readonly RepoInfo[]): string | null {
   const labelOf = new Map<string, string | undefined>();
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
-      labelOf.set(toWorktreeId(repo.name, wt.name), repo.label);
+      labelOf.set(toWorktreeId(repo.name, wt.name, wt.hostId), repo.label);
     }
   }
 

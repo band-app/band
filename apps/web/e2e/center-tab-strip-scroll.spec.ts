@@ -38,7 +38,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-center-tab-strip-scroll-token";
 const REPO = "tab-strip-scroll-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 const FILES = Array.from({ length: 10 }, (_, i) => `tab-strip-file-number-${i}.txt`);
 
 let server: ServerHandle;

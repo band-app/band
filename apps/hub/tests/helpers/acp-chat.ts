@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { seedSettings, seedState } from "./seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./server";
-import { isRemoteLoopback } from "./test-host";
+import { isRemoteLoopback, testWorktreeId } from "./test-host";
 
 export const STUB_AGENT_PATH = join(import.meta.dirname, "..", "fixtures", "acp-stub-agent.mjs");
 
@@ -27,7 +27,7 @@ export function uploadsLocation(home: string, worktreeId: string) {
   }
   return {
     dir: join(realpathSync(tmpdir()), ".band-uploads", worktreeId),
-    urlPattern: new RegExp(`^/api/uploads/${worktreeId}/[^/]+$`),
+    urlPattern: new RegExp(`^/api/uploads/${encodeURIComponent(worktreeId)}/[^/]+$`),
   };
 }
 
@@ -39,7 +39,7 @@ export function sharedDirHintPattern(worktreeId: string): RegExp {
   );
 }
 export const TEST_TOKEN = "acp-chat-test-token";
-export const WORKTREE_ID = "testrepo-main";
+export const WORKTREE_ID = testWorktreeId("testrepo", "main");
 
 /** One scripted turn of the stub agent. See the stub's header for steps. */
 export interface StubTurn {

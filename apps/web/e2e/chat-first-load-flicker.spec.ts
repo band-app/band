@@ -54,7 +54,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-first-load-flicker-token";
 const REPO = "flickerproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const CHAT_ID = "flicker-chat-deterministic-id";
 const SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 

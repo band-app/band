@@ -30,7 +30,7 @@ import { createTmpHome, type ServerHandle, startServer } from "../tests/helpers/
 
 const TOKEN = "terminal-typing-bench-token";
 const REPO = "benchproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 
 const FLOOD_COUNTS = (process.env.BENCH_FLOODS ?? "0,1,3").split(",").map(Number);
 const FLOOD_KIND = process.env.BENCH_FLOOD ?? "saturate";

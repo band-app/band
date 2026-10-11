@@ -51,7 +51,7 @@ const TOKEN = "e2e-quick-open-external-file-token";
 const REPO = "quick-open-external-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH = "feature";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Distinctive marker so the CodeMirror render of the `.ts` external file is
 // unambiguous.

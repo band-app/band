@@ -41,7 +41,7 @@ const TOKEN = "e2e-chat-file-link-mobile-token";
 const REPO = "chat-file-link-mobile-repo";
 const DEFAULT_BRANCH = "main";
 
-const WORKTREE_A = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE_A = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 const WORKTREE_OTHER = "some-other-worktree/main";
 
 // Narrow viewport — `useIsDesktop()` reports false (the threshold is

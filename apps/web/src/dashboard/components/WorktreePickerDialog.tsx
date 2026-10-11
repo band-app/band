@@ -71,7 +71,7 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
     const entries: WorktreeEntry[] = [];
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
-        const worktreeId = toWorktreeId(repo.name, worktree.name);
+        const worktreeId = toWorktreeId(repo.name, worktree.name, worktree.hostId);
         entries.push({
           worktreeId,
           repoName: repo.name,

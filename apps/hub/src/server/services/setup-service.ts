@@ -8,6 +8,7 @@ import { agentModeFromVia } from "./settings-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("setup");
 
@@ -68,6 +69,7 @@ export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
   // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs
   // with focused writes that it must not overwrite from a stale snapshot.
+  forgetLocalWorktrees();
   const repoSync = ensureRepoStateInSync().then(() => ensureRepoRemotes());
 
   await ensureCliInstalled();
@@ -184,6 +186,18 @@ async function ensureRepoRemotes(): Promise<void> {
   } catch (err) {
     log.warn(
       "Failed to record repo remotes at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/** With `BAND_LOCAL_HOST=off`, the hub's own machine holds no worktrees: forget the records. */
+function forgetLocalWorktrees(): void {
+  try {
+    worktreeService.forgetLocalWorktrees();
+  } catch (err) {
+    log.warn(
+      "Failed to forget local worktrees at boot: %s",
       err instanceof Error ? err.message : String(err),
     );
   }

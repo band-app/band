@@ -1,9 +1,13 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
 import { repoService } from "../../services/repo-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 import { repoErrorToTrpc } from "./errors";
+
+/** Host ids of an allowed-hosts list. An empty list is refused, since it would allow no host. */
+const hostIds = z.array(z.string().min(1)).min(1).max(100);
 
 /**
  * Repos sub-router — Phase 2 of the 3-tier refactor
@@ -53,6 +57,8 @@ export const reposRouter = t.router({
         name: z.string().min(1).max(100).optional(),
         label: z.string().optional(),
         addRoot: z.boolean().optional(),
+        allowedHostIds: hostIds.nullable().optional(),
+        primaryHostId: z.string().min(1).optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -75,6 +81,8 @@ export const reposRouter = t.router({
         defaultBranch: z.string().trim().min(1).max(200).optional(),
         name: z.string().min(1).max(100).optional(),
         label: z.string().optional(),
+        allowedHostIds: hostIds.nullable().optional(),
+        primaryHostId: z.string().min(1).optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -142,11 +150,37 @@ export const reposRouter = t.router({
     return { ok: true };
   }),
 
-  /** Changes a repo's settings. Only `meta` so far: whether the repo is a meta repo. */
+  /**
+   * Changes a repo's settings: `meta` (whether it is a meta repo), `allowedHostIds` (the hosts it
+   * may run on, `null` for all) and `primaryHostId` (the host that lists its default branch,
+   * `null` to let the hub pick). Changing the host policy is an admin call.
+   */
   update: publicProcedure
-    .input(z.object({ name: z.string(), meta: z.boolean().optional() }))
-    .mutation(({ input }) => {
+    .input(
+      z.object({
+        name: z.string(),
+        meta: z.boolean().optional(),
+        allowedHostIds: hostIds.nullable().optional(),
+        primaryHostId: z.string().min(1).nullable().optional(),
+      }),
+    )
+    .mutation(({ input, ctx }) => {
       try {
+        if (
+          (input.allowedHostIds !== undefined || input.primaryHostId !== undefined) &&
+          !ctx.admin
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only an admin token can change the hosts a repo runs on.",
+          });
+        }
+        if (input.allowedHostIds !== undefined || input.primaryHostId !== undefined) {
+          repoService.setHostPolicy(input.name, {
+            allowedHostIds: input.allowedHostIds,
+            primaryHostId: input.primaryHostId,
+          });
+        }
         if (input.meta !== undefined) repoService.setMeta(input.name, input.meta);
         return { ok: true };
       } catch (err) {

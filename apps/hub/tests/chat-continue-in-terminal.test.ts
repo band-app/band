@@ -33,7 +33,6 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -43,6 +42,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const gitEnv = {
@@ -157,7 +157,7 @@ interface ContinueResponse {
 describe("chats.continueInTerminal — claude-code", () => {
   const TOKEN = "continue-terminal-claude-token";
   const REPO = "cont-proj";
-  const WORKTREE_ID = toWorktreeId(REPO, "main");
+  const WORKTREE_ID = testWorktreeId(REPO, "main");
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -249,7 +249,7 @@ describe("chats.continueInTerminal — claude-code", () => {
 describe("chats.continueInTerminal — unsupported agent", () => {
   const TOKEN = "continue-terminal-gemini-token";
   const REPO = "cont-gem-proj";
-  const WORKTREE_ID = toWorktreeId(REPO, "main");
+  const WORKTREE_ID = testWorktreeId(REPO, "main");
   let server: ServerHandle;
   let tmpHome: string;
 

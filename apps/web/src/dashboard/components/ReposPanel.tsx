@@ -8,15 +8,12 @@ import type React from "react";
 export function ReposPanel({
   count,
   actions,
-  groupBy,
   onListClick,
   tall,
   children,
 }: {
   count: number | null;
   actions?: React.ReactNode;
-  /** The Group by switch, shown under the header. */
-  groupBy?: React.ReactNode;
   onListClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** Make the header as tall as the mobile worktree header, so the two line up. */
   tall?: boolean;
@@ -26,9 +23,12 @@ export function ReposPanel({
     <section className="flex min-h-0 flex-1 flex-col" data-testid="repos-panel" aria-label="Repos">
       <div
         data-testid="repos-panel__header"
-        className={cn("flex shrink-0 items-center gap-1 pr-2 pl-4", tall ? "h-12" : "h-7")}
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-1 pr-2 pl-4",
+          tall ? "h-12" : "h-7",
+        )}
       >
-        <div className="flex h-full min-w-0 flex-1 items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        <div className="flex h-full shrink-0 items-center gap-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
           <span>Repos</span>
           {count !== null && (
             <span className="text-[10px] font-medium tabular-nums" data-testid="repos-panel__count">
@@ -38,7 +38,6 @@ export function ReposPanel({
         </div>
         {actions}
       </div>
-      {groupBy}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the list itself handles the keys */}
       <div
         className="min-h-0 flex-1 overflow-y-auto pb-3"

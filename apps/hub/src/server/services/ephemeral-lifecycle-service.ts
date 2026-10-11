@@ -236,7 +236,7 @@ export class EphemeralLifecycleService {
             repo: repo.name,
             name: wt.name,
             path: wt.path,
-            worktreeId: toWorktreeId(repo.name, wt.name),
+            worktreeId: toWorktreeId(repo.name, wt.name, wt.hostId),
           });
         }
       }
@@ -748,7 +748,9 @@ export class EphemeralLifecycleService {
   private moveWorktree(row: WorktreeSleepRow, path: string): void {
     const state = loadState();
     const repo = state.repos.find((p) => p.name === row.repo);
-    const wt = repo?.worktrees.find((w) => w.name === row.name);
+    const wt = repo?.worktrees.find(
+      (w) => w.name === row.name && (w.hostId ?? "local") === row.hostId,
+    );
     if (!wt) return;
     wt.path = path;
     saveState(state);

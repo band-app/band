@@ -56,7 +56,7 @@ describe("review gh runs on the worktree's host", () => {
     const res = await trpcQuery(
       server.url,
       "reviews.forWorktree",
-      { worktreeId: toWorktreeId("widgets", branch) },
+      { worktreeId: toWorktreeId("widgets", branch, worker.hostId) },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -131,7 +131,7 @@ describe("review gh runs on the worktree's host", () => {
   });
 
   it("S4: the sidebar badge and the Checks panel read the same host's gh", async () => {
-    const worktreeId = toWorktreeId("widgets", "feat/online");
+    const worktreeId = toWorktreeId("widgets", "feat/online", worker.hostId);
     // The hub's gh would give another PR number, so a badge computed on the hub would disagree.
     workerGh.setBranchStatusQuery(FAKE_REPO, () =>
       branchRepository({ pullRequests: [prNode({ number: 7, title: "From the worker" })] }),

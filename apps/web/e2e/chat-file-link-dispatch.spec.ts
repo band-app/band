@@ -45,7 +45,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-chat-file-link-dispatch-token";
 const REPO = "chat-file-link-dispatch-repo";
 const DEFAULT_BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` returns true and the shared
 // dockview renders — the chat pane lives in the dockview, and

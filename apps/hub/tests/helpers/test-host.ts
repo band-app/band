@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+import { toWorktreeId, type WorktreeId } from "@band-app/shared/worktree-id";
 import { waitFor } from "./wait-for";
 
 type TestHostMode = "local" | "remote-loopback";
@@ -43,6 +44,22 @@ function readMode(): TestHostMode {
 }
 
 export const isRemoteLoopback = readMode() === "remote-loopback";
+
+/**
+ * The host id of the loopback worker. It is fixed so a test can compute a worktree id at module
+ * level, before its server has started.
+ */
+export const LOOPBACK_HOST_ID = "h-loopback";
+
+/**
+ * The id of a worktree the test seeded or made without naming a host: on the hub's own host in
+ * `local` mode, and on the loopback worker in `remote-loopback` mode, where the seeded worktrees
+ * move. A test that starts its server with `remoteHost: false` passes `onLoopback: false`. Ids are
+ * only ever built here, through `toWorktreeId`.
+ */
+export function testWorktreeId(repo: string, branch: string, onLoopback = true): WorktreeId {
+  return toWorktreeId(repo, branch, isRemoteLoopback && onLoopback ? LOOPBACK_HOST_ID : "local");
+}
 
 const GUARD_PRELOAD = join(import.meta.dirname, "worker-fs-guard.mjs");
 
@@ -158,7 +175,7 @@ export async function startLoopbackWorker(target: WorkerTarget): Promise<Loopbac
     target,
     "mutation",
     "tokens.issueWorkerBootstrap",
-    { hostName: "Loopback worker", labels: ["loopback"] },
+    { hostName: "Loopback worker", labels: ["loopback"], hostId: LOOPBACK_HOST_ID },
   );
 
   const child = spawn(

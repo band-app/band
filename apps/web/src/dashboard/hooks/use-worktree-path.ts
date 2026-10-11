@@ -16,7 +16,7 @@ export function useWorktreePath(worktreeId: string): string | undefined {
   return useMemo(() => {
     for (const proj of repos) {
       for (const wt of proj.worktrees) {
-        if (toWorktreeId(proj.name, wt.name) === worktreeId) {
+        if (toWorktreeId(proj.name, wt.name, wt.hostId) === worktreeId) {
           return wt.path;
         }
       }

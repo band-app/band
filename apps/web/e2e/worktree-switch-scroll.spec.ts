@@ -67,14 +67,19 @@ function makeRepos(): {
   }));
 }
 
-const FIRST_WORKTREE = toWorktreeId("repo-00", "main");
-const LAST_WORKTREE = toWorktreeId(`repo-${String(REPO_COUNT - 1).padStart(2, "0")}`, "main");
+const FIRST_WORKTREE = toWorktreeId("repo-00", "main", "local");
+const LAST_WORKTREE = toWorktreeId(
+  `repo-${String(REPO_COUNT - 1).padStart(2, "0")}`,
+  "main",
+  "local",
+);
 // A worktree mid-list — far enough from either edge that
 // `scrollIntoView({ block: "center" })` can actually center it without
 // hitting the scroll-bounds clamp.
 const MIDDLE_WORKTREE = toWorktreeId(
   `repo-${String(Math.floor(REPO_COUNT / 2)).padStart(2, "0")}`,
   "main",
+  "local",
 );
 
 test.beforeAll(async () => {

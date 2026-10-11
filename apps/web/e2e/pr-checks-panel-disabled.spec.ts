@@ -66,7 +66,7 @@ test.afterAll(async () => {
 
 test("a disabled GitHub plugin adds no Checks tab and never runs gh", async ({ page }) => {
   const worktree = new WorktreePage(page, server.url, TOKEN);
-  await worktree.gotoAndWaitForPlugins(toWorktreeId(REPO, "main"));
+  await worktree.gotoAndWaitForPlugins(toWorktreeId(REPO, "main", "local"));
   await worktree.waitForReady();
   await worktree.revealRightPanel();
 

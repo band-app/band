@@ -88,7 +88,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  worktreeId = toWorktreeId(REPO_NAME, HEAD_BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, HEAD_BRANCH, "local");
 });
 
 // UI state lives on the server now: start each test from none, like the

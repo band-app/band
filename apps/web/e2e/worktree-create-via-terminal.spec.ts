@@ -148,7 +148,7 @@ test.describe("worktrees.create --via terminal (issue #551)", () => {
     // lives on the `WorktreePage` POM so the test body stays free of
     // request plumbing.
     const branch = "feat/via-e2e";
-    const targetWorktreeId = toWorktreeId(REPO, branch);
+    const targetWorktreeId = toWorktreeId(REPO, branch, "local");
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const created = await worktreePage.createWorktreeViaTerminal(
       REPO,

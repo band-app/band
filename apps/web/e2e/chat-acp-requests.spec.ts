@@ -219,7 +219,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acppermission", "main"));
+    await chatPane.goto(toWorktreeId("acppermission", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("deploy please");
@@ -244,7 +244,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpelicit", "main"));
+    await chatPane.goto(toWorktreeId("acpelicit", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("ask me something");
@@ -268,7 +268,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpquestions", "main"));
+    await chatPane.goto(toWorktreeId("acpquestions", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -341,7 +341,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("arrow keys move a highlight through the options and Enter picks it", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpkeys", "main"));
+    await chatPane.goto(toWorktreeId("acpkeys", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -422,7 +422,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpskip", "main"));
+    await chatPane.goto(toWorktreeId("acpskip", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("quiz me");
@@ -449,7 +449,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("the X declines the whole set of questions", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpskipall", "main"));
+    await chatPane.goto(toWorktreeId("acpskipall", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("skip me");
@@ -472,7 +472,7 @@ test.describe("Chat pane — ACP agent requests", () => {
 
   test("a form with no fields shows its message and answers with Submit", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpconfirm", "main"));
+    await chatPane.goto(toWorktreeId("acpconfirm", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("confirm it");
@@ -490,7 +490,7 @@ test.describe("Chat pane — ACP agent requests", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("acpmodel", "main"));
+    await chatPane.goto(toWorktreeId("acpmodel", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");

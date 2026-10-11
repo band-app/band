@@ -89,7 +89,7 @@ test.describe("OpenCode model picker", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("providersopencode", "main"));
+    await chatPane.goto(toWorktreeId("providersopencode", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -147,7 +147,7 @@ test.describe("OpenCode model picker", () => {
 test.describe("Other agents' model picker", () => {
   test("keeps the flat More models list with full model names", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("providersclaude", "main"));
+    await chatPane.goto(toWorktreeId("providersclaude", "main", "local"));
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("claude-code");

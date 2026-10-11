@@ -43,11 +43,11 @@ const REPO_B = "shortcuts-history-b";
 const REPO_CHAT = "shortcuts-show-chat";
 const REPO_SPLIT = "shortcuts-palette-split";
 const LABEL = "label-shortcuts";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
-const WORKTREE_A = toWorktreeId(REPO_A, BRANCH);
-const WORKTREE_B = toWorktreeId(REPO_B, BRANCH);
-const WORKTREE_CHAT = toWorktreeId(REPO_CHAT, BRANCH);
-const WORKTREE_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
+const WORKTREE_A = toWorktreeId(REPO_A, BRANCH, "local");
+const WORKTREE_B = toWorktreeId(REPO_B, BRANCH, "local");
+const WORKTREE_CHAT = toWorktreeId(REPO_CHAT, BRANCH, "local");
+const WORKTREE_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the center dockview renders.
 test.use({ viewport: { width: 1280, height: 800 } });

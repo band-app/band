@@ -33,7 +33,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-worktree-cold-park-token";
 const REPO = "cold-park-repo";
 const BRANCHES = ["cold-a", "cold-b", "cold-c"];
-const [WS_A, WS_B, WS_C] = BRANCHES.map((branch) => toWorktreeId(REPO, branch));
+const [WS_A, WS_B, WS_C] = BRANCHES.map((branch) => toWorktreeId(REPO, branch, "local"));
 const FILE = "notes.txt";
 
 const MINUTE = 60_000;

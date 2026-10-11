@@ -650,7 +650,10 @@ export class CronjobService {
     const appState = loadState();
     const repo = appState.repos.find((p) => p.name === fileKey);
     if (!repo) return null;
-    return toWorktreeId(repo.name, repo.defaultBranch);
+    // The default branch's worktree, on the local host when it has one.
+    const onDefault = repo.worktrees.filter((wt) => wt.name === repo.defaultBranch);
+    const row = onDefault.find((wt) => (wt.hostId ?? "local") === "local") ?? onDefault[0];
+    return toWorktreeId(repo.name, repo.defaultBranch, row?.hostId);
   }
 
   // -------------------------------------------------------------------------

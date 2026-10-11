@@ -38,7 +38,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-right-panel-header-token";
 const REPO = "alpha-right-header";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so the desktop layout (sidebars + dockview)
 // renders (>= 1024px in useIsDesktop.ts).

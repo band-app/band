@@ -28,7 +28,9 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-terminal-tab-switch-resize-token";
 // One worktree per test: PTYs and terminal tabs outlive a test.
 const REPOS = ["tsr-switch", "tsr-resize", "tsr-hidden", "tsr-split"];
-const [WT_SWITCH, WT_RESIZE, WT_HIDDEN, WT_SPLIT] = REPOS.map((r) => toWorktreeId(r, "main"));
+const [WT_SWITCH, WT_RESIZE, WT_HIDDEN, WT_SPLIT] = REPOS.map((r) =>
+  toWorktreeId(r, "main", "local"),
+);
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

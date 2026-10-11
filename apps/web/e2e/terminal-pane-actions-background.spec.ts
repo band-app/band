@@ -29,7 +29,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-terminal-pane-actions-bg-token";
 const BRANCH = "main";
 const REPO = "term-pane-actions-bg";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and terminals can split.
 test.use({ viewport: { width: 1280, height: 800 } });

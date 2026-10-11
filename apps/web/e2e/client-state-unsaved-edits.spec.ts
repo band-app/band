@@ -71,7 +71,7 @@ function freshWorktree(): string {
   const branch = TEST_BRANCHES[nextWorktree];
   if (!branch) throw new Error("add a branch to TEST_BRANCHES for the new test");
   nextWorktree += 1;
-  return toWorktreeId(REPO, branch);
+  return toWorktreeId(REPO, branch, "local");
 }
 
 const unsavedKey = (worktree: string, path: string) => `band-unsaved:${worktree}:${path}`;

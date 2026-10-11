@@ -8,6 +8,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "search-content-test-token";
@@ -129,7 +130,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("returns matches from both tracked and untracked files", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND_RG_MARKER",
     });
     expect(res.status).toBe(200);
@@ -150,7 +151,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("returns matches from tracked files inside dot-directories (#536)", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND_RG_MARKER",
     });
     expect(res.status).toBe(200);
@@ -173,7 +174,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
     // fixture files contain it, so any match would have to come from
     // .git/ itself.
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "ref:",
     });
     expect(res.status).toBe(200);
@@ -183,7 +184,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("respects .gitignore and excludes ignored files", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND_RG_MARKER",
     });
     const { results } = await trpcData<{ results: SearchResult[] }>(res);
@@ -193,7 +194,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
   it("supports case-sensitive search", async () => {
     // Lowercase query, case-insensitive (default): matches the uppercase marker.
     const insensitive = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "band_rg_marker",
     });
     const insensitiveData = await trpcData<{ results: SearchResult[] }>(insensitive);
@@ -201,7 +202,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
     // Same query case-sensitive: no matches.
     const sensitive = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "band_rg_marker",
       caseSensitive: true,
     });
@@ -214,7 +215,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
     // word "hello" matches as a whole word; "ello" should not when wholeWord
     // is true.
     const wholeWordMatch = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "hello",
       wholeWord: true,
     });
@@ -222,7 +223,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
     expect(matchData.results.some((r) => r.file === "tracked.txt")).toBe(true);
 
     const wholeWordMiss = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "ello",
       wholeWord: true,
     });
@@ -234,7 +235,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
     // A regex meta-character that would match anything in regex mode. With
     // fixed strings (the default), it should match literally and find nothing.
     const literal = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND.*MARKER",
     });
     const literalData = await trpcData<{ results: SearchResult[] }>(literal);
@@ -242,7 +243,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
     // Same query with regex enabled should match all marker lines.
     const regex = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND.*MARKER",
       regex: true,
     });
@@ -252,7 +253,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("respects the limit parameter", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "BAND_RG_MARKER",
       limit: 1,
     });
@@ -262,7 +263,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("returns an empty result set when there are no matches", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       query: "this-string-does-not-exist-anywhere-in-the-repo-zzz",
     });
     expect(res.status).toBe(200);
@@ -272,7 +273,7 @@ describe("tRPC — worktree.searchContent (ripgrep)", () => {
 
   it("returns an error for an unknown worktree", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       query: "anything",
     });
     expect(res.status).toBe(500);
@@ -322,7 +323,7 @@ describe("tRPC — worktree.searchContent in non-git directories", () => {
 
   it("finds files in a worktree that is not a git repository", async () => {
     const res = await trpcQuery(server.url, "worktree.searchContent", {
-      worktreeId: "plain-main",
+      worktreeId: testWorktreeId("plain", "main"),
       query: "BAND_PLAIN_MARKER",
     });
     expect(res.status).toBe(200);

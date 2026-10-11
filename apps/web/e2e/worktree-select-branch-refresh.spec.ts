@@ -21,8 +21,8 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-select-branch-refresh-token";
 const REPO = "selectrefresh";
-const MAIN = toWorktreeId(REPO, "main");
-const FEATURE = toWorktreeId(REPO, "feature");
+const MAIN = toWorktreeId(REPO, "main", "local");
+const FEATURE = toWorktreeId(REPO, "feature", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

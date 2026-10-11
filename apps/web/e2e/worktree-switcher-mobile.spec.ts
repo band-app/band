@@ -42,7 +42,7 @@ const TOKEN = "e2e-worktree-switcher-mobile-token";
 const REPO = "switcher-mobile-repo";
 const DEFAULT_BRANCH = "main";
 
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 // Narrow viewport — `useIsDesktop()` reports false (threshold 1024 px), so the
 // mobile branch of `worktree.$worktreeId.tsx` mounts: a header with the

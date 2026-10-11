@@ -20,6 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, trpc, turnEnded } from "./helpers/acp-chat";
 import { RELAY_CLI_COMMANDS } from "./helpers/relay-cli-commands";
@@ -84,6 +85,9 @@ let hubRepo: string;
 let server: ServerHandle;
 let a: Worker;
 let b: Worker;
+// The ids of the two worktrees, named after their hosts. Set once the workers are up.
+let WT_A = "";
+let WT_B = "";
 
 const q = <T>(procedure: string, input?: unknown) =>
   trpcQuery(server.url, procedure, input, TEST_TOKEN).then(async (res) => {
@@ -120,11 +124,13 @@ function startWorkerProcess(w: Omit<Worker, "child" | "exited">, token: string):
   return { ...w, child, exited };
 }
 
-async function addWorker(name: string, scenario: object): Promise<Worker> {
-  const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
-    hostName: name,
-    labels: [],
-  });
+type IssuedWorker = { token: string; hostId: string };
+
+const issueWorker = (name: string) =>
+  m<IssuedWorker>("tokens.issueWorkerBootstrap", { hostName: name, labels: [] });
+
+async function addWorker(name: string, scenario: object, issued?: IssuedWorker): Promise<Worker> {
+  issued ??= await issueWorker(name);
   const home = tmp(`band-relay-${name}-home-`);
   const root = tmp(`band-relay-${name}-root-`);
   makeRepo(join(root, "proj"));
@@ -161,7 +167,7 @@ async function createWorktree(w: Worker, branch: string): Promise<string> {
     hostId: w.hostId,
     hostRepoPath: join(w.root, "proj"),
   });
-  return `proj-${branch}`;
+  return toWorktreeId("proj", branch, w.hostId);
 }
 
 const worktreeOf = (w: Worker, branch: string) => join(w.root, ".band-worktrees", "proj", branch);
@@ -256,15 +262,20 @@ beforeAll(async () => {
   const post = (name: string, path: string, body: object) => ({
     http: { name, path, method: "POST", body },
   });
+  // Both hosts exist before the scenario does, because a worktree's id names its host.
+  const issuedA = await issueWorker("a");
+  const issuedB = await issueWorker("b");
+  WT_A = toWorktreeId("proj", "relay-a", issuedA.hostId);
+  WT_B = toWorktreeId("proj", "relay-b", issuedB.hostId);
   const scenario = {
     turns: [
       {
         match: "^relay-probe",
         steps: [
-          probe("own-chats", listChats("proj-relay-a")),
-          probe("other-worker-chats", listChats("proj-relay-b")),
+          probe("own-chats", listChats(WT_A)),
+          probe("other-worker-chats", listChats(WT_B)),
           probe("hub-chats", listChats("proj-main")),
-          probe("no-token", listChats("proj-relay-a"), { auth: "none" }),
+          probe("no-token", listChats(WT_A), { auth: "none" }),
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
@@ -275,12 +286,12 @@ beforeAll(async () => {
           }),
           probe("mcp-own", "/mcp", {
             method: "POST",
-            body: mcpChatsList("proj-relay-a"),
+            body: mcpChatsList(WT_A),
             headers: MCP_HEADERS,
           }),
           probe("mcp-other", "/mcp", {
             method: "POST",
-            body: mcpChatsList("proj-relay-b"),
+            body: mcpChatsList(WT_B),
             headers: MCP_HEADERS,
           }),
           probe("mcp-tokens", "/mcp", {
@@ -295,16 +306,16 @@ beforeAll(async () => {
           }),
           probe(
             "batch",
-            `/trpc/chats.list,tokens.list?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { worktreeId: "proj-relay-a" }, 1: {} }))}`,
+            `/trpc/chats.list,tokens.list?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { worktreeId: WT_A }, 1: {} }))}`,
           ),
           probe("decoy-terminal", "/trpc/terminal.kill", {
             method: "POST",
-            body: { terminalId: "hub-terminal", worktreeId: "proj-relay-a" },
+            body: { terminalId: "hub-terminal", worktreeId: WT_A },
             headers: { "content-type": "application/json" },
           }),
           probe("decoy-repo", "/trpc/worktrees.gitPush", {
             method: "POST",
-            body: { repo: "proj", name: "main", worktreeId: "proj-relay-a" },
+            body: { repo: "proj", name: "main", worktreeId: WT_A },
             headers: { "content-type": "application/json" },
           }),
           probe("other-route", "/api/worktree-file/proj-main/hello.txt"),
@@ -319,30 +330,30 @@ beforeAll(async () => {
         match: "^id-probe",
         steps: [
           post("b-chat-collide", "/trpc/chats.create", {
-            worktreeId: "proj-relay-b",
+            worktreeId: WT_B,
             id: "a-owned-chat",
           }),
           post("b-browser-collide", "/trpc/browsers.create", {
-            worktreeId: "proj-relay-b",
+            worktreeId: WT_B,
             id: "a-owned-browser",
           }),
           post("b-chat-into-a", "/trpc/chats.create", {
-            worktreeId: "proj-relay-a",
+            worktreeId: WT_A,
             id: "fresh-id",
           }),
           post("b-chat-own", "/trpc/chats.create", {
-            worktreeId: "proj-relay-b",
+            worktreeId: WT_B,
             id: "b-owned-chat",
           }),
           post("b-browser-own", "/trpc/browsers.create", {
-            worktreeId: "proj-relay-b",
+            worktreeId: WT_B,
             id: "b-owned-browser",
           }),
           post("repos-remove", "/trpc/repos.remove", { name: "proj" }),
           post("tokens-list", "/trpc/tokens.list", {}),
           post("chats-unlisted", "/trpc/chats.continueInTerminal", {
             chatId: "b-owned-chat",
-            worktreeId: "proj-relay-b",
+            worktreeId: WT_B,
           }),
           post("tasks-cancel", "/trpc/tasks.cancel", { taskId: "x" }),
           post("worktrees-remove", "/trpc/worktrees.remove", {
@@ -363,8 +374,8 @@ beforeAll(async () => {
       },
     ],
   };
-  a = await addWorker("a", scenario);
-  b = await addWorker("b", scenario);
+  a = await addWorker("a", scenario, issuedA);
+  b = await addWorker("b", scenario, issuedB);
 }, 180_000);
 
 afterAll(async () => {
@@ -379,7 +390,7 @@ describe("uploads (S1)", () => {
     await createWorktree(a, "relay-a");
     await createWorktree(b, "relay-b");
 
-    const { events } = await submit("proj-relay-a", "look at this file", [
+    const { events } = await submit(WT_A, "look at this file", [
       { mediaType: "text/plain", url: dataUrl("uploaded to a worker\n"), filename: "notes.txt" },
     ]);
     expect(events.find(turnEnded)).toBeDefined();
@@ -392,7 +403,7 @@ describe("uploads (S1)", () => {
       .filter((r) => r.method === "session/prompt");
     const uri = prompts.at(-1)?.params.prompt?.find((blk) => blk.uri)?.uri ?? "";
     const path = decodeURIComponent(new URL(uri).pathname);
-    expect(path.startsWith(join(a.root, ".band-uploads", "proj-relay-a"))).toBe(true);
+    expect(path.startsWith(join(a.root, ".band-uploads", WT_A))).toBe(true);
     expect(readFileSync(path, "utf8")).toBe("uploaded to a worker\n");
 
     // The hub's disk has no uploads.
@@ -405,7 +416,7 @@ describe("uploads (S1)", () => {
       | undefined;
     const url = prompt?.files?.[0]?.url ?? "";
     expect(url).toBe(
-      `/api/uploads/proj-relay-a/${encodeURIComponent(path.split("/").at(-1) ?? "")}`,
+      `/api/uploads/${encodeURIComponent(WT_A)}/${encodeURIComponent(path.split("/").at(-1) ?? "")}`,
     );
     const served = await fetch(`${server.url}${url}`, {
       headers: { Cookie: `band_token=${TEST_TOKEN}` },
@@ -432,15 +443,15 @@ describe("uploads (S1)", () => {
   });
 
   it("shows a file the agent shares on the worker as a download in the chat", async () => {
-    const { events } = await submit("proj-relay-a", "share-file please");
+    const { events } = await submit(WT_A, "share-file please");
     const file = events.find((e) => e.type === "file") as
       | { url: string; filename: string }
       | undefined;
     expect(file?.filename).toBe("report.txt");
-    expect(readFileSync(join(a.root, ".band-shared", "proj-relay-a", "report.txt"), "utf8")).toBe(
+    expect(readFileSync(join(a.root, ".band-shared", WT_A, "report.txt"), "utf8")).toBe(
       "shared from the worker\n",
     );
-    expect(existsSync(join(hubHome, ".band", "shared", "proj-relay-a"))).toBe(false);
+    expect(existsSync(join(hubHome, ".band", "shared", WT_A))).toBe(false);
     const served = await fetch(`${server.url}${file?.url}`, {
       headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
@@ -451,7 +462,7 @@ describe("uploads (S1)", () => {
 
 describe("the worker relay (S2)", () => {
   it("gives the agent the relay as its server and lets it call the hub for its own worktree", async () => {
-    await submit("proj-relay-a", "relay-probe");
+    await submit(WT_A, "relay-probe");
     const lines = httpLog(a);
     const by = (name: string) => lines.find((l) => l.name === name);
 
@@ -505,12 +516,12 @@ describe("the worker relay (S2)", () => {
       .map((l) => JSON.parse(l) as { env: { BAND_SERVER_URL?: string } })
       .find((r) => r.env.BAND_SERVER_URL);
     const relay = info?.env.BAND_SERVER_URL ?? "";
-    const res = await fetch(`${relay}${listChats("proj-relay-a")}`, {
+    const res = await fetch(`${relay}${listChats(WT_A)}`, {
       headers: { Cookie: "band_token=brt_not-issued" },
     });
     expect(res.status).toBe(401);
     // The hub's own shared token is no credential for the relay either.
-    const withShared = await fetch(`${relay}${listChats("proj-relay-a")}`, {
+    const withShared = await fetch(`${relay}${listChats(WT_A)}`, {
       headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
     expect(withShared.status).toBe(401);
@@ -519,10 +530,10 @@ describe("the worker relay (S2)", () => {
 
 describe("what an agent may call, and which ids it may take", () => {
   it("refuses a chat or browser id that belongs to a worktree on another worker", async () => {
-    await m("chats.create", { worktreeId: "proj-relay-a", id: "a-owned-chat" });
-    await m("browsers.create", { worktreeId: "proj-relay-a", id: "a-owned-browser" });
+    await m("chats.create", { worktreeId: WT_A, id: "a-owned-chat" });
+    await m("browsers.create", { worktreeId: WT_A, id: "a-owned-browser" });
 
-    await submit("proj-relay-b", "id-probe");
+    await submit(WT_B, "id-probe");
     const by = (name: string) => httpLog(b).find((l) => l.name === name);
 
     expect(by("b-chat-collide")?.status).toBe(403);
@@ -534,16 +545,16 @@ describe("what an agent may call, and which ids it may take", () => {
 
     // Worker A's chat and tab are untouched, and B's calls made nothing in A.
     const chats = await q<{ chats: Array<{ id: string }> }>("chats.list", {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
     });
     expect(chats.chats.filter((c) => c.id === "a-owned-chat")).toHaveLength(1);
     expect(chats.chats.map((c) => c.id)).not.toContain("fresh-id");
     const aChat = await q<{ chat: { worktreeId?: string } | null }>("chats.get", {
       chatId: "a-owned-chat",
     });
-    expect(JSON.stringify(aChat)).toContain("proj-relay-a");
+    expect(JSON.stringify(aChat)).toContain(WT_A);
     const bChats = await q<{ chats: Array<{ id: string }> }>("chats.list", {
-      worktreeId: "proj-relay-b",
+      worktreeId: WT_B,
     });
     expect(bChats.chats.map((c) => c.id)).not.toContain("a-owned-chat");
   });
@@ -560,6 +571,66 @@ describe("what an agent may call, and which ids it may take", () => {
       repos: Array<{ name: string; worktrees: Array<{ name: string }> }>;
     }>("repos.list");
     expect(repos.find((p) => p.name === "proj")?.worktrees.map((w) => w.name)).toContain("relay-a");
+  });
+
+  it("pins create and remove to the caller's host on /trpc and /mcp alike", async () => {
+    const { pinWorktreeHost, checkRelayRequest } = await import(
+      "../src/server/services/relay-scope"
+    );
+    const post = (path: string, payload: unknown) => ({
+      scope: { worktreeId: "proj-relay-a@h-w" },
+      method: "POST",
+      path,
+      headers: {},
+      body: Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
+    });
+    const bodyOf = (req: { body?: string }) =>
+      JSON.parse(Buffer.from(req.body ?? "", "base64").toString("utf8"));
+    const remove = { repo: "proj", name: "main" };
+    for (const path of ["/trpc/worktrees%2Eremove", "/trpc/../trpc/worktrees.remove"]) {
+      expect(bodyOf(pinWorktreeHost(post(path, remove), "h-w")).hostId).toBe("h-w");
+    }
+    expect(bodyOf(pinWorktreeHost(post("/trpc/worktrees.remove", remove), "h-w"))).toEqual({
+      ...remove,
+      hostId: "h-w",
+    });
+    const call = (name: string, args: unknown) => ({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args },
+    });
+    const pinned = bodyOf(
+      pinWorktreeHost(post("/mcp", call("band_worktrees_remove", remove)), "h-w"),
+    );
+    expect(pinned.params.arguments).toEqual({ ...remove, hostId: "h-w" });
+    // A batch is pinned per message, and other tools are left alone.
+    const batch = bodyOf(
+      pinWorktreeHost(
+        post("/mcp", [
+          call("band_worktrees_create", { repo: "proj", branch: "x" }),
+          call("band_chats_list", { worktreeId: "w" }),
+        ]),
+        "h-w",
+      ),
+    );
+    expect(batch[0].params.arguments.hostId).toBe("h-w");
+    expect(batch[1].params.arguments).toEqual({ worktreeId: "w" });
+    // Naming another host is refused outright.
+    const lookups: Parameters<typeof checkRelayRequest>[2] = {
+      hostOfWorktree: () => "h-w",
+      worktreeOfChat: () => null,
+      worktreeOfCwd: () => null,
+      hostOfTerminal: () => null,
+      worktreeOfBrowser: () => null,
+      worktreeOfSubscription: () => null,
+    };
+    const other = checkRelayRequest(
+      post("/trpc/worktrees.remove", { ...remove, hostId: "local" }),
+      "h-w",
+      lookups,
+    );
+    expect(other.ok).toBe(false);
   });
 
   it("lists only procedures the hub has", async () => {
@@ -647,11 +718,11 @@ describe("the band CLI through the relay (S2)", () => {
     "runs `band chats list` for its own worktree and is refused another's",
     async () => {
       expect(agentEnv()?.BAND_SERVER_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-      const own = await run("chats", "list", "proj-relay-a", "--output", "json");
+      const own = await run("chats", "list", WT_A, "--output", "json");
       expect(own.code).toBe(0);
       expect(own.out).toContain("a-owned-chat");
 
-      const other = await run("chats", "list", "proj-relay-b", "--output", "json");
+      const other = await run("chats", "list", WT_B, "--output", "json");
       expect(other.code).not.toBe(0);
       expect(other.out).not.toContain("b-owned-chat");
       const hubs = await run("chats", "list", "proj-main", "--output", "json");
@@ -660,7 +731,7 @@ describe("the band CLI through the relay (S2)", () => {
   );
 
   it.skipIf(!cli)("runs the commands the band skills name, for its own worktree", async () => {
-    const ws = "proj-relay-a";
+    const ws = WT_A;
     const json = async (...args: string[]) => JSON.parse(await ok(...args));
 
     const listed = await json("worktrees", "list", "--output", "json");
@@ -815,8 +886,8 @@ describe("the band CLI through the relay (S2)", () => {
   it.skipIf(!cli)("lists only the repos that have a worktree on its worker (S3)", async () => {
     const out = JSON.parse((await run("worktrees", "list", "--output", "json")).out);
     const ids = (out.worktrees as Array<{ worktreeId: string }>).map((w) => w.worktreeId);
-    expect(ids).toContain("proj-relay-a");
-    expect(ids).not.toContain("proj-relay-b");
+    expect(ids).toContain(WT_A);
+    expect(ids).not.toContain(WT_B);
     expect(ids).not.toContain("proj-main");
   });
 
@@ -831,7 +902,7 @@ describe("the band CLI through the relay (S2)", () => {
       expect(result.out).toContain(`${name} is not available to agents`);
       expect(result.out).not.toContain("Unknown error");
     }
-    const other = await run("chats", "list", "proj-relay-b");
+    const other = await run("chats", "list", WT_B);
     expect(other.out).toContain("chats.list");
     expect(other.out).not.toContain("Unknown error");
   });
@@ -840,7 +911,7 @@ describe("the band CLI through the relay (S2)", () => {
     "attaches to a terminal on the worker through the relay and detaches without killing it (S1, S3)",
     async () => {
       const created = await m<{ terminalId: string }>("terminal.create", {
-        worktreeId: "proj-relay-a",
+        worktreeId: WT_A,
       });
       // The attach detaches at EOF on stdin, so the input stays open long enough for the output to arrive.
       const attached = await runWith(
@@ -854,7 +925,7 @@ describe("the band CLI through the relay (S2)", () => {
       succeeded.add("terminals attach");
 
       // Detaching, or killing the CLI, leaves the terminal running.
-      const listed = await ok("terminals", "list", "proj-relay-a");
+      const listed = await ok("terminals", "list", WT_A);
       expect(listed).toContain(created.terminalId);
 
       // Closing the terminal on the hub ends an attached CLI with a clear message.
@@ -865,7 +936,7 @@ describe("the band CLI through the relay (S2)", () => {
         created.terminalId,
       );
       await new Promise((r) => setTimeout(r, 1_000));
-      await m("terminal.kill", { terminalId: created.terminalId, worktreeId: "proj-relay-a" });
+      await m("terminal.kill", { terminalId: created.terminalId, worktreeId: WT_A });
       const closed = await watching;
       expect(closed.out).toContain("[terminal exited]");
     },
@@ -920,10 +991,10 @@ describe("the band CLI on a worker", () => {
       timeoutMs: 30_000,
     });
     const created = await m<{ terminalId: string }>("terminal.create", {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
     });
     const socket = await TerminalSocket.open(server, {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -931,11 +1002,11 @@ describe("the band CLI on a worker", () => {
       socket.type("echo found=$(command -v band)\r");
       await socket.waitForOutput(`found=${cached(a)}`);
 
-      socket.type("band chats list proj-relay-a --output json >/dev/null; echo own=$?\r");
+      socket.type(`band chats list ${WT_A} --output json >/dev/null; echo own=$?\r`);
       await socket.waitForOutput("own=0");
 
       // The credential is scoped: another worker's worktree, the hub's own, and admin procedures are refused.
-      socket.type("band chats list proj-relay-b --output json >/dev/null 2>&1; echo other=$?\r");
+      socket.type(`band chats list ${WT_B} --output json >/dev/null 2>&1; echo other=$?\r`);
       await socket.waitForOutput("other=1");
       socket.type("band chats list proj-main --output json >/dev/null 2>&1; echo hub=$?\r");
       await socket.waitForOutput("hub=1");
@@ -946,7 +1017,7 @@ describe("the band CLI on a worker", () => {
 
       // The worker's session token never reaches the shell.
       socket.type("echo ws=$BAND_WORKTREE_ID\r");
-      await socket.waitForOutput("ws=proj-relay-a");
+      await socket.waitForOutput(`ws=${WT_A}`);
       socket.type(`echo leak=$(env | grep -c -e '${TEST_TOKEN}' -e 'bws_')\r`);
       await socket.waitForOutput("leak=0");
     } finally {
@@ -960,7 +1031,7 @@ describe("the band CLI on a worker", () => {
       timeoutMs: 30_000,
     });
     // Starts an agent after the CLI is cached, so its environment carries the PATH.
-    await submit("proj-relay-a", "path-probe");
+    await submit(WT_A, "path-probe");
     const env = readFileSync(a.stubLog, "utf8")
       .split("\n")
       .filter(Boolean)
@@ -979,11 +1050,11 @@ describe("the band CLI on a worker", () => {
       .reverse()
       .find((r) => r.env.BAND_TOKEN)?.env;
     expect(env?.PATH?.split(":")[0]).toBe(join(a.state, "bin"));
-    expect(env?.BAND_WORKTREE_ID).toBe("proj-relay-a");
+    expect(env?.BAND_WORKTREE_ID).toBe(WT_A);
     expect(env?.LEAK).toBe(false);
     const out = execFileSync(
       "sh",
-      ["-c", "command -v band && band chats list proj-relay-a --output json"],
+      ["-c", `command -v band && band chats list ${WT_A} --output json`],
       {
         encoding: "utf8",
         env: {
@@ -1001,12 +1072,12 @@ describe("the band CLI on a worker", () => {
 describe("hooks through the relay (S3)", () => {
   it("delivers a hook sent from a terminal on the worker to the hub", async () => {
     // The chats that ran before ask for attention, which outranks a hook's `working` until it is cleared.
-    await m("statuses.clearNeedsAttention", { worktreeId: "proj-relay-a" });
+    await m("statuses.clearNeedsAttention", { worktreeId: WT_A });
     const created = await m<{ terminalId: string }>("terminal.create", {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
     });
     const socket = await TerminalSocket.open(server, {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -1032,7 +1103,7 @@ describe("hooks through the relay (S3)", () => {
         const data = await trpc<{ agent?: { status?: string } } | null>(
           server.url,
           "statuses.get",
-          { worktreeId: "proj-relay-a" },
+          { worktreeId: WT_A },
           "query",
         );
         return data?.agent?.status === "working" ? data.agent.status : undefined;
@@ -1046,10 +1117,10 @@ describe("hooks through the relay (S3)", () => {
     // Worker B's agent token must not report into worker A's worktree. The call
     // goes through the relay as a terminal on B would send it.
     const created = await m<{ terminalId: string }>("terminal.create", {
-      worktreeId: "proj-relay-b",
+      worktreeId: WT_B,
     });
     const socket = await TerminalSocket.open(server, {
-      worktreeId: "proj-relay-b",
+      worktreeId: WT_B,
       terminalId: created.terminalId,
       token: TEST_TOKEN,
     });
@@ -1069,7 +1140,7 @@ describe("system and editor calls on the worker (S4)", () => {
     writeFileSync(join(worktreeOf(a, "relay-a"), "only-on-worker.txt"), "x\n");
     const opened = await m<{ ok: boolean; external: boolean; filePath: string }>(
       "editor.openFile",
-      { worktreeId: "proj-relay-a", filePath: "only-on-worker.txt" },
+      { worktreeId: WT_A, filePath: "only-on-worker.txt" },
     );
     expect(opened).toMatchObject({ ok: true, external: false, filePath: "only-on-worker.txt" });
 
@@ -1077,7 +1148,7 @@ describe("system and editor calls on the worker (S4)", () => {
     const outside = await trpcMutate(
       server.url,
       "editor.openFile",
-      { worktreeId: "proj-relay-a", filePath: join(hubRepo, "hello.txt") },
+      { worktreeId: WT_A, filePath: join(hubRepo, "hello.txt") },
       TEST_TOKEN,
     );
     expect(outside.status).toBe(404);
@@ -1087,7 +1158,7 @@ describe("system and editor calls on the worker (S4)", () => {
   it("formats a file with the config on the worker", async () => {
     writeFileSync(join(worktreeOf(a, "relay-a"), ".prettierrc"), JSON.stringify({ semi: false }));
     const formatted = await m<{ formatted: string; skipped: boolean }>("worktree.formatFile", {
-      worktreeId: "proj-relay-a",
+      worktreeId: WT_A,
       filePath: "x.ts",
       content: "const a = 1;\n",
     });
@@ -1138,7 +1209,7 @@ describe("removing a worktree while its worker is offline (S5)", () => {
     );
     // The worker could not be told, so the checkout is still there.
     expect(existsSync(dir)).toBe(true);
-    expect(worktreeId).toBe("proj-relay-c");
+    expect(worktreeId).toBe(toWorktreeId("proj", "relay-c", b.hostId));
 
     b = startWorkerProcess(b, "bwb_unused-because-the-session-token-is-saved");
     await waitFor(async () => ((await hostStatus(b)) === "online" ? true : undefined), {

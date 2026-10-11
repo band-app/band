@@ -81,7 +81,7 @@ export const tasksRouter = t.router({
       const worktreeIds = new Set<string>();
       for (const p of state.repos) {
         for (const wt of p.worktrees) {
-          worktreeIds.add(toWorktreeId(p.name, wt.name));
+          worktreeIds.add(toWorktreeId(p.name, wt.name, wt.hostId));
         }
       }
       return {

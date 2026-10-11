@@ -88,8 +88,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     prompt?: string,
     agentMode?: AgentMode,
     host?: { hostId: string; hostRepoPath?: string },
-  ): Promise<void> {
-    await this.trpc.worktrees.create.mutate({
+  ): Promise<{ hostId?: string }> {
+    const res = await this.trpc.worktrees.create.mutate({
       repo,
       branch,
       base,
@@ -98,14 +98,20 @@ export class WebDashboardAdapter implements DashboardAdapter {
       hostId: host?.hostId,
       hostRepoPath: host?.hostRepoPath,
     });
+    return { hostId: res.hostId };
   }
 
-  async removeWorktree(repo: string, name: string): Promise<void> {
-    await this.trpc.worktrees.remove.mutate({ repo, name });
+  async removeWorktree(repo: string, name: string, hostId?: string): Promise<void> {
+    await this.trpc.worktrees.remove.mutate({ repo, name, hostId });
   }
 
-  async setWorktreePinned(repo: string, name: string, pinned: boolean): Promise<void> {
-    await this.trpc.worktrees.setPinned.mutate({ repo, name, pinned });
+  async setWorktreePinned(
+    repo: string,
+    name: string,
+    pinned: boolean,
+    hostId?: string,
+  ): Promise<void> {
+    await this.trpc.worktrees.setPinned.mutate({ repo, name, pinned, hostId });
   }
 
   async clearNeedsAttention(worktreeId: string): Promise<void> {
@@ -120,12 +126,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.worktrees.runScript.mutate({ path, scriptType });
   }
 
-  gitPull(repo: string, name: string): Promise<GitOpResult> {
-    return this.trpc.worktrees.gitPull.mutate({ repo, name });
+  gitPull(repo: string, name: string, hostId?: string): Promise<GitOpResult> {
+    return this.trpc.worktrees.gitPull.mutate({ repo, name, hostId });
   }
 
-  gitPush(repo: string, name: string): Promise<GitOpResult> {
-    return this.trpc.worktrees.gitPush.mutate({ repo, name });
+  gitPush(repo: string, name: string, hostId?: string): Promise<GitOpResult> {
+    return this.trpc.worktrees.gitPush.mutate({ repo, name, hostId });
   }
 
   async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {

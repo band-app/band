@@ -18,6 +18,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findChromium } from "@band-app/host-local/browser/chromium";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -71,7 +72,10 @@ let hostId: string;
 let site: Server;
 let origin: string;
 let hubLog: string;
-const worktreeId = "proj-cdp-feat";
+// Named after its host, so it is known once the worker has been issued.
+let worktreeId = "";
+// The worker names a profile directory after the id with every character outside [A-Za-z0-9._-] turned into "_".
+const profileName = () => worktreeId.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_");
 
 const q = <T>(procedure: string, input?: unknown) =>
   trpcQuery(server.url, procedure, input, TOKEN).then(async (res) => {
@@ -130,7 +134,7 @@ function printLaunchDiagnostics(): void {
   }
   try {
     lines.push(
-      `chromium.log: ${readFileSync(join(workerState, "browser", worktreeId, "chromium.log"), "utf8").slice(-2000)}`,
+      `chromium.log: ${readFileSync(join(workerState, "browser", profileName(), "chromium.log"), "utf8").slice(-2000)}`,
     );
   } catch {
     // browser never started
@@ -230,6 +234,7 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
       labels: [],
     });
     hostId = issued.hostId;
+    worktreeId = toWorktreeId("proj", "cdp-feat", hostId);
     worker = spawn(
       process.execPath,
       [
@@ -279,24 +284,28 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
   // The first call starts Chromium. Its launch budget is 44 s, so the test waits longer than that and a
   // failed launch reports the launcher's error with the browser's log instead of a bare timeout.
   it("reads the title of a page on the worker's localhost through the hub (S1)", async () => {
-    expect(await title(`worktreeId=${worktreeId}`, origin)).toBe("dev server on the worker");
+    expect(await title(`worktreeId=${encodeURIComponent(worktreeId)}`, origin)).toBe(
+      "dev server on the worker",
+    );
   }, 90_000);
 
   it("keeps cookies across a reopen of the worktree's browser (S2)", async () => {
-    expect(await title(`worktreeId=${worktreeId}`, `${origin}/cookie`)).toBe(
+    expect(await title(`worktreeId=${encodeURIComponent(worktreeId)}`, `${origin}/cookie`)).toBe(
       "dev server on the worker",
     );
-    const profile = join(workerState, "browser", worktreeId);
+    const profile = join(workerState, "browser", profileName());
     expect(existsSync(join(profile, "DevToolsActivePort"))).toBe(true);
     // Ending the browser through a worktree removal is S3. Here a second connection must see the same browser.
-    expect(await title(`worktreeId=${worktreeId}`, `${origin}/echo`)).toBe("cookie:band=kept");
+    expect(await title(`worktreeId=${encodeURIComponent(worktreeId)}`, `${origin}/echo`)).toBe(
+      "cookie:band=kept",
+    );
   });
 
   it("refuses a /cdp upgrade without a valid token", async () => {
     for (const headers of [{}, { Authorization: "Bearer wrong" }]) {
       const outcome = await new Promise<string>((resolve) => {
         const ws = new WebSocket(
-          `${server.url.replace("http", "ws")}/cdp?worktreeId=${worktreeId}`,
+          `${server.url.replace("http", "ws")}/cdp?worktreeId=${encodeURIComponent(worktreeId)}`,
           {
             headers,
           },
@@ -325,8 +334,8 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
 
   it("binds DevTools to loopback and ends Chromium when the worktree is removed (S3)", async () => {
     // Start from a known state so the test does not depend on the ones before it.
-    await title(`worktreeId=${worktreeId}`, origin);
-    const portFile = join(workerState, "browser", worktreeId, "DevToolsActivePort");
+    await title(`worktreeId=${encodeURIComponent(worktreeId)}`, origin);
+    const portFile = join(workerState, "browser", profileName(), "DevToolsActivePort");
     const [port] = readFileSync(portFile, "utf8").split("\n");
     const listeners = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
       encoding: "utf8",
@@ -334,7 +343,7 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
     expect(listeners).toContain("127.0.0.1:");
     expect(listeners).not.toMatch(/\*:|0\.0\.0\.0:|\[::\]:/);
 
-    const pids = execFileSync("pgrep", ["-f", join(workerState, "browser", worktreeId)], {
+    const pids = execFileSync("pgrep", ["-f", join(workerState, "browser", profileName())], {
       encoding: "utf8",
     })
       .trim()

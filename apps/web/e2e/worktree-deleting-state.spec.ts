@@ -36,9 +36,9 @@ const DEFAULT_BRANCH = "main";
 const BRANCH_UI = "feature-delete-ui";
 const BRANCH_API = "feature-delete-api";
 
-const WORKTREE_MAIN = toWorktreeId(REPO, DEFAULT_BRANCH);
-const WORKTREE_UI = toWorktreeId(REPO, BRANCH_UI);
-const WORKTREE_API = toWorktreeId(REPO, BRANCH_API);
+const WORKTREE_MAIN = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
+const WORKTREE_UI = toWorktreeId(REPO, BRANCH_UI, "local");
+const WORKTREE_API = toWorktreeId(REPO, BRANCH_API, "local");
 
 // Long enough to observe the deleting state, well under the 60s cap. The
 // API case asserts the marker within MARKER_TIMEOUT_MS, well before the

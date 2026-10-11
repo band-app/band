@@ -46,15 +46,15 @@ const TOKEN = "e2e-terminal-parking-dispose-token";
 // (e.g. the split in the close-tab test) must not share it with another.
 const REPO_A = "alpha-parking-dispose";
 const REPO_B = "bravo-parking-dispose";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 // A deletable worktree of REPO_A (non-default branch — the "Delete worktree"
 // menu item is hidden for the default branch). Used by the delete-dispose test.
 const FEATURE_BRANCH = "feature";
-const WORKTREE_A_FEATURE = toWorktreeId(REPO_A, FEATURE_BRANCH);
+const WORKTREE_A_FEATURE = toWorktreeId(REPO_A, FEATURE_BRANCH, "local");
 // Dedicated worktree for the close-tab test (it splits, mutating the layout).
 const REPO_CLOSE = "charlie-parking-dispose";
-const WORKTREE_CLOSE = toWorktreeId(REPO_CLOSE, "main");
+const WORKTREE_CLOSE = toWorktreeId(REPO_CLOSE, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

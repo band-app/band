@@ -62,8 +62,8 @@ const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-a";
 const BRANCH_B = "feature-b";
 
-const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
-const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
 // A file that exists ONLY in worktree A. When a leaked navigate makes B's
 // FileViewer stat `<B-root>/only-in-a.ts`, the read fails with ENOENT — the

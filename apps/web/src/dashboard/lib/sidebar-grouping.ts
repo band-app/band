@@ -101,7 +101,7 @@ export type GroupedRow =
 function entriesOf(repos: RepoInfo[]): WorktreeEntry[] {
   return repos.flatMap((repo) =>
     repo.worktrees.map((worktree) => ({
-      worktreeId: toWorktreeId(repo.name, worktree.name),
+      worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
       repo,
       worktree,
     })),
@@ -109,8 +109,9 @@ function entriesOf(repos: RepoInfo[]): WorktreeEntry[] {
 }
 
 /**
- * The Origin view: worktrees with no origin (or whose origin is gone) at the top level, each
- * one's children nested under it, in repo order. A collapsed parent hides its subtree.
+ * The Origin view: each repo's main worktree at the top level, with everything started from it
+ * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
+ * on the same host. Children are listed in repo order. A collapsed parent hides its subtree.
  */
 export function buildOriginRows(
   repos: RepoInfo[],
@@ -119,14 +120,30 @@ export function buildOriginRows(
   const entries = entriesOf(repos);
   const byId = new Map(entries.map((e) => [e.worktreeId, e]));
   const childrenOf = new Map<string, WorktreeEntry[]>();
+  const addChild = (parentId: string, entry: WorktreeEntry) =>
+    childrenOf.set(parentId, [...(childrenOf.get(parentId) ?? []), entry]);
+  const hasLiveOrigin = (entry: WorktreeEntry) => {
+    const parentId = entry.worktree.origin?.worktreeId;
+    return !!parentId && parentId !== entry.worktreeId && byId.has(parentId);
+  };
+  // A repo's main worktree on a host: where work with no origin is listed.
+  const isMain = (entry: WorktreeEntry) =>
+    entry.repo.kind !== "plain" && entry.worktree.name === entry.repo.defaultBranch;
+  const mains = new Map<string, WorktreeEntry>();
+  for (const entry of entries) {
+    if (isMain(entry) && !hasLiveOrigin(entry)) {
+      mains.set(`${entry.repo.name}@${hostIdOf(entry.worktree)}`, entry);
+    }
+  }
   const roots: WorktreeEntry[] = [];
   for (const entry of entries) {
-    const parentId = entry.worktree.origin?.worktreeId;
-    if (parentId && parentId !== entry.worktreeId && byId.has(parentId)) {
-      childrenOf.set(parentId, [...(childrenOf.get(parentId) ?? []), entry]);
-    } else {
-      roots.push(entry);
+    if (hasLiveOrigin(entry)) {
+      addChild(entry.worktree.origin!.worktreeId, entry);
+      continue;
     }
+    const main = mains.get(`${entry.repo.name}@${hostIdOf(entry.worktree)}`);
+    if (main && main !== entry) addChild(main.worktreeId, entry);
+    else roots.push(entry);
   }
   const rows: GroupedRow[] = [];
   const seen = new Set<string>();
@@ -142,7 +159,7 @@ export function buildOriginRows(
       depth,
       childCount: kids.length,
       collapsed,
-      parentRemoved: depth === 0 && entry.worktree.origin?.removed === true,
+      parentRemoved: !hasLiveOrigin(entry) && entry.worktree.origin?.removed === true,
     });
     if (collapsed) {
       hide(entry.worktreeId);
@@ -164,6 +181,17 @@ export function buildOriginRows(
   return rows;
 }
 
+/** The name a host tag shows. */
+export function hostLabel(hostId: string, hosts: HostInfoLite[]): string {
+  if (hostId === LOCAL_HOST) return "This hub";
+  return hosts.find((h) => h.id === hostId)?.name?.trim() || hostId;
+}
+
+/** True when a repo has worktrees on more than one host. */
+export function repoSpansHosts(repo: RepoInfo): boolean {
+  return new Set(repo.worktrees.map(hostIdOf)).size > 1;
+}
+
 export function hostIdOf(worktree: WorktreeInfo): string {
   return worktree.hostId || LOCAL_HOST;
 }
@@ -175,9 +203,13 @@ export function buildHostRows(
   isCollapsed: (id: string) => boolean,
 ): GroupedRow[] {
   const entries = entriesOf(repos);
+  // The hub's own machine has no row in the host list when it is turned off (BAND_LOCAL_HOST=off),
+  // so it gets no group either.
+  const localOff = hosts.length > 0 && !hosts.some((h) => h.id === LOCAL_HOST);
   const hostIds: string[] = [];
   for (const entry of entries) {
     const id = hostIdOf(entry.worktree);
+    if (localOff && id === LOCAL_HOST) continue;
     if (!hostIds.includes(id)) hostIds.push(id);
   }
   hostIds.sort((a, b) => (a === LOCAL_HOST ? -1 : b === LOCAL_HOST ? 1 : 0));

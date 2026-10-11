@@ -70,23 +70,50 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
 ]);
 
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
-const UNBATCHABLE = new Set(["repos.list", "worktrees.create"]);
+const UNBATCHABLE = new Set(["repos.list", "worktrees.create", "worktrees.remove"]);
 
 /**
- * `worktrees.create` from a worker makes the worktree on that worker. The
+ * `worktrees.create` from a worker makes the worktree on that worker, and `worktrees.remove` removes the
+ * one of that name on it, because the same repo and branch can live on several hosts. The
  * check refuses another `hostId`, and this puts the caller's own into the body
  * the hub sees, so a call that names no host cannot land on the hub's machine.
  */
 export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
-  if (request.method !== "POST" || request.path.split("?")[0] !== "/trpc/worktrees.create") {
+  if (request.method !== "POST") return request;
+  // Read the path as the check and the hub's HTTP server do, so `/trpc/worktrees%2Eremove` or
+  // `/trpc/../trpc/worktrees.remove` cannot pass the check and skip the pin.
+  let call: string;
+  try {
+    call = decodeURIComponent(new URL(request.path, "http://relay.invalid").pathname);
+  } catch {
     return request;
   }
+  const isTrpc = call === "/trpc/worktrees.create" || call === "/trpc/worktrees.remove";
+  const isMcp = call === "/mcp";
+  if (!isTrpc && !isMcp) return request;
   const parsed = parseJson(bodyText(request.body));
   if (!parsed.ok || parsed.value === null || typeof parsed.value !== "object") return request;
-  const body = Buffer.from(
-    JSON.stringify({ ...(parsed.value as object), hostId: workerId }),
-    "utf8",
-  ).toString("base64");
+  let value: unknown;
+  if (isTrpc) {
+    value = { ...(parsed.value as object), hostId: workerId };
+  } else {
+    // The same tools through the MCP endpoint, as `tools/call` messages (one or a batch).
+    const pin = (message: unknown): unknown => {
+      if (message === null || typeof message !== "object") return message;
+      const { method, params } = message as { method?: unknown; params?: Record<string, unknown> };
+      if (
+        method !== "tools/call" ||
+        (params?.name !== "band_worktrees_create" && params?.name !== "band_worktrees_remove")
+      ) {
+        return message;
+      }
+      const args = params.arguments;
+      const base = args !== null && typeof args === "object" ? (args as object) : {};
+      return { ...message, params: { ...params, arguments: { ...base, hostId: workerId } } };
+    };
+    value = Array.isArray(parsed.value) ? parsed.value.map(pin) : pin(parsed.value);
+  }
+  const body = Buffer.from(JSON.stringify(value), "utf8").toString("base64");
   return { ...request, body };
 }
 
@@ -194,17 +221,17 @@ const UNSCOPED_KEYS = new Set([
   "profileId",
 ]);
 
-function collect(value: unknown, into: Named, depth = 0): void {
+function collect(value: unknown, into: Named, workerId: string, depth = 0): void {
   if (depth > MAX_DEPTH || value === null || typeof value !== "object") return;
   if (Array.isArray(value)) {
-    for (const item of value) collect(item, into, depth + 1);
+    for (const item of value) collect(item, into, workerId, depth + 1);
     return;
   }
   const record = value as Record<string, unknown>;
   if (depth === 0) {
     const { repo, name } = record;
     if (typeof repo === "string" && typeof name === "string") {
-      into.worktrees.push(toWorktreeId(repo, name));
+      into.worktrees.push(toWorktreeId(repo, name, workerId));
     } else if (repo !== undefined) {
       into.unscoped = true;
     }
@@ -219,7 +246,7 @@ function collect(value: unknown, into: Named, depth = 0): void {
       else if (key === "chatId") into.chats.push(v);
       else if (key === "cwd") into.cwds.push(v);
     } else {
-      collect(v, into, depth + 1);
+      collect(v, into, workerId, depth + 1);
     }
   }
 }
@@ -240,7 +267,7 @@ function checkNamed(
     browsers: [],
     unscoped: false,
   };
-  collect(input, named);
+  collect(input, named, workerId);
   const outside = deny(403, "That worktree is not on this host");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
   for (const id of named.worktrees) {
@@ -326,6 +353,13 @@ function checkCall(
       return deny(403, `${procedure}: A worktree made from a worker is created on that worker`);
     }
     return { ok: true };
+  }
+  if (procedure === "worktrees.remove") {
+    const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;
+    if (hostId !== undefined && hostId !== workerId) {
+      return deny(403, `${procedure}: A worktree on another host cannot be removed from a worker`);
+    }
+    named = rest;
   }
   if (procedure === "subscriptions.remove") {
     const { id } = (input ?? {}) as { id?: unknown };

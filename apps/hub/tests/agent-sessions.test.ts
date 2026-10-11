@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests, TEST_TOKEN, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 interface LaunchResult {
@@ -115,12 +116,18 @@ describe("agentSessions.launch", () => {
 
   it("returns NOT_FOUND for an unknown worktree", async () => {
     await expect(
-      trpc(server.url, "agentSessions.launch", { worktreeId: "nope-main", mode: "gui" }),
+      trpc(server.url, "agentSessions.launch", {
+        worktreeId: testWorktreeId("nope", "main"),
+        mode: "gui",
+      }),
     ).rejects.toThrow(/\(404\)/);
   });
 
   it("rejects a chat id that belongs to another worktree", async () => {
-    await trpc(server.url, "chats.create", { worktreeId: "other-main", id: "chat_other_ws" });
+    await trpc(server.url, "chats.create", {
+      worktreeId: testWorktreeId("other", "main"),
+      id: "chat_other_ws",
+    });
     await expect(launch(server.url, { mode: "gui", chatId: "chat_other_ws" })).rejects.toThrow(
       /\(400\).*not in worktree/,
     );

@@ -1,6 +1,11 @@
 import { HostOfflineError, HostPathDeniedError } from "@band-app/host-api";
 import { TRPCError } from "@trpc/server";
-import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../../errors";
+import {
+  RepoConflictError,
+  RepoHostNotAllowedError,
+  RepoInputError,
+  RepoOutsideRootsError,
+} from "../../errors";
 
 /** Maps what `RepoService` throws for the caller to fix onto tRPC codes. Anything else is rethrown as it came. */
 export function repoErrorToTrpc(err: unknown): unknown {
@@ -10,6 +15,9 @@ export function repoErrorToTrpc(err: unknown): unknown {
       message: `OUTSIDE_ROOTS: ${err.message}`,
       cause: err,
     });
+  }
+  if (err instanceof RepoHostNotAllowedError) {
+    return new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
   }
   if (err instanceof RepoConflictError) {
     return new TRPCError({ code: "CONFLICT", message: err.message });

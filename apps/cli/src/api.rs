@@ -158,7 +158,15 @@ fn parse_trpc_body(mut response: http::Response<Body>) -> Result<serde_json::Val
             .and_then(serde_json::Value::as_str)
             .or_else(|| error.as_str())
             .unwrap_or("Unknown error");
-        return Err(msg.to_string());
+        // A branch already on another host names that worktree, so the caller can use it.
+        let existing = error
+            .get("data")
+            .and_then(|d| d.get("existingWorktreeId"))
+            .and_then(serde_json::Value::as_str);
+        return Err(match existing {
+            Some(id) => format!("{msg} (worktree {id})"),
+            None => msg.to_string(),
+        });
     }
 
     // Non-200 without tRPC error body

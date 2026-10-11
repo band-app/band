@@ -1,3 +1,4 @@
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 /**
  * The desktop viewer (plan step 7.2): noVNC draws a worker's desktop through the hub, starts
  * view-only, and forwards keys only after "Take control".
@@ -316,7 +317,7 @@ test("the worktree header opens the desktop of the worktree's host", async ({ pa
   });
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const viewer = new DesktopViewerPage(page);
-  await worktreePage.goto(`${REPO}-on-desktop`);
+  await worktreePage.goto(toWorktreeId(REPO, "on-desktop", hostId));
   await worktreePage.waitForReady();
   await viewer.headerButton.click();
   await expect(viewer.dialog).toBeVisible();

@@ -9,7 +9,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -20,6 +19,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "environment-test-token";
@@ -62,7 +62,7 @@ async function createWorktree(repo: string, branch: string): Promise<string> {
   const res = await trpcMutate(server.url, "worktrees.create", { repo, branch }, TOKEN);
   const body = await res.text();
   expect(res.status, body).toBe(200);
-  return toWorktreeId(repo, branch);
+  return testWorktreeId(repo, branch, false);
 }
 
 async function terminalOutputs(worktreeId: string): Promise<string[]> {

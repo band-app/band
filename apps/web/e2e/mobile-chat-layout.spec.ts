@@ -55,7 +55,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-mobile-chat-layout-token";
 const REPO = "mobilelayout";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 // In an app-mode window `window.innerHeight` is the full screen height, so an
 // element that clears the home indicator ends at `innerHeight - SAFE_AREA_BOTTOM`.
 const SAFE_AREA_BOTTOM = 34;
@@ -495,7 +495,7 @@ for (const viewport of NARROW_SCREENS) {
     test("composer controls and plan entries stay inside the screen", async ({ page }) => {
       const layout = new MobileLayoutPage(page, server.url, TOKEN);
       const chat = new ChatPanePage(page, server.url, TOKEN);
-      await chat.goto(toWorktreeId(narrowRepo(viewport.width), "main"));
+      await chat.goto(toWorktreeId(narrowRepo(viewport.width), "main", "local"));
       await chat.waitForReady();
       await chat.typeMessage("Plan the work");
       await chat.submit();

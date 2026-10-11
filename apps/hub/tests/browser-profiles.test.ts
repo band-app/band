@@ -12,6 +12,7 @@ import {
   startServer,
   trpcData,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 // Integration tests for browser profiles and the per-repo default
 // profile (`browserProfiles.*`, `browsers.create` / `browsers.setProfile`).
@@ -122,9 +123,9 @@ describe("browser profiles — per-repo default", () => {
   let server: ServerHandle;
   let tmpHome: string;
   // Two worktrees of repo "alpha", one of repo "beta".
-  const alphaMain = "alpha-main";
-  const alphaFeature = "alpha-feature";
-  const betaMain = "beta-main";
+  const alphaMain = testWorktreeId("alpha", "main");
+  const alphaFeature = testWorktreeId("alpha", "feature");
+  const betaMain = testWorktreeId("beta", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-browser-profiles-");

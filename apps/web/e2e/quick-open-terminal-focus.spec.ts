@@ -34,7 +34,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-quick-open-terminal-focus-token";
 const REPO = "quick-open-focus-repo";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

@@ -14,6 +14,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clipboard,
+  Folder,
   FolderOpen,
   Home,
   Loader,
@@ -32,6 +33,7 @@ import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
+  RepoAvatarInfo,
   RepoKind,
   SetupStatus,
   WorktreeBranchStatus,
@@ -42,6 +44,7 @@ import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { PullRequestBadge } from "./PullRequestBadge";
+import { RepoAvatar } from "./RepoAvatar";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
 
@@ -109,13 +112,17 @@ interface Props {
    * cards apart when they're mixed across repos.
    */
   showRepoName?: boolean;
+  /** Repo avatar shown before the repo name when `showRepoName` is set. */
+  repoAvatar?: RepoAvatarInfo | null;
+  /** Host name shown as a small gray tag beside the repo name (or the branch name). */
+  hostTag?: string;
   /**
    * Toggle the pinned state for this card's worktree. Passed as a prop
    * (rather than reading from `usePinnedWorktrees()` inside the card) so
    * each card stays inert to changes in the repos-query cache —
    * otherwise every pin/unpin re-renders every WorktreeCard on the page.
    */
-  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean, hostId?: string) => void;
 }
 
 export const WorktreeCard = memo(function WorktreeCard({
@@ -129,6 +136,8 @@ export const WorktreeCard = memo(function WorktreeCard({
   isFocused,
   onShowDeleteDialog,
   showRepoName,
+  repoAvatar,
+  hostTag,
   onTogglePinned,
 }: Props) {
   const isPlain = repoKind === "plain";
@@ -148,7 +157,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   // worktree distinction (the repo header IS the worktree).
   const isRoot = !isPlain && worktree.name === defaultBranch;
 
-  const worktreeId = toWorktreeId(repoName, worktree.name);
+  const worktreeId = toWorktreeId(repoName, worktree.name, worktree.hostId);
   const isActive = useDashboardStore((s) => s.activeWorktreeId === worktreeId);
   // The card stays listed, disabled, until the worktree is gone.
   const isDeleting = useDashboardStore((s) => isWorktreeDeleting(s, worktreeId));
@@ -229,11 +238,16 @@ export const WorktreeCard = memo(function WorktreeCard({
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
-      removeWorktreeMutation.mutate({ repo: repoName, name: worktree.name });
+      removeWorktreeMutation.mutate({
+        repo: repoName,
+        name: worktree.name,
+        hostId: worktree.hostId,
+      });
     } else {
       onShowDeleteDialog({
         repoName,
         name: worktree.name,
+        hostId: worktree.hostId,
         isUnmerged: hasUnmergedPR,
         isDirty,
         hasUnpushedCommits,
@@ -277,13 +291,41 @@ export const WorktreeCard = memo(function WorktreeCard({
                   // stays scannable without a long, mid-truncated
                   // `repo/branch` string on one line. Shared with the ⌘K
                   // worktree picker via `WorktreeLabel`.
-                  <WorktreeLabel name={worktree.name} repoName={repoName} isActive={isActive} />
+                  <WorktreeLabel
+                    name={worktree.name}
+                    repoName={repoName}
+                    isActive={isActive}
+                    hostTag={hostTag}
+                    repoIcon={
+                      <RepoAvatar
+                        avatar={repoAvatar}
+                        className="size-3 shrink-0 rounded-sm"
+                        testId={`worktree-label__avatar--${repoName}`}
+                        fallback={
+                          <Folder
+                            data-testid={`worktree-label__avatar-fallback--${repoName}`}
+                            className="size-3 shrink-0 text-muted-foreground"
+                          />
+                        }
+                      />
+                    }
+                  />
                 ) : (
-                  <span
-                    className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
-                  >
-                    {worktree.name}
-                  </span>
+                  <>
+                    <span
+                      className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
+                    >
+                      {worktree.name}
+                    </span>
+                    {hostTag && (
+                      <span
+                        data-testid="worktree-label__host"
+                        className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+                      >
+                        {hostTag}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </TooltipTrigger>
@@ -325,6 +367,40 @@ export const WorktreeCard = memo(function WorktreeCard({
               {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
+          {/* The repo was limited to other hosts after this worktree was made. Nothing is deleted. */}
+          {worktree.hostNotAllowed && !isDeleting && (
+            <span
+              data-testid="worktree-card__not-allowed"
+              title="This repo is no longer allowed on this host. The worktree is kept and still opens."
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              Not allowed on this host
+            </span>
+          )}
+          {/* The host no longer has the worktree's folder. Remove drops the record. */}
+          {worktree.missing && !isDeleting && (
+            <span
+              data-testid="worktree-card__missing"
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              Missing
+              <button
+                type="button"
+                data-testid="worktree-card__remove-missing"
+                className="underline hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  removeWorktreeMutation.mutate({
+                    repo: repoName,
+                    name: worktree.name,
+                    hostId: worktree.hostId,
+                  });
+                }}
+              >
+                Remove
+              </button>
+            </span>
+          )}
           <div
             className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
           >
@@ -350,7 +426,9 @@ export const WorktreeCard = memo(function WorktreeCard({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuLabel>Worktree</ContextMenuLabel>
-        <ContextMenuItem onClick={() => onTogglePinned(repoName, worktree.name, isPinned)}>
+        <ContextMenuItem
+          onClick={() => onTogglePinned(repoName, worktree.name, isPinned, worktree.hostId)}
+        >
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
         </ContextMenuItem>
@@ -380,13 +458,13 @@ export const WorktreeCard = memo(function WorktreeCard({
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPull(repoName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPull(repoName, worktree.name, worktree.hostId)}>
             <ArrowDownToLine />
             Git pull
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPush(repoName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPush(repoName, worktree.name, worktree.hostId)}>
             <ArrowUpFromLine />
             Git push
           </ContextMenuItem>

@@ -12,6 +12,7 @@ import {
   trpcQuery as sharedTrpcQuery,
   startServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 // Integration tests for issue #520 — panel labels + cronjob chat dispatch.
 //
@@ -87,7 +88,7 @@ interface ChatRecord {
 describe("chats — label round-trip", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const worktreeId = "myrepo-main";
+  const worktreeId = testWorktreeId("myrepo", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
@@ -244,7 +245,7 @@ describe("chats — label round-trip", () => {
 describe("chats — label validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const worktreeId = "myrepo-main";
+  const worktreeId = testWorktreeId("myrepo", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
@@ -361,7 +362,7 @@ describe("chats — label validation", () => {
 describe("chats — legacy panel_states rows load with empty labels", () => {
   let server: ServerHandle;
   let tmpHome: string;
-  const worktreeId = "myrepo-main";
+  const worktreeId = testWorktreeId("myrepo", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");
@@ -442,7 +443,7 @@ describe("cronjobs — labeled chat dispatch", () => {
   let tmpHome: string;
   let jobId: string;
   let secondJobId: string;
-  const worktreeId = "triggerproj-main";
+  const worktreeId = testWorktreeId("triggerproj", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-chat-labels-");

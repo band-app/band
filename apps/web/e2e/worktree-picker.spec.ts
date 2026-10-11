@@ -45,15 +45,15 @@ const REPO_ALPHA = "alpha-picker";
 const REPO_BETA = "beta-picker";
 const REPO_GAMMA = "gamma-picker";
 
-const WS_ALPHA = toWorktreeId(REPO_ALPHA, "main");
-const WS_BETA = toWorktreeId(REPO_BETA, "main");
-const WS_GAMMA = toWorktreeId(REPO_GAMMA, "main");
+const WS_ALPHA = toWorktreeId(REPO_ALPHA, "main", "local");
+const WS_BETA = toWorktreeId(REPO_BETA, "main", "local");
+const WS_GAMMA = toWorktreeId(REPO_GAMMA, "main", "local");
 
 // A feature-branch worktree on alpha (name !== defaultBranch), used to assert
 // the switcher shows the branch glyph — not the house icon — for non-root
 // worktrees.
 const ALPHA_FEATURE_BRANCH = "feat/switcher-home";
-const WS_ALPHA_FEATURE = toWorktreeId(REPO_ALPHA, ALPHA_FEATURE_BRANCH);
+const WS_ALPHA_FEATURE = toWorktreeId(REPO_ALPHA, ALPHA_FEATURE_BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
 // owns the ⌘K picker shortcut and the repo-list sidebar) mounts, along with

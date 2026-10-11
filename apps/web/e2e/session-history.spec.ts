@@ -86,7 +86,7 @@ test.describe("Session history dropdown", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId(EMPTY_REPO, "main"));
+    await chatPane.goto(toWorktreeId(EMPTY_REPO, "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.openSessionHistory();
@@ -99,7 +99,7 @@ test.describe("Session history dropdown", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId(FLOW_REPO, "main"));
+    await chatPane.goto(toWorktreeId(FLOW_REPO, "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("remember this conversation");

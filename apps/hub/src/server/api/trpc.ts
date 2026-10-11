@@ -1,4 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
+import { BranchOnOtherHostError } from "../errors";
 import type { Context } from "./context";
 
 /**
@@ -10,7 +11,20 @@ import type { Context } from "./context";
  * `initTRPC.context<Context>().create()` anywhere else would silently
  * break the merge in `server/api/router.ts`.
  */
-export const t = initTRPC.context<Context>().create();
+export const t = initTRPC.context<Context>().create({
+  // A refusal for a branch that already lives on another host names that worktree, so a client
+  // can open it without parsing the message.
+  errorFormatter({ shape, error }) {
+    const cause = error.cause;
+    if (cause instanceof BranchOnOtherHostError) {
+      return {
+        ...shape,
+        data: { ...shape.data, existingWorktreeId: cause.worktreeId, existingHostId: cause.hostId },
+      };
+    }
+    return shape;
+  },
+});
 
 export const publicProcedure = t.procedure;
 

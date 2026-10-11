@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "@band-app/link";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -29,6 +30,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const SHARED_TOKEN = "remote-host-shared-secret";
@@ -158,7 +160,8 @@ async function exchange(token: string, workerId?: string): Promise<Response> {
   });
 }
 
-const worktreeId = "proj-remote-feat";
+// Set once the worker has a host id: a worktree on a worker is named after its host.
+let worktreeId = "";
 
 beforeAll(async () => {
   hubHome = createTmpHome("band-remote-hub-");
@@ -186,6 +189,7 @@ beforeAll(async () => {
 
   const issued = await issueBootstrap("Test worker");
   hostId = issued.hostId;
+  worktreeId = toWorktreeId("proj", "remote-feat", hostId);
   bootstrapToken = issued.token;
   worker = startWorkerProcess(issued.token);
   await waitForStatus("online");
@@ -301,7 +305,7 @@ describe("a worktree on the remote host", () => {
     expect(names).toEqual(expect.arrayContaining(["main", "remote-feat"]));
     // Local worktrees still read their files from the hub's disk.
     const local = await trpcQ<{ entries: Array<{ name: string }> }>("worktree.listFiles", {
-      worktreeId: "proj-main",
+      worktreeId: testWorktreeId("proj", "main"),
       path: "",
     });
     expect(local.entries.map((e) => e.name)).toContain("hello.txt");
@@ -343,7 +347,7 @@ describe("losing and regaining the worker", () => {
     expect(res.status).not.toBe(200);
     expect(await res.text()).toMatch(/offline/);
     const local = await trpcQ<{ entries: unknown[] }>("worktree.listFiles", {
-      worktreeId: "proj-main",
+      worktreeId: testWorktreeId("proj", "main"),
       path: "",
     });
     expect(local.entries.length).toBeGreaterThan(0);

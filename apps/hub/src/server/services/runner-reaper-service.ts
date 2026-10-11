@@ -326,7 +326,7 @@ export class RunnerReaperService {
     const out: string[] = [];
     for (const repo of loadState().repos) {
       for (const wt of repo.worktrees) {
-        if (wt.hostId === hostId) out.push(toWorktreeId(repo.name, wt.name));
+        if (wt.hostId === hostId) out.push(toWorktreeId(repo.name, wt.name, wt.hostId));
       }
     }
     return out;

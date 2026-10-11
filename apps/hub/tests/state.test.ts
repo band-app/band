@@ -59,7 +59,7 @@ describe("upsertWorktreeStatus — identity healing", () => {
     const repoName = "kbhq";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "kbhq-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     // Repo state has a real worktree for this worktreeId.
     seedState(tmp, {
@@ -104,7 +104,7 @@ describe("upsertWorktreeStatus — identity healing", () => {
     const repoName = "kbhq";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "kbhq-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     seedState(tmp, {
       repos: [
@@ -142,7 +142,7 @@ describe("upsertWorktreeStatus — identity healing", () => {
     const branch = "main";
     const staleButValidPath = "/tmp/some-old-cached-worktree-path";
     const newPathInState = join(tmp, "worktrees", "kbhq-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     // state.json (repos/worktrees DB) currently resolves the
     // worktree to a different path. We should NOT clobber the row.
@@ -232,7 +232,7 @@ describe("upsertWorktreeStatus — no-op write skip", () => {
     const repoName = "demo";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "demo-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     seedState(tmp, {
       repos: [
@@ -271,7 +271,7 @@ describe("upsertWorktreeStatus — no-op write skip", () => {
     const repoName = "demo";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "demo-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     seedState(tmp, {
       repos: [
@@ -341,7 +341,7 @@ describe("upsertWorktreeStatus — identity lookup with slashes in branch", () =
     const repoName = "demo";
     const branch = "feat/nested/thing";
     const wtPath = join(tmp, "worktrees", "demo-feat-nested-thing");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
     // Sanity: helper collapses slashes to dashes.
     expect(worktreeId).toBe("demo-feat-nested-thing");
 

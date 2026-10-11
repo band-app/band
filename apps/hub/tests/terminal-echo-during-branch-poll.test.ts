@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 import { StatusStream } from "./helpers/status-stream";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // A held key must echo at the key-repeat rate while the branch-status poller
@@ -25,7 +25,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-echo-branch-poll-token";
 const REPO = "echoproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 /** Enough worktrees that one tick's work used to block the loop for ~300 ms+. */
 const EXTRA_WORKTREES = 72;
 /** macOS key auto-repeat is ~30 keys/s. */

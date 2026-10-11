@@ -54,7 +54,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-reconnect-token";
 const REPO = "reconnectproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

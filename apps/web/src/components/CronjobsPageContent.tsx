@@ -1,3 +1,4 @@
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Badge,
   Button,
@@ -41,7 +42,7 @@ interface RepoInfo {
   name: string;
   defaultBranch: string;
   avatar?: RepoAvatarInfo | null;
-  worktrees: { branch: string; worktreeId?: string }[];
+  worktrees: { name: string; branch: string; hostId?: string; worktreeId?: string }[];
 }
 
 function relativeTime(iso: string): string {
@@ -424,7 +425,7 @@ function CronjobDialog({
     return (
       repo?.worktrees.map((w) => ({
         branch: w.branch,
-        worktreeId: w.worktreeId ?? `${selectedRepo}-${w.branch.replaceAll("/", "-")}`,
+        worktreeId: w.worktreeId ?? toWorktreeId(selectedRepo, w.name, w.hostId),
       })) ?? []
     );
   }, [repos, selectedRepo]);

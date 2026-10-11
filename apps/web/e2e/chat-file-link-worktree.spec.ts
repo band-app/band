@@ -68,8 +68,8 @@ const DEFAULT_BRANCH = "main";
 const BRANCH_A = "feature-a";
 const BRANCH_B = "feature-b";
 
-const WORKTREE_A = toWorktreeId(REPO, BRANCH_A);
-const WORKTREE_B = toWorktreeId(REPO, BRANCH_B);
+const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
+const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout where multiple

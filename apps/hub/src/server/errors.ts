@@ -208,3 +208,34 @@ export class RepoOutsideRootsError extends Error {
     this.roots = roots;
   }
 }
+
+/**
+ * Thrown when a repo limited to some hosts is asked to run on another: a worktree, a clone or a
+ * placement. The message is "<repo> is only available on <host names>". Mapped to 412.
+ */
+export class RepoHostNotAllowedError extends Error {
+  constructor(
+    message: string,
+    readonly repo: string,
+    readonly allowedHostIds: string[],
+  ) {
+    super(message);
+    this.name = "RepoHostNotAllowedError";
+  }
+}
+
+/**
+ * Thrown when a branch of a repo already has a Band worktree on another host. `worktreeId` is
+ * that worktree, so a caller can open it. Mapped to 409.
+ */
+export class BranchOnOtherHostError extends Error {
+  constructor(
+    readonly branch: string,
+    readonly hostId: string,
+    readonly hostName: string,
+    readonly worktreeId: string,
+  ) {
+    super(`${branch} is already on ${hostName}`);
+    this.name = "BranchOnOtherHostError";
+  }
+}

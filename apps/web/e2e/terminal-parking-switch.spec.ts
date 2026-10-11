@@ -51,8 +51,8 @@ const TOKEN = "e2e-terminal-parking-switch-token";
 
 const REPO_A = "alpha-parking-switch";
 const REPO_B = "bravo-parking-switch";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 
 test.use({
   viewport: { width: 1280, height: 800 },

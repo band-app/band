@@ -24,6 +24,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "task-cleanup-test-token";
@@ -164,7 +165,11 @@ describe("worktree task cleanup on removal (issue #416)", () => {
           defaultBranch: "main",
           worktrees: [
             { name: "main", branch: "main", path: repoPath },
-            { name: "feature", branch: "feature", path: join(tmpHome, "proj-feature") },
+            {
+              name: "feature",
+              branch: "feature",
+              path: join(tmpHome, "proj-feature"),
+            },
           ],
         },
       ],
@@ -176,7 +181,7 @@ describe("worktree task cleanup on removal (issue #416)", () => {
     try {
       seedTask(sqlite, {
         id: "tsk_main_a",
-        worktreeId: "proj-main",
+        worktreeId: testWorktreeId("proj", "main"),
         repo: "proj",
         branch: "main",
         prompt: "main task 1",
@@ -186,7 +191,7 @@ describe("worktree task cleanup on removal (issue #416)", () => {
       });
       seedTask(sqlite, {
         id: "tsk_main_b",
-        worktreeId: "proj-main",
+        worktreeId: testWorktreeId("proj", "main"),
         repo: "proj",
         branch: "main",
         prompt: "main task 2",
@@ -196,7 +201,7 @@ describe("worktree task cleanup on removal (issue #416)", () => {
       });
       seedTask(sqlite, {
         id: "tsk_feature_a",
-        worktreeId: "proj-feature",
+        worktreeId: testWorktreeId("proj", "feature"),
         repo: "proj",
         branch: "feature",
         prompt: "feature task 1",
@@ -223,8 +228,10 @@ describe("worktree task cleanup on removal (issue #416)", () => {
     {
       const sqlite = openDb(tmpHome);
       try {
-        expect(listWorktreeTaskIds(sqlite, "proj-feature")).toEqual(["tsk_feature_a"]);
-        expect(listWorktreeTaskIds(sqlite, "proj-main").sort()).toEqual([
+        expect(listWorktreeTaskIds(sqlite, testWorktreeId("proj", "feature"))).toEqual([
+          "tsk_feature_a",
+        ]);
+        expect(listWorktreeTaskIds(sqlite, testWorktreeId("proj", "main")).sort()).toEqual([
           "tsk_main_a",
           "tsk_main_b",
         ]);
@@ -241,9 +248,12 @@ describe("worktree task cleanup on removal (issue #416)", () => {
 
     const sqlite = openDb(tmpHome);
     try {
-      expect(listWorktreeTaskIds(sqlite, "proj-feature")).toEqual([]);
+      expect(listWorktreeTaskIds(sqlite, testWorktreeId("proj", "feature"))).toEqual([]);
       // Other worktree's tasks remain untouched.
-      expect(listWorktreeTaskIds(sqlite, "proj-main").sort()).toEqual(["tsk_main_a", "tsk_main_b"]);
+      expect(listWorktreeTaskIds(sqlite, testWorktreeId("proj", "main")).sort()).toEqual([
+        "tsk_main_a",
+        "tsk_main_b",
+      ]);
     } finally {
       sqlite.close();
     }
@@ -280,7 +290,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old completed row — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_completed",
-          worktreeId: "any-main",
+          worktreeId: testWorktreeId("any", "main"),
           repo: "any",
           branch: "main",
           prompt: "old completed",
@@ -291,7 +301,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old failed row — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_failed",
-          worktreeId: "any-main",
+          worktreeId: testWorktreeId("any", "main"),
           repo: "any",
           branch: "main",
           prompt: "old failed",
@@ -302,7 +312,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Old orphan (no completedAt) older than 30 d by startedAt — must be deleted.
         seedTask(sqlite, {
           id: "tsk_old_orphan",
-          worktreeId: "any-main",
+          worktreeId: testWorktreeId("any", "main"),
           repo: "any",
           branch: "main",
           prompt: "abandoned",
@@ -313,7 +323,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Recent completed row — must survive.
         seedTask(sqlite, {
           id: "tsk_recent_completed",
-          worktreeId: "any-main",
+          worktreeId: testWorktreeId("any", "main"),
           repo: "any",
           branch: "main",
           prompt: "recent completed",
@@ -324,7 +334,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         // Recent orphan (no completedAt) within window by startedAt — must survive.
         seedTask(sqlite, {
           id: "tsk_recent_orphan",
-          worktreeId: "any-main",
+          worktreeId: testWorktreeId("any", "main"),
           repo: "any",
           branch: "main",
           prompt: "recent orphan",

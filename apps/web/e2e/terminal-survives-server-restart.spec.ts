@@ -32,7 +32,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-restart-token";
 const REPO = "alpha-terminal-restart";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const SHELL_VALUE = "band-restart-shell-4b1d";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview

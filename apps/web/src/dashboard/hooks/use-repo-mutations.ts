@@ -124,9 +124,9 @@ export function useCreateWorktree() {
       prompt?: string;
       host?: { hostId: string; hostRepoPath?: string };
     }) => adapter.createWorktree(repo, branch, base, prompt, readAgentMode(), host),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.repos });
-      const worktreeId = toWorktreeId(vars.repo, vars.branch);
+      const worktreeId = toWorktreeId(vars.repo, vars.branch, data.hostId ?? vars.host?.hostId);
       openWorktree(worktreeId);
     },
     onError: (err) => {
@@ -144,19 +144,19 @@ export function useRemoveWorktree() {
   const store = useRawDashboardStore();
 
   return useMutation({
-    mutationFn: ({ repo, name }: { repo: string; name: string }) =>
-      adapter.removeWorktree(repo, name),
+    mutationFn: ({ repo, name, hostId }: { repo: string; name: string; hostId?: string }) =>
+      adapter.removeWorktree(repo, name, hostId),
     // The server runs the worktree's teardown before it removes anything,
     // which can take up to a minute. Mark the card as deleting meanwhile.
-    onMutate: ({ repo, name }) => {
-      setDeleting(toWorktreeId(repo, name), true);
+    onMutate: ({ repo, name, hostId }) => {
+      setDeleting(toWorktreeId(repo, name, hostId), true);
     },
-    onSuccess: async (_data, { repo, name }) => {
+    onSuccess: async (_data, { repo, name, hostId }) => {
       // Awaited so the card is gone from the list before it stops showing
       // as deleting (see onSettled), rather than flashing back to normal.
       await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
 
-      const deletedWorktreeId = toWorktreeId(repo, name);
+      const deletedWorktreeId = toWorktreeId(repo, name, hostId);
       if (store.getState().activeWorktreeId === deletedWorktreeId) {
         const repos = queryClient.getQueryData<RepoInfo[]>(queryKeys.repos);
         const repoInfo = repos?.find((p) => p.name === repo);
@@ -168,17 +168,21 @@ export function useRemoveWorktree() {
           // `defaultBranch` if no row matches (best-effort, matches prior
           // behavior).
           const mainWt = repoInfo.worktrees.find(
-            (wt) => wt.name === repoInfo.defaultBranch || wt.branch === repoInfo.defaultBranch,
+            (wt) =>
+              (wt.name === repoInfo.defaultBranch || wt.branch === repoInfo.defaultBranch) &&
+              (wt.hostId ?? "local") === (hostId ?? "local"),
           );
-          openWorktree(toWorktreeId(repo, mainWt?.name ?? repoInfo.defaultBranch));
+          openWorktree(
+            toWorktreeId(repo, mainWt?.name ?? repoInfo.defaultBranch, mainWt?.hostId ?? hostId),
+          );
         }
       }
     },
     onError: (err) => {
       setError(err);
     },
-    onSettled: (_data, _err, { repo, name }) => {
-      setDeleting(toWorktreeId(repo, name), false);
+    onSettled: (_data, _err, { repo, name, hostId }) => {
+      setDeleting(toWorktreeId(repo, name, hostId), false);
     },
   });
 }

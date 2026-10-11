@@ -45,10 +45,10 @@ const REPO_PERSONAL_2 = "beta-personal";
 const REPO_WORK_1 = "alpha-work";
 const REPO_WORK_2 = "beta-work";
 
-const WS_PERSONAL_1 = toWorktreeId(REPO_PERSONAL_1, "main");
-const WS_PERSONAL_2 = toWorktreeId(REPO_PERSONAL_2, "main");
-const WS_WORK_1 = toWorktreeId(REPO_WORK_1, "main");
-const WS_WORK_2 = toWorktreeId(REPO_WORK_2, "main");
+const WS_PERSONAL_1 = toWorktreeId(REPO_PERSONAL_1, "main", "local");
+const WS_PERSONAL_2 = toWorktreeId(REPO_PERSONAL_2, "main", "local");
+const WS_WORK_1 = toWorktreeId(REPO_WORK_1, "main", "local");
+const WS_WORK_2 = toWorktreeId(REPO_WORK_2, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders, matching the platform where users actually run into this

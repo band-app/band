@@ -27,6 +27,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const DEFAULT_TOKEN = "worktree-git-ops-token";
 
@@ -178,7 +179,7 @@ describe("tRPC — worktree.gitPull", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPull",
-      { worktreeId: "alpha-main" },
+      { worktreeId: testWorktreeId("alpha", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -200,7 +201,7 @@ describe("tRPC — worktree.gitPull", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPull",
-      { worktreeId: "nope-main" },
+      { worktreeId: testWorktreeId("nope", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -210,7 +211,7 @@ describe("tRPC — worktree.gitPull", () => {
     const res = await fetch(`${server.url}/trpc/worktree.gitPull`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ worktreeId: "alpha-main" }),
+      body: JSON.stringify({ worktreeId: testWorktreeId("alpha", "main") }),
     });
     expect(res.status).toBe(401);
   });
@@ -263,7 +264,7 @@ describe("tRPC — worktree.gitPush", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPush",
-      { worktreeId: "alpha-main" },
+      { worktreeId: testWorktreeId("alpha", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -287,7 +288,7 @@ describe("tRPC — worktree.gitPush", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPush",
-      { worktreeId: "nope-main" },
+      { worktreeId: testWorktreeId("nope", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -337,7 +338,7 @@ describe("tRPC — worktree.gitCommit", () => {
       server.url,
       "worktree.gitCommit",
       {
-        worktreeId: "alpha-main",
+        worktreeId: testWorktreeId("alpha", "main"),
         message: "Add new.md",
         body: "Tracks the new note file.",
       },
@@ -368,7 +369,7 @@ describe("tRPC — worktree.gitCommit", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitCommit",
-      { worktreeId: "alpha-main", message: "" },
+      { worktreeId: testWorktreeId("alpha", "main"), message: "" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(400);
@@ -378,7 +379,7 @@ describe("tRPC — worktree.gitCommit", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitCommit",
-      { worktreeId: "nope-main", message: "noop" },
+      { worktreeId: testWorktreeId("nope", "main"), message: "noop" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -477,7 +478,7 @@ describe("tRPC — git refusals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPull",
-      { worktreeId: "dirty-main" },
+      { worktreeId: testWorktreeId("dirty", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -502,7 +503,7 @@ describe("tRPC — git refusals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPull",
-      { worktreeId: "lone-lone-branch" },
+      { worktreeId: testWorktreeId("lone", "lone-branch") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -534,7 +535,7 @@ describe("tRPC — git refusals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPush",
-      { worktreeId: "ahead-main" },
+      { worktreeId: testWorktreeId("ahead", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -547,7 +548,7 @@ describe("tRPC — git refusals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitCommit",
-      { worktreeId: "clean-main", message: "noop" },
+      { worktreeId: testWorktreeId("clean", "main"), message: "noop" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -563,7 +564,7 @@ describe("tRPC — git refusals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.gitPull",
-      { worktreeId: "broken-main" },
+      { worktreeId: testWorktreeId("broken", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -627,7 +628,7 @@ describe("tRPC — worktree.generateCommitMessage", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.generateCommitMessage",
-      { worktreeId: "alpha-main" },
+      { worktreeId: testWorktreeId("alpha", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -642,7 +643,7 @@ describe("tRPC — worktree.generateCommitMessage", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.generateCommitMessage",
-      { worktreeId: "nope-main" },
+      { worktreeId: testWorktreeId("nope", "main") },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -697,7 +698,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.saveFile",
-      { worktreeId: "alpha-main", path: ".git/config", content: "malicious" },
+      { worktreeId: testWorktreeId("alpha", "main"), path: ".git/config", content: "malicious" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -710,7 +711,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       server.url,
       "worktree.createFile",
       {
-        worktreeId: "alpha-main",
+        worktreeId: testWorktreeId("alpha", "main"),
         path: ".git/hooks/pre-commit",
         content: "#!/bin/bash\nrm -rf ~",
       },
@@ -725,7 +726,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
     const res = await trpcMutate(
       server.url,
       "worktree.createDirectory",
-      { worktreeId: "alpha-main", path: ".git/refs/heads/sneaky" },
+      { worktreeId: testWorktreeId("alpha", "main"), path: ".git/refs/heads/sneaky" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
@@ -745,7 +746,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       server.url,
       "worktree.getFileDiff",
       {
-        worktreeId: "alpha-main",
+        worktreeId: testWorktreeId("alpha", "main"),
         filePath: "README.md",
         section: "branch",
         mergeBase: "--exec=touch /tmp/pwned",
@@ -762,7 +763,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       server.url,
       "worktree.getFileDiff",
       {
-        worktreeId: "alpha-main",
+        worktreeId: testWorktreeId("alpha", "main"),
         filePath: "README.md",
         section: "branch",
         mergeBase: "HEAD",
@@ -779,7 +780,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       server.url,
       "worktree.getFileDiff",
       {
-        worktreeId: "alpha-main",
+        worktreeId: testWorktreeId("alpha", "main"),
         filePath: "README.md",
         section: "branch",
         mergeBase: "0123456789abcdef0123456789abcdef0123456",

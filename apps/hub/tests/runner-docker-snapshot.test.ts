@@ -26,6 +26,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -295,7 +296,7 @@ describe.skipIf(!IMAGE)("the docker hook's snapshot and restore", () => {
 
     // A file read wakes the worktree. The restore hook starts a new container from the snapshot.
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: "proj-snap",
+      worktreeId: toWorktreeId("proj", "snap", hostId),
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\n");

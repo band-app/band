@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GitHttpAuthStub, startGitHttpAuthStub } from "./fixtures/git-http-auth-stub";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -258,7 +259,7 @@ describe("a worker the runner starts", () => {
     );
     hostId = wt.hostId ?? "";
     expect(hostId).toMatch(/^h-/);
-    worktreeId = "proj-git-feat";
+    worktreeId = toWorktreeId("proj", "git-feat", hostId);
 
     // The server saw the credential, and the clone is on the worker's disk.
     expect(stub.authenticated).toContain(GIT_USER);

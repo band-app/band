@@ -113,7 +113,7 @@ function useWorktreeNames(worktreeId: string): { name: string; repoName: string 
   return useMemo(() => {
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
-        if (toWorktreeId(repo.name, worktree.name) === worktreeId) {
+        if (toWorktreeId(repo.name, worktree.name, worktree.hostId) === worktreeId) {
           return { name: worktree.name, repoName: repo.name };
         }
       }

@@ -9,6 +9,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "needs-attention-test-token";
@@ -203,12 +204,14 @@ describe("needs_attention — clearing via statuses.update", () => {
 
   it("sets needs_attention status", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention", lastActivity: "user input needed" },
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{ agent: { status: string } }>(getRes);
     expect(data.agent.status).toBe("needs_attention");
   });
@@ -216,17 +219,19 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("clears needs_attention via clearNeedsAttention", async () => {
     // Set needs_attention first
     await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention" },
     });
 
     // Clear it via the dedicated endpoint
     const res = await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(getRes);
     expect(data.agent.status).toBe("waiting");
     // lastActivity should be preserved from earlier update
@@ -236,23 +241,25 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("preserves other fields when clearing needs_attention", async () => {
     // Set up with full agent info
     await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention", lastActivity: "waiting for approval" },
     });
 
     // Clear via the dedicated endpoint
     await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
     });
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{
       worktreeId: string;
       repo: string;
       branch: string;
       agent: { status: string; lastActivity: string };
     }>(getRes);
-    expect(data.worktreeId).toBe("myrepo-main");
+    expect(data.worktreeId).toBe(testWorktreeId("myrepo", "main"));
     expect(data.repo).toBe("myrepo");
     expect(data.branch).toBe("main");
     expect(data.agent.status).toBe("waiting");
@@ -262,18 +269,20 @@ describe("needs_attention — clearing via statuses.update", () => {
   it("clearNeedsAttention is a no-op when status is working", async () => {
     // Set status to working
     await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "working", lastActivity: "coding something" },
     });
 
     // Attempt to clear — should be a no-op
     const res = await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
     });
     expect(res.status).toBe(200);
 
     // Status should still be working
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(getRes);
     expect(data.agent.status).toBe("working");
     expect(data.agent.lastActivity).toBe("coding something");
@@ -305,7 +314,7 @@ describe("needs_attention — reset on server startup", () => {
     // Seed a worktree status with needs_attention BEFORE starting server
     seedWorktreeStatuses(tmpHome, [
       {
-        worktreeId: "myrepo-main",
+        worktreeId: testWorktreeId("myrepo", "main"),
         repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
@@ -317,7 +326,9 @@ describe("needs_attention — reset on server startup", () => {
     const server = await startServer({ tmpHome });
     try {
       // After startup, resetAgentStatuses should have cleared needs_attention
-      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", {
+        worktreeId: testWorktreeId("myrepo", "main"),
+      });
       const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(res);
       expect(data.agent.status).toBe("waiting");
       // lastActivity should still be preserved
@@ -347,7 +358,7 @@ describe("needs_attention — reset on server startup", () => {
     });
     seedWorktreeStatuses(tmpHome, [
       {
-        worktreeId: "myrepo-main",
+        worktreeId: testWorktreeId("myrepo", "main"),
         repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
@@ -358,7 +369,9 @@ describe("needs_attention — reset on server startup", () => {
 
     const server = await startServer({ tmpHome });
     try {
-      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", {
+        worktreeId: testWorktreeId("myrepo", "main"),
+      });
       const data = await trpcData<{ agent: { status: string } }>(res);
       expect(data.agent.status).toBe("waiting");
     } finally {
@@ -386,7 +399,7 @@ describe("needs_attention — reset on server startup", () => {
     });
     seedWorktreeStatuses(tmpHome, [
       {
-        worktreeId: "myrepo-main",
+        worktreeId: testWorktreeId("myrepo", "main"),
         repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
@@ -396,7 +409,9 @@ describe("needs_attention — reset on server startup", () => {
 
     const server = await startServer({ tmpHome });
     try {
-      const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+      const res = await trpcQuery(server.url, "statuses.get", {
+        worktreeId: testWorktreeId("myrepo", "main"),
+      });
       const data = await trpcData<{ agent: { status: string } }>(res);
       expect(data.agent.status).toBe("waiting");
     } finally {
@@ -443,11 +458,11 @@ describe("needs_attention — status stream via WebSocket", () => {
   it("WebSocket snapshot reflects current status after clearing needs_attention", async () => {
     // Set needs_attention, then clear it
     await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention" },
     });
     await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
     });
 
     // Subscribe — snapshot should show "waiting", not "needs_attention"
@@ -462,7 +477,7 @@ describe("needs_attention — status stream via WebSocket", () => {
       };
       expect(snapshotData.kind).toBe("snapshot");
       const ws = snapshotData.statuses.find(
-        (s: { worktreeId?: string }) => s.worktreeId === "myrepo-main",
+        (s: { worktreeId?: string }) => s.worktreeId === testWorktreeId("myrepo", "main"),
       );
       expect(ws).toBeDefined();
       expect(ws!.agent.status).toBe("waiting");
@@ -474,7 +489,7 @@ describe("needs_attention — status stream via WebSocket", () => {
   it("WebSocket receives update event when needs_attention is cleared", async () => {
     // Set needs_attention
     await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention" },
     });
 
@@ -486,7 +501,7 @@ describe("needs_attention — status stream via WebSocket", () => {
 
       // Now clear the status via the dedicated endpoint — should arrive as an "update" event
       await trpcMutate(server.url, "statuses.clearNeedsAttention", {
-        worktreeId: "myrepo-main",
+        worktreeId: testWorktreeId("myrepo", "main"),
       });
 
       const updateEvent = await sub.waitForEvent(
@@ -500,7 +515,7 @@ describe("needs_attention — status stream via WebSocket", () => {
         status: { worktreeId: string; agent: { status: string } };
       };
       expect(eventData.kind).toBe("update");
-      expect(eventData.status.worktreeId).toBe("myrepo-main");
+      expect(eventData.status.worktreeId).toBe(testWorktreeId("myrepo", "main"));
       expect(eventData.status.agent.status).toBe("waiting");
     } finally {
       sub.close();
@@ -554,7 +569,9 @@ describe("statuses.notify — agent hook mapping", () => {
     if (res.status !== 200) {
       throw new Error(`statuses.notify failed: HTTP ${res.status} — ${await res.text()}`);
     }
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{ agent?: { status: string } } | null>(getRes);
     return data?.agent?.status;
   }
@@ -642,7 +659,9 @@ describe("statuses.notify — agent hook mapping", () => {
   it("stamps a recent lastActivity timestamp", async () => {
     const before = Date.now();
     await notifyStatus({ hook_event_name: "Stop" });
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{ agent?: { lastActivity: string } } | null>(getRes);
     const stamped = data?.agent?.lastActivity;
     expect(typeof stamped).toBe("string");

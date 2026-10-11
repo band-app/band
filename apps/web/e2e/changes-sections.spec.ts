@@ -54,7 +54,7 @@ function createRepo(name: string, files: Record<string, string>, branch = "work"
   gitCommit(path, "initial");
   if (branch !== "main") git(path, ["checkout", "-b", branch]);
   repos[name] = path;
-  worktrees[name] = toWorktreeId(name, branch);
+  worktrees[name] = toWorktreeId(name, branch, "local");
   return path;
 }
 
@@ -102,7 +102,7 @@ test.beforeAll(async () => {
   gitCommit(conflict, "main edit");
   git(conflict, ["checkout", "work"]);
   expect(() => git(conflict, ["merge", "main"])).toThrow();
-  worktrees.conflict = toWorktreeId("conflict", "work");
+  worktrees.conflict = toWorktreeId("conflict", "work", "local");
 
   seedState(tmpHome, {
     repos: Object.entries(repos).map(([name, path]) => ({

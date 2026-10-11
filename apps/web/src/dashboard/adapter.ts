@@ -70,12 +70,12 @@ export interface DashboardAdapter {
     prompt?: string,
     agentMode?: AgentMode,
     host?: { hostId: string; hostRepoPath?: string },
-  ): Promise<void>;
-  removeWorktree(repo: string, name: string): Promise<void>;
-  setWorktreePinned(repo: string, name: string, pinned: boolean): Promise<void>;
+  ): Promise<{ hostId?: string }>;
+  removeWorktree(repo: string, name: string, hostId?: string): Promise<void>;
+  setWorktreePinned(repo: string, name: string, pinned: boolean, hostId?: string): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
-  gitPull(repo: string, name: string): Promise<GitOpResult>;
-  gitPush(repo: string, name: string): Promise<GitOpResult>;
+  gitPull(repo: string, name: string, hostId?: string): Promise<GitOpResult>;
+  gitPush(repo: string, name: string, hostId?: string): Promise<GitOpResult>;
 
   // Browser profiles (optional). Profiles hold the browser pane's cookies;
   // each repo remembers which one its new tabs open with.

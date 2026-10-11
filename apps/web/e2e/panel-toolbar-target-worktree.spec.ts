@@ -102,14 +102,14 @@ const TOKEN = "e2e-panel-toolbar-target-token";
 
 // One dedicated worktree pair per test (visible + cached), so no test's
 // toolbar-added panel can leak into another's restore/prune path.
-const ADD_VISIBLE = toWorktreeId("alpha-add", "main");
-const ADD_CACHED = toWorktreeId("bravo-add", "main");
-const SPLIT_VISIBLE = toWorktreeId("alpha-split", "main");
-const SPLIT_CACHED = toWorktreeId("bravo-split", "main");
-const TERM_ADD_VISIBLE = toWorktreeId("alpha-term-add", "main");
-const TERM_ADD_CACHED = toWorktreeId("bravo-term-add", "main");
-const TERM_SPLIT_VISIBLE = toWorktreeId("alpha-term-split", "main");
-const TERM_SPLIT_CACHED = toWorktreeId("bravo-term-split", "main");
+const ADD_VISIBLE = toWorktreeId("alpha-add", "main", "local");
+const ADD_CACHED = toWorktreeId("bravo-add", "main", "local");
+const SPLIT_VISIBLE = toWorktreeId("alpha-split", "main", "local");
+const SPLIT_CACHED = toWorktreeId("bravo-split", "main", "local");
+const TERM_ADD_VISIBLE = toWorktreeId("alpha-term-add", "main", "local");
+const TERM_ADD_CACHED = toWorktreeId("bravo-term-add", "main", "local");
+const TERM_SPLIT_VISIBLE = toWorktreeId("alpha-term-split", "main", "local");
+const TERM_SPLIT_CACHED = toWorktreeId("bravo-term-split", "main", "local");
 
 function repo(name: string) {
   return {

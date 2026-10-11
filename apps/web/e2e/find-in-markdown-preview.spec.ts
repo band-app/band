@@ -92,7 +92,7 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
-  worktreeId = toWorktreeId(REPO_NAME, BRANCH);
+  worktreeId = toWorktreeId(REPO_NAME, BRANCH, "local");
 });
 
 test.afterAll(async () => {

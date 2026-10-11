@@ -16,6 +16,14 @@ export interface WorktreeIdentity {
 }
 
 /**
+ * SQL form of `toWorktreeId(repo, name, hostId)`: `<repo>-<name>` on the local host and
+ * `<repo>-<name>@<hostId>` elsewhere.
+ */
+export function WORKTREE_ID_MATCH(worktreeId: string) {
+  return sql`${worktreesTable.repoName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') || CASE WHEN ${worktreesTable.hostId} = 'local' THEN '' ELSE '@' || ${worktreesTable.hostId} END = ${worktreeId}`;
+}
+
+/**
  * Worktree-scoped data access layer (Phase 3 of the 3-tier refactor —
  * issue #314).
  *
@@ -47,8 +55,8 @@ export class WorktreeQueries {
    * Resolve a worktree ID back to its on-disk identity (repo, branch,
    * worktree path) by scanning the `worktrees` table.
    *
-   * The match expression mirrors `toWorktreeId(repo, name)`:
-   *   `${repo}-${name.replaceAll("/", "-")}`
+   * The match expression mirrors `toWorktreeId(repo, name, hostId)`:
+   *   `${repo}-${name.replaceAll("/", "-")}` plus `@${hostId}` off the local host
    * where `name` is the immutable worktree identity (see the `worktrees`
    * schema), NOT the live `branch`. SQLite's `REPLACE(str, "/", "-")` is
    * also a replace-all, so this is bit-identical to the JS computation.
@@ -83,15 +91,14 @@ export class WorktreeQueries {
         name: worktreesTable.name,
         branch: worktreesTable.branch,
         worktreePath: worktreesTable.path,
+        hostId: worktreesTable.hostId,
       })
       .from(worktreesTable)
-      .where(
-        sql`${worktreesTable.repoName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${worktreeId}`,
-      )
+      .where(WORKTREE_ID_MATCH(worktreeId))
       .get();
     // Use the `toWorktreeId` helper as a runtime sanity check in case the
     // helper's encoding ever evolves to disagree with the SQL above.
-    if (row && toWorktreeId(row.repo, row.name) === worktreeId) {
+    if (row && toWorktreeId(row.repo, row.name, row.hostId) === worktreeId) {
       return { repo: row.repo, branch: row.branch, worktreePath: row.worktreePath };
     }
     return null;
@@ -109,12 +116,10 @@ export class WorktreeQueries {
         hostId: worktreesTable.hostId,
       })
       .from(worktreesTable)
-      .where(
-        sql`${worktreesTable.repoName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${worktreeId}`,
-      )
+      .where(WORKTREE_ID_MATCH(worktreeId))
       .get();
     // Same sanity check as `findIdentity`.
-    return row && toWorktreeId(row.repo, row.name) === worktreeId ? row.hostId : null;
+    return row && toWorktreeId(row.repo, row.name, row.hostId) === worktreeId ? row.hostId : null;
   }
 
   /**

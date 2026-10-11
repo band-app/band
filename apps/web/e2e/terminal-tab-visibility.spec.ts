@@ -35,7 +35,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-tab-visibility-token";
 const REPO = "term-tab-visibility";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

@@ -25,7 +25,6 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -38,6 +37,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { listTasksForWorktree } from "./helpers/tasks";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // ---------------------------------------------------------------------------
@@ -217,7 +217,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     expect(data.via).toBe("terminal");
     expect(typeof data.terminalId).toBe("string");
     expect(data.terminalId!.length).toBeGreaterThan(0);
-    expect(data.worktreeId).toBe("viacron-main");
+    expect(data.worktreeId).toBe(testWorktreeId("viacron", "main"));
     expect(data.taskId).toBeUndefined();
 
     // The stub vendor CLI logged its argv (one atomic line per spawn) to a file
@@ -246,7 +246,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     // Self-close: the command ended with `exit`, so the pane closes when the
     // (fast) stub finishes, and the `cleanupOnExit` hook prunes it from the
     // pool. No terminal should remain for the worktree.
-    const worktreeId = toWorktreeId("viacron", "main");
+    const worktreeId = testWorktreeId("viacron", "main");
     const remaining = await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -331,7 +331,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
 
     // Wait until the PTY is registered so the overlap check has something to
     // observe, then fire the second trigger while the stub is still sleeping.
-    const worktreeId = toWorktreeId("overlapcron", "main");
+    const worktreeId = testWorktreeId("overlapcron", "main");
     await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -424,10 +424,10 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     expect(data.terminalId).toBeUndefined();
     // Assert the full chat-branch shape so a field rename/drop is caught: the
     // union also carries worktreeId + chatId.
-    expect(data.worktreeId).toBe("chatcron-main");
+    expect(data.worktreeId).toBe(testWorktreeId("chatcron", "main"));
     expect(typeof data.chatId).toBe("string");
 
-    const worktreeId = toWorktreeId("chatcron", "main");
+    const worktreeId = testWorktreeId("chatcron", "main");
 
     // Positive anchor: the chat task actually landed.
     const tasks = await waitFor(
@@ -528,7 +528,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     expect(data.terminalId).toBeUndefined();
     // Assert the full fallback shape: it lands on the chat branch, so
     // worktreeId + chatId are present just like a native via=chat trigger.
-    expect(data.worktreeId).toBe("fbcron-main");
+    expect(data.worktreeId).toBe(testWorktreeId("fbcron", "main"));
     expect(typeof data.chatId).toBe("string");
   });
 });
@@ -605,7 +605,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const triggerData = await trpcData<TriggerResponse>(trigger);
     expect(triggerData.via).toBe("terminal");
 
-    const worktreeId = toWorktreeId("delcron", "main");
+    const worktreeId = testWorktreeId("delcron", "main");
 
     // Positive anchor: the PTY is live (the stub is still sleeping).
     await waitFor(
@@ -760,7 +760,7 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
     expect(statuses).toEqual([200, 409]);
 
     // And the worktree holds exactly one terminal — no orphan.
-    const worktreeId = toWorktreeId("racecron", "main");
+    const worktreeId = testWorktreeId("racecron", "main");
     const terminals = await waitFor(
       async () => {
         const list = await listTerminals(server.url, worktreeId, TOKEN);
@@ -786,7 +786,7 @@ describe("cronjobs.trigger via=terminal on a worktree-scoped job", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let jobId: string;
-  const FEATURE_WS = toWorktreeId("wsscron", "feature");
+  const FEATURE_WS = testWorktreeId("wsscron", "feature");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cron-via-wsscope-");

@@ -8,6 +8,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "terminal-config-test-token";
@@ -105,7 +106,7 @@ describe("worktree.getTerminalConfig", () => {
 
   it("returns null when no config exists", async () => {
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -119,7 +120,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify({ setup: "npm install" }));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -145,7 +146,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -203,7 +204,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -242,7 +243,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -277,7 +278,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(invalidConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -302,7 +303,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(invalidConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{ config: null }>(res);
@@ -336,7 +337,7 @@ describe("worktree.getTerminalConfig", () => {
     writeFileSync(join(configDir, "config.json"), JSON.stringify(terminalConfig));
 
     const res = await trpcQuery(server.url, "worktree.getTerminalConfig", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{

@@ -49,11 +49,11 @@ const REPO_TITLE = "term-panes-title";
 const REPO_DRAG = "term-panes-drag";
 const REPO_ICON = "term-panes-icon";
 const REPO_CHAT = "term-panes-chat";
-const WS_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH);
-const WS_TITLE = toWorktreeId(REPO_TITLE, BRANCH);
-const WS_DRAG = toWorktreeId(REPO_DRAG, BRANCH);
-const WS_ICON = toWorktreeId(REPO_ICON, BRANCH);
-const WS_CHAT = toWorktreeId(REPO_CHAT, BRANCH);
+const WS_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH, "local");
+const WS_TITLE = toWorktreeId(REPO_TITLE, BRANCH, "local");
+const WS_DRAG = toWorktreeId(REPO_DRAG, BRANCH, "local");
+const WS_ICON = toWorktreeId(REPO_ICON, BRANCH, "local");
+const WS_CHAT = toWorktreeId(REPO_CHAT, BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the split-capable center
 // dockview renders (mobile is single-pane / no split).

@@ -35,7 +35,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 const TOKEN = "e2e-queue-ui-token";
 // One repo per test, so each gets a fresh chat and queue.
 const REPOS = ["queuerender", "queueedit", "queuereorder"];
-const [RENDER_WS, EDIT_WS, REORDER_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
+const [RENDER_WS, EDIT_WS, REORDER_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
 // A 1x1 PNG, the smallest image the composer accepts as an attachment.
 const PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",

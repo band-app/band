@@ -62,7 +62,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-virtualization-token";
 const REPO = "virtproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const CHAT_ID = "virt-chat-deterministic-id";
 const SESSION_ID = "11111111-2222-3333-4444-555555555555";
 

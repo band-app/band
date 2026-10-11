@@ -44,12 +44,12 @@ const TOKEN = "e2e-terminal-parking-liveness-token";
 // the worktree the focus test reconnects to (busy shell / markers scrolled off).
 const REPO_A = "alpha-parking-live";
 const REPO_B = "bravo-parking-live";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 const REPO_C = "charlie-parking-live";
 const REPO_D = "delta-parking-live";
-const WORKTREE_C = toWorktreeId(REPO_C, "main");
-const WORKTREE_D = toWorktreeId(REPO_D, "main");
+const WORKTREE_C = toWorktreeId(REPO_C, "main", "local");
+const WORKTREE_D = toWorktreeId(REPO_D, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

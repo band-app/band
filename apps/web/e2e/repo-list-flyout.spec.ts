@@ -32,7 +32,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-repo-list-flyout-token";
 const REPO = "flyout-repo";
 const DEFAULT_BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 // Narrow viewport so `useIsDesktop()` reports false (threshold 1024px) and the
 // mobile branch of `worktree.$worktreeId.tsx` mounts (header hamburger).

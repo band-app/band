@@ -17,12 +17,12 @@
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createTsLspRepo } from "./fixtures/ts-lsp-repo";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const TOKEN = "lsp-reconnect-token";
 const REPO = "lsp-reconnect-repo";
@@ -83,7 +83,7 @@ class LspSocket {
   static async open(cookie?: string, idBase = 0): Promise<LspSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(toWorktreeId(REPO, "main"))}&lang=typescript`,
+      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(testWorktreeId(REPO, "main"))}&lang=typescript`,
       cookie ? { headers: { Cookie: cookie } } : {},
     );
     await new Promise<void>((resolve, reject) => {

@@ -90,8 +90,12 @@ import {
   buildHostRows,
   buildOriginRows,
   HOST_COLLAPSE_KEY,
+  type HostInfoLite,
+  hostIdOf,
+  hostLabel,
   navigableIds,
   ORIGIN_COLLAPSE_KEY,
+  repoSpansHosts,
   useGroupBy,
 } from "../lib/sidebar-grouping";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
@@ -175,6 +179,8 @@ interface SortableRepoProps {
    */
   hasPinnedSiblings?: boolean;
   onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
+  /** Known hosts, to name the host tag of a repo that spans several. */
+  hosts: HostInfoLite[];
 }
 
 function SortableRepo({
@@ -194,6 +200,7 @@ function SortableRepo({
   onToggleCollapse,
   hasPinnedSiblings,
   onTogglePinned,
+  hosts,
 }: SortableRepoProps) {
   const isPlain = repo.kind === "plain";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -235,7 +242,9 @@ function SortableRepo({
   // `worktrees[0].name` directly rather than `?.name ?? "main"`;
   // the optional chain would mask a real state-corruption bug.
   const plainName = isPlain ? repo.worktrees[0].name : "";
-  const plainWorktreeId = isPlain ? toWorktreeId(repo.name, plainName) : "";
+  const plainWorktreeId = isPlain
+    ? toWorktreeId(repo.name, plainName, repo.worktrees[0].hostId)
+    : "";
   const plainIsActive = useDashboardStore((s) => isPlain && s.activeWorktreeId === plainWorktreeId);
   const plainHref = isPlain ? capabilities.getWorktreeHref?.(plainWorktreeId) : undefined;
   const plainAgent = isPlain ? statuses.get(plainWorktreeId)?.agent : undefined;
@@ -252,7 +261,7 @@ function SortableRepo({
   const gitHeaderIsActive = useMemo(
     () =>
       !isPlain &&
-      repo.worktrees.some((wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId),
+      repo.worktrees.some((wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId),
     [isPlain, repo.worktrees, repo.name, activeWorktreeId],
   );
 
@@ -544,7 +553,7 @@ function SortableRepo({
             )
           ) : (
             repo.worktrees.map((wt) => {
-              const wsId = toWorktreeId(repo.name, wt.name);
+              const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
               const currentIndex = worktreeIndex++;
               return (
                 <WorktreeCard
@@ -559,6 +568,7 @@ function SortableRepo({
                   isFocused={!collapsed && currentIndex === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
                   onTogglePinned={onTogglePinned}
+                  hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
                 />
               );
             })
@@ -635,7 +645,7 @@ function findWorktree(
 ): { wt: RepoInfo["worktrees"][number]; repo: RepoInfo } | undefined {
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
-      if (toWorktreeId(repo.name, wt.name) === worktreeId) return { wt, repo };
+      if (toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId) return { wt, repo };
     }
   }
   return undefined;
@@ -681,7 +691,6 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const hostsQuery = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
-    enabled: groupBy === "host",
   });
   const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorktrees();
   // Plain (non-git) repos have no separate worktree card to pull up
@@ -797,7 +806,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
       return g.repos.flatMap((p) => {
         if (repoCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name));
+        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name, wt.hostId));
       });
     });
     return [...pinnedPart, ...rest];
@@ -926,7 +935,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     for (const group of groups) {
       for (const repo of group.repos) {
         const containsActive = repo.worktrees.some(
-          (wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId,
+          (wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId,
         );
         if (!containsActive) continue;
         if (labelFilter && group.labelId !== labelFilter) return;
@@ -1099,6 +1108,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
             rows={groupedRows}
             originCollapse={originCollapse}
             hostCollapse={hostCollapse}
+            hosts={hostsQuery.data ?? []}
             statuses={statuses}
             branchStatuses={branchStatuses}
             setupStatuses={setupStatuses}
@@ -1208,6 +1218,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
                               onToggleCollapse={repoCollapse.toggle}
                               hasPinnedSiblings={reposWithPinned.has(repo.name)}
                               onTogglePinned={togglePinned}
+                              hosts={hostsQuery.data ?? []}
                             />
                           </div>
                         ))}
@@ -1256,6 +1267,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
             removeWorktreeMutation.mutate({
               repo: deleteDialog.repoName,
               name: deleteDialog.name,
+              hostId: deleteDialog.hostId,
             });
             setDeleteDialog(null);
           }

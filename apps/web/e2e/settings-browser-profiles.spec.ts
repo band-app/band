@@ -143,8 +143,8 @@ test("picking a repo's browser profile makes new tabs in every worktree use it",
 
   await expect.poll(repoDefault).toBe(PROFILE_ID);
   await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toContainText("Default");
-  expect(await newTabProfile(toWorktreeId(REPO, FEATURE_BRANCH))).toBe(PROFILE_ID);
-  expect(await newTabProfile(toWorktreeId(REPO, "main"))).toBe(PROFILE_ID);
+  expect(await newTabProfile(toWorktreeId(REPO, FEATURE_BRANCH, "local"))).toBe(PROFILE_ID);
+  expect(await newTabProfile(toWorktreeId(REPO, "main", "local"))).toBe(PROFILE_ID);
 });
 
 test("deleting a profile removes it and puts its repo back on Default", async ({ page }) => {
@@ -164,5 +164,5 @@ test("deleting a profile removes it and puts its repo back on Default", async ({
   await expect(settingsPage.browserProfileRows()).toHaveCount(0);
   await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
   await expect.poll(repoDefault).toBeNull();
-  expect(await newTabProfile(toWorktreeId(REPO, "main"))).toBeNull();
+  expect(await newTabProfile(toWorktreeId(REPO, "main", "local"))).toBeNull();
 });

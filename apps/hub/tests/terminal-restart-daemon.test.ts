@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -18,6 +17,7 @@ import {
   stopTerminalDaemon,
 } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // `terminal.restartDaemon` (Settings > Terminal / `band terminals
@@ -29,7 +29,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-restart-daemon-token";
 const REPO = "restartproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = testWorktreeId(REPO, "main", false);
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 interface TerminalEntry {

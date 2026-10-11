@@ -30,7 +30,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-worktree-switch-no-remount-token";
 const REPO = "no-remount-repo";
 const BRANCHES = ["nr-0", "nr-1", "nr-2", "nr-3", "nr-4", "nr-5"];
-const WS = BRANCHES.map((branch) => toWorktreeId(REPO, branch));
+const WS = BRANCHES.map((branch) => toWorktreeId(REPO, branch, "local"));
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

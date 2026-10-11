@@ -42,7 +42,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-visible-output-token";
 const REPO = "visible-output";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

@@ -35,7 +35,7 @@ import { createTmpHome } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
 const REPO = "testrepo";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 const ENV_KEYS = [
   "BAND_HOME",

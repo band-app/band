@@ -34,7 +34,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-terminal-find-long-line-token";
 const REPO = "find-long-line-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 /** Screen rows the one logical line fills. Under the 10,000-row scrollback so
  *  no row is trimmed, and deep enough to overflow the old recursive rewind. */

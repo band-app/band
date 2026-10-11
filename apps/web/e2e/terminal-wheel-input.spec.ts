@@ -89,7 +89,7 @@ async function startProbe(
   name: ProbeName,
   setup: string,
 ): Promise<string> {
-  const worktreeId = toWorktreeId(REPOS[name], "main");
+  const worktreeId = toWorktreeId(REPOS[name], "main", "local");
   const probe = writeInputProbe(workdirs[name], setup);
   await worktreePage.goto(worktreeId);
   await worktreePage.waitForReady();
@@ -103,7 +103,7 @@ async function startProbe(
 function openSurface(page: Page, name: ProbeName) {
   return {
     worktreePage: new WorktreePage(page, server.url, TOKEN),
-    terminal: new TerminalInputSurface(page, toWorktreeId(REPOS[name], "main")),
+    terminal: new TerminalInputSurface(page, toWorktreeId(REPOS[name], "main", "local")),
   };
 }
 
@@ -237,7 +237,7 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
   test("the wheel scrolls a shell's scrollback", async ({ page }) => {
     test.setTimeout(90_000);
     const { worktreePage, terminal } = openSurface(page, "shell");
-    const worktreeId = toWorktreeId(REPOS.shell, "main");
+    const worktreeId = toWorktreeId(REPOS.shell, "main", "local");
     await worktreePage.goto(worktreeId);
     await worktreePage.waitForReady();
     await worktreePage.openTerminalTab();
@@ -293,7 +293,7 @@ test.describe("Terminal input coalescing", () => {
   test("the typing-latency probe still stamps every echoed key", async ({ page }) => {
     test.setTimeout(90_000);
     const { worktreePage } = openSurface(page, "latency");
-    const worktreeId = toWorktreeId(REPOS.latency, "main");
+    const worktreeId = toWorktreeId(REPOS.latency, "main", "local");
     await worktreePage.goto(worktreeId);
     await worktreePage.waitForReady();
     await worktreePage.openTerminalTab();

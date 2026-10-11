@@ -849,6 +849,8 @@ BAND_TEST_HOST=remote-loopback pnpm --filter @band-app/server exec vitest run
 
 CI runs the second command as the job "Test (remote-loopback)". The host contract suite itself (`packages/host-local`, `apps/worker/tests/host-remote-contract.test.ts`) already runs against `LocalHost` and `RemoteHost`.
 
+In this mode the loopback worker has the fixed host id `h-loopback`, and a worktree id names its host (`<repo>-<branch>@h-loopback`). A test never writes an id by hand: it calls `testWorktreeId(repo, branch)` from `apps/hub/tests/helpers/test-host.ts`, which gives the local id in `local` mode and the loopback id here. Pass `false` as the third argument for a worktree that stays on the hub: one a test makes through `worktrees.create` without a host, or any worktree of a server started with `remoteHost: false`. A URL path that holds an id needs `encodeURIComponent`, because `@` is encoded as `%40`.
+
 A test that cannot run on a worker passes `remoteHost: false` to `startServer`. The current list:
 
 - `terminal-restart-daemon`, `terminal-daemon-restart`, `terminal-daemon-build-mismatch` and `terminal-cold-restore` drive the hub's own terminal daemon. A worker runs terminals in its process (`BAND_TERMINAL_DAEMON=0`).

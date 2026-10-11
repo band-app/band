@@ -40,7 +40,7 @@ test.skip(process.env.BAND_TYPING_BENCH !== "1", "benchmark; set BAND_TYPING_BEN
 const TOKEN = "e2e-typing-latency-token";
 const REPO = "typing-bench";
 const BRANCHES = ["idle", "split", "parked", "visible", "flood-1", "flood-2", "flood-3"];
-const WS = Object.fromEntries(BRANCHES.map((b) => [b, toWorktreeId(REPO, b)]));
+const WS = Object.fromEntries(BRANCHES.map((b) => [b, toWorktreeId(REPO, b, "local")]));
 const KEYS = Number(process.env.BENCH_KEYS ?? 150);
 const KEY_INTERVAL_MS = 40;
 

@@ -52,11 +52,11 @@ const REPO_RESIZED = "resized-reveal";
 const REPO_ZOOMED = "zoomed-reveal";
 const REPO_BACKLOG = "backlog-reveal";
 const REPO_OTHER = "other-reveal";
-const WORKTREE_FIRST_FRAME = toWorktreeId(REPO_FIRST_FRAME, "main");
-const WORKTREE_RESIZED = toWorktreeId(REPO_RESIZED, "main");
-const WORKTREE_ZOOMED = toWorktreeId(REPO_ZOOMED, "main");
-const WORKTREE_BACKLOG = toWorktreeId(REPO_BACKLOG, "main");
-const WORKTREE_OTHER = toWorktreeId(REPO_OTHER, "main");
+const WORKTREE_FIRST_FRAME = toWorktreeId(REPO_FIRST_FRAME, "main", "local");
+const WORKTREE_RESIZED = toWorktreeId(REPO_RESIZED, "main", "local");
+const WORKTREE_ZOOMED = toWorktreeId(REPO_ZOOMED, "main", "local");
+const WORKTREE_BACKLOG = toWorktreeId(REPO_BACKLOG, "main", "local");
+const WORKTREE_OTHER = toWorktreeId(REPO_OTHER, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

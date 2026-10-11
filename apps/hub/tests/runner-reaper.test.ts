@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { STUB_AGENT_PATH, TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -492,7 +493,7 @@ describe("maximum lifetime and the destroy action", () => {
     );
     expect(destroyed.note).toContain("maximum lifetime of 2s");
     // It handed its work over first: only the worker's persist pushes this ref.
-    const ref = "refs/heads/band/wip/lifeproj-life-a";
+    const ref = `refs/heads/band/wip/${toWorktreeId("lifeproj", "life-a", hostId)}`;
     expect(git(origin, "show", `${ref}:hello.txt`)).toContain("edited on the worker");
     expect(git(origin, "show", `${ref}:notes/scratch.txt`)).toBe("scratch\n");
     expect(isAlive(pid)).toBe(false);
@@ -505,7 +506,7 @@ describe("maximum lifetime and the destroy action", () => {
     // The worktree keeps its work: it wakes on a new machine with the edit present.
     await setRunner();
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: "lifeproj-life-a",
+      worktreeId: toWorktreeId("lifeproj", "life-a", hostId),
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited on the worker\n");
@@ -523,7 +524,10 @@ describe("maximum lifetime and the destroy action", () => {
     const res = await fetch(`${server.url}/api/chats/life-busy/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-      body: JSON.stringify({ worktreeId: "lifeproj-life-b", text: "slow please" }),
+      body: JSON.stringify({
+        worktreeId: toWorktreeId("lifeproj", "life-b", hostId),
+        text: "slow please",
+      }),
     });
     expect(res.ok).toBe(true);
 
@@ -568,7 +572,7 @@ describe("maximum lifetime and the destroy action", () => {
       intervalMs: 250,
     });
     expect(destroyed.note).toContain("hard deadline passed with worktrees NOT stored");
-    expect(destroyed.note).toContain("lifeproj-life-b");
+    expect(destroyed.note).toContain(toWorktreeId("lifeproj", "life-b", hostId));
     await waitFor(async () => !isAlive(pid), { label: "worker stopped", timeoutMs: 10_000 });
     await setRunner();
   }, 240_000);
@@ -582,7 +586,10 @@ describe("maximum lifetime and the destroy action", () => {
       const res = await fetch(`${server.url}/api/chats/life-slow-start/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-        body: JSON.stringify({ worktreeId: "lifeproj-life-d", text: "hello" }),
+        body: JSON.stringify({
+          worktreeId: toWorktreeId("lifeproj", "life-d", hostId),
+          text: "hello",
+        }),
       });
       expect(res.ok).toBe(true);
       const running = await waitFor(() => machineOf(hostId, "running"), {

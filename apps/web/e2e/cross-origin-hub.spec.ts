@@ -32,7 +32,7 @@ import { TerminalSurface } from "./pages/TerminalSurface";
 
 const TOKEN = "e2e-cross-origin-hub-token";
 const REPO = "crossproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

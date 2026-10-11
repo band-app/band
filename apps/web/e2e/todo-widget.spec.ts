@@ -36,7 +36,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-todo-widget-token";
 const REPO = "todoproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

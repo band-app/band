@@ -94,7 +94,7 @@ function bootServer(theme: "light" | "dark"): ServerContext {
   const ctx: ServerContext = {
     server: undefined as unknown as ServerHandle,
     tmpHome: "",
-    worktreeId: toWorktreeId(REPO_NAME, BRANCH),
+    worktreeId: toWorktreeId(REPO_NAME, BRANCH, "local"),
     commitSha: "",
   };
   test.beforeAll(async () => {

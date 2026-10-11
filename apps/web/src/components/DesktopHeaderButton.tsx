@@ -15,7 +15,9 @@ export function DesktopHeaderButton({ worktreeId }: { worktreeId: string }) {
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
   });
   const hostId = repos
-    .flatMap((repo) => repo.worktrees.map((wt) => ({ id: toWorktreeId(repo.name, wt.name), wt })))
+    .flatMap((repo) =>
+      repo.worktrees.map((wt) => ({ id: toWorktreeId(repo.name, wt.name, wt.hostId), wt })),
+    )
     .find((entry) => entry.id === worktreeId)?.wt.hostId;
   const host = hosts.data?.find((h) => h.id === (hostId ?? "local"));
   if (!host || host.status !== "online" || !host.capabilities.includes("desktop")) return null;

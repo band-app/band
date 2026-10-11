@@ -29,8 +29,8 @@ import { createTmpHome } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
 const REPO = "testrepo";
-const MAIN = toWorktreeId(REPO, "main");
-const FEATURE = toWorktreeId(REPO, "feat");
+const MAIN = toWorktreeId(REPO, "main", "local");
+const FEATURE = toWorktreeId(REPO, "feat", "local");
 
 const gitEnv = {
   ...process.env,

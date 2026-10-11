@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 import { StatusStream } from "./helpers/status-stream";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // The git half of each worktree's branch status, as the poller pushes it on
@@ -134,7 +134,7 @@ describe("branch status git fields", () => {
 
   it("reports dirty, conflict, ahead/behind and sync state for each worktree", async () => {
     const stream = await StatusStream.open(server.url, TOKEN);
-    const status = (branch: string) => stream.latest(toWorktreeId(REPO, branch));
+    const status = (branch: string) => stream.latest(testWorktreeId(REPO, branch));
     try {
       // The first tick's worktree sync also finds the `conflict-other` helper
       // worktree, so wait for these worktrees by name, not by count.

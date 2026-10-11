@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 // End-to-end test for `worktree.formatFile`: boots the real server, drives
@@ -91,7 +92,7 @@ describe("worktree.formatFile (tRPC)", () => {
     writeFileSync(target, "// stale on-disk version\n");
 
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: "const   a={x:1,y:2}\n",
     });
@@ -115,7 +116,7 @@ describe("worktree.formatFile (tRPC)", () => {
   it("returns skipped=true for unsupported file extensions", async () => {
     const target = join(repoPath, "blob.bin");
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: "anything",
     });
@@ -129,7 +130,7 @@ describe("worktree.formatFile (tRPC)", () => {
   it("returns changed=false when input is already formatted", async () => {
     const target = join(repoPath, "clean.js");
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: "const a = 1;\n",
     });
@@ -157,7 +158,7 @@ describe("worktree.formatFile (tRPC)", () => {
   it("surfaces Prettier syntax errors as 400", async () => {
     const target = join(repoPath, "broken.ts");
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: "const x: =;\n",
     });
@@ -172,7 +173,7 @@ describe("worktree.formatFile (tRPC)", () => {
     const target = join(repoPath, "quotes.js");
 
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: `const s = "hello";\n`,
     });
@@ -191,7 +192,7 @@ describe("worktree.formatFile (tRPC)", () => {
   it("formats files that don't exist on disk yet (untitled / unsaved buffers)", async () => {
     const target = join(repoPath, "brand-new-never-saved.ts");
     const res = await trpcMutate(server.url, "worktree.formatFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       filePath: target,
       content: "const a:number=1\n",
     });

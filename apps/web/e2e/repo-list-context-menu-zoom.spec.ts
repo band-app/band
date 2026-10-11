@@ -56,7 +56,7 @@ const TOKEN = "e2e-context-menu-zoom-token";
 
 const REPO = "zoom-ctx-menu-repo";
 const BRANCH = "feature-zoom-ctx";
-const WORKTREE_ID = toWorktreeId(REPO, BRANCH);
+const WORKTREE_ID = toWorktreeId(REPO, BRANCH, "local");
 
 // Wide viewport so the desktop layout — and therefore the sidebar repo
 // list — is the one that mounts. Matches the `>= 1024px` desktop cutoff.

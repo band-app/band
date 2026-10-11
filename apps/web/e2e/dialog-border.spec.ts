@@ -34,7 +34,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-dialog-border-token";
 const REPO = "dialog-border-repo";
 const DEFAULT_BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 let server: ServerHandle;
 let tmpHome: string;

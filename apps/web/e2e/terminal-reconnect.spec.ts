@@ -55,7 +55,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-reconnect-token";
 const REPO = "alpha-terminal-reconnect";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const MARKER = "band-reconnect-marker-7f3c";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview

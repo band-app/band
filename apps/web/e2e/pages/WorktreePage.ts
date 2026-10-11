@@ -398,6 +398,31 @@ export class WorktreePage {
     });
   }
 
+  /** The branch name field of the open New Worktree dialog. */
+  get newWorktreeBranchInput(): Locator {
+    return this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" });
+  }
+
+  /** Fills the branch name of the open New Worktree dialog. */
+  async fillNewWorktreeBranch(branch: string): Promise<void> {
+    await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(branch);
+  }
+
+  /** The "<branch> is already on <host>" line under the branch name. */
+  get newWorktreeSlugError(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__slug-error");
+  }
+
+  /** "Open it": opens the worktree that already holds the branch on another host. */
+  get newWorktreeOpenExisting(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__open-existing");
+  }
+
+  /** The note on a card whose host the repo is no longer allowed on. */
+  notAllowedMark(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__not-allowed");
+  }
+
   /** Clicks Create in the New Worktree dialog. */
   async submitNewWorktree(): Promise<void> {
     await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();

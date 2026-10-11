@@ -8,6 +8,7 @@ import {
   type ServerHandle,
   startServer as startServerBase,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "trpc-default-token";
@@ -178,7 +179,7 @@ describe("tRPC — repos CRUD", () => {
     const proj = data.repos.find((p) => p.name === "myrepo")!;
     expect(proj.worktrees.length).toBeGreaterThanOrEqual(1);
     const mainWt = proj.worktrees.find((wt) => wt.branch === "main")!;
-    expect(mainWt.worktreeId).toBe("myrepo-main");
+    expect(mainWt.worktreeId).toBe(testWorktreeId("myrepo", "main", false));
     expect(mainWt.agent).toBeNull();
   });
 
@@ -543,7 +544,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.listFiles returns directory entries", async () => {
     const res = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     expect(res.status).toBe(200);
@@ -564,7 +565,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.listFiles returns subdirectory contents", async () => {
     const res = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src",
     });
     expect(res.status).toBe(200);
@@ -577,7 +578,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.listFiles returns error for unknown worktree", async () => {
     const res = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       path: "",
     });
     expect(res.status).toBe(500);
@@ -587,7 +588,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.getFile returns file content with language", async () => {
     const res = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src/index.ts",
     });
     expect(res.status).toBe(200);
@@ -599,7 +600,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.getFile returns markdown language for .md files", async () => {
     const res = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "README.md",
     });
     expect(res.status).toBe(200);
@@ -610,7 +611,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.getFile returns error for unknown worktree", async () => {
     const res = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       path: "README.md",
     });
     expect(res.status).toBe(500);
@@ -620,7 +621,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile creates an empty file at the root", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "NOTES.md",
     });
     expect(res.status).toBe(200);
@@ -629,7 +630,7 @@ describe("tRPC — worktree operations", () => {
 
     // Verify the new file appears in listFiles and is empty
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
@@ -638,7 +639,7 @@ describe("tRPC — worktree operations", () => {
     expect(entry!.type).toBe("file");
 
     const getRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "NOTES.md",
     });
     const getData = await trpcData<{ content: string }>(getRes);
@@ -647,14 +648,14 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile creates a file inside a subdirectory with content", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src/util.ts",
       content: "export const x = 1;\n",
     });
     expect(res.status).toBe(200);
 
     const getRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src/util.ts",
     });
     const getData = await trpcData<{ content: string; language?: string }>(getRes);
@@ -664,7 +665,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile rejects an existing path", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "README.md",
     });
     expect(res.status).toBe(500);
@@ -674,7 +675,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile rejects path traversal attempts", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "../escape.txt",
     });
     expect(res.status).toBe(500);
@@ -682,7 +683,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile rejects when the parent directory does not exist", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "no-such-dir/file.txt",
     });
     expect(res.status).toBe(500);
@@ -692,7 +693,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile rejects empty path input", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     expect(res.status).toBe(400);
@@ -700,7 +701,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createFile rejects unknown worktree", async () => {
     const res = await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       path: "x.txt",
     });
     expect(res.status).toBe(500);
@@ -710,13 +711,13 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory creates a directory at the root", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs",
     });
     expect(res.status).toBe(200);
 
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
@@ -727,13 +728,13 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory creates a nested directory under an existing one", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs/api",
     });
     expect(res.status).toBe(200);
 
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs",
     });
     const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
@@ -744,7 +745,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory rejects an existing path", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src",
     });
     expect(res.status).toBe(500);
@@ -754,7 +755,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory rejects path traversal attempts", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "../escape-dir",
     });
     expect(res.status).toBe(500);
@@ -762,7 +763,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory rejects when the parent directory does not exist", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "no-such-parent/child",
     });
     expect(res.status).toBe(500);
@@ -772,7 +773,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory rejects empty path input", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     expect(res.status).toBe(400);
@@ -780,7 +781,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.createDirectory rejects unknown worktree", async () => {
     const res = await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       path: "newdir",
     });
     expect(res.status).toBe(500);
@@ -791,7 +792,7 @@ describe("tRPC — worktree operations", () => {
   it("worktree.deletePath deletes a file", async () => {
     // NOTES.md was created earlier in the createFile tests.
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "NOTES.md",
     });
     expect(res.status).toBe(200);
@@ -801,7 +802,7 @@ describe("tRPC — worktree operations", () => {
 
     // Verify it's gone from the listing.
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
@@ -810,7 +811,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath deletes a nested file", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src/util.ts",
     });
     expect(res.status).toBe(200);
@@ -818,7 +819,7 @@ describe("tRPC — worktree operations", () => {
     expect(data.kind).toBe("file");
 
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "src",
     });
     const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
@@ -827,7 +828,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath deletes an empty directory", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs/api",
     });
     expect(res.status).toBe(200);
@@ -835,7 +836,7 @@ describe("tRPC — worktree operations", () => {
     expect(data.kind).toBe("directory");
 
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs",
     });
     const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
@@ -845,13 +846,13 @@ describe("tRPC — worktree operations", () => {
   it("worktree.deletePath deletes a directory recursively", async () => {
     // Re-populate `docs` with a nested file so we can verify recursive removal.
     await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs/inner.txt",
       content: "hi",
     });
 
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "docs",
     });
     expect(res.status).toBe(200);
@@ -859,7 +860,7 @@ describe("tRPC — worktree operations", () => {
     expect(data.kind).toBe("directory");
 
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
@@ -868,7 +869,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath rejects a missing path", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "no-such-thing.txt",
     });
     expect(res.status).toBe(500);
@@ -878,7 +879,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath rejects path traversal attempts", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "../README.md",
     });
     expect(res.status).toBe(500);
@@ -886,7 +887,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath refuses to delete .git internals", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: ".git",
     });
     expect(res.status).toBe(500);
@@ -896,7 +897,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath rejects empty path input", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     expect(res.status).toBe(400);
@@ -904,7 +905,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.deletePath rejects unknown worktree", async () => {
     const res = await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       path: "README.md",
     });
     expect(res.status).toBe(500);
@@ -915,13 +916,13 @@ describe("tRPC — worktree operations", () => {
   it("worktree.renamePath renames a file at the root", async () => {
     // Set up: create a file we can rename.
     await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "rename-me.txt",
       content: "rename my contents\n",
     });
 
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "rename-me.txt",
       toPath: "renamed.txt",
     });
@@ -932,7 +933,7 @@ describe("tRPC — worktree operations", () => {
 
     // Old path is gone, new path exists with the same content.
     const listRes = await trpcQuery(server.url, "worktree.listFiles", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "",
     });
     const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
@@ -940,7 +941,7 @@ describe("tRPC — worktree operations", () => {
     expect(listData.entries.find((e) => e.name === "renamed.txt")).toBeDefined();
 
     const getRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "renamed.txt",
     });
     const getData = await trpcData<{ content: string }>(getRes);
@@ -948,24 +949,24 @@ describe("tRPC — worktree operations", () => {
 
     // Cleanup so later tests don't see the renamed entry.
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "renamed.txt",
     });
   });
 
   it("worktree.renamePath renames a directory along with its descendants", async () => {
     await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "rename-dir",
     });
     await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "rename-dir/inner.txt",
       content: "inside\n",
     });
 
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "rename-dir",
       toPath: "renamed-dir",
     });
@@ -975,7 +976,7 @@ describe("tRPC — worktree operations", () => {
 
     // Descendant file should now be under the new path.
     const innerRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "renamed-dir/inner.txt",
     });
     const innerData = await trpcData<{ content: string }>(innerRes);
@@ -983,14 +984,14 @@ describe("tRPC — worktree operations", () => {
 
     // Cleanup.
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "renamed-dir",
     });
   });
 
   it("worktree.renamePath rejects identical source and destination", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "README.md",
     });
@@ -1001,7 +1002,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects when destination already exists", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "src",
     });
@@ -1012,7 +1013,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects missing source", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "no-such-file.txt",
       toPath: "elsewhere.txt",
     });
@@ -1023,7 +1024,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects when destination parent is missing", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "no-such-dir/README.md",
     });
@@ -1034,7 +1035,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects path traversal on the source", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "../README.md",
       toPath: "elsewhere.txt",
     });
@@ -1043,7 +1044,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects path traversal on the destination", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "../escape.txt",
     });
@@ -1052,7 +1053,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath refuses to rename .git internals", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: ".git",
       toPath: "git-backup",
     });
@@ -1063,7 +1064,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects empty source path", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "",
       toPath: "x.txt",
     });
@@ -1072,7 +1073,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects empty destination path", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "",
     });
@@ -1081,7 +1082,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.renamePath rejects unknown worktree", async () => {
     const res = await trpcMutate(server.url, "worktree.renamePath", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       fromPath: "README.md",
       toPath: "x.md",
     });
@@ -1092,7 +1093,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath copies a file and leaves the original intact", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "README-copy.md",
     });
@@ -1103,14 +1104,14 @@ describe("tRPC — worktree operations", () => {
 
     // Source still exists.
     const srcRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "README.md",
     });
     expect(srcRes.status).toBe(200);
 
     // Copy has the same content.
     const dstRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "README-copy.md",
     });
     const dstData = await trpcData<{ content: string }>(dstRes);
@@ -1118,24 +1119,24 @@ describe("tRPC — worktree operations", () => {
 
     // Cleanup.
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "README-copy.md",
     });
   });
 
   it("worktree.copyPath copies a directory recursively", async () => {
     await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "to-copy",
     });
     await trpcMutate(server.url, "worktree.createFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "to-copy/inside.txt",
       content: "nested\n",
     });
 
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "to-copy",
       toPath: "copied",
     });
@@ -1145,7 +1146,7 @@ describe("tRPC — worktree operations", () => {
 
     // Verify the nested file landed at the new path with its content.
     const innerRes = await trpcQuery(server.url, "worktree.getFile", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "copied/inside.txt",
     });
     const innerData = await trpcData<{ content: string }>(innerRes);
@@ -1153,18 +1154,18 @@ describe("tRPC — worktree operations", () => {
 
     // Cleanup both source and copy.
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "to-copy",
     });
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "copied",
     });
   });
 
   it("worktree.copyPath rejects copying onto an existing destination", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "src",
     });
@@ -1175,16 +1176,16 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects copying a directory into its descendant", async () => {
     await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "outer",
     });
     await trpcMutate(server.url, "worktree.createDirectory", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "outer/inner",
     });
 
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "outer",
       toPath: "outer/inner/copy",
     });
@@ -1193,14 +1194,14 @@ describe("tRPC — worktree operations", () => {
     expect(body.error.message).toMatch(/into itself/);
 
     await trpcMutate(server.url, "worktree.deletePath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       path: "outer",
     });
   });
 
   it("worktree.copyPath rejects missing source", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "no-such-file.txt",
       toPath: "anywhere.txt",
     });
@@ -1211,7 +1212,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects path traversal on the source", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "../README.md",
       toPath: "elsewhere.txt",
     });
@@ -1220,7 +1221,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects path traversal on the destination", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "../escape.txt",
     });
@@ -1229,7 +1230,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath refuses to copy .git internals", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: ".git",
       toPath: "git-backup",
     });
@@ -1240,7 +1241,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects identical source and destination", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "README.md",
     });
@@ -1251,14 +1252,14 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects empty paths", async () => {
     const emptyFrom = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "",
       toPath: "x.txt",
     });
     expect(emptyFrom.status).toBe(400);
 
     const emptyTo = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
       fromPath: "README.md",
       toPath: "",
     });
@@ -1267,7 +1268,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.copyPath rejects unknown worktree", async () => {
     const res = await trpcMutate(server.url, "worktree.copyPath", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
       fromPath: "README.md",
       toPath: "x.md",
     });
@@ -1278,7 +1279,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.getDiff returns empty diff on clean branch", async () => {
     const res = await trpcQuery(server.url, "worktree.getDiff", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -1325,7 +1326,7 @@ describe("tRPC — worktree operations", () => {
 
   it("worktree.getDiff returns error for unknown worktree", async () => {
     const res = await trpcQuery(server.url, "worktree.getDiff", {
-      worktreeId: "nonexistent-main",
+      worktreeId: testWorktreeId("nonexistent", "main"),
     });
     expect(res.status).toBe(500);
   });
@@ -1356,7 +1357,7 @@ describe("tRPC — worktree operations", () => {
     // On the default branch, comparing against `main` is a no-op, so the
     // server skips re-adding it to the list.
     const res = await trpcQuery(server.url, "worktree.listBranches", {
-      worktreeId: "repo-main",
+      worktreeId: testWorktreeId("repo", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -1848,7 +1849,7 @@ describe("tRPC — statuses", () => {
 
   it("statuses.update creates a status file", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "working", lastActivity: "1234567890" },
     });
     expect(res.status).toBe(200);
@@ -1857,25 +1858,29 @@ describe("tRPC — statuses", () => {
   });
 
   it("statuses.get returns the status after update", async () => {
-    const res = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const res = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{
       worktreeId: string;
       agent: { status: string; lastActivity: string };
     }>(res);
-    expect(data.worktreeId).toBe("myrepo-main");
+    expect(data.worktreeId).toBe(testWorktreeId("myrepo", "main"));
     expect(data.agent.status).toBe("working");
     expect(data.agent.lastActivity).toBe("1234567890");
   });
 
   it("statuses.update merges agent fields", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
-      worktreeId: "myrepo-main",
+      worktreeId: testWorktreeId("myrepo", "main"),
       agent: { status: "needs_attention" },
     });
     expect(res.status).toBe(200);
 
-    const getRes = await trpcQuery(server.url, "statuses.get", { worktreeId: "myrepo-main" });
+    const getRes = await trpcQuery(server.url, "statuses.get", {
+      worktreeId: testWorktreeId("myrepo", "main"),
+    });
     const data = await trpcData<{
       worktreeId: string;
       agent: { status: string; lastActivity: string };
@@ -1889,14 +1894,14 @@ describe("tRPC — statuses", () => {
     const res = await trpcQuery(server.url, "statuses.resolve", { cwd: repoPath });
     expect(res.status).toBe(200);
     const data = await trpcData<{ worktreeId: string | null }>(res);
-    expect(data.worktreeId).toBe("myrepo-main");
+    expect(data.worktreeId).toBe(testWorktreeId("myrepo", "main"));
   });
 
   it("statuses.resolve returns worktreeId for subdirectory CWD", async () => {
     const res = await trpcQuery(server.url, "statuses.resolve", { cwd: join(repoPath, "src") });
     expect(res.status).toBe(200);
     const data = await trpcData<{ worktreeId: string | null }>(res);
-    expect(data.worktreeId).toBe("myrepo-main");
+    expect(data.worktreeId).toBe(testWorktreeId("myrepo", "main"));
   });
 
   it("statuses.resolve returns null for unmatched CWD", async () => {
@@ -2607,7 +2612,7 @@ describe("tRPC — worktree identity survives a git branch switch", () => {
     const feature = proj!.worktrees.find((wt) => wt.name === "feature");
     expect(feature).toBeDefined();
     // Id is derived from the immutable `name`, so it stays `proj-feature`…
-    expect(feature!.worktreeId).toBe("proj-feature");
+    expect(feature!.worktreeId).toBe(testWorktreeId("proj", "feature"));
     // …even though the live git branch has moved on.
     expect(feature!.branch).toBe("feature-renamed");
     // The id must NOT have followed the branch to `proj-feature-renamed`.

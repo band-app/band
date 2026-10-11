@@ -49,7 +49,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-send-optimistic-token";
 const REPO = "chatproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so the desktop chat layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -137,7 +137,7 @@ test.describe("Chat send — optimistic dispatch (#478)", () => {
     // we override the worktree to one that doesn't exist; the server's
     // `chat-submit` returns 404.
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("does-not-exist", "main"));
+    await chatPane.goto(toWorktreeId("does-not-exist", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("forty-two");

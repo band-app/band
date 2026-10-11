@@ -11,6 +11,7 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { BranchOnOtherHostError } from "../../errors";
 import { hostRegistry } from "../../infra/host/registry";
 import { chatService } from "../../services/chat-service";
 import { worktreeService } from "../../services/worktree-service";
@@ -91,9 +92,18 @@ function createServer(chatId: string): McpServer {
         const branch = slugifyBranchName(input.branch);
         return jsonText({
           ...result,
-          worktreeId: result.provisioning ? undefined : toWorktreeId(input.repo, branch),
+          worktreeId: result.provisioning
+            ? undefined
+            : toWorktreeId(input.repo, branch, result.hostId ?? input.hostId),
         });
       } catch (err) {
+        // A branch that already lives on another host names that worktree, so the agent can use it.
+        if (err instanceof BranchOnOtherHostError) {
+          return jsonText(
+            { error: err.message, worktreeId: err.worktreeId, hostId: err.hostId },
+            true,
+          );
+        }
         return jsonText({ error: err instanceof Error ? err.message : String(err) }, true);
       }
     },

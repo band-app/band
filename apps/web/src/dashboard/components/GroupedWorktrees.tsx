@@ -1,6 +1,12 @@
 import { ChevronRight, Folder } from "lucide-react";
 import type { CollapseState } from "../hooks/use-collapse-state";
-import type { GroupBy, GroupedRow } from "../lib/sidebar-grouping";
+import {
+  type GroupBy,
+  type GroupedRow,
+  type HostInfoLite,
+  hostIdOf,
+  hostLabel,
+} from "../lib/sidebar-grouping";
 import type { DeleteDialogInfo, SetupStatus, WorktreeBranchStatus, WorktreeStatus } from "../types";
 import { RepoAvatar } from "./RepoAvatar";
 import { WorktreeCard } from "./WorktreeCard";
@@ -12,6 +18,7 @@ interface GroupedWorktreesProps {
   rows: GroupedRow[];
   originCollapse: CollapseState;
   hostCollapse: CollapseState;
+  hosts: HostInfoLite[];
   statuses: Map<string, WorktreeStatus>;
   branchStatuses: Map<string, WorktreeBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
@@ -26,6 +33,7 @@ export function GroupedWorktrees({
   rows,
   originCollapse,
   hostCollapse,
+  hosts,
   statuses,
   branchStatuses,
   setupStatuses,
@@ -140,6 +148,8 @@ export function GroupedWorktrees({
                   isFocused={index === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
                   showRepoName={mode === "origin"}
+                  repoAvatar={entry.repo.avatar}
+                  hostTag={hostLabel(hostIdOf(entry.worktree), hosts)}
                   onTogglePinned={onTogglePinned}
                 />
               </div>

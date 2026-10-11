@@ -54,7 +54,7 @@ const SHORT_BEFORE = "export const version = 1;";
 // file is then past the new end, so reopening exercises the selection clamp
 // (an unclamped out-of-range selection throws when dispatched).
 const SHORT_AFTER = "export const v = 2;";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

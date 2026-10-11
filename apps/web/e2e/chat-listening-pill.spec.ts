@@ -31,7 +31,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-listening-pill-token";
 const REPO = "listeningproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const CHAT_ID = "chat-listening-pill";
 
 interface SubscriptionRow {
