@@ -49,7 +49,7 @@ const TOKEN = "e2e-quick-open-select-first-token";
 const REPO = "quick-open-repo";
 const DEFAULT_BRANCH = "main";
 const BRANCH = "feature";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Distinctly long name → worst length tiebreaker → deterministically LAST in
 // both `report` and `reports` rankings, regardless of the on-disk file order

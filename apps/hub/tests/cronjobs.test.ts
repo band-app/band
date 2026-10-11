@@ -12,6 +12,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "cronjob-test-token";
@@ -472,13 +473,13 @@ describe("tRPC — cronjobs.trigger", () => {
     expect(res.status).toBe(200);
     const data = await trpcData<{ taskId: string; worktreeId: string }>(res);
     expect(data.taskId).toBeDefined();
-    expect(data.worktreeId).toBe("triggerproj-main");
+    expect(data.worktreeId).toBe(testWorktreeId("triggerproj", "main"));
 
     // Verify the task was created via tasks.list
     const listRes = await trpcQuery(
       server.url,
       "tasks.list",
-      { worktreeId: "triggerproj-main" },
+      { worktreeId: testWorktreeId("triggerproj", "main") },
       DEFAULT_TOKEN,
     );
     const listData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(listRes);
@@ -513,7 +514,7 @@ describe("tRPC — cronjobs.trigger", () => {
     const initialListRes = await trpcQuery(
       server.url,
       "tasks.list",
-      { worktreeId: "triggerproj-main" },
+      { worktreeId: testWorktreeId("triggerproj", "main") },
       DEFAULT_TOKEN,
     );
     const initialListData = await trpcData<{ tasks: Array<{ id: string }> }>(initialListRes);
@@ -528,7 +529,7 @@ describe("tRPC — cronjobs.trigger", () => {
           const listRes = await trpcQuery(
             server.url,
             "tasks.list",
-            { worktreeId: "triggerproj-main", status: "running" },
+            { worktreeId: testWorktreeId("triggerproj", "main"), status: "running" },
             DEFAULT_TOKEN,
           );
           const listData = await trpcData<{ tasks: unknown[] }>(listRes);

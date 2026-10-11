@@ -40,7 +40,7 @@ test.skip(process.env.BAND_SCROLL_BENCH !== "1", "benchmark; set BAND_SCROLL_BEN
 
 const TOKEN = "e2e-scroll-bench-token";
 const REPO = "scroll-bench";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const DURATION_MS = Number(process.env.BENCH_DURATION_MS ?? 4_000);
 
 /**

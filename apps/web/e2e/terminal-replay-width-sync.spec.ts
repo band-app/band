@@ -45,7 +45,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-replay-width-sync-token";
 const REPO = "alpha-replay-width";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const MARKER = "SCATTERZEBRA";
 
 // Start narrow so the first session fits the terminal to a small column count;

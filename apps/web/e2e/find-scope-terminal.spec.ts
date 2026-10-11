@@ -47,7 +47,7 @@ const TOKEN = "e2e-find-scope-terminal-token";
 const REPO = "find-scope-repo";
 const BRANCH = "main";
 const FILE = "app.ts";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared center dockview
 // (with its per-leaf find + terminal) renders — matches >= 1024px.

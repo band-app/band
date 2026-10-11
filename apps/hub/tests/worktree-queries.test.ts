@@ -17,7 +17,7 @@ import { seedState } from "./helpers/seed-state";
 // is lossy: repo "foo-bar" + branch "main" and repo "foo" + branch
 // "bar/main" both serialize to "foo-bar-main". The SQL match expression
 // (`repo_name || '-' || REPLACE(branch, '/', '-')`) and the runtime
-// sanity-check guard (`toWorktreeId(row.repo, row.branch) ===
+// sanity-check guard (`toWorktreeId(row.repo, row.branch, "local") ===
 // worktreeId`) both accept either row, so SQLite's `.get()` returns
 // whichever row it finds first. These tests lock that current contract
 // so a future SQL rewrite (or change to `toWorktreeId`) can't silently
@@ -50,7 +50,7 @@ describe("WorktreeQueries.findIdentity", () => {
     const repoName = "kbhq";
     const branch = "main";
     const wtPath = join(tmp, "worktrees", "kbhq-main");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
 
     seedState(tmp, {
       repos: [
@@ -71,7 +71,7 @@ describe("WorktreeQueries.findIdentity", () => {
     const repoName = "kbhq";
     const branch = "feature/login";
     const wtPath = join(tmp, "worktrees", "kbhq", "feature", "login");
-    const worktreeId = toWorktreeId(repoName, branch);
+    const worktreeId = toWorktreeId(repoName, branch, "local");
     expect(worktreeId).toBe("kbhq-feature-login");
 
     seedState(tmp, {
@@ -110,7 +110,7 @@ describe("WorktreeQueries.findIdentity", () => {
     // "foo-bar-main" via `toWorktreeId`. Both SQL rows satisfy the
     // match expression `repo_name || '-' || REPLACE(branch, '/', '-')`
     // and both satisfy the runtime sanity check
-    // `toWorktreeId(row.repo, row.branch) === worktreeId`, so
+    // `toWorktreeId(row.repo, row.branch, "local") === worktreeId`, so
     // SQLite's `.get()` returns whichever row it finds first. We don't
     // assert which one wins — that's an implementation detail of the
     // SQL engine — but we DO assert that:
@@ -121,9 +121,9 @@ describe("WorktreeQueries.findIdentity", () => {
     //      (sanity-check holds).
     const wtPathA = join(tmp, "worktrees", "foo-bar", "main");
     const wtPathB = join(tmp, "worktrees", "foo", "bar", "main");
-    const worktreeId = toWorktreeId("foo-bar", "main");
+    const worktreeId = toWorktreeId("foo-bar", "main", "local");
     expect(worktreeId).toBe("foo-bar-main");
-    expect(toWorktreeId("foo", "bar/main")).toBe(worktreeId);
+    expect(toWorktreeId("foo", "bar/main", "local")).toBe(worktreeId);
 
     seedState(tmp, {
       repos: [
@@ -149,6 +149,6 @@ describe("WorktreeQueries.findIdentity", () => {
       { repo: "foo", branch: "bar/main", worktreePath: wtPathB },
     ];
     expect(candidates).toContainEqual(identity);
-    expect(toWorktreeId(identity!.repo, identity!.branch)).toBe(worktreeId);
+    expect(toWorktreeId(identity!.repo, identity!.branch, "local")).toBe(worktreeId);
   });
 });

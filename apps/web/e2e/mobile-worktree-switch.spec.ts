@@ -57,8 +57,8 @@ const TOKEN = "e2e-mobile-worktree-switch-token";
 const REPO = "mobile-switch";
 const ALPHA = "feat/alpha";
 const BETA = "feat/beta";
-const WS_ALPHA = toWorktreeId(REPO, ALPHA);
-const WS_BETA = toWorktreeId(REPO, BETA);
+const WS_ALPHA = toWorktreeId(REPO, ALPHA, "local");
+const WS_BETA = toWorktreeId(REPO, BETA, "local");
 const CHECKS = "github-pull-request";
 
 test.use({ viewport: { width: 390, height: 844 } });

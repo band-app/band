@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { countBranchStatusRows, readRepoKind, seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -14,6 +15,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "plain-repos-token";
@@ -158,7 +160,7 @@ describe("tRPC — plain repos (add)", () => {
     expect(scratch.worktrees).toHaveLength(1);
     expect(scratch.worktrees[0].branch).toBe("main");
     expect(scratch.worktrees[0].path).toBe(plainPath);
-    expect(scratch.worktrees[0].worktreeId).toBe("scratch-main");
+    expect(scratch.worktrees[0].worktreeId).toBe(toWorktreeId("scratch", "main", "local"));
   });
 });
 
@@ -457,7 +459,7 @@ describe("tRPC — plain repos (worktree mutations rejected)", () => {
     // to surface a git error — return an empty result so the UI renders its
     // "folder is not a git repo" message instead.
     const res = await trpcQuery(server.url, "worktree.getChanges", {
-      worktreeId: "scratch-main",
+      worktreeId: testWorktreeId("scratch", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<Record<string, unknown>>(res);
@@ -526,7 +528,7 @@ describe("tRPC — plain repos (getChanges defensive .git guard)", () => {
     // against a folder with no `.git` and throw — surfacing as the wall
     // of red text in the Changes view that motivated #427's hardening.
     const res = await trpcQuery(server.url, "worktree.getChanges", {
-      worktreeId: "stale-git-main",
+      worktreeId: testWorktreeId("stale-git", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<Record<string, unknown[]>>(res);
@@ -597,7 +599,9 @@ describe("tRPC — plain repos (promote to git)", () => {
     // The implicit "main" worktree stays — its path now corresponds to
     // git's main worktree, and its worktreeId is stable across promotion
     // so the user's chats/terminals/browsers keep working.
-    expect(proj.worktrees.some((w) => w.worktreeId === "scratch-main")).toBe(true);
+    expect(proj.worktrees.some((w) => w.worktreeId === testWorktreeId("scratch", "main"))).toBe(
+      true,
+    );
   });
 
   it("repos.promoteToGit on an already-git repo returns 400", async () => {
@@ -640,7 +644,7 @@ describe("tRPC — plain repos (promote to git)", () => {
     // output. The freshly-promoted repo has the existing `notes.md`
     // file from createPlainDir as an untracked file.
     const res = await trpcQuery(server.url, "worktree.getChanges", {
-      worktreeId: "scratch-main",
+      worktreeId: testWorktreeId("scratch", "main"),
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -785,7 +789,7 @@ describe("tRPC — plain repos (branch-status-poller skips)", () => {
     // and emits one branch-status row per surviving worktree. Plain
     // repos must not produce one — verify by counting rows in the
     // branch_statuses table for the implicit worktreeId.
-    const rows = countBranchStatusRows(server.home, "scratch-main");
+    const rows = countBranchStatusRows(server.home, testWorktreeId("scratch", "main"));
     expect(rows).toBe(0);
   });
 });

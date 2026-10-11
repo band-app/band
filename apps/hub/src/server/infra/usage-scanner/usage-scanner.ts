@@ -492,7 +492,7 @@ function defaultListWorktrees(): ReturnType<NonNullable<UsageScannerDeps["listWo
   for (const repo of repos) {
     for (const worktree of repo.worktrees) {
       out.push({
-        worktreeId: toWorktreeId(repo.name, worktree.name),
+        worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
         repo: repo.name,
         worktreePath: worktree.path,
       });

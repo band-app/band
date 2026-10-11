@@ -147,7 +147,7 @@ function getWorktrees(): WorktreeInfo[] {
         : repo.path;
       if (repoPath === null || !hostFor(repo.name, wt.hostId)) continue;
       worktrees.push({
-        worktreeId: toWorktreeId(repo.name, wt.name),
+        worktreeId: toWorktreeId(repo.name, wt.name, wt.hostId),
         repo: repo.name,
         branch: wt.branch,
         defaultBranch: repo.defaultBranch,

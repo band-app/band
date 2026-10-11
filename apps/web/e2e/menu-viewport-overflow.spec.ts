@@ -94,7 +94,7 @@ test("the repo menu's Set label submenu stays inside the window and scrolls to i
   page,
 }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
-  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.goto(toWorktreeId(REPO, "main", "local"));
   await worktreePage.zoomInBy(3);
 
   await worktreePage.openRepoContextMenu(REPO);
@@ -122,7 +122,7 @@ test("the Default agent select stays inside the window and scrolls to its last a
 }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.goto(toWorktreeId(REPO, "main", "local"));
   await worktreePage.zoomInBy(3);
 
   await settingsPage.openDialog("agents");
@@ -146,7 +146,7 @@ test("the command palette and a toolbar dialog stay inside the window", async ({
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
   const reports = new ReportsDialog(page, server.url, TOKEN);
-  await worktreePage.goto(toWorktreeId(REPO, "main"));
+  await worktreePage.goto(toWorktreeId(REPO, "main", "local"));
   await worktreePage.zoomInBy(3);
 
   await palette.open();

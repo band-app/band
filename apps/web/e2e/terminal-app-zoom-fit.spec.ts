@@ -42,7 +42,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-app-zoom-fit-token";
 const REPO = "alpha-app-zoom-fit";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const MARKER = "ZOOMFIT-LAST-ROW";
 // Sub-pixel rounding of the overlay's inline sizes, in visual px.
 const TOLERANCE_PX = 2;

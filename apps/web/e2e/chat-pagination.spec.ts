@@ -46,7 +46,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-pagination-token";
 const REPO = "pageproj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const CHAT_ID = "page-chat-deterministic-id";
 const SESSION_ID = "22222222-3333-4444-5555-666666666666";
 

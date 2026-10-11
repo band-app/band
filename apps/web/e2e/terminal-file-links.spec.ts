@@ -41,7 +41,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-file-links-token";
 const REPO = "alpha-terminal-file-links";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // A worktree-relative path (slash + known extension → `isFilePath` links it)
 // with a line indicator. The `zz` prefix keeps it from colliding with

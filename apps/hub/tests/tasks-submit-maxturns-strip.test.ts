@@ -42,12 +42,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAcpServer } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, trpcData, trpcMutate } from "./helpers/server";
 import { listTasksForWorktree } from "./helpers/tasks";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const gitEnv = {
@@ -97,7 +97,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
   const TOKEN = "strip-tasks-submit-token";
   let server: ServerHandle;
   let tmpHome: string;
-  const WORKTREE_ID = toWorktreeId("stripproj", "main");
+  const WORKTREE_ID = testWorktreeId("stripproj", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-strip-tasks-");
@@ -291,7 +291,7 @@ describe("worktrees.create — legacy maxTurns is silently stripped", () => {
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
-    const worktreeId = toWorktreeId("wsproj", "feat/strip-baseline");
+    const worktreeId = testWorktreeId("wsproj", "feat/strip-baseline", false);
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);
@@ -324,7 +324,7 @@ describe("worktrees.create — legacy maxTurns is silently stripped", () => {
     expect(data.ok).toBe(true);
 
     // Positive anchor: the dispatched task matches the baseline shape.
-    const worktreeId = toWorktreeId("wsproj", "feat/strip-legacy");
+    const worktreeId = testWorktreeId("wsproj", "feat/strip-legacy", false);
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorktree(server.url, worktreeId, TOKEN);

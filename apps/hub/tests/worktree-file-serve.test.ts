@@ -9,9 +9,10 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 
 const TOKEN = "worktree-file-serve-test-token";
-const WORKTREE_ID = "files-main";
+const WORKTREE_ID = testWorktreeId("files", "main");
 
 // NUL and high bytes, so a text decoding anywhere on the path corrupts them.
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]);

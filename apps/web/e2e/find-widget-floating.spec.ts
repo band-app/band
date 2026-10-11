@@ -36,7 +36,7 @@ const TOKEN = "e2e-find-widget-floating-token";
 const REPO = "find-widget-repo";
 const BRANCH = "main";
 const FILE = "app.ts";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Committed content, then an uncommitted edit so the Changes tab lists FILE.
 // The working copy holds "needle" three times.

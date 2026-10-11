@@ -42,7 +42,7 @@ import { WorktreePicker } from "./pages/WorktreePicker";
 const TOKEN = "e2e-bottom-drawer-token";
 const REPO = "bottom-drawer-repo";
 const DEFAULT_BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {

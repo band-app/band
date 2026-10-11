@@ -91,7 +91,9 @@ function createServer(chatId: string): McpServer {
         const branch = slugifyBranchName(input.branch);
         return jsonText({
           ...result,
-          worktreeId: result.provisioning ? undefined : toWorktreeId(input.repo, branch),
+          worktreeId: result.provisioning
+            ? undefined
+            : toWorktreeId(input.repo, branch, result.hostId ?? input.hostId),
         });
       } catch (err) {
         return jsonText({ error: err instanceof Error ? err.message : String(err) }, true);

@@ -24,9 +24,12 @@ import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
+import { hasQueuedMessages } from "./_utils/queued-message-store";
+import { isFolderGoneError } from "./_utils/remote-worktrees";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `worktreeService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
@@ -52,7 +55,10 @@ import { clientStateService } from "./client-state-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { resolveWorktreeHostId } from "./local-host-policy";
+// FRAGILE: ESM cycle leg — `./ephemeral-lifecycle-service` imports this file. Keep every
+// `ephemeralLifecycleService` reference inside a function body.
+import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { LocalHostDisabledError, resolveWorktreeHostId } from "./local-host-policy";
 import { panelFocusService } from "./panel-focus-service";
 // FRAGILE: ESM cycle leg — `./placement-service` imports `worktreeService` from
 // this file. Keep every `placementService` reference inside a function body.
@@ -73,6 +79,7 @@ import {
 // `subscriptionService` reference inside a function body.
 import { subscriptionService } from "./subscription-service";
 import { syncService, type WorktreeRemoval } from "./sync-service";
+import { hasRunningTask } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 // FRAGILE: ESM cycle leg #3 — `./worktree-script-service` imports
@@ -183,11 +190,27 @@ export interface WorktreeCaller {
   terminalId?: string;
 }
 
+/**
+ * The worktree row of `repo` called `name` on `hostId`. With no `hostId` it is the local one, or the
+ * only one of that name.
+ */
+export function findWorktreeRow<T extends { name: string; hostId?: string | null }>(
+  worktrees: T[],
+  name: string,
+  hostId?: string,
+): T | undefined {
+  const named = worktrees.filter((wt) => wt.name === name);
+  if (hostId !== undefined) return named.find((wt) => (wt.hostId ?? "local") === hostId);
+  return named.find((wt) => (wt.hostId ?? "local") === "local") ?? named[0];
+}
+
 export const worktreeRemoveInput = z.object({
   repo: z.string(),
   // Worktree identity (the immutable `name`), NOT the live git branch. The
   // live branch to delete is resolved from the worktree row.
   name: z.string(),
+  // The host the worktree lives on. Omitted means the only worktree of that name, or the local one.
+  hostId: z.string().optional(),
 });
 export type WorktreeRemoveInput = z.infer<typeof worktreeRemoveInput>;
 
@@ -204,6 +227,7 @@ export const worktreeSetPinnedInput = z.object({
   repo: z.string(),
   // Worktree identity (immutable `name`), not the live git branch.
   name: z.string(),
+  hostId: z.string().optional(),
   pinned: z.boolean(),
 });
 export type WorktreeSetPinnedInput = z.infer<typeof worktreeSetPinnedInput>;
@@ -212,6 +236,7 @@ export const worktreeGitInput = z.object({
   repo: z.string(),
   // Worktree identity (immutable `name`), not the live git branch.
   name: z.string(),
+  hostId: z.string().optional(),
 });
 export type WorktreeGitInput = z.infer<typeof worktreeGitInput>;
 
@@ -396,7 +421,7 @@ export class WorktreeService {
       for (const worktree of repo.worktrees) {
         // Identity is by the immutable `name`, so the resolve keeps working
         // after a git branch switch (which moves `worktree.branch`).
-        if (toWorktreeId(repo.name, worktree.name) === worktreeId) {
+        if (toWorktreeId(repo.name, worktree.name, worktree.hostId) === worktreeId) {
           return { repo, worktree, host: hostRegistry.hostFor(worktreeId) };
         }
       }
@@ -448,6 +473,9 @@ export class WorktreeService {
         }. Host "${host.id}" does not.`,
       );
     }
+    // The hub's own machine never gets a clone when it is turned off.
+    if (host.id === hostRegistry.local.id && !isLocalHostEnabled())
+      throw new LocalHostDisabledError();
     const { path } = await host.repos.ensure({
       remoteUrl: repo.remoteUrl,
       defaultBranch: repo.defaultBranch,
@@ -522,6 +550,8 @@ export class WorktreeService {
   ): Promise<{
     ok: true;
     path: string;
+    /** The host the worktree lives on, once it exists (an omitted `hostId` is resolved here). */
+    hostId?: string;
     via?: WorktreeVia;
     terminalId?: string;
     /** Set when no host fits yet: the worktree is created once the request is fulfilled. */
@@ -565,12 +595,8 @@ export class WorktreeService {
     //     never-switched worktree, where `name === branch`).
     // Either way we return the existing path, keeping create idempotent and
     // preserving the immutable-name invariant.
-    const existing = repo.worktrees.find(
-      (wt) => wt.name === input.branch || wt.branch === input.branch,
-    );
-    if (existing) return { ok: true, path: existing.path };
-
-    const worktreeId = toWorktreeId(input.repo, input.branch);
+    const sameName = (wt: { name: string; branch: string; hostId?: string | null }) =>
+      wt.name === input.branch || wt.branch === input.branch;
     if (input.placement) {
       if (input.hostId) {
         throw new Error("Pass either hostId or placement, not both.");
@@ -583,6 +609,12 @@ export class WorktreeService {
       return this.create({ ...rest, hostId: placed.hostId });
     }
     const hostId = resolveWorktreeHostId(input.hostId);
+    // The same branch on another host is another worktree, so only this host's rows collide.
+    const existing = repo.worktrees.find(
+      (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) === hostId,
+    );
+    if (existing) return { ok: true, path: existing.path, hostId };
+    const worktreeId = toWorktreeId(input.repo, input.branch, hostId);
     // No row exists for a new worktree yet, so the host comes from the request.
     const host = hostRegistry.hostById(hostId);
     const remote = hostId !== hostRegistry.local.id;
@@ -681,7 +713,7 @@ export class WorktreeService {
     worktreeScriptService.startSetup(worktreeId, worktreePath, repoPath);
 
     if (!input.prompt) {
-      return { ok: true, path: worktreePath };
+      return { ok: true, path: worktreePath, hostId };
     }
 
     // Fire-and-forget: the launch logs its own spawn failure, and the
@@ -700,6 +732,7 @@ export class WorktreeService {
     return {
       ok: true,
       path: worktreePath,
+      hostId,
       via: launched.mode === "tui" ? "terminal" : "chat",
       terminalId: launched.terminalId,
     };
@@ -839,7 +872,7 @@ export class WorktreeService {
     // Resolve the worktree by its immutable `name`. The live git branch
     // (what we actually delete) comes from the row, since it may have been
     // switched away from `name` since creation.
-    const wtRow = repo.worktrees.find((wt) => wt.name === input.name);
+    const wtRow = findWorktreeRow(repo.worktrees, input.name, input.hostId);
     if (!wtRow) {
       throw new WorktreeNotFoundError(input.name);
     }
@@ -852,13 +885,15 @@ export class WorktreeService {
     // A worktree on a remote host is listed from that host's checkout.
     const wtHostId = wtRow.hostId ?? hostRegistry.local.id;
     const checkoutPath = hostRegistry.repoPathOn(repo.name, wtHostId, repo.path) ?? repo.path;
-    const worktreeId = toWorktreeId(input.repo, input.name);
+    const worktreeId = toWorktreeId(input.repo, input.name, wtHostId);
+    input = { ...input, hostId: wtHostId };
     let worktrees: Awaited<ReturnType<Host["worktree"]["list"]>>;
-    try {
-      worktrees = await (wtHostId === hostRegistry.local.id
+    const listHost =
+      wtHostId === hostRegistry.local.id
         ? hostRegistry.hostForRepo(repo.name)
-        : hostRegistry.hostById(wtHostId)
-      ).worktree.list(checkoutPath);
+        : hostRegistry.hostById(wtHostId);
+    try {
+      worktrees = await listHost.worktree.list(checkoutPath);
     } catch (err) {
       // A worker that is offline can't be asked. Take the worktree off the
       // hub now and delete the checkout when the worker reconnects.
@@ -871,9 +906,30 @@ export class WorktreeService {
       }
       throw err;
     }
-    const match = worktrees.find((wt) => wt.branch === currentBranch);
-    if (!match) {
-      throw new WorktreeNotFoundError(input.name);
+    // By path first, so a worktree whose branch was switched still matches.
+    const match =
+      worktrees.find((wt) => wt.path === wtRow.path) ??
+      worktrees.find((wt) => wt.branch === currentBranch);
+    // Git still lists a worktree whose folder was deleted, until it is pruned.
+    const folderGone =
+      match !== undefined &&
+      !(await listHost.fs.stat(match.path).then(
+        () => true,
+        (err: unknown) => !isFolderGoneError(err),
+      ));
+    if (!match || folderGone) {
+      // The folder is gone, or git no longer lists it (an external tool removed it). Drop the
+      // record and prune git's metadata. No files and no branch are deleted.
+      log.info({ worktreeId }, "worktree is gone from its host; dropping the record");
+      return this.removeNow(
+        input,
+        worktreeId,
+        wtRow.path,
+        currentBranch,
+        currentBranch,
+        false,
+        true,
+      );
     }
     const worktreePath = match.path;
 
@@ -912,6 +968,7 @@ export class WorktreeService {
     currentBranch: string,
     matchedBranch: string,
     deferCleanup = false,
+    missing = false,
   ): Promise<{ ok: true }> {
     // Until git no longer lists the worktree, a sync would add it back.
     const removal = await syncService.beginWorktreeRemoval(worktreePath);
@@ -925,6 +982,7 @@ export class WorktreeService {
         matchedBranch,
         removal,
         deferCleanup,
+        missing,
       );
       cleanupScheduled = true;
       return result;
@@ -941,19 +999,21 @@ export class WorktreeService {
     matchedBranch: string,
     removal: WorktreeRemoval,
     deferCleanup: boolean,
+    missing = false,
   ): { ok: true } {
     const state = loadState();
     const repo = state.repos.find((p) => p.name === input.repo);
     if (!repo) {
       throw new RepoNotFoundError(input.repo);
     }
-    if (!repo.worktrees.some((wt) => wt.name === input.name)) {
+    const gone = findWorktreeRow(repo.worktrees, input.name, input.hostId);
+    if (!gone) {
       throw new WorktreeNotFoundError(input.name);
     }
     const host = hostRegistry.hostFor(worktreeId);
 
     // ── Fast path: update state and emit immediately ──
-    repo.worktrees = repo.worktrees.filter((wt) => wt.name !== input.name);
+    repo.worktrees = repo.worktrees.filter((wt) => wt !== gone);
     saveState(state);
     removal.commit();
 
@@ -1053,6 +1113,16 @@ export class WorktreeService {
     // call up front keeps the background logs free of noise that's hard
     // to distinguish from a genuine problem.
     const branchToDelete = matchedBranch.startsWith(DETACHED_BRANCH_PREFIX) ? null : currentBranch;
+    if (missing) {
+      // Only git's own bookkeeping is touched: no files and no branch are deleted.
+      setImmediate(() => {
+        host.git
+          .exec(["worktree", "prune"], projPath)
+          .catch((err) => log.warn({ worktreeId, err }, "git worktree prune failed"))
+          .finally(removal.end);
+      });
+      return { ok: true };
+    }
     if (deferCleanup) {
       this.pendingRemovals.add({
         hostId: host.id,
@@ -1191,13 +1261,90 @@ export class WorktreeService {
         `Repo "${input.repo}" is a plain (non-git) repo. Pinning is not available.`,
       );
     }
-    const worktree = repo.worktrees.find((w) => w.name === input.name);
+    const worktree = findWorktreeRow(repo.worktrees, input.name, input.hostId);
     if (!worktree) {
       throw new WorktreeNotFoundError(input.name);
     }
     worktree.pinned = input.pinned;
     saveState(state);
     return { ok: true };
+  }
+
+  private pruning = new Set<string>();
+
+  /**
+   * Removes the records of worktrees whose folder is gone from their host (`missing` after a scan),
+   * unless a chat in one still has work: a running task, a live agent or queued messages. Only
+   * records and git's worktree metadata go; no files are deleted.
+   */
+  async pruneMissing(
+    repoName: string,
+    rows: { name: string; hostId?: string; missing?: boolean }[],
+  ): Promise<void> {
+    for (const row of rows) {
+      if (!row.missing) continue;
+      const worktreeId = toWorktreeId(repoName, row.name, row.hostId);
+      const busy = chatService
+        .list(worktreeId)
+        .some(
+          (chat) =>
+            hasRunningTask(chat.id) ||
+            agentSessionService.isActive(chat.id) ||
+            hasQueuedMessages(chat.id),
+        );
+      if (busy || this.pruning.has(worktreeId)) continue;
+      // A sleeping or waking worktree is not on its host yet; it is not gone.
+      if (ephemeralLifecycleService.stateOf(worktreeId) !== null) continue;
+      this.pruning.add(worktreeId);
+      try {
+        // A live terminal counts as work: removing the record would kill it.
+        if ((await terminalService.list(worktreeId).catch(() => [])).length > 0) continue;
+        await this.remove({ repo: repoName, name: row.name, hostId: row.hostId ?? "local" });
+        log.info({ worktreeId }, "pruned a worktree whose folder is gone");
+      } catch (err) {
+        log.warn({ worktreeId, err }, "could not prune a missing worktree");
+      } finally {
+        this.pruning.delete(worktreeId);
+      }
+    }
+  }
+
+  /**
+   * Boot step for a hub with its own machine turned off (`BAND_LOCAL_HOST=off`): forgets the
+   * worktrees recorded on the local host and the hub's checkout of each git repo, with their
+   * chats and statuses. No file is deleted and git is not asked to remove anything.
+   */
+  forgetLocalWorktrees(): number {
+    if (isLocalHostEnabled()) return 0;
+    const forgotten = this.repoQueries.forgetLocalHost();
+    for (const wt of forgotten) {
+      const worktreeId = toWorktreeId(wt.repo, wt.name, "local");
+      deleteWorktreeStatus(worktreeId);
+      this.queries.deleteBranchStatus(worktreeId);
+      chatService.removeAllForWorktree(worktreeId);
+      agentSessionRegistry.removeAllForWorktree(worktreeId);
+      browserService.removeAllForWorktree(worktreeId);
+      terminalService.deleteLayout(worktreeId);
+      panelFocusService.remove(worktreeId);
+      clientStateService.removeAllForWorktree(worktreeId);
+      subscriptionService.removeForWorktree(worktreeId);
+      cronjobService.removeForKey(worktreeId);
+      emit({ kind: "remove", worktreeId });
+    }
+    if (forgotten.length > 0) {
+      log.info(
+        { count: forgotten.length },
+        "forgot worktrees on the hub's own machine (local host is off)",
+      );
+    }
+    return forgotten.length;
+  }
+
+  /** The id of the worktree an input names, on its host. */
+  private idOf(input: { repo: string; name: string; hostId?: string }): string {
+    const repo = loadState().repos.find((p) => p.name === input.repo);
+    const row = repo ? findWorktreeRow(repo.worktrees, input.name, input.hostId) : undefined;
+    return toWorktreeId(input.repo, input.name, row ? row.hostId : input.hostId);
   }
 
   /**
@@ -1210,7 +1357,7 @@ export class WorktreeService {
    * the way, or no upstream, come back as an `ok: false` refusal.
    */
   async gitPull(input: WorktreeGitInput): Promise<GitOpResult> {
-    const worktreeId = toWorktreeId(input.repo, input.name);
+    const worktreeId = this.idOf(input);
     const worktree = this.resolve(worktreeId);
     if (!worktree) {
       throw new WorktreeNotFoundError(input.name);
@@ -1235,7 +1382,7 @@ export class WorktreeService {
    * `ok: false` refusal.
    */
   async gitPush(input: WorktreeGitInput): Promise<GitOpResult> {
-    const worktreeId = toWorktreeId(input.repo, input.name);
+    const worktreeId = this.idOf(input);
     const worktree = this.resolve(worktreeId);
     if (!worktree) {
       throw new WorktreeNotFoundError(input.name);

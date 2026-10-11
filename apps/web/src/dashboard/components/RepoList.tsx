@@ -235,7 +235,9 @@ function SortableRepo({
   // `worktrees[0].name` directly rather than `?.name ?? "main"`;
   // the optional chain would mask a real state-corruption bug.
   const plainName = isPlain ? repo.worktrees[0].name : "";
-  const plainWorktreeId = isPlain ? toWorktreeId(repo.name, plainName) : "";
+  const plainWorktreeId = isPlain
+    ? toWorktreeId(repo.name, plainName, repo.worktrees[0].hostId)
+    : "";
   const plainIsActive = useDashboardStore((s) => isPlain && s.activeWorktreeId === plainWorktreeId);
   const plainHref = isPlain ? capabilities.getWorktreeHref?.(plainWorktreeId) : undefined;
   const plainAgent = isPlain ? statuses.get(plainWorktreeId)?.agent : undefined;
@@ -252,7 +254,7 @@ function SortableRepo({
   const gitHeaderIsActive = useMemo(
     () =>
       !isPlain &&
-      repo.worktrees.some((wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId),
+      repo.worktrees.some((wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId),
     [isPlain, repo.worktrees, repo.name, activeWorktreeId],
   );
 
@@ -544,7 +546,7 @@ function SortableRepo({
             )
           ) : (
             repo.worktrees.map((wt) => {
-              const wsId = toWorktreeId(repo.name, wt.name);
+              const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
               const currentIndex = worktreeIndex++;
               return (
                 <WorktreeCard
@@ -635,7 +637,7 @@ function findWorktree(
 ): { wt: RepoInfo["worktrees"][number]; repo: RepoInfo } | undefined {
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
-      if (toWorktreeId(repo.name, wt.name) === worktreeId) return { wt, repo };
+      if (toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId) return { wt, repo };
     }
   }
   return undefined;
@@ -797,7 +799,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
       return g.repos.flatMap((p) => {
         if (repoCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name));
+        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name, wt.hostId));
       });
     });
     return [...pinnedPart, ...rest];
@@ -926,7 +928,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     for (const group of groups) {
       for (const repo of group.repos) {
         const containsActive = repo.worktrees.some(
-          (wt) => toWorktreeId(repo.name, wt.name) === activeWorktreeId,
+          (wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId,
         );
         if (!containsActive) continue;
         if (labelFilter && group.labelId !== labelFilter) return;
@@ -1256,6 +1258,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
             removeWorktreeMutation.mutate({
               repo: deleteDialog.repoName,
               name: deleteDialog.name,
+              hostId: deleteDialog.hostId,
             });
             setDeleteDialog(null);
           }

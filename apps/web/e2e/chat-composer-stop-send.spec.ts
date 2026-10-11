@@ -34,7 +34,7 @@ const TOKEN = "e2e-composer-stop-send-token";
 // One repo per test, so a task one test leaves running (or queued)
 // doesn't reach the next.
 const REPOS = ["stopsendidle", "stopsendrunning", "stopsendescape"];
-const [IDLE_WS, RUNNING_WS, ESCAPE_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
+const [IDLE_WS, RUNNING_WS, ESCAPE_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
 // A 1x1 PNG, the smallest image the composer accepts as an attachment.
 const PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",

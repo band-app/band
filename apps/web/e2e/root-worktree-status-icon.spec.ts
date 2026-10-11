@@ -34,7 +34,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-root-worktree-status-icon-token";
 const REPO = "status-icon-repo";
 const DEFAULT_BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH);
+const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true (threshold 1024px) and the
 // desktop sidebar renders the repo list with its worktree cards.

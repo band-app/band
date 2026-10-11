@@ -101,7 +101,7 @@ export type GroupedRow =
 function entriesOf(repos: RepoInfo[]): WorktreeEntry[] {
   return repos.flatMap((repo) =>
     repo.worktrees.map((worktree) => ({
-      worktreeId: toWorktreeId(repo.name, worktree.name),
+      worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
       repo,
       worktree,
     })),
@@ -175,9 +175,13 @@ export function buildHostRows(
   isCollapsed: (id: string) => boolean,
 ): GroupedRow[] {
   const entries = entriesOf(repos);
+  // The hub's own machine has no row in the host list when it is turned off (BAND_LOCAL_HOST=off),
+  // so it gets no group either.
+  const localOff = hosts.length > 0 && !hosts.some((h) => h.id === LOCAL_HOST);
   const hostIds: string[] = [];
   for (const entry of entries) {
     const id = hostIdOf(entry.worktree);
+    if (localOff && id === LOCAL_HOST) continue;
     if (!hostIds.includes(id)) hostIds.push(id);
   }
   hostIds.sort((a, b) => (a === LOCAL_HOST ? -1 : b === LOCAL_HOST ? 1 : 0));

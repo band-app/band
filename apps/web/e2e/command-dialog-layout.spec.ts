@@ -55,7 +55,7 @@ const REPO = "layout-demo";
 // "s") for readability.
 const BRANCHES = ["main", "alpha", "bravo", "charlie", "delta", "epsilon"];
 const FILTER_TO_ONE = "epsilon";
-const WS_MAIN = toWorktreeId(REPO, "main");
+const WS_MAIN = toWorktreeId(REPO, "main", "local");
 
 let server: ServerHandle;
 let tmpHome: string;

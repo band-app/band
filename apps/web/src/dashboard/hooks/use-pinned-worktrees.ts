@@ -36,7 +36,7 @@ export function usePinnedWorktrees() {
           list.push({
             repo,
             worktree: wt,
-            worktreeId: toWorktreeId(repo.name, wt.name),
+            worktreeId: toWorktreeId(repo.name, wt.name, wt.hostId),
           });
         }
       }
@@ -52,12 +52,14 @@ export function usePinnedWorktrees() {
       repo,
       name,
       pinned: nextPinned,
+      hostId,
     }: {
       repo: string;
       name: string;
       pinned: boolean;
-    }) => adapter.setWorktreePinned(repo, name, nextPinned),
-    onMutate: async ({ repo, name, pinned: nextPinned }) => {
+      hostId?: string;
+    }) => adapter.setWorktreePinned(repo, name, nextPinned, hostId),
+    onMutate: async ({ repo, name, pinned: nextPinned, hostId }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.repos });
       const previous = queryClient.getQueryData<RepoInfo[]>(queryKeys.repos);
       if (previous) {
@@ -66,7 +68,9 @@ export function usePinnedWorktrees() {
             ? {
                 ...p,
                 worktrees: p.worktrees.map((w) =>
-                  w.name === name ? { ...w, pinned: nextPinned } : w,
+                  w.name === name && (w.hostId ?? "local") === (hostId ?? "local")
+                    ? { ...w, pinned: nextPinned }
+                    : w,
                 ),
               }
             : p,
@@ -90,8 +94,8 @@ export function usePinnedWorktrees() {
   // `mutation` object itself, which `useMutation` re-creates every render
   // and would defeat the memoisation here.
   const toggle = useCallback(
-    (repo: string, name: string, currentlyPinned: boolean) =>
-      mutation.mutate({ repo, name, pinned: !currentlyPinned }),
+    (repo: string, name: string, currentlyPinned: boolean, hostId?: string) =>
+      mutation.mutate({ repo, name, pinned: !currentlyPinned, hostId }),
     [mutation.mutate],
   );
 

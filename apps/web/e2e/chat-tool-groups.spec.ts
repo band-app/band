@@ -40,7 +40,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-chat-tool-groups-token";
 const REPO = "toolgroups";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const REPLY = "Fixed the lint errors.";
 const STATUS_REPLY = "The tree is clean.";
 const README_REPLY = "The README is short.";

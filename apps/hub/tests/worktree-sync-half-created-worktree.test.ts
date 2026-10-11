@@ -18,7 +18,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -30,6 +29,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { StatusStream } from "./helpers/status-stream";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "worktree-sync-half-created-token";
@@ -117,7 +117,7 @@ describe("worktree sync during git worktree add", () => {
     timeout: 60_000,
   }, async () => {
     if (!server) throw new Error("server not started");
-    await syncThroughPoller(server, toWorktreeId(REPO, "main"));
+    await syncThroughPoller(server, testWorktreeId(REPO, "main", false));
 
     expect(listWorktreeNames(tmpHome, REPO)).toEqual(["main"]);
     expect(await listedWorktreeNames(server)).toEqual(["main"]);
@@ -128,7 +128,7 @@ describe("worktree sync during git worktree add", () => {
     // A restart runs the poller's first tick, and its sync, again.
     await server.close();
     server = await startServer({ remoteHost: false, tmpHome });
-    await syncThroughPoller(server, toWorktreeId(REPO, "feat/half"));
+    await syncThroughPoller(server, testWorktreeId(REPO, "feat/half", false));
 
     expect(listWorktreeNames(tmpHome, REPO)).toEqual(["feat/half", "main"]);
     expect(await listedWorktreeNames(server)).toEqual(["feat/half", "main"]);

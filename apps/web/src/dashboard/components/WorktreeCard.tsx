@@ -115,7 +115,7 @@ interface Props {
    * each card stays inert to changes in the repos-query cache —
    * otherwise every pin/unpin re-renders every WorktreeCard on the page.
    */
-  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (repo: string, name: string, currentlyPinned: boolean, hostId?: string) => void;
 }
 
 export const WorktreeCard = memo(function WorktreeCard({
@@ -148,7 +148,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   // worktree distinction (the repo header IS the worktree).
   const isRoot = !isPlain && worktree.name === defaultBranch;
 
-  const worktreeId = toWorktreeId(repoName, worktree.name);
+  const worktreeId = toWorktreeId(repoName, worktree.name, worktree.hostId);
   const isActive = useDashboardStore((s) => s.activeWorktreeId === worktreeId);
   // The card stays listed, disabled, until the worktree is gone.
   const isDeleting = useDashboardStore((s) => isWorktreeDeleting(s, worktreeId));
@@ -229,11 +229,16 @@ export const WorktreeCard = memo(function WorktreeCard({
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
-      removeWorktreeMutation.mutate({ repo: repoName, name: worktree.name });
+      removeWorktreeMutation.mutate({
+        repo: repoName,
+        name: worktree.name,
+        hostId: worktree.hostId,
+      });
     } else {
       onShowDeleteDialog({
         repoName,
         name: worktree.name,
+        hostId: worktree.hostId,
         isUnmerged: hasUnmergedPR,
         isDirty,
         hasUnpushedCommits,
@@ -325,6 +330,30 @@ export const WorktreeCard = memo(function WorktreeCard({
               {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
+          {/* The host no longer has the worktree's folder. Remove drops the record. */}
+          {worktree.missing && !isDeleting && (
+            <span
+              data-testid="worktree-card__missing"
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              Missing
+              <button
+                type="button"
+                data-testid="worktree-card__remove-missing"
+                className="underline hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  removeWorktreeMutation.mutate({
+                    repo: repoName,
+                    name: worktree.name,
+                    hostId: worktree.hostId,
+                  });
+                }}
+              >
+                Remove
+              </button>
+            </span>
+          )}
           <div
             className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
           >
@@ -350,7 +379,9 @@ export const WorktreeCard = memo(function WorktreeCard({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuLabel>Worktree</ContextMenuLabel>
-        <ContextMenuItem onClick={() => onTogglePinned(repoName, worktree.name, isPinned)}>
+        <ContextMenuItem
+          onClick={() => onTogglePinned(repoName, worktree.name, isPinned, worktree.hostId)}
+        >
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
         </ContextMenuItem>
@@ -380,13 +411,13 @@ export const WorktreeCard = memo(function WorktreeCard({
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPull(repoName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPull(repoName, worktree.name, worktree.hostId)}>
             <ArrowDownToLine />
             Git pull
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPush(repoName, worktree.name)}>
+          <ContextMenuItem onClick={() => gitPush(repoName, worktree.name, worktree.hostId)}>
             <ArrowUpFromLine />
             Git push
           </ContextMenuItem>

@@ -38,7 +38,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-sidebar-toggle-token";
 const REPO = "alpha-sidebar";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the desktop layout
 // (sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).

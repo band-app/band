@@ -86,7 +86,7 @@ test.afterAll(async () => {
 test.describe("GitHub repo avatars", () => {
   test("a GitHub repo shows its owner's avatar instead of the folder icon", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await worktreePage.goto(toWorktreeId(GITHUB_REPO, "main"));
+    await worktreePage.goto(toWorktreeId(GITHUB_REPO, "main", "local"));
 
     await expect(worktreePage.repoAvatar(GITHUB_REPO)).toBeVisible();
     await expect(worktreePage.repoAvatar(GITHUB_REPO)).toHaveAttribute("alt", "acme-org/widgets");
@@ -96,7 +96,7 @@ test.describe("GitHub repo avatars", () => {
 
   test("a repo hosted elsewhere keeps the folder icon", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await worktreePage.goto(toWorktreeId(GITLAB_REPO, "main"));
+    await worktreePage.goto(toWorktreeId(GITLAB_REPO, "main", "local"));
 
     await expect(worktreePage.repoFolderIcon(GITLAB_REPO)).toBeVisible();
     await expect(worktreePage.repoAvatar(GITLAB_REPO)).toHaveCount(0);
@@ -106,7 +106,7 @@ test.describe("GitHub repo avatars", () => {
     page,
   }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await worktreePage.goto(toWorktreeId(UNREACHABLE_REPO, "main"));
+    await worktreePage.goto(toWorktreeId(UNREACHABLE_REPO, "main", "local"));
 
     // Positive anchor: the neighbouring GitHub repo's avatar rendered, so
     // the repo list has loaded its avatar data.

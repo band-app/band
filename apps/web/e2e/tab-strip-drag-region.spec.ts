@@ -47,8 +47,8 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-tab-strip-drag-region-token";
 const REPO = "drag-region-repo";
-const WORKTREE_A = toWorktreeId(REPO, "main");
-const WORKTREE_B = toWorktreeId(REPO, "second");
+const WORKTREE_A = toWorktreeId(REPO, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO, "second", "local");
 
 // Wide viewport so the desktop layout (sidebar + dockview) renders
 // (>= 1024px in useIsDesktop.ts).

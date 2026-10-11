@@ -1,5 +1,7 @@
 import { gitRunner } from "@band-app/host-api";
 import { getRepoInfo } from "@band-app/host-local/git/git-client";
+import { createLogger } from "@band-app/logger";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import {
@@ -88,6 +90,20 @@ async function detectRemoteDefaultBranch(repo: RepoState): Promise<string | null
   return null;
 }
 
+const log = createLogger("sync-service");
+
+/**
+ * Drops the worktrees whose folder a scan found gone. It runs after the sync, not inside it, since
+ * a removal saves the state itself. The import is lazy because the worktree service imports this one.
+ */
+export function pruneMissing(repoName: string, worktrees: WorktreeState[]): void {
+  const missing = worktrees.filter((wt) => wt.missing);
+  if (missing.length === 0) return;
+  void import("./worktree-service")
+    .then(({ worktreeService }) => worktreeService.pruneMissing(repoName, missing))
+    .catch((err) => log.warn({ repoName, err }, "pruning missing worktrees failed"));
+}
+
 export function syncWorktrees(): Promise<void> {
   const sync = runSync();
   syncsInFlight.add(sync);
@@ -174,9 +190,10 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
 
   // The hub holds no checkout of this repo (it was added by URL or from a worker), so there is
   // no local `git worktree list` to reconcile. Its worktrees are on workers.
-  if (!repo.path) {
+  if (!repo.path || !isLocalHostEnabled()) {
     const remote = await refreshRemoteWorktrees(repo.name, repo.path, repo.worktrees);
     if (remote.changed) repo.worktrees = remote.worktrees;
+    pruneMissing(repo.name, remote.worktrees);
     return remote.changed;
   }
 
@@ -254,6 +271,7 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
     repo.worktrees = remote.worktrees;
     mutated = true;
   }
+  pruneMissing(repo.name, remote.worktrees);
 
   // Sync default branch with remote's HEAD
   const remoteBranch = await detectRemoteDefaultBranch(repo);

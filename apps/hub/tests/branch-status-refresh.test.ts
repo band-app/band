@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -12,6 +11,7 @@ import {
   trpcMutate,
 } from "./helpers/server";
 import { StatusStream } from "./helpers/status-stream";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // `statuses.refreshBranchStatus` re-reads one worktree's git status on
@@ -20,7 +20,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "branch-status-refresh-token";
 const REPO = "refreshproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 
 const gitEnv = {
   ...process.env,

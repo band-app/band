@@ -131,7 +131,7 @@ export function useRecordLabelLastWorktree(activeWorktreeId: string | null): voi
     if (lastSeen.current === activeWorktreeId || repos.length === 0) return;
     lastSeen.current = activeWorktreeId;
     const repo = repos.find((p) =>
-      p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === activeWorktreeId),
+      p.worktrees.some((wt) => toWorktreeId(p.name, wt.name, wt.hostId) === activeWorktreeId),
     );
     if (repo?.label === labelFilter) setLastWorktree(labelFilter, activeWorktreeId);
   }, [labelFilter, activeWorktreeId, repos, setLastWorktree]);

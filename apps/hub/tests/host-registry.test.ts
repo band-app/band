@@ -78,13 +78,13 @@ describe("host registry", () => {
     db.exec("UPDATE worktrees SET host_id = 'remote-1' WHERE name = 'feat'");
     db.close();
 
-    expect(registry.hostFor("proj-feat")).toBe(remote);
+    expect(registry.hostFor("proj-feat@remote-1")).toBe(remote);
     expect(registry.hostFor("proj-main")).toBe(hostRegistry.local);
 
     // A save from the in-memory tree keeps the stored host.
     const state = loadState();
     saveState(state);
-    expect(registry.hostFor("proj-feat")).toBe(remote);
+    expect(registry.hostFor("proj-feat@remote-1")).toBe(remote);
     expect(registry.hostFor("proj-main")).toBe(hostRegistry.local);
   });
 });

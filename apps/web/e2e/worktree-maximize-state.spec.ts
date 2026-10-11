@@ -41,8 +41,8 @@ const TOKEN = "e2e-worktree-maximize-state-token";
 
 const REPO_A = "alpha-max";
 const REPO_B = "bravo-max";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared
 // dockview renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).

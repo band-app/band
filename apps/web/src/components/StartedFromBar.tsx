@@ -13,7 +13,7 @@ export function StartedFromBar({ worktreeId }: { worktreeId: string }) {
   const capabilities = useCapabilities();
   const origin = repos
     .flatMap((r) => r.worktrees.map((wt) => ({ repo: r, wt })))
-    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name) === worktreeId)?.wt.origin;
+    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId)?.wt.origin;
   if (!origin) return null;
 
   if (origin.removed || !origin.repo) {

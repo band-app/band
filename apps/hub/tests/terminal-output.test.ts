@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -13,6 +12,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // `terminal.output` returns the last 100 000 characters a terminal printed.
@@ -22,7 +22,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-output-token";
 const REPO = "outputproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 const MAX_OUTPUT_CHARS = 100_000;
 
 let tmpHome: string;

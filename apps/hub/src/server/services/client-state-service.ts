@@ -51,7 +51,7 @@ export class ClientStateService {
   /** Whether the worktree exists, so its UI state may be stored. */
   private worktreeExists(worktreeId: string): boolean {
     return loadState().repos.some((p) =>
-      p.worktrees.some((wt) => toWorktreeId(p.name, wt.name) === worktreeId),
+      p.worktrees.some((wt) => toWorktreeId(p.name, wt.name, wt.hostId) === worktreeId),
     );
   }
 

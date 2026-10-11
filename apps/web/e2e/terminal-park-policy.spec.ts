@@ -40,7 +40,7 @@ const REPO = "park-policy-repo";
 
 // Server-side PTYs outlive a test's page, so each test uses its own worktrees.
 const BRANCHES = Array.from({ length: 12 }, (_, i) => `park-${i}`);
-const WS = BRANCHES.map((branch) => toWorktreeId(REPO, branch));
+const WS = BRANCHES.map((branch) => toWorktreeId(REPO, branch, "local"));
 
 const SECOND = 1_000;
 const MINUTE = 60 * SECOND;

@@ -41,10 +41,10 @@ const REPO = "name-label-proj";
 // later switched to "feature-renamed" (its live `branch`).
 const NAME = "feature";
 const LIVE_BRANCH = "feature-renamed";
-const FEATURE_WORKTREE = toWorktreeId(REPO, NAME);
-const MAIN_WORKTREE = toWorktreeId(REPO, "main");
+const FEATURE_WORKTREE = toWorktreeId(REPO, NAME, "local");
+const MAIN_WORKTREE = toWorktreeId(REPO, "main", "local");
 // The id must NOT follow the branch — this worktree should never exist.
-const BRANCH_WORKTREE = toWorktreeId(REPO, LIVE_BRANCH);
+const BRANCH_WORKTREE = toWorktreeId(REPO, LIVE_BRANCH, "local");
 
 // Wide viewport so the desktop layout (with the sidebar repo list) renders.
 test.use({ viewport: { width: 1280, height: 800 } });

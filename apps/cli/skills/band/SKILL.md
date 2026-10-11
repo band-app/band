@@ -132,10 +132,10 @@ band worktrees create my-app feat/experiment
 ### Remove a worktree (git worktree + state cleanup)
 
 ```sh
-band worktrees remove <repo> <name>
+band worktrees remove <repo> <name> [--host <hostId>]
 ```
 
-`<name>` is the worktree's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
+`<name>` is the worktree's stable identity — the branch it was created on (unchanged even if the git branch was later switched). `--host` picks the host when the same repo and name exist on more than one (ids from `band hosts`); without it the local worktree, or the only one of that name, is removed.
 
 Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
 

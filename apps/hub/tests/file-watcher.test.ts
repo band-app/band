@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const _PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -181,7 +182,7 @@ describe("file-watcher — external file change events", () => {
   let tmpHome: string;
   let repoPath: string;
   let otherRepoPath: string;
-  const worktreeId = "myrepo-main";
+  const worktreeId = testWorktreeId("myrepo", "main");
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-file-watcher-test-");

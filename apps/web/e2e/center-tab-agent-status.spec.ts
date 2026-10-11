@@ -33,7 +33,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-center-tab-agent-status-token";
 // One repo per test, so one test's agent status doesn't reach the other.
 const REPOS = ["tabstatuschat", "tabstatusterm"];
-const [CHAT_WS, TERM_WS] = REPOS.map((p) => toWorktreeId(p, "main"));
+const [CHAT_WS, TERM_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

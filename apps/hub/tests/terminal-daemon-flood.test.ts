@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -13,6 +12,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // A terminal printing as fast as its PTY allows must not cost the server its
@@ -26,7 +26,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "terminal-daemon-flood-token";
 const REPO = "floodproj";
-const WORKTREE_ID = toWorktreeId(REPO, "main");
+const WORKTREE_ID = testWorktreeId(REPO, "main");
 /** Well past the daemon's 64 MB drop threshold. */
 const FLOOD_BYTES = 200_000_000;
 

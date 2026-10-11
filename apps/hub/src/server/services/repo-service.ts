@@ -25,6 +25,7 @@ import {
   repoAvatarService,
 } from "./repo-avatar-service";
 import { type SettingsService, settingsService } from "./settings-service";
+import { pruneMissing } from "./sync-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
 
@@ -161,7 +162,7 @@ export class RepoService {
       // the `git worktree list` enrichment entirely and rely on the
       // worktree row that `add` synthesized into state.
       let worktrees = repo.worktrees;
-      if (repo.kind === "git" && !repo.path) {
+      if (repo.kind === "git" && (!repo.path || !isLocalHostEnabled())) {
         // No checkout on the hub's machine: its worktrees are on workers.
         try {
           worktrees = (await refreshRemoteWorktrees(repo.name, repo.path, repo.worktrees))
@@ -222,6 +223,9 @@ export class RepoService {
         }
       }
 
+      // The dashboard lists every 30 s, which is the scan that notices a vanished folder.
+      pruneMissing(repo.name, worktrees);
+
       return {
         name: repo.name,
         path: repo.path,
@@ -236,7 +240,7 @@ export class RepoService {
         avatar: await avatar,
         worktrees: worktrees.map((wt) => {
           // Identity is by the immutable `name`, not the live branch.
-          const worktreeId = toWorktreeId(repo.name, wt.name);
+          const worktreeId = toWorktreeId(repo.name, wt.name, wt.hostId);
           const status = statusMap.get(worktreeId);
           const lifecycle = lifecycles.get(worktreeId);
           return {
@@ -273,6 +277,11 @@ export class RepoService {
    * to relay back to the client.
    */
   async add({ path, label }: { path: string; label?: string }): Promise<RepoState> {
+    if (!isLocalHostEnabled()) {
+      throw new RepoInputError(
+        "This hub does not use its own machine (BAND_LOCAL_HOST=off). Add the repo from a worker or by URL.",
+      );
+    }
     const repos = this.queries.loadAll();
     const name = basename(path);
 
@@ -533,6 +542,7 @@ export class RepoService {
    * host knows it holds the repo already. Safe to run on every boot.
    */
   async backfillRemotes(): Promise<void> {
+    if (!isLocalHostEnabled()) return;
     for (const repo of this.queries.loadAll()) {
       if (!repo.path || repo.kind !== "git") continue;
       try {
@@ -878,7 +888,10 @@ function originLinks(repos: RepoState[]): {
   const known = new Map<string, { repo: string; branch: string }>();
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
-      known.set(toWorktreeId(repo.name, wt.name), { repo: repo.name, branch: wt.branch });
+      known.set(toWorktreeId(repo.name, wt.name, wt.hostId), {
+        repo: repo.name,
+        branch: wt.branch,
+      });
     }
   }
   const origins = new Map<string, WorktreeOriginInfo>();
@@ -886,7 +899,7 @@ function originLinks(repos: RepoState[]): {
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
       if (!wt.origin) continue;
-      const id = toWorktreeId(repo.name, wt.name);
+      const id = toWorktreeId(repo.name, wt.name, wt.hostId);
       const parent = known.get(wt.origin.worktreeId);
       origins.set(id, {
         ...wt.origin,

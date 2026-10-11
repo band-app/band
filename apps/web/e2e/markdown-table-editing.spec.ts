@@ -31,7 +31,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-markdown-table-editing-token";
 const REPO = "md-table-repo";
 const BRANCH = "main";
-const WORKTREE = toWorktreeId(REPO, BRANCH);
+const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
 // Uneven padding and a centred column, so a re-serialiser would show up in
 // the saved bytes.

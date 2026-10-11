@@ -43,8 +43,8 @@ import { HubUnreachablePage } from "./pages/HubUnreachablePage";
 
 const LOCAL_TOKEN = "desktop-e2e-local-token";
 const REMOTE_TOKEN = "desktop-e2e-remote-token";
-const LOCAL_WORKTREE = toWorktreeId("localproj", "main");
-const REMOTE_WORKTREE = toWorktreeId("remoteproj", "main");
+const LOCAL_WORKTREE = toWorktreeId("localproj", "main", "local");
+const REMOTE_WORKTREE = toWorktreeId("remoteproj", "main", "local");
 const LOCAL_REPLY = "Reply from the local hub";
 const REMOTE_REPLY = "Reply from the remote hub";
 

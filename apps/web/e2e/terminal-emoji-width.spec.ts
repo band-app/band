@@ -44,7 +44,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-emoji-width-token";
 const REPO = "alpha-emoji-width";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const EMOJI = "\u{1F7E0}";
 const TEXT = "GAPTAIL";
 // Emoji (two cells: the glyph, then an empty right half) followed by TEXT.

@@ -32,7 +32,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-client-state-sync-token";
 const REPO = "sync-proj";
-const WORKTREE = toWorktreeId(REPO, "main");
+const WORKTREE = toWorktreeId(REPO, "main", "local");
 const DESKTOP = { viewport: { width: 1280, height: 800 } };
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 

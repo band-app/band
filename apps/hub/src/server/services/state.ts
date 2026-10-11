@@ -300,7 +300,7 @@ export function resolveWorktreeIdByCwd(cwd: string): string | null {
   for (const proj of state.repos) {
     for (const wt of proj.worktrees) {
       if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
-        return toWorktreeId(proj.name, wt.name);
+        return toWorktreeId(proj.name, wt.name, wt.hostId);
       }
     }
   }

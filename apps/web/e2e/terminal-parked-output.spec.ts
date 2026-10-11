@@ -43,8 +43,8 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-terminal-parked-output-token";
 const REPO_A = "alpha-parked-output";
 const REPO_B = "bravo-parked-output";
-const WORKTREE_A = toWorktreeId(REPO_A, "main");
-const WORKTREE_B = toWorktreeId(REPO_B, "main");
+const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
+const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 

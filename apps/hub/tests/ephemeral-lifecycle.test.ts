@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { maxId, openStream, STUB_AGENT_PATH, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -266,6 +267,7 @@ afterAll(async () => {
 
 describe("sleep and wake", () => {
   let hostId = "";
+  const wtA = () => toWorktreeId("proja", "eph-a", hostId);
   let worktree = "";
   let chatId = "";
   let sessionFile = "";
@@ -283,7 +285,7 @@ describe("sleep and wake", () => {
     writeFileSync(join(worktree, "notes", "scratch.txt"), "scratch\n");
 
     chatId = "eph-chat";
-    const first = await turn("proja-eph-a", chatId, "remember: banana");
+    const first = await turn(wtA(), chatId, "remember: banana");
     seen = maxId(first);
     const sessions = readdirSync(stubState).filter((f) => f.endsWith(".json"));
     expect(sessions).toHaveLength(1);
@@ -301,11 +303,11 @@ describe("sleep and wake", () => {
     await waitFor(async () => !isAlive(pid), { label: "worker process exits", timeoutMs: 20_000 });
     expect(workerLog(hostId)).toContain("the hub stored the worktrees, exiting");
     // Origin holds the working tree, on top of the branch head.
-    const ref = "refs/heads/band/wip/proja-eph-a";
+    const ref = `refs/heads/band/wip/${wtA()}`;
     expect(git(a.origin, "show", `${ref}:hello.txt`)).toContain("edited on the worker");
     expect(git(a.origin, "show", `${ref}:notes/scratch.txt`)).toBe("scratch\n");
     // The hub holds the agent session.
-    expect(existsSync(join(hubHome, ".band", "sleep", "proja-eph-a", "sessions.json"))).toBe(true);
+    expect(existsSync(join(hubHome, ".band", "sleep", wtA(), "sessions.json"))).toBe(true);
   }, 180_000);
 
   it("wakes on a chat message with the edit present and the conversation resumed (S2)", async () => {
@@ -313,7 +315,7 @@ describe("sleep and wake", () => {
     for (const f of readdirSync(stubState)) rmSync(join(stubState, f), { recursive: true });
     const sessionsStarted = stubRequests("session/new").length;
 
-    const events = await turn("proja-eph-a", chatId, "what was it?", seen);
+    const events = await turn(wtA(), chatId, "what was it?", seen);
     expect(events.some((e) => e.type === "turn-ended")).toBe(true);
     seen = maxId(events);
 
@@ -336,14 +338,14 @@ describe("sleep and wake", () => {
     expect(stubRequests("session/new")).toHaveLength(sessionsStarted);
     expect(readdirSync(stubState)).toContain(sessionFile);
     // The snapshot branch is cleaned up on origin, and the hub dropped its copy.
-    expect(git(a.origin, "branch", "--list", "band/wip/proja-eph-a").trim()).toBe("");
-    expect(existsSync(join(hubHome, ".band", "sleep", "proja-eph-a"))).toBe(false);
+    expect(git(a.origin, "branch", "--list", `band/wip/${wtA()}`).trim()).toBe("");
+    expect(existsSync(join(hubHome, ".band", "sleep", wtA()))).toBe(false);
     worktree = wt?.path ?? worktree;
   }, 180_000);
 
   it("keeps the worker while a terminal runs, and sleeps after it is closed (S3)", async () => {
     const terminalId = "11111111-1111-4111-8111-111111111111";
-    await m("terminal.create", { worktreeId: "proja-eph-a", id: terminalId });
+    await m("terminal.create", { worktreeId: wtA(), id: terminalId });
     // Longer than two idle times: the worker asks, and the hub says no.
     await waitFor(
       async () => (workerLog(hostId).includes("a terminal is running") ? true : undefined),
@@ -362,7 +364,7 @@ describe("sleep and wake", () => {
 
   it("keeps the worker for the length of a running turn (S3)", async () => {
     const started = Date.now();
-    const turnDone = turn("proja-eph-a", chatId, "slow please", seen);
+    const turnDone = turn(wtA(), chatId, "slow please", seen);
     // Wakes on the message, then the 9 s turn outlasts two idle times.
     await waitFor(
       async () => {
@@ -383,7 +385,7 @@ describe("sleep and wake", () => {
 
   it("wakes on a file read too", async () => {
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: "proja-eph-a",
+      worktreeId: wtA(),
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\nedited on the worker\n");
@@ -420,11 +422,13 @@ describe("persist failure", () => {
     rmSync(sleepPath);
     await sleeping("projb", "eph-b");
     expect((await host(hostId))?.sleepError).toBeNull();
-    expect(existsSync(join(sleepPath, "projb-eph-b", "snapshot.bundle"))).toBe(true);
+    expect(
+      existsSync(join(sleepPath, toWorktreeId("projb", "eph-b", hostId), "snapshot.bundle")),
+    ).toBe(true);
 
     // The bundle brings the edit back on a new worker.
     const file = await q<{ content: string }>("worktree.getFile", {
-      worktreeId: "projb-eph-b",
+      worktreeId: toWorktreeId("projb", "eph-b", hostId),
       path: "hello.txt",
     });
     expect(file.content).toBe("hello\ndo not lose me\n");

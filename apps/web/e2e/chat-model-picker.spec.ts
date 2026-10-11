@@ -108,7 +108,7 @@ test.describe("Chat model settings menu", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("pickersettings", "main"));
+    await chatPane.goto(toWorktreeId("pickersettings", "main", "local"));
     await chatPane.waitForReady();
 
     await chatPane.typeMessage("first");
@@ -161,7 +161,7 @@ test.describe("Chat model settings menu", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("pickerfresh", "main"));
+    await chatPane.goto(toWorktreeId("pickerfresh", "main", "local"));
     await chatPane.waitForReady();
 
     // One turn so the agent's options are known, then "New session": the
@@ -211,7 +211,7 @@ test.describe("New chat agent picker", () => {
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(toWorktreeId("pickeragent", "main"));
+    await chatPane.goto(toWorktreeId("pickeragent", "main", "local"));
 
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
