@@ -124,6 +124,9 @@ test.describe("Terminal under app zoom", () => {
     const expectFitted = async (zoom: number) => {
       // Positive anchor: the shortcut really moved the app to this zoom level.
       await expect.poll(() => worktreePage.readAppZoom()).toBeCloseTo(zoom, 2);
+      // The fit finishes over a few frames after the zoom change; assert on
+      // the settled geometry, not a frame in between.
+      await worktreePage.waitForTerminalRowsStable(WORKTREE);
       await expect
         .poll(
           async () => {
