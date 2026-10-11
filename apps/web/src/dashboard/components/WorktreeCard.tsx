@@ -14,6 +14,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clipboard,
+  Folder,
   FolderOpen,
   Home,
   Loader,
@@ -32,6 +33,7 @@ import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
+  RepoAvatarInfo,
   RepoKind,
   SetupStatus,
   WorktreeBranchStatus,
@@ -42,6 +44,7 @@ import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { PullRequestBadge } from "./PullRequestBadge";
+import { RepoAvatar } from "./RepoAvatar";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
 
@@ -109,6 +112,10 @@ interface Props {
    * cards apart when they're mixed across repos.
    */
   showRepoName?: boolean;
+  /** Repo avatar shown before the repo name when `showRepoName` is set. */
+  repoAvatar?: RepoAvatarInfo | null;
+  /** Host name shown as a small gray tag beside the repo name (or the branch name). */
+  hostTag?: string;
   /**
    * Toggle the pinned state for this card's worktree. Passed as a prop
    * (rather than reading from `usePinnedWorktrees()` inside the card) so
@@ -129,6 +136,8 @@ export const WorktreeCard = memo(function WorktreeCard({
   isFocused,
   onShowDeleteDialog,
   showRepoName,
+  repoAvatar,
+  hostTag,
   onTogglePinned,
 }: Props) {
   const isPlain = repoKind === "plain";
@@ -282,13 +291,41 @@ export const WorktreeCard = memo(function WorktreeCard({
                   // stays scannable without a long, mid-truncated
                   // `repo/branch` string on one line. Shared with the ⌘K
                   // worktree picker via `WorktreeLabel`.
-                  <WorktreeLabel name={worktree.name} repoName={repoName} isActive={isActive} />
+                  <WorktreeLabel
+                    name={worktree.name}
+                    repoName={repoName}
+                    isActive={isActive}
+                    hostTag={hostTag}
+                    repoIcon={
+                      <RepoAvatar
+                        avatar={repoAvatar}
+                        className="size-3 shrink-0 rounded-sm"
+                        testId={`worktree-label__avatar--${repoName}`}
+                        fallback={
+                          <Folder
+                            data-testid={`worktree-label__avatar-fallback--${repoName}`}
+                            className="size-3 shrink-0 text-muted-foreground"
+                          />
+                        }
+                      />
+                    }
+                  />
                 ) : (
-                  <span
-                    className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
-                  >
-                    {worktree.name}
-                  </span>
+                  <>
+                    <span
+                      className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
+                    >
+                      {worktree.name}
+                    </span>
+                    {hostTag && (
+                      <span
+                        data-testid="worktree-label__host"
+                        className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+                      >
+                        {hostTag}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </TooltipTrigger>

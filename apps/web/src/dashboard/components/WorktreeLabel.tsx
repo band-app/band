@@ -1,4 +1,5 @@
 import { cn } from "@band-app/ui";
+import type { ReactNode } from "react";
 
 /**
  * Two-row worktree label: the worktree name on the first line with the
@@ -22,9 +23,20 @@ interface WorktreeLabelProps {
   repoName: string;
   isActive?: boolean;
   tone?: "sidebar" | "switcher";
+  /** Rendered before the repo name, e.g. the repo avatar. */
+  repoIcon?: ReactNode;
+  /** A small gray tag after the repo name, e.g. the host. */
+  hostTag?: string;
 }
 
-export function WorktreeLabel({ name, repoName, isActive, tone = "sidebar" }: WorktreeLabelProps) {
+export function WorktreeLabel({
+  name,
+  repoName,
+  isActive,
+  tone = "sidebar",
+  repoIcon,
+  hostTag,
+}: WorktreeLabelProps) {
   const nameClass =
     tone === "switcher"
       ? `text-foreground ${isActive ? "font-semibold" : "font-medium"}`
@@ -47,11 +59,22 @@ export function WorktreeLabel({ name, repoName, isActive, tone = "sidebar" }: Wo
       >
         {name}
       </span>
-      <span
-        data-testid="worktree-label__repo"
-        className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", repoClass)}
-      >
-        {repoName}
+      <span className="flex min-w-0 items-center gap-1">
+        {repoIcon}
+        <span
+          data-testid="worktree-label__repo"
+          className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", repoClass)}
+        >
+          {repoName}
+        </span>
+        {hostTag && (
+          <span
+            data-testid="worktree-label__host"
+            className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+          >
+            {hostTag}
+          </span>
+        )}
       </span>
     </div>
   );

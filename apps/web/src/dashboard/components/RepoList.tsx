@@ -90,8 +90,12 @@ import {
   buildHostRows,
   buildOriginRows,
   HOST_COLLAPSE_KEY,
+  type HostInfoLite,
+  hostIdOf,
+  hostLabel,
   navigableIds,
   ORIGIN_COLLAPSE_KEY,
+  repoSpansHosts,
   useGroupBy,
 } from "../lib/sidebar-grouping";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
@@ -175,6 +179,8 @@ interface SortableRepoProps {
    */
   hasPinnedSiblings?: boolean;
   onTogglePinned: (repo: string, name: string, currentlyPinned: boolean) => void;
+  /** Known hosts, to name the host tag of a repo that spans several. */
+  hosts: HostInfoLite[];
 }
 
 function SortableRepo({
@@ -194,6 +200,7 @@ function SortableRepo({
   onToggleCollapse,
   hasPinnedSiblings,
   onTogglePinned,
+  hosts,
 }: SortableRepoProps) {
   const isPlain = repo.kind === "plain";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -561,6 +568,7 @@ function SortableRepo({
                   isFocused={!collapsed && currentIndex === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
                   onTogglePinned={onTogglePinned}
+                  hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
                 />
               );
             })
@@ -683,7 +691,6 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const hostsQuery = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
-    enabled: groupBy === "host",
   });
   const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorktrees();
   // Plain (non-git) repos have no separate worktree card to pull up
@@ -1101,6 +1108,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
             rows={groupedRows}
             originCollapse={originCollapse}
             hostCollapse={hostCollapse}
+            hosts={hostsQuery.data ?? []}
             statuses={statuses}
             branchStatuses={branchStatuses}
             setupStatuses={setupStatuses}
@@ -1210,6 +1218,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
                               onToggleCollapse={repoCollapse.toggle}
                               hasPinnedSiblings={reposWithPinned.has(repo.name)}
                               onTogglePinned={togglePinned}
+                              hosts={hostsQuery.data ?? []}
                             />
                           </div>
                         ))}
