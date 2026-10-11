@@ -35,6 +35,7 @@ import {
   createTmpHome,
   resetClientState,
   type ServerHandle,
+  seedHostWorktree,
   seedSettings,
   seedState,
   startServer,
@@ -210,7 +211,16 @@ test.beforeAll(async () => {
   await waitOnline(b);
 
   await createOn(a, BRANCH);
-  await createOn(b, BRANCH);
+  // One branch lives on one host now, so Band refuses to create `feat/same` on B as well. This
+  // spec is about data that predates the rule: B's copy is added the way that install holds it.
+  git(join(b.root, REPO), "worktree", "add", "-q", "-b", BRANCH, b.checkout);
+  seedHostWorktree(tmpHome, {
+    repo: REPO,
+    name: BRANCH,
+    branch: BRANCH,
+    path: b.checkout,
+    hostId: b.id,
+  });
   await expect
     .poll(async () => (await listedIds()).sort())
     .toEqual(expect.arrayContaining([a.same, b.same]));

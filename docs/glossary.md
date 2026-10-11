@@ -14,9 +14,13 @@ Each host (the hub's own machine and every worker) keeps its own table from a no
 
 Adding a repo from a worker's folder picker records that folder in the worker's table, so the worker never clones it again.
 
+## Allowed hosts and primary host
+
+A repo can be limited to some hosts (`repos.allowed_host_ids`, `null` for all). Band refuses to create a worktree, clone or placement for it anywhere else. Only the primary host (`repos.primary_host_id`) lists the repo's default-branch worktree. See `docs/repo-hosts.md`.
+
 ## Worktree
 
-One working copy of a repo that an agent and a user work in. Its id is `<repo>-<branch>`, for example `band-feat-login`. A worktree has chats, terminals, browser tabs and a git status.
+One working copy of a repo that an agent and a user work in. Its id is `<repo>-<branch>`, for example `band-feat-login`. A worktree has chats, terminals, browser tabs and a git status. A branch has a worktree on one host only.
 
 For a git repo a worktree is a git worktree created with `git worktree add`, and the id's branch is the branch it was created on. A plain (non-git) repo uses the word without a git worktree: it has one implicit worktree, the folder itself, with no branch isolation and no git features.
 

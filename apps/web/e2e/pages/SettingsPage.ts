@@ -33,6 +33,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { AGENT_MODE_KEY } from "@/dashboard";
+import { RepoHostsFieldsPage } from "./RepoHostsFieldsPage";
 
 /** Ids of the pages in the settings sidebar (`SETTINGS_SECTIONS` in `SettingsPage.tsx`). */
 export type SettingsNavId =
@@ -458,6 +459,36 @@ export class SettingsPage {
   /** The default branch line of a repo row. */
   repoBranch(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__branch");
+  }
+
+  /** Closes the Settings dialog with Escape. */
+  async closeDialog(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.dialog).toBeHidden();
+  }
+
+  /** The "Available on" and "Primary host" fields of a repo row in Settings > Repos. */
+  repoHosts(name: string): RepoHostsFieldsPage {
+    return new RepoHostsFieldsPage(this.repoRow(name));
+  }
+
+  /** Saves the hosts edited in a repo row. The refusal, if there is one, shows in `repoHostsError`. */
+  async saveRepoHosts(name: string): Promise<void> {
+    await test.step(`Save the hosts of ${name}`, async () => {
+      await this.repoRow(name).getByTestId("settings-repos__hosts-save").click();
+    });
+  }
+
+  repoHostsEmptyNotice(name: string): Locator {
+    return this.repoRow(name).getByTestId("repo-hosts__empty");
+  }
+
+  repoHostsSaveButton(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__hosts-save");
+  }
+
+  repoHostsError(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__hosts-error");
   }
 
   repoRemoveButton(name: string): Locator {

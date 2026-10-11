@@ -69,6 +69,10 @@ export interface RepoState {
   hasOrigin: boolean;
   /** Whether the repo is a meta repo. Read-only here: `RepoQueries.setMeta` changes it. */
   meta?: boolean;
+  /** The hosts the repo may run on; absent means every host. Read-only here: `setHostPolicy` writes it. */
+  allowedHostIds?: string[];
+  /** The host whose default-branch checkout is listed as a worktree. Read-only here: `setHostPolicy` writes it. */
+  primaryHostId?: string;
 }
 
 /** Where a worktree was started from. Ids only, since the origin may be on any repo and host. */
@@ -218,6 +222,8 @@ export class RepoQueries {
       kind: (row.kind ?? "git") as RepoKind,
       hasOrigin: row.hasOrigin,
       meta: row.meta,
+      ...(row.allowedHostIds ? { allowedHostIds: row.allowedHostIds } : {}),
+      ...(row.primaryHostId ? { primaryHostId: row.primaryHostId } : {}),
       worktrees: wtByRepo.get(row.name) ?? [],
     }));
   }
@@ -247,12 +253,17 @@ export class RepoQueries {
         .all();
       // Origins and the meta flag are written by their own calls, so the rewrite keeps what
       // the database holds instead of what a possibly stale snapshot says.
-      const metaByRepo = new Map(
+      const kept = new Map(
         tx
-          .select({ name: reposTable.name, meta: reposTable.meta })
+          .select({
+            name: reposTable.name,
+            meta: reposTable.meta,
+            allowedHostIds: reposTable.allowedHostIds,
+            primaryHostId: reposTable.primaryHostId,
+          })
           .from(reposTable)
           .all()
-          .map((r) => [r.name, r.meta]),
+          .map((r) => [r.name, r]),
       );
       const originByWorktree = new Map(
         tx
@@ -283,17 +294,24 @@ export class RepoQueries {
             sortOrder: i,
             kind: repo.kind,
             hasOrigin: repo.hasOrigin,
-            meta: metaByRepo.get(repo.name) ?? false,
+            meta: kept.get(repo.name)?.meta ?? false,
+            // A repo new to the database may carry its policy; one that exists keeps what is stored.
+            allowedHostIds: kept.has(repo.name)
+              ? (kept.get(repo.name)?.allowedHostIds ?? null)
+              : (repo.allowedHostIds ?? null),
+            primaryHostId: kept.has(repo.name)
+              ? (kept.get(repo.name)?.primaryHostId ?? null)
+              : (repo.primaryHostId ?? null),
           })
           .run();
 
         for (const wt of repo.worktrees) {
-          const kept = originByWorktree.get(`${repo.name}\0${wt.name}`);
+          const origin = originByWorktree.get(`${repo.name}\0${wt.name}`);
           tx.insert(worktreesTable)
             .values({
-              originWorktreeId: kept?.originWorktreeId ?? null,
-              originChatId: kept?.originChatId ?? null,
-              originTerminalId: kept?.originTerminalId ?? null,
+              originWorktreeId: origin?.originWorktreeId ?? null,
+              originChatId: origin?.originChatId ?? null,
+              originTerminalId: origin?.originTerminalId ?? null,
               repoName: repo.name,
               name: wt.name,
               branch: wt.branch,
@@ -477,6 +495,40 @@ export class RepoQueries {
     return (
       getDb().update(reposTable).set({ meta }).where(eq(reposTable.name, name)).run().changes > 0
     );
+  }
+
+  /**
+   * Sets which hosts a repo may run on (`null` for every host) and which host lists its
+   * default-branch checkout (`null` to let the hub pick). A field left out is unchanged.
+   * Focused UPDATE, because `saveAll` keeps the stored policy and never writes its snapshot's.
+   * Returns false when no repo has that name.
+   */
+  setHostPolicy(
+    name: string,
+    policy: { allowedHostIds?: string[] | null; primaryHostId?: string | null },
+  ): boolean {
+    const set: { allowedHostIds?: string[] | null; primaryHostId?: string | null } = {};
+    if (policy.allowedHostIds !== undefined) set.allowedHostIds = policy.allowedHostIds;
+    if (policy.primaryHostId !== undefined) set.primaryHostId = policy.primaryHostId;
+    if (Object.keys(set).length === 0) return this.findLocation(name) !== undefined;
+    return getDb().update(reposTable).set(set).where(eq(reposTable.name, name)).run().changes > 0;
+  }
+
+  /** The stored host policy of one repo, or undefined for an unknown repo. */
+  findHostPolicy(
+    name: string,
+  ): { allowedHostIds: string[] | null; primaryHostId: string | null } | undefined {
+    const row = getDb()
+      .select({
+        allowedHostIds: reposTable.allowedHostIds,
+        primaryHostId: reposTable.primaryHostId,
+      })
+      .from(reposTable)
+      .where(eq(reposTable.name, name))
+      .get();
+    return row
+      ? { allowedHostIds: row.allowedHostIds ?? null, primaryHostId: row.primaryHostId ?? null }
+      : undefined;
   }
 
   /**

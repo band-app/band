@@ -367,6 +367,16 @@ export const WorktreeCard = memo(function WorktreeCard({
               {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
+          {/* The repo was limited to other hosts after this worktree was made. Nothing is deleted. */}
+          {worktree.hostNotAllowed && !isDeleting && (
+            <span
+              data-testid="worktree-card__not-allowed"
+              title="This repo is no longer allowed on this host. The worktree is kept and still opens."
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              Not allowed on this host
+            </span>
+          )}
           {/* The host no longer has the worktree's folder. Remove drops the record. */}
           {worktree.missing && !isDeleting && (
             <span

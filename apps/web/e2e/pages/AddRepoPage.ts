@@ -4,16 +4,20 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { RepoHostsFieldsPage } from "./RepoHostsFieldsPage";
 
 export class AddRepoPage {
   private readonly page: Page;
   private readonly dialog: Locator;
   private readonly form: Locator;
+  /** The "Available on" and "Primary host" fields of whichever add mode is showing. */
+  readonly hosts: RepoHostsFieldsPage;
 
   constructor(page: Page) {
     this.page = page;
     this.dialog = page.getByTestId("add-repo__dialog");
     this.form = this.dialog.getByTestId("add-repo__form");
+    this.hosts = new RepoHostsFieldsPage(this.form);
   }
 
   /** Opens Add repo from the sidebar's Repos panel. */

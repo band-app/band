@@ -17,7 +17,7 @@ import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
-import { WorktreeNotFoundError } from "../errors";
+import { BranchOnOtherHostError, WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
 import { RepoQueries, type WorktreeOrigin } from "../infra/db/queries/repos";
 import { TaskQueries } from "../infra/db/queries/tasks";
@@ -30,6 +30,7 @@ import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { isFolderGoneError } from "./_utils/remote-worktrees";
+import { assertHostAllowed, hostNamesOf, listedWorktrees } from "./_utils/repo-host-policy";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `worktreeService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
@@ -380,6 +381,9 @@ export function expandHome(given: string, home: string | undefined, hostId: stri
 }
 
 export class WorktreeService {
+  /** `repo\0branch` to the host of a create that passed the one-host rule but has not saved its row. */
+  private readonly creatingBranches = new Map<string, string>();
+
   private readonly pendingRemovals = new PendingRemovalQueries();
   private readonly repoQueries = new RepoQueries();
 
@@ -441,6 +445,8 @@ export class WorktreeService {
     host: Host,
     given: string | undefined,
   ): Promise<string> {
+    // Nothing is cloned or mapped on a host the repo is not allowed on.
+    assertHostAllowed(repo.name, host.id);
     // A hub that already holds the repo keeps using its own copy, whatever path the caller names.
     if (given !== undefined && !(host.id === hostRegistry.local.id && repo.path)) {
       const info = await host.info();
@@ -481,6 +487,8 @@ export class WorktreeService {
       defaultBranch: repo.defaultBranch,
     });
     hostRegistry.setRepoPathOn(repo.name, host.id, path);
+    // The first host to clone a repo that was added by URL becomes the one that lists its default branch.
+    if (!repo.primaryHostId) this.repoQueries.setHostPolicy(repo.name, { primaryHostId: host.id });
     return path;
   }
 
@@ -614,46 +622,79 @@ export class WorktreeService {
       (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) === hostId,
     );
     if (existing) return { ok: true, path: existing.path, hostId };
+    // Hard rules, for every entry point: the repo must be allowed on the host, and a branch
+    // lives on one host only.
+    assertHostAllowed(repo.name, hostId);
+    const elsewhere = listedWorktrees(repo).find(
+      (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) !== hostId,
+    );
+    // A create on another host that has passed this check but not saved its row yet counts too.
+    const inFlightKey = `${input.repo}\0${input.branch}`;
+    const inFlightHost = this.creatingBranches.get(inFlightKey);
+    if (!elsewhere && inFlightHost && inFlightHost !== hostId) {
+      throw new BranchOnOtherHostError(
+        input.branch,
+        inFlightHost,
+        hostNamesOf([inFlightHost])[0] ?? inFlightHost,
+        toWorktreeId(input.repo, input.branch, inFlightHost),
+      );
+    }
+    if (elsewhere) {
+      const otherHost = elsewhere.hostId ?? hostRegistry.local.id;
+      throw new BranchOnOtherHostError(
+        input.branch,
+        otherHost,
+        hostNamesOf([otherHost])[0] ?? otherHost,
+        toWorktreeId(input.repo, elsewhere.name, otherHost),
+      );
+    }
+    this.creatingBranches.set(inFlightKey, hostId);
     const worktreeId = toWorktreeId(input.repo, input.branch, hostId);
     // No row exists for a new worktree yet, so the host comes from the request.
     const host = hostRegistry.hostById(hostId);
     const remote = hostId !== hostRegistry.local.id;
     // On a remote host the repo's checkout and the worktree live under the
     // worker's roots, at paths the worker reports.
-    const repoPath = await this.checkoutOn(repo, host, input.hostRepoPath);
-    const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
-    const worktreePath = remote
-      ? posix.join(wtDir, input.repo, input.branch)
-      : join(wtDir, input.repo, input.branch);
-    // Pre-create the `<repo>` subdir under the worktrees root so the
-    // first `worktrees.create` call on a freshly-installed Band has
-    // somewhere to land. For slash-containing branch names (e.g.
-    // `feature/my-feature` → `<wtDir>/<repo>/feature/my-feature`)
-    // we deliberately do NOT pre-create the in-between segments
-    // (`feature/`): `git worktree add` itself creates every intermediate
-    // directory under its target path, so an extra mkdir here would be
-    // redundant. Verified against `git 2.x` — `git worktree add
-    // /tmp/wt/feature/login -b feature/login` succeeds without the
-    // parent existing.
-    await host.fs.mkdir(remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo), {
-      recursive: true,
-    });
+    let repoPath: string;
+    let worktreePath: string;
     try {
-      // Async — `git worktree add` on a large repo can take 200–500 ms
-      // and the surrounding `create` is already async, so blocking the
-      // event loop for the duration would stall every concurrent SSE
-      // stream / chat event / API request. Mirrors the async `git`
-      // helpers used by `remove` below.
-      await host.worktree.create({
-        repoPath,
-        path: worktreePath,
-        branch: input.branch,
-        base: input.base,
+      repoPath = await this.checkoutOn(repo, host, input.hostRepoPath);
+      const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
+      worktreePath = remote
+        ? posix.join(wtDir, input.repo, input.branch)
+        : join(wtDir, input.repo, input.branch);
+      // Pre-create the `<repo>` subdir under the worktrees root so the
+      // first `worktrees.create` call on a freshly-installed Band has
+      // somewhere to land. For slash-containing branch names (e.g.
+      // `feature/my-feature` → `<wtDir>/<repo>/feature/my-feature`)
+      // we deliberately do NOT pre-create the in-between segments
+      // (`feature/`): `git worktree add` itself creates every intermediate
+      // directory under its target path, so an extra mkdir here would be
+      // redundant. Verified against `git 2.x` — `git worktree add
+      // /tmp/wt/feature/login -b feature/login` succeeds without the
+      // parent existing.
+      await host.fs.mkdir(remote ? posix.join(wtDir, input.repo) : join(wtDir, input.repo), {
+        recursive: true,
       });
-    } catch (e) {
-      throw new Error(e instanceof Error ? e.message : String(e));
+      try {
+        // Async — `git worktree add` on a large repo can take 200–500 ms
+        // and the surrounding `create` is already async, so blocking the
+        // event loop for the duration would stall every concurrent SSE
+        // stream / chat event / API request. Mirrors the async `git`
+        // helpers used by `remove` below.
+        await host.worktree.create({
+          repoPath,
+          path: worktreePath,
+          branch: input.branch,
+          base: input.base,
+        });
+      } catch (e) {
+        throw new Error(e instanceof Error ? e.message : String(e));
+      }
+    } catch (err) {
+      this.creatingBranches.delete(inFlightKey);
+      throw err;
     }
-
     // `name` == `branch` at creation and is frozen from here on — sync will
     // update `branch` to track git but never `name`, keeping the id stable.
     const row = {
@@ -671,6 +712,7 @@ export class WorktreeService {
       freshRepo.worktrees.push(row);
       saveState(fresh);
     }
+    this.creatingBranches.delete(inFlightKey);
     if (originLink) this.repoQueries.setOrigin(input.repo, input.branch, originLink);
     syncService.commitWorktreeAdd(input.repo, row);
 
