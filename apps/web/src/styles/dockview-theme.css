@@ -537,32 +537,46 @@
 
 /* ---------------------------------------------------------------------------
  * Mobile layout (`dockview-center-mobile`, WorktreeCenterDockview's theme on
- * a phone): each tab and the strip's "+" and "Tab actions" buttons are 44px
- * tall, iOS's minimum tap target. The strip is 53px: 44px of tab, its 4px
- * inset above and below, and the strip's 1px bottom border. `zoom` scales a
- * tab's label and icons together (12px text becomes about 14px) without
- * restyling each tab kind.
+ * a phone): a compact strip. Each tab and the strip's "+" and "Tab actions"
+ * buttons are 34px tall, with 3px above and below each tab and the strip's 1px
+ * bottom border, so the strip is 41px.
+ *
+ * The tabs are no longer scaled with `zoom: 1.2`, which made every width and
+ * height fractional. dockview's
+ * scrollbar (`Scrollbar` in dockview-core) answers every `scroll` event by
+ * clamping the list to `scrollWidth - clientWidth` (both rounded to integers)
+ * and writing `scrollLeft` back. With fractional tab widths the real maximum
+ * lies a fraction of a pixel away from that figure, so at the end of a swipe
+ * the write snapped the list back and fired another scroll event, and it cut
+ * the fling short. `overscroll-behavior-x: none` also removes the bounce / glow
+ * at the ends that `contain` still allows, and `touch-action: pan-x` keeps the
+ * strip from starting a vertical pan. dockview's own 4px bar is hidden: it is
+ * a mouse affordance, and its position writes are what fought the swipe.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-mobile {
-  --dv-tabs-and-actions-container-height: 53px;
+  --dv-tabs-and-actions-container-height: 41px;
 }
 .dockview-center-mobile .dv-tab {
-  margin-top: 4px;
-  margin-bottom: 4px;
-  min-width: 120px;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  min-width: 104px;
 }
-.dockview-center-mobile .dv-tab .dv-default-tab {
-  zoom: 1.2;
+.dockview-center-mobile .dv-scrollable > .dv-tabs-container {
+  overscroll-behavior-x: none;
+  touch-action: pan-x;
+}
+.dockview-center-mobile .dv-scrollable > .dv-scrollbar {
+  display: none;
 }
 .dockview-center-mobile .dv-left-actions-container button,
 .dockview-center-mobile .dv-right-actions-container button {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
 }
 .dockview-center-mobile .dv-left-actions-container button svg,
 .dockview-center-mobile .dv-right-actions-container button svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 
 /* ---------------------------------------------------------------------------

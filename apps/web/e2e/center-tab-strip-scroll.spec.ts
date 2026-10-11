@@ -11,9 +11,11 @@
  *     strip and leaves the active tab alone; a tap still switches tabs.
  *     dockview activates a tab on pointerdown, so the drag used to switch to
  *     the tab under the finger and never scrolled.
- *  3. Size: on a phone each tab, the "+" and the ⋮ button is at least 44px tall,
- *     iOS's minimum tap target; the desktop strip stays 38px, the height of
- *     the window's title bar row.
+ *  3. Size: on a phone the strip is compact (34px tabs, "+" and ⋮ buttons, a
+ *     41px strip, all whole pixels); the desktop strip stays 38px, the height
+ *     of the window's title bar row.
+ *  4. Edge: at the end of a swipe the strip settles on its real maximum and
+ *     stays there.
  *
  * Each file holds its own name, so the editor line that is visible tells which
  * tab is active. Real production binary, no tRPC mocks, page objects only.
@@ -136,6 +138,7 @@ test.describe("phone", () => {
         return maxScrollLeft - scrollLeft;
       })
       .toBeGreaterThan(100);
+    await strip.waitForScrollSettled();
     const before = (await strip.readScroll()).scrollLeft;
 
     // Start the drag on a different, inactive tab: before the fix that tab
@@ -152,7 +155,7 @@ test.describe("phone", () => {
     await expect(worktreePage.fileLeafLine(FILES[2])).toBeVisible();
   });
 
-  test("each tab and the strip's buttons are at least 44px tall", async ({ page }) => {
+  test("the phone strip is compact", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const strip = new CenterTabStrip(page);
     await worktreePage.goto(WORKTREE);
@@ -161,15 +164,44 @@ test.describe("phone", () => {
     await worktreePage.openFileViaQuickOpen(FILES[1]);
     await expect(worktreePage.fileLeafLine(FILES[1])).toBeVisible();
 
+    expect((await strip.strip.boundingBox())?.height).toBe(41);
     // The active and an inactive tab.
     for (const file of FILES.slice(0, 2)) {
-      expect(await strip.readTabTapHeight(worktreePage.fileTab(file))).toBeGreaterThanOrEqual(44);
+      expect(await strip.readTabTapHeight(worktreePage.fileTab(file))).toBe(34);
     }
     for (const button of [strip.newTabButton, strip.tabActionsButton]) {
       const box = await button.boundingBox();
-      expect(box?.height).toBeGreaterThanOrEqual(44);
-      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBe(34);
+      expect(box?.width).toBe(34);
     }
+  });
+
+  test("a swipe to the end of the strip settles on the maximum and stays put", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForMobileReady();
+    for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
+    await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(300);
+
+    // The last opened tab is active and in view, so the strip starts at its
+    // end: swipe back to the start, then forward to the end again.
+    await strip.touchSwipe(worktreePage.fileTab(FILES[FILES.length - 1]), -3000);
+    await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBe(0);
+    await strip.touchSwipe(worktreePage.fileTab(FILES[0]), 3000);
+
+    // At the end: the strip rests on its maximum, and a scroll event that
+    // fires later does not move it (no snap-back from dockview's scrollbar).
+    await expect
+      .poll(async () => {
+        const { scrollLeft, maxScrollLeft } = await strip.readScroll();
+        return maxScrollLeft - scrollLeft;
+      })
+      .toBeLessThan(1);
+    expect(await strip.countScrollEventsWhileIdle(300)).toBe(0);
+    const { scrollLeft, maxScrollLeft } = await strip.readScroll();
+    expect(scrollLeft).toBeLessThanOrEqual(maxScrollLeft);
+    await expect(strip.scrollbar).toBeHidden();
   });
 
   test("tapping a tab's close button closes that tab", async ({ page }) => {

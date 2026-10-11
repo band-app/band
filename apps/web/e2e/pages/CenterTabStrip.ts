@@ -22,6 +22,8 @@ export class CenterTabStrip {
   readonly list: Locator;
   /** dockview's hidden-tabs dropdown in the visible worktree's dockview. */
   readonly overflowDropdown: Locator;
+  /** dockview's custom 4px scrollbar over the list. */
+  readonly scrollbar: Locator;
   /** The strip row: the tabs plus the header actions on either side. */
   readonly strip: Locator;
   /** The "+" button that opens the new-tab menu. */
@@ -31,6 +33,9 @@ export class CenterTabStrip {
 
   constructor(private readonly page: Page) {
     this.list = page.locator(".dockview-center-tabs .dv-tabs-container").filter({ visible: true });
+    this.scrollbar = page
+      .locator(".dockview-center-tabs .dv-scrollable > .dv-scrollbar")
+      .filter({ visible: true });
     this.strip = page
       .locator(".dockview-center-tabs .dv-tabs-and-actions-container")
       .filter({ visible: true });
@@ -60,6 +65,44 @@ export class CenterTabStrip {
       if (!wrapper) throw new Error("tab is not inside a dockview .dv-tab");
       return wrapper.getBoundingClientRect().height;
     });
+  }
+
+  /** Wait until the list stops scrolling: activating a tab scrolls it into
+   *  view, and that scroll can still be running when a test acts next. */
+  async waitForScrollSettled(): Promise<void> {
+    await test.step("Wait for the tab strip to stop scrolling", async () => {
+      await this.list.evaluate(
+        (el) =>
+          new Promise<void>((resolve) => {
+            let last = el.scrollLeft;
+            let still = 0;
+            const tick = () => {
+              still = el.scrollLeft === last ? still + 1 : 0;
+              last = el.scrollLeft;
+              if (still >= 5) resolve();
+              else requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
+    });
+  }
+
+  /** How many `scroll` events the list fires over `ms` milliseconds. */
+  async countScrollEventsWhileIdle(ms: number): Promise<number> {
+    return await this.list.evaluate(
+      (el, duration) =>
+        new Promise<number>((resolve) => {
+          let count = 0;
+          const onScroll = () => count++;
+          el.addEventListener("scroll", onScroll);
+          setTimeout(() => {
+            el.removeEventListener("scroll", onScroll);
+            resolve(count);
+          }, duration);
+        }),
+      ms,
+    );
   }
 
   /** Whether `tab` lies entirely inside the strip's visible area. */
