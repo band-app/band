@@ -542,8 +542,7 @@
  * bottom border, so the strip is 41px.
  *
  * The tabs are no longer scaled with `zoom: 1.2`, which made every width and
- * height fractional. dockview's
- * scrollbar (`Scrollbar` in dockview-core) answers every `scroll` event by
+ * height fractional. dockview's scrollbar (`Scrollbar` in dockview-core) answers every `scroll` event by
  * clamping the list to `scrollWidth - clientWidth` (both rounded to integers)
  * and writing `scrollLeft` back. With fractional tab widths the real maximum
  * lies a fraction of a pixel away from that figure, so at the end of a swipe

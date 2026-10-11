@@ -12,8 +12,8 @@
  *     dockview activates a tab on pointerdown, so the drag used to switch to
  *     the tab under the finger and never scrolled.
  *  3. Size: on a phone the strip is compact (34px tabs, "+" and ⋮ buttons, a
- *     41px strip, all whole pixels); the desktop strip stays 38px, the height
- *     of the window's title bar row.
+ *     41px strip); the desktop strip stays 38px, the height of the window's
+ *     title bar row.
  *  4. Edge: at the end of a swipe the strip settles on its real maximum and
  *     stays there.
  *
