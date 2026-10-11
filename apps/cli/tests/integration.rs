@@ -550,6 +550,119 @@ fn repos_set_meta_persists_and_lists() {
 }
 
 #[test]
+fn repos_set_checkpoints_round_trips_in_the_list() {
+    let env = TestEnv::new();
+    let checkpoints = |env: &TestEnv| {
+        let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+        listed["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "my-repo")
+            .expect("my-repo in list")["checkpointsEnabled"]
+            .clone()
+    };
+    // A repo available on every host follows the default: on.
+    assert_eq!(checkpoints(&env), true);
+
+    let off = env.band(&["repos", "set", "my-repo", "--checkpoints", "off"]);
+    assert!(off.status.success(), "stderr: {}", stderr(&off));
+    assert_eq!(checkpoints(&env), false);
+    let text = stdout(&env.band(&["repos", "list"]));
+    assert!(
+        text.contains("CHECKPOINTS") && text.contains("off"),
+        "{text}"
+    );
+
+    let on = env.band(&["repos", "set", "my-repo", "--checkpoints", "on"]);
+    assert!(on.status.success(), "stderr: {}", stderr(&on));
+    assert_eq!(checkpoints(&env), true);
+
+    let default = env.band(&["repos", "set", "my-repo", "--checkpoints", "default"]);
+    assert!(default.status.success(), "stderr: {}", stderr(&default));
+    assert_eq!(checkpoints(&env), true);
+
+    let bad = env.band(&["repos", "set", "my-repo", "--checkpoints", "maybe"]);
+    assert!(!bad.status.success());
+    assert!(
+        stderr(&bad).contains("on, off or default"),
+        "{}",
+        stderr(&bad)
+    );
+}
+
+/// Registers a worker host the way the UI does and returns its id.
+fn issue_worker_host(env: &TestEnv, name: &str) -> String {
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
+    )
+    .expect("settings json");
+    let port = settings["webServerPort"].as_u64().expect("port");
+    let token = settings["tokenSecret"].as_str().expect("token");
+    let issued: serde_json::Value = ureq::post(format!(
+        "http://127.0.0.1:{port}/trpc/tokens.issueWorkerBootstrap"
+    ))
+    .header("Authorization", format!("Bearer {token}"))
+    .send_json(serde_json::json!({"hostName": name, "labels": []}))
+    .expect("issue bootstrap")
+    .body_mut()
+    .read_json()
+    .expect("json");
+    issued["result"]["data"]["hostId"]
+        .as_str()
+        .expect("hostId")
+        .to_string()
+}
+
+#[test]
+fn worktrees_checkpoints_restore_and_evacuate_report_plainly() {
+    let env = TestEnv::new();
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/cp"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let listed = json_of(&env.band(&["worktrees", "list", "my-repo", "--output", "json"]));
+    let id = listed["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "feat/cp")
+        .expect("worktree")["worktreeId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A worktree on the hub's own machine has none.
+    let none = env.band(&["worktrees", "checkpoints", &id]);
+    assert!(none.status.success(), "stderr: {}", stderr(&none));
+    assert!(
+        stdout(&none).contains("No checkpoints"),
+        "{}",
+        stdout(&none)
+    );
+
+    // An unknown host is named, and an offline worker host cannot take work.
+    let unknown = env.band(&["worktrees", "restore", &id, "--to", "nowhere"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("Unknown host"),
+        "{}",
+        stderr(&unknown)
+    );
+    let worker = issue_worker_host(&env, "Sleepy box");
+    let offline = env.band(&["worktrees", "restore", &id, "--to", &worker]);
+    assert!(!offline.status.success());
+    assert!(!stderr(&offline).trim().is_empty());
+
+    // A host with nothing on it evacuates zero worktrees.
+    let evacuated = env.band(&["hosts", "evacuate", &worker, "--to", "local"]);
+    assert!(evacuated.status.success(), "stderr: {}", stderr(&evacuated));
+    assert!(
+        stdout(&evacuated).contains("0 worktrees moved"),
+        "{}",
+        stdout(&evacuated)
+    );
+}
+
+#[test]
 fn repos_set_hosts_limits_the_repo_and_refuses_other_hosts() {
     let env = TestEnv::new();
 

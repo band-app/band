@@ -35,3 +35,16 @@ export function effectivePrimaryHost(
 export function onlyAvailableOnMessage(repo: string, hostNames: readonly string[]): string {
   return `${repo} is only available on ${hostNames.join(", ")}`;
 }
+
+/**
+ * Whether the hub keeps checkpoints of a repo's worktrees on static workers. A stored choice
+ * wins. Without one, a repo available on every host is checkpointed and a repo limited to chosen
+ * hosts is not, because limiting a repo usually means its code must stay off other machines.
+ */
+export function checkpointsEnabledFor(
+  stored: boolean | null | undefined,
+  allowed: AllowedHosts,
+): boolean {
+  if (stored != null) return stored;
+  return !allowed;
+}

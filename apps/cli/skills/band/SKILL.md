@@ -69,7 +69,10 @@ A folder with no remote is registered without a URL and can only run on the host
 ```sh
 band repos set <name> --meta true|false
 band repos set <name> --hosts mac,contabo|all --primary mac
+band repos set <name> --checkpoints on|off|default
 ```
+
+`--checkpoints` sets whether the hub keeps checkpoints of the repo's worktrees on workers. `default` is on for a repo available on every host and off for one limited with `--hosts`. Needs an admin token. `band repos list` shows the effective value in the `CHECKPOINTS` column.
 
 `--meta true` marks the repo as a meta repo, one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults. `band repos list` shows it in the `META` column.
 
@@ -131,6 +134,16 @@ band worktrees create my-app feat/experiment
 **Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-repo-path` says where the repository is on the chosen host the first time the repo is used there.
 
 **Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
+
+### Checkpoints, move and restore
+
+```sh
+band worktrees checkpoints <id> [--take]
+band worktrees move <id> --to <host> [--add-host]
+band worktrees restore <id> --to <host> [--checkpoint <checkpointId>] [--add-host]
+```
+
+The hub keeps recent checkpoints of worktrees on workers: uncommitted and untracked changes plus the agent session. Ignored files and running processes are not included. `checkpoints` lists them (`--take` makes one now). `move` works while the worktree's host is online: it takes a fresh checkpoint, restores it on the target and removes the source only after the target has the same files. `restore` works when the host is offline and leaves the old copy on disk, listed as superseded in `band worktrees list`; remove it with `band worktrees remove`. A target the repo is not allowed on is refused unless `--add-host` is given (admin token). `<id>` is the worktree id from `band worktrees list`; `--to` takes a host id or name.
 
 ### Remove a worktree (git worktree + state cleanup)
 
@@ -215,6 +228,14 @@ band hosts list
 ```
 
 Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`.
+
+### Move every worktree off a host
+
+```sh
+band hosts evacuate <host> --to <host> [--add-host]
+```
+
+Moves the host's worktrees to another host one after the other and prints one line per worktree. An online host moves them (fresh checkpoint, target confirms, source removed). An offline host restores them from their last checkpoints and leaves its copies superseded. The exit code is non-zero if any worktree failed. Needs an admin token. `--add-host` adds the target to the allowed hosts of repos that lack it.
 
 ### Remove a worker host
 

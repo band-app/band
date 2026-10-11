@@ -183,6 +183,9 @@ enum ReposCmd {
         /// Host that lists the repo's default-branch worktree (id or name), or `auto`
         #[arg(long, value_name = "HOST|auto")]
         primary: Option<String>,
+        /// Whether the hub keeps checkpoints of the repo's worktrees on workers
+        #[arg(long, value_name = "on|off|default")]
+        checkpoints: Option<String>,
     },
     /// Unregister a repo
     Remove {
@@ -269,6 +272,39 @@ enum WorktreesCmd {
         /// repo and name exist on more than one host.
         #[arg(long)]
         host: Option<String>,
+    },
+    /// Move a worktree to another host while its host is online (fresh checkpoint, then the source is removed)
+    Move {
+        /// Worktree ID
+        id: String,
+        /// Target host (id or name, see `band hosts list`)
+        #[arg(long)]
+        to: String,
+        /// Add the target host to the repo's allowed hosts when it is missing (admin token)
+        #[arg(long)]
+        add_host: bool,
+    },
+    /// Restore a worktree on another host from its latest (or a chosen) checkpoint. The old copy stays, superseded
+    Restore {
+        /// Worktree ID
+        id: String,
+        /// Target host (id or name, see `band hosts list`)
+        #[arg(long)]
+        to: String,
+        /// Checkpoint ID (default: the newest)
+        #[arg(long)]
+        checkpoint: Option<String>,
+        /// Add the target host to the repo's allowed hosts when it is missing (admin token)
+        #[arg(long)]
+        add_host: bool,
+    },
+    /// List the hub's checkpoints of a worktree
+    Checkpoints {
+        /// Worktree ID
+        id: String,
+        /// Take a checkpoint first
+        #[arg(long)]
+        take: bool,
     },
 }
 
@@ -619,6 +655,17 @@ enum HostsCmd {
         /// Host ID (from `band hosts list`)
         id: String,
     },
+    /// Move every worktree on a host to another host, one after the other
+    Evacuate {
+        /// Source host (id or name)
+        host: String,
+        /// Target host (id or name)
+        #[arg(long)]
+        to: String,
+        /// Add the target host to the allowed hosts of repos that lack it (admin token)
+        #[arg(long)]
+        add_host: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -853,7 +900,14 @@ fn main() {
                 meta,
                 hosts,
                 primary,
-            } => cmd_repos_set(&name, meta, hosts.as_deref(), primary.as_deref()),
+                checkpoints,
+            } => cmd_repos_set(
+                &name,
+                meta,
+                hosts.as_deref(),
+                primary.as_deref(),
+                checkpoints.as_deref(),
+            ),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
         Commands::Worktrees { cmd } => match cmd {
@@ -896,6 +950,14 @@ fn main() {
             WorktreesCmd::Remove { repo, name, host } => {
                 cmd_worktrees_remove(&repo, &name, host.as_deref())
             }
+            WorktreesCmd::Move { id, to, add_host } => cmd_worktrees_move(&id, &to, add_host),
+            WorktreesCmd::Restore {
+                id,
+                to,
+                checkpoint,
+                add_host,
+            } => cmd_worktrees_restore(&id, &to, checkpoint.as_deref(), add_host),
+            WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
             AgentsCmd::List { worktree_id } => cmd_agents_list(worktree_id.as_deref()),
@@ -1061,6 +1123,7 @@ fn main() {
         Commands::Hosts { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
+            HostsCmd::Evacuate { host, to, add_host } => cmd_hosts_evacuate(&host, &to, add_host),
         },
         Commands::Runners { cmd } => match cmd {
             RunnersCmd::List => cmd_runners_list(),
@@ -1186,6 +1249,7 @@ fn allowed_hosts_text(allowed: &serde_json::Value) -> String {
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn cmd_repos_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let data = client.trpc_query_no_input("repos.list")?;
@@ -1197,7 +1261,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_repos = Vec::new();
-    let mut rows: Vec<[String; 8]> = Vec::new();
+    let mut rows: Vec<[String; 9]> = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -1227,6 +1291,14 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
         let hosts_text = allowed_hosts_text(&allowed_hosts);
+        let checkpoints = proj
+            .get("checkpointsEnabled")
+            .and_then(serde_json::Value::as_bool);
+        let checkpoints_text = match checkpoints {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => "-",
+        };
         let clones = proj
             .get("clones")
             .and_then(|c| c.as_array())
@@ -1261,6 +1333,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             clones_text,
             if meta { "yes" } else { "-" }.to_string(),
             hosts_text,
+            checkpoints_text.to_string(),
         ]);
         json_repos.push(serde_json::json!({
             "name": name,
@@ -1272,6 +1345,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "meta": meta,
             "allowedHostIds": allowed_hosts,
             "primaryHostId": primary_host,
+            "checkpointsEnabled": checkpoints,
         }));
     }
 
@@ -1285,6 +1359,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "CLONES",
             "META",
             "HOSTS",
+            "CHECKPOINTS",
         ],
         &rows,
     );
@@ -1387,11 +1462,12 @@ fn cmd_repos_set(
     meta: Option<bool>,
     hosts: Option<&str>,
     primary: Option<&str>,
+    checkpoints: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(name, "Repo name")?;
-    if meta.is_none() && hosts.is_none() && primary.is_none() {
+    if meta.is_none() && hosts.is_none() && primary.is_none() && checkpoints.is_none() {
         return Err(
-            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all or --primary <host>"
+            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host> or --checkpoints on|off|default"
                 .to_string(),
         );
     }
@@ -1402,6 +1478,29 @@ fn cmd_repos_set(
         input["meta"] = serde_json::json!(meta);
     }
     let mut lines = Vec::new();
+    if let Some(value) = checkpoints {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "on" => {
+                input["checkpointsEnabled"] = serde_json::json!(true);
+                lines.push(format!("{name} keeps checkpoints on the hub"));
+            }
+            "off" => {
+                input["checkpointsEnabled"] = serde_json::json!(false);
+                lines.push(format!("{name} keeps no checkpoints on the hub"));
+            }
+            "default" => {
+                input["checkpointsEnabled"] = serde_json::Value::Null;
+                lines.push(format!(
+                    "{name} follows the default (on, unless the repo is limited to chosen hosts)"
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "--checkpoints takes on, off or default, not \"{other}\""
+                ));
+            }
+        }
+    }
     if hosts.is_some() || primary.is_some() {
         let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
         let known = listed
@@ -1453,6 +1552,7 @@ fn cmd_repos_set(
             "meta": meta,
             "allowedHostIds": input.get("allowedHostIds"),
             "primaryHostId": input.get("primaryHostId"),
+            "checkpointsEnabled": input.get("checkpointsEnabled"),
         }),
     })
 }
@@ -1521,10 +1621,15 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 }
                 None => "-".to_string(),
             };
+            let superseded_by = wt.get("supersededBy").and_then(|v| v.as_str());
+            let id_text = match superseded_by {
+                Some(new_id) => format!("{worktree_id} (superseded by {new_id})"),
+                None => worktree_id.to_string(),
+            };
             rows.push([
                 name.to_string(),
                 branch.to_string(),
-                worktree_id.to_string(),
+                id_text,
                 path.to_string(),
                 origin_text,
             ]);
@@ -1533,6 +1638,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 "branch": branch,
                 "worktreeId": worktree_id,
                 "path": path,
+                "supersededBy": superseded_by,
                 "origin": origin,
                 "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
@@ -1551,6 +1657,178 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
     Ok(CommandResult {
         text,
         json: serde_json::json!({"worktrees": listed}),
+    })
+}
+
+/// Turns a target host given by id or name into its id.
+fn target_host_id(client: &api::ApiClient, given: &str) -> Result<String, String> {
+    let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
+    let known = listed
+        .get("hosts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    resolve_host_id(&known, given)
+}
+
+/// Adds the `--add-host` hint to the hub's "only available on" refusal.
+fn with_add_host_hint(err: String) -> String {
+    if err.contains("is only available on") {
+        format!("{err}\nRun again with --add-host to add the target host to the repo's allowed hosts (needs an admin token).")
+    } else {
+        err
+    }
+}
+
+fn cmd_worktrees_move(id: &str, to: &str, add_host: bool) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let host = target_host_id(&client, to)?;
+    let mut input = serde_json::json!({"worktreeId": id, "toHostId": host});
+    if add_host {
+        input["addHost"] = serde_json::json!(true);
+    }
+    let data = client
+        .trpc_mutate("checkpoints.move", &input)
+        .map_err(with_add_host_hint)?;
+    Ok(CommandResult {
+        text: restore_text(&data, "Moved", id),
+        json: data,
+    })
+}
+
+fn cmd_worktrees_restore(
+    id: &str,
+    to: &str,
+    checkpoint: Option<&str>,
+    add_host: bool,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let host = target_host_id(&client, to)?;
+    let mut input = serde_json::json!({"worktreeId": id, "toHostId": host});
+    if let Some(checkpoint) = checkpoint {
+        input["checkpointId"] = serde_json::json!(checkpoint);
+    }
+    if add_host {
+        input["addHost"] = serde_json::json!(true);
+    }
+    let data = client
+        .trpc_mutate("checkpoints.restore", &input)
+        .map_err(with_add_host_hint)?;
+    Ok(CommandResult {
+        text: restore_text(&data, "Restored", id),
+        json: data,
+    })
+}
+
+#[allow(clippy::format_push_string)]
+fn restore_text(data: &serde_json::Value, verb: &str, id: &str) -> String {
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let mut out = format!(
+        "{verb} {id} as {} on {}\n",
+        text("worktreeId"),
+        text("hostId")
+    );
+    if let Some(old) = data.get("supersededId").and_then(|v| v.as_str()) {
+        out.push_str(&format!(
+            "The copy {old} is left untouched on its host and listed as superseded\n"
+        ));
+    }
+    if let Some(warning) = data.get("warning").and_then(|v| v.as_str()) {
+        out.push_str(&format!("Warning: {warning}\n"));
+    }
+    out
+}
+
+fn format_bytes(n: u64) -> String {
+    if n >= 1024 * 1024 {
+        format!(
+            "{}.{} MB",
+            n / (1024 * 1024),
+            (n % (1024 * 1024)) * 10 / (1024 * 1024)
+        )
+    } else if n >= 1024 {
+        format!("{} KB", n / 1024)
+    } else {
+        format!("{n} B")
+    }
+}
+
+#[allow(clippy::format_push_string)]
+fn cmd_worktrees_checkpoints(id: &str, take: bool) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut prefix = String::new();
+    let mut taken = serde_json::Value::Null;
+    if take {
+        let res = client.trpc_mutate("checkpoints.take", &serde_json::json!({"worktreeId": id}))?;
+        let status = res.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        prefix = match status {
+            "created" => "Checkpoint created\n".to_string(),
+            "unchanged" => "Nothing changed since the newest checkpoint\n".to_string(),
+            _ => format!(
+                "Checkpoint skipped: {}\n",
+                res.get("reason").and_then(|v| v.as_str()).unwrap_or("")
+            ),
+        };
+        taken = res;
+    }
+    let data = client.trpc_query("checkpoints.list", &serde_json::json!({"worktreeId": id}))?;
+    let list = data
+        .get("checkpoints")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 6]> = list
+        .iter()
+        .map(|c| {
+            let text = |key: &str| {
+                c.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let at = c
+                .get("createdAt")
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(String::new, |ms| {
+                    format!("{} ago", format_span(now_ms().saturating_sub(ms)))
+                });
+            let dirty = c
+                .get("dirty")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            [
+                text("id"),
+                at,
+                text("trigger"),
+                format_bytes(
+                    c.get("sizeBytes")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0),
+                ),
+                if dirty { "dirty" } else { "clean" }.to_string(),
+                text("branch"),
+            ]
+        })
+        .collect();
+    let mut text = prefix;
+    if rows.is_empty() {
+        text.push_str(&format!("No checkpoints for {id}\n"));
+    } else {
+        text.push_str(&format_table(
+            &["ID", "TAKEN", "TRIGGER", "SIZE", "TREE", "BRANCH"],
+            &rows,
+        ));
+    }
+    if let Some(warning) = data.get("warning").and_then(|v| v.as_str()) {
+        text.push_str(&format!("Warning: {warning}\n"));
+    }
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({
+            "checkpoints": list,
+            "warning": data.get("warning"),
+            "taken": taken,
+        }),
     })
 }
 
@@ -3669,6 +3947,55 @@ fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+#[allow(clippy::format_push_string)]
+fn cmd_hosts_evacuate(host: &str, to: &str, add_host: bool) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let from_id = target_host_id(&client, host)?;
+    let to_id = target_host_id(&client, to)?;
+    let mut input = serde_json::json!({"fromHostId": from_id, "toHostId": to_id});
+    if add_host {
+        input["addHost"] = serde_json::json!(true);
+    }
+    let data = client
+        .trpc_mutate("checkpoints.evacuate", &input)
+        .map_err(with_add_host_hint)?;
+    let results = data
+        .get("results")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut text = String::new();
+    let mut failed = 0;
+    for r in &results {
+        let id = r.get("worktreeId").and_then(|v| v.as_str()).unwrap_or("");
+        if r.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+            text.push_str(&format!(
+                "ok      {id} -> {} ({})\n",
+                r.get("newWorktreeId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+                r.get("mode").and_then(|v| v.as_str()).unwrap_or("")
+            ));
+        } else {
+            failed += 1;
+            text.push_str(&format!(
+                "failed  {id}: {}\n",
+                r.get("error").and_then(|v| v.as_str()).unwrap_or("")
+            ));
+        }
+    }
+    let ok = results.len() - failed;
+    text.push_str(&format!(
+        "{} worktree{} moved from {from_id} to {to_id}, {failed} failed\n",
+        ok,
+        if ok == 1 { "" } else { "s" }
+    ));
+    if failed > 0 {
+        return Err(text.trim_end().to_string());
+    }
+    Ok(CommandResult { text, json: data })
+}
+
 // --- Runners commands ---
 
 fn cmd_runners_list() -> Result<CommandResult, String> {
@@ -4742,6 +5069,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--meta", "type": "boolean", "required": false, "description": "Mark the repo as a meta repo (true) or unmark it (false)"},
                 {"name": "--hosts", "type": "string", "required": false, "description": "Hosts the repo may run on (ids or names, comma separated), or `all`"},
                 {"name": "--primary", "type": "string", "required": false, "description": "Host that lists the repo's default-branch worktree (id or name), or `auto`"},
+                {"name": "--checkpoints", "type": "string", "required": false, "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default"},
             ],
             "notes": "A meta repo is one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults; it changes no behaviour. `band repos list` shows it in the META column. `--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
         }),
@@ -4787,6 +5115,46 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--host", "type": "string", "required": false, "description": "Host the worktree lives on (see `band hosts`). Needed when the same repo and name exist on more than one host."},
             ],
             "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
+        }),
+        serde_json::json!({
+            "name": "worktrees move",
+            "description": "Move a worktree to another host while its host is online",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
+                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the repo's allowed hosts if missing (admin token)"},
+            ],
+            "notes": "Takes a fresh checkpoint, restores it on the target (branch, uncommitted and untracked files, agent session, chats), and removes the source worktree only after the target has the same files. Running processes and ignored files are not carried."
+        }),
+        serde_json::json!({
+            "name": "worktrees restore",
+            "description": "Restore a worktree on another host from a checkpoint",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
+                {"name": "--checkpoint", "type": "string", "required": false, "description": "Checkpoint ID (default: the newest)"},
+                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the repo's allowed hosts if missing (admin token)"},
+            ],
+            "notes": "Works when the old host is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`."
+        }),
+        serde_json::json!({
+            "name": "worktrees checkpoints",
+            "description": "List the hub's checkpoints of a worktree",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "--take", "type": "boolean", "required": false, "description": "Take a checkpoint first"},
+            ],
+            "notes": "Text output: `ID  TAKEN  TRIGGER  SIZE  TREE  BRANCH`, plus a warning when a checkpoint was skipped for size.\nJSON output: `{\"checkpoints\": [...], \"warning\": null, \"taken\": null}`."
+        }),
+        serde_json::json!({
+            "name": "hosts evacuate",
+            "description": "Move every worktree on a host to another host, one after the other",
+            "parameters": [
+                {"name": "host", "type": "string", "required": true, "positional": true, "description": "Source host (id or name)"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
+                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the allowed hosts of repos that lack it"},
+            ],
+            "notes": "Needs an admin token. An online host moves its worktrees; an offline host restores them from their last checkpoints. Prints one line per worktree and exits non-zero if any failed."
         }),
         serde_json::json!({
             "name": "settings",

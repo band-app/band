@@ -28,6 +28,7 @@ import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { DiffTargetHeader } from "./DiffTargetHeader";
+import { CheckpointSidepanel, useOfflineCheckpoint } from "./OfflineCheckpoint";
 import { usePerWorktreeState } from "./per-worktree-state-store";
 import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
 
@@ -321,9 +322,10 @@ function RightSidepanelInner({
   // Fetch the Changes sections for both the Changes tab badge and the lists.
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
+  const offlineCheckpoint = useOfflineCheckpoint(worktreeId);
   const changesQuery = useWorktreeChanges(worktreeId, {
-    enabled: visible,
-    refetchInterval: visible ? 15_000 : false,
+    enabled: visible && !offlineCheckpoint.active,
+    refetchInterval: visible && !offlineCheckpoint.active ? 15_000 : false,
   });
 
   // The header's branch names outlive the result for one target: a new pick
@@ -376,6 +378,18 @@ function RightSidepanelInner({
       getWorktreeLeafActions(worktreeId)?.openCommitDiff(sha, path, { preview: !pinned }),
     [worktreeId],
   );
+
+  if (offlineCheckpoint.active) {
+    // The host is offline: read the newest checkpoint instead, read-only.
+    return (
+      <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
+        <SidepanelHeader actions={headerActions} />
+        <div className="min-h-0 flex-1">
+          <CheckpointSidepanel worktreeId={worktreeId} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">

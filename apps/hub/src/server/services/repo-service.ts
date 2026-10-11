@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
 import { gitRunner, type Host } from "@band-app/host-api";
 import { parseRemoteUrl } from "@band-app/shared/remote-url";
-import { isHostAllowed } from "@band-app/shared/repo-hosts";
+import { checkpointsEnabledFor, isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
 import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../errors";
@@ -13,10 +13,12 @@ import {
   reconcileKindForRepo,
   type WorktreeState,
 } from "../infra/db/queries/repos";
+import { CheckpointQueries } from "../infra/db/queries/worktree-checkpoints";
 import { WorktreeStatusQueries } from "../infra/db/queries/worktree-statuses";
 import type { WorktreeAgentInfo } from "../infra/events/status-event-bus";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
+import { forgetCheckpoints } from "./_utils/checkpoint-store";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import { assertHostAllowed, listedWorktrees, primaryHostOf } from "./_utils/repo-host-policy";
@@ -58,6 +60,8 @@ function isInsideRoots(path: string, roots: string[]): boolean {
  * `docs/web-architecture.md` for the rationale.
  */
 export class RepoService {
+  private readonly checkpointQueries = new CheckpointQueries();
+
   constructor(
     private readonly queries: RepoQueries = new RepoQueries(),
     private readonly settings: SettingsService = settingsService,
@@ -104,6 +108,10 @@ export class RepoService {
       allowedHostIds: string[] | null;
       /** The host whose default-branch checkout is listed as a worktree, once one is known. */
       primaryHostId: string | null;
+      /** Whether the hub keeps checkpoints of this repo's worktrees (the stored choice, else the default). */
+      checkpointsEnabled: boolean;
+      /** The stored choice, or null when the repo follows the default. */
+      checkpointsSetting: boolean | null;
       /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
       avatar: RepoAvatarInfo | null;
       worktrees: Array<{
@@ -118,6 +126,10 @@ export class RepoService {
         hostNotAllowed?: boolean;
         /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is coming back (`waking`). */
         lifecycle?: WorktreeLifecycle;
+        /** Set when this copy was restored on another host. The value is the replacement's worktree id. */
+        supersededBy?: string;
+        /** When the hub took the newest checkpoint of this worktree, or null when it has none. */
+        lastCheckpointAt: number | null;
         worktreeId: string;
         // `WorktreeAgentInfo` is the per-worktree agent snapshot owned
         // by the infra status event-bus (`infra/events/status-event-bus.ts`).
@@ -139,6 +151,7 @@ export class RepoService {
     const statuses = this.statusQueries.loadCurrent();
     const statusMap = new Map(statuses.map((s) => [s.worktreeId, s]));
     const lifecycles = ephemeralLifecycleService.states();
+    const lastCheckpoints = this.checkpointQueries.latestTimes();
     const hostPaths = this.queries.allHostPaths();
     const links = originLinks(repos);
 
@@ -247,6 +260,8 @@ export class RepoService {
         meta: repo.meta ?? false,
         allowedHostIds: repo.allowedHostIds ?? null,
         primaryHostId: primaryHostOf({ ...repo, worktrees }),
+        checkpointsEnabled: checkpointsEnabledFor(repo.checkpointsEnabled, repo.allowedHostIds),
+        checkpointsSetting: repo.checkpointsEnabled ?? null,
         avatar: await avatar,
         // The default-branch checkout of every host but the primary one is a hidden cache.
         worktrees: listedWorktrees({ ...repo, worktrees }).map((wt) => {
@@ -259,6 +274,7 @@ export class RepoService {
             worktreeId,
             ...(isHostAllowed(repo.allowedHostIds, wt.hostId) ? {} : { hostNotAllowed: true }),
             ...(lifecycle ? { lifecycle } : {}),
+            lastCheckpointAt: lastCheckpoints.get(worktreeId) ?? null,
             agent: status?.agent ?? null,
             origin: links.origins.get(worktreeId) ?? null,
             children: links.children.get(worktreeId) ?? [],
@@ -860,7 +876,32 @@ export class RepoService {
       primary = null;
     }
     this.checkHostPolicy(allowed, primary);
+    const wasOn = this.checkpointsOn(name);
     this.queries.setHostPolicy(name, { allowedHostIds: allowed, primaryHostId: primary });
+    this.forgetCheckpointsIfTurnedOff(name, wasOn);
+  }
+
+  /** Whether the hub keeps checkpoints for `name` now: the stored setting, else the default for its hosts. */
+  private checkpointsOn(name: string): boolean {
+    return checkpointsEnabledFor(
+      this.queries.findCheckpointsEnabled(name) ?? null,
+      this.queries.findHostPolicy(name)?.allowedHostIds ?? null,
+    );
+  }
+
+  /** A repo that keeps no checkpoints keeps nothing on the hub, so a change that turns them off deletes the stored ones. */
+  private forgetCheckpointsIfTurnedOff(name: string, wasOn: boolean): void {
+    if (!wasOn || this.checkpointsOn(name)) return;
+    for (const id of this.checkpointQueries.worktreeIdsForRepo(name)) forgetCheckpoints(id);
+  }
+
+  /** Turns checkpoints on the hub on or off for `name`, or back to the default with `null`. */
+  setCheckpointsEnabled(name: string, enabled: boolean | null): void {
+    const wasOn = this.checkpointsOn(name);
+    if (!this.queries.setCheckpointsEnabled(name, enabled)) {
+      throw new RepoInputError(`Unknown repo "${name}"`);
+    }
+    this.forgetCheckpointsIfTurnedOff(name, wasOn);
   }
 
   /** Marks or unmarks `name` as a meta repo. */

@@ -19,14 +19,16 @@ import {
   Home,
   Loader,
   Moon,
+  MoveRight,
   Pin,
   PinOff,
   Play,
   Square,
   Trash2,
 } from "lucide-react";
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useCapabilities } from "../context";
+import { timeAgo, useHostOffline } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
@@ -43,6 +45,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
+import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
@@ -151,6 +154,19 @@ export const WorktreeCard = memo(function WorktreeCard({
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorktreeMutation = useRemoveWorktree();
   const isPinned = worktree.pinned;
+  const hostOffline = useHostOffline(worktree.hostId);
+  const superseded = worktree.supersededBy;
+  const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
+  const [moveOpen, setMoveOpen] = useState(false);
+  // Move needs the host online. Restore needs a checkpoint to restore from.
+  const moveMode: "move" | "restore" | null =
+    !worktree.hostId || worktree.hostId === "local" || superseded
+      ? null
+      : hostOffline
+        ? lastCheckpointAt !== null
+          ? "restore"
+          : null
+        : "move";
   // The default-branch worktree is a git repo's main checkout — its path is
   // the repository root (git's "main worktree"). A home icon marks it apart
   // from the added feature worktrees below it. Plain repos have no root
@@ -367,6 +383,50 @@ export const WorktreeCard = memo(function WorktreeCard({
               {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
+          {/* The host is offline: the hub may hold a checkpoint of the worktree. */}
+          {hostOffline && !superseded && !isDeleting && (
+            <span
+              data-testid="worktree-card__offline"
+              data-checkpoint={lastCheckpointAt !== null ? "true" : "false"}
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              {lastCheckpointAt !== null
+                ? `Offline, last checkpoint ${timeAgo(lastCheckpointAt)}`
+                : "Host offline"}
+            </span>
+          )}
+          {/* This copy was restored on another host. Its files are untouched until a person removes it. */}
+          {superseded && !isDeleting && (
+            <span
+              data-testid="worktree-card__superseded"
+              data-superseded-by={superseded}
+              title={`Restored as ${superseded}. The files on this host are untouched.`}
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              Superseded by {superseded}
+              <button
+                type="button"
+                data-testid="worktree-card__remove-superseded"
+                className="underline hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (
+                    window.confirm(
+                      `Remove this copy? The files of ${worktree.name} on its host are deleted. The restored worktree ${superseded} is not touched.`,
+                    )
+                  ) {
+                    removeWorktreeMutation.mutate({
+                      repo: repoName,
+                      name: worktree.name,
+                      hostId: worktree.hostId,
+                    });
+                  }
+                }}
+              >
+                Remove
+              </button>
+            </span>
+          )}
           {/* The repo was limited to other hosts after this worktree was made. Nothing is deleted. */}
           {worktree.hostNotAllowed && !isDeleting && (
             <span
@@ -472,6 +532,12 @@ export const WorktreeCard = memo(function WorktreeCard({
         {/* Plain repos have a single implicit worktree; removing it
             would orphan the repo, so the user is steered toward
             removing the repo itself instead. */}
+        {moveMode && !isPlain && worktree.name !== defaultBranch && (
+          <ContextMenuItem data-testid="worktree-card__move" onClick={() => setMoveOpen(true)}>
+            <MoveRight />
+            {moveMode === "move" ? "Move to host…" : "Restore on another host…"}
+          </ContextMenuItem>
+        )}
         {!isPlain && worktree.name !== defaultBranch && (
           <ContextMenuItem variant="destructive" onClick={handleDelete}>
             <Trash2 />
@@ -479,6 +545,15 @@ export const WorktreeCard = memo(function WorktreeCard({
           </ContextMenuItem>
         )}
       </ContextMenuContent>
+      {moveMode && moveOpen && (
+        <MoveWorktreeDialog
+          open={moveOpen}
+          onOpenChange={setMoveOpen}
+          repoName={repoName}
+          worktree={worktree}
+          mode={moveMode}
+        />
+      )}
     </ContextMenu>
   );
 });

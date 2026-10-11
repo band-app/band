@@ -112,6 +112,13 @@ export interface LifecyclePolicy {
  */
 export const METHOD_LIFECYCLE_SLEEP = "lifecycle.sleep";
 
+/**
+ * Worker to hub: a worker that was asked to stop tells the hub before it closes the link, so the
+ * hub can take a last checkpoint of every worktree on it. The reply says how many it stored. The
+ * worker waits for it for a bounded time and stops either way.
+ */
+export const METHOD_LIFECYCLE_SHUTDOWN = "lifecycle.shutdown";
+
 /** Hub to worker: reads the agent session files of the named sessions. See `apps/worker/src/methods-lifecycle.ts`. */
 export const METHOD_LIFECYCLE_EXPORT_SESSIONS = "lifecycle.exportSessions";
 /** Hub to worker: moves staged session files into the agent session directories. */

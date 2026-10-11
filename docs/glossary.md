@@ -43,3 +43,5 @@ Band had projects: a cross-repo body of work with a context repo, a project fold
 - `.band/config.json` still reads `workspace.copyFiles`, `workspace.defaultVia` and `workspace.terminal`. The format of a file in a user's repo is not renamed.
 - Claude Code stores transcripts under `~/.claude/projects`. That directory belongs to Claude, so Band reads it by that name.
 - A pnpm workspace is a package of this monorepo and has nothing to do with a Band worktree.
+
+A **checkpoint** is the hub's own copy of a worktree on a static worker, taken after an agent turn, after quiet files and on a clean worker shutdown. It keeps the work readable when the worker is offline and lets it be restored on another host. A copy replaced by a restore is **superseded**. See `docs/checkpoints.md`.

@@ -124,6 +124,9 @@ export const repos = sqliteTable("repos", {
   // The one host whose default-branch checkout is listed as a worktree. Null means the
   // host picks itself (`effectivePrimaryHost` in `@band-app/shared/repo-hosts`).
   primaryHostId: text("primary_host_id"),
+  // Whether the hub keeps checkpoints of the repo's worktrees on static workers. Null means the
+  // default: on for a repo available on every host, off for one limited to chosen hosts.
+  checkpointsEnabled: integer("checkpoints_enabled", { mode: "boolean" }),
 });
 
 // A repo's checkout path on each host. `repos.path` stays the source
@@ -169,6 +172,9 @@ export const worktrees = sqliteTable("worktrees", {
   originWorktreeId: text("origin_worktree_id"),
   originChatId: text("origin_chat_id"),
   originTerminalId: text("origin_terminal_id"),
+  // Set when the worktree was restored on another host: the id of the replacement. The copy
+  // stays on disk untouched and is listed as superseded until a person removes it.
+  supersededBy: text("superseded_by"),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was
@@ -282,6 +288,33 @@ export const worktreeSleep = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("worktree_sleep_host_idx").on(t.hostId)],
+);
+
+// Checkpoints the hub keeps of worktrees on static workers. The bundle and the agent session files
+// are files under `<BAND_HOME>/checkpoints/<worktree id>/<id>/`; this row says what they hold.
+export const worktreeCheckpoints = sqliteTable(
+  "worktree_checkpoints",
+  {
+    id: text("id").primaryKey(),
+    worktreeId: text("worktree_id").notNull(),
+    hostId: text("host_id").notNull(),
+    repo: text("repo").notNull(),
+    name: text("name").notNull(),
+    // The branch checked out when the checkpoint was taken. Empty for a detached HEAD.
+    branch: text("branch").notNull(),
+    baseSha: text("base_sha").notNull(),
+    // The commit holding the working tree. Equals `base_sha` when it was clean.
+    snapshotSha: text("snapshot_sha").notNull(),
+    treeSha: text("tree_sha").notNull(),
+    // Whether `bundle.pack` holds objects. False when every remote already has the snapshot.
+    hasBundle: integer("has_bundle", { mode: "boolean" }).notNull(),
+    sessionIds: text("session_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    sessionsHash: text("sessions_hash").notNull().default(""),
+    sizeBytes: integer("size_bytes").notNull(),
+    trigger: text("trigger", { enum: ["turn", "quiet", "shutdown", "manual", "move"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("worktree_checkpoints_worktree_idx").on(t.worktreeId, t.createdAt)],
 );
 
 // Machine snapshots a runner's `snapshot` hook took when an ephemeral worker went to sleep.

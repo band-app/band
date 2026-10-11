@@ -621,6 +621,24 @@ export class ChatService {
   }
 
   /**
+   * Moves every chat of `oldId` to the worktree `newId` after the rows were rekeyed in the
+   * database (`rekeyWorktreeRows`). Each chat's agent process is stopped, because it runs on the
+   * old worktree's host; the next prompt starts one on the new host and resumes the session.
+   */
+  reassignWorktree(oldId: string, newId: string): string[] {
+    this.ensureInitialized();
+    const ids = [...(this.worktreeChats.get(oldId) ?? [])];
+    for (const chatId of ids) {
+      agentSessionService.stop(chatId);
+      const session = this.chatSessions.get(chatId);
+      if (!session) continue;
+      this.removeFromIndex(chatId);
+      this.addToIndex({ ...session, worktreeId: newId });
+    }
+    return ids;
+  }
+
+  /**
    * Load all chat panes from the database into the in-memory registry.
    * Called on server startup. Resets all statuses to "idle" since no agent
    * can be running when the server just started.

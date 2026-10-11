@@ -66,6 +66,7 @@ import { agentSessionRegistry } from "./src/server/services/agent-session-regist
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
+import { checkpointService } from "./src/server/services/checkpoint-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
 import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
@@ -744,6 +745,7 @@ async function main() {
   environmentBuildService.start();
   runnerService.start();
   runnerReaperService.start();
+  checkpointService.start();
   vaultService.start();
   mcpProxyService.start();
 
@@ -1613,6 +1615,7 @@ async function main() {
     });
     runnerService.stop();
     runnerReaperService.stop();
+    checkpointService.stop();
     vaultService.stop();
     mcpProxyService.stop();
     placementService.stop();
