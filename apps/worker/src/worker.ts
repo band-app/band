@@ -12,6 +12,7 @@ import {
   type LinkClientOptions,
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_POLICY,
+  METHOD_LIFECYCLE_SHUTDOWN,
   METHOD_LIFECYCLE_SLEEP,
   type Ready,
   RPC_METHOD_NOT_FOUND,
@@ -231,11 +232,30 @@ export class Worker {
   private async shutdown(code: number): Promise<void> {
     this.exitCode = code;
     for (const t of this.timers) clearInterval(t);
+    await this.tellHubShuttingDown();
     await this.client.close();
     await this.tokenSaved;
     for (const dispose of this.disposers) await Promise.resolve(dispose()).catch(() => undefined);
     await stopAllAgentProcesses().catch(() => undefined);
     this.resolveExit(this.exitCode);
+  }
+
+  /**
+   * A worker that stops cleanly tells the hub first, so the hub can take a last checkpoint of its
+   * worktrees while the link is still up. An ephemeral worker has the sleep hand-off instead. The
+   * wait is bounded and every failure is ignored: stopping must not hang on the hub.
+   */
+  private async tellHubShuttingDown(): Promise<void> {
+    if (this.config.ephemeral || !this.client.session.attached) return;
+    try {
+      await this.client.session.request(METHOD_LIFECYCLE_SHUTDOWN, {}, { timeoutMs: 30_000 });
+    } catch (err) {
+      if (err instanceof RpcError && err.code === RPC_METHOD_NOT_FOUND) return;
+      log.debug(
+        { message: err instanceof Error ? err.message : String(err) },
+        "the hub did not take a final checkpoint",
+      );
+    }
   }
 
   private wire(ctx: WorkerContext): void {

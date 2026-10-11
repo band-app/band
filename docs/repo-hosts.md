@@ -29,6 +29,8 @@ The rule has no override. A worktree, a clone or a folder mapping on a host that
 
 The New Worktree dialog lists the allowed hosts only. A worktree that already exists on a host that is no longer allowed is kept and is never deleted. `repos.list` marks it `hostNotAllowed`, the sidebar card says "Not allowed on this host", and it opens like any other worktree. Nothing new can be created there.
 
+A repo limited to chosen hosts does not get [checkpoints](checkpoints.md) unless you turn them on, and a restore or move to a host outside the list is refused unless an admin adds the host in the same call.
+
 ## One host per branch
 
 Creating a worktree for a repo and branch that already has a Band worktree on another host fails with `<branch> is already on <host name>`. The tRPC error is `CONFLICT` and carries `data.existingWorktreeId` and `data.existingHostId`. The CLI prints `(worktree <id>)` after the message, the MCP tools return `worktreeId`, and the New Worktree dialog shows an "Open it" button that opens that worktree.

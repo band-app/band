@@ -134,7 +134,10 @@
         "apps/hub/src/server/services/runner-service.ts",
         "apps/hub/src/server/services/_utils/runner-config.ts",
         "apps/hub/src/server/services/_utils/vault-crypto.ts",
-        "apps/hub/src/server/services/ephemeral-lifecycle-service.ts"
+        "apps/hub/src/server/services/ephemeral-lifecycle-service.ts",
+        "apps/hub/src/server/services/checkpoint-service.ts",
+        "apps/hub/src/server/services/_utils/checkpoint-store.ts",
+        "apps/hub/src/server/infra/db/queries/worktree-rekey.ts"
       ],
       "linter": {
         "rules": {

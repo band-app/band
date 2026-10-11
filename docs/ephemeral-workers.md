@@ -1,5 +1,7 @@
 # Ephemeral workers
 
+Static workers get [checkpoints](checkpoints.md) instead of sleep.
+
 A worktree placed on a worker that a runner started behaves like one on a machine that stays up. When the worker has been idle for a while, the hub stores the worktree and the worker exits. The next message, terminal or file access for that worktree starts a new worker, restores the worktree and resumes the chat.
 
 ## States

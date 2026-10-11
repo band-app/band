@@ -26,6 +26,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
+import { forgetCheckpoints } from "./_utils/checkpoint-store";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
@@ -492,6 +493,16 @@ export class WorktreeService {
     return path;
   }
 
+  /**
+   * The folder that holds `repoName` on `hostId`, cloning it there when it has none. Fails when
+   * the repo is not allowed on the host. Restore and move use it before they add a worktree.
+   */
+  async ensureCheckoutOn(repoName: string, hostId: string, hostRepoPath?: string): Promise<string> {
+    const repo = loadState().repos.find((r) => r.name === repoName);
+    if (!repo) throw new RepoNotFoundError(repoName);
+    return this.checkoutOn(repo, hostRegistry.hostById(hostId), hostRepoPath);
+  }
+
   /** Where a remote host keeps the worktrees of Band worktrees: under its first root. */
   private async remoteWorktreesDir(host: Host): Promise<string> {
     const [root] = (await host.info()).roots;
@@ -625,8 +636,9 @@ export class WorktreeService {
     // Hard rules, for every entry point: the repo must be allowed on the host, and a branch
     // lives on one host only.
     assertHostAllowed(repo.name, hostId);
+    // A copy that was restored on another host stays on disk, superseded, and does not count.
     const elsewhere = listedWorktrees(repo).find(
-      (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) !== hostId,
+      (wt) => sameName(wt) && !wt.supersededBy && (wt.hostId ?? hostRegistry.local.id) !== hostId,
     );
     // A create on another host that has passed this check but not saved its row yet counts too.
     const inFlightKey = `${input.repo}\0${input.branch}`;
@@ -1092,6 +1104,9 @@ export class WorktreeService {
 
     // Drop the worktree's shared UI state (center tabs, drafts, splits).
     clientStateService.removeAllForWorktree(worktreeId);
+
+    // The hub's checkpoints of this worktree are of no use once it is gone.
+    forgetCheckpoints(worktreeId);
 
     // Drop the worktree's subscriptions.
     subscriptionService.removeForWorktree(worktreeId);

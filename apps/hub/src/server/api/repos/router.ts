@@ -153,7 +153,7 @@ export const reposRouter = t.router({
   /**
    * Changes a repo's settings: `meta` (whether it is a meta repo), `allowedHostIds` (the hosts it
    * may run on, `null` for all) and `primaryHostId` (the host that lists its default branch,
-   * `null` to let the hub pick). Changing the host policy is an admin call.
+   * `null` to let the hub pick) and `checkpointsEnabled` (whether the hub keeps checkpoints, `null` for the default). Changing the host policy or the checkpoint setting is an admin call.
    */
   update: publicProcedure
     .input(
@@ -162,10 +162,21 @@ export const reposRouter = t.router({
         meta: z.boolean().optional(),
         allowedHostIds: hostIds.nullable().optional(),
         primaryHostId: z.string().min(1).nullable().optional(),
+        checkpointsEnabled: z.boolean().nullable().optional(),
       }),
     )
     .mutation(({ input, ctx }) => {
       try {
+        if (input.checkpointsEnabled !== undefined) {
+          if (!ctx.admin) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message:
+                "Only an admin token can change whether the hub keeps checkpoints of a repo.",
+            });
+          }
+          repoService.setCheckpointsEnabled(input.name, input.checkpointsEnabled);
+        }
         if (
           (input.allowedHostIds !== undefined || input.primaryHostId !== undefined) &&
           !ctx.admin

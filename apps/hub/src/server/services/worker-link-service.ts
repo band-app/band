@@ -25,6 +25,7 @@ import { selectWsProtocol } from "../../../auth";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
+import { checkpointService } from "./checkpoint-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
@@ -184,6 +185,7 @@ export class WorkerLinkService {
     workerCliService.attach(session);
     gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
+    checkpointService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {

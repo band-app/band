@@ -47,6 +47,7 @@ import { browserProfilesRouter } from "./browser-profiles/router";
 import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
 import { chatsRouter } from "./chats/router";
+import { checkpointsRouter } from "./checkpoints/router";
 import { cliRouter } from "./cli/router";
 import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
@@ -104,6 +105,7 @@ export const appRouter = t.router({
   hosts: hostsRouter,
   environment: environmentRouter,
   hostRequests: hostRequestsRouter,
+  checkpoints: checkpointsRouter,
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,

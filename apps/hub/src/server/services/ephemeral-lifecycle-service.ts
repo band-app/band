@@ -58,6 +58,7 @@ import { WorktreeSleepQueries, type WorktreeSleepRow } from "../infra/db/queries
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
+import { buildSnapshot, WIP_DIR } from "./_utils/snapshot-git";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { placementService } from "./placement-service";
@@ -68,19 +69,11 @@ import { hasRunningTask } from "./task-service";
 const log = createLogger("ephemeral-lifecycle");
 
 const LOCAL_HOST_ID = "local";
-/** Beside the worktrees, in the worker's first root, where the path policy allows it. */
-const WIP_DIR = ".band-wip";
 const WAKE_POLL_MS = 500;
 /** On top of the placement timeout, for the checkout after the worker connects. */
 const WAKE_GRACE_MS = 5 * 60_000;
 /** How long a worker may stay connected after the hub said it could exit. */
 const EXIT_GRACE_MS = 60_000;
-const BOT = {
-  GIT_AUTHOR_NAME: "Band",
-  GIT_AUTHOR_EMAIL: "band@localhost",
-  GIT_COMMITTER_NAME: "Band",
-  GIT_COMMITTER_EMAIL: "band@localhost",
-};
 
 export class SleepError extends Error {
   constructor(message: string) {
@@ -384,29 +377,14 @@ export class EphemeralLifecycleService {
     const [root] = (await host.info()).roots;
     if (!root) throw new SleepError(`host ${hostId} serves no directory`);
     const wipDir = posix.join(root, WIP_DIR);
-    await host.fs.mkdir(wipDir, { recursive: true });
 
-    // The snapshot is built in a temporary index, so the branch and the real index are untouched.
-    const baseSha = await git(["rev-parse", "HEAD"]);
-    const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-    const indexFile = posix.join(wipDir, `${ws.worktreeId}.index`);
-    const env = { ...BOT, GIT_INDEX_FILE: indexFile };
-    await host.fs.rm(indexFile, { force: true });
-    let snapshotSha: string;
-    try {
-      await git(["read-tree", "HEAD"], env);
-      await git(["add", "-A"], env);
-      const tree = await git(["write-tree"], env);
-      snapshotSha =
-        tree === (await git(["rev-parse", "HEAD^{tree}"]))
-          ? baseSha
-          : await git(
-              ["commit-tree", tree, "-p", baseSha, "-m", `band: snapshot of ${ws.worktreeId}`],
-              env,
-            );
-    } finally {
-      await host.fs.rm(indexFile, { force: true }).catch(() => undefined);
-    }
+    const { baseSha, branch, snapshotSha } = await buildSnapshot(
+      host,
+      cwd,
+      wipDir,
+      ws.worktreeId,
+      `band: snapshot of ${ws.worktreeId}`,
+    );
 
     const ref = `refs/heads/band/wip/${ws.worktreeId}`;
     const store = await this.upload(host, git, wipDir, ws.worktreeId, ref, snapshotSha);
@@ -417,7 +395,7 @@ export class EphemeralLifecycleService {
       hostId,
       repo: ws.repo,
       name: ws.name,
-      branch: branch === "HEAD" ? "" : branch,
+      branch,
       worktreePath: ws.path,
       baseSha,
       snapshotSha,

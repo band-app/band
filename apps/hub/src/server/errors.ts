@@ -239,3 +239,26 @@ export class BranchOnOtherHostError extends Error {
     this.name = "BranchOnOtherHostError";
   }
 }
+
+/** Why a checkpoint call was refused. */
+export type CheckpointErrorCode =
+  | "disabled"
+  | "offline"
+  | "no-checkpoint"
+  | "oversize"
+  | "conflict"
+  | "invalid";
+
+/**
+ * Thrown when a checkpoint, restore or move cannot go ahead. The router maps `no-checkpoint` to
+ * 404, `conflict` to 409 and the rest to 412.
+ */
+export class CheckpointError extends Error {
+  constructor(
+    readonly code: CheckpointErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CheckpointError";
+  }
+}

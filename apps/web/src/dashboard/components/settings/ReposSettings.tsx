@@ -6,6 +6,7 @@ import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
 import type { RepoInfo } from "../../types";
 import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "../RepoHostsFields";
+import { useIsAdmin } from "./DevicesSettings";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -75,6 +76,76 @@ function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
           role="alert"
           className="text-xs text-destructive"
           data-testid="settings-repos__hosts-error"
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Whether the hub keeps checkpoints of the repo's worktrees on static workers. Without a stored
+ * choice the repo follows the default: on when it is available on every host, off when it is
+ * limited to chosen hosts, because limiting a repo usually means its code must stay off other
+ * machines.
+ */
+function CheckpointsSwitch({ repo }: { repo: RepoInfo }) {
+  const queryClient = useQueryClient();
+  const admin = useIsAdmin();
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const enabled = repo.checkpointsEnabled ?? !repo.allowedHostIds;
+  const followsDefault = (repo.checkpointsSetting ?? null) === null;
+
+  const change = async (next: boolean) => {
+    setError(null);
+    setSaving(true);
+    try {
+      await trpc.repos.update.mutate({ name: repo.name, checkpointsEnabled: next });
+      await queryClient.invalidateQueries({ queryKey: ["repos"] });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const id = `settings-repo-${repo.name}-checkpoints`;
+  return (
+    <div className="space-y-1" data-testid="settings-repos__checkpoints">
+      <div className="flex items-center gap-2">
+        <input
+          id={id}
+          type="checkbox"
+          checked={enabled}
+          disabled={!admin || saving}
+          aria-label={`Checkpoints on the hub for ${repo.name}`}
+          data-testid="settings-repos__checkpoints-switch"
+          onChange={(e) => void change(e.target.checked)}
+        />
+        <label htmlFor={id} className="text-xs font-medium">
+          Checkpoints on the hub
+        </label>
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="settings-repos__checkpoints-note">
+        {enabled
+          ? "The hub keeps recent copies of this repo's uncommitted work, so a worktree stays readable when its host goes offline and can be restored on another host."
+          : "The hub stores nothing for this repo. If a host goes offline its uncommitted work cannot be restored elsewhere."}
+        {followsDefault
+          ? enabled
+            ? " On by default because the repo is available on all hosts."
+            : " Off by default because the repo is limited to chosen hosts."
+          : ""}
+      </p>
+      {admin ? null : (
+        <p className="text-xs text-muted-foreground">Changing this needs an admin token.</p>
+      )}
+      {error ? (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="settings-repos__checkpoints-error"
         >
           {error}
         </p>
@@ -181,6 +252,7 @@ export function ReposSettings() {
                 ))}
               </ul>
               <RepoHostsEditor repo={repo} />
+              <CheckpointsSwitch repo={repo} />
               {inUse ? (
                 <p className="text-xs text-muted-foreground" data-testid="settings-repos__in-use">
                   Remove its worktrees before removing it here.

@@ -78,6 +78,10 @@ export interface RepoInfo {
   allowedHostIds?: string[] | null;
   /** The host whose default-branch checkout is listed as a worktree. */
   primaryHostId?: string | null;
+  /** Whether the hub keeps checkpoints of this repo's worktrees (the stored choice, else the default). */
+  checkpointsEnabled?: boolean;
+  /** The stored choice, or null when the repo follows the default. */
+  checkpointsSetting?: boolean | null;
 }
 
 export interface RepoAvatarInfo {
@@ -112,6 +116,10 @@ export interface WorktreeInfo {
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */
   hostNotAllowed?: boolean;
+  /** Set when this copy was restored on another host. The value is the replacement's worktree id. */
+  supersededBy?: string;
+  /** When the hub took the newest checkpoint of this worktree, or null when it has none. */
+  lastCheckpointAt?: number | null;
   /** Where the worktree was started from, or null for top-level work. */
   origin?: WorktreeOrigin | null;
   /** Ids of the worktrees started from this one, on any repo and host. */

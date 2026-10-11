@@ -21,6 +21,7 @@ import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
+import { OfflineCheckpointBar } from "./OfflineCheckpoint";
 import { getPerWorktreeState, subscribePerWorktreeState } from "./per-worktree-state-store";
 import { StartedFromBar } from "./StartedFromBar";
 import {
@@ -744,6 +745,7 @@ export function SharedDockviewLayout() {
             <WindowDragContext.Provider value={wsActive}>
               <div className="flex h-full w-full flex-col">
                 <StartedFromBar worktreeId={worktreeId} />
+                <OfflineCheckpointBar worktreeId={worktreeId} />
                 <div className="relative min-h-0 flex-1">
                   <WorktreeCenterDockview
                     worktreeId={worktreeId}

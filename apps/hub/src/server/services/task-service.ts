@@ -13,6 +13,7 @@ import {
   removeQueuedMessage,
 } from "./_utils/queued-message-store";
 import { openSharedDir } from "./_utils/shared-dir";
+import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import {
@@ -503,6 +504,7 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
   task.completedAt = Date.now();
   persistTask(task);
   if (tasks.get(task.chatId) === task) tasks.delete(task.chatId);
+  emitTurnEnded(task.worktreeId);
 
   if (status === "completed" && drainQueue(task.worktreeId, task.chatId)) return;
 

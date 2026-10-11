@@ -6,6 +6,8 @@ import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
+import { useIsAdmin } from "./DevicesSettings";
+import { EvacuateHostDialog } from "./EvacuateHostDialog";
 import { SettingsRow } from "./SettingsRow";
 import { ThisComputerSettings } from "./ThisComputerSettings";
 import {
@@ -123,6 +125,8 @@ export function HostsSettings() {
     select: (all) => all.filter((t) => t.kind !== "device"),
   });
 
+  const admin = useIsAdmin();
+  const [evacuating, setEvacuating] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [hostName, setHostName] = useState("");
   const [labels, setLabels] = useState("");
@@ -260,6 +264,18 @@ export function HostsSettings() {
                     Open desktop
                   </Button>
                 )}
+                {host.id !== "local" && admin && host.status !== "disposed" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Move all worktrees on ${host.name}`}
+                    data-testid="settings__host-evacuate"
+                    onClick={() => setEvacuating(host.id)}
+                  >
+                    Move all worktrees on this host…
+                  </Button>
+                )}
                 {host.id !== "local" && (
                   <Button
                     type="button"
@@ -278,6 +294,19 @@ export function HostsSettings() {
           ))}
         </ul>
       </SettingsRow>
+      {(hosts.data ?? [])
+        .filter((h) => h.id === evacuating)
+        .map((h) => (
+          <EvacuateHostDialog
+            key={h.id}
+            open
+            onOpenChange={(open) => {
+              if (!open) setEvacuating(null);
+            }}
+            from={h}
+            hosts={hosts.data ?? []}
+          />
+        ))}
 
       <SettingsRow
         variant="stacked"

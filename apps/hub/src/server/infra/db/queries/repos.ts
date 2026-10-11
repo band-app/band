@@ -73,6 +73,8 @@ export interface RepoState {
   allowedHostIds?: string[];
   /** The host whose default-branch checkout is listed as a worktree. Read-only here: `setHostPolicy` writes it. */
   primaryHostId?: string;
+  /** Whether the hub keeps checkpoints of the repo's worktrees; absent means the default. Read-only here: `setCheckpointsEnabled` writes it. */
+  checkpointsEnabled?: boolean;
 }
 
 /** Where a worktree was started from. Ids only, since the origin may be on any repo and host. */
@@ -111,6 +113,12 @@ export interface WorktreeState {
    * `RepoQueries.setOrigin` writes it.
    */
   origin?: WorktreeOrigin;
+  /**
+   * The id of the worktree that replaced this one when it was restored on another host. The copy
+   * stays on its host untouched. Read-only here: `saveAll` keeps what the database holds, and
+   * `RepoQueries.setSupersededBy` writes it.
+   */
+  supersededBy?: string;
 }
 
 /**
@@ -208,6 +216,7 @@ export class RepoQueries {
               },
             }
           : {}),
+        ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
       });
       wtByRepo.set(row.repoName, list);
     }
@@ -224,6 +233,7 @@ export class RepoQueries {
       meta: row.meta,
       ...(row.allowedHostIds ? { allowedHostIds: row.allowedHostIds } : {}),
       ...(row.primaryHostId ? { primaryHostId: row.primaryHostId } : {}),
+      ...(row.checkpointsEnabled != null ? { checkpointsEnabled: row.checkpointsEnabled } : {}),
       worktrees: wtByRepo.get(row.name) ?? [],
     }));
   }
@@ -260,6 +270,7 @@ export class RepoQueries {
             meta: reposTable.meta,
             allowedHostIds: reposTable.allowedHostIds,
             primaryHostId: reposTable.primaryHostId,
+            checkpointsEnabled: reposTable.checkpointsEnabled,
           })
           .from(reposTable)
           .all()
@@ -277,6 +288,18 @@ export class RepoQueries {
           .from(worktreesTable)
           .all()
           .map((w) => [`${w.repoName}\0${w.name}`, w]),
+      );
+      const supersededBy = new Map(
+        tx
+          .select({
+            repoName: worktreesTable.repoName,
+            name: worktreesTable.name,
+            hostId: worktreesTable.hostId,
+            supersededBy: worktreesTable.supersededBy,
+          })
+          .from(worktreesTable)
+          .all()
+          .map((w) => [`${w.repoName}\0${w.name}\0${w.hostId}`, w.supersededBy]),
       );
       tx.delete(worktreesTable).run();
       tx.delete(reposTable).run();
@@ -302,6 +325,9 @@ export class RepoQueries {
             primaryHostId: kept.has(repo.name)
               ? (kept.get(repo.name)?.primaryHostId ?? null)
               : (repo.primaryHostId ?? null),
+            checkpointsEnabled: kept.has(repo.name)
+              ? (kept.get(repo.name)?.checkpointsEnabled ?? null)
+              : (repo.checkpointsEnabled ?? null),
           })
           .run();
 
@@ -319,6 +345,8 @@ export class RepoQueries {
               head: wt.head ?? null,
               pinned: wt.pinned,
               hostId: wt.hostId ?? "local",
+              supersededBy:
+                supersededBy.get(`${repo.name}\0${wt.name}\0${wt.hostId ?? "local"}`) ?? null,
             })
             .run();
         }
@@ -512,6 +540,45 @@ export class RepoQueries {
     if (policy.primaryHostId !== undefined) set.primaryHostId = policy.primaryHostId;
     if (Object.keys(set).length === 0) return this.findLocation(name) !== undefined;
     return getDb().update(reposTable).set(set).where(eq(reposTable.name, name)).run().changes > 0;
+  }
+
+  /** Turns checkpoints on or off for a repo, or back to the default with `null`. Returns false when no repo has that name. */
+  setCheckpointsEnabled(name: string, enabled: boolean | null): boolean {
+    return (
+      getDb()
+        .update(reposTable)
+        .set({ checkpointsEnabled: enabled })
+        .where(eq(reposTable.name, name))
+        .run().changes > 0
+    );
+  }
+
+  /** The stored `checkpointsEnabled` of one repo: null for the default, undefined for an unknown repo. */
+  findCheckpointsEnabled(name: string): boolean | null | undefined {
+    const row = getDb()
+      .select({ checkpointsEnabled: reposTable.checkpointsEnabled })
+      .from(reposTable)
+      .where(eq(reposTable.name, name))
+      .get();
+    return row ? (row.checkpointsEnabled ?? null) : undefined;
+  }
+
+  /**
+   * Marks the worktree on `hostId` as replaced by `newId`, or clears the mark with `null`.
+   * Focused UPDATE, because `saveAll` keeps the stored mark.
+   */
+  setSupersededBy(repoName: string, name: string, hostId: string, newId: string | null): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ supersededBy: newId })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          eq(worktreesTable.hostId, hostId),
+        ),
+      )
+      .run();
   }
 
   /** The stored host policy of one repo, or undefined for an unknown repo. */
