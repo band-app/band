@@ -201,7 +201,9 @@ test.describe("phone", () => {
     expect(await strip.countScrollEventsWhileIdle(300)).toBe(0);
     const { scrollLeft, maxScrollLeft } = await strip.readScroll();
     expect(scrollLeft).toBeLessThanOrEqual(maxScrollLeft);
-    await expect(strip.scrollbar).toBeHidden();
+    // Anchor: the bar is in the DOM (one per visible group's strip), just hidden.
+    await expect(strip.scrollbar.first()).toBeAttached();
+    await expect(strip.scrollbar.first()).toBeHidden();
   });
 
   test("tapping a tab's close button closes that tab", async ({ page }) => {

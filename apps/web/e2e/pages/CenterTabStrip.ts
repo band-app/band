@@ -33,9 +33,7 @@ export class CenterTabStrip {
 
   constructor(private readonly page: Page) {
     this.list = page.locator(".dockview-center-tabs .dv-tabs-container").filter({ visible: true });
-    this.scrollbar = page
-      .locator(".dockview-center-tabs .dv-scrollable > .dv-scrollbar")
-      .filter({ visible: true });
+    this.scrollbar = page.locator(".dockview-center-tabs .dv-scrollable > .dv-scrollbar");
     this.strip = page
       .locator(".dockview-center-tabs .dv-tabs-and-actions-container")
       .filter({ visible: true });
