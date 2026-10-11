@@ -571,7 +571,7 @@
  * strip is the window's top row. It matches the 38px height of the sidebar's
  * title bar and the right sidepanel's header, and the empty strip space of the
  * top-row groups (marked `data-band-top-row` by `useGroupEdges`) drags the
- * window in the desktop app. Both rules stop at the group's own header, so a
+ * window in the desktop app. These rules stop at the group's own header, so a
  * nested dockview (TerminalSplitLeaf) keeps its own strip.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-desktop {
@@ -580,17 +580,44 @@
 .band-worktree-entry:not([inert])
   .dockview-center-desktop
   [data-band-top-row]
-  > .dv-tabs-and-actions-container
-  .dv-void-container {
+  > .dv-tabs-and-actions-container {
   -webkit-app-region: drag;
+}
+/* The tab viewport (the strip's scroll box, so only the tabs' visible part:
+ * a tab scrolled out under the sidebar cuts nothing out of the sidebar's title
+ * bar), the left and right action clusters (whole, so the padding between
+ * their buttons doesn't drag) and every strip button are `no-drag`. They are
+ * descendants of the strip, so they come after its `drag` box in document
+ * order and cut themselves out of it, and out of every drag box before the
+ * strip (the sidebar's title bar and gutter), even one that reaches past its
+ * drawn place, as long as Chromium puts the `no-drag` box where the control
+ * is drawn. */
+.band-worktree-entry:not([inert]) .dockview-center-desktop
+  [data-band-top-row]
+  > .dv-tabs-and-actions-container
+  > .dv-scrollable,
+.band-worktree-entry:not([inert])
+  .dockview-center-desktop
+  [data-band-top-row]
+  > .dv-tabs-and-actions-container
+  > :is(.dv-left-actions-container, .dv-right-actions-container)
+  > *,
+.band-worktree-entry:not([inert])
+  .dockview-center-desktop
+  [data-band-top-row]
+  > .dv-tabs-and-actions-container
+  button {
+  -webkit-app-region: no-drag;
 }
 
 /* How the desktop window's drag region works (Electron 42, Chromium 148).
  * Drag: the sidebar title bar, the sidebar gutter in the strip while the
- * sidebar is collapsed, each top-row group's empty strip space (the rule
- * above), the right sidepanel's header and the center drag bar. No-drag: the
- * nav cluster, the sidepanel's tabs and header actions. Tabs and strip buttons
- * have no app-region; they work only because no drag rect covers them.
+ * sidebar is collapsed, each top-row group's strip (the rules above), the
+ * right sidepanel's header and the center drag bar. No-drag: the nav cluster,
+ * the strip's tab viewport, action clusters and buttons, the sidepanel's tabs
+ * and header actions. A drag box that comes after a top-row control in
+ * document order (the right sidepanel's header, a later group's strip) must
+ * not overlap it, because it would cover the control again.
  * Chromium walks the layout tree in document order, adds each `drag` border
  * box whose `visibility` is `visible` and cuts out each `no-drag` one.
  * Clipping, z-index, `pointer-events` and `inert` don't count, so a box can
@@ -599,6 +626,6 @@
  * transform-only change. Electron hit-tests every mouse-down against the
  * result before the page sees it. Hidden worktrees stay mounted and laid out
  * at the same place as the shown one, so only the shown worktree sets any
- * app-region: the rule above matches only a non-`inert` worktree entry, and
+ * app-region: the rules above match only a non-`inert` worktree entry, and
  * the sidebar gutter and center drag bar read `WindowDragContext`
  * (`DesktopTitleBar.tsx`), which is false inside a hidden entry. */
