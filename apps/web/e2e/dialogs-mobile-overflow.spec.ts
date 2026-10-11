@@ -152,6 +152,13 @@ for (const width of WIDTHS) {
       await expect(addRepo.rootConfirmation()).toBeVisible();
       await expectFits(await addRepo.overflow());
       await expect(addRepo.confirmRootButton()).toBeInViewport({ ratio: 1 });
+      // The host fields sit above the sticky button, so scrolling brings them into view.
+      await addRepo.hosts.onlyRadio().scrollIntoViewIfNeeded();
+      await expect(addRepo.hosts.onlyRadio()).toBeInViewport();
+      await expect(addRepo.hosts.primarySelect()).toBeAttached();
+      await addRepo.hosts.primarySelect().scrollIntoViewIfNeeded();
+      await expect(addRepo.hosts.primarySelect()).toBeInViewport();
+      await expect(addRepo.confirmRootButton()).toBeInViewport({ ratio: 1 });
     });
 
     test("Add repo by URL fits the screen", async ({ page }, testInfo) => {
@@ -161,6 +168,9 @@ for (const width of WIDTHS) {
       await addRepo.chooseUrl();
       await addRepo.fillUrl(LONG_URL);
       await expectFits(await addRepo.overflow());
+      await expect(addRepo.urlSubmitButton()).toBeInViewport({ ratio: 1 });
+      await addRepo.hosts.primarySelect().scrollIntoViewIfNeeded();
+      await expect(addRepo.hosts.primarySelect()).toBeInViewport();
       await expect(addRepo.urlSubmitButton()).toBeInViewport({ ratio: 1 });
       if (width === 390) await addRepo.screenshot(shotPath(testInfo, "add-repo-url.png"));
     });

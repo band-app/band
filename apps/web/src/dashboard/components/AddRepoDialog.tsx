@@ -22,6 +22,12 @@ import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "./RepoHost
 const LOCAL_HOST_ID = "local";
 const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
 
+/**
+ * The action row of each step. The dialog scrolls, so the row sticks to its bottom edge (the
+ * negative margins cancel the dialog's p-6) and the button stays visible above the fields.
+ */
+const ACTION_ROW = "sticky bottom-0 -mx-6 -mb-6 border-t border-border bg-background px-6 py-3";
+
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** True when the hub runs on this machine, so a folder picked in the desktop app is on its disk. */
@@ -364,7 +370,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                 ) : null}
               </div>
             ) : null}
-            <div className="flex justify-between gap-2">
+            <div className={`flex justify-between gap-2 ${ACTION_ROW}`}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -530,7 +536,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                     </li>
                   ))}
                 </ul>
-                <div className="flex justify-end">
+                <div className={`flex justify-end ${ACTION_ROW}`}>
                   <Button
                     size="sm"
                     disabled={busy}
@@ -596,7 +602,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
             />
           </div>
           {hostsFields}
-          <div className="flex justify-end">
+          <div className={`flex justify-end ${ACTION_ROW}`}>
             <Button
               size="sm"
               disabled={busy || remoteUrl.trim() === "" || !repoHostsValid(hostsValue)}
