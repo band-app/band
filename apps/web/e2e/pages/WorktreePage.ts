@@ -486,6 +486,14 @@ export class WorktreePage {
     await expect.poll(() => this.readAppZoom()).toBeCloseTo(1 + steps / 10, 5);
   }
 
+  /** Reset the app zoom to 100% via the real Ctrl+Shift+0 shortcut (caught
+   *  by a window listener in `useZoom`, so focus doesn't matter). */
+  async zoomResetViaShortcut(): Promise<void> {
+    await test.step("Reset zoom via Ctrl+Shift+0", async () => {
+      await this.page.keyboard.press("Control+Shift+Digit0");
+    });
+  }
+
   /** Zoom the app out by one step via the real Ctrl/Cmd+- shortcut. Mirror
    *  of `zoomInViaShortcut`; "Minus" so `e.key` resolves to "-". */
   async zoomOutViaShortcut(): Promise<void> {
@@ -851,7 +859,8 @@ export class WorktreePage {
    *  but still laid-out worktree's strip must stay out of the region by
    *  setting no app-region at all, not only through its visibility.
    *  Only Electron hit-tests that region, so this is the DOM-level
-   *  projection of it; each control is sampled on a 3px grid. Returns a
+   *  projection of it; each control is sampled on a 3px grid, over the part
+   *  its overflow-clipping ancestors show. Returns a
    *  label per covered control (testid, aria-label, title or text), and
    *  throws when there is no drag rect or no tab, so a renamed class can't
    *  pass vacuously. */
@@ -892,9 +901,25 @@ export class WorktreePage {
       if (!controls.some((el) => el.classList.contains("dv-tab"))) {
         throw new Error("no visible .dv-tab on the page");
       }
+      // The part of a control that its overflow-clipping ancestors show: a
+      // tab scrolled (or, mid-layout, pushed) past its strip's viewport can't
+      // be clicked there, whatever covers it.
+      const shownRect = (el: Element) => {
+        let { left, top, right, bottom } = el.getBoundingClientRect();
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          const style = getComputedStyle(a);
+          if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+          const clip = a.getBoundingClientRect();
+          left = Math.max(left, clip.left);
+          top = Math.max(top, clip.top);
+          right = Math.min(right, clip.right);
+          bottom = Math.min(bottom, clip.bottom);
+        }
+        return { left, top, right, bottom };
+      };
       const covered: string[] = [];
       for (const el of controls) {
-        const rect = el.getBoundingClientRect();
+        const rect = shownRect(el);
         let hit = false;
         for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
           for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
@@ -912,6 +937,57 @@ export class WorktreePage {
       }
       return covered;
     });
+  }
+
+  /** Whether the empty top-row spots that should move the desktop window
+   *  are inside its drag region, with the same document-order walk as
+   *  {@link controlsUnderWindowDragRegion}: the middle of the sidebar title
+   *  bar's right half (clear of the nav cluster), `null` while the sidebar is
+   *  collapsed, and the middle of the empty space in each top-row tab strip of
+   *  the shown worktree. Throws when no strip has empty space, so it can't
+   *  pass vacuously. */
+  async emptyTopRowSpotsInDragRegion(): Promise<{
+    sidebarTitleBar: boolean | null;
+    strips: boolean[];
+  }> {
+    return await this.page.evaluate(() => {
+      const ops: { drag: boolean; rect: DOMRect }[] = [];
+      for (const el of document.querySelectorAll("*")) {
+        const style = getComputedStyle(el);
+        const region =
+          style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
+        if (region !== "drag" && region !== "no-drag") continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) ops.push({ drag: region === "drag", rect });
+      }
+      const inDragRegion = (x: number, y: number) => {
+        let drag = false;
+        for (const { drag: isDrag, rect } of ops) {
+          if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) drag = isDrag;
+        }
+        return drag;
+      };
+      const middleOf = (rect: DOMRect, from = 0) =>
+        inDragRegion(rect.left + (from + (1 - from) / 2) * rect.width, rect.top + rect.height / 2);
+      const titleBar = document.querySelector('[data-testid="desktop-title-bar__sidebar-surface"]');
+      const titleRect = titleBar?.getBoundingClientRect();
+      const sidebarTitleBar = titleRect && titleRect.width > 50 ? middleOf(titleRect, 0.5) : null;
+      const voids = Array.from(
+        document.querySelectorAll(
+          ".band-worktree-entry:not([inert]) [data-band-top-row] > .dv-tabs-and-actions-container > .dv-void-container",
+        ),
+      )
+        .map((el) => el.getBoundingClientRect())
+        .filter((rect) => rect.width > 4 && rect.height > 0);
+      if (voids.length === 0) throw new Error("no top-row tab strip has empty space");
+      return { sidebarTitleBar, strips: voids.map((rect) => middleOf(rect)) };
+    });
+  }
+
+  /** Persist an app zoom level the way the zoom setting does, for the next
+   *  load (`band:zoom-level`, read by the pre-paint zoom script). */
+  async persistAppZoom(level: number): Promise<void> {
+    await this.page.evaluate((z) => localStorage.setItem("band:zoom-level", String(z)), level);
   }
 
   /** Elements inside a hidden (`inert`) worktree entry whose computed
