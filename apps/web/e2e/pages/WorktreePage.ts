@@ -44,7 +44,8 @@ interface Rect {
  *  `WorktreePage.readTopRowDragGeometry`. */
 interface TopRowDragGeometry {
   ops: (Rect & { drag: boolean; visible: boolean })[];
-  controls: (Rect & { label: string; inTopRowStrip: boolean })[];
+  /** `ownOps`: indexes into `ops` of the control's own box and its ancestors'. */
+  controls: (Rect & { label: string; inTopRowStrip: boolean; ownOps: number[] })[];
   sidebarTitleBar: Rect | null;
   stripVoids: Rect[];
 }
@@ -892,6 +893,7 @@ export class WorktreePage {
     return await this.page.evaluate(() => {
       const box = (r: DOMRect) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
       const ops: TopRowDragGeometry["ops"] = [];
+      const opElements: Element[] = [];
       for (const el of document.querySelectorAll("*")) {
         const style = getComputedStyle(el);
         const region =
@@ -899,6 +901,7 @@ export class WorktreePage {
         if (region !== "drag" && region !== "no-drag") continue;
         const rect = el.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
+        opElements.push(el);
         ops.push({
           drag: region === "drag",
           visible: style.visibility === "visible",
@@ -945,6 +948,7 @@ export class WorktreePage {
             (el.textContent ?? "").trim(),
           inTopRowStrip:
             el.closest("[data-band-top-row] > .dv-tabs-and-actions-container") !== null,
+          ownOps: opElements.flatMap((op, i) => (op.contains(el) ? [i] : [])),
           ...shownRect(el),
         };
       });
@@ -1019,9 +1023,9 @@ export class WorktreePage {
     return stripControls
       .filter((c) => {
         let cut = -1;
-        ops.forEach((op, i) => {
-          if (!op.drag && contains(op, c)) cut = i;
-        });
+        for (const i of c.ownOps) {
+          if (!ops[i].drag && contains(ops[i], c)) cut = i;
+        }
         return cut === -1 || ops.slice(cut + 1).some((op) => op.drag && overlaps(op, c));
       })
       .map((c) => c.label);

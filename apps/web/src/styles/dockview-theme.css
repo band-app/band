@@ -615,9 +615,9 @@
  * sidebar is collapsed, each top-row group's strip (the rules above), the
  * right sidepanel's header and the center drag bar. No-drag: the nav cluster,
  * the strip's tab viewport, action clusters and buttons, the sidepanel's tabs
- * and header actions. A drag box that comes after a top-row control in document order
- * (the right sidepanel's header, a later group's strip) must not overlap it,
- * because it would cover the control again.
+ * and header actions. A drag box that comes after a top-row control in
+ * document order (the right sidepanel's header, a later group's strip) must
+ * not overlap it, because it would cover the control again.
  * Chromium walks the layout tree in document order, adds each `drag` border
  * box whose `visibility` is `visible` and cuts out each `no-drag` one.
  * Clipping, z-index, `pointer-events` and `inert` don't count, so a box can
