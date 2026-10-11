@@ -77,6 +77,18 @@ export class SidebarGroupingPage {
     return this.page.getByTestId(`repo-list__host-repo-header--${hostId}--${repo}`);
   }
 
+  /** The gray host tag inside a worktree row or repo-mode card. */
+  hostTag(rowOrCard: Locator): Locator {
+    return rowOrCard.getByTestId("worktree-label__host");
+  }
+
+  /** The repo avatar (or its folder fallback) on an Origin row. */
+  repoAvatar(row: Locator, repo: string): Locator {
+    return row.locator(
+      `[data-testid="worktree-label__avatar--${repo}"], [data-testid="worktree-label__avatar-fallback--${repo}"]`,
+    );
+  }
+
   metaBadge(repo: string): Locator {
     return this.page.getByTestId(`repo-list__meta-badge--${repo}`).first();
   }

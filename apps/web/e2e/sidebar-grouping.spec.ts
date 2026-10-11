@@ -115,6 +115,9 @@ test.beforeAll(async () => {
     { worktreeId: "svc-alpha", chatId: ORIGIN_CHAT },
   );
   await createFrom({ repo: "lib", branch: "orphan", origin: "svc-beta" });
+  // Worktrees with no origin: the Origin view lists them under their repo's main.
+  await createFrom({ repo: "svc", branch: "solo", noOrigin: true });
+  await createFrom({ repo: "lib", branch: "solo2", noOrigin: true });
 
   // A worker with a clone of svc, and one worktree on it.
   const res = await fetch(`${server.url}/trpc/tokens.issueWorkerBootstrap`, {
@@ -182,24 +185,66 @@ test("Origin mode nests what started what across repos, with the repo name on ev
   const sidebar = await open(page, "borko-main");
   await sidebar.selectMode("origin");
 
-  // The tree comes first, in repo order. The remaining top-level rows follow the repo order.
+  // The tree comes first, in repo order. Parentless worktrees nest under their repo's main.
   await expect
     .poll(async () => (await sidebar.rowOrder()).slice(0, 5).map((r) => `${r.depth}:${r.id}`))
     .toEqual(["0:borko-main", "1:svc-alpha", "2:lib-gamma", "1:svc-beta", "2:lib-orphan"]);
-  const rest = (await sidebar.rowOrder()).slice(5);
-  expect(rest.every((r) => r.depth === 0)).toBe(true);
-  expect(rest.map((r) => r.id).sort()).toEqual(["lib-main", "svc-main", remote1]);
+  const rest = (await sidebar.rowOrder()).slice(5).map((r) => `${r.depth}:${r.id}`);
+  // remote1 is on a host with no svc main, so it stays at the top level.
+  expect(rest).toEqual(["0:svc-main", "1:svc-solo", `0:${remote1}`, "0:lib-main", "1:lib-solo2"]);
   await expect(sidebar.row("lib-gamma")).toContainText("lib");
   await expect(sidebar.row("svc-alpha")).toContainText("svc");
   await expect(sidebar.row("borko-main")).toContainText("borko");
   await expect(sidebar.metaBadge("borko")).toBeVisible();
+
+  // Every row has the repo avatar (a folder here, the repos have no GitHub owner) and a gray host tag.
+  await expect(sidebar.repoAvatar(sidebar.row("svc-solo"), "svc")).toBeVisible();
+  await expect(sidebar.hostTag(sidebar.row("svc-solo"))).toHaveText("This hub");
+  await expect(sidebar.hostTag(sidebar.row(remote1))).toHaveText("e2e-box");
 
   // Collapsing a parent hides its subtree.
   await sidebar.originToggle("svc-alpha").click();
   await expect(sidebar.row("lib-gamma")).toHaveCount(0);
   await sidebar.originToggle("svc-alpha").click();
   await expect(sidebar.row("lib-gamma")).toBeVisible();
+
+  // Collapsing a main hides its parentless worktrees, and the choice survives a reload.
+  await sidebar.originToggle("svc-main").click();
+  await expect(sidebar.row("svc-solo")).toHaveCount(0);
+  await sidebar.reload();
+  await expect(sidebar.row("lib-main")).toBeVisible();
+  await expect(sidebar.row("svc-solo")).toHaveCount(0);
+  await sidebar.originToggle("svc-main").click();
+  await expect(sidebar.row("svc-solo")).toBeVisible();
 });
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`the host tag is muted next to the repo name in ${scheme} mode (S3)`, async ({
+    page,
+  }, testInfo) => {
+    // The app takes its theme from the saved setting, not from the browser's color scheme.
+    await trpcMutate(server.url, TOKEN, "settings.update", { theme: scheme });
+    const sidebar = await open(page, "borko-main");
+    await sidebar.selectMode("origin");
+    const tag = sidebar.hostTag(sidebar.row("svc-solo"));
+    await expect(tag).toBeVisible();
+    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /^(?!.*dark)/);
+    // Gray like the repo line, not the foreground of the branch name.
+    const colors = await sidebar.row("svc-solo").evaluate((el) => {
+      const read = (id: string) => {
+        const node = el.querySelector(`[data-testid="${id}"]`);
+        return node ? getComputedStyle(node).color : "";
+      };
+      return { name: read("worktree-label__name"), tag: read("worktree-label__host") };
+    });
+    expect(colors.tag).not.toBe("");
+    expect(colors.tag).not.toBe(colors.name);
+    await testInfo.attach(`origin-view-${scheme}.png`, {
+      body: await page.getByTestId("repo-list__grouped--origin").screenshot(),
+      contentType: "image/png",
+    });
+  });
+}
 
 test("Repo mode lists each worktree under its repo, and Host mode groups by worker (S2)", async ({
   page,
@@ -208,6 +253,10 @@ test("Repo mode lists each worktree under its repo, and Host mode groups by work
   await expect(sidebar.repoModeCard("svc-alpha")).toBeVisible();
   await expect(sidebar.repoModeCard("lib-gamma")).toBeVisible();
   await expect(sidebar.metaBadge("borko")).toBeVisible();
+  // svc lives on two hosts, so its cards carry a host tag. lib is on one, so its cards don't.
+  await expect(sidebar.hostTag(sidebar.repoModeCard("svc-alpha"))).toHaveText("This hub");
+  await expect(sidebar.hostTag(sidebar.repoModeCard(remote1))).toHaveText("e2e-box");
+  await expect(sidebar.hostTag(sidebar.repoModeCard("lib-gamma"))).toHaveCount(0);
 
   await sidebar.selectMode("host");
   await expect(sidebar.hostHeader("local")).toBeVisible();
@@ -287,14 +336,15 @@ test("the Started from link opens the origin chat (S4)", async ({ page }) => {
   await expect(sidebar.startedFrom).toHaveCount(0);
 });
 
-test("a worktree whose parent was deleted shows at top level with a hint (S4)", async ({
+test("a worktree whose parent was deleted shows under its repo's main with a hint (S4)", async ({
   page,
 }) => {
   await trpcMutate(server.url, TOKEN, "worktrees.remove", { repo: "svc", name: "beta" });
   const sidebar = await open(page, "borko-main");
   await sidebar.selectMode("origin");
   await expect(sidebar.row("svc-beta")).toHaveCount(0);
-  await expect(sidebar.row("lib-orphan")).toHaveAttribute("data-depth", "0");
+  await expect(sidebar.row("lib-orphan")).toHaveAttribute("data-depth", "1");
+  await expect(sidebar.rowOrder()).resolves.toContainEqual({ id: "lib-main", depth: 0 });
   await expect(sidebar.parentRemovedHint("lib-orphan")).toBeVisible();
 
   await sidebar.row("lib-orphan").click();

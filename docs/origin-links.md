@@ -57,7 +57,7 @@ band repos list                # META column
 The sidebar has a Group by switch: Repo, Origin or Host. The choice is kept per device in localStorage (`band.sidebar.group-by`) and defaults to Repo.
 
 - Repo is the list by repo. A meta repo shows a "meta" badge.
-- Origin lists worktrees with no origin at the top level and nests each worktree under the one that started it, across repos. Every row shows its repo name. A chevron collapses a subtree. A worktree whose parent was removed moves to the top level with a "parent removed" hint.
+- Origin has each repo's main worktree at the top level. A worktree nests under the one that started it, across repos. A worktree with no origin nests under its repo's main on the same host, and so does one whose parent was removed, which also shows a "parent removed" hint. A worktree on a host with no main of its repo stays at the top level. Every row shows the repo avatar, the repo name and a gray host tag. A chevron collapses a subtree, and the choice is kept per device. Repo view shows the host tag only for a repo with worktrees on more than one host.
 - Host groups by worker (the hub's own machine first) with its online state, then by repo. Pinned worktrees stay in place in Origin and Host.
 - A worktree started from another one has a "Started from <repo · branch>" bar above its tabs. The link opens the origin worktree on the chat (or terminal) that started it, when that tab is open there.
 
