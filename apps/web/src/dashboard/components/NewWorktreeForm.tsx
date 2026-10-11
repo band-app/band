@@ -92,7 +92,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
             <DialogTitle>Add Worktree</DialogTitle>
             <DialogDescription>Create a new worktree branch for {repoName}.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 py-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 py-4">
             {hostChoices.length > 1 && (
               <>
                 <Label htmlFor="worktree-host">Host</Label>
@@ -101,7 +101,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
                   data-testid="new-worktree-form__host"
                   value={hostId}
                   onChange={(e) => setHostId(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                 >
                   {hostChoices.map((h) => (
                     <option key={h.id} value={h.id}>
