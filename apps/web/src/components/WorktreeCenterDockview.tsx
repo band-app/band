@@ -349,8 +349,8 @@ const bandDesktopTheme: DockviewTheme = {
   className: `${bandTheme.className} dockview-center-desktop`,
 };
 
-// Mobile layout: a compact strip (34px tabs and "+" button) that dockview's
-// scrollbar doesn't fight during a swipe. See `.dockview-center-mobile` in
+// Mobile layout: a compact strip (34px tabs and "+" button), not scaled with
+// `zoom`, so dockview's scroll clamp doesn't fight a swipe. See `.dockview-center-mobile` in
 // dockview-theme.css.
 const bandMobileTheme: DockviewTheme = {
   ...bandTheme,

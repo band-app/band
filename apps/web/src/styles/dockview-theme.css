@@ -541,16 +541,16 @@
  * buttons are 34px tall, with 3px above and below each tab and the strip's 1px
  * bottom border, so the strip is 41px.
  *
- * The tabs are no longer scaled with `zoom: 1.2`, which made every width and
- * height fractional. dockview's scrollbar (`Scrollbar` in dockview-core) answers every `scroll` event by
- * clamping the list to `scrollWidth - clientWidth` (both rounded to integers)
- * and writing `scrollLeft` back. With fractional tab widths the real maximum
- * lies a fraction of a pixel away from that figure, so at the end of a swipe
- * the write snapped the list back and fired another scroll event, and it cut
- * the fling short. `overscroll-behavior-x: none` also removes the bounce / glow
- * at the ends that `contain` still allows, and `touch-action: pan-x` keeps the
- * strip from starting a vertical pan. dockview's own 4px bar is hidden: it is
- * a mouse affordance, and its position writes are what fought the swipe.
+ * The tabs are no longer scaled with `zoom: 1.2`. dockview's scrollbar
+ * (`Scrollbar` in dockview-core) answers every `scroll` event by clamping the
+ * list to `scrollWidth - clientWidth` (both rounded to integers) and writing
+ * `scrollLeft` back. Under the zoom, that write snapped the list back at the
+ * end of a swipe, fired another scroll event, and cut the fling short. The
+ * clamp keeps running when the bar is hidden: hiding it does not stop the
+ * writes. `overscroll-behavior-x: none` also removes the bounce / glow at the
+ * ends that `contain` still allows, and `touch-action: pan-x` keeps the strip
+ * from starting a vertical pan. dockview's own 4px bar is hidden because it is
+ * a mouse affordance with no use on a phone.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-mobile {
   --dv-tabs-and-actions-container-height: 41px;

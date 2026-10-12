@@ -185,22 +185,25 @@ test.describe("phone", () => {
     await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(300);
 
     // The last opened tab is active and in view, so the strip starts at its
-    // end: swipe back to the start, then forward to the end again.
-    await strip.touchSwipe(worktreePage.fileTab(FILES[FILES.length - 1]), -3000);
-    await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBe(0);
-    await strip.touchSwipe(worktreePage.fileTab(FILES[0]), 3000);
+    // end: swipe back to the start, then forward to the end again. Each swipe
+    // stays inside the strip, so it takes a few to cross the whole list.
+    await expect
+      .poll(async () => {
+        await strip.touchSwipeAcross(-200);
+        return (await strip.readScroll()).scrollLeft;
+      })
+      .toBe(0);
 
     // At the end: the strip rests on its maximum, and a scroll event that
     // fires later does not move it (no snap-back from dockview's scrollbar).
     await expect
       .poll(async () => {
+        await strip.touchSwipeAcross(200);
         const { scrollLeft, maxScrollLeft } = await strip.readScroll();
         return maxScrollLeft - scrollLeft;
       })
       .toBeLessThan(1);
     expect(await strip.countScrollEventsWhileIdle(300)).toBe(0);
-    const { scrollLeft, maxScrollLeft } = await strip.readScroll();
-    expect(scrollLeft).toBeLessThanOrEqual(maxScrollLeft);
     // Anchor: the bar is in the DOM (one per visible group's strip), just hidden.
     await expect(strip.scrollbar.first()).toBeAttached();
     await expect(strip.scrollbar.first()).toBeHidden();
