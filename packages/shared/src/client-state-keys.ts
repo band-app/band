@@ -172,6 +172,8 @@ const RULES: KeyRule[] = [
   // The worktree a restart opens (`lib/last-worktree.ts`).
   exact("band:last-worktree", [rawPart("device")]),
   perWorktree("band:dockview-layout-v9:", [jsonPart("device")]),
+  // The repo names the mobile app's worktree list has collapsed.
+  exact("band.mobile.collapsed-repos", [jsonPart("device")]),
 ];
 
 export interface MatchedKey {

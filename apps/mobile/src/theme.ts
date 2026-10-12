@@ -26,3 +26,14 @@ export const navigationTheme: Theme = {
     primary: colors.foreground,
   },
 };
+
+/** Agent and badge colors. Attention is the one that must stand out from the rest of the row. */
+export const tones = {
+  running: "#60a5fa",
+  attention: "#fb923c",
+  success: "#4ade80",
+  failure: "#ff6467",
+  pending: "#facc15",
+  merged: "#a78bfa",
+  neutral: "#8a8a8a",
+};

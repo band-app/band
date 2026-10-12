@@ -1,0 +1,45 @@
+# S4: tapping a worktree opens its screen, and Back returns to the same place in a long list.
+appId: app.getband.mobile
+name: S4 open a worktree and come back
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: fill?n=12
+- pressKey: home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: home__repo-alpha
+    timeout: 20000
+# Pull to refresh brings the new worktrees in.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- scrollUntilVisible:
+    element:
+      id: home__worktree-alpha-bulk-9
+    timeout: 30000
+- takeScreenshot: s4-scrolled-list
+- tapOn:
+    id: home__worktree-alpha-bulk-9
+- extendedWaitUntil:
+    visible:
+      id: worktree__screen
+    timeout: 10000
+- assertVisible:
+    id: worktree__name
+    text: bulk-9
+- assertVisible:
+    id: worktree__branch
+    text: bulk-9
+- takeScreenshot: s4-worktree-screen
+- tapOn:
+    text: Band
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-bulk-9
+    timeout: 10000
+- takeScreenshot: s4-back-at-same-position

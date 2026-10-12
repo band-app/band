@@ -111,26 +111,30 @@ describe("S4: tokens live only in the secure store", () => {
     });
   }
 
-  it("the only storage the app uses is expo-secure-store", () => {
+  it("tokens go to expo-secure-store; AsyncStorage holds only client state", () => {
     const pkg = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
     };
-    for (const dep of [
-      "@react-native-async-storage/async-storage",
-      "expo-file-system",
-      "react-native-mmkv",
-    ]) {
+    for (const dep of ["expo-file-system", "react-native-mmkv"]) {
       assert.equal(dep in pkg.dependencies, false, `${dep} must not be a dependency`);
     }
     for (const file of sources(join(appRoot, "src"))) {
       const text = readFileSync(file, "utf8");
       assert.doesNotMatch(
         text,
-        /(from|require\(|import\()\s*["'][^"']*(async-storage|expo-file-system|mmkv)/,
+        /(from|require\(|import\()\s*["'][^"']*(expo-file-system|mmkv)/,
         file,
       );
       assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${file} must not log`);
     }
+    // AsyncStorage backs the client-state store (collapsed repos) and nothing else.
+    const asyncUsers = sources(join(appRoot, "src")).filter((f) =>
+      /(from|require\(|import\()\s*["'][^"']*async-storage/.test(readFileSync(f, "utf8")),
+    );
+    assert.deepEqual(
+      asyncUsers.map((f) => f.slice(appRoot.length + 1)),
+      ["src/lib/hub-session.tsx"],
+    );
     const storeUsers = sources(join(appRoot, "src")).filter((f) =>
       /(from|require\(|import\()\s*["']expo-secure-store["']/.test(readFileSync(f, "utf8")),
     );

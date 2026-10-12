@@ -1,0 +1,49 @@
+# S2: a row follows the agent without a refresh: running when a turn starts, needs attention
+# when the agent asks for permission. The "needs me" filter keeps only the waiting worktrees.
+appId: app.getband.mobile
+name: S2 live agent status
+---
+- runFlow: subflows/pair-link.yaml
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*Idle.*"
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: work?wt=alpha-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*Running.*"
+    timeout: 2000
+- takeScreenshot: s2-running
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: ask?wt=beta-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-beta-main
+      text: ".*Needs attention.*"
+    timeout: 2000
+- takeScreenshot: s2-needs-attention
+- tapOn:
+    id: home__needs-me
+- assertVisible:
+    id: home__worktree-beta-main
+- assertNotVisible:
+    id: home__worktree-alpha-main
+- takeScreenshot: s2-needs-me-filter
+- tapOn:
+    id: home__needs-me
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: halt?wt=alpha-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*Idle.*"
+    timeout: 2000

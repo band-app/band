@@ -26,6 +26,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SCENARIO } from "./seed.mjs";
 
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HUB_ROOT = join(APP_ROOT, "../hub");
@@ -66,6 +67,13 @@ function cleanEnv() {
   return Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("BAND_")));
 }
 
+/** The scripted agent's turns (`seed.mjs`), written into the home so a restart keeps them. */
+function scenarioFile(home) {
+  const file = join(home, "acp-scenario.json");
+  writeFileSync(file, JSON.stringify(SCENARIO));
+  return file;
+}
+
 /**
  * Starts the hub detached in its own process group, with its output appended to `hub.log` in
  * the temp home, and resolves with its port once the log shows the listening banner.
@@ -88,6 +96,8 @@ function boot({ home, port, adminToken }) {
       NODE_ENV: "production",
       BAND_ADMIN_TOKEN: adminToken,
       BAND_TEST_ACP_AGENT: join(HUB_ROOT, "tests/fixtures/acp-stub-agent.mjs"),
+      BAND_TEST_ACP_SCENARIO: scenarioFile(home),
+      BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
     },
     stdio: ["ignore", fd, fd],
     detached: true,

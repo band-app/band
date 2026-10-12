@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
+import { fillWorktrees, seedHub, startTurn, stopTurn } from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 
@@ -47,13 +48,30 @@ function requireTool(cmd, hint, env) {
   }
 }
 
-/** A loopback server the S3 flow calls (`e2e/scripts/hub-control.js`) to stop and restart the hub. */
-function startControlServer() {
+/**
+ * A loopback server the flows call (`e2e/scripts/hub-control.js`) to drive the hub:
+ * POST /stop and /start stop and restart it, /work?wt=<id>, /ask?wt=<id> and /halt?wt=<id>
+ * make the scripted agent work, ask for permission or stop, /fill adds worktrees, and
+ * /sleep?ms=<n> answers after n milliseconds (a flow's way to wait while the app is away).
+ */
+function startControlServer(hub, chats) {
   const server = createServer(async (req, res) => {
     try {
-      if (req.method === "POST" && req.url === "/stop") await stopHub();
-      else if (req.method === "POST" && req.url === "/start") await restartHub();
-      else {
+      const url = new URL(req.url ?? "/", "http://control");
+      const wt = url.searchParams.get("wt") ?? "";
+      if (req.method !== "POST") {
+        res.writeHead(404).end();
+        return;
+      }
+      if (url.pathname === "/stop") await stopHub();
+      else if (url.pathname === "/start") await restartHub();
+      else if (url.pathname === "/work") await startTurn(hub, chats, wt, "work until I say stop");
+      else if (url.pathname === "/ask") await startTurn(hub, chats, wt, "ask before you run the tests");
+      else if (url.pathname === "/halt") await stopTurn(hub, chats, wt);
+      else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
+      else if (url.pathname === "/sleep") {
+        await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
+      } else {
         res.writeHead(404).end();
         return;
       }
@@ -115,7 +133,8 @@ async function main() {
 
   const hub = await startHub();
   console.log(`Hub at ${hub.url} (home ${hub.home})`);
-  const control = await startControlServer();
+  const chats = await seedHub(hub);
+  const control = await startControlServer(hub, chats);
   const controlUrl = `http://127.0.0.1:${control.address().port}`;
 
   const device = pickSimulator();
