@@ -72,14 +72,17 @@ export class CenterTabStrip {
     await test.step("Wait for the tab strip to stop scrolling", async () => {
       await this.list.evaluate(
         (el) =>
-          new Promise<void>((resolve) => {
+          new Promise<void>((resolve, reject) => {
+            const deadline = performance.now() + 5_000;
             let last = el.scrollLeft;
             let still = 0;
             const tick = () => {
               still = el.scrollLeft === last ? still + 1 : 0;
               last = el.scrollLeft;
               if (still >= 5) resolve();
-              else requestAnimationFrame(tick);
+              else if (performance.now() > deadline) {
+                reject(new Error("tab strip still scrolling after 5000 ms"));
+              } else requestAnimationFrame(tick);
             };
             requestAnimationFrame(tick);
           }),

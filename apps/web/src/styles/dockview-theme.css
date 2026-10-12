@@ -543,8 +543,8 @@
  *
  * The tabs are no longer scaled with `zoom: 1.2`. dockview's scrollbar
  * (`Scrollbar` in dockview-core) answers every `scroll` event by clamping the
- * list to `scrollWidth - clientWidth` (both rounded to integers) and writing
- * `scrollLeft` back. Under the zoom, that write snapped the list back at the
+ * list to its `scrollWidth` minus the `.dv-scrollable` wrapper's `clientWidth`
+ * (both rounded to integers) and writing `scrollLeft` back. Under the zoom, that write snapped the list back at the
  * end of a swipe, fired another scroll event, and cut the fling short. The
  * clamp keeps running when the bar is hidden: hiding it does not stop the
  * writes. `overscroll-behavior-x: none` also removes the bounce / glow at the

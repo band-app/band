@@ -43,6 +43,10 @@ const BRANCH = "main";
 const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 const FILES = Array.from({ length: 10 }, (_, i) => `tab-strip-file-number-${i}.txt`);
 
+// Crossing the ~2000px list takes several 200px swipes, more than the
+// default 5 s poll allows on a runner whose flings are short.
+const SWIPE_POLL = { timeout: 15_000 };
+
 let server: ServerHandle;
 let tmpHome: string;
 
@@ -191,17 +195,17 @@ test.describe("phone", () => {
       .poll(async () => {
         await strip.touchSwipeAcross(-200);
         return (await strip.readScroll()).scrollLeft;
-      })
+      }, SWIPE_POLL)
       .toBe(0);
 
-    // At the end: the strip rests on its maximum, and a scroll event that
-    // fires later does not move it (no snap-back from dockview's scrollbar).
+    // At the end: the strip rests on its maximum and fires no further scroll
+    // events (no snap-back write from dockview's scrollbar).
     await expect
       .poll(async () => {
         await strip.touchSwipeAcross(200);
         const { scrollLeft, maxScrollLeft } = await strip.readScroll();
         return maxScrollLeft - scrollLeft;
-      })
+      }, SWIPE_POLL)
       .toBeLessThan(1);
     expect(await strip.countScrollEventsWhileIdle(300)).toBe(0);
     // Anchor: the bar is in the DOM (one per visible group's strip), just hidden.
