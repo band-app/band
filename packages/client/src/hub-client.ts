@@ -39,9 +39,19 @@ export function toWsUrl(httpUrl: string): string {
 /** The subprotocol list that authenticates a WebSocket to the hub. */
 export function tokenProtocols(token: string | undefined, protocols?: string | string[]): string[] {
   const list = protocols === undefined ? [] : Array.isArray(protocols) ? protocols : [protocols];
-  if (!token) return list;
+  // A token outside the subprotocol character set makes `new WebSocket` throw with the token in the message.
+  if (!token || !/^[A-Za-z0-9._~-]+$/.test(token)) return list;
   const rest = list.filter((p) => p !== WS_BASE_PROTOCOL);
   return [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${token}`, ...rest];
+}
+
+function isHubUrl(url: string, hubUrl: string): boolean {
+  if (!hubUrl) return false;
+  try {
+    return new URL(url).origin === new URL(hubUrl).origin;
+  } catch {
+    return false;
+  }
 }
 
 /** `fetch` that resolves hub paths against `hubUrl` and adds the Bearer header. */
@@ -49,9 +59,13 @@ export function createHubFetch(options: Pick<HubClientOptions, "hubUrl" | "token
   const { hubUrl, token } = options;
   const doFetch = options.fetch ?? fetch;
   const hubFetch: HubFetch = (input, init) => {
+    const url = input.startsWith("/") ? `${hubUrl}${input}` : input;
     const headers = new Headers(init?.headers);
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    return doFetch(input.startsWith("/") ? `${hubUrl}${input}` : input, { ...init, headers });
+    // Never send the token to another origin, e.g. an absolute URL a server supplied.
+    if (token && (input.startsWith("/") || isHubUrl(url, hubUrl))) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return doFetch(url, { ...init, headers });
   };
   return hubFetch;
 }

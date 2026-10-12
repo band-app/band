@@ -17,7 +17,7 @@ Band's phone experience is the web UI in a mobile browser or as a PWA. iOS suspe
 
 ## CORS and `Origin`
 
-No CORS change is needed. `classifyOrigin` in `apps/hub/cors.ts` returns `none` for a request without an `Origin` header, and such a request is not subject to the allowlist. The Expo networking layer sends no `Origin` on `fetch`, and React Native's `WebSocket` sends none by default, the same as the CLI and curl. A native client authenticates with `Authorization: Bearer <device token>` on HTTP and with the `["band", "band-token.<token>"]` subprotocol on WebSockets, exactly as a cross-origin browser client does through `hub-config.ts`. If a future React Native version starts sending an `Origin`, the hub's `BAND_CORS_ORIGINS` list is the place to allow it, not a code change.
+No CORS change is needed. `classifyOrigin` in `apps/hub/cors.ts` returns `none` for a request without an `Origin` header, and such a request is not subject to the allowlist. The Expo networking layer sends no `Origin` on `fetch`, and `fetch` is the case this relies on. React Native's `WebSocket` may send an `Origin` equal to the hub URL. `classifyOrigin` treats that as `same` when it matches the `Host` or `X-Forwarded-Host` header, so a reverse proxy in front of the hub must pass one of them. Confirm the behaviour on the React Native version M1.2 pins. A native client authenticates with `Authorization: Bearer <device token>` on HTTP and with the `["band", "band-token.<token>"]` subprotocol on WebSockets, exactly as a cross-origin browser client does through `hub-config.ts`. If a client sends an `Origin` that is neither `same` nor listed, the hub's `BAND_CORS_ORIGINS` list is the place to allow it, not a code change.
 
 ## What moved into `@band-app/client`
 

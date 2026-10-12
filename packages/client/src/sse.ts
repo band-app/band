@@ -33,7 +33,7 @@ export function parseSseFrame(frame: string): SseFrame | null {
   return { event, data: data.join("\n"), id };
 }
 
-/** Read frames from a streaming body until it ends or `signal` aborts. */
+/** Read frames from a streaming body until it ends or the body read rejects (an aborted fetch). */
 export async function readSseBody(
   body: ReadableStream<Uint8Array>,
   onFrame: (frame: SseFrame) => void,
@@ -41,17 +41,25 @@ export async function readSseBody(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  // A chunk may end between the CR and LF of one CRLF, so the CR waits for the next chunk.
+  let pendingCr = false;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
-    let end = buffer.indexOf("\n\n");
+    let text = decoder.decode(value, { stream: true });
+    if (pendingCr) text = `\r${text}`;
+    pendingCr = text.endsWith("\r");
+    if (pendingCr) text = text.slice(0, -1);
+    buffer += text.replace(/\r\n?/g, "\n");
+    let start = 0;
+    let end = buffer.indexOf("\n\n", start);
     while (end !== -1) {
-      const frame = parseSseFrame(buffer.slice(0, end));
+      const frame = parseSseFrame(buffer.slice(start, end));
       if (frame) onFrame(frame);
-      buffer = buffer.slice(end + 2);
-      end = buffer.indexOf("\n\n");
+      start = end + 2;
+      end = buffer.indexOf("\n\n", start);
     }
+    if (start > 0) buffer = buffer.slice(start);
   }
 }
 

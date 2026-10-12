@@ -30,7 +30,7 @@ import {
 } from "@band-app/shared/client-state";
 import { type KeyPart, matchKey } from "@band-app/shared/client-state-keys";
 
-/** Synchronous key-value storage the store reads and writes. the browser's local storage fits on the web. */
+/** Synchronous key-value storage the store reads and writes. The browser's local storage fits on the web. */
 export interface ClientStateStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -112,8 +112,6 @@ export interface ClientStateStoreOptions {
   deviceType: () => DeviceType;
   /** Called after the store writes a server value into the storage, for same-page listeners. */
   onStorageWrite?: (key: string, oldValue: string | null, newValue: string | null) => void;
-  /** Retry timers and clocks; defaults to the globals. */
-  random?: () => number;
 }
 
 const META_KEY = "band:client-state:v1";
@@ -164,8 +162,11 @@ function byteLength(text: string): number {
     if (code < 0x80) bytes += 1;
     else if (code < 0x800) bytes += 2;
     else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      i++;
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i++;
+      } else bytes += 3;
     } else bytes += 3;
   }
   return bytes;
@@ -202,8 +203,7 @@ export class ClientStateStore {
 
   constructor(options: ClientStateStoreOptions) {
     this.options = options;
-    this.clientId =
-      (options.random ?? Math.random)().toString(36).slice(2) + Date.now().toString(36);
+    this.clientId = Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 
   private readLocal(key: string): string | null {

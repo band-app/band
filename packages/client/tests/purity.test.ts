@@ -17,7 +17,7 @@ function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
-    return entry.name.endsWith(".ts") ? [path] : [];
+    return /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name) ? [path] : [];
   });
 }
 
@@ -48,7 +48,7 @@ describe("@band-app/client purity", () => {
     const offenders: string[] = [];
     for (const file of sources(join(ROOT, "src"))) {
       const text = code(file);
-      for (const m of text.matchAll(/from\s+["']([^"']+)["']/g)) {
+      for (const m of text.matchAll(/(?:\bfrom|\bimport|\brequire\()\s*\(?\s*["']([^"']+)["']/g)) {
         if (BANNED_DEPENDENCIES.test(m[1] ?? "")) offenders.push(`${file}: imports ${m[1]}`);
       }
       const global = BANNED_GLOBALS.exec(text);
