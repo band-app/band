@@ -132,6 +132,22 @@ test("a hidden worktree's tab strip doesn't cover the visible worktree's tabs", 
   expect(await wp.appRegionsInHiddenWorktrees()).toEqual([]);
 });
 
+test("no window drag box sits under the tab viewport, but the strip's empty space drags", async ({
+  page,
+}) => {
+  const wp = new WorktreePage(page, server.url, TOKEN);
+  await wp.goto(WORKTREE_A);
+  await wp.waitForReady();
+  await wp.clickTerminalAddTab(WORKTREE_A);
+  await expect(wp.terminalTabs()).toHaveCount(2);
+
+  expect(await wp.dragBoxesOverTabViewports()).toBe(0);
+  expect((await wp.emptyTopRowSpotsInDragRegion()).strips).toEqual([true]);
+  // Back to the single default tab, which later tests start from.
+  await wp.closeTerminalTab(WORKTREE_A);
+  await expect(wp.terminalTabs()).toHaveCount(1);
+});
+
 test("a hidden worktree with every tab closed sets no app-region", async ({ page }) => {
   const wp = new WorktreePage(page, server.url, TOKEN);
   // Closing A's only tab replaces its strip with the center drag bar.
