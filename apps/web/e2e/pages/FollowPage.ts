@@ -86,6 +86,22 @@ export class FollowPage {
     return this.panel.getByTestId("divergence-panel__notice");
   }
 
+  get discardLoss(): Locator {
+    return this.panel.getByTestId("divergence-panel__loss");
+  }
+
+  /** Walks the two confirmations a diverged copy needs, and stops on the one that names the loss. */
+  async reviewDiscardOfDivergedCopy(): Promise<void> {
+    await test.step("Ask to discard the diverged old copy", async () => {
+      await this.panel.getByTestId("divergence-panel__discard").click();
+      await this.panel.getByTestId("divergence-panel__review-loss").click();
+    });
+  }
+
+  async keepOldCopy(): Promise<void> {
+    await this.panel.getByRole("button", { name: "Keep it" }).click();
+  }
+
   async bringOver(): Promise<void> {
     await test.step("Bring the changes over to the new copy", async () => {
       await this.panel.getByTestId("divergence-panel__bring-over").click();

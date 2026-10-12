@@ -69,11 +69,11 @@ export const followRouter = t.router({
     .input(z.object({ worktreeId }))
     .mutation(({ input }) => guard(() => followService.bringOver(input.worktreeId))),
 
-  /** Removes the old copy and its files. Refused unless `confirm` is true. */
+  /** Removes the old copy and its files. Refused unless `confirm` is true, and for a diverged copy unless `discardChanges` is true too. */
   discardOld: publicProcedure
-    .input(z.object({ worktreeId, confirm: z.boolean() }))
+    .input(z.object({ worktreeId, confirm: z.boolean(), discardChanges: z.boolean().optional() }))
     .mutation(({ input }) =>
-      guard(() => followService.discardOld(input.worktreeId, input.confirm)),
+      guard(() => followService.discardOld(input.worktreeId, input.confirm, input.discardChanges)),
     ),
 });
 

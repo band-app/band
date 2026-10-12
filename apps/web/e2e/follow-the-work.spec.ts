@@ -361,6 +361,12 @@ test("when A returns with a newer change, the old copy is Diverged and the chang
   await follow.panelFile("after.txt").click();
   await expect(follow.panelDiff).toContainText("written on A after the checkpoint");
 
+  // Discarding a diverged copy asks twice, and the second ask names what would be lost.
+  await follow.reviewDiscardOfDivergedCopy();
+  await expect(follow.discardLoss).toContainText("1 changed file");
+  await follow.keepOldCopy();
+  expect(existsSync(join(oldPath, "after.txt"))).toBe(true);
+
   await follow.bringOver();
   await expect(follow.panelNotice).toContainText("Brought over 1 file");
   const newPath = (await worktreeRow("app", "feat-one", b.hostId))?.path ?? "";

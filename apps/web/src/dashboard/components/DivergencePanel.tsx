@@ -43,6 +43,8 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<Array<{ path: string; message: string }>>([]);
   const [confirming, setConfirming] = useState(false);
+  // A diverged copy needs a second confirmation that names what would be lost.
+  const [confirmingLoss, setConfirmingLoss] = useState(false);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["repos"] });
@@ -74,18 +76,24 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await trpc.follow.discardOld.mutate({ worktreeId, confirm: true });
+      await trpc.follow.discardOld.mutate({
+        worktreeId,
+        confirm: true,
+        ...(report.data?.state === "diverged" ? { discardChanges: true } : {}),
+      });
       await queryClient.invalidateQueries({ queryKey: ["repos"] });
       onOpenChange(false);
     } catch (err) {
       setError(errorText(err));
       setConfirming(false);
+      setConfirmingLoss(false);
     } finally {
       setBusy(false);
     }
   };
 
   const data = report.data;
+  const lostFiles = data?.files.length ?? 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[640px]" data-testid="divergence-panel">
@@ -168,28 +176,55 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
             className="space-y-2 rounded border border-destructive/50 p-2"
             data-testid="divergence-panel__confirm"
           >
-            <p className="text-xs">
-              Discard the old copy? Its files on the old host are deleted. The continued worktree is
-              not touched.
-            </p>
+            {data?.state === "diverged" && confirmingLoss ? (
+              <p className="text-xs font-medium" data-testid="divergence-panel__loss">
+                {lostFiles} changed file{lostFiles === 1 ? "" : "s"} exist only on the old copy and
+                will be lost for good. Bring them over first if you want to keep them.
+              </p>
+            ) : (
+              <p className="text-xs">
+                Discard the old copy? Its files on the old host are deleted. The continued worktree
+                is not touched.
+                {data?.state === "diverged"
+                  ? ` It holds ${lostFiles} changed file${lostFiles === 1 ? "" : "s"} the new copy lacks (listed above).`
+                  : ""}
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onClick={() => setConfirming(false)}
+                onClick={() => {
+                  setConfirming(false);
+                  setConfirmingLoss(false);
+                }}
               >
                 Keep it
               </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                data-testid="divergence-panel__confirm-discard"
-                disabled={busy}
-                onClick={() => void discard()}
-              >
-                Delete old copy
-              </Button>
+              {data?.state === "diverged" && !confirmingLoss ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  data-testid="divergence-panel__review-loss"
+                  disabled={busy}
+                  onClick={() => setConfirmingLoss(true)}
+                >
+                  Continue
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  data-testid="divergence-panel__confirm-discard"
+                  disabled={busy}
+                  onClick={() => void discard()}
+                >
+                  {data?.state === "diverged"
+                    ? `Delete old copy and ${lostFiles} changed file${lostFiles === 1 ? "" : "s"}`
+                    : "Delete old copy"}
+                </Button>
+              )}
             </div>
           </div>
         ) : (

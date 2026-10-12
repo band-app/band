@@ -65,7 +65,7 @@ When the worker connects, the hub compares the working tree of each copy it hold
 The panel of a diverged copy (`follow.divergence`) lists the files that differ and the diff of each one. Two actions settle it:
 
 - **Bring these changes over** (`follow.bringOver`) builds a patch of what the old copy changed since the checkpoint and applies it to the new copy. A patch that does not apply cleanly changes nothing and comes back with the conflicting files, so you can resolve them by hand. A clean apply marks the old copy `resolved`.
-- **Discard old copy** (`follow.discardOld`) removes the old worktree and its files on the old host. It needs `confirm: true`, and the UI asks first. Nothing else in this feature deletes files on any host. If the old host is offline, the removal runs when it next connects.
+- **Discard old copy** (`follow.discardOld`) removes the old worktree and its files on the old host. It needs `confirm: true`, and the UI asks first. A diverged copy is refused unless the call also passes `discardChanges: true`: the refusal names how many files would be lost, and the UI shows the diff and asks a second time with that count. A copy whose changes were brought over counts as resolved and needs only `confirm`, until it changes again. Nothing else in this feature deletes files on any host. If the old host is offline, the removal runs when it next connects.
 
 Until a person settles it, the old copy stays on disk and takes no checkpoints.
 

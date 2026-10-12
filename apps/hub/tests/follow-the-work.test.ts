@@ -255,11 +255,22 @@ describe("the prompt, accepting, and the divergence of the old copy (S1, S4)", (
     expect(existsSync(join(w.worktreePath(a, "proj", "feat-s4"), "hello.txt"))).toBe(true);
     expect(await worktreeOf("proj", "feat-s4", a.hostId)).toBeDefined();
 
-    await w.m("follow.discardOld", { worktreeId: s4, confirm: true });
+    // The copy is diverged: a plain confirmation is not enough, and the message names the loss.
+    const lossy = await w.mFail("follow.discardOld", { worktreeId: s4, confirm: true });
+    expect(lossy.status).not.toBe(200);
+    expect(lossy.body).toMatch(/1 file that the continued worktree lacks/);
+    expect(lossy.body).toMatch(/discardChanges/);
+    expect(existsSync(join(w.worktreePath(a, "proj", "feat-s4"), "hello.txt"))).toBe(true);
+    expect(await worktreeOf("proj", "feat-s4", a.hostId)).toBeDefined();
+
+    await w.m("follow.discardOld", { worktreeId: s4, confirm: true, discardChanges: true });
     expect(await worktreeOf("proj", "feat-s4", a.hostId)).toBeUndefined();
     expect(existsSync(w.worktreePath(a, "proj", "feat-s4"))).toBe(false);
     // The other old copy is untouched.
     expect(existsSync(join(w.worktreePath(a, "proj", "feat-s1"), "from-a.txt"))).toBe(true);
+    // Its changes were brought over, so a plain confirmation is enough for this one.
+    await w.m("follow.discardOld", { worktreeId: s1, confirm: true });
+    expect(await worktreeOf("proj", "feat-s1", a.hostId)).toBeUndefined();
   }, 120_000);
 });
 

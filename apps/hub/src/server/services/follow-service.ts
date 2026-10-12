@@ -536,9 +536,15 @@ export class FollowService {
       files = await this.changedFiles(old.hostId, old.worktree.path, row.treeSha, snap.treeSha);
       count = files.length > 0 ? files.length : undefined;
     }
+    // A person already brought these changes over: the verdict stands until the copy changes again.
+    const before = old.worktree.divergence;
+    if (before?.state === "resolved" && before.treeSha === snap.treeSha) {
+      return { divergence: before, files: [] };
+    }
     const divergence: Divergence = {
       state,
       checkedAt: Date.now(),
+      treeSha: snap.treeSha,
       checkpointId: row.id,
       ...(count !== undefined ? { files: count } : {}),
     };
@@ -675,7 +681,7 @@ export class FollowService {
       })
     ).stdout;
     if (patch.trim() === "") {
-      this.markResolved(old, repl.from);
+      this.markResolved(old, repl.from, toTree);
       return { applied: true, files: 0, conflicts: [] };
     }
 
@@ -698,17 +704,18 @@ export class FollowService {
       await newHost.fs.rm(patchFile, { force: true }).catch(() => undefined);
     }
     const files = (patch.match(/^diff --git /gm) ?? []).length;
-    this.markResolved(old, repl.from);
+    this.markResolved(old, repl.from, toTree);
     void checkpointService.take(nextId, "manual").catch((err) => {
       log.debug({ nextId, err: errorText(err) }, "no checkpoint after bringing changes over");
     });
     return { applied: true, files, conflicts: [] };
   }
 
-  private markResolved(old: Located, from: ContinuedFrom): void {
+  private markResolved(old: Located, from: ContinuedFrom, treeSha: string): void {
     this.repos.setDivergence(old.repo.name, old.worktree.name, old.hostId, {
       state: "resolved",
       checkedAt: Date.now(),
+      treeSha,
       checkpointId: from.checkpointId,
     });
   }
@@ -717,7 +724,7 @@ export class FollowService {
    * Removes the old copy. Only after `confirm` is true: this deletes files on its host. A host
    * that is offline removes the checkout the next time it connects.
    */
-  async discardOld(oldId: string, confirm: boolean): Promise<{ ok: true }> {
+  async discardOld(oldId: string, confirm: boolean, discardChanges = false): Promise<{ ok: true }> {
     if (!confirm) {
       throw new CheckpointError(
         "invalid",
@@ -728,6 +735,20 @@ export class FollowService {
     const old = this.locate(oldId);
     if (!repl || !old)
       throw new CheckpointError("invalid", `${oldId} was not continued elsewhere.`);
+    // A copy with changes the continuation lacks is refused unless the caller says it accepts losing them.
+    if (!discardChanges) {
+      let divergence = old.worktree.divergence;
+      if (checkpointService.isHostOnline(old.hostId)) {
+        divergence = (await this.compare(oldId).catch(() => null))?.divergence ?? divergence;
+      }
+      if (divergence?.state === "diverged") {
+        const count = divergence.files;
+        throw new CheckpointError(
+          "invalid",
+          `${oldId} has changes${count ? ` in ${count} file${count === 1 ? "" : "s"}` : ""} that the continued worktree lacks, and removing it loses them. Bring them over first, or pass discardChanges: true to delete them.`,
+        );
+      }
+    }
     await worktreeService.remove({
       repo: old.repo.name,
       name: old.worktree.name,

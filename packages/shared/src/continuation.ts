@@ -40,6 +40,8 @@ export interface Divergence {
   checkpointId: string;
   /** How many files differ. Absent when unknown. */
   files?: number;
+  /** The tree of the old copy when it was compared, so a `resolved` verdict holds until the copy changes again. */
+  treeSha?: string;
 }
 
 /** Default age under which a checkpoint is fresh enough to continue on without asking. */
