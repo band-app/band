@@ -3,29 +3,34 @@
  * mobile-verify: build the app, start a throwaway hub, install on a booted iOS simulator, run
  * the Maestro flows in `e2e/`, and leave screenshots and a report in `e2e/artifacts/<run>/`.
  *
- *   node scripts/verify.mjs [--skip-build] [--keep-hub] [flow-name ...]
+ *   node scripts/verify.mjs [--skip-build] [--keep-hub] [--perf] [flow-name ...]
  *
- * Flow names are file names in `e2e/` without `.yaml` (default: all of them). Needs Xcode with
- * a booted iOS simulator, Maestro, and Java 17 or newer for Maestro.
+ * Flow names are file names in `e2e/` without `.yaml` (default: every flow but the `perf-`
+ * ones). `--perf` builds the app with the JS frame log (`EXPO_PUBLIC_BAND_PERF_LOG=1`) and
+ * defaults to the `perf-` flows. Needs Xcode with a booted iOS simulator, Maestro, and Java 17
+ * or newer for Maestro.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
-import { fillWorktrees, seedHub, startTurn, stopTurn } from "./seed.mjs";
+import { fillWorktrees, seedHub, startTurn, STREAM_LINES, stopTurn } from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
+import { buildRows, copyText } from "../src/lib/chat/rows.ts";
+import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
 
 const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
 const keepHub = args.includes("--keep-hub");
+const perf = args.includes("--perf");
 const E2E = join(APP_ROOT, "e2e");
 const allFlows = readdirSync(E2E)
   .filter((f) => f.endsWith(".yaml"))
   .map((f) => f.replace(/\.yaml$/, ""));
 const wanted = args.filter((a) => !a.startsWith("--"));
-const flows = wanted.length ? wanted : allFlows;
+const flows = wanted.length ? wanted : allFlows.filter((f) => f.startsWith("perf-") === perf);
 for (const f of flows) {
   if (!allFlows.includes(f)) throw new Error(`No flow e2e/${f}.yaml (have: ${allFlows.join(", ")})`);
 }
@@ -48,13 +53,85 @@ function requireTool(cmd, hint, env) {
   }
 }
 
+/** The simulator's clipboard. */
+function clipboard(udid) {
+  return execFileSync("xcrun", ["simctl", "pbpaste", udid], { encoding: "utf8" });
+}
+
+/**
+ * A chat as the hub has it: the events a cold subscribe replays, folded by the shared reducer.
+ * Reads `/api/chats/:id/events` until `history-meta`, then hangs up.
+ */
+async function hubTranscript(hub, chatId) {
+  const abort = new AbortController();
+  const res = await fetch(`${hub.url}/api/chats/${encodeURIComponent(chatId)}/events`, {
+    headers: { Authorization: `Bearer ${hub.adminToken}`, Accept: "text/event-stream" },
+    signal: abort.signal,
+  });
+  const events = [];
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for await (const chunk of res.body) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let end = buffer.indexOf("\n\n");
+      while (end !== -1) {
+        const data = buffer
+          .slice(0, end)
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).trim())
+          .join("\n");
+        buffer = buffer.slice(end + 2);
+        end = buffer.indexOf("\n\n");
+        if (!data) continue;
+        const event = JSON.parse(data);
+        events.push(event);
+        if (event.type === "history-meta") throw new Error("done");
+      }
+    }
+  } catch (err) {
+    if (err.message !== "done") throw err;
+  } finally {
+    abort.abort();
+  }
+  return { events, state: foldEvents(INITIAL_TRANSCRIPT, events) };
+}
+
+/**
+ * S4's check: the text the app copied from the last turn equals the hub's, and every streamed
+ * line is in it exactly once, in order.
+ */
+async function checkTranscript(hub, chats, worktreeId, udid) {
+  const { events, state } = await hubTranscript(hub, chats[worktreeId]);
+  const rows = buildRows(state.messages, false);
+  const expected = copyText(rows[rows.length - 1]);
+  const copied = clipboard(udid);
+  const chunks = events.filter(
+    (e) => e.type === "update" && e.update.sessionUpdate === "agent_message_chunk",
+  ).length;
+  const counts = STREAM_LINES.map((line) => copied.split(line).length - 1);
+  const ordered = STREAM_LINES.every((line, i) => i === 0 || copied.indexOf(line) > copied.indexOf(STREAM_LINES[i - 1]));
+  const ok = copied === expected && counts.every((n) => n === 1) && ordered;
+  return {
+    ok,
+    note: `hub: ${events.length} events, ${chunks} text chunks; app copied ${copied.length} chars, ${
+      copied === expected ? "equal to" : "DIFFERENT from"
+    } the hub's text; lines once each: ${counts.every((n) => n === 1)}; in order: ${ordered}`,
+  };
+}
+
 /**
  * A loopback server the flows call (`e2e/scripts/hub-control.js`) to drive the hub:
  * POST /stop and /start stop and restart it, /work?wt=<id>, /ask?wt=<id> and /halt?wt=<id>
- * make the scripted agent work, ask for permission or stop, /fill adds worktrees, and
- * /sleep?ms=<n> answers after n milliseconds (a flow's way to wait while the app is away).
+ * make the scripted agent work, ask for permission or stop, /stream?wt=<id> streams numbered
+ * lines for 45 s, /fill adds worktrees, and /sleep?ms=<n> answers after n milliseconds (a
+ * flow's way to wait while the app is away). /clipboard?value=<text> fails unless the
+ * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
+ * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
+ * to the report.
  */
-function startControlServer(hub, chats) {
+function startControlServer(hub, chats, udid, notes) {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://control");
@@ -68,6 +145,19 @@ function startControlServer(hub, chats) {
       else if (url.pathname === "/work") await startTurn(hub, chats, wt, "work until I say stop");
       else if (url.pathname === "/ask") await startTurn(hub, chats, wt, "ask before you run the tests");
       else if (url.pathname === "/halt") await stopTurn(hub, chats, wt);
+      else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
+      else if (url.pathname === "/clipboard") {
+        const want = url.searchParams.get("value") ?? "";
+        const got = clipboard(udid);
+        if (got !== want) throw new Error(`clipboard holds ${JSON.stringify(got.slice(0, 200))}`);
+        notes.push(`clipboard: ${JSON.stringify(got)}`);
+      } else if (url.pathname === "/check-transcript") {
+        const result = await checkTranscript(hub, chats, wt, udid);
+        notes.push(`${wt}: ${result.note}`);
+        if (!result.ok) throw new Error(result.note);
+      } else if (url.pathname === "/note") {
+        notes.push(`${url.searchParams.get("name")}: ${url.searchParams.get("value")}`);
+      }
       else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
@@ -129,15 +219,17 @@ async function main() {
   requireTool("java", "brew install openjdk@17", env);
 
   const app = appPath();
-  if (!skipBuild || !existsSync(app)) buildForSimulator();
+  if (!skipBuild || !existsSync(app)) {
+    buildForSimulator("Release", perf ? { EXPO_PUBLIC_BAND_PERF_LOG: "1" } : {});
+  }
 
   const hub = await startHub();
   console.log(`Hub at ${hub.url} (home ${hub.home})`);
   const chats = await seedHub(hub);
-  const control = await startControlServer(hub, chats);
-  const controlUrl = `http://127.0.0.1:${control.address().port}`;
-
   const device = pickSimulator();
+  const notes = [];
+  const control = await startControlServer(hub, chats, device.udid, notes);
+  const controlUrl = `http://127.0.0.1:${control.address().port}`;
   installApp(device.udid, app);
 
   const out = join(E2E, "artifacts", stamp());
@@ -211,6 +303,7 @@ async function main() {
     "",
     `Token in logs or app files: ${leaks.length ? `FOUND in ${leaks.join(", ")}` : `none (searched ${log.lines} log lines, and the app's data container after each flow)`}`,
     ...(logSearched ? [] : [`Log search: FAILED, only ${log.lines} lines of the app's log since ${since}`]),
+    ...(notes.length ? ["", "Measurements and checks:", ...notes.map((n) => `- ${n}`)] : []),
     "",
     "Screenshots:",
     ...screenshots.map((s) => `- e2e/artifacts/${out.split("/").pop()}/${s}`),

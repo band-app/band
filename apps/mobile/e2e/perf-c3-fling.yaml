@@ -1,0 +1,82 @@
+# S3: a transcript of over 1,500 events. Flings through it leave no blank cells once the list
+# settles, and the JS thread never stalls over 100 ms. Needs the perf build
+# (`verify.mjs --perf`), whose frame log shows the longest gap between JS frames.
+appId: app.getband.mobile
+name: S3 flinging through a 1,600-event transcript
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-long
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      text: "All 400 modules checked."
+    timeout: 20000
+- copyTextFrom:
+    id: perf__frame-log-text
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: note?name=open-1600-events
+      VALUE: ${maestro.copiedText}
+# Start measuring from here: only the flings count.
+- tapOn:
+    id: perf__frame-log
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          start: 50%, 25%
+          end: 50%, 90%
+          duration: 120
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+- assertVisible:
+    id: chat__row-part
+- takeScreenshot: s3-settled-after-up
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 50%, 90%
+          end: 50%, 25%
+          duration: 120
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+- assertVisible:
+    id: chat__row-part
+- takeScreenshot: s3-settled-after-down
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          start: 50%, 25%
+          end: 50%, 90%
+          duration: 120
+      - swipe:
+          start: 50%, 90%
+          end: 50%, 25%
+          duration: 120
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+- assertVisible:
+    id: chat__row-part
+- takeScreenshot: s3-settled-after-flings
+- copyTextFrom:
+    id: perf__frame-log-text
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: note?name=flings
+      VALUE: ${maestro.copiedText}

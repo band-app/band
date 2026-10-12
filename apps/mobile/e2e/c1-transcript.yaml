@@ -1,0 +1,74 @@
+# S1: a chat with history renders every item natively: the prompt with its image, thinking,
+# markdown (heading, list, table, file links, code with highlighting, a mermaid fence), a folded
+# run of tool calls with a file edit as a diff and a command, the plan, and the turn's end.
+appId: app.getband.mobile
+name: S1 chat transcript renders the seeded history
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-main
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- assertVisible:
+    text: "Done. The tests pass; the README is next."
+- assertVisible:
+    id: chat__plan
+- assertVisible:
+    text: "Update the README"
+- takeScreenshot: s1-bottom
+# The folded tool calls: open the group, then the edit (a diff) and the command.
+- tapOn:
+    id: tool-group__summary
+- tapOn:
+    text: "Edit src/parser.ts.*"
+- assertVisible:
+    id: tool-call__diff
+- tapOn:
+    text: "Run the tests.*"
+- assertVisible:
+    id: tool-call__command
+- takeScreenshot: s1-tools-open
+- scrollUntilVisible:
+    element:
+      text: "graph TD.*"
+    direction: UP
+    timeout: 20000
+- assertVisible:
+    text: "diagram"
+- scrollUntilVisible:
+    element:
+      text: "export function parse.*"
+    direction: UP
+    timeout: 20000
+- takeScreenshot: s1-code
+- scrollUntilVisible:
+    element:
+      text: "Plan for the parser fix"
+    direction: UP
+    timeout: 20000
+- assertVisible:
+    text: "parse as base 10"
+- takeScreenshot: s1-markdown
+# A file path opens the placeholder for the file viewer.
+# A link inside a paragraph is its own element on iOS, named by its text.
+- tapOn:
+    text: "src/parser\\.ts:12"
+- assertVisible:
+    text: ".*file viewer comes in a later version.*"
+- takeScreenshot: s1-file-link
+- tapOn:
+    text: OK
+- scrollUntilVisible:
+    element:
+      id: chat__image
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: chat__thought
+- assertVisible:
+    text: ".*Read it, patch it, run the tests.*"
+- takeScreenshot: s1-top

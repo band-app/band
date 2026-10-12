@@ -9,7 +9,12 @@
  */
 
 import { type ClientStateApi, ClientStateStore } from "@band-app/client/client-state";
-import { createHubConnection, type HubClient } from "@band-app/client/hub-client";
+import {
+  createHubConnection,
+  createHubFetch,
+  type HubClient,
+  type HubFetch,
+} from "@band-app/client/hub-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -21,6 +26,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { fetch as expoFetch } from "expo/fetch";
 import { AppState } from "react-native";
 import { createClientStateStorage } from "./client-state-storage";
 import type { SavedHub } from "./hub-store";
@@ -30,7 +36,13 @@ import type { StatusEvent } from "./status-state";
 interface HubSessionValue {
   /** `sessionKey` of the hub this session belongs to. */
   key: string;
+  hub: SavedHub;
   client: HubClient;
+  /**
+   * `fetch` for hub paths with the Bearer token, over `expo/fetch`, whose response body streams.
+   * React Native's own `fetch` buffers the whole body, which never ends for an event stream.
+   */
+  hubFetch: HubFetch;
   queryClient: QueryClient;
   feed: StatusFeed;
   clientState: ClientStateStore;
@@ -49,6 +61,18 @@ const noStoreFetch: typeof fetch = (input, init) => {
   headers.set("Cache-Control", "no-store");
   return fetch(input, { ...init, headers });
 };
+
+/** `noStoreFetch` over `expo/fetch`. Its types are its own; the calls `HubFetch` makes are the standard ones. */
+const streamingFetch = ((input: string, init?: RequestInit) => {
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "no-store");
+  return expoFetch(input, {
+    method: init?.method,
+    body: init?.body as string | undefined,
+    signal: init?.signal ?? undefined,
+    headers: Object.fromEntries(headers.entries()),
+  });
+}) as unknown as typeof fetch;
 
 function statusSource(getClient: () => HubClient): StatusSource {
   return {
@@ -169,12 +193,26 @@ function SessionHost({
     return () => sub.remove();
   }, [queryClient]);
 
+  const hubFetch = useMemo(
+    () => createHubFetch({ hubUrl: hub.url, token: hub.token, fetch: streamingFetch }),
+    [hub.url, hub.token],
+  );
+
   const key = sessionKey(hub);
   const client = connection.client;
   const store = clientState.store;
   useEffect(() => {
-    onSession({ key, client, feed, queryClient, clientState: store, clientStateReady });
-  }, [onSession, key, client, feed, queryClient, store, clientStateReady]);
+    onSession({
+      key,
+      hub,
+      client,
+      hubFetch,
+      feed,
+      queryClient,
+      clientState: store,
+      clientStateReady,
+    });
+  }, [onSession, key, hub, client, hubFetch, feed, queryClient, store, clientStateReady]);
   return null;
 }
 
