@@ -99,12 +99,14 @@ Check each tool first and install only what is missing. All of it is user space 
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
 | `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
 | `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
-| `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the frame log's longest JS gap goes into the report. Runs only with `--perf`. |
+| `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
+| `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
 `alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The repo `gamma` holds the
 chat flows' worktrees: `gamma-main` (a finished "showcase" turn with an attached image),
-`gamma-long` (a finished turn of 1,610 replayed events), and the empty `gamma-stream` and
+`gamma-long` (a finished turn of 1,610 replayed events), `gamma-history` (24 short turns, more
+than the 20 the hub sends on open), and the empty `gamma-stream` and
 `gamma-resume`. The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
 with `work` as a turn that runs until stopped, one starting with `ask` as a turn that waits for a
 permission answer, and one starting with `stream` as 90 numbered lines over 45 s.

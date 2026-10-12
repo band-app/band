@@ -133,7 +133,7 @@ async function checkTranscript(hub, chats, worktreeId, udid) {
  * flow's way to wait while the app is away). /clipboard?value=<text> fails unless the
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
  * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
- * to the report.
+ * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
  */
 function startControlServer(hub, chats, udid, notes) {
   const server = createServer(async (req, res) => {
@@ -160,7 +160,14 @@ function startControlServer(hub, chats, udid, notes) {
         notes.push(`${wt}: ${result.note}`);
         if (!result.ok) throw new Error(result.note);
       } else if (url.pathname === "/note") {
-        notes.push(`${url.searchParams.get("name")}: ${url.searchParams.get("value")}`);
+        const value = url.searchParams.get("value") ?? "";
+        notes.push(`${url.searchParams.get("name")}: ${value}`);
+        // `max-gap=<ms>` fails the call when the frame log's longest gap is above it.
+        const limit = url.searchParams.get("max-gap");
+        const gap = Number(/max (\d+)ms/.exec(value)?.[1] ?? Number.NaN);
+        if (limit !== null && !(gap <= Number(limit))) {
+          throw new Error(`the longest JS frame gap was ${value}, over ${limit} ms`);
+        }
       }
       else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {

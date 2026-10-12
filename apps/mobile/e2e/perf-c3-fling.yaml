@@ -1,5 +1,6 @@
 # S3: a transcript of over 1,500 events. Flings through it leave no blank cells once the list
-# settles, and the JS thread never stalls over 100 ms. Needs the perf build
+# settles, and the JS thread never stalls over 100 ms (the last note fails the flow when the
+# longest gap between JS frames during the flings is above that). Needs the perf build
 # (`verify.mjs --perf`), whose frame log shows the longest gap between JS frames.
 appId: app.getband.mobile
 name: S3 flinging through a 1,600-event transcript
@@ -78,5 +79,5 @@ name: S3 flinging through a 1,600-event transcript
 - runScript:
     file: scripts/hub-control.js
     env:
-      ACTION: note?name=flings
+      ACTION: note?name=flings&max-gap=100
       VALUE: ${maestro.copiedText}

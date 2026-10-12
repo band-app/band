@@ -181,7 +181,12 @@ export const WORKTREES = {
   /** Empty chats a flow streams a turn into (S2, S4). */
   GAMMA_STREAM: "gamma-stream",
   GAMMA_RESUME: "gamma-resume",
+  /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
+  GAMMA_HISTORY: "gamma-history",
 };
+
+/** Turns in the history chat; the hub's first page holds `HISTORY_PAGE_SIZE` (20). */
+export const HISTORY_TURNS = 24;
 
 async function trpcResult(procedure, res) {
   const body = await res.json().catch(() => null);
@@ -230,7 +235,7 @@ export async function seedHub(state) {
     await trpc(state, "repos.add", { path: join(root, name) });
   }
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
-  for (const branch of ["long", "stream", "resume"]) {
+  for (const branch of ["long", "stream", "resume", "history"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   const chats = {};
@@ -245,6 +250,10 @@ export async function seedHub(state) {
     pngFile("screenshot.png"),
   ]);
   await seedTurn(state, chats, WORKTREES.GAMMA_LONG, "long: check every module");
+  for (let i = 1; i <= HISTORY_TURNS; i++) {
+    const n = String(i).padStart(2, "0");
+    await seedTurn(state, chats, WORKTREES.GAMMA_HISTORY, `turn ${n}: say done`);
+  }
   return chats;
 }
 

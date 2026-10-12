@@ -23,14 +23,23 @@ name: S1 chat transcript renders the seeded history
 # The folded tool calls: open the group, then the edit (a diff) and the command.
 - tapOn:
     id: tool-group__summary
+# Opening a call at the bottom grows the list downward without scrolling, so scroll to it.
 - tapOn:
     text: "Edit src/parser.ts.*"
-- assertVisible:
-    id: tool-call__diff
+- scrollUntilVisible:
+    element:
+      id: tool-call__diff
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Run the tests.*"
+    timeout: 10000
 - tapOn:
     text: "Run the tests.*"
-- assertVisible:
-    id: tool-call__command
+- scrollUntilVisible:
+    element:
+      id: tool-call__command
+    timeout: 10000
 - takeScreenshot: s1-tools-open
 - scrollUntilVisible:
     element:
