@@ -26,6 +26,13 @@ export interface ClientPluginHost {
   startAgent(worktreeId: string, prompt: string): Promise<void>;
   /** Open a URL in the system browser (the desktop app) or a new tab (the web app). */
   openUrl(url: string): void;
+  /** Open a file of the worktree in the center dock, scrolled to `line` when given. */
+  openFile(worktreeId: string, path: string, line?: number | null): void;
+  /**
+   * Renders Markdown from an untrusted author with the app's sanitising
+   * renderer: no raw HTML, links open outside the dashboard.
+   */
+  Markdown: ComponentType<{ children: string; className?: string }>;
 }
 
 const ClientPluginHostContext = createContext<ClientPluginHost | null>(null);

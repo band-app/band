@@ -76,6 +76,72 @@ export type ReviewDecision = "approved" | "changes_requested" | "review_required
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+/** One reviewer's standing on a review. `pending` means requested, no review yet. */
+export type ReviewerState =
+  | "approved"
+  | "changes_requested"
+  | "commented"
+  | "pending"
+  | "dismissed";
+
+/** A person (or team) who was asked to review or left a review. */
+export interface Reviewer {
+  login: string;
+  avatarUrl: string | null;
+  /** Their latest state: a later review replaces an earlier one. */
+  state: ReviewerState;
+  submittedAt: string | null;
+  /** Whether the forge requires this reviewer (code owners), when it says. */
+  required?: boolean;
+}
+
+/** The author of a comment. */
+export interface CommentAuthor {
+  login: string;
+  avatarUrl: string | null;
+}
+
+/** One message: a conversation comment, a review summary or a reply in a thread. */
+export interface ReviewComment {
+  id: string;
+  author: CommentAuthor;
+  /** Markdown, from an untrusted author. */
+  body: string;
+  createdAt: string;
+  /** The message on the forge. */
+  url: string | null;
+}
+
+/** A top-level comment on the review or a review's summary. */
+export interface ReviewConversationItem extends ReviewComment {
+  kind: "comment" | "review";
+  /** For `review`: the verdict that came with the summary. */
+  reviewState?: ReviewerState;
+}
+
+/** An inline discussion on a line of a file. */
+export interface ReviewThread {
+  id: string;
+  path: string;
+  /** The line in the head commit, or the last known one when outdated. */
+  line: number | null;
+  isResolved: boolean;
+  isOutdated: boolean;
+  comments: ReviewComment[];
+  /** True when the forge holds more messages than `comments` carries. */
+  truncated?: boolean;
+}
+
+/** Everything people said on a review, read-only. */
+export interface ReviewDiscussion {
+  /** Conversation comments and review summaries, oldest first. */
+  items: ReviewConversationItem[];
+  /** Inline threads, ordered by their first message, oldest first. */
+  threads: ReviewThread[];
+  /** True when the forge holds more than was fetched. */
+  truncated?: boolean;
+}
+
 /** A code review (a pull request or merge request) for a branch. */
 export interface ReviewInfo {
   number: number;
@@ -87,6 +153,10 @@ export interface ReviewInfo {
   mergeState: MergeState;
   /** CI is a property of the review's head commit. */
   checks: ChecksReport;
+  /** Absent when the provider does not report reviewers. */
+  reviewers?: Reviewer[];
+  /** Absent when the provider does not report comments. */
+  discussion?: ReviewDiscussion;
 }
 
 export interface ReviewProvider {
