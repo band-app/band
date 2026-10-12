@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "../connection";
 import {
@@ -7,6 +8,13 @@ import {
   repos as reposTable,
   worktrees as worktreesTable,
 } from "../schema";
+
+const worktreeKey = (repoName: string, name: string, hostId: string) =>
+  and(
+    eq(worktreesTable.repoName, repoName),
+    eq(worktreesTable.name, name),
+    eq(worktreesTable.hostId, hostId),
+  );
 
 /**
  * Repo data access — Phase 2 of the 3-tier refactor
@@ -75,6 +83,8 @@ export interface RepoState {
   primaryHostId?: string;
   /** Whether the hub keeps checkpoints of the repo's worktrees; absent means the default. Read-only here: `setCheckpointsEnabled` writes it. */
   checkpointsEnabled?: boolean;
+  /** Whether an offline host's worktrees continue elsewhere without asking. Read-only here: `setAutoContinue` writes it. */
+  autoContinue?: boolean;
 }
 
 /** Where a worktree was started from. Ids only, since the origin may be on any repo and host. */
@@ -119,6 +129,16 @@ export interface WorktreeState {
    * `RepoQueries.setSupersededBy` writes it.
    */
   supersededBy?: string;
+  /**
+   * Set on a copy that a continuation created. Read-only here: `saveAll` keeps what the database
+   * holds, and `RepoQueries.setContinuedFrom` writes it.
+   */
+  continuedFrom?: ContinuedFrom;
+  /**
+   * Set on a superseded copy once its host is back and compared. Read-only here, like
+   * `continuedFrom`; `RepoQueries.setDivergence` writes it.
+   */
+  divergence?: Divergence;
 }
 
 /**
@@ -217,6 +237,10 @@ export class RepoQueries {
             }
           : {}),
         ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
+        ...(row.continuedFrom
+          ? { continuedFrom: row.continuedFrom as unknown as ContinuedFrom }
+          : {}),
+        ...(row.divergence ? { divergence: row.divergence as unknown as Divergence } : {}),
       });
       wtByRepo.set(row.repoName, list);
     }
@@ -234,6 +258,7 @@ export class RepoQueries {
       ...(row.allowedHostIds ? { allowedHostIds: row.allowedHostIds } : {}),
       ...(row.primaryHostId ? { primaryHostId: row.primaryHostId } : {}),
       ...(row.checkpointsEnabled != null ? { checkpointsEnabled: row.checkpointsEnabled } : {}),
+      ...(row.autoContinue != null ? { autoContinue: row.autoContinue } : {}),
       worktrees: wtByRepo.get(row.name) ?? [],
     }));
   }
@@ -271,6 +296,7 @@ export class RepoQueries {
             allowedHostIds: reposTable.allowedHostIds,
             primaryHostId: reposTable.primaryHostId,
             checkpointsEnabled: reposTable.checkpointsEnabled,
+            autoContinue: reposTable.autoContinue,
           })
           .from(reposTable)
           .all()
@@ -289,17 +315,19 @@ export class RepoQueries {
           .all()
           .map((w) => [`${w.repoName}\0${w.name}`, w]),
       );
-      const supersededBy = new Map(
+      const continuation = new Map(
         tx
           .select({
             repoName: worktreesTable.repoName,
             name: worktreesTable.name,
             hostId: worktreesTable.hostId,
             supersededBy: worktreesTable.supersededBy,
+            continuedFrom: worktreesTable.continuedFrom,
+            divergence: worktreesTable.divergence,
           })
           .from(worktreesTable)
           .all()
-          .map((w) => [`${w.repoName}\0${w.name}\0${w.hostId}`, w.supersededBy]),
+          .map((w) => [`${w.repoName}\0${w.name}\0${w.hostId}`, w]),
       );
       tx.delete(worktreesTable).run();
       tx.delete(reposTable).run();
@@ -328,11 +356,15 @@ export class RepoQueries {
             checkpointsEnabled: kept.has(repo.name)
               ? (kept.get(repo.name)?.checkpointsEnabled ?? null)
               : (repo.checkpointsEnabled ?? null),
+            autoContinue: kept.has(repo.name)
+              ? (kept.get(repo.name)?.autoContinue ?? null)
+              : (repo.autoContinue ?? null),
           })
           .run();
 
         for (const wt of repo.worktrees) {
           const origin = originByWorktree.get(`${repo.name}\0${wt.name}`);
+          const carried = continuation.get(`${repo.name}\0${wt.name}\0${wt.hostId ?? "local"}`);
           tx.insert(worktreesTable)
             .values({
               originWorktreeId: origin?.originWorktreeId ?? null,
@@ -345,8 +377,9 @@ export class RepoQueries {
               head: wt.head ?? null,
               pinned: wt.pinned,
               hostId: wt.hostId ?? "local",
-              supersededBy:
-                supersededBy.get(`${repo.name}\0${wt.name}\0${wt.hostId ?? "local"}`) ?? null,
+              supersededBy: carried?.supersededBy ?? null,
+              continuedFrom: carried?.continuedFrom ?? null,
+              divergence: carried?.divergence ?? null,
             })
             .run();
         }
@@ -578,6 +611,50 @@ export class RepoQueries {
           eq(worktreesTable.hostId, hostId),
         ),
       )
+      .run();
+  }
+
+  /** Turns "continue on another host automatically" on or off, or back to the default with `null`. Returns false when no repo has that name. */
+  setAutoContinue(name: string, enabled: boolean | null): boolean {
+    return (
+      getDb()
+        .update(reposTable)
+        .set({ autoContinue: enabled })
+        .where(eq(reposTable.name, name))
+        .run().changes > 0
+    );
+  }
+
+  /** The stored `autoContinue` of one repo: null for the default (off), undefined for an unknown repo. */
+  findAutoContinue(name: string): boolean | null | undefined {
+    const row = getDb()
+      .select({ autoContinue: reposTable.autoContinue })
+      .from(reposTable)
+      .where(eq(reposTable.name, name))
+      .get();
+    return row ? (row.autoContinue ?? null) : undefined;
+  }
+
+  /** Records on the copy on `hostId` where its work came from. Focused UPDATE, because `saveAll` keeps the stored value. */
+  setContinuedFrom(
+    repoName: string,
+    name: string,
+    hostId: string,
+    value: ContinuedFrom | null,
+  ): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ continuedFrom: value as unknown as Record<string, unknown> | null })
+      .where(worktreeKey(repoName, name, hostId))
+      .run();
+  }
+
+  /** Records on the superseded copy on `hostId` how it compares with the checkpoint used. */
+  setDivergence(repoName: string, name: string, hostId: string, value: Divergence | null): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ divergence: value as unknown as Record<string, unknown> | null })
+      .where(worktreeKey(repoName, name, hostId))
       .run();
   }
 

@@ -155,6 +155,68 @@ function CheckpointsSwitch({ repo }: { repo: RepoInfo }) {
 }
 
 /**
+ * Whether a worktree whose host is offline continues on another host without a prompt. It
+ * applies while the newest checkpoint is younger than 30 minutes; an older one always asks.
+ */
+function AutoContinueSwitch({ repo }: { repo: RepoInfo }) {
+  const queryClient = useQueryClient();
+  const admin = useIsAdmin();
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const enabled = repo.autoContinue ?? false;
+
+  const change = async (next: boolean) => {
+    setError(null);
+    setSaving(true);
+    try {
+      await trpc.repos.update.mutate({ name: repo.name, autoContinue: next });
+      await queryClient.invalidateQueries({ queryKey: ["repos"] });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const id = `settings-repo-${repo.name}-auto-continue`;
+  return (
+    <div className="space-y-1" data-testid="settings-repos__auto-continue">
+      <div className="flex items-center gap-2">
+        <input
+          id={id}
+          type="checkbox"
+          checked={enabled}
+          disabled={!admin || saving}
+          aria-label={`Continue on another host automatically for ${repo.name}`}
+          data-testid="settings-repos__auto-continue-switch"
+          onChange={(e) => void change(e.target.checked)}
+        />
+        <label htmlFor={id} className="text-xs font-medium">
+          Continue on another host automatically
+        </label>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        When a worktree's host is offline and you message, open a terminal in or start an agent
+        there, Band continues it on another allowed host without asking, if its checkpoint is
+        younger than 30 minutes. An older checkpoint always asks. Needs checkpoints.
+      </p>
+      {admin ? null : (
+        <p className="text-xs text-muted-foreground">Changing this needs an admin token.</p>
+      )}
+      {error ? (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="settings-repos__auto-continue-error"
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * The Settings dialog's Repos section, a registry with no add: every repo the hub knows with its
  * remote URL, default branch, the folder each host keeps it in,.
  * Adding a repo happens in the sidebar's Repos panel. A repo can be removed here once it has no
@@ -253,6 +315,7 @@ export function ReposSettings() {
               </ul>
               <RepoHostsEditor repo={repo} />
               <CheckpointsSwitch repo={repo} />
+              <AutoContinueSwitch repo={repo} />
               {inUse ? (
                 <p className="text-xs text-muted-foreground" data-testid="settings-repos__in-use">
                   Remove its worktrees before removing it here.

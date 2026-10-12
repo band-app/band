@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { ContinueGateError } from "../../errors";
+import { followService } from "../../services/follow-service";
 import { terminalService } from "../../services/terminal-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
@@ -40,18 +42,28 @@ const terminalRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const terminalId = input.id ?? randomUUID();
+      // A terminal needs a live host: continue the work elsewhere, or tell the client its choices.
+      let worktreeId = input.worktreeId;
+      try {
+        worktreeId = (await followService.gate(input.worktreeId)).worktreeId;
+      } catch (err) {
+        if (err instanceof ContinueGateError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message, cause: err });
+        }
+        throw err;
+      }
       // `terminalService.spawn` resolves the worktree, asks the backend to
       // fork the PTY, and registers the new terminal in the saved
       // dockview layout. The event emit stays here so the WebSocket
       // spawn path (which goes through the same service method) doesn't
       // double-broadcast.
-      const entry = await terminalService.spawn(input.worktreeId, terminalId, {
+      const entry = await terminalService.spawn(worktreeId, terminalId, {
         command: input.command,
         cwd: input.cwd,
         env: input.env,
       });
-      emit({ kind: "terminal-created", worktreeId: input.worktreeId, terminalId });
-      return { terminalId, worktreeId: input.worktreeId, pid: entry.pid };
+      emit({ kind: "terminal-created", worktreeId, terminalId });
+      return { terminalId, worktreeId, pid: entry.pid };
     }),
 
   send: publicProcedure

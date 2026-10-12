@@ -45,3 +45,5 @@ Band had projects: a cross-repo body of work with a context repo, a project fold
 - A pnpm workspace is a package of this monorepo and has nothing to do with a Band worktree.
 
 A **checkpoint** is the hub's own copy of a worktree on a static worker, taken after an agent turn, after quiet files and on a clean worker shutdown. It keeps the work readable when the worker is offline and lets it be restored on another host. A copy replaced by a restore is **superseded**. See `docs/checkpoints.md`.
+
+**Follow the work** is continuing a worktree on another allowed host from its latest checkpoint when its host is offline, on request or automatically for a repo that opts in. The copy left behind is superseded, and flagged diverged when its host returns with changes the checkpoint lacks. See `docs/follow-the-work.md`.

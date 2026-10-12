@@ -18,6 +18,8 @@
  * domain errors without pretending it imports them from the service layer).
  */
 
+import type { HostOfflineAnswer } from "@band-app/shared/continuation";
+
 /**
  * Thrown when a worktree can't be resolved by the service tier.
  *
@@ -248,6 +250,19 @@ export type CheckpointErrorCode =
   | "oversize"
   | "conflict"
   | "invalid";
+
+/**
+ * Thrown before an action that needs a live host when the worktree's host is offline: the work
+ * either needs an answer from a person (`HOST_OFFLINE`, with the offer to continue elsewhere) or
+ * cannot continue at all (`CONTINUE_NOT_POSSIBLE`, with the reason). The chat submit route
+ * answers 409 with `answer`; tRPC carries it in the error's `data.hostOffline`.
+ */
+export class ContinueGateError extends Error {
+  constructor(readonly answer: HostOfflineAnswer) {
+    super(answer.error);
+    this.name = "ContinueGateError";
+  }
+}
 
 /**
  * Thrown when a checkpoint, restore or move cannot go ahead. The router maps `no-checkpoint` to

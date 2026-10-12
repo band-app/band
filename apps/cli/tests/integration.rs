@@ -591,6 +591,73 @@ fn repos_set_checkpoints_round_trips_in_the_list() {
     );
 }
 
+#[test]
+fn repos_set_auto_continue_round_trips_in_the_list() {
+    let env = TestEnv::new();
+    let auto_continue = |env: &TestEnv| {
+        let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+        listed["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "my-repo")
+            .expect("my-repo in list")["autoContinue"]
+            .clone()
+    };
+    // Off until a person turns it on.
+    assert_eq!(auto_continue(&env), false);
+
+    let on = env.band(&["repos", "set", "my-repo", "--auto-continue", "on"]);
+    assert!(on.status.success(), "stderr: {}", stderr(&on));
+    assert_eq!(auto_continue(&env), true);
+
+    let off = env.band(&["repos", "set", "my-repo", "--auto-continue", "off"]);
+    assert!(off.status.success(), "stderr: {}", stderr(&off));
+    assert_eq!(auto_continue(&env), false);
+
+    let bad = env.band(&["repos", "set", "my-repo", "--auto-continue", "maybe"]);
+    assert!(!bad.status.success());
+    assert!(stderr(&bad).contains("on or off"), "{}", stderr(&bad));
+}
+
+#[test]
+fn worktrees_continue_explains_why_it_cannot() {
+    let env = TestEnv::new();
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/cont"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let listed = json_of(&env.band(&["worktrees", "list", "my-repo", "--output", "json"]));
+    let id = listed["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "feat/cont")
+        .expect("worktree")["worktreeId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The hub's own machine is up, so there is nothing to continue.
+    let up = env.band(&["worktrees", "continue", &id]);
+    assert!(!up.status.success());
+    assert!(stderr(&up).contains("is online"), "{}", stderr(&up));
+
+    let unknown = env.band(&["worktrees", "continue", "no-such-worktree"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("Unknown worktree"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    let nowhere = env.band(&["worktrees", "continue", &id, "--to", "nowhere"]);
+    assert!(!nowhere.status.success());
+    assert!(
+        stderr(&nowhere).contains("Unknown host"),
+        "{}",
+        stderr(&nowhere)
+    );
+}
+
 /// Registers a worker host the way the UI does and returns its id.
 fn issue_worker_host(env: &TestEnv, name: &str) -> String {
     let settings: serde_json::Value = serde_json::from_str(

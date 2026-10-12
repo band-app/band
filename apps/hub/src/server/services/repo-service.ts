@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
 import { gitRunner, type Host } from "@band-app/host-api";
+import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 import { parseRemoteUrl } from "@band-app/shared/remote-url";
 import { checkpointsEnabledFor, isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
@@ -126,6 +127,8 @@ export class RepoService {
       checkpointsEnabled: boolean;
       /** The stored choice, or null when the repo follows the default. */
       checkpointsSetting: boolean | null;
+      /** Whether a worktree whose host is offline continues on another host without asking. */
+      autoContinue: boolean;
       /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
       avatar: RepoAvatarInfo | null;
       worktrees: Array<{
@@ -142,6 +145,10 @@ export class RepoService {
         lifecycle?: WorktreeLifecycle;
         /** Set when this copy was restored on another host. The value is the replacement's worktree id. */
         supersededBy?: string;
+        /** Set on a copy a continuation created: where the work came from. */
+        continuedFrom?: ContinuedFrom;
+        /** Set on a superseded copy once its host is back: whether it holds changes the continuation missed. */
+        divergence?: Divergence;
         /** When the hub took the newest checkpoint of this worktree, or null when it has none. */
         lastCheckpointAt: number | null;
         worktreeId: string;
@@ -277,6 +284,7 @@ export class RepoService {
         mainMissing: mainMissingOf({ ...repo, worktrees }),
         checkpointsEnabled: checkpointsEnabledFor(repo.checkpointsEnabled, repo.allowedHostIds),
         checkpointsSetting: repo.checkpointsEnabled ?? null,
+        autoContinue: repo.autoContinue ?? false,
         avatar: await avatar,
         // The default-branch checkout of every host but the primary one is a hidden cache.
         worktrees: listedWorktrees({ ...repo, worktrees }).map((wt) => {
@@ -962,6 +970,13 @@ export class RepoService {
       throw new RepoInputError(`Unknown repo "${name}"`);
     }
     this.forgetCheckpointsIfTurnedOff(name, wasOn);
+  }
+
+  /** Turns "continue on another host automatically" on or off for `name`, or back to the default (off) with `null`. */
+  setAutoContinue(name: string, enabled: boolean | null): void {
+    if (!this.queries.setAutoContinue(name, enabled)) {
+      throw new RepoInputError(`Unknown repo "${name}"`);
+    }
   }
 
   /** Marks or unmarks `name` as a meta repo. */

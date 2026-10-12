@@ -192,6 +192,9 @@ enum ReposCmd {
         /// Whether the hub keeps checkpoints of the repo's worktrees on workers
         #[arg(long, value_name = "on|off|default")]
         checkpoints: Option<String>,
+        /// Whether a worktree on an offline host continues on another host without asking
+        #[arg(long, value_name = "on|off")]
+        auto_continue: Option<String>,
     },
     /// Unregister a repo
     Remove {
@@ -309,6 +312,14 @@ enum WorktreesCmd {
         /// Add the target host to the repo's allowed hosts when it is missing (admin token)
         #[arg(long)]
         add_host: bool,
+    },
+    /// Continue a worktree on another host from its latest checkpoint when its host is offline. The old copy stays, superseded
+    Continue {
+        /// Worktree ID
+        id: String,
+        /// Target host (id or name, see `band hosts list`). Default: the host the hub recommends
+        #[arg(long)]
+        to: Option<String>,
     },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
@@ -913,12 +924,14 @@ fn main() {
                 hosts,
                 primary,
                 checkpoints,
+                auto_continue,
             } => cmd_repos_set(
                 &name,
                 meta,
                 hosts.as_deref(),
                 primary.as_deref(),
                 checkpoints.as_deref(),
+                auto_continue.as_deref(),
             ),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
@@ -971,6 +984,7 @@ fn main() {
                 checkpoint,
                 add_host,
             } => cmd_worktrees_restore(&id, &to, checkpoint.as_deref(), add_host),
+            WorktreesCmd::Continue { id, to } => cmd_worktrees_continue(&id, to.as_deref()),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1314,6 +1328,9 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             Some(false) => "off",
             None => "-",
         };
+        let auto_continue = proj
+            .get("autoContinue")
+            .and_then(serde_json::Value::as_bool);
         let clones = proj
             .get("clones")
             .and_then(|c| c.as_array())
@@ -1361,6 +1378,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "allowedHostIds": allowed_hosts,
             "primaryHostId": primary_host,
             "checkpointsEnabled": checkpoints,
+            "autoContinue": auto_continue,
         }));
     }
 
@@ -1472,17 +1490,79 @@ fn resolve_host_id(hosts: &[serde_json::Value], given: &str) -> Result<String, S
         .ok_or_else(|| format!("Unknown host \"{given}\". See `band hosts list`."))
 }
 
+/// Reads `--checkpoints on|off|default` into the `repos.update` input and the report lines.
+fn apply_checkpoints_flag(
+    name: &str,
+    value: &str,
+    input: &mut serde_json::Value,
+    lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => {
+            input["checkpointsEnabled"] = serde_json::json!(true);
+            lines.push(format!("{name} keeps checkpoints on the hub"));
+        }
+        "off" => {
+            input["checkpointsEnabled"] = serde_json::json!(false);
+            lines.push(format!("{name} keeps no checkpoints on the hub"));
+        }
+        "default" => {
+            input["checkpointsEnabled"] = serde_json::Value::Null;
+            lines.push(format!(
+                "{name} follows the default (on, unless the repo is limited to chosen hosts)"
+            ));
+        }
+        other => {
+            return Err(format!(
+                "--checkpoints takes on, off or default, not \"{other}\""
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reads `--auto-continue on|off` into the `repos.update` input and the report lines.
+fn apply_auto_continue_flag(
+    name: &str,
+    value: &str,
+    input: &mut serde_json::Value,
+    lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => {
+            input["autoContinue"] = serde_json::json!(true);
+            lines.push(format!(
+                "{name} continues on another host by itself when its host is offline and the checkpoint is young"
+            ));
+        }
+        "off" => {
+            input["autoContinue"] = serde_json::json!(false);
+            lines.push(format!("{name} asks before it continues on another host"));
+        }
+        other => {
+            return Err(format!("--auto-continue takes on or off, not \"{other}\""));
+        }
+    }
+    Ok(())
+}
+
 fn cmd_repos_set(
     name: &str,
     meta: Option<bool>,
     hosts: Option<&str>,
     primary: Option<&str>,
     checkpoints: Option<&str>,
+    auto_continue: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(name, "Repo name")?;
-    if meta.is_none() && hosts.is_none() && primary.is_none() && checkpoints.is_none() {
+    if meta.is_none()
+        && hosts.is_none()
+        && primary.is_none()
+        && checkpoints.is_none()
+        && auto_continue.is_none()
+    {
         return Err(
-            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host> or --checkpoints on|off|default"
+            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host>, --checkpoints on|off|default or --auto-continue on|off"
                 .to_string(),
         );
     }
@@ -1494,27 +1574,10 @@ fn cmd_repos_set(
     }
     let mut lines = Vec::new();
     if let Some(value) = checkpoints {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "on" => {
-                input["checkpointsEnabled"] = serde_json::json!(true);
-                lines.push(format!("{name} keeps checkpoints on the hub"));
-            }
-            "off" => {
-                input["checkpointsEnabled"] = serde_json::json!(false);
-                lines.push(format!("{name} keeps no checkpoints on the hub"));
-            }
-            "default" => {
-                input["checkpointsEnabled"] = serde_json::Value::Null;
-                lines.push(format!(
-                    "{name} follows the default (on, unless the repo is limited to chosen hosts)"
-                ));
-            }
-            other => {
-                return Err(format!(
-                    "--checkpoints takes on, off or default, not \"{other}\""
-                ));
-            }
-        }
+        apply_checkpoints_flag(name, value, &mut input, &mut lines)?;
+    }
+    if let Some(value) = auto_continue {
+        apply_auto_continue_flag(name, value, &mut input, &mut lines)?;
     }
     if hosts.is_some() || primary.is_some() {
         let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
@@ -1568,6 +1631,7 @@ fn cmd_repos_set(
             "allowedHostIds": input.get("allowedHostIds"),
             "primaryHostId": input.get("primaryHostId"),
             "checkpointsEnabled": input.get("checkpointsEnabled"),
+            "autoContinue": input.get("autoContinue"),
         }),
     })
 }
@@ -1707,6 +1771,26 @@ fn cmd_worktrees_move(id: &str, to: &str, add_host: bool) -> Result<CommandResul
         .map_err(with_add_host_hint)?;
     Ok(CommandResult {
         text: restore_text(&data, "Moved", id),
+        json: data,
+    })
+}
+
+fn cmd_worktrees_continue(id: &str, to: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"worktreeId": id});
+    if let Some(to) = to {
+        input["toHostId"] = serde_json::json!(target_host_id(&client, to)?);
+    }
+    let data = client.trpc_mutate("follow.continue", &input)?;
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let out = format!(
+        "Continued {id} as {} on {} (host {})\nThe copy {id} is left untouched on its host and listed as superseded\n",
+        text("worktreeId"),
+        text("hostName"),
+        text("hostId")
+    );
+    Ok(CommandResult {
+        text: out,
         json: data,
     })
 }
@@ -5114,6 +5198,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--hosts", "type": "string", "required": false, "description": "Hosts the repo may run on (ids or names, comma separated), or `all`"},
                 {"name": "--primary", "type": "string", "required": false, "description": "Host that lists the repo's default-branch worktree (id or name), or `auto`"},
                 {"name": "--checkpoints", "type": "string", "required": false, "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default"},
+                {"name": "--auto-continue", "type": "string", "required": false, "description": "Whether a worktree on an offline host continues on another host without asking: on or off"},
             ],
             "notes": "A meta repo is one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults; it changes no behaviour. `band repos list` shows it in the META column. `--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
         }),
@@ -5180,6 +5265,15 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the repo's allowed hosts if missing (admin token)"},
             ],
             "notes": "Works when the old host is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`."
+        }),
+        serde_json::json!({
+            "name": "worktrees continue",
+            "description": "Continue a worktree on another host when its host is offline",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "--to", "type": "string", "required": false, "description": "Target host (id or name). Default: the host the hub recommends"},
+            ],
+            "notes": "Restores the worktree from the hub's latest checkpoint on an online host the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its host comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the host is online (use `worktrees move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is not available on another host."
         }),
         serde_json::json!({
             "name": "worktrees checkpoints",

@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 import { isMacPlatform } from "@/dashboard";
+import { promptOnHostOffline } from "../lib/continue-prompt";
 import {
   cycleGridGroups,
   selectNeighbourBeforeRemove,
@@ -368,7 +369,7 @@ export function TerminalSplitLeaf({
       // echo doesn't spawn a stray OUTER tab for this pane.
       registerPaneOwner(id, leafId);
       addPane(api, { worktreeId, terminalId: id, autoFocus: true }, { referenceGroup, direction });
-      trpc.terminal.create.mutate({ worktreeId, id }).catch(() => {});
+      trpc.terminal.create.mutate({ worktreeId, id }).catch(promptOnHostOffline);
     },
     [worktreeId, leafId, mobile],
   );

@@ -153,7 +153,7 @@ export const reposRouter = t.router({
   /**
    * Changes a repo's settings: `meta` (whether it is a meta repo), `allowedHostIds` (the hosts it
    * may run on, `null` for all) and `primaryHostId` (the host that lists its default branch,
-   * `null` to let the hub pick) and `checkpointsEnabled` (whether the hub keeps checkpoints, `null` for the default). Changing the host policy or the checkpoint setting is an admin call.
+   * `null` to let the hub pick) and `checkpointsEnabled` (whether the hub keeps checkpoints, `null` for the default) and `autoContinue` (whether a worktree on an offline host continues elsewhere without asking, `null` for off). Changing the host policy, the checkpoint setting or auto-continue is an admin call.
    */
   update: publicProcedure
     .input(
@@ -163,6 +163,7 @@ export const reposRouter = t.router({
         allowedHostIds: hostIds.nullable().optional(),
         primaryHostId: z.string().min(1).nullable().optional(),
         checkpointsEnabled: z.boolean().nullable().optional(),
+        autoContinue: z.boolean().nullable().optional(),
       }),
     )
     .mutation(({ input, ctx }) => {
@@ -176,6 +177,16 @@ export const reposRouter = t.router({
             });
           }
           repoService.setCheckpointsEnabled(input.name, input.checkpointsEnabled);
+        }
+        if (input.autoContinue !== undefined) {
+          if (!ctx.admin) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message:
+                "Only an admin token can change whether a repo continues on another host by itself.",
+            });
+          }
+          repoService.setAutoContinue(input.name, input.autoContinue);
         }
         if (
           (input.allowedHostIds !== undefined || input.primaryHostId !== undefined) &&

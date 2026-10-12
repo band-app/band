@@ -78,7 +78,7 @@ export interface World {
   /** The status of a tRPC mutation that is expected to fail, with the error body. */
   mFail(procedure: string, input: unknown): Promise<{ status: number; body: string }>;
   tmp(prefix: string): string;
-  addWorker(name: string, repos: string[]): Promise<Worker>;
+  addWorker(name: string, repos: string[], opts?: AddWorkerOptions): Promise<Worker>;
   /** Starts the worker process again with the state it saved, as a restart of the same machine. */
   restartWorker(w: Worker): Promise<Worker>;
   killWorker(w: Worker, signal?: NodeJS.Signals): Promise<void>;
@@ -95,7 +95,14 @@ export interface World {
   close(): Promise<void>;
 }
 
+export interface AddWorkerOptions {
+  /** Leave the scripted ACP agent out of the worker's environment, so it resolves agents as a real machine does. */
+  noStubAgent?: boolean;
+}
+
 export interface WorldOptions {
+  /** Extra settings for the hub, merged over the defaults (for example more coding agents). */
+  settings?: Record<string, unknown>;
   /** Repos to create, each with a bare origin and the hub's clone. */
   repos: Array<{ name: string }>;
   /** Extra environment for the hub. */
@@ -109,6 +116,10 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
     scratch.push(dir);
     return dir;
   };
+  // A `claude` the capability probe finds (`BAND_AGENT_BIN_DIRS`), so a worker with the scripted
+  // agent reports Claude Code as installed and logged in (`ANTHROPIC_API_KEY`), as a real one would.
+  const agentBin = tmp("band-ckpt-agent-bin-");
+  writeFileSync(join(agentBin, "claude"), '#!/bin/sh\necho "claude 1.0.0"\n', { mode: 0o755 });
   const workers: Worker[] = [];
   const lastEventId = new Map<string, number>();
   const hubHome = createTmpHome("band-ckpt-hub-");
@@ -132,6 +143,7 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
     tokenSecret: TEST_TOKEN,
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     defaultCodingAgent: "claude-code",
+    ...opts.settings,
   });
   seedState(hubHome, {
     repos: opts.repos.map((r) => ({
@@ -167,7 +179,10 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       return trpcData<T>(res);
     });
 
-  const spawnWorker = (w: Omit<Worker, "child" | "exited">): Worker => {
+  const spawnWorker = (
+    w: Omit<Worker, "child" | "exited">,
+    spawnOpts: AddWorkerOptions = {},
+  ): Worker => {
     const child = spawn(
       process.execPath,
       [
@@ -186,10 +201,17 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
           ...process.env,
           HOME: w.home,
           BAND_HOME: join(w.home, ".band"),
-          BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
-          BAND_TEST_ACP_STATE: w.stubState,
-          BAND_TEST_ACP_LOG: w.stubLog,
-          BAND_AGENT_SESSION_DIRS: w.stubState,
+          // Vitest puts the stub in every child's environment, so a worker without it unsets it.
+          ...(spawnOpts.noStubAgent
+            ? { BAND_TEST_ACP_AGENT: "" }
+            : {
+                BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
+                BAND_TEST_ACP_STATE: w.stubState,
+                BAND_TEST_ACP_LOG: w.stubLog,
+                BAND_AGENT_SESSION_DIRS: w.stubState,
+                BAND_AGENT_BIN_DIRS: agentBin,
+                ANTHROPIC_API_KEY: "test-key",
+              }),
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -216,7 +238,7 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       const res = await trpcMutate(server.url, procedure, input, TEST_TOKEN);
       return { status: res.status, body: await res.text() };
     },
-    async addWorker(name, repos) {
+    async addWorker(name, repos, addOpts = {}) {
       const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
         hostName: name,
         labels: [],
@@ -230,16 +252,19 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       }
       const stubState = join(home, "acp-state");
       mkdirSync(stubState, { recursive: true });
-      const w = spawnWorker({
-        name,
-        hostId: issued.hostId,
-        root,
-        state: tmp(`band-ckpt-${name}-state-`),
-        home,
-        stubState,
-        stubLog: join(home, "stub-log.jsonl"),
-        token: issued.token,
-      });
+      const w = spawnWorker(
+        {
+          name,
+          hostId: issued.hostId,
+          root,
+          state: tmp(`band-ckpt-${name}-state-`),
+          home,
+          stubState,
+          stubLog: join(home, "stub-log.jsonl"),
+          token: issued.token,
+        },
+        addOpts,
+      );
       workers.push(w);
       await waitFor(async () => ((await hostStatus(w.hostId)) === "online" ? true : undefined), {
         label: `${name} online`,
