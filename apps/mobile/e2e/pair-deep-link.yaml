@@ -1,0 +1,47 @@
+# S1: the deep link pairs with the hub, and the pairing survives an app restart.
+appId: app.getband.mobile
+name: S1 pair through the deep link
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- openLink: ${PAIR_LINK}
+# iOS asks "Open in “Band”?" for a custom scheme opened from outside the app.
+- tapOn:
+    text: Open
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: pair__host
+    timeout: 20000
+- takeScreenshot: s1-confirm-hub
+- tapOn:
+    id: pair__connect
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- assertVisible:
+    id: home__hub-url
+    text: ${HUB_URL}
+- takeScreenshot: s1-paired-by-deep-link
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- assertVisible:
+    id: home__hub-url
+    text: ${HUB_URL}
+- takeScreenshot: s1-still-paired-after-restart

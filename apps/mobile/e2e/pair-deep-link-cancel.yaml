@@ -1,0 +1,37 @@
+# A deep link asks before pairing, and Cancel saves nothing.
+appId: app.getband.mobile
+name: Deep link cancelled
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- openLink: ${PAIR_LINK}
+# iOS asks "Open in “Band”?" for a custom scheme opened from outside the app.
+- tapOn:
+    text: Open
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: pair__host
+    timeout: 20000
+- tapOn:
+    id: pair__cancel
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- takeScreenshot: deep-link-cancelled-nothing-saved
