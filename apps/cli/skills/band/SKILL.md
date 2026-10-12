@@ -86,6 +86,8 @@ band repos remove <name>
 
 Removes the repo from Band's registry (does not delete the repository).
 
+An agent running on a worker may use `repos add`, `repos set` and `repos remove` like a person. The only refusal is a repo limited to hosts that do not include the agent's own host (`band repos set <name> --hosts ...`), and adding a repo limited to hosts that exclude the host its folder is on.
+
 ### List worktrees, optionally filtered by repo
 
 ```sh
