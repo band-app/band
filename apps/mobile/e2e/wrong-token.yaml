@@ -1,0 +1,41 @@
+# S2: a wrong token shows "invalid token" and saves nothing.
+appId: app.getband.mobile
+name: S2 wrong token
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- tapOn:
+    id: connect__manual
+- tapOn:
+    id: manual__url
+- inputText: ${HUB_URL}
+- tapOn:
+    id: manual__token
+- inputText: bdt_this_token_does_not_exist
+- tapOn:
+    id: manual__connect
+- extendedWaitUntil:
+    visible:
+      id: manual__error
+      text: Invalid token. The hub rejected it.
+    timeout: 20000
+- takeScreenshot: s2-invalid-token
+# Nothing was saved: a restart lands on the pairing screen again.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- assertNotVisible:
+    id: home__screen
+- takeScreenshot: s2-nothing-saved-after-restart

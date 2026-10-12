@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Band",
+    "slug": "band",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "band",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#1e1e1e",
+    "ios": {
+      "bundleIdentifier": "app.getband.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Band connects to the hub on your local network."
+      }
+    },
+    "android": {
+      "package": "app.getband.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Band uses the camera to scan the QR code from Settings > Devices.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
