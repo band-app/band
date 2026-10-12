@@ -23,9 +23,10 @@ export function appPath(configuration = "Release") {
 
 /**
  * `expo prebuild` (when `ios/` is missing), `pod install`, then `xcodebuild` for the simulator.
- * Release embeds the JS bundle, so the app runs without Metro.
+ * Release embeds the JS bundle, so the app runs without Metro. `env` reaches the bundler, which
+ * inlines `EXPO_PUBLIC_*` variables into the bundle.
  */
-export function buildForSimulator(configuration = "Release") {
+export function buildForSimulator(configuration = "Release", env = {}) {
   if (!existsSync(join(APP_ROOT, "ios/Band.xcworkspace"))) {
     run(join(APP_ROOT, "node_modules/.bin/expo"), ["prebuild", "--platform", "ios", "--no-install"]);
     run("pod", ["install"], { cwd: join(APP_ROOT, "ios") });
@@ -50,7 +51,7 @@ export function buildForSimulator(configuration = "Release") {
   ];
   // One architecture is enough for the local simulator and halves the build.
   if (arch() === "arm64") args.push("EXCLUDED_ARCHS=x86_64");
-  run("xcodebuild", [...args, "build"]);
+  run("xcodebuild", [...args, "build"], { env: { ...process.env, ...env } });
   return appPath(configuration);
 }
 

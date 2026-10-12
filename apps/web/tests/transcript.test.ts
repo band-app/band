@@ -8,6 +8,7 @@
  * covered end to end by the chat e2e specs.
  */
 
+import { formatToolDuration, toolDuration } from "@band-app/client/tool-summary";
 import {
   type ChatMessage,
   foldEvents,
@@ -23,7 +24,6 @@ import type {
   SessionUpdate,
 } from "@band-app/shared/chat-events";
 import { describe, expect, it } from "vitest";
-import { formatToolDuration, toolDuration } from "../src/components/chat/tool-summary";
 
 /** Gives each payload a logged (positive, increasing) event id. */
 function logged(events: ChatEventPayload[], firstId = 1): ChatEvent[] {

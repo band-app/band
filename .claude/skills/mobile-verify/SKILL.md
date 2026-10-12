@@ -71,6 +71,11 @@ Check each tool first and install only what is missing. All of it is user space 
 
    Run some flows only by naming them: `node apps/mobile/scripts/verify.mjs --skip-build wrong-token hub-down`.
 
+   The `perf-` flows need the frame log, which only a perf build has:
+   `node apps/mobile/scripts/verify.mjs --perf` builds with `EXPO_PUBLIC_BAND_PERF_LOG=1` and
+   runs only the `perf-` flows. Without `--perf` they are skipped. Build without `--perf`
+   again before the other flows, because the perf build shows the log over the chat.
+
 3. Read the report. The script prints it and saves it with the screenshots under
    `apps/mobile/e2e/artifacts/<timestamp>/` (gitignored). Each flow has a folder with its
    screenshots and Maestro's output. The script exits non-zero when a flow fails or the token
@@ -90,17 +95,30 @@ Check each tool first and install only what is missing. All of it is user space 
 | `w2-status-live.yaml` | A row shows Running within 2 s of the agent starting a turn and Needs attention when it asks for permission; the "needs me" filter keeps only waiting worktrees. |
 | `w3-foreground.yaml` | After a minute in the background the list shows what changed meanwhile. |
 | `w4-open.yaml` | Tapping a worktree opens its screen with the right name and branch; Back returns to the same place in a long list. |
+| `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link shows the "file viewer comes later" notice. |
+| `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
+| `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
+| `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
+| `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
+| `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
-`alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The stub agent's scenario
-(`SCENARIO` in the same file) treats a prompt starting with `work` as a turn that runs until
-stopped and one starting with `ask` as a turn that waits for a permission answer.
+`alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The repo `gamma` holds the
+chat flows' worktrees: `gamma-main` (a finished "showcase" turn with an attached image),
+`gamma-long` (a finished turn of 1,610 replayed events), `gamma-history` (24 short turns, more
+than the 20 the hub sends on open), and the empty `gamma-stream` and
+`gamma-resume`. The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
+with `work` as a turn that runs until stopped, one starting with `ask` as a turn that waits for a
+permission answer, and one starting with `stream` as 90 numbered lines over 45 s.
 
 Flows drive the hub through a loopback control server that `verify.mjs` runs
 (`e2e/scripts/hub-control.js`, `ACTION` is a path with its query): `stop` and `start` stop and
 restart it (`hub-down.yaml`), `work?wt=<worktree id>`, `ask?wt=<id>` and `halt?wt=<id>` make the
-agent work, ask for permission or stop, `fill?n=12` adds worktrees to `alpha`, and
-`sleep?ms=<n>` answers after n ms. The `w` flows run in number order on purpose: `w4-open.yaml` adds worktrees that push `beta` off the first screen. Shared steps live in `e2e/subflows/` (`pair-link.yaml` pairs
+agent work, ask for permission or stop, `stream?wt=<id>` starts the streamed turn,
+`fill?n=12` adds worktrees to `alpha`, and `sleep?ms=<n>` answers after n ms. `clipboard` fails
+unless the simulator's clipboard holds `VALUE`, `check-transcript?wt=<id>` compares the copied
+last turn with the hub's, and `note?name=<n>` with `VALUE` adds a line to the report's
+"Measurements and checks". The `w` flows run in number order on purpose: `w4-open.yaml` adds worktrees that push `beta` off the first screen. Shared steps live in `e2e/subflows/` (`pair-link.yaml` pairs
 through the deep link), which `verify.mjs` does not run on its own. Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`,
 `CONTROL_URL`, `WRONG_TOKEN`, `HUB_URL_ALT` (the same hub at `localhost`) and `HUB_ID` /
 `HUB_ID_ALT` (the app's ids for the two, used in the Hubs screen's testIDs) as Maestro env

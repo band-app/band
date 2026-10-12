@@ -1,0 +1,63 @@
+# S2: streamed text appears line by line while the list stays at the bottom; scrolling up stops
+# following and shows "Jump to latest", which brings the list back to the newest line.
+appId: app.getband.mobile
+name: S2 streaming stays pinned until the user scrolls up
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-stream
+# A chat with no messages yet.
+- extendedWaitUntil:
+    visible:
+      id: chat__empty
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: stream?wt=gamma-stream
+- extendedWaitUntil:
+    visible:
+      text: "Line 04 of the stream."
+    timeout: 15000
+- takeScreenshot: s2-streaming-1
+# Pinned: by line 30 the text is taller than the screen, and each new line still shows up
+# without any scrolling.
+- extendedWaitUntil:
+    visible:
+      text: "Line 30 of the stream."
+    timeout: 25000
+- assertNotVisible:
+    text: "stream: go"
+- assertNotVisible:
+    id: chat__jump-latest
+- takeScreenshot: s2-streaming-pinned
+- scrollUntilVisible:
+    element:
+      text: "stream: go"
+    direction: UP
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: chat__jump-latest
+    timeout: 5000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=5000
+# Five seconds of new lines later the list has not moved.
+- assertVisible:
+    text: "stream: go"
+- assertVisible:
+    id: chat__jump-latest
+- takeScreenshot: s2-scrolled-up
+- tapOn:
+    id: chat__jump-latest
+- assertNotVisible:
+    id: chat__jump-latest
+- extendedWaitUntil:
+    visible:
+      text: "END of the stream."
+    timeout: 60000
+- takeScreenshot: s2-back-at-latest

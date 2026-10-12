@@ -1,18 +1,21 @@
+import { diffLines } from "@band-app/client/diff-lines";
+import {
+  describeTool,
+  formatToolDuration,
+  hasToolDetails,
+  OUTPUT_LIMIT,
+  shellRun,
+  shownExitCode,
+  summarizeTools,
+  type ToolLabel,
+  toolDetails,
+  toolDuration,
+  toolState,
+} from "@band-app/client/tool-summary";
 import type { ToolEntry } from "@band-app/client/transcript";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
-import {
-  describeTool,
-  formatToolDuration,
-  OUTPUT_LIMIT,
-  shellRun,
-  summarizeTools,
-  type ToolLabel,
-  toolDuration,
-  toolState,
-} from "../chat/tool-summary";
-import { diffLines } from "./diff-lines";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
@@ -124,7 +127,7 @@ function Label({ label }: { label: ToolLabel }) {
 function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) {
   const run = useMemo(() => shellRun(entry), [entry]);
   if (!run) return null;
-  const showExit = run.exitCode !== undefined && (failed || run.exitCode !== 0);
+  const exitCode = shownExitCode(run, failed);
   return (
     <div className={cn("space-y-2 font-mono text-xs", failed && "text-red-400")}>
       <pre
@@ -134,7 +137,7 @@ function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) 
         <span className="select-none text-muted-foreground">$ </span>
         {run.command}
       </pre>
-      {showExit && <div data-testid="tool-call__exit-code">Exit code {run.exitCode}</div>}
+      {exitCode !== undefined && <div data-testid="tool-call__exit-code">Exit code {exitCode}</div>}
       {run.output && (
         <pre
           data-testid="tool-call__output"
@@ -152,12 +155,7 @@ function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) 
 
 /** What the agent reported for any other call: diffs, text, raw input and output. */
 function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
-  const diffs = entry.content.filter((c) => c.type === "diff");
-  const texts = entry.content.flatMap((c) =>
-    c.type === "content" && c.content.type === "text" ? [c.content.text] : [],
-  );
-  // Plans and thinking come back as prose; command output is raw text.
-  const prose = entry.toolKind === "switch_mode" || entry.toolKind === "think";
+  const { diffs, texts, prose } = toolDetails(entry);
   return (
     <>
       {diffs.map((d) => (
@@ -191,13 +189,7 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
   const state = toolState(entry);
   const failed = state === "error";
   const shell = entry.toolKind === "execute";
-  const hasBody =
-    shell ||
-    entry.content.some(
-      (c) => c.type === "diff" || (c.type === "content" && c.content.type === "text"),
-    ) ||
-    entry.rawInput !== undefined ||
-    entry.rawOutput !== undefined;
+  const hasBody = hasToolDetails(entry);
 
   return (
     <Collapsible

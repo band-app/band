@@ -1,0 +1,13 @@
+# Opens a worktree of the gamma repo from the home screen. WT is the worktree id.
+appId: app.getband.mobile
+---
+- scrollUntilVisible:
+    element:
+      id: home__worktree-${WT}
+    timeout: 30000
+- tapOn:
+    id: home__worktree-${WT}
+- extendedWaitUntil:
+    visible:
+      id: worktree__screen
+    timeout: 10000
