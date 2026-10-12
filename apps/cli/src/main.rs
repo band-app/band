@@ -253,6 +253,12 @@ enum WorktreesCmd {
         /// first time the repo is used there).
         #[arg(long)]
         host_repo_path: Option<String>,
+        /// Create it on this host (id or name, see `band hosts list`). Inside
+        /// a worker's agent, only an online, static worker the repo allows,
+        /// and only when the hub setting "Agents may start worktrees on other
+        /// hosts" is on. Without it the worktree goes where the caller runs.
+        #[arg(long, conflicts_with_all = ["labels", "requires", "any_host", "isolation"])]
+        host: Option<String>,
         /// Worktree id to record as the origin (where this work was started
         /// from). Inside a Band chat or terminal the origin defaults to that
         /// worktree, and through a worker's relay also to the chat or terminal.
@@ -926,6 +932,7 @@ fn main() {
                 any_host,
                 isolation,
                 host_repo_path,
+                host,
                 origin,
                 no_origin,
             } => cmd_worktrees_create(
@@ -943,6 +950,7 @@ fn main() {
                     any_host,
                     isolation: isolation.as_deref(),
                     host_repo_path: host_repo_path.as_deref(),
+                    host: host.as_deref(),
                 },
                 origin.as_deref(),
                 no_origin,
@@ -1840,6 +1848,8 @@ struct Placement<'a> {
     any_host: bool,
     isolation: Option<&'a str>,
     host_repo_path: Option<&'a str>,
+    /// A host id or name to create on.
+    host: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1934,6 +1944,9 @@ fn cmd_worktrees_create(
     }
     if let Some(path) = placement.host_repo_path {
         input["hostRepoPath"] = serde_json::json!(path);
+    }
+    if let Some(host) = placement.host {
+        input["hostId"] = serde_json::json!(target_host_id(&client, host)?);
     }
     // The origin is the worktree this one is started from. An explicit
     // `--origin` wins, `--no-origin` clears it, and otherwise a command run

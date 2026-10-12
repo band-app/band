@@ -288,7 +288,7 @@ describe("origin links through a worker", () => {
   it("keeps a chat on a worker on that worker, and honours noOrigin", async () => {
     await say("elsewhere-chat", wt("borko", "start"), "start-elsewhere");
     const refused = httpLog().find((l) => l.name === "elsewhere-call");
-    expect(refused?.body).toContain("on that worker only");
+    expect(refused?.body).toContain("hub's own machine");
     expect(await worktreeOf("svc-elsewhere")).toBeUndefined();
 
     await say("none-chat", wt("borko", "start"), "start-none");

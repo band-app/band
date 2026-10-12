@@ -762,6 +762,41 @@ fn worktrees_create_refuses_a_host_the_repo_is_not_allowed_on() {
 }
 
 #[test]
+fn worktrees_create_host_flag_conflicts_and_unknown_host() {
+    let env = TestEnv::new();
+
+    let out = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/h",
+        "--host",
+        "h-1",
+        "--labels",
+        "a=b",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("cannot be used with"),
+        "stderr: {}",
+        stderr(&out)
+    );
+
+    let out = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/h",
+        "--host",
+        "no-such-host",
+    ]);
+    assert!(!out.status.success());
+    assert!(!stderr(&out).is_empty());
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    assert!(!listed.to_string().contains("feat-h"), "listed: {listed}");
+}
+
+#[test]
 fn worktrees_create_records_the_origin_and_list_shows_it() {
     let env = TestEnv::new();
     for branch in ["feat/parent", "feat/other"] {

@@ -22,7 +22,7 @@
  * with a stubbed `dialog.showOpenDialog`) and the auto-updater.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
@@ -47,6 +47,19 @@ const LOCAL_WORKTREE = toWorktreeId("localproj", "main", "local");
 const REMOTE_WORKTREE = toWorktreeId("remoteproj", "main", "local");
 const LOCAL_REPLY = "Reply from the local hub";
 const REMOTE_REPLY = "Reply from the remote hub";
+
+/** The files under `dir` (recursively) whose bytes contain `needle`, as paths relative to `dir`. */
+function filesContaining(dir: string, needle: string, base = dir): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...filesContaining(path, needle, base));
+    else if (entry.isFile() && readFileSync(path).includes(needle)) {
+      found.push(path.slice(base.length + 1));
+    }
+  }
+  return found;
+}
 
 interface HubHome {
   home: string;
@@ -199,6 +212,39 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(false);
     expect(existsSync(join(hub.home, ".band", "server.log"))).toBe(false);
     expect(app.cspViolations).toEqual([]);
+  });
+
+  test("a plain-text hub token from an older version moves into the key store and the file is deleted", async () => {
+    const hub = await seedHome("unused", "unused", LOCAL_TOKEN);
+    homes.push(hub.home);
+    const legacy = join(hub.home, ".band", "desktop-hub.json");
+    writeFileSync(legacy, JSON.stringify({ mode: "remote", url: remote.url, token: REMOTE_TOKEN }));
+    const app = await launchDesktop({
+      answeredWorkerPrompt: [remote.url],
+      home: hub.home,
+      hubPort: hub.port,
+    });
+    desktop = app;
+    const dashboard = new DesktopDashboardPage(app.window);
+
+    // Connecting to the remote hub still works with the migrated token.
+    await dashboard.expectRepoListed("remoteproj");
+    expect(existsSync(legacy)).toBe(false);
+    expect(existsSync(join(hub.home, ".band", "desktop-hub.enc"))).toBe(true);
+
+    // The next launch reads the token back from the key store.
+    await app.close();
+    desktop = null;
+    const again = await launchDesktop({
+      answeredWorkerPrompt: [remote.url],
+      home: hub.home,
+      hubPort: hub.port,
+    });
+    desktop = again;
+    await new DesktopDashboardPage(again.window).expectRepoListed("remoteproj");
+
+    // No file under this HOME holds the remote hub's token in plain text.
+    expect(filesContaining(hub.home, REMOTE_TOKEN)).toEqual([]);
   });
 
   test("a saved remote hub that is down offers Retry and Use local, and Use local starts the local hub", async () => {

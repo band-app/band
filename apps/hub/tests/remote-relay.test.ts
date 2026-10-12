@@ -624,6 +624,7 @@ describe("what an agent may call, and which ids it may take", () => {
       hostOfTerminal: () => null,
       worktreeOfBrowser: () => null,
       worktreeOfSubscription: () => null,
+      crossHostRefusal: () => null,
     };
     const other = checkRelayRequest(
       post("/trpc/worktrees.remove", { ...remove, hostId: "local" }),
@@ -740,6 +741,11 @@ describe("the band CLI through the relay (S2)", () => {
       (w) => w.worktreeId === ws,
     )?.path as string;
     expect(await ok("repos", "list", "--output", "json")).toContain("proj");
+    // The host list an agent gets has no roots, home or tools.
+    const hostList = await ok("hosts", "list", "--output", "json");
+    expect(hostList).toContain(b.hostId);
+    expect(hostList).not.toContain('"roots"');
+    expect(hostList).not.toContain('"home"');
 
     const chat = await json("chats", "create", ws, "--name", "skill-chat", "--output", "json");
     const chatId: string = chat.chatId ?? chat.id ?? chat.chat?.id;
@@ -857,7 +863,8 @@ describe("the band CLI through the relay (S2)", () => {
         ?.worktrees.find((w) => w.name === "relay-cli-new");
       expect(made?.hostId).toBe(a.hostId);
 
-      // A call that names another host is refused, and so is removing a worktree on another host.
+      // A call that names the hub's own machine is refused (another worker is allowed, see
+      // `cross-host-worktrees.test.ts`), and so is removing a worktree on another host.
       const relay = agentEnv();
       const post = (procedure: string, body: object) =>
         fetch(`${relay?.BAND_SERVER_URL}/trpc/${procedure}`, {
@@ -871,7 +878,7 @@ describe("the band CLI through the relay (S2)", () => {
       const elsewhere = await post("worktrees.create", {
         repo: "proj",
         branch: "x",
-        hostId: b.hostId,
+        hostId: "local",
       });
       expect(elsewhere.status).toBe(403);
       expect(await elsewhere.text()).toContain("worktrees.create");

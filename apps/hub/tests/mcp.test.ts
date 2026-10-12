@@ -157,7 +157,10 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).not.toContain("band_queue_stream");
 
     // Credentials stay out of agent reach
-    expect(toolNames.filter((n) => /^band_(tokens|hosts)_/.test(n))).toEqual([]);
+    // The redacted host list is the one `hosts` tool an agent gets.
+    expect(toolNames.filter((n) => /^band_(tokens|hosts)_/.test(n))).toEqual([
+      "band_hosts_forAgents",
+    ]);
   });
 
   it("calls band_repos_list tool and gets results", async () => {

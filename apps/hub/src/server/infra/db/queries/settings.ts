@@ -186,6 +186,8 @@ export interface Settings {
    */
   agents?: {
     defaultMode?: "gui" | "tui";
+    /** Agents on a worker may start worktrees on other hosts. On unless false. */
+    crossHostWorktrees?: boolean;
     [key: string]: unknown;
   };
   /**

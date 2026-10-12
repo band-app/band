@@ -112,6 +112,9 @@ export const settingsUpdateInput = z
     agents: z
       .object({
         defaultMode: z.enum(["gui", "tui"]).optional(),
+        // Whether an agent on a worker may start a worktree on another allowed, online, static
+        // worker (cross-host worktrees). On unless false.
+        crossHostWorktrees: z.boolean().optional(),
       })
       .passthrough()
       .optional(),
