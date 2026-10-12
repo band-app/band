@@ -541,16 +541,17 @@
  * buttons are 34px tall, with 3px above and below each tab and the strip's 1px
  * bottom border, so the strip is 41px.
  *
- * The tabs are no longer scaled with `zoom: 1.2`. dockview's scrollbar
- * (`Scrollbar` in dockview-core) answers every `scroll` event by clamping the
- * list to its `scrollWidth` minus the `.dv-scrollable` wrapper's `clientWidth`
- * (both rounded to integers) and writing `scrollLeft` back. Under the zoom, that write snapped the list back at the
- * end of a swipe, fired another scroll event, and cut the fling short. The
- * clamp keeps running when the bar is hidden: hiding it does not stop the
- * writes. `overscroll-behavior-x: none` also removes the bounce / glow at the
- * ends that `contain` still allows, and `touch-action: pan-x` keeps the strip
- * from starting a vertical pan. dockview's own 4px bar is hidden because it is
- * a mouse affordance with no use on a phone.
+ * Do not scale the tabs with `zoom`. dockview's scrollbar (`Scrollbar` in
+ * dockview-core) answers every `scroll` event by clamping the list to its
+ * `scrollWidth` minus the `.dv-scrollable` wrapper's `clientWidth` (both
+ * rounded to integers) and writing `scrollLeft` back. Under the old
+ * `zoom: 1.2`, that write snapped the list back at the end of a swipe, fired
+ * another scroll event, and cut the fling short. The clamp keeps running when
+ * the bar is hidden: hiding it does not stop the writes.
+ * `overscroll-behavior-x: none` also removes the bounce / glow at the ends
+ * that `contain` still allows, and `touch-action: pan-x` keeps the strip from
+ * starting a vertical pan. dockview's own 4px bar is hidden because it is a
+ * mouse affordance with no use on a phone.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-mobile {
   --dv-tabs-and-actions-container-height: 41px;
