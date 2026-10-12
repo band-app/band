@@ -21,9 +21,17 @@ Check each tool first and install only what is missing. All of it is user space 
 3. Java 17 for Maestro: `/opt/homebrew/opt/openjdk@17/bin/java -version`, else
    `brew install openjdk@17`. The verify script puts it on PATH itself, so no shell profile
    change is needed.
-4. Maestro: `maestro --version` (the script also looks in `~/.maestro/bin`), else
-   `brew tap mobile-dev-inc/tap && brew install mobile-dev-inc/tap/maestro`.
-5. Node 24 (`.nvmrc`) and the workspace installed: `pnpm install`.
+4. Maestro: `PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH" maestro --version` (the script
+   also looks in `~/.maestro/bin`), else
+   `brew tap mobile-dev-inc/tap && brew install mobile-dev-inc/tap/maestro`. Without Java 17 on
+   PATH, a bare `maestro --version` fails with "Unable to locate a Java Runtime" even when
+   Maestro is installed.
+5. Node 24 (`.nvmrc`): `node --version` must print v24. If it doesn't, put a Node 24 first on
+   PATH for every command below (for example `~/.nvm/versions/node/v24.*/bin`).
+6. The workspace installed: `pnpm install`. On a fresh worktree this is the longest step
+   (about 15 minutes with a cold pnpm store).
+7. Disk: a build needs about 2.5 GB in the worktree (`apps/mobile/build` about 1.9 GB, the
+   generated `apps/mobile/ios` about 650 MB). Check `df -h .` first.
 
 ## Every run
 
@@ -57,7 +65,7 @@ Check each tool first and install only what is missing. All of it is user space 
      token `wrong-token.yaml` types, and fails when the log search found under 10 lines;
    - stops the hub and deletes its temp home.
 
-   The first build takes 10 to 20 minutes. Later runs with no native change can skip it:
+   The first native build takes 5 to 20 minutes (on top of `pnpm install` in a fresh worktree). Later runs with no native change can skip it:
    `node apps/mobile/scripts/verify.mjs --skip-build`. A JS-only change still needs a build,
    because Release embeds the bundle.
 
