@@ -1,7 +1,7 @@
+import type { Entry } from "@band-app/client/transcript";
 import { Button } from "@band-app/ui";
 import { Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
-import type { Entry } from "../chat/transcript";
 import { MessageResponse } from "./message";
 
 type PermissionEntry = Extract<Entry, { kind: "permission" }>;

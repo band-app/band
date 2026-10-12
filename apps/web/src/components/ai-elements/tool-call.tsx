@@ -1,3 +1,4 @@
+import type { ToolEntry } from "@band-app/client/transcript";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
@@ -11,7 +12,6 @@ import {
   toolDuration,
   toolState,
 } from "../chat/tool-summary";
-import type { ToolEntry } from "../chat/transcript";
 import { diffLines } from "./diff-lines";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";

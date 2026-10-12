@@ -112,6 +112,10 @@
       "entry": ["src/index.ts", "src/server.ts", "src/client.tsx"],
       "project": ["src/**/*.{ts,tsx}"]
     },
+    "packages/client": {
+      "entry": ["src/*.ts", "tests/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
     "packages/shared": {
       "entry": ["src/*.ts"],
       "project": ["src/**/*.ts"]

@@ -1,3 +1,4 @@
+import type { Entry } from "@band-app/client/transcript";
 import { Button, cn } from "@band-app/ui";
 import { CheckIcon, ChevronLeft, ChevronRight, Loader2, PencilIcon, XIcon } from "lucide-react";
 import {
@@ -11,7 +12,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Entry } from "../chat/transcript";
 
 type ElicitationEntry = Extract<Entry, { kind: "elicitation" }>;
 type Value = string | number | boolean | string[];

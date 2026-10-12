@@ -2,6 +2,7 @@
 // session settings and requests all come from `useChatSubscription`, which
 // folds the server's event stream through `transcriptReducer`.
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { ChatMessage, Entry } from "@band-app/client/transcript";
 import type { SessionState } from "@band-app/shared/chat-events";
 import {
   cn,
@@ -60,7 +61,6 @@ import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
 import { groupEntries } from "./chat/tool-summary";
-import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatFind } from "./chat/use-chat-find";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import {

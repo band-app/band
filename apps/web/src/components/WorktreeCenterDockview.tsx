@@ -1,4 +1,13 @@
 import {
+  type CenterTab,
+  type CenterTabs,
+  centerTabsKey,
+  diffCenterTabs,
+  keepHiddenTabs,
+  parseCenterTabs,
+  withLocalMembership,
+} from "@band-app/client/center-tabs";
+import {
   Button,
   ContextMenu,
   ContextMenuContent,
@@ -109,18 +118,7 @@ import {
   useWorktreeChanges,
 } from "../hooks/useWorktreeChanges";
 import { useWorktreeColdParked } from "../hooks/useWorktreeColdParked";
-import {
-  type CenterTab,
-  type CenterTabs,
-  centerTabsFromApi,
-  centerTabsKey,
-  diffCenterTabs,
-  keepHiddenTabs,
-  parseCenterTabs,
-  readCenterTabs,
-  withLocalMembership,
-  writeCenterTabs,
-} from "../lib/center-tabs";
+import { centerTabsFromApi, readCenterTabs, writeCenterTabs } from "../lib/center-tabs";
 import { clientStorage, hydrateWorktree, subscribeClientState } from "../lib/client-state";
 import { writeClipboardText } from "../lib/clipboard";
 import { listen as desktopListen } from "../lib/desktop-ipc";
