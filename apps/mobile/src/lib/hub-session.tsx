@@ -17,6 +17,7 @@ import {
 } from "@band-app/client/hub-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fetch as expoFetch } from "expo/fetch";
 import {
   createContext,
   type ReactNode,
@@ -26,7 +27,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { fetch as expoFetch } from "expo/fetch";
 import { AppState } from "react-native";
 import { createClientStateStorage } from "./client-state-storage";
 import type { SavedHub } from "./hub-store";

@@ -58,14 +58,30 @@ function walk(node: Node, scope: string | undefined, out: CodeRun[]): void {
   for (const child of node.children ?? []) walk(child, next, out);
 }
 
+/**
+ * Recent results, so a list cell rebound to a row it showed before (scrolling back) doesn't
+ * re-run lowlight. A Map keeps insertion order: the first key is the least recently used.
+ */
+const cache = new Map<string, CodeRun[]>();
+const CACHE_SIZE = 64;
+
 export function highlight(code: string, lang: string): CodeRun[] {
   const name = languageOf(lang);
   if (!name || code.length > HIGHLIGHT_LIMIT) return [{ text: code }];
-  try {
-    const out: CodeRun[] = [];
-    walk(lowlight.highlight(name, code) as Node, undefined, out);
-    return out;
-  } catch {
-    return [{ text: code }];
+  const key = `${name}\n${code}`;
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
   }
+  let out: CodeRun[] = [];
+  try {
+    walk(lowlight.highlight(name, code) as Node, undefined, out);
+  } catch {
+    out = [{ text: code }];
+  }
+  cache.set(key, out);
+  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
+  return out;
 }

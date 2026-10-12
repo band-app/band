@@ -43,7 +43,8 @@ describe("buildRows", () => {
   });
 
   it("ends a running turn with a thinking row instead of a footer", () => {
-    const rows = buildRows(state.messages, true);
+    const running = transcript(events.filter((e) => e.type !== "turn-ended"));
+    const rows = buildRows(running.messages, true);
     assert.deepEqual(
       rows.map((r) => r.kind),
       ["user", "part", "part", "part", "thinking"],
@@ -57,7 +58,24 @@ describe("buildRows", () => {
       say("Sure"),
     ]);
     const after = buildRows(next.messages, false);
+    // The footer (index 4) is a new object on every call; its content still matches.
     for (let i = 0; i < 4; i++) assert.equal(after[i], before[i]);
+    assert.deepEqual(after[4], before[4]);
+  });
+
+  it("drops blank text from the rows and from the copied text", () => {
+    const blank = transcript([
+      { type: "prompt", eventId: ++id, text: "go" } as ChatEvent,
+      say("\n\n"),
+      tool("t3", "read"),
+      say("Read it."),
+    ]);
+    const rows = buildRows(blank.messages, false);
+    assert.deepEqual(
+      rows.map((r) => rowType(r)),
+      ["user", "tool", "text", "footer"],
+    );
+    assert.equal(copyText(rows[1]), "Read it.");
   });
 
   it("copies the message's text from any of its rows", () => {
@@ -78,6 +96,7 @@ describe("buildRows", () => {
     ]);
     const rows = buildRows(waiting.messages, true);
     assert.equal(rows[rows.length - 1].kind, "part");
+    assert.ok(!rows.some((r) => r.kind === "thinking"));
   });
 });
 

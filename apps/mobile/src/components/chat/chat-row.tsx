@@ -2,7 +2,7 @@ import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { memo } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { type ChatRow, copyText } from "../../lib/chat/rows";
+import type { ChatRow } from "../../lib/chat/rows";
 import { chatColors, colors, tones } from "../../theme";
 import { useAssetSource, useChat, useOpen } from "./chat-context";
 import { Markdown } from "./markdown";
@@ -50,18 +50,28 @@ function Thought({ id, text }: { id: string; text: string }) {
   );
 }
 
+/** The answer as the web chat words it: the picked option's name, not its id. */
+function answerText(entry: Extract<Entry, { kind: "permission" | "elicitation" }>): string {
+  if (entry.kind === "elicitation") {
+    if (entry.answer === "accept") return "Answer sent to the agent";
+    return entry.answer === "decline" ? "Skipped" : "Not answered";
+  }
+  if (entry.answer === "cancelled") return "Not answered";
+  const picked = entry.request.options.find((o) => o.optionId === entry.answer);
+  return picked?.name ?? entry.answer ?? "";
+}
+
 /** A permission or question the agent waits on. The answer forms come in a later version. */
 function Request({ entry }: { entry: Extract<Entry, { kind: "permission" | "elicitation" }> }) {
   const subject =
     entry.kind === "permission"
       ? (entry.request.toolCall.title ?? "a tool call")
       : entry.request.message;
-  const waiting = !entry.answer;
   const label = entry.kind === "permission" ? "Permission" : "Question";
   return (
     <View style={styles.request} testID="chat__request">
       <Text style={styles.requestTitle}>
-        {waiting ? `Waiting for ${label.toLowerCase()}` : `${label}: ${entry.answer}`}
+        {entry.answer ? `${label}: ${answerText(entry)}` : `Waiting for ${label.toLowerCase()}`}
       </Text>
       <Text style={styles.muted}>{subject}</Text>
     </View>
@@ -172,12 +182,12 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
 /** One list row. A long press copies its message's text. */
 export const ChatRowView = memo(
   function ChatRowView({ row }: { row: ChatRow }) {
-    const { copy } = useChat();
+    const { copyRow } = useChat();
     return (
       <Pressable
         // Not one accessibility element: the row's text, links and buttons stay reachable.
         accessible={false}
-        onLongPress={() => copy(copyText(row))}
+        onLongPress={() => copyRow(row.key)}
         delayLongPress={350}
         style={styles.row}
         testID={`chat__row-${row.kind}`}

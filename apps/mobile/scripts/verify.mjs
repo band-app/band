@@ -68,6 +68,7 @@ async function hubTranscript(hub, chatId) {
     headers: { Authorization: `Bearer ${hub.adminToken}`, Accept: "text/event-stream" },
     signal: abort.signal,
   });
+  if (!res.ok) throw new Error(`events of ${chatId}: HTTP ${res.status}`);
   const events = [];
   const decoder = new TextDecoder();
   let buffer = "";
@@ -94,6 +95,9 @@ async function hubTranscript(hub, chatId) {
     if (err.message !== "done") throw err;
   } finally {
     abort.abort();
+  }
+  if (!events.some((e) => e.type === "history-meta")) {
+    throw new Error(`events of ${chatId}: the stream ended before history-meta`);
   }
   return { events, state: foldEvents(INITIAL_TRANSCRIPT, events) };
 }

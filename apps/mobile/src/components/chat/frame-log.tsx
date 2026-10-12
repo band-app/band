@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
+import { fonts } from "../../theme";
 
 /** A gap between two JS frames longer than this is a stall. */
 const STALL_MS = 100;
@@ -63,5 +64,5 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 8,
   },
-  text: { color: "#4ade80", fontFamily: "Menlo", fontSize: 11 },
+  text: { color: "#4ade80", fontFamily: fonts.mono, fontSize: 11 },
 });

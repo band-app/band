@@ -39,7 +39,10 @@ class OpenSet {
       this.listeners.set(id, set);
     }
     set.add(listener);
-    return () => set.delete(listener);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0) this.listeners.delete(id);
+    };
   }
 }
 
@@ -47,7 +50,10 @@ interface ChatContextValue {
   hubUrl: string;
   token: string;
   openSet: OpenSet;
+  onToggle: () => void;
   copy: (text: string) => void;
+  /** Copies what a long press on the row `key` copies, read from the current transcript. */
+  copyRow: (key: string) => void;
   openFile: (path: string) => void;
 }
 
@@ -57,29 +63,47 @@ export function ChatProvider({
   hubUrl,
   token,
   onCopied,
+  onToggle,
+  rowText,
   children,
 }: {
   hubUrl: string;
   token: string;
   onCopied: () => void;
+  /** Called when the user opens or closes a collapsible. */
+  onToggle: () => void;
+  /**
+   * The copy text of a row as the transcript holds it now. A memoized row can be stale: an
+   * earlier part of a message that is still growing doesn't re-render, but copies the whole message.
+   */
+  rowText: (key: string) => string;
   children: ReactNode;
 }) {
   const openSet = useRef(new OpenSet()).current;
   const copiedRef = useRef(onCopied);
   copiedRef.current = onCopied;
-  const value = useMemo<ChatContextValue>(
-    () => ({
+  const toggledRef = useRef(onToggle);
+  toggledRef.current = onToggle;
+  const rowTextRef = useRef(rowText);
+  rowTextRef.current = rowText;
+  const value = useMemo<ChatContextValue>(() => {
+    const copy = (text: string) => {
+      if (!text) return;
+      Clipboard.setStringAsync(text).then(
+        () => copiedRef.current(),
+        () => Alert.alert("Couldn't copy"),
+      );
+    };
+    return {
       hubUrl,
       token,
       openSet,
-      copy: (text) => {
-        if (!text) return;
-        void Clipboard.setStringAsync(text).then(() => copiedRef.current());
-      },
+      onToggle: () => toggledRef.current(),
+      copy,
+      copyRow: (key) => copy(rowTextRef.current(key)),
       openFile: (path) => Alert.alert(path, "The file viewer comes in a later version."),
-    }),
-    [hubUrl, token, openSet],
-  );
+    };
+  }, [hubUrl, token, openSet]);
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }
 
@@ -91,10 +115,13 @@ export function useChat(): ChatContextValue {
 
 /** Whether the collapsible `id` is open, and a toggle for it. */
 export function useOpen(id: string): [boolean, () => void] {
-  const { openSet } = useChat();
+  const { openSet, onToggle } = useChat();
   const subscribe = useCallback((cb: () => void) => openSet.subscribe(id, cb), [openSet, id]);
   const open = useSyncExternalStore(subscribe, () => openSet.isOpen(id));
-  const toggle = useCallback(() => openSet.toggle(id), [openSet, id]);
+  const toggle = useCallback(() => {
+    onToggle();
+    openSet.toggle(id);
+  }, [openSet, onToggle, id]);
   return [open, toggle];
 }
 

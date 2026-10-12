@@ -34,7 +34,14 @@ export interface ListItem {
 export type Block =
   | { type: "heading"; depth: number; spans: Span[] }
   | { type: "paragraph"; spans: Span[] }
-  | { type: "code"; lang: string; text: string; label?: "diagram" | "math" }
+  | {
+      type: "code";
+      lang: string;
+      text: string;
+      label?: "diagram" | "math";
+      /** A fence still streaming: no closing marker yet. */
+      open?: boolean;
+    }
   | { type: "list"; ordered: boolean; start: number; items: ListItem[] }
   | { type: "quote"; blocks: Block[] }
   | { type: "table"; align: Align[]; header: Span[][]; rows: Span[][][] }
@@ -64,7 +71,13 @@ const inlineMath: TokenizerExtension = {
   },
 };
 
-const marked = new Marked({ gfm: true, breaks: true, extensions: [blockMath, inlineMath] });
+/** The closing line of a fenced block (an opening line alone is not one). */
+const CLOSING_FENCE = /\n {0,3}(`{3,}|~{3,})[^\S\n]*\n*$/;
+
+// The math extensions' `start` hooks rescan the rest of the source for every token, so text
+// without `$$` is lexed without them.
+const marked = new Marked({ gfm: true, breaks: true });
+const markedWithMath = new Marked({ gfm: true, breaks: true, extensions: [blockMath, inlineMath] });
 
 const ENTITIES: Record<string, string> = {
   amp: "&",
@@ -106,10 +119,15 @@ function textSpans(text: string, style: Style): Span[] {
   return spans;
 }
 
+/** Schemes a tap may open. Any other (`band:`, `tel:`, another app's deep link) stays text. */
+const OPENABLE_SCHEME = /^(https?|mailto):/i;
+
 function linkTarget(href: string): Span["link"] {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return { url: href };
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href))
+    return OPENABLE_SCHEME.test(href) ? { url: href } : undefined;
   if (isFilePath(href)) return { file: href };
-  return { url: href };
+  // `#section`, `/api/x`: nothing a tap could open.
+  return undefined;
 }
 
 function inline(tokens: Token[] | undefined, style: Style = {}): Span[] {
@@ -141,13 +159,17 @@ function inline(tokens: Token[] | undefined, style: Style = {}): Span[] {
       case "br":
         spans.push({ text: "\n", ...style });
         break;
-      case "link":
-        spans.push(...inline(token.tokens, { ...style, link: linkTarget(token.href) }));
+      case "link": {
+        const link = linkTarget(token.href);
+        spans.push(...inline(token.tokens, link ? { ...style, link } : style));
         break;
-      case "image":
+      }
+      case "image": {
         // A picture in an agent's prose is rare; the chat shows its alt text as a link.
-        spans.push({ text: token.text || token.href, ...style, link: linkTarget(token.href) });
+        const link = linkTarget(token.href);
+        spans.push({ text: token.text || token.href, ...style, ...(link && { link }) });
         break;
+      }
       case "html":
         spans.push({ text: token.text, ...style });
         break;
@@ -185,6 +207,8 @@ function blocks(tokens: Token[]): Block[] {
           text: token.text,
           ...(lang === "mermaid" && { label: "diagram" as const }),
           ...((lang === "math" || lang === "latex") && { label: "math" as const }),
+          ...(token.codeBlockStyle !== "indented" &&
+            !CLOSING_FENCE.test(token.raw) && { open: true }),
         });
         break;
       }
@@ -230,7 +254,7 @@ function blocks(tokens: Token[]): Block[] {
 }
 
 export function parseMarkdown(source: string): Block[] {
-  return blocks(marked.lexer(source));
+  return blocks((source.includes("$$") ? markedWithMath : marked).lexer(source));
 }
 
 /** The text of spans, for accessibility labels and copying. */

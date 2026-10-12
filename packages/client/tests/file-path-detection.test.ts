@@ -15,7 +15,7 @@ describe("findFilePaths", () => {
     assert.deepEqual(findFilePaths("Edit src/app.ts later"), []);
   });
 
-  it("agrees with isFilePath on inline code", () => {
+  it("isFilePath accepts a path and rejects a command", () => {
     assert.equal(isFilePath("src/app.ts"), true);
     assert.equal(isFilePath("npm test"), false);
   });

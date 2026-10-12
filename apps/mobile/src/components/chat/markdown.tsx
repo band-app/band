@@ -159,7 +159,9 @@ function BlockView({ block, muted }: { block: Block; muted?: boolean }) {
     case "paragraph":
       return <Paragraph spans={block.spans} style={tone} />;
     case "code":
-      return <CodeBlock code={block.text} lang={block.lang} label={block.label} />;
+      return (
+        <CodeBlock code={block.text} lang={block.lang} label={block.label} open={block.open} />
+      );
     case "list":
       return (
         <ListView ordered={block.ordered} start={block.start} items={block.items} muted={muted} />

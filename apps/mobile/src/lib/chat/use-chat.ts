@@ -35,10 +35,12 @@ export function useChatTranscript(chatId: string): ChatTranscript {
   const [state, dispatch] = useReducer(transcriptReducer, INITIAL_TRANSCRIPT);
   const [connected, setConnected] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [foreground, setForeground] = useState(AppState.currentState === "active");
+  // `inactive` (Control Center, the app switcher, a call banner) keeps the stream: iOS suspends
+  // the app only in `background`.
+  const [foreground, setForeground] = useState(AppState.currentState !== "background");
 
   useEffect(() => {
-    const sub = AppState.addEventListener("change", (next) => setForeground(next === "active"));
+    const sub = AppState.addEventListener("change", (next) => setForeground(next !== "background"));
     return () => sub.remove();
   }, []);
 

@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams } from "expo-router";
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChatView } from "../../components/chat/chat-view";
@@ -73,7 +73,8 @@ function WorktreeScreen({ id }: { id: string }) {
   );
 }
 
-function WorktreeChat({ worktreeId }: { worktreeId: string }) {
+/** Memoized: the screen re-renders on every hub status event, the chat only on its own data. */
+const WorktreeChat = memo(function WorktreeChat({ worktreeId }: { worktreeId: string }) {
   const { chatId, loading, error } = useActiveChat(worktreeId);
   if (chatId) return <ChatView key={chatId} chatId={chatId} />;
   return (
@@ -87,7 +88,7 @@ function WorktreeChat({ worktreeId }: { worktreeId: string }) {
       )}
     </Centered>
   );
-}
+});
 
 const local = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },

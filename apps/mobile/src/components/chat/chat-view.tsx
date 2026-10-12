@@ -1,5 +1,5 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   type NativeScrollEvent,
@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
+import { buildRows, type ChatRow, copyText, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
@@ -44,10 +44,19 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+
   const onCopied = useCallback(() => {
     setCopied(true);
     clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+  }, []);
+
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const rowText = useCallback((key: string) => {
+    const row = rowsRef.current.find((r) => r.key === key);
+    return row ? copyText(row) : "";
   }, []);
 
   const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -61,8 +70,19 @@ export function ChatView({ chatId }: { chatId: string }) {
     setShowJump(!atBottom);
   }, []);
 
+  // Opening a tool call or a thought grows the content too. Following that would push what the
+  // user just opened above the screen, so the list follows again only once new output arrives.
+  const toggled = useRef(false);
+  const onToggle = useCallback(() => {
+    toggled.current = true;
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `rows` is the trigger
+  useEffect(() => {
+    toggled.current = false;
+  }, [rows]);
+
   const followOutput = useCallback(() => {
-    if (pinned.current) listRef.current?.scrollToEnd({ animated: false });
+    if (pinned.current && !toggled.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
   const jumpToLatest = useCallback(() => {
@@ -76,7 +96,13 @@ export function ChatView({ chatId }: { chatId: string }) {
   }, [state.hasOlder, loadOlder]);
 
   return (
-    <ChatProvider hubUrl={hub.url} token={hub.token} onCopied={onCopied}>
+    <ChatProvider
+      hubUrl={hub.url}
+      token={hub.token}
+      onCopied={onCopied}
+      onToggle={onToggle}
+      rowText={rowText}
+    >
       <View style={styles.root} testID="chat__view">
         {!loaded ? (
           <View style={styles.center} testID="chat__loading">

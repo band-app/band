@@ -28,6 +28,26 @@ describe("parseMarkdown", () => {
     assert.equal(para.type === "paragraph" && spansText(para.spans), "one\ntwo");
   });
 
+  it("links only web and mail schemes, so agent text can't open the app's own or another app's links", () => {
+    const [para] = parseMarkdown(
+      "[pair](band://pair?hub=x) [call](tel:123) [web](https://a.b) [mail](mailto:a@b.c) " +
+        "[top](#section) [api](/api/x) [f](src/app.ts)",
+    );
+    if (para.type !== "paragraph") throw new Error("expected a paragraph");
+    assert.deepEqual(
+      para.spans.filter((s) => s.text.trim()),
+      [
+        { text: "pair" },
+        { text: "call" },
+        { text: "web", link: { url: "https://a.b" } },
+        { text: "mail", link: { url: "mailto:a@b.c" } },
+        { text: "top" },
+        { text: "api" },
+        { text: "f", link: { file: "src/app.ts" } },
+      ],
+    );
+  });
+
   it("turns file paths in inline code and in text with a line number into file links", () => {
     const [para] = parseMarkdown("Edited `src/app.ts`, see lib/util.ts:12 and `npm test`.");
     assert.equal(para.type, "paragraph");
@@ -78,7 +98,11 @@ describe("parseMarkdown", () => {
 
   it("shows an unclosed fence while it streams", () => {
     const [code] = parseMarkdown("```ts\nconst a = 1");
-    assert.deepEqual(code, { type: "code", lang: "ts", text: "const a = 1" });
+    assert.deepEqual(code, { type: "code", lang: "ts", text: "const a = 1", open: true });
+    const [closed] = parseMarkdown("```ts\nconst a = 1\n```");
+    assert.deepEqual(closed, { type: "code", lang: "ts", text: "const a = 1" });
+    const [indented] = parseMarkdown("    const a = 1");
+    assert.equal(indented.type === "code" && indented.open, undefined);
   });
 });
 
@@ -97,6 +121,12 @@ describe("highlight", () => {
     assert.equal(languageOf("sh"), "bash");
     assert.equal(languageOf("tsx"), "tsx");
     assert.equal(languageOf("nope"), null);
+  });
+
+  it("gives the same runs for a repeated block, and each language its own", () => {
+    const code = "def f(): return 1";
+    assert.deepEqual(highlight(code, "python"), highlight(code, "python"));
+    assert.notDeepEqual(highlight(code, "python"), highlight(code, "text"));
   });
 
   it("leaves an unknown language plain", () => {

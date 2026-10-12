@@ -206,6 +206,8 @@ export interface FilePathMatch {
 
 /** The file paths with a line indicator in plain text, in order. */
 export function findFilePaths(text: string): FilePathMatch[] {
+  // Every match has `:<digit>`; most text has none, and the chat calls this per text token.
+  if (!/:\d/.test(text)) return [];
   const re = new RegExp(FILE_PATH_WITH_LINE_RE.source, "g");
   const found: FilePathMatch[] = [];
   for (let match = re.exec(text); match !== null; match = re.exec(text)) {
