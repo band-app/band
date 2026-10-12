@@ -78,6 +78,8 @@ export interface RepoInfo {
   allowedHostIds?: string[] | null;
   /** The host whose default-branch checkout is listed as a worktree. */
   primaryHostId?: string | null;
+  /** Set when no host lists the default branch: the primary host, whose clone is not on it. */
+  mainMissing?: { hostId: string } | null;
   /** Whether the hub keeps checkpoints of this repo's worktrees (the stored choice, else the default). */
   checkpointsEnabled?: boolean;
   /** The stored choice, or null when the repo follows the default. */
