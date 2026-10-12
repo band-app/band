@@ -1,5 +1,6 @@
 import { CornerUpLeft } from "lucide-react";
 import { toWorktreeId, useCapabilities, useRepos } from "@/dashboard";
+import { ContinuedFromLine } from "../dashboard/components/ContinuedFromLine";
 import { readCenterTabs, writeCenterTabs } from "../lib/center-tabs";
 import { getWorktreeDockviewApi } from "./WorktreeCenterDockview";
 
@@ -11,21 +12,32 @@ import { getWorktreeDockviewApi } from "./WorktreeCenterDockview";
 export function StartedFromBar({ worktreeId }: { worktreeId: string }) {
   const { repos } = useRepos();
   const capabilities = useCapabilities();
-  const origin = repos
+  const worktree = repos
     .flatMap((r) => r.worktrees.map((wt) => ({ repo: r, wt })))
-    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId)?.wt.origin;
-  if (!origin) return null;
+    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId)?.wt;
+  const origin = worktree?.origin;
+  const continued = worktree?.continuedFrom;
+  if (!origin && !continued) return null;
+  const continuedBar = continued ? (
+    <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground">
+      <ContinuedFromLine from={continued} testId="worktree-header__continued-from" />
+    </div>
+  ) : null;
+  if (!origin) return continuedBar;
 
   if (origin.removed || !origin.repo) {
     return (
-      <div
-        data-testid="started-from"
-        data-removed="true"
-        className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground"
-      >
-        <CornerUpLeft className="size-3.5" />
-        Started from a worktree that was removed
-      </div>
+      <>
+        {continuedBar}
+        <div
+          data-testid="started-from"
+          data-removed="true"
+          className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground"
+        >
+          <CornerUpLeft className="size-3.5" />
+          Started from a worktree that was removed
+        </div>
+      </>
     );
   }
 
@@ -44,21 +56,24 @@ export function StartedFromBar({ worktreeId }: { worktreeId: string }) {
   };
 
   return (
-    <div
-      data-testid="started-from"
-      className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground"
-    >
-      <CornerUpLeft className="size-3.5" />
-      <span>Started from</span>
-      <button
-        type="button"
-        data-testid="started-from__link"
-        data-origin-worktree={origin.worktreeId}
-        onClick={open}
-        className="truncate font-medium text-foreground underline-offset-2 hover:underline"
+    <>
+      {continuedBar}
+      <div
+        data-testid="started-from"
+        className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground"
       >
-        {origin.repo} · {origin.branch}
-      </button>
-    </div>
+        <CornerUpLeft className="size-3.5" />
+        <span>Started from</span>
+        <button
+          type="button"
+          data-testid="started-from__link"
+          data-origin-worktree={origin.worktreeId}
+          onClick={open}
+          className="truncate font-medium text-foreground underline-offset-2 hover:underline"
+        >
+          {origin.repo} · {origin.branch}
+        </button>
+      </div>
+    </>
   );
 }

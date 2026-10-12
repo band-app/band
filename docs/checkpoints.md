@@ -80,6 +80,10 @@ If a repo has no remote URL, the target must already know the repo, or the call 
 
 `band hosts evacuate <host> --to <host>` (Move all worktrees on this host in Settings > Hosts, admin) does this for every worktree on a host, one after the other, and prints a summary. One failure does not stop the others. A repo's own clone is not moved. An offline source host restores from the last checkpoints and leaves its copies superseded.
 
+## Continue when a host is offline
+
+When someone acts on an offline worktree (a chat message, a terminal, an agent launch), Band offers a restore on another host, or does it by itself for a repo that opts in. See [Follow the work](follow-the-work.md).
+
 ## Permissions
 
 Reading checkpoints, restore and move take any device token. Adding a host to a repo, changing the setting and evacuating a host need an admin token. The MCP endpoint and the worker relay do not offer `checkpoints.*`, so an agent cannot move work between hosts.

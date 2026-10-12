@@ -127,6 +127,9 @@ export const repos = sqliteTable("repos", {
   // Whether the hub keeps checkpoints of the repo's worktrees on static workers. Null means the
   // default: on for a repo available on every host, off for one limited to chosen hosts.
   checkpointsEnabled: integer("checkpoints_enabled", { mode: "boolean" }),
+  // Whether a worktree whose host is offline continues on another host without asking, while its
+  // checkpoint is younger than the age limit. Null means off.
+  autoContinue: integer("auto_continue", { mode: "boolean" }),
 });
 
 // A repo's checkout path on each host. `repos.path` stays the source
@@ -175,6 +178,12 @@ export const worktrees = sqliteTable("worktrees", {
   // Set when the worktree was restored on another host: the id of the replacement. The copy
   // stays on disk untouched and is listed as superseded until a person removes it.
   supersededBy: text("superseded_by"),
+  // Set on the copy a continuation created: where it came from, why and from which checkpoint.
+  // JSON of `ContinuedFrom` (`@band-app/shared/continuation`).
+  continuedFrom: text("continued_from", { mode: "json" }).$type<Record<string, unknown>>(),
+  // Set on a superseded copy once its host is back: whether its files differ from the checkpoint
+  // the continuation used. JSON of `Divergence` (`@band-app/shared/continuation`).
+  divergence: text("divergence", { mode: "json" }).$type<Record<string, unknown>>(),
 });
 
 // Worktrees on a remote host whose worktree was removed while the host was

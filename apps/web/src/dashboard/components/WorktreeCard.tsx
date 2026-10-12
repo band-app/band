@@ -44,6 +44,8 @@ import type {
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
+import { ContinuedFromLine } from "./ContinuedFromLine";
+import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
@@ -158,6 +160,8 @@ export const WorktreeCard = memo(function WorktreeCard({
   const superseded = worktree.supersededBy;
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
+  const [divergenceOpen, setDivergenceOpen] = useState(false);
+  const diverged = worktree.divergence?.state === "diverged";
   // Move needs the host online. Restore needs a checkpoint to restore from.
   const moveMode: "move" | "restore" | null =
     !worktree.hostId || worktree.hostId === "local" || superseded
@@ -395,6 +399,14 @@ export const WorktreeCard = memo(function WorktreeCard({
                 : "Host offline"}
             </span>
           )}
+          {/* The work of this worktree continued here from another host's checkpoint. */}
+          {worktree.continuedFrom && !isDeleting && (
+            <ContinuedFromLine
+              from={worktree.continuedFrom}
+              testId="worktree-card__continued-from"
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            />
+          )}
           {/* This copy was restored on another host. Its files are untouched until a person removes it. */}
           {superseded && !isDeleting && (
             <span
@@ -404,6 +416,19 @@ export const WorktreeCard = memo(function WorktreeCard({
               className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
             >
               Superseded by {superseded}
+              {diverged && (
+                <button
+                  type="button"
+                  data-testid="worktree-card__diverged"
+                  className="rounded bg-destructive/15 px-1 text-destructive underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDivergenceOpen(true);
+                  }}
+                >
+                  Diverged
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="worktree-card__remove-superseded"
@@ -545,6 +570,13 @@ export const WorktreeCard = memo(function WorktreeCard({
           </ContextMenuItem>
         )}
       </ContextMenuContent>
+      {superseded && divergenceOpen && (
+        <DivergencePanel
+          open={divergenceOpen}
+          onOpenChange={setDivergenceOpen}
+          worktreeId={worktreeId}
+        />
+      )}
       {moveMode && moveOpen && (
         <MoveWorktreeDialog
           open={moveOpen}

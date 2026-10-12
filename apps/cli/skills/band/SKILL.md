@@ -147,6 +147,15 @@ band worktrees restore <id> --to <host> [--checkpoint <checkpointId>] [--add-hos
 
 The hub keeps recent checkpoints of worktrees on workers: uncommitted and untracked changes plus the agent session. Ignored files and running processes are not included. `checkpoints` lists them (`--take` makes one now). `move` works while the worktree's host is online: it takes a fresh checkpoint, restores it on the target and removes the source only after the target has the same files. `restore` works when the host is offline and leaves the old copy on disk, listed as superseded in `band worktrees list`; remove it with `band worktrees remove`. A target the repo is not allowed on is refused unless `--add-host` is given (admin token). `<id>` is the worktree id from `band worktrees list`; `--to` takes a host id or name.
 
+### Continue on another host when a host is offline
+
+```sh
+band worktrees continue <id> [--to <host>]
+band repos set <repo> --auto-continue on|off
+```
+
+When the host of a worktree is offline, the hub can continue the work on another host the repo may run on, from its latest checkpoint: the branch, uncommitted and untracked files, the agent sessions and the chats. The repo's setup runs on the new copy. `continue` does it on request (the hub picks the target unless `--to` names one). A chat message, a new terminal or an agent launch for such a worktree is refused with the same offer, unless the repo has `--auto-continue on` and the checkpoint is younger than 30 minutes (`BAND_AUTO_CONTINUE_MAX_AGE_MS`), in which case it continues by itself. Reading the worktree (changes, files, chat history) never triggers it. The command fails with a reason when the host is online (use `move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is missing on every other host. The old copy is never deleted: it is listed as superseded, and when its host returns the UI flags it diverged if it holds changes the checkpoint lacks. Ignored files and running processes are not carried over.
+
 ### Remove a worktree (git worktree + state cleanup)
 
 ```sh

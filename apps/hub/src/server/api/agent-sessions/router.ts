@@ -6,9 +6,10 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { WorktreeNotFoundError } from "../../errors";
+import { ContinueGateError, WorktreeNotFoundError } from "../../errors";
 import { agentLaunchService, ChatNotInWorktreeError } from "../../services/agent-launch-service";
 import { agentSessionRegistry } from "../../services/agent-session-registry-service";
+import { followService } from "../../services/follow-service";
 import { TaskConflictError } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -39,8 +40,13 @@ export const agentSessionsRouter = t.router({
     )
     .mutation(async ({ input }) => {
       try {
+        // An agent needs a live host: continue the work elsewhere, or tell the client its choices.
+        const gate = await followService.gate(input.worktreeId, {
+          chatId: input.chatId,
+          agentId: input.agentId,
+        });
         const { ready, ...result } = agentLaunchService.launch({
-          worktreeId: input.worktreeId,
+          worktreeId: gate.worktreeId,
           agentDefinitionId: input.agentId,
           prompt: input.prompt,
           mode: input.mode,
@@ -48,8 +54,13 @@ export const agentSessionsRouter = t.router({
           terminalId: input.terminalId,
         });
         await ready;
-        return result;
+        return gate.continued
+          ? { ...result, worktreeId: gate.worktreeId, continued: gate.continued }
+          : result;
       } catch (err) {
+        if (err instanceof ContinueGateError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message, cause: err });
+        }
         if (err instanceof WorktreeNotFoundError) {
           throw new TRPCError({ code: "NOT_FOUND", message: err.message });
         }
