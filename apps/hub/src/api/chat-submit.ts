@@ -13,9 +13,12 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
+import type { ContinuedFrom } from "@band-app/shared/continuation";
+import { ContinueGateError } from "../server/errors";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveWorktreeUploads } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
+import { followService } from "../server/services/follow-service";
 import {
   type TaskAttachment,
   taskService,
@@ -61,13 +64,32 @@ export async function handleChatSubmit(
     return;
   }
 
-  const { worktreeId, text, sessionId, mode, model, codingAgentId, files } = body;
+  const { text, sessionId, mode, model, codingAgentId, files } = body;
+  let { worktreeId } = body;
   if (!worktreeId || !text?.trim()) {
     sendJson(res, 400, { error: "worktreeId and text are required" });
     return;
   }
   if (sessionId !== undefined && !SESSION_ID_PATTERN.test(sessionId)) {
     sendJson(res, 400, { error: "invalid sessionId" });
+    return;
+  }
+
+  // A message needs a live host. When the worktree's host is offline, the work continues on
+  // another host (the repo opted in and the checkpoint is young) or the client is told what its
+  // choices are, so it can show the prompt and send again.
+  let continued: ContinuedFrom | undefined;
+  try {
+    const gate = await followService.gate(worktreeId, { chatId, agentId: codingAgentId });
+    worktreeId = gate.worktreeId;
+    continued = gate.continued;
+  } catch (err) {
+    if (err instanceof ContinueGateError) {
+      sendJson(res, 409, err.answer);
+      return;
+    }
+    log.error({ chatId, err }, "chat-submit: could not check the worktree's host");
+    sendJson(res, 500, { error: "Internal server error" });
     return;
   }
 
@@ -109,7 +131,11 @@ export async function handleChatSubmit(
       { chatId, worktreeId },
       result.queued ? "chat-submit: chat busy, message queued" : "chat-submit: task started",
     );
-    sendJson(res, 200, { ok: true, queued: result.queued });
+    sendJson(res, 200, {
+      ok: true,
+      queued: result.queued,
+      ...(continued ? { worktreeId, continued } : {}),
+    });
   } catch (err) {
     if (err instanceof WorktreeNotFoundError) {
       sendJson(res, 404, { error: err.message });

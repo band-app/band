@@ -53,6 +53,7 @@ import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { environmentRouter } from "./environment/router";
+import { followRouter } from "./follow/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { hostRequestsRouter } from "./host-requests/router";
@@ -106,6 +107,7 @@ export const appRouter = t.router({
   environment: environmentRouter,
   hostRequests: hostRequestsRouter,
   checkpoints: checkpointsRouter,
+  follow: followRouter,
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,

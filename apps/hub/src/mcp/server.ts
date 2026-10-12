@@ -40,6 +40,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("tokens.") ||
       path.startsWith("vault.") ||
       path.startsWith("checkpoints.") ||
+      path.startsWith("follow.") ||
       path.startsWith("mcp.") ||
       (path.startsWith("hosts.") && path !== "hosts.forAgents") ||
       path.startsWith("hostRequests.") ||

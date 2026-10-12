@@ -1,4 +1,5 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
+import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 
 export type { FormatFileResult } from "@band-app/shared/format-file-result";
 export type {
@@ -84,6 +85,8 @@ export interface RepoInfo {
   checkpointsEnabled?: boolean;
   /** The stored choice, or null when the repo follows the default. */
   checkpointsSetting?: boolean | null;
+  /** Whether a worktree whose host is offline continues on another host without asking. */
+  autoContinue?: boolean;
 }
 
 export interface RepoAvatarInfo {
@@ -122,6 +125,10 @@ export interface WorktreeInfo {
   supersededBy?: string;
   /** When the hub took the newest checkpoint of this worktree, or null when it has none. */
   lastCheckpointAt?: number | null;
+  /** Set on a copy a continuation created: where the work came from. */
+  continuedFrom?: ContinuedFrom;
+  /** Set on a superseded copy once its host is back: whether it holds changes the continuation missed. */
+  divergence?: Divergence;
   /** Where the worktree was started from, or null for top-level work. */
   origin?: WorktreeOrigin | null;
   /** Ids of the worktrees started from this one, on any repo and host. */

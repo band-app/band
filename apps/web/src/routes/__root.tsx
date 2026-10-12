@@ -20,6 +20,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { ContinuePromptHost } from "@/dashboard/components/ContinueOnHostDialog";
 import { ToastHost } from "@/dashboard/components/ToastHost";
 import { queryClient, queryKeys } from "@/dashboard/query-client";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
@@ -1025,6 +1026,7 @@ function RootLayout() {
           <AppShell />
         </ClientStateGate>
         <ToastHost />
+        <ContinuePromptHost />
       </TooltipProvider>
     </DashboardProvider>
   );

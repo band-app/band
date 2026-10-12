@@ -123,6 +123,7 @@ import {
 } from "../lib/center-tabs";
 import { clientStorage, hydrateWorktree, subscribeClientState } from "../lib/client-state";
 import { writeClipboardText } from "../lib/clipboard";
+import { announceIfMoved, promptOnHostOffline } from "../lib/continue-prompt";
 import { listen as desktopListen } from "../lib/desktop-ipc";
 import {
   cycleGridGroups,
@@ -3464,9 +3465,11 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
             addChatLeaf(api, worktreeId, result.chatId, position);
           }
           if (result.notice) console.warn("[WorktreeCenterDockview]", result.notice);
+          announceIfMoved(worktreeId, (result as { worktreeId?: string }).worktreeId);
         })
         .catch((err) => {
           console.error("[WorktreeCenterDockview] agent launch failed:", err);
+          promptOnHostOffline(err);
           // A default-agent chat pane still works without its launch: it
           // creates its chat row on the first message, the way panes did
           // before #682. With a picked agent no pane opens, since it would
@@ -3492,9 +3495,13 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (kind === "term") {
         const id = newTerminalId();
         addTermLeaf(api, worktreeId, id, { autoFocus: true }, position);
-        trpc.terminal.create.mutate({ worktreeId, id }).catch((err) => {
-          console.error("[WorktreeCenterDockview] terminal create failed:", err);
-        });
+        trpc.terminal.create
+          .mutate({ worktreeId, id })
+          .then((created) => announceIfMoved(worktreeId, created.worktreeId))
+          .catch((err) => {
+            console.error("[WorktreeCenterDockview] terminal create failed:", err);
+            promptOnHostOffline(err);
+          });
       } else if (kind === "chat") {
         launchAgent(position, agentId);
       } else if (kind === "browser") {
@@ -3518,7 +3525,10 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (kind === "term") {
         const id = newTerminalId();
         addTermLeaf(api, worktreeId, id, { autoFocus: true }, position);
-        trpc.terminal.create.mutate({ worktreeId, id }).catch(() => {});
+        trpc.terminal.create
+          .mutate({ worktreeId, id })
+          .then((created) => announceIfMoved(worktreeId, created.worktreeId))
+          .catch(promptOnHostOffline);
       } else if (kind === "chat") {
         launchAgent(position);
       } else if (kind === "browser" && isDesktop) {

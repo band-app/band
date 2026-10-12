@@ -1,5 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
-import { BranchOnOtherHostError } from "../errors";
+import { BranchOnOtherHostError, ContinueGateError } from "../errors";
 import type { Context } from "./context";
 
 /**
@@ -21,6 +21,11 @@ export const t = initTRPC.context<Context>().create({
         ...shape,
         data: { ...shape.data, existingWorktreeId: cause.worktreeId, existingHostId: cause.hostId },
       };
+    }
+    // A refusal to act on a worktree whose host is offline carries the offer (who could take the
+    // work, or why nobody can), so the UI shows its prompt without parsing the message.
+    if (cause instanceof ContinueGateError) {
+      return { ...shape, data: { ...shape.data, hostOffline: cause.answer } };
     }
     return shape;
   },
