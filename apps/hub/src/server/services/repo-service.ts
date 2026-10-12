@@ -21,7 +21,13 @@ import { hostRegistry } from "../infra/host/registry";
 import { forgetCheckpoints } from "./_utils/checkpoint-store";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
-import { assertHostAllowed, listedWorktrees, primaryHostOf } from "./_utils/repo-host-policy";
+import {
+  assertHostAllowed,
+  hostNamesOf,
+  listedWorktrees,
+  mainMissingOf,
+  primaryHostOf,
+} from "./_utils/repo-host-policy";
 import { ephemeralLifecycleService, type WorktreeLifecycle } from "./ephemeral-lifecycle-service";
 import {
   type RepoAvatarInfo,
@@ -59,6 +65,12 @@ function isInsideRoots(path: string, roots: string[]): boolean {
  * own slice of the work and returns; the caller chains the rest. See
  * `docs/web-architecture.md` for the rationale.
  */
+/** What `addFromWorker` answers: the repo, plus the clone it registered when the repo already existed. */
+export type AddedFromWorker = RepoState & {
+  existed?: true;
+  clone?: { hostId: string; hostName: string; path: string };
+};
+
 export class RepoService {
   private readonly checkpointQueries = new CheckpointQueries();
 
@@ -108,6 +120,8 @@ export class RepoService {
       allowedHostIds: string[] | null;
       /** The host whose default-branch checkout is listed as a worktree, once one is known. */
       primaryHostId: string | null;
+      /** Set when no host lists a default-branch checkout: the primary host, whose clone is not on it. */
+      mainMissing: { hostId: string } | null;
       /** Whether the hub keeps checkpoints of this repo's worktrees (the stored choice, else the default). */
       checkpointsEnabled: boolean;
       /** The stored choice, or null when the repo follows the default. */
@@ -260,6 +274,7 @@ export class RepoService {
         meta: repo.meta ?? false,
         allowedHostIds: repo.allowedHostIds ?? null,
         primaryHostId: primaryHostOf({ ...repo, worktrees }),
+        mainMissing: mainMissingOf({ ...repo, worktrees }),
         checkpointsEnabled: checkpointsEnabledFor(repo.checkpointsEnabled, repo.allowedHostIds),
         checkpointsSetting: repo.checkpointsEnabled ?? null,
         avatar: await avatar,
@@ -438,7 +453,7 @@ export class RepoService {
     allowedHostIds?: string[] | null;
     /** The host that lists the default branch. Default: the host the folder is on. */
     primaryHostId?: string;
-  }): Promise<RepoState> {
+  }): Promise<AddedFromWorker> {
     if (input.hostId === "local" && !isLocalHostEnabled()) {
       throw new RepoInputError("This hub does not use its own machine. Choose a worker.");
     }
@@ -451,13 +466,6 @@ export class RepoService {
     const inspected = await host.repos.inspect(input.path).catch((err: unknown) => {
       throw new RepoInputError(err instanceof Error ? err.message : String(err));
     });
-    if (input.hostId !== "local") {
-      const { roots } = await host.info();
-      if (!isInsideRoots(inspected.path, roots)) {
-        if (!input.addRoot) throw new RepoOutsideRootsError(inspected.path, roots);
-        await host.repos.addRoot(inspected.path);
-      }
-    }
     const remote = inspected.remoteUrl ? parseRemoteUrl(inspected.remoteUrl) : null;
     if (inspected.remoteUrl && !remote) {
       throw new RepoInputError(`The origin URL of ${inspected.path} is not one Band can clone.`);
@@ -467,6 +475,13 @@ export class RepoService {
     const existing = remote ? repos.find((r) => r.remoteKey === remote.key) : undefined;
     // A folder on a host the repo is not allowed on is not recorded as a place the repo lives.
     if (existing) assertHostAllowed(existing.name, input.hostId);
+    if (input.hostId !== "local") {
+      const { roots } = await host.info();
+      if (!isInsideRoots(inspected.path, roots)) {
+        if (!input.addRoot) throw new RepoOutsideRootsError(inspected.path, roots);
+        await host.repos.addRoot(inspected.path);
+      }
+    }
     let repo = existing;
     if (!repo) {
       const name = this.pickName(
@@ -522,7 +537,52 @@ export class RepoService {
     }
     this.queries.setHostPath(repo.name, input.hostId, inspected.path);
     if (remote) await host.repos.map(remote.url, inspected.path);
-    return this.queries.loadAll().find((r) => r.name === repo?.name) ?? repo;
+    if (existing && inspected.isGit) {
+      await this.recordCloneWorktrees(existing.name, input.hostId, inspected.path, host);
+    }
+    const saved = this.queries.loadAll().find((r) => r.name === repo?.name) ?? repo;
+    if (!existing) return saved;
+    const hostName = hostNamesOf([input.hostId])[0] ?? input.hostId;
+    return {
+      ...saved,
+      existed: true as const,
+      clone: { hostId: input.hostId, hostName, path: inspected.path },
+    };
+  }
+
+  /**
+   * Records the worktrees a newly registered clone holds, so a repo added again from another
+   * worker shows that worker's checkouts (its default branch in particular). A branch that has a
+   * listed worktree on another host is skipped, because a branch lives on one host.
+   */
+  private async recordCloneWorktrees(
+    repoName: string,
+    hostId: string,
+    path: string,
+    host: Host,
+  ): Promise<void> {
+    const listed = await host.worktree.list(path).catch(() => []);
+    const fresh = this.queries.loadAll();
+    const repo = fresh.find((r) => r.name === repoName);
+    if (!repo) return;
+    const onThisHost = (wt: { hostId?: string }) => (wt.hostId || "local") === hostId;
+    let changed = false;
+    for (const wt of listed) {
+      if (wt.isBare || !wt.branch) continue;
+      if (repo.worktrees.some((r) => r.branch === wt.branch && onThisHost(r))) continue;
+      const isDefault = wt.branch === repo.defaultBranch;
+      if (!isDefault && repo.worktrees.some((r) => r.branch === wt.branch)) continue;
+      repo.worktrees.push({
+        name: wt.branch,
+        branch: wt.branch,
+        path: wt.path,
+        head: wt.head,
+        pinned: false,
+        ...(hostId === "local" ? {} : { hostId }),
+      });
+      changed = true;
+    }
+    if (changed) this.queries.saveAll(fresh);
   }
 
   /**

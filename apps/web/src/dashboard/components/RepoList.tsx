@@ -111,6 +111,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { GroupedWorktrees, MetaBadge } from "./GroupedWorktrees";
+import { MainMissingRow } from "./MainMissingRow";
 import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
@@ -547,6 +548,7 @@ function SortableRepo({
           {provisioning.map((request) => (
             <ProvisioningWorktreeCard key={request.id} request={request} />
           ))}
+          <MainMissingRow repo={repo} hosts={hosts} />
           {repo.worktrees.length === 0 ? (
             hasPinnedSiblings || provisioning.length > 0 ? null : (
               <p className="text-[13px] text-foreground/60 px-4 py-2">No worktrees yet</p>
