@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@babel/runtime": "^7.29.2",
+    "@band-app/client": "workspace:^",
     "@band-app/server": "workspace:^",
     "@band-app/plugin-api": "workspace:^",
     "@band-app/plugin-github": "workspace:^",

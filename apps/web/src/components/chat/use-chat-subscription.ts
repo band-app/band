@@ -5,35 +5,26 @@
  *   • The server is the single writer. Each chat is an event log of what
  *     crossed the chat's ACP connection: `session/update` payloads, prompts,
  *     permission and elicitation requests, turn boundaries.
- *   • One `EventSource` per visible chat. Native SSE auto-reconnect sends
- *     `Last-Event-ID` for gap-fill; a manual reopen passes the cursor and
- *     the log revision as query params.
+ *   • One SSE stream per visible chat (`openChatStream` in
+ *     `@band-app/client`). A reconnect passes the cursor and the log
+ *     revision as query params for gap-fill.
  *   • The pure `transcriptReducer` folds events into render state.
  *   • `send` POSTs to `/api/chats/:chatId/messages` after showing the user's
  *     bubble optimistically; the server's `prompt` event confirms it.
  */
 
-import {
-  CHAT_EVENT_TYPES,
-  type ChatEvent,
-  type ChatEventFile,
-  type SessionState,
-} from "@band-app/shared/chat-events";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { hubFetch } from "../../lib/hub-config";
-import {
-  EVENT_SOURCE_CLOSED,
-  type EventSourceLike,
-  openEventSource,
-} from "../../lib/hub-event-source";
-import { trpc } from "../../lib/trpc-client";
+import { fetchChatHistory, openChatStream } from "@band-app/client/chat-stream";
 import {
   type ChatMessage,
   foldEvents,
   INITIAL_TRANSCRIPT,
   type TranscriptState,
   transcriptReducer,
-} from "./transcript";
+} from "@band-app/client/transcript";
+import type { ChatEventFile, SessionState } from "@band-app/shared/chat-events";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { hubFetch } from "../../lib/hub-config";
+import { trpc } from "../../lib/trpc-client";
 
 export interface UseChatSubscriptionOptions {
   worktreeId: string;
@@ -41,7 +32,7 @@ export interface UseChatSubscriptionOptions {
   /** Pass-through to `submitTask` server-side. */
   codingAgentId?: string;
   /**
-   * When `false`, the hook closes its EventSource until set back to `true`
+   * When `false`, the hook closes its event stream until set back to `true`
    * (e.g. a chat pane that isn't the focused tab). The state survives; the
    * next open gap-fills from the cursor.
    */
@@ -61,7 +52,7 @@ export interface UseChatSubscriptionResult
     | "errorMessage"
     | "hasOlder"
   > {
-  /** True while the EventSource is connected. */
+  /** True while the event stream is connected. */
   isConnected: boolean;
   send: (text: string, files?: File[]) => Promise<void>;
   /** Stops the running turn (`session/cancel`). */
@@ -80,9 +71,6 @@ export interface UseChatSubscriptionResult
   loadOlder: () => Promise<void>;
   loadingOlder: boolean;
 }
-
-const MAX_BACKOFF_MS = 10_000;
-const INITIAL_BACKOFF_MS = 500;
 
 /** Convert a browser `File` to the wire shape the server expects. */
 async function fileToWirePart(file: File): Promise<ChatEventFile> {
@@ -104,7 +92,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
   const [state, dispatch] = useReducer(transcriptReducer, INITIAL_TRANSCRIPT);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Tab visibility drives the EventSource lifecycle. Coming back after more
+  // Tab visibility drives the event stream lifecycle. Coming back after more
   // than a second hidden (iOS / PWA backgrounding kills SSE silently), a
   // BFCache restore, or going back online forces a clean reopen.
   const [docVisible, setDocVisible] = useState(() =>
@@ -142,84 +130,24 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
 
   const shouldBeOpen = enabled && docVisible;
 
-  // Cursor and revision for manual reopens. Native EventSource retries
-  // carry `Last-Event-ID` on their own.
+  // Cursor and revision for every reconnect.
   const cursorRef = useRef<{ lastEventId?: number; revision: number }>({ revision: 0 });
   cursorRef.current = { lastEventId: state.lastEventId, revision: state.revision };
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof EventSource === "undefined") return;
+    if (typeof window === "undefined") return;
     if (!shouldBeOpen) return;
     void resumeKey;
 
-    let cancelled = false;
-    let source: EventSourceLike | null = null;
-    let retryDelay = INITIAL_BACKOFF_MS;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    const offs: Array<() => void> = [];
-
-    function open() {
-      if (cancelled) return;
-      const params = new URLSearchParams();
-      const { lastEventId, revision } = cursorRef.current;
-      if (lastEventId !== undefined) {
-        params.set("lastEventId", String(lastEventId));
-        params.set("revision", String(revision));
-      }
-      source = openEventSource(
-        `/api/chats/${encodeURIComponent(chatId)}/events?${params.toString()}`,
-      );
-      const current = source;
-      const onOpen = () => {
-        setIsConnected(true);
-        retryDelay = INITIAL_BACKOFF_MS;
-      };
-      current.addEventListener("open", onOpen);
-      offs.push(() => current.removeEventListener("open", onOpen));
-
-      // Frames are `event: <type>`, so the default `message` event never
-      // fires; listen per type.
-      for (const type of CHAT_EVENT_TYPES) {
-        const handler = (e: MessageEvent) => {
-          const raw = e.data;
-          if (!raw || typeof raw !== "string") return;
-          try {
-            dispatch(JSON.parse(raw) as ChatEvent);
-          } catch (err) {
-            console.error("[chat-sub] dispatch error", err);
-          }
-        };
-        current.addEventListener(type, handler as EventListener);
-        offs.push(() => current.removeEventListener(type, handler as EventListener));
-      }
-
-      const onError = () => {
-        setIsConnected(false);
-        // Transient errors are retried by EventSource itself. A closed
-        // stream has to be reopened by hand.
-        if (current.readyState === EVENT_SOURCE_CLOSED) {
-          for (const off of offs) off();
-          offs.length = 0;
-          current.close();
-          source = null;
-          if (!cancelled) {
-            retryTimer = setTimeout(open, retryDelay);
-            retryDelay = Math.min(retryDelay * 2, MAX_BACKOFF_MS);
-          }
-        }
-      };
-      current.addEventListener("error", onError);
-      offs.push(() => current.removeEventListener("error", onError));
-    }
-
-    open();
+    const stream = openChatStream({
+      fetch: hubFetch,
+      chatId,
+      getCursor: () => cursorRef.current,
+      onEvent: dispatch,
+      onConnection: setIsConnected,
+    });
     return () => {
-      cancelled = true;
-      for (const off of offs) off();
-      offs.length = 0;
-      if (retryTimer !== undefined) clearTimeout(retryTimer);
-      source?.close();
-      source = null;
+      stream.close();
       setIsConnected(false);
     };
   }, [chatId, shouldBeOpen, resumeKey]);
@@ -338,19 +266,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const params = new URLSearchParams({
-        before: String(oldestEventId),
-        revision: String(revision),
-      });
-      const res = await hubFetch(
-        `/api/chats/${encodeURIComponent(chatId)}/history?${params.toString()}`,
-      );
-      if (!res.ok) throw new Error(`history fetch failed: HTTP ${res.status}`);
-      const page = (await res.json()) as {
-        events: ChatEvent[];
-        hasOlder: boolean;
-        oldestEventId: number;
-      };
+      const page = await fetchChatHistory(hubFetch, chatId, oldestEventId, revision);
       const folded = foldEvents(INITIAL_TRANSCRIPT, page.events);
       const messages: ChatMessage[] = folded.messages;
       dispatch({

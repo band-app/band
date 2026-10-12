@@ -9,7 +9,7 @@
  */
 
 import type { ToolKind } from "@agentclientprotocol/sdk";
-import type { Entry, ToolEntry } from "./transcript";
+import type { Entry, ToolEntry } from "@band-app/client/transcript";
 
 /** One item in an assistant message: an entry on its own, or a run of
  *  tool calls (with any thinking between them) shown as one group. */

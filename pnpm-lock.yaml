@@ -214,6 +214,9 @@ importers:
       '@babel/runtime':
         specifier: ^7.29.2
         version: 7.29.2
+      '@band-app/client':
+        specifier: workspace:^
+        version: link:../../packages/client
       '@band-app/plugin-api':
         specifier: workspace:^
         version: link:../../packages/plugin-api
@@ -533,6 +536,28 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+
+  packages/client:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@4.6.5)
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../shared
+      '@trpc/client':
+        specifier: ^11.12.0
+        version: 11.12.0(@trpc/server@11.12.0(typescript@5.9.3))(typescript@5.9.3)
+    devDependencies:
+      '@band-app/server':
+        specifier: workspace:^
+        version: link:../../apps/hub
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
   packages/coding-agent:
     dependencies:
