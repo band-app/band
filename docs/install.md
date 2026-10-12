@@ -72,6 +72,7 @@ Node 22.5 or newer is required. `install-service` writes the worker's settings a
 
 - On Linux it creates the systemd user unit `~/.config/systemd/user/band-worker.service` and enables it with `systemctl --user enable --now`. It then runs `loginctl enable-linger` so the worker keeps running after you log out. When that is refused it prints the `sudo loginctl enable-linger $USER` command.
 - On macOS it creates the launchd agent `~/Library/LaunchAgents/app.band.worker.plist` and loads it.
+- The macOS worker writes its own log, `~/.band/worker-service/worker.log`, and rotates it at 10 MB, keeping 3 files (`worker.log`, `worker.log.1`, `worker.log.2`). A larger existing log is rotated when the worker starts. launchd's own output goes to `/dev/null`, because launchd cannot rotate a file. On Linux the unit logs to journald and writes no file: read it with `journalctl --user -u band-worker`.
 
 The token lives in `~/.band/worker-service/worker.env` (Linux) or in the plist (macOS), both mode 0600 in a 0700 directory. After the first connect the worker keeps its own session token in its state directory and the bootstrap token is no longer used.
 

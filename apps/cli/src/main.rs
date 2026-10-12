@@ -11,7 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "band", about = "Band CLI — programmatic worktree management")]
+#[command(
+    name = "band",
+    about = "Band CLI — programmatic worktree management",
+    version
+)]
 struct Cli {
     /// Output format: text or json
     #[arg(long, global = true, default_value = "text", env = "BAND_OUTPUT")]
@@ -94,6 +98,8 @@ enum Commands {
     },
     /// Show current settings
     Settings,
+    /// Print the CLI version and, when the hub answers, the hub version
+    Version,
     /// Manage the remote tunnel
     Tunnel {
         #[command(subcommand)]
@@ -1208,6 +1214,7 @@ fn main() {
             McpCmd::Remove { name } => cmd_mcp_remove(&name),
         },
         Commands::Settings => cmd_settings(json_output),
+        Commands::Version => Ok(cmd_version(json_output)),
         Commands::Tunnel { cmd } => match cmd {
             TunnelCmd::Status => cmd_tunnel_status(),
             TunnelCmd::Start => cmd_tunnel_start(),
@@ -4808,6 +4815,30 @@ fn cmd_settings(json_output: bool) -> Result<CommandResult, String> {
     Ok(CommandResult { text, json: result })
 }
 
+/// Prints the CLI version, then the hub version when the hub answers. An
+/// unreachable or older hub is not an error: the CLI version still prints.
+fn cmd_version(json_output: bool) -> CommandResult {
+    let cli_version = env!("CARGO_PKG_VERSION");
+    let hub_version = api::ApiClient::from_settings()
+        .and_then(|client| client.trpc_query_no_input("services.health"))
+        .ok()
+        .and_then(|health| {
+            health
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
+    let text = match &hub_version {
+        Some(hub) => format!("CLI: {cli_version}\nHub: {hub}\n"),
+        None => format!("CLI: {cli_version}\nHub: unreachable\n"),
+    };
+    CommandResult {
+        text: if json_output { String::new() } else { text },
+        json: serde_json::json!({ "cli": cli_version, "hub": hub_version }),
+    }
+}
+
 // --- Tunnel commands ---
 
 fn cmd_tunnel_status() -> Result<CommandResult, String> {
@@ -5268,6 +5299,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Show current settings",
             "parameters": [],
             "notes": "Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON."
+        }),
+        serde_json::json!({
+            "name": "version",
+            "description": "Print the CLI version and the hub version",
+            "parameters": [],
+            "notes": "Prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. `band --version` prints only the CLI version and needs no hub. With `--output json`, prints `{\"cli\": ..., \"hub\": ... | null}`."
         }),
         serde_json::json!({
             "name": "tunnel status",
