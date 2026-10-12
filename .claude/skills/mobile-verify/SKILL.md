@@ -86,9 +86,22 @@ Check each tool first and install only what is missing. All of it is user space 
 | `pair-manual.yaml` | Manual pairing with URL and token. |
 | `wrong-token.yaml` | A wrong token shows "Invalid token. The hub rejected it." and nothing is saved. |
 | `hub-down.yaml` | A stopped hub shows the unreachable screen at start; Retry reconnects after the hub restarts. |
+| `w1-list.yaml` | The home screen lists both seeded repos with their worktrees, branch and host; a collapsed repo stays collapsed after a restart; search narrows the list. |
+| `w2-status-live.yaml` | A row shows Running within 2 s of the agent starting a turn and Needs attention when it asks for permission; the "needs me" filter keeps only waiting worktrees. |
+| `w3-foreground.yaml` | After a minute in the background the list shows what changed meanwhile. |
+| `w4-open.yaml` | Tapping a worktree opens its screen with the right name and branch; Back returns to the same place in a long list. |
 
-`hub-down.yaml` stops and restarts the hub through a loopback control server that `verify.mjs`
-runs (`e2e/scripts/hub-control.js`). Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`,
+The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
+`alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The stub agent's scenario
+(`SCENARIO` in the same file) treats a prompt starting with `work` as a turn that runs until
+stopped and one starting with `ask` as a turn that waits for a permission answer.
+
+Flows drive the hub through a loopback control server that `verify.mjs` runs
+(`e2e/scripts/hub-control.js`, `ACTION` is a path with its query): `stop` and `start` stop and
+restart it (`hub-down.yaml`), `work?wt=<worktree id>`, `ask?wt=<id>` and `halt?wt=<id>` make the
+agent work, ask for permission or stop, `fill?n=12` adds worktrees to `alpha`, and
+`sleep?ms=<n>` answers after n ms. The `w` flows run in number order on purpose: `w4-open.yaml` adds worktrees that push `beta` off the first screen. Shared steps live in `e2e/subflows/` (`pair-link.yaml` pairs
+through the deep link), which `verify.mjs` does not run on its own. Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`,
 `CONTROL_URL`, `WRONG_TOKEN`, `HUB_URL_ALT` (the same hub at `localhost`) and `HUB_ID` /
 `HUB_ID_ALT` (the app's ids for the two, used in the Hubs screen's testIDs) as Maestro env
 values. New flows find elements by `testID` (`id:` in Maestro),

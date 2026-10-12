@@ -70,7 +70,11 @@ export function createHubFetch(options: Pick<HubClientOptions, "hubUrl" | "token
   return hubFetch;
 }
 
-export function createHubClient(options: HubClientOptions) {
+/**
+ * The tRPC client plus a `close()` that shuts its WebSocket. A caller that rebuilds the client
+ * (the mobile app does, when it returns to the foreground) closes the old one first.
+ */
+export function createHubConnection(options: HubClientOptions) {
   const { hubUrl, token } = options;
   const WebSocketImpl = options.WebSocket ?? WebSocket;
 
@@ -87,7 +91,7 @@ export function createHubClient(options: HubClientOptions) {
     WebSocket: HubWebSocket,
   });
 
-  return createTRPCClient<AppRouter>({
+  const client = createTRPCClient<AppRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === "subscription",
@@ -101,6 +105,11 @@ export function createHubClient(options: HubClientOptions) {
       }),
     ],
   });
+  return { client, close: () => void wsClient.close() };
+}
+
+export function createHubClient(options: HubClientOptions) {
+  return createHubConnection(options).client;
 }
 
 export type HubClient = ReturnType<typeof createHubClient>;
