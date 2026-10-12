@@ -20,7 +20,7 @@ name: S2 wrong token
 - inputText: ${HUB_URL}
 - tapOn:
     id: manual__token
-- inputText: bdt_this_token_does_not_exist
+- inputText: ${WRONG_TOKEN}
 - tapOn:
     id: manual__connect
 - extendedWaitUntil:

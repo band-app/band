@@ -11,8 +11,19 @@ export default function Hubs() {
   const { list, setActive, remove } = useHubs();
   const hubs = list?.hubs ?? [];
 
+  const failed = (err: unknown) =>
+    Alert.alert(
+      "Band could not update its saved hubs",
+      err instanceof Error ? err.message : String(err),
+    );
+
   const choose = async (hub: SavedHub) => {
-    await setActive(hub.id);
+    try {
+      await setActive(hub.id);
+    } catch (err) {
+      failed(err);
+      return;
+    }
     resetTo("/home");
   };
 
@@ -25,7 +36,7 @@ export default function Hubs() {
         onPress: () =>
           void remove(hub.id).then(() => {
             if (hubs.length <= 1) resetTo("/connect");
-          }),
+          }, failed),
       },
     ]);
   };

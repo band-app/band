@@ -45,14 +45,16 @@ Check each tool first and install only what is missing. All of it is user space 
    It does, in order:
    - `expo prebuild` and `pod install` when `apps/mobile/ios/` is missing, then `xcodebuild`
      (Release, JS bundle embedded, so no Metro) with DerivedData in `apps/mobile/build/`;
-   - starts a hub (`apps/mobile/scripts/hub.mjs start`) on a free port with a temp HOME, a
-     random admin token and `BAND_TEST_ACP_AGENT`, and creates a device token with
+   - starts a hub (`apps/mobile/scripts/hub.mjs start`) on a free port with a temp HOME and
+     `BAND_HOME` (inherited `BAND_*` variables are dropped), a random admin token and `BAND_TEST_ACP_AGENT`, and creates a device token with
      `tokens.createDevice`;
    - boots one existing iPhone simulator (a booted one first, never a new one; set
      `BAND_SIM_UDID` to pick one), installs the app;
    - runs every `apps/mobile/e2e/*.yaml` flow with `maestro test`, pairing through the deep
-     link `band://pair?url=…&token=…` instead of the camera;
-   - searches the app's log lines and data container for the device token;
+     link `band://pair?url=…&token=…` instead of the camera (the app asks to confirm the hub,
+     and the flows tap Connect);
+   - searches the app's log lines and data container for the device token and the wrong
+     token `wrong-token.yaml` types, and fails when the log search found under 10 lines;
    - stops the hub and deletes its temp home.
 
    The first build takes 10 to 20 minutes. Later runs with no native change can skip it:
@@ -70,14 +72,18 @@ Check each tool first and install only what is missing. All of it is user space 
 
 | File | Scenario |
 | --- | --- |
-| `pair-deep-link.yaml` | The deep link pairs, the home screen shows Connected, and a restart keeps it. |
+| `pair-deep-link.yaml` | The deep link asks to confirm the hub, then pairs; the home screen shows Connected, and a restart keeps it. |
+| `pair-deep-link-cancel.yaml` | Cancel on the deep link's confirmation saves nothing. |
+| `hubs-switch-remove.yaml` | Pairs the hub under two origins, switches between them, removes both and lands on the pairing screen. |
 | `pair-manual.yaml` | Manual pairing with URL and token. |
 | `wrong-token.yaml` | A wrong token shows "Invalid token. The hub rejected it." and nothing is saved. |
 | `hub-down.yaml` | A stopped hub shows the unreachable screen at start; Retry reconnects after the hub restarts. |
 
 `hub-down.yaml` stops and restarts the hub through a loopback control server that `verify.mjs`
-runs (`e2e/scripts/hub-control.js`). Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK` and
-`CONTROL_URL` as Maestro env values. New flows find elements by `testID` (`id:` in Maestro),
+runs (`e2e/scripts/hub-control.js`). Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`,
+`CONTROL_URL`, `WRONG_TOKEN`, `HUB_URL_ALT` (the same hub at `localhost`) and `HUB_ID` /
+`HUB_ID_ALT` (the app's ids for the two, used in the Hubs screen's testIDs) as Maestro env
+values. New flows find elements by `testID` (`id:` in Maestro),
 named `<screen>__<element>`.
 
 ## Driving the hub by hand

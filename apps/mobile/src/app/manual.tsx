@@ -1,15 +1,21 @@
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Body, Button, ErrorText, Field, Screen } from "../components/ui";
+import { hubIdFor } from "../lib/hub-store";
 import { useHubs } from "../lib/hubs-context";
 import { resetTo } from "../lib/navigation";
 import { parseHubUrl } from "../lib/pairing";
 
-/** Manual pairing, and editing a saved hub (`?url=` fills the URL in). */
+/**
+ * Manual pairing, and editing a saved hub: `?replaces=<hub id>&url=<its URL>` fills the URL in
+ * and forgets that hub once the edited one pairs under another URL.
+ */
 export default function Manual() {
-  const params = useLocalSearchParams<{ url?: string }>();
-  const { pair } = useHubs();
-  const [url, setUrl] = useState(params.url ?? "");
+  const params = useLocalSearchParams<{ url?: string; replaces?: string }>();
+  const { list, pair, remove } = useHubs();
+  // Any app can open this route as a link, so take the params only when they name a saved hub.
+  const editing = list?.hubs.find((h) => h.id === params.replaces && h.url === params.url);
+  const [url, setUrl] = useState(editing?.url ?? "");
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,9 +33,17 @@ export default function Manual() {
     }
     setBusy(true);
     const check = await pair({ url: parsed.value, token: token.trim() });
+    if (!check.ok) {
+      setBusy(false);
+      setError(check.error);
+      return;
+    }
+    if (editing && editing.id !== hubIdFor(parsed.value)) {
+      // The edited hub is saved and active; a failure to forget the old one leaves it listed.
+      await remove(editing.id).catch(() => {});
+    }
     setBusy(false);
-    if (check.ok) resetTo("/home");
-    else setError(check.error);
+    resetTo("/home");
   };
 
   return (

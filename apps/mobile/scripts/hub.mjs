@@ -10,7 +10,18 @@
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -50,56 +61,66 @@ function alive(pid) {
   }
 }
 
-/** Starts the hub detached in its own process group and resolves with its port. */
+/** The caller's environment without `BAND_*`, so a BAND_HOME or token in the shell can't leak in. */
+function cleanEnv() {
+  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("BAND_")));
+}
+
+/**
+ * Starts the hub detached in its own process group, with its output appended to `hub.log` in
+ * the temp home, and resolves with its port once the log shows the listening banner.
+ */
 function boot({ home, port, adminToken }) {
   const entry = join(HUB_ROOT, "dist/start-server.mjs");
   if (!existsSync(entry)) {
     throw new Error(`No hub build at ${entry}. Run \`pnpm build:web\` from the repo root first.`);
   }
   const log = join(home, "hub.log");
+  const logStart = existsSync(log) ? statSync(log).size : 0;
+  const fd = openSync(log, "a");
+  const child = spawn(process.execPath, [entry], {
+    cwd: HUB_ROOT,
+    env: {
+      ...cleanEnv(),
+      HOME: home,
+      BAND_HOME: join(home, ".band"),
+      PORT: String(port),
+      NODE_ENV: "production",
+      BAND_ADMIN_TOKEN: adminToken,
+      BAND_TEST_ACP_AGENT: join(HUB_ROOT, "tests/fixtures/acp-stub-agent.mjs"),
+    },
+    stdio: ["ignore", fd, fd],
+    detached: true,
+  });
+  closeSync(fd);
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry], {
-      cwd: HUB_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        BAND_ADMIN_TOKEN: adminToken,
-        BAND_TEST_ACP_AGENT: join(HUB_ROOT, "tests/fixtures/acp-stub-agent.mjs"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
+    let exited = null;
+    child.on("exit", (code, signal) => {
+      exited = code ?? signal;
     });
-    let out = "";
-    const timer = setTimeout(() => {
-      fail(new Error(`The hub did not start within 30 s. Log: ${log}`));
-    }, 30_000);
-    const fail = (err) => {
-      clearTimeout(timer);
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {}
-      reject(err);
-    };
-    const onData = (chunk) => {
-      out += chunk.toString();
-      writeFileSync(log, out);
-      const bound = BANNER.exec(out)?.[1];
+    const deadline = Date.now() + 30_000;
+    const poll = () => {
+      const bound = BANNER.exec(readFileSync(log).subarray(logStart).toString())?.[1];
       if (bound) {
-        clearTimeout(timer);
         child.removeAllListeners("exit");
-        child.stdout.removeAllListeners("data");
-        child.stderr.removeAllListeners("data");
-        child.stdout.destroy();
-        child.stderr.destroy();
         child.unref();
         resolve({ pid: child.pid, port: Number(bound) });
+        return;
       }
+      if (exited !== null) {
+        reject(new Error(`The hub exited (${exited}). Log: ${log}`));
+        return;
+      }
+      if (Date.now() > deadline) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {}
+        reject(new Error(`The hub did not start within 30 s. Log: ${log}`));
+        return;
+      }
+      setTimeout(poll, 100);
     };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
-    child.on("exit", (code) => fail(new Error(`The hub exited with code ${code}. Log: ${log}`)));
+    poll();
   });
 }
 

@@ -12,8 +12,10 @@ export default function Scan() {
   const { pair } = useHubs();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // The camera reports the same code many times a second; handle one at a time.
+  // The camera reports the same code many times a second; handle one at a time, and don't
+  // retry a code that already failed until the camera sees a different one.
   const handling = useRef(false);
+  const lastFailed = useRef<string | null>(null);
 
   if (!permission) {
     return (
@@ -36,11 +38,12 @@ export default function Scan() {
   }
 
   const onScanned = async ({ data }: { data: string }) => {
-    if (handling.current) return;
+    if (handling.current || data === lastFailed.current) return;
     handling.current = true;
     const parsed = parseSignInUrl(data);
     if (!parsed.ok) {
       setError(parsed.error);
+      lastFailed.current = data;
       handling.current = false;
       return;
     }
@@ -52,6 +55,7 @@ export default function Scan() {
       return;
     }
     setError(check.error);
+    lastFailed.current = data;
     handling.current = false;
   };
 
@@ -70,6 +74,17 @@ export default function Scan() {
           <Body>Point the camera at the QR code in Settings &gt; Devices.</Body>
         )}
         {error ? <ErrorText testID="scan__error">{error}</ErrorText> : null}
+        {error ? (
+          <Button
+            label="Try again"
+            variant="secondary"
+            onPress={() => {
+              lastFailed.current = null;
+              setError(null);
+            }}
+            testID="scan__retry"
+          />
+        ) : null}
       </View>
     </View>
   );

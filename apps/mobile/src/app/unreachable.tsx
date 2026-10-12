@@ -37,7 +37,9 @@ export default function Unreachable() {
       <Button
         label="Edit hub"
         variant="secondary"
-        onPress={() => router.push({ pathname: "/manual", params: { url: active.url } })}
+        onPress={() =>
+          router.push({ pathname: "/manual", params: { url: active.url, replaces: active.id } })
+        }
         testID="unreachable__edit"
       />
     </Centered>

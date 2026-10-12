@@ -1,50 +1,62 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
-import { Body, Button, Centered, ErrorText, Spinner, Title } from "../components/ui";
+import { useLocalSearchParams } from "expo-router";
+import { useState } from "react";
+import { Body, Button, Centered, ErrorText, Title } from "../components/ui";
 import { useHubs } from "../lib/hubs-context";
 import { resetTo } from "../lib/navigation";
 import { parsePairLink } from "../lib/pairing";
 
-/** The deep link `band://pair?url=<hub URL>&token=<token>`: the same pairing as a scan. */
+/**
+ * The deep link `band://pair?url=<hub URL>&token=<token>`: the same pairing as a scan. Any
+ * page or app can open the link, so the person confirms the hub before Band pairs with it
+ * and makes it the active hub.
+ */
 export default function Pair() {
   const { url, token } = useLocalSearchParams<{ url?: string; token?: string }>();
-  const { pair } = useHubs();
-  const [error, setError] = useState<string | null>(null);
+  const { pair, active } = useHubs();
+  // A second link can reuse this screen with new params, so an error belongs to the link it
+  // came from.
+  const link = `${url ?? ""}\n${token ?? ""}`;
+  const [failure, setFailure] = useState<{ link: string; error: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const parsed = parsePairLink({ url, token });
+  const error = failure?.link === link ? failure.error : null;
 
-  useEffect(() => {
-    let cancelled = false;
-    const parsed = parsePairLink({ url, token });
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
-    setError(null);
-    void pair(parsed.value).then((check) => {
-      if (cancelled) return;
-      if (check.ok) resetTo("/home");
-      else setError(check.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [url, token, pair]);
+  const leave = () => resetTo(active ? "/home" : "/connect");
 
-  if (!error) {
+  if (!parsed.ok || error) {
     return (
       <Centered>
-        <Spinner />
-        <Body testID="pair__progress">Connecting to the hub…</Body>
+        <Title>Couldn't pair</Title>
+        <ErrorText testID="pair__error">{parsed.ok ? error : parsed.error}</ErrorText>
+        <Button
+          label="Connect another way"
+          variant="secondary"
+          onPress={() => resetTo("/connect")}
+        />
+        <Button label="Cancel" variant="secondary" onPress={leave} testID="pair__cancel" />
       </Centered>
     );
   }
+
+  const connect = async () => {
+    setBusy(true);
+    const check = await pair(parsed.value);
+    setBusy(false);
+    if (check.ok) resetTo("/home");
+    else setFailure({ link, error: check.error });
+  };
+
   return (
     <Centered>
-      <Title>Couldn't pair</Title>
-      <ErrorText testID="pair__error">{error}</ErrorText>
-      <Button label="Connect another way" variant="secondary" onPress={() => resetTo("/connect")} />
-      {router.canGoBack() ? (
-        <Button label="Back" variant="secondary" onPress={() => router.back()} />
-      ) : null}
+      <Title testID="pair__title">Connect to this hub?</Title>
+      <Title testID="pair__host">{new URL(parsed.value.url).host}</Title>
+      <Body testID="pair__url">{parsed.value.url}</Body>
+      <Body>
+        Only connect to a hub you run or trust. It will see the prompts and files you work on in
+        Band.
+      </Body>
+      <Button label="Connect" busy={busy} onPress={() => void connect()} testID="pair__connect" />
+      <Button label="Cancel" variant="secondary" onPress={leave} testID="pair__cancel" />
     </Centered>
   );
 }

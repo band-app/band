@@ -49,6 +49,31 @@ describe("HubStore", () => {
     assert.equal(activeId, hubIdFor(HUB.url));
   });
 
+  it("leaves no token behind when the index write fails", async () => {
+    const kv = memoryKV();
+    const set = kv.setItemAsync.bind(kv);
+    kv.setItemAsync = async (key, value) => {
+      if (key === "band.hubs") throw new Error("keychain locked");
+      await set(key, value);
+    };
+    await assert.rejects(new HubStore(kv).save(HUB), /keychain locked/);
+    assert.deepEqual([...kv.data.keys()], []);
+  });
+
+  it("keeps an http and an https pairing of one host apart", async () => {
+    const store = new HubStore(memoryKV());
+    await store.save({ url: "https://192.168.1.5:3456", label: "lan", token: "bdt_https" });
+    await store.save({ url: "http://192.168.1.5:3456", label: "lan", token: "bdt_http" });
+    const { hubs } = await store.list();
+    assert.deepEqual(
+      hubs.map((h) => [h.url, h.token]),
+      [
+        ["https://192.168.1.5:3456", "bdt_https"],
+        ["http://192.168.1.5:3456", "bdt_http"],
+      ],
+    );
+  });
+
   it("switches and removes hubs, moving active to the next one", async () => {
     const kv = memoryKV();
     const store = new HubStore(kv);
@@ -99,11 +124,15 @@ describe("S4: tokens live only in the secure store", () => {
     }
     for (const file of sources(join(appRoot, "src"))) {
       const text = readFileSync(file, "utf8");
-      assert.doesNotMatch(text, /from ["'][^"']*(async-storage|expo-file-system|mmkv)/, file);
+      assert.doesNotMatch(
+        text,
+        /(from|require\(|import\()\s*["'][^"']*(async-storage|expo-file-system|mmkv)/,
+        file,
+      );
       assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${file} must not log`);
     }
     const storeUsers = sources(join(appRoot, "src")).filter((f) =>
-      /from "expo-secure-store"/.test(readFileSync(f, "utf8")),
+      /(from|require\(|import\()\s*["']expo-secure-store["']/.test(readFileSync(f, "utf8")),
     );
     assert.deepEqual(
       storeUsers.map((f) => f.slice(appRoot.length + 1)),

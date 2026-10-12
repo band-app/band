@@ -54,7 +54,10 @@ describe("pairing input errors", () => {
   });
 
   it("refuses a QR code that is not a URL", () => {
-    assert.equal(parseSignInUrl("hello").ok, false);
+    assert.deepEqual(parseSignInUrl("hello"), {
+      ok: false,
+      error: "This QR code is not a Band sign-in link",
+    });
   });
 
   it("refuses a deep link without a hub URL", () => {
@@ -73,7 +76,10 @@ describe("pairing input errors", () => {
   });
 
   it("refuses other schemes", () => {
-    assert.equal(parseHubUrl("ftp://hub.example.com").ok, false);
+    assert.deepEqual(parseHubUrl("ftp://hub.example.com"), {
+      ok: false,
+      error: "The hub URL must start with https:// or http://",
+    });
   });
 });
 

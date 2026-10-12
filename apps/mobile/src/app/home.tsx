@@ -12,15 +12,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!active) return;
+    let cancelled = false;
     const check = () =>
       void recheck().then((c) => {
-        if (c.state === "unreachable") resetTo("/unreachable");
+        if (!cancelled && c.state === "unreachable") resetTo("/unreachable");
       });
     check();
     const sub = AppState.addEventListener("change", (s) => {
       if (s === "active") check();
     });
-    return () => sub.remove();
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
   }, [active, recheck]);
 
   if (!active) return <Redirect href="/connect" />;

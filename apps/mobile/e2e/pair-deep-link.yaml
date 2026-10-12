@@ -20,6 +20,13 @@ name: S1 pair through the deep link
     optional: true
 - extendedWaitUntil:
     visible:
+      id: pair__host
+    timeout: 20000
+- takeScreenshot: s1-confirm-hub
+- tapOn:
+    id: pair__connect
+- extendedWaitUntil:
+    visible:
       id: home__status
       text: Connected
     timeout: 20000

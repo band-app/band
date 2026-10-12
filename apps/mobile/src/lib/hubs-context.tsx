@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { checkHub, type HubCheck } from "./hub-api";
@@ -48,8 +49,13 @@ export function HubsProvider({ children }: { children: ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [connection, setConnection] = useState<Connection>({ state: "checking" });
 
+  // The last list read, for callbacks that must compare against the current active hub rather
+  // than the one from the render that created them.
+  const listRef = useRef<HubList | null>(null);
+
   const reload = useCallback(async () => {
     const next = await hubStore.list();
+    listRef.current = next;
     setList(next);
     return next;
   }, []);
@@ -60,13 +66,32 @@ export function HubsProvider({ children }: { children: ReactNode }) {
     });
   }, [reload]);
 
-  const active = useMemo(() => list?.hubs.find((h) => h.id === list.activeId) ?? null, [list]);
+  // Every reload parses new objects, so keep the same `active` object while the saved hub is
+  // unchanged. Home re-checks the hub whenever `active` changes.
+  const found = list?.hubs.find((h) => h.id === list.activeId) ?? null;
+  const activeRef = useRef<SavedHub | null>(null);
+  const prev = activeRef.current;
+  const active =
+    found &&
+    prev &&
+    found.id === prev.id &&
+    found.url === prev.url &&
+    found.token === prev.token &&
+    found.label === prev.label
+      ? prev
+      : found;
+  activeRef.current = active;
+
+  // Each check gets a number, and only the newest one may set `connection`, so a slow check of
+  // a hub the user has switched away from can't overwrite the state of the hub now shown.
+  const checkSeq = useRef(0);
 
   const recheck = useCallback(async (): Promise<Connection> => {
     if (!active) return { state: "checking" };
+    const seq = ++checkSeq.current;
     setConnection({ state: "checking" });
     const next = toConnection(await checkHub(active.url, active.token));
-    setConnection(next);
+    if (seq === checkSeq.current) setConnection(next);
     return next;
   }, [active]);
 
@@ -74,30 +99,43 @@ export function HubsProvider({ children }: { children: ReactNode }) {
     async (pairing: Pairing): Promise<HubCheck> => {
       const check = await checkHub(pairing.url, pairing.token);
       if (!check.ok) return check;
-      await hubStore.save({ url: pairing.url, token: pairing.token, label: check.label });
+      try {
+        await hubStore.save({ url: pairing.url, token: pairing.token, label: check.label });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, reason: "error", error: `Could not save the hub: ${message}` };
+      }
+      checkSeq.current++;
       setConnection({ state: "connected" });
-      await reload();
+      // The hub is saved and active; a failed read only leaves the list stale until the next one.
+      await reload().catch(() => {});
       return check;
     },
     [reload],
   );
 
+  /** Forgets the active hub's connection state when another hub becomes the active one. */
+  const activeChanging = useCallback(() => {
+    checkSeq.current++;
+    setConnection({ state: "checking" });
+  }, []);
+
   const setActive = useCallback(
     async (id: string) => {
       await hubStore.setActive(id);
-      setConnection({ state: "checking" });
+      if (id !== listRef.current?.activeId) activeChanging();
       await reload();
     },
-    [reload],
+    [reload, activeChanging],
   );
 
   const remove = useCallback(
     async (id: string) => {
       await hubStore.remove(id);
-      setConnection({ state: "checking" });
+      if (id === listRef.current?.activeId) activeChanging();
       await reload();
     },
-    [reload],
+    [reload, activeChanging],
   );
 
   const value = useMemo(

@@ -29,9 +29,12 @@ export interface HubList {
 const INDEX_KEY = "band.hubs";
 const hubKey = (id: string) => `band.hub.${id}`;
 
-/** One id per hub origin. Secure store keys allow letters, digits, `.`, `-` and `_`. */
+/**
+ * One id per hub origin, scheme included, so an http pairing never replaces the https one for
+ * the same host. Secure store keys allow letters, digits, `.`, `-` and `_`.
+ */
 export function hubIdFor(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/[^A-Za-z0-9._-]/g, "_");
+  return url.replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
 interface Index {
@@ -99,8 +102,15 @@ export class HubStore {
       JSON.stringify({ url: saved.url, label: saved.label, token: saved.token }),
     );
     const index = await this.index();
-    const ids = index.ids.includes(saved.id) ? index.ids : [...index.ids, saved.id];
-    await this.writeIndex({ ids, activeId: saved.id });
+    const known = index.ids.includes(saved.id);
+    const ids = known ? index.ids : [...index.ids, saved.id];
+    try {
+      await this.writeIndex({ ids, activeId: saved.id });
+    } catch (err) {
+      // A new hub's token must not stay in the Keychain under a key no index lists.
+      if (!known) await this.kv.deleteItemAsync(hubKey(saved.id)).catch(() => {});
+      throw err;
+    }
     return saved;
   }
 

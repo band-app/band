@@ -5,8 +5,8 @@
  *
  *   node scripts/verify.mjs [--skip-build] [--keep-hub] [flow-name ...]
  *
- * Flow names are file names in `e2e/` without `.yaml` (default: all of them). The steps and
- * the one-time setup are in `.claude/skills/mobile-verify/SKILL.md`.
+ * Flow names are file names in `e2e/` without `.yaml` (default: all of them). Needs Xcode with
+ * a booted iOS simulator, Maestro, and Java 17 or newer for Maestro.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
@@ -14,6 +14,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
+import { hubIdFor } from "../src/lib/hub-store.ts";
 
 const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
@@ -81,14 +82,14 @@ function tokenInFiles(udid, token) {
   return grep.stdout.trim() ? grep.stdout.trim().split("\n") : [];
 }
 
-/** Whether the app's log lines since `since` hold the token, and how many lines were searched. */
-function tokenInLog(udid, token, since) {
+/** Whether the app's log lines since `since` hold any of the tokens, and how many lines were searched. */
+function tokenInLog(udid, tokens, since) {
   const log = execFileSync(
     "xcrun",
     ["simctl", "spawn", udid, "log", "show", "--style", "compact", "--start", since, "--predicate", 'process == "Band"'],
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
   );
-  return { found: log.includes(token), lines: log.split("\n").length };
+  return { found: tokens.some((t) => log.includes(t)), lines: log.split("\n").length };
 }
 
 function run(cmd, cmdArgs, opts) {
@@ -122,7 +123,13 @@ async function main() {
 
   const out = join(E2E, "artifacts", stamp());
   mkdirSync(out, { recursive: true });
-  const since = new Date(Date.now() - 1000).toISOString().replace("T", " ").slice(0, 19);
+  // `log show --start` reads the time as local time; sv-SE formats it as YYYY-MM-DD HH:MM:SS.
+  const since = new Date(Date.now() - 1000).toLocaleString("sv-SE");
+  // The token wrong-token.yaml types; the app must not keep it anywhere either.
+  const wrongToken = "bdt_this_token_does_not_exist";
+  const tokens = [hub.deviceToken, wrongToken];
+  // The same hub under a second origin, so a flow can pair two hubs.
+  const altUrl = hub.url.replace("127.0.0.1", "localhost");
   const pairLink = `band://pair?url=${encodeURIComponent(hub.url)}&token=${encodeURIComponent(hub.deviceToken)}`;
 
   const results = [];
@@ -148,15 +155,25 @@ async function main() {
         `PAIR_LINK=${pairLink}`,
         "-e",
         `CONTROL_URL=${controlUrl}`,
+        "-e",
+        `WRONG_TOKEN=${wrongToken}`,
+        "-e",
+        `HUB_URL_ALT=${altUrl}`,
+        "-e",
+        `HUB_ID=${hubIdFor(hub.url)}`,
+        "-e",
+        `HUB_ID_ALT=${hubIdFor(altUrl)}`,
       ],
       { cwd: flowOut, env, stdio: "inherit" },
     );
 
-    const leakedFiles = tokenInFiles(device.udid, hub.deviceToken);
+    const leakedFiles = tokens.flatMap((t) => tokenInFiles(device.udid, t));
     results.push({ flow, ok: status === 0, leakedFiles });
   }
 
-  const log = tokenInLog(device.udid, hub.deviceToken, since);
+  const log = tokenInLog(device.udid, tokens, since);
+  // A search that found almost no lines searched the wrong window, which proves nothing.
+  const logSearched = log.lines >= 10;
   const leaks = [...(log.found ? ["the app's log"] : []), ...results.flatMap((r) => r.leakedFiles)];
   control.close();
   if (!keepHub) await cleanHub();
@@ -174,6 +191,7 @@ async function main() {
     ...results.map((r) => `| ${r.flow} | ${r.ok ? "pass" : "FAIL"} |`),
     "",
     `Token in logs or app files: ${leaks.length ? `FOUND in ${leaks.join(", ")}` : `none (searched ${log.lines} log lines, and the app's data container after each flow)`}`,
+    ...(logSearched ? [] : [`Log search: FAILED, only ${log.lines} lines of the app's log since ${since}`]),
     "",
     "Screenshots:",
     ...screenshots.map((s) => `- e2e/artifacts/${out.split("/").pop()}/${s}`),
@@ -182,7 +200,7 @@ async function main() {
   writeFileSync(join(out, "report.md"), report);
   console.log(`\n${report}`);
   console.log(`Report: ${join(out, "report.md")}`);
-  if (results.some((r) => !r.ok) || leaks.length) process.exit(1);
+  if (results.some((r) => !r.ok) || leaks.length || !logSearched) process.exit(1);
 }
 
 main().catch(async (err) => {

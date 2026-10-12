@@ -20,6 +20,12 @@ name: S3 hub down
     optional: true
 - extendedWaitUntil:
     visible:
+      id: pair__host
+    timeout: 20000
+- tapOn:
+    id: pair__connect
+- extendedWaitUntil:
+    visible:
       id: home__status
       text: Connected
     timeout: 20000
