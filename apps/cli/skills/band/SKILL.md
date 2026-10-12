@@ -98,7 +98,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--origin <worktree id> | --no-origin]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--host <host>] [--origin <worktree id> | --no-origin]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -130,6 +130,8 @@ When to omit `--prompt` (rare — user explicitly wants no task):
 # User says "just create a worktree, I'll work on it myself"
 band worktrees create my-app feat/experiment
 ```
+
+**Another host (`--host`).** `--host <id or name>` creates the worktree on that host (ids and names are in `band hosts list`). An agent on a worker may do this when the hub setting "Agents may start worktrees on other hosts" is on, the host is an online static worker and the repo allows it; the new worktree records the caller's worktree and chat as its origin. A refusal names the reason. It cannot be combined with `--labels`, `--requires`, `--any-host` or `--isolation`, and without it the worktree is created where the caller runs.
 
 **Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-repo-path` says where the repository is on the chosen host the first time the repo is used there.
 
@@ -227,7 +229,7 @@ Stops the remote tunnel.
 band hosts list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`.
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
 
 ### Move every worktree off a host
 

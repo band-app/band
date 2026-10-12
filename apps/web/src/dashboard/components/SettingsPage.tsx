@@ -285,6 +285,9 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const [defaultAgentMode, setDefaultAgentMode] = useState<AgentMode>(
     settings.agents?.defaultMode ?? "gui",
   );
+  const [crossHostWorktrees, setCrossHostWorktrees] = useState(
+    settings.agents?.crossHostWorktrees !== false,
+  );
   const [deviceAgentMode, setDeviceAgentMode] = useAgentMode();
   const [webServerPort, setWebServerPort] = useState(settings.webServerPort?.toString() ?? "");
   const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
@@ -513,6 +516,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       return true;
     if (defaultAgentId !== (settings.defaultCodingAgent ?? "")) return true;
     if (defaultAgentMode !== (settings.agents?.defaultMode ?? "gui")) return true;
+    if (crossHostWorktrees !== (settings.agents?.crossHostWorktrees !== false)) return true;
     if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
       return true;
@@ -533,6 +537,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     codingAgents,
     defaultAgentId,
     defaultAgentMode,
+    crossHostWorktrees,
     webServerPort,
     soundOnNeedsAttention,
     selectedSound,
@@ -554,6 +559,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     setCodingAgents(Array.isArray(settings.codingAgents) ? settings.codingAgents : []);
     setDefaultAgentId(settings.defaultCodingAgent ?? "");
     setDefaultAgentMode(settings.agents?.defaultMode ?? "gui");
+    setCrossHostWorktrees(settings.agents?.crossHostWorktrees !== false);
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
@@ -613,7 +619,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       worktreesDir: worktreesDir.trim() || null,
       codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
       defaultCodingAgent: defaultAgentId || undefined,
-      agents: { ...settings.agents, defaultMode: defaultAgentMode },
+      agents: { ...settings.agents, defaultMode: defaultAgentMode, crossHostWorktrees },
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
@@ -1001,6 +1007,17 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                           </Select>
                         </SettingsRow>
                       )}
+                      <SettingsRow
+                        htmlFor="cross-host-worktrees"
+                        label="Agents may start worktrees on other hosts"
+                        description="An agent on a worker can create a worktree on another online worker, when the repo allows that host. The new worktree records the agent's worktree as its origin. Agents never start runner machines this way."
+                      >
+                        <Switch
+                          id="cross-host-worktrees"
+                          checked={crossHostWorktrees}
+                          onCheckedChange={setCrossHostWorktrees}
+                        />
+                      </SettingsRow>
                       <SettingsRow
                         variant="responsive"
                         label="Open agents on this device as"

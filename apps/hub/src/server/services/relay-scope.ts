@@ -58,6 +58,8 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "statuses.notify",
   "statuses.clearNeedsAttention",
   "repos.list",
+  "hosts.list",
+  "hosts.forAgents",
   "cronjobs.list",
   "cronjobs.create",
   "cronjobs.update",
@@ -70,13 +72,21 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
 ]);
 
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
-const UNBATCHABLE = new Set(["repos.list", "worktrees.create", "worktrees.remove"]);
+const UNBATCHABLE = new Set(["repos.list", "hosts.list", "worktrees.create", "worktrees.remove"]);
+
+/** `input` with `hostId` set to the worker's, or left alone when `keep` and the call named a host. */
+function pinHost(input: unknown, workerId: string, keep: boolean): object {
+  const base =
+    input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  return keep && typeof base.hostId === "string" ? base : { ...base, hostId: workerId };
+}
 
 /**
- * `worktrees.create` from a worker makes the worktree on that worker, and `worktrees.remove` removes the
- * one of that name on it, because the same repo and branch can live on several hosts. The
- * check refuses another `hostId`, and this puts the caller's own into the body
- * the hub sees, so a call that names no host cannot land on the hub's machine.
+ * `worktrees.create` from a worker makes the worktree on that worker unless it names another host
+ * that `checkCall` approved (`crossHostRefusal`). `worktrees.remove` removes the one of that name on
+ * the worker, because the same repo and branch can live on several hosts. The check refuses another
+ * `hostId` for a remove, and this puts the caller's own into the body the hub sees, so a call that
+ * names no host cannot land on the hub's machine.
  */
 export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
   if (request.method !== "POST") return request;
@@ -95,7 +105,8 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
   if (!parsed.ok || parsed.value === null || typeof parsed.value !== "object") return request;
   let value: unknown;
   if (isTrpc) {
-    value = { ...(parsed.value as object), hostId: workerId };
+    const keep = call === "/trpc/worktrees.create";
+    value = pinHost(parsed.value, workerId, keep);
   } else {
     // The same tools through the MCP endpoint, as `tools/call` messages (one or a batch).
     const pin = (message: unknown): unknown => {
@@ -107,9 +118,11 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
       ) {
         return message;
       }
-      const args = params.arguments;
-      const base = args !== null && typeof args === "object" ? (args as object) : {};
-      return { ...message, params: { ...params, arguments: { ...base, hostId: workerId } } };
+      const keep = params.name === "band_worktrees_create";
+      return {
+        ...message,
+        params: { ...params, arguments: pinHost(params.arguments, workerId, keep) },
+      };
     };
     value = Array.isArray(parsed.value) ? parsed.value.map(pin) : pin(parsed.value);
   }
@@ -123,7 +136,13 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
  * service cuts its answer down to the worker's own worktrees
  * (`filterRelayReply`).
  */
-const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "repos.list"]);
+const SCOPE_FROM_HEADERS = new Set([
+  "subscriptions.create",
+  "subscriptions.list",
+  "repos.list",
+  "hosts.list",
+  "hosts.forAgents",
+]);
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
 
@@ -179,6 +198,50 @@ export function filterReposReply(data: unknown, workerId: string): unknown {
   return { ...data, result: { ...result, data: { ...result?.data, repos: kept } } };
 }
 
+/** What an agent may know about a host. No roots, home, tools, report, runner settings or tokens. */
+export interface AgentHostView {
+  id: string;
+  name: string;
+  status: string;
+  mode: string;
+  os: string | null;
+  arch: string | null;
+  agents: string[];
+  capabilities: string[];
+  labels: string[];
+}
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+/** The redacted view of one `hosts.list` row. Lists the fields it keeps, so a field added later stays hidden. */
+export function agentHostView(host: Record<string, unknown>): AgentHostView {
+  const info = (host.info ?? {}) as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    id: String(host.id ?? ""),
+    name: String(host.name ?? ""),
+    status: String(host.status ?? ""),
+    mode: String(host.mode ?? ""),
+    os: text(info.os),
+    arch: text(info.arch),
+    agents: strings(host.agents),
+    capabilities: strings(host.capabilities),
+    labels: strings(host.labels),
+  };
+}
+
+/** Cuts a `hosts.list` answer down to `agentHostView` rows. A reply of another shape becomes empty. */
+export function redactHostsReply(data: unknown): unknown {
+  if (data === null || typeof data !== "object") return data;
+  const result = (data as { result?: { data?: { hosts?: unknown } } }).result;
+  const hosts = result?.data?.hosts;
+  const view = Array.isArray(hosts)
+    ? hosts.map((h) => agentHostView((h ?? {}) as Record<string, unknown>))
+    : [];
+  return { ...data, result: { ...result, data: { ...result?.data, hosts: view } } };
+}
+
 const CHAT_ROUTE = /^\/api\/chats\/([^/]+)\/(events|history|messages)$/;
 const MAX_DEPTH = 8;
 
@@ -195,6 +258,8 @@ export interface ScopeLookups {
   worktreeOfBrowser(browserId: string): string | null;
   /** The worktree a subscription belongs to, or null when there is no such subscription. */
   worktreeOfSubscription(subscriptionId: string): string | null;
+  /** Why an agent on `callerHostId` may not create a worktree of `repo` on `hostId`, or null when it may. */
+  crossHostRefusal(repo: string, hostId: string, callerHostId: string): string | null;
 }
 
 export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
@@ -350,7 +415,16 @@ function checkCall(
       return deny(403, `${procedure}: The origin is not a worktree on this host`);
     }
     if (hostId !== undefined && hostId !== workerId) {
-      return deny(403, `${procedure}: A worktree made from a worker is created on that worker`);
+      if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
+      const refusal = lookups.crossHostRefusal(repo, hostId, workerId);
+      if (refusal !== null) return deny(403, `${procedure}: ${refusal}`);
+      const { hostRepoPath, placement } = (input ?? {}) as Record<string, unknown>;
+      if (hostRepoPath !== undefined || placement !== undefined) {
+        return deny(
+          403,
+          `${procedure}: hostRepoPath and placement cannot be set for another host from a worker`,
+        );
+      }
     }
     return { ok: true };
   }

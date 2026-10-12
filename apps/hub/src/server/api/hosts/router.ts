@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import { agentHostView } from "../../services/relay-scope";
 import { repoService } from "../../services/repo-service";
 import {
   DEFAULT_LIST_LIMIT,
@@ -72,6 +73,37 @@ export const hostsRouter = t.router({
         })),
       };
     }),
+
+  /**
+   * The host list as an agent may see it: id, name, status, OS and architecture, agents,
+   * capabilities and labels. No roots, home, tool versions, tokens or runner settings. The MCP
+   * endpoint lists this one and not `hosts.list`.
+   */
+  forAgents: publicProcedure.query(async () => {
+    const hosts = tokenService
+      .listHosts(MAX_LIST_LIMIT)
+      .filter((h) => h.id !== "local" || h.usable);
+    const local = hosts.find((h) => h.id === "local");
+    const info = local ? await hostRegistry.local.info().catch(() => null) : null;
+    return {
+      hosts: hosts.map((h) => {
+        const view = agentHostView({ ...h });
+        if (h.id === "local" && info) {
+          view.os = info.os;
+          view.arch = info.arch;
+          view.capabilities = Object.entries(info.capabilities)
+            .filter(([, on]) => on)
+            .map(([name]) => name);
+          view.agents = info.report
+            ? info.report.agents
+                .filter((a) => a.installed && a.loggedIn !== false)
+                .map((a) => a.type)
+            : view.agents;
+        }
+        return view;
+      }),
+    };
+  }),
 
   /**
    * Lists the directories in a folder on a host, for the folder picker of "Add repo from a

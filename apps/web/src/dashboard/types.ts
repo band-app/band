@@ -242,7 +242,7 @@ export interface Settings {
    * the caller has no device mode of its own (the CLI, cronjobs, MCP).
    * Browsers use their per-device mode (`dashboard/lib/agent-mode.ts`).
    */
-  agents?: { defaultMode?: AgentMode };
+  agents?: { defaultMode?: AgentMode; crossHostWorktrees?: boolean };
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];

@@ -14,6 +14,7 @@ import { z } from "zod";
 import { BranchOnOtherHostError } from "../../errors";
 import { hostRegistry } from "../../infra/host/registry";
 import { chatService } from "../../services/chat-service";
+import { crossHostRefusal } from "../../services/cross-host-policy";
 import { worktreeService } from "../../services/worktree-service";
 
 const createInput = z.object({
@@ -25,7 +26,7 @@ const createInput = z.object({
     .min(1)
     .optional()
     .describe(
-      "Host to create it on. Defaults to the host this chat runs on; a chat on a worker cannot pick another host.",
+      'Host to create it on. Defaults to the host this chat runs on. A chat on a worker may name another online, static worker that the repo allows, when the hub setting "Agents may start worktrees on other hosts" is on. See band_hosts_list.',
     ),
   prompt: z
     .string()
@@ -69,12 +70,11 @@ function createServer(chatId: string): McpServer {
         const callerHost = hostRegistry.hostIdOfScope(chat.worktreeId) ?? hostRegistry.local.id;
         if (callerHost !== hostRegistry.local.id) {
           if (input.hostId !== undefined && input.hostId !== callerHost) {
-            return jsonText(
-              { error: "A chat on a worker creates worktrees on that worker only" },
-              true,
-            );
+            const refusal = crossHostRefusal(input.repo, input.hostId, callerHost);
+            if (refusal !== null) return jsonText({ error: refusal }, true);
+          } else {
+            input.hostId = callerHost;
           }
-          input.hostId = callerHost;
           if (
             input.origin !== undefined &&
             hostRegistry.hostIdOfScope(input.origin) !== callerHost

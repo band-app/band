@@ -1,15 +1,20 @@
 /**
- * Which hub the desktop app talks to, kept in `~/.band/desktop-hub.json`.
+ * Which hub the desktop app talks to.
  *
  * `local` (the default) spawns the bundled hub, as the app always has.
  * `remote` talks to a hub at another URL with a token and spawns nothing.
- * The file holds the remote token, so it is written with mode 0600. It is
- * separate from `settings.json`, which the hub owns and writes.
+ * The choice holds the remote token, so it is encrypted with the OS key store
+ * (`secret-store.ts`, Electron `safeStorage`) into `~/.band/desktop-hub.enc`.
+ * Only where the OS has no key store does it fall back to `~/.band/desktop-hub.json`
+ * with mode 0600. A `desktop-hub.json` left by an older version is migrated to the
+ * encrypted file on the first load, and deleted along with its temp copy. Both files
+ * are separate from `settings.json`, which the hub owns and writes.
  */
 
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bandHome } from "./log.js";
+import { activeSecretStore } from "./secret-store.js";
 
 export type HubChoice = { mode: "local" } | { mode: "remote"; url: string; token: string };
 
@@ -27,6 +32,18 @@ const TOKEN_PATTERN = /^[A-Za-z0-9._~-]+$/;
 
 function choiceFile(): string {
   return join(bandHome(), "desktop-hub.json");
+}
+
+function encryptedChoiceFile(): string {
+  return join(bandHome(), "desktop-hub.enc");
+}
+
+/** The plain-text file, its temp copy and any backup an older version or an editor left. */
+function removePlainChoiceFiles(): void {
+  const file = choiceFile();
+  for (const path of [file, `${file}.tmp`, `${file}.bak`, `${file}~`]) {
+    rmSync(path, { force: true });
+  }
 }
 
 function isLoopback(hostname: string): boolean {
@@ -74,27 +91,74 @@ export function parseHubChoice(input: unknown): { choice: HubChoice } | { error:
   return { choice: { mode: "remote", url: parsed.origin, token: token.trim() } };
 }
 
-/** The saved choice, or local when there is none or the file is unusable. */
-export function loadHubChoice(): HubChoice {
+function parseStored(raw: string): HubChoice | null {
   try {
-    const raw = JSON.parse(readFileSync(choiceFile(), "utf8")) as unknown;
-    const parsed = parseHubChoice(raw);
-    return "choice" in parsed ? parsed.choice : LOCAL_HUB_CHOICE;
+    const parsed = parseHubChoice(JSON.parse(raw) as unknown);
+    return "choice" in parsed ? parsed.choice : null;
   } catch {
-    return LOCAL_HUB_CHOICE;
+    return null;
   }
+}
+
+/**
+ * The saved choice, or local when there is none or the files are unusable. With a key store,
+ * a plain-text file from an older version moves into the encrypted file and is deleted.
+ */
+export function loadHubChoice(): HubChoice {
+  const secrets = activeSecretStore();
+  if (secrets) {
+    try {
+      const choice = parseStored(
+        secrets.decrypt(Buffer.from(readFileSync(encryptedChoiceFile(), "utf8"), "base64")),
+      );
+      if (choice) {
+        removePlainChoiceFiles();
+        return choice;
+      }
+    } catch {
+      // No encrypted file yet, or one this user's key cannot open: look for the old file.
+    }
+  }
+  let legacy: HubChoice | null = null;
+  try {
+    legacy = parseStored(readFileSync(choiceFile(), "utf8"));
+  } catch {
+    legacy = null;
+  }
+  if (!legacy) return LOCAL_HUB_CHOICE;
+  if (secrets) {
+    try {
+      saveHubChoice(legacy);
+    } catch {
+      // Keep the old file when the migration fails, so the choice is not lost.
+    }
+  }
+  return legacy;
 }
 
 /** Write through a temp file, so a crash mid-write keeps the old choice. */
 export function saveHubChoice(choice: HubChoice): void {
-  const file = choiceFile();
   mkdirSync(bandHome(), { recursive: true });
+  const secrets = activeSecretStore();
+  if (secrets) {
+    const file = encryptedChoiceFile();
+    const tmp = `${file}.tmp`;
+    const blob = secrets.encrypt(JSON.stringify(choice)).toString("base64");
+    writeFileSync(tmp, blob, { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, file);
+    removePlainChoiceFiles();
+    return;
+  }
+  const file = choiceFile();
   const tmp = `${file}.tmp`;
   // `mode` creates the file private; the chmod covers a leftover temp file from
   // a crash, whose old mode `writeFileSync` would keep.
   writeFileSync(tmp, JSON.stringify(choice), { mode: 0o600 });
   chmodSync(tmp, 0o600);
   renameSync(tmp, file);
+  // A stale encrypted copy would win at the next load if the key store came back.
+  rmSync(encryptedChoiceFile(), { force: true });
 }
 
 export function viewHubChoice(choice: HubChoice): HubChoiceView {

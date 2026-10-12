@@ -206,6 +206,11 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "Code intelligence (LSP)" });
   }
 
+  /** Settings > Agents: whether an agent on a worker may start worktrees on other hosts. */
+  crossHostWorktreesSwitch(): Locator {
+    return this.dialog.getByRole("switch", { name: "Agents may start worktrees on other hosts" });
+  }
+
   /** Browser CDP experimental toggle. */
   webBrowserCdpSwitch(): Locator {
     return this.dialog.getByRole("switch", {
