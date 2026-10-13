@@ -1,0 +1,40 @@
+name: Set up Playwright browsers
+description: >
+  Restores the Playwright browsers cache, installs Chromium and WebKit with
+  their system packages, and saves the cache on trusted events. Needs
+  dependencies installed first.
+runs:
+  using: composite
+  steps:
+    # Keyed on the Playwright version with no restore-keys, so a bump starts clean.
+    - name: Resolve Playwright version
+      id: playwright
+      shell: bash
+      working-directory: apps/web
+      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Playwright browsers cache
+      id: cache-playwright
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
+
+    # `--with-deps` still installs the apt packages on a cache hit. WebKit runs
+    # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
+    - name: Install Playwright Chromium and WebKit
+      shell: bash
+      run: pnpm --filter @band-app/web exec playwright install --with-deps chromium webkit
+
+    # Same trust gate as the cache saves in ci.yml.
+    - name: Save Playwright browsers cache
+      if: |
+        steps.cache-playwright.outputs.cache-hit != 'true' &&
+        ((github.event_name != 'pull_request' &&
+          github.event_name != 'pull_request_target') ||
+         github.event.pull_request.head.repo.full_name == github.repository)
+      continue-on-error: true
+      uses: actions/cache/save@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
