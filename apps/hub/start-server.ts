@@ -1027,21 +1027,34 @@ async function main() {
 
     // Serve worktree files (images, PDFs, etc.) — URL: /api/worktree-file/<worktreeId>/<path...>
     if (req.url?.startsWith("/api/worktree-file/")) {
-      const rest = req.url.slice("/api/worktree-file/".length);
+      // Drop the query string: an `<img>` against a remote hub carries `?token=`.
+      const queryIdx = req.url.indexOf("?");
+      const rest = req.url.slice(
+        "/api/worktree-file/".length,
+        queryIdx === -1 ? undefined : queryIdx,
+      );
       const slashIdx = rest.indexOf("/");
       if (slashIdx === -1) {
         res.writeHead(400);
         res.end("Bad request");
         return;
       }
-      const wId = decodeURIComponent(rest.slice(0, slashIdx));
-      const filePath = rest.slice(slashIdx + 1);
+      let wId: string;
+      let filePath: string;
+      try {
+        wId = decodeURIComponent(rest.slice(0, slashIdx));
+        filePath = decodeURIComponent(rest.slice(slashIdx + 1));
+      } catch {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
+      }
       if (!wId || !filePath) {
         res.writeHead(400);
         res.end("Bad request");
         return;
       }
-      await serveWorktreeFile(res, wId, decodeURIComponent(filePath));
+      await serveWorktreeFile(res, wId, filePath);
       return;
     }
 
