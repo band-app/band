@@ -50,3 +50,14 @@ export function crossHostRefusal(
   }
   return null;
 }
+
+/**
+ * A message saying why an agent on `callerHostId` may not act on `repo`, or null when it may. A
+ * repo limited to hosts that exclude the caller's is refused. A repo open to every host, or one
+ * that does not exist, is not.
+ */
+export function repoHostRefusal(repo: string, callerHostId: string): string | null {
+  const allowed = allowedHostsOf(repo);
+  if (isHostAllowed(allowed, callerHostId)) return null;
+  return `${repo} is limited to other hosts (${hostNamesOf(allowed ?? []).join(", ")})`;
+}

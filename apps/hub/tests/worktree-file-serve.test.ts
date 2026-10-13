@@ -17,6 +17,8 @@ const WORKTREE_ID = testWorktreeId("files", "main");
 // NUL and high bytes, so a text decoding anywhere on the path corrupts them.
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]);
 
+const PDF_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.from([0x00, 0xff, 0xfe, 0x80])]);
+
 describe("GET /api/worktree-file/<worktreeId>/<path>", () => {
   let server: ServerHandle;
   let tmpHome: string;
@@ -32,6 +34,9 @@ describe("GET /api/worktree-file/<worktreeId>/<path>", () => {
     worktree = join(tmpHome, "files");
     mkdirSync(join(worktree, "assets"), { recursive: true });
     writeFileSync(join(worktree, "assets", "pixel.png"), PNG_BYTES);
+    writeFileSync(join(worktree, "assets", "doc.pdf"), PDF_BYTES);
+    mkdirSync(join(worktree, ".am", "evidence"), { recursive: true });
+    writeFileSync(join(worktree, ".am", "evidence", "shot.png"), PNG_BYTES);
     // A file next to the worktree, which a path escape would reach.
     writeFileSync(join(tmpHome, "secret.txt"), "outside the worktree");
 
@@ -61,6 +66,44 @@ describe("GET /api/worktree-file/<worktreeId>/<path>", () => {
     expect(res.headers.get("content-type")).toBe("image/png");
     expect(res.headers.get("content-length")).toBe(String(PNG_BYTES.length));
     expect(Buffer.from(await res.arrayBuffer()).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("serves a file under a dot folder", async () => {
+    const res = await get(`${WORKTREE_ID}/.am/evidence/shot.png`);
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("serves a file when the token is in the query string, as an <img> against a remote hub sends it", async () => {
+    const res = await fetch(
+      `${server.url}/api/worktree-file/${WORKTREE_ID}/assets/pixel.png?token=${TOKEN}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("refuses a wrong token in the query string", async () => {
+    const res = await fetch(
+      `${server.url}/api/worktree-file/${WORKTREE_ID}/assets/pixel.png?token=wrong`,
+    );
+
+    expect(res.status).toBe(401);
+  });
+
+  it("answers 400 for a malformed escape in the path", async () => {
+    const res = await get(`${WORKTREE_ID}/assets/%zz`);
+
+    expect(res.status).toBe(400);
+  });
+
+  it("serves a PDF with its type and exact bytes", async () => {
+    const res = await get(`${WORKTREE_ID}/assets/doc.pdf`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(Buffer.from(await res.arrayBuffer()).equals(PDF_BYTES)).toBe(true);
   });
 
   it("returns 404 for a file that does not exist", async () => {

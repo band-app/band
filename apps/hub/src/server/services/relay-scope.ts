@@ -58,6 +58,17 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "statuses.notify",
   "statuses.clearNeedsAttention",
   "repos.list",
+  "repos.add",
+  "repos.addFromWorker",
+  "repos.addByUrl",
+  "repos.inspectFolder",
+  "repos.resolveRemote",
+  "repos.gitInit",
+  "repos.promoteToGit",
+  "repos.update",
+  "repos.updateLabel",
+  "repos.reorder",
+  "repos.remove",
   "hosts.list",
   "hosts.forAgents",
   "cronjobs.list",
@@ -260,6 +271,8 @@ export interface ScopeLookups {
   worktreeOfSubscription(subscriptionId: string): string | null;
   /** Why an agent on `callerHostId` may not create a worktree of `repo` on `hostId`, or null when it may. */
   crossHostRefusal(repo: string, hostId: string, callerHostId: string): string | null;
+  /** Why an agent on `callerHostId` may not act on `repo`, or null when it may (or the repo does not exist). */
+  repoHostRefusal(repo: string, callerHostId: string): string | null;
 }
 
 export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
@@ -382,6 +395,50 @@ function checkChosenId(procedure: string, input: unknown, lookups: ScopeLookups)
   return { ok: true };
 }
 
+/** Repo procedures that act on one existing repo, by the `name` in their input. */
+const REPO_BY_NAME_PROCEDURES = new Set([
+  "repos.update",
+  "repos.updateLabel",
+  "repos.remove",
+  "repos.promoteToGit",
+]);
+
+/**
+ * Repo management from a worker. The one limit is a repo's allowed hosts: an agent may not act on a
+ * repo limited to hosts that exclude its own, nor add a repo limited to hosts that exclude the host
+ * the folder is on. These calls name a repo or a host, not a worktree, so they skip `checkNamed`.
+ */
+function checkRepoCall(
+  procedure: string,
+  input: unknown,
+  workerId: string,
+  lookups: ScopeLookups,
+): RelayVerdict {
+  const record = (input ?? {}) as Record<string, unknown>;
+  if (REPO_BY_NAME_PROCEDURES.has(procedure)) {
+    if (typeof record.name !== "string") return deny(400, `${procedure} needs a repo name`);
+    const refusal = lookups.repoHostRefusal(record.name, workerId);
+    return refusal === null ? { ok: true } : deny(403, `${procedure}: ${refusal}`);
+  }
+  if (procedure === "repos.addFromWorker") {
+    const { hostId, name, allowedHostIds } = record;
+    if (typeof hostId !== "string") return deny(400, `${procedure} needs a hostId`);
+    if (Array.isArray(allowedHostIds) && !allowedHostIds.includes(hostId)) {
+      return deny(
+        403,
+        `${procedure}: The repo would be limited to hosts that exclude ${hostId}, where the folder is`,
+      );
+    }
+    // An existing repo named by the call is checked here. One found by the folder's remote is
+    // checked against the folder's host in the service (`assertHostAllowed`).
+    if (typeof name === "string") {
+      const refusal = lookups.repoHostRefusal(name, workerId);
+      if (refusal !== null) return deny(403, `${procedure}: ${refusal}`);
+    }
+  }
+  return { ok: true };
+}
+
 /** One procedure call: allowed, and tied to this host by what it names (or by the token's scope). */
 function checkCall(
   procedure: string,
@@ -390,6 +447,9 @@ function checkCall(
   lookups: ScopeLookups,
 ): RelayVerdict {
   if (!RELAY_PROCEDURES.has(procedure)) return deny(403, `${procedure} is not available to agents`);
+  if (procedure.startsWith("repos.") && procedure !== "repos.list") {
+    return checkRepoCall(procedure, input, workerId, lookups);
+  }
   let named = input;
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
