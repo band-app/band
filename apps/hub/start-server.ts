@@ -62,6 +62,10 @@ import {
 import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
+import {
+  verifyWorktreePreviewGrant,
+  WORKTREE_PREVIEW_PREFIX,
+} from "./src/server/services/_utils/worktree-preview-link.ts";
 import { agentSessionRegistry } from "./src/server/services/agent-session-registry-service.ts";
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
@@ -456,6 +460,7 @@ async function serveWorktreeFile(
   res: ServerResponse,
   worktreeId: string,
   rawPath: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<void> {
   const worktree = worktreeService.resolve(worktreeId);
   if (!worktree) {
@@ -479,12 +484,28 @@ async function serveWorktreeFile(
 
   try {
     const { fs } = worktree.host;
+    // A symlink must not lead out of the worktree.
+    const [realRoot, realTarget] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+    if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) {
+      res.writeHead(400);
+      res.end("Bad request");
+      return;
+    }
     const fileStat = await fs.stat(target, { followSymlinks: true });
     const contentType = mimeTypeFromFilename(basename(target));
+    const isHtml = contentType.startsWith("text/html");
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": fileStat.size.toString(),
       "Cache-Control": "private, no-cache",
+      // HTML from a repo must not run with the hub's origin.
+      ...(isHtml
+        ? {
+            "Content-Security-Policy": "sandbox allow-scripts",
+            "X-Content-Type-Options": "nosniff",
+          }
+        : {}),
+      ...extraHeaders,
     });
     pipeline(
       Readable.from(fs.readStream(target), { objectMode: false, highWaterMark: 64 * 1024 }),
@@ -495,6 +516,43 @@ async function serveWorktreeFile(
     res.writeHead(404);
     res.end("Not found");
   }
+}
+
+/** `GET /api/worktree-preview/<worktreeId>/<grant>/<path>`: a worktree file behind a signed grant. */
+async function handleWorktreePreview(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const rest = (req.url ?? "").slice(WORKTREE_PREVIEW_PREFIX.length).split("?")[0];
+  const [rawId, grant, ...pathParts] = rest.split("/");
+  let wId: string;
+  let filePath: string;
+  try {
+    wId = decodeURIComponent(rawId ?? "");
+    filePath = decodeURIComponent(pathParts.join("/"));
+  } catch {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!wId || !grant || !filePath) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!verifyWorktreePreviewGrant(wId, grant, filePath)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  await serveWorktreeFile(res, wId, filePath, {
+    // The page runs repo-controlled scripts on the hub's origin. `sandbox`
+    // without `allow-same-origin` gives it an opaque origin, so it cannot use
+    // the hub's cookies, storage or tRPC. Its own assets are plain GETs under
+    // the grant, and the wildcard CORS header lets scripts fetch them.
+    "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-modals",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "private, no-store",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +937,14 @@ async function main() {
         return;
       }
       await handleSubscriptionWebhook(req, res, subscriptionId);
+      return;
+    }
+
+    // Signed worktree file: /api/worktree-preview/<worktreeId>/<expiry>.<signature>/<path...>.
+    // Before the device-token check, because a browser tab cannot send it; the
+    // signature is scoped to one worktree and expires.
+    if (req.method === "GET" && req.url?.startsWith(WORKTREE_PREVIEW_PREFIX)) {
+      await handleWorktreePreview(req, res);
       return;
     }
 
