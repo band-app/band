@@ -43,7 +43,7 @@ const allFlows = readdirSync(E2E)
   // Sorted: the tab flows build on each other (t1 to t6), and readdir promises no order.
   .sort();
 const wanted = args.filter((a) => !a.startsWith("--"));
-const flows = wanted.length ? wanted : allFlows.filter((f) => f.startsWith("perf-") === perf);
+const flows = wanted.length ? [...wanted].sort() : allFlows.filter((f) => f.startsWith("perf-") === perf);
 for (const f of flows) {
   if (!allFlows.includes(f)) throw new Error(`No flow e2e/${f}.yaml (have: ${allFlows.join(", ")})`);
 }

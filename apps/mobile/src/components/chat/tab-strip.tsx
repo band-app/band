@@ -103,14 +103,14 @@ export function TabStrip({
   const [switcher, setSwitcher] = useState(false);
   const [picker, setPicker] = useState(false);
 
-  // Keep the shown tab in view when it changes (from the sheet, or a new chat at the end). A tab
-  // not laid out yet (the shared active tab on open) scrolls into view from its `onLayout`.
-  const scrolledTo = useRef<string | null>(null);
+  // Keep the shown tab in view when it changes (from the sheet, or a new chat at the end). Its
+  // `onLayout` scrolls again once it is laid out for a new set or order of tabs (on open, or after
+  // a close or a move shifted it), but not when only a label or a state dot changed its width.
+  const idsKey = tabs.map((t) => t.id).join(",");
+  const laidOutFor = useRef<string | null>(null);
   const reveal = useCallback((id: string, animated: boolean) => {
     const at = offsets.current.get(id);
-    if (!at) return;
-    scrolledTo.current = id;
-    scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
+    if (at) scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
   }, []);
   useEffect(() => {
     if (active) reveal(active, true);
@@ -142,12 +142,12 @@ export function TabStrip({
               onLongPress={() => showTabMenu(tab, i, tabs.length, actions)}
               onLayout={(e) => {
                 const { x, width } = e.nativeEvent.layout;
-                const before = offsets.current.get(tab.id);
                 offsets.current.set(tab.id, { x, width });
-                // Follow the shown tab when it is first laid out, and when a close or a move
-                // shifts it.
-                const moved = before?.x !== x || before?.width !== width;
-                if (selected && (scrolledTo.current !== tab.id || moved)) reveal(tab.id, false);
+                const layoutKey = `${tab.id}|${idsKey}`;
+                if (selected && laidOutFor.current !== layoutKey) {
+                  laidOutFor.current = layoutKey;
+                  reveal(tab.id, false);
+                }
               }}
               style={[styles.tab, selected && styles.tabSelected]}
               testID={`tabs__tab-${tab.id}`}
