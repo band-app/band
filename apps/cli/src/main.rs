@@ -321,6 +321,22 @@ enum WorktreesCmd {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Set or remove a worktree's parent (the worktree it was started from)
+    SetOrigin {
+        /// Repo name
+        repo: String,
+        /// Worktree name (the branch it was created on)
+        name: String,
+        /// Host the worktree is on (default: local)
+        #[arg(long)]
+        host: Option<String>,
+        /// Parent worktree ID
+        #[arg(long, conflicts_with = "none", required_unless_present = "none")]
+        origin: Option<String>,
+        /// Remove the parent
+        #[arg(long)]
+        none: bool,
+    },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
         /// Worktree ID
@@ -990,6 +1006,13 @@ fn main() {
                 add_host,
             } => cmd_worktrees_restore(&id, &to, checkpoint.as_deref(), add_host),
             WorktreesCmd::Continue { id, to } => cmd_worktrees_continue(&id, to.as_deref()),
+            WorktreesCmd::SetOrigin {
+                repo,
+                name,
+                host,
+                origin,
+                none,
+            } => cmd_worktrees_set_origin(&repo, &name, host.as_deref(), origin.as_deref(), none),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1796,6 +1819,36 @@ fn cmd_worktrees_continue(id: &str, to: Option<&str>) -> Result<CommandResult, S
     Ok(CommandResult {
         text: out,
         json: data,
+    })
+}
+
+fn cmd_worktrees_set_origin(
+    repo: &str,
+    name: &str,
+    host: Option<&str>,
+    origin: Option<&str>,
+    none: bool,
+) -> Result<CommandResult, String> {
+    validate::validate_name(repo, "Repo name")?;
+    validate::validate_name(name, "Worktree name")?;
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "repo": repo,
+        "name": name,
+        "origin": if none { None } else { origin },
+    });
+    if let Some(host) = host {
+        validate::validate_name(host, "Host id")?;
+        input["hostId"] = serde_json::json!(host);
+    }
+    client.trpc_mutate("worktrees.setOrigin", &input)?;
+    let text = match origin {
+        Some(origin) if !none => format!("Parent of {repo}/{name} set to {origin}\n"),
+        _ => format!("Parent of {repo}/{name} removed\n"),
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true}),
     })
 }
 
@@ -5287,6 +5340,18 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--to", "type": "string", "required": false, "description": "Target host (id or name). Default: the host the hub recommends"},
             ],
             "notes": "Restores the worktree from the hub's latest checkpoint on an online host the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its host comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the host is online (use `worktrees move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is not available on another host."
+        }),
+        serde_json::json!({
+            "name": "worktrees set-origin",
+            "description": "Set or remove a worktree's parent (the worktree it was started from)",
+            "parameters": [
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name"},
+                {"name": "--host", "type": "string", "required": false, "description": "Host the worktree is on (default: local)"},
+                {"name": "--origin", "type": "string", "required": false, "description": "Parent worktree ID. Required unless --none"},
+                {"name": "--none", "type": "boolean", "required": false, "description": "Remove the parent"},
+            ],
+            "notes": "Rejects the worktree itself and any of its descendants as the parent. A manual parent records no chat or terminal."
         }),
         serde_json::json!({
             "name": "worktrees checkpoints",

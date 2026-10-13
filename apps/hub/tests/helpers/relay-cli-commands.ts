@@ -68,6 +68,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "worktrees move": "moves work between hosts, which an agent on a worker must not do",
   "worktrees restore": "moves work between hosts, which an agent on a worker must not do",
   "worktrees continue": "moves work between hosts, which an agent on a worker must not do",
+  "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "hosts evacuate": "admin only, moves every worktree off a host",
   "runners list": "reads the hub's runner settings, which name its scripts and machines",

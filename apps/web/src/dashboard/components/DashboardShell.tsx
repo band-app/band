@@ -33,6 +33,7 @@ import { useRepos } from "../hooks/use-repos";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useBranchStatusWatcher,
+  useOriginChangeWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
@@ -122,6 +123,7 @@ export function DashboardShell({
   useStatusWatcher();
   useBranchStatusWatcher();
   useSetupStatusWatcher();
+  useOriginChangeWatcher();
 
   const handleSettingsClick = useCallback(() => {
     setSettingsHosts(false);

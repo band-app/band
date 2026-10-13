@@ -89,6 +89,20 @@ export function useBranchStatusWatcher() {
   }, [adapter, updateGitStatus, updateCIStatus]);
 }
 
+/** A parent set or removed from another device or the CLI changes the Origin tree. */
+export function useOriginChangeWatcher() {
+  const adapter = useAdapter();
+  useEffect(
+    () =>
+      adapter.subscribeStatusEvents((event) => {
+        if (event.kind === "worktree-origin-changed") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+        }
+      }),
+    [adapter],
+  );
+}
+
 export function useSetupStatusWatcher() {
   const adapter = useAdapter();
   const updateSetupStatus = useDashboardStore((s) => s.updateSetupStatus);

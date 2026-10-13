@@ -10,10 +10,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clipboard,
+  CornerUpLeft,
   Folder,
   FolderOpen,
   Home,
@@ -25,12 +27,15 @@ import {
   Play,
   Square,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { timeAgo, useHostOffline } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
+import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
@@ -50,6 +55,7 @@ import { GitStatusIndicator } from "./GitStatusIndicator";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
+import { SetParentDialog } from "./SetParentDialog";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
 
@@ -160,6 +166,9 @@ export const WorktreeCard = memo(function WorktreeCard({
   const superseded = worktree.supersededBy;
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
+  const [parentOpen, setParentOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
   const [divergenceOpen, setDivergenceOpen] = useState(false);
   const diverged = worktree.divergence?.state === "diverged";
   // Move needs the host online. Restore needs a checkpoint to restore from.
@@ -255,6 +264,13 @@ export const WorktreeCard = memo(function WorktreeCard({
   const hasUnmergedPR = ciState !== undefined && ciState !== "none" && ciState !== "merged";
   const isDirty = branchStatus?.git.dirty ?? false;
   const hasUnpushedCommits = (branchStatus?.git.ahead ?? 0) > 0;
+
+  const removeParent = () => {
+    trpc.worktrees.setOrigin
+      .mutate({ repo: repoName, name: worktree.name, hostId: worktree.hostId, origin: null })
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.repos }))
+      .catch((err) => setError(err));
+  };
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
@@ -522,6 +538,19 @@ export const WorktreeCard = memo(function WorktreeCard({
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
         </ContextMenuItem>
+        <ContextMenuItem
+          data-testid="worktree-card__set-parent"
+          onClick={() => setParentOpen(true)}
+        >
+          <CornerUpLeft />
+          Set parent…
+        </ContextMenuItem>
+        {worktree.origin && (
+          <ContextMenuItem data-testid="worktree-card__remove-parent" onClick={removeParent}>
+            <Unlink />
+            Remove parent
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         {capabilities.copyPath && (
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(worktree.path)}>
@@ -580,6 +609,14 @@ export const WorktreeCard = memo(function WorktreeCard({
           open={divergenceOpen}
           onOpenChange={setDivergenceOpen}
           worktreeId={worktreeId}
+        />
+      )}
+      {parentOpen && (
+        <SetParentDialog
+          open={parentOpen}
+          onOpenChange={setParentOpen}
+          repoName={repoName}
+          worktree={worktree}
         />
       )}
       {moveMode && moveOpen && (
