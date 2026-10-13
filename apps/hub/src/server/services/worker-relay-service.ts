@@ -21,7 +21,7 @@ import { CHAT_ID_HEADER, TERMINAL_ID_HEADER, WORKTREE_ID_HEADER } from "../api/c
 import { hostRegistry } from "../infra/host/registry";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
-import { crossHostRefusal } from "./cross-host-policy";
+import { crossHostRefusal, repoHostRefusal } from "./cross-host-policy";
 import {
   checkRelayRequest,
   filterReposReply,
@@ -56,12 +56,13 @@ const defaultLookups: ScopeLookups = {
     const chat = chatService.get(id);
     return chat?.worktreeId ?? null;
   },
-  worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
+  worktreeOfCwd: (cwd, hostId) => resolveWorktreeIdByCwd(cwd, hostId),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
   worktreeOfBrowser: (id) => browserService.get(id)?.worktreeId ?? null,
   worktreeOfSubscription: (id) =>
     subscriptionService.list().find((s) => s.id === id)?.worktreeId ?? null,
   crossHostRefusal,
+  repoHostRefusal,
 };
 
 export class WorkerRelayService {

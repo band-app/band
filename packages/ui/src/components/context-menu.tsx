@@ -1,7 +1,14 @@
 import { ChevronRightIcon } from "lucide-react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 import type * as React from "react";
-
+import {
+  DrillLevel,
+  DrillSub,
+  DrillSubContent,
+  DrillSubTrigger,
+  useDrillIn,
+  useInDrillSub,
+} from "../menu-drill";
 import { POPPER_MAX_HEIGHT, POPPER_MAX_WIDTH } from "../popper";
 import { cn } from "../utils";
 
@@ -16,6 +23,7 @@ function ContextMenuTrigger({
 }
 
 function ContextMenuPortal({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Portal>) {
+  if (useInDrillSub()) return props.children;
   return <ContextMenuPrimitive.Portal data-slot="context-menu-portal" {...props} />;
 }
 
@@ -23,8 +31,10 @@ function ContextMenuContent({
   className,
   onPointerDownCapture,
   onPointerUpCapture,
+  children,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  const drillIn = useDrillIn();
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
@@ -68,7 +78,9 @@ function ContextMenuContent({
           className,
         )}
         {...props}
-      />
+      >
+        {drillIn ? <DrillLevel>{children}</DrillLevel> : children}
+      </ContextMenuPrimitive.Content>
     </ContextMenuPrimitive.Portal>
   );
 }
@@ -97,6 +109,7 @@ function ContextMenuItem({
 }
 
 function ContextMenuSub({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Sub>) {
+  if (useDrillIn()) return <DrillSub>{props.children}</DrillSub>;
   return <ContextMenuPrimitive.Sub data-slot="context-menu-sub" {...props} />;
 }
 
@@ -108,6 +121,22 @@ function ContextMenuSubTrigger({
 }: React.ComponentProps<typeof ContextMenuPrimitive.SubTrigger> & {
   inset?: boolean;
 }) {
+  if (useInDrillSub()) {
+    const { onSelect, ...rest } = props as React.ComponentProps<"div"> & {
+      onSelect?: (event: Event) => void;
+    };
+    return (
+      <DrillSubTrigger
+        Item={ContextMenuItem as never}
+        data-inset={inset}
+        className={cn("data-[inset]:pl-8", className)}
+        onSelect={onSelect}
+        {...rest}
+      >
+        {children}
+      </DrillSubTrigger>
+    );
+  }
   return (
     <ContextMenuPrimitive.SubTrigger
       data-slot="context-menu-sub-trigger"
@@ -128,6 +157,16 @@ function ContextMenuSubContent({
   className,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
+  if (useInDrillSub()) {
+    return (
+      <DrillSubContent
+        Item={ContextMenuItem as never}
+        data-testid={(props as { "data-testid"?: string })["data-testid"]}
+      >
+        {props.children}
+      </DrillSubContent>
+    );
+  }
   return (
     <ContextMenuPrimitive.SubContent
       data-slot="context-menu-sub-content"

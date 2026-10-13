@@ -19,6 +19,19 @@ impl ApiClient {
     /// `cmd_worktrees_create` walking the `--via` precedence chain)
     /// share a single load — the file is small but the syscall pair
     /// (`stat` + `read`) adds up if we do it twice per CLI invocation.
+    /// A client whose requests give up after `timeout` in total (connect,
+    /// send and read). For callers that must never wait on a slow hub.
+    pub fn from_settings_with_timeout(timeout: std::time::Duration) -> Result<Self, String> {
+        let mut client = Self::from_settings()?;
+        client.agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .http_status_as_error(false)
+                .timeout_global(Some(timeout))
+                .build(),
+        );
+        Ok(client)
+    }
+
     pub(crate) fn from_loaded_settings(settings: state::Settings) -> Self {
         let base_url = if let Ok(url) = std::env::var("BAND_SERVER_URL") {
             url

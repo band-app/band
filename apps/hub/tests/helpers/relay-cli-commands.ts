@@ -30,7 +30,10 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "hosts list",
   "notify",
   "open",
+  "repos add",
   "repos list",
+  "repos remove",
+  "repos set",
   "subscriptions create",
   "subscriptions list",
   "subscriptions remove",
@@ -47,10 +50,6 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
 
 /** Commands the relay refuses or cannot carry, each with the reason. */
 export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
-  "repos add":
-    "registers a repo for the whole hub (a path, a URL or a worker folder), which is not a worker action",
-  "repos remove": "removes a repo for every host",
-  "repos set": "changes a repo's settings for every host",
   settings: "reads the hub's settings, which hold credentials",
   "tunnel start": "controls the hub's tunnel",
   "tunnel status": "reads the hub's tunnel",
@@ -69,6 +68,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "worktrees move": "moves work between hosts, which an agent on a worker must not do",
   "worktrees restore": "moves work between hosts, which an agent on a worker must not do",
   "worktrees continue": "moves work between hosts, which an agent on a worker must not do",
+  "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "hosts evacuate": "admin only, moves every worktree off a host",
   "runners list": "reads the hub's runner settings, which name its scripts and machines",

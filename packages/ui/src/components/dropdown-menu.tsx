@@ -1,7 +1,14 @@
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import type * as React from "react";
-
+import {
+  DrillLevel,
+  DrillSub,
+  DrillSubContent,
+  DrillSubTrigger,
+  useDrillIn,
+  useInDrillSub,
+} from "../menu-drill";
 import { POPPER_MAX_HEIGHT, POPPER_MAX_WIDTH } from "../popper";
 import { cn } from "../utils";
 
@@ -12,6 +19,7 @@ function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrim
 function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>) {
+  if (useInDrillSub()) return props.children;
   return <DropdownMenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />;
 }
 
@@ -24,8 +32,10 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const drillIn = useDrillIn();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -37,7 +47,9 @@ function DropdownMenuContent({
           className,
         )}
         {...props}
-      />
+      >
+        {drillIn ? <DrillLevel>{children}</DrillLevel> : children}
+      </DropdownMenuPrimitive.Content>
     </DropdownMenuPrimitive.Portal>
   );
 }
@@ -166,6 +178,7 @@ function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"spa
 }
 
 function DropdownMenuSub({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
+  if (useDrillIn()) return <DrillSub>{props.children}</DrillSub>;
   return <DropdownMenuPrimitive.Sub data-slot="dropdown-menu-sub" {...props} />;
 }
 
@@ -177,6 +190,22 @@ function DropdownMenuSubTrigger({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & {
   inset?: boolean;
 }) {
+  if (useInDrillSub()) {
+    const { onSelect, ...rest } = props as React.ComponentProps<"div"> & {
+      onSelect?: (event: Event) => void;
+    };
+    return (
+      <DrillSubTrigger
+        Item={DropdownMenuItem as never}
+        data-inset={inset}
+        className={cn("data-[inset]:pl-8", className)}
+        onSelect={onSelect}
+        {...rest}
+      >
+        {children}
+      </DrillSubTrigger>
+    );
+  }
   return (
     <DropdownMenuPrimitive.SubTrigger
       data-slot="dropdown-menu-sub-trigger"
@@ -197,6 +226,16 @@ function DropdownMenuSubContent({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  if (useInDrillSub()) {
+    return (
+      <DrillSubContent
+        Item={DropdownMenuItem as never}
+        data-testid={(props as { "data-testid"?: string })["data-testid"]}
+      >
+        {props.children}
+      </DrillSubContent>
+    );
+  }
   return (
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"

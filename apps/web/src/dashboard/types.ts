@@ -8,7 +8,12 @@ export type {
   WorktreeTerminalConfig,
 } from "@band-app/shared/terminal-config";
 
-export type AgentStatusType = "working" | "needs_attention" | "waiting";
+/**
+ * What an agent is doing: `working`, `monitoring` (the turn is over but a
+ * loop or background work runs), `question` (waits for the user), `done`,
+ * `failed` or `idle`.
+ */
+export type AgentStatusType = "working" | "monitoring" | "question" | "done" | "failed" | "idle";
 
 export interface AgentInfo {
   name: string;
@@ -21,7 +26,7 @@ export interface AgentInfo {
 export interface TabAgentStatus {
   chatId?: string;
   terminalId?: string;
-  status: "working" | "needs_attention";
+  status: Exclude<AgentStatusType, "idle">;
 }
 
 export interface WorktreeStatus {
@@ -30,7 +35,7 @@ export interface WorktreeStatus {
   branch: string;
   worktreePath: string;
   agent?: AgentInfo;
-  /** Chats and terminals whose agent is working or needs attention. */
+  /** Chats and terminals whose agent is not idle. */
   tabStatuses?: TabAgentStatus[];
 }
 
@@ -314,8 +319,23 @@ export interface Settings {
 }
 
 export interface HooksStatus {
+  /** Band's current hook is present for every event. */
   installed: boolean;
+  /** Band has hooks, but not the current set. */
+  outdated: boolean;
   other_hooks_exist: boolean;
+  /** The version of the hook set this build installs. */
+  version: number;
+}
+
+/** One host's Claude Code hooks (`hooks.hosts`). */
+export interface HostHooks {
+  hostId: string;
+  name: string;
+  online: boolean;
+  hasClaudeCode: boolean;
+  status: HooksStatus | null;
+  error?: string;
 }
 
 export type CliStatus =

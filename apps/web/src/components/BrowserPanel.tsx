@@ -2,6 +2,7 @@ import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
+import { BROWSER_LOAD_EVENT, type BrowserLoadDetail } from "../dashboard/lib/html-preview";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { registerBrowserGuest } from "../lib/browser-guest-retention";
@@ -565,6 +566,17 @@ export function BrowserPaneComponent({
     },
     [navigateWebview],
   );
+
+  // Another part of the UI (the HTML file Preview button) asks this tab to
+  // load a URL. Loading the URL it already shows reloads it.
+  useEffect(() => {
+    const onLoad = (e: Event) => {
+      const detail = (e as CustomEvent<BrowserLoadDetail>).detail;
+      if (detail?.browserId === browserIdRef.current) handleNavigate(detail.url);
+    };
+    window.addEventListener(BROWSER_LOAD_EVENT, onLoad);
+    return () => window.removeEventListener(BROWSER_LOAD_EVENT, onLoad);
+  }, [handleNavigate]);
 
   // The guest methods throw until it is attached and ready; the buttons are
   // harmless no-ops before that.

@@ -78,6 +78,7 @@ test("settings opens full screen with one page per sidebar entry", async ({ page
     ["browser", () => settingsPage.webBrowserCdpSwitch()],
     ["hosts", () => settingsPage.hostRow("local")],
     ["credentials", () => settingsPage.credentialsAddButton()],
+    ["agent-hooks", () => settingsPage.hooksHostRow("local")],
     ["labels", () => settingsPage.addLabelButton().first()],
     ["notifications", () => settingsPage.soundOnNeedsAttentionSwitch()],
     ["web-server", () => settingsPage.webServerPortInput()],
