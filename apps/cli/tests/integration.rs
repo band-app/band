@@ -1941,6 +1941,52 @@ fn settings_shows_config() {
     );
 }
 
+// --- Version tests ---
+
+#[test]
+fn dash_dash_version_prints_the_cli_version() {
+    let out = band_offline(&["--version"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out).trim(),
+        format!("band {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_prints_cli_and_hub_versions() {
+    let body = r#"{"result":{"data":{"webserver":true,"version":"9.8.7","tunnel":false}}}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["version"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        format!("CLI: {}\nHub: 9.8.7", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_labels_an_unreachable_hub() {
+    // Port 1 refuses connections.
+    let tmp = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["version"])
+        .env("BAND_HOME", tmp.path())
+        .env("BAND_SERVER_URL", "http://127.0.0.1:1")
+        .output()
+        .expect("failed to execute band");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        format!("CLI: {}\nHub: unreachable", env!("CARGO_PKG_VERSION"))
+    );
+}
+
 // --- Tunnel tests ---
 
 #[test]

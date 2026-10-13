@@ -306,7 +306,9 @@ describe("chat over ACP", () => {
       answer: "cancelled",
     });
     expect(events.at(-1)).toMatchObject({ type: "turn-ended", stopReason: "cancelled" });
-    expect(stubRequests(server.home, "session/cancel")).toHaveLength(1);
+    // Aborting answers the open permission request first, so the turn can end before the
+    // session/cancel notification reaches the agent. Wait for the agent to log it.
+    await expect.poll(() => stubRequests(server.home, "session/cancel")).toHaveLength(1);
   });
 
   it("queues a message sent during a turn and runs it after", async () => {

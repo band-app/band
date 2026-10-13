@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import pkg from "../../../../package.json" with { type: "json" };
 // TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
 // inline worktree-filter / aggregation / sort logic in `resourcesRepos`
 // and `resourcesRepoSize` are a layering bypass — the architecture doc
@@ -51,6 +52,7 @@ export const systemRouter = t.router({
     log.debug({ tunnel }, "services.health: tunnel status");
     const result = {
       webserver: true,
+      version: pkg.version,
       tunnel: tunnel.running,
       tunnel_url: tunnel.url,
     };
