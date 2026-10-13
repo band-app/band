@@ -54,7 +54,7 @@ A worker that says `ephemeral` in its hello is claimed by the worktrees created 
 | Setting | Where | Meaning |
 |---|---|---|
 | `BAND_EPHEMERAL_IDLE_TIMEOUT_MS` | hub | Idle time the hub sends to ephemeral workers. |
-| `BAND_AGENT_IDLE_TIMEOUT_MS` | hub | Idle stop of a chat's agent process. The worker stays up while that process runs. |
+| `BAND_AGENT_IDLE_TIMEOUT_MS` | hub | Opt-in idle stop of a chat's agent process (unset: never stopped). The worker stays up while that process runs. |
 | `BAND_AGENT_SESSION_DIRS` | worker | Extra directories (separated like `PATH`) that hold agent sessions. |
 | `BAND_PLACEMENT_TIMEOUT_MS` | hub | How long a wake request may wait for a worker. |
 

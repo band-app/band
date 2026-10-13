@@ -7,10 +7,12 @@ export {
 } from "./cli-invocation.ts";
 export {
   detectHookAgentType,
+  foldSubagents,
   hookSessionId,
   isHookSessionEnd,
   mapClaudeCodeHookStatus,
   mapHookPayloadToStatus,
+  type SubagentHold,
 } from "./hook-status.ts";
 export {
   CLAUDE_CODE_DEFAULT_BINARY,
