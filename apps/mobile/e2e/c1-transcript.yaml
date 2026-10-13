@@ -67,7 +67,13 @@ name: S1 chat transcript renders the seeded history
     text: "parse as base 10"
 - takeScreenshot: s1-markdown
 # A file path opens the placeholder for the file viewer.
-# A link inside a paragraph is its own element on iOS, named by its text.
+# A link inside a paragraph is its own element on iOS, named by its text. Maestro counts text
+# clipped under the headers above the list as visible, so the scroll above can stop with the
+# heading and this link hidden there; a short swipe brings them into the middle of the list.
+- swipe:
+    start: 50%, 45%
+    end: 50%, 70%
+    duration: 600
 - tapOn:
     text: "src/parser\\.ts:12"
 - assertVisible:

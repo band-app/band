@@ -12,8 +12,11 @@ name: Older turns load on scroll-back and the list keeps its place
     visible:
       id: chat__list
     timeout: 15000
+# Inside the list: the chat's tab is labelled with its first prompt, "turn 01: say done".
 - assertNotVisible:
     text: "turn 01: say done"
+    childOf:
+      id: chat__list
 # Turn 05 is the oldest the hub sent; scrolling to it reaches the top of the first page.
 - scrollUntilVisible:
     element:
@@ -31,6 +34,8 @@ name: Older turns load on scroll-back and the list keeps its place
 - scrollUntilVisible:
     element:
       text: "turn 01: say done"
+      childOf:
+        id: chat__list
     direction: UP
     timeout: 20000
 - takeScreenshot: c6-first-turn

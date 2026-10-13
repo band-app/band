@@ -20,9 +20,11 @@ import {
   receivedPrompts,
   seedHub,
   sessionState,
+  sharedTabs,
   startTurn,
   STREAM_LINES,
   stopTurn,
+  webEditTabs,
 } from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
@@ -37,9 +39,11 @@ const perf = args.includes("--perf");
 const E2E = join(APP_ROOT, "e2e");
 const allFlows = readdirSync(E2E)
   .filter((f) => f.endsWith(".yaml"))
-  .map((f) => f.replace(/\.yaml$/, ""));
+  .map((f) => f.replace(/\.yaml$/, ""))
+  // Sorted: the tab flows build on each other (t1 to t6), and readdir promises no order.
+  .sort();
 const wanted = args.filter((a) => !a.startsWith("--"));
-const flows = wanted.length ? wanted : allFlows.filter((f) => f.startsWith("perf-") === perf);
+const flows = wanted.length ? [...wanted].sort() : allFlows.filter((f) => f.startsWith("perf-") === perf);
 for (const f of flows) {
   if (!allFlows.includes(f)) throw new Error(`No flow e2e/${f}.yaml (have: ${allFlows.join(", ")})`);
 }
@@ -135,9 +139,55 @@ async function checkTranscript(hub, chats, worktreeId, udid) {
 }
 
 /**
+ * Checks the shared tab list the hub holds for a worktree against a flow's expectations:
+ * `chats=<n>` chat tabs (and as many chats on the hub), `keep=<id,id>` tabs that must still be
+ * listed, `has=<id,id>` and `lacks=<id,id>` chat ids, `order=<id,id>`, `active=<id>` or `active=new` (a chat
+ * tab not seeded), and `label=<id>:<name>` for a chat's name on the hub.
+ */
+function checkTabs({ tabs, chats }, params) {
+  const list = tabs?.tabs ?? [];
+  const chatTabs = list.filter((t) => t.kind === "chat").map((t) => t.id);
+  const problems = [];
+  const want = params.get("chats");
+  if (want !== null && chatTabs.length !== Number(want)) problems.push(`${chatTabs.length} chat tabs, not ${want}`);
+  if (want !== null && chats.length !== Number(want)) problems.push(`${chats.length} chats on the hub, not ${want}`);
+  for (const id of (params.get("keep") ?? "").split(",").filter(Boolean)) {
+    if (!list.some((t) => t.id === id)) problems.push(`tab ${id} was dropped`);
+  }
+  for (const id of (params.get("has") ?? "").split(",").filter(Boolean)) {
+    if (!chatTabs.includes(id)) problems.push(`no chat tab ${id}`);
+  }
+  for (const id of (params.get("lacks") ?? "").split(",").filter(Boolean)) {
+    if (chatTabs.includes(id) || chats.some((c) => c.id === id)) problems.push(`chat ${id} is still there`);
+  }
+  // `order=<id,...>` is the exact chat tab order, with `new` for a chat not seeded as `chat_tabs_*`.
+  const order = params.get("order");
+  const seen = chatTabs.map((id) => (/^chat_tabs_/.test(id) ? id : "new")).join(",");
+  if (order !== null && seen !== order) problems.push(`the chat tabs are in the order ${seen}, not ${order}`);
+  const active = params.get("active");
+  if (active === "new" && (!tabs?.active || /^chat_tabs_/.test(tabs.active) || !chatTabs.includes(tabs.active))) {
+    problems.push(`the active tab is ${tabs?.active}, not a new chat`);
+  } else if (active && active !== "new" && tabs?.active !== active) {
+    problems.push(`the active tab is ${tabs?.active}, not ${active}`);
+  }
+  // `label` in ACTION, or in VALUE when the name has spaces.
+  const label = params.get("label") ?? params.get("value");
+  if (label) {
+    const [id, name] = [label.slice(0, label.indexOf(":")), label.slice(label.indexOf(":") + 1)];
+    const found = chats.find((c) => c.id === id)?.name;
+    if (found !== name) problems.push(`chat ${id} is named ${found}, not ${name}`);
+  }
+  const note = `shared tabs ${list.map((t) => `${t.kind}:${t.id}`).join(", ")}; active ${tabs?.active}; hub chats ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`;
+  return { ok: problems.length === 0, note: problems.length ? `${problems.join("; ")}. ${note}` : note };
+}
+
+/**
  * A loopback server the flows call (`e2e/scripts/hub-control.js`) to drive the hub:
  * POST /stop and /start stop and restart it, /work?wt=<id>, /ask?wt=<id> and /halt?wt=<id>
- * make the scripted agent work, ask for permission or stop, /stream?wt=<id> streams numbered
+ * make the scripted agent work, ask for permission or stop (in the chat `chat=<id>` names, else
+ * the worktree's first), /check-tabs?wt=<id> checks the shared tab list (`checkTabs`, retried
+ * for up to 10 s), /web-tabs?wt=<id> changes it as the web would (`webEditTabs`),
+ * /stream?wt=<id> streams numbered
  * lines for 45 s, /fill adds worktrees, and /sleep?ms=<n> answers after n milliseconds (a
  * flow's way to wait while the app is away). /clipboard?value=<text> fails unless the
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
@@ -153,11 +203,27 @@ function startControlServer(hub, chats, udid, notes) {
         res.writeHead(404).end();
         return;
       }
+      // `chat=<id>` aims /work, /ask and /halt at that chat instead of the worktree's first one.
+      const chat = url.searchParams.get("chat");
+      const target = chat ? { ...chats, [wt]: chat } : chats;
       if (url.pathname === "/stop") await stopHub();
       else if (url.pathname === "/start") await restartHub();
-      else if (url.pathname === "/work") await startTurn(hub, chats, wt, "work until I say stop");
-      else if (url.pathname === "/ask") await startTurn(hub, chats, wt, "ask before you run the tests");
-      else if (url.pathname === "/halt") await stopTurn(hub, chats, wt);
+      else if (url.pathname === "/work") await startTurn(hub, target, wt, "work until I say stop");
+      else if (url.pathname === "/ask") await startTurn(hub, target, wt, "ask before you run the tests");
+      else if (url.pathname === "/halt") await stopTurn(hub, target, wt);
+      else if (url.pathname === "/check-tabs") {
+        // The phone pushes its tab list 500 ms after a change and removes a chat without waiting,
+        // so the hub may not have it yet: check again until it does or 10 s pass.
+        const deadline = Date.now() + 10_000;
+        let result = checkTabs(await sharedTabs(hub, wt), url.searchParams);
+        while (!result.ok && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 200));
+          result = checkTabs(await sharedTabs(hub, wt), url.searchParams);
+        }
+        notes.push(`${wt}: ${result.note}`);
+        if (!result.ok) throw new Error(result.note);
+      }
+      else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
       else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
         const want = url.searchParams.get("value") ?? "";

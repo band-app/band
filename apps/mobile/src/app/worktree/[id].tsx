@@ -1,17 +1,18 @@
 import { Stack, useLocalSearchParams } from "expo-router";
-import { memo, useEffect } from "react";
+import { memo, useEffect, useMemo } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChatView } from "../../components/chat/chat-view";
+import { TabStrip } from "../../components/chat/tab-strip";
 import { Body, Centered } from "../../components/ui";
 import { StatePill } from "../../components/worktree-row";
-import { useActiveChat } from "../../lib/chat/use-active-chat";
+import { useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
 import { findRow } from "../../lib/worktree-list";
 import { colors } from "../../theme";
 
-/** A worktree's screen: a line naming its branch and host, then its active chat. */
+/** A worktree's screen: a line naming its branch and host, its chat tabs, then the shown chat. */
 export default function WorktreeRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   return (
@@ -64,25 +65,68 @@ function WorktreeScreen({ id }: { id: string }) {
         </View>
         <StatePill row={row} />
       </View>
-      <WorktreeChat worktreeId={id} />
+      <WorktreeChats worktreeId={id} />
     </SafeAreaView>
   );
 }
 
-/** Memoized: the screen re-renders on every hub status event, the chat only on its own data. */
-const WorktreeChat = memo(function WorktreeChat({ worktreeId }: { worktreeId: string }) {
-  const { chatId, loading, error } = useActiveChat(worktreeId);
-  if (chatId) return <ChatView key={chatId} chatId={chatId} worktreeId={worktreeId} />;
+/**
+ * The worktree's chat tabs and the shown chat. Memoized: the screen re-renders on every hub status
+ * event, and this part follows only this worktree's status. The last few chats shown stay mounted under the shown one, so switching back to one shows
+ * it at once, at the place the user left it, with its stream still open.
+ */
+const WorktreeChats = memo(function WorktreeChats({ worktreeId }: { worktreeId: string }) {
+  const tabs = useWorktreeTabs(worktreeId);
+  const { select, close, move, rename, create } = tabs;
+  const actions = useMemo(
+    () => ({ select, close, move, rename, create }),
+    [select, close, move, rename, create],
+  );
+  if (!tabs.ready) {
+    return (
+      <Centered>
+        {tabs.loading ? (
+          <ActivityIndicator color={colors.mutedForeground} />
+        ) : (
+          <Body testID="worktree__no-chat">Couldn't load this worktree's chats.</Body>
+        )}
+      </Centered>
+    );
+  }
+  // Stable order, so a change of the shown tab never moves a mounted chat's view.
+  const mounted = tabs.tabs.filter((t) => tabs.mounted.includes(t.id));
   return (
-    <Centered>
-      {loading ? (
-        <ActivityIndicator color={colors.mutedForeground} />
+    <>
+      <TabStrip
+        tabs={tabs.tabs}
+        active={tabs.active}
+        hidden={tabs.hidden}
+        agents={tabs.agents}
+        actions={actions}
+      />
+      {tabs.active ? (
+        <View style={local.chats}>
+          {mounted.map(({ id }) => {
+            const shown = id === tabs.active;
+            return (
+              <View
+                key={id}
+                style={[StyleSheet.absoluteFill, shown ? local.shown : local.kept]}
+                pointerEvents={shown ? "auto" : "none"}
+                accessibilityElementsHidden={!shown}
+                importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
+              >
+                <ChatView chatId={id} worktreeId={worktreeId} active={shown} />
+              </View>
+            );
+          })}
+        </View>
       ) : (
-        <Body testID="worktree__no-chat">
-          {error ? "Couldn't load this worktree's chats." : "This worktree has no chat yet."}
-        </Body>
+        <Centered>
+          <Body testID="worktree__no-chat">This worktree has no chat yet. Tap + to start one.</Body>
+        </Centered>
       )}
-    </Centered>
+    </>
   );
 });
 
@@ -101,4 +145,7 @@ const local = StyleSheet.create({
   name: { color: colors.foreground, fontSize: 15, fontWeight: "600" },
   meta: { flexDirection: "row", gap: 6 },
   line: { color: colors.mutedForeground, flexShrink: 1, fontSize: 13 },
+  chats: { flex: 1 },
+  shown: { opacity: 1, zIndex: 1 },
+  kept: { opacity: 0, zIndex: 0 },
 });
