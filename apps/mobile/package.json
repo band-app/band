@@ -23,6 +23,7 @@
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.21",
     "expo-document-picker": "~57.0.3",
+    "expo-haptics": "~57.0.3",
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.12",
     "expo-router": "~57.0.25",

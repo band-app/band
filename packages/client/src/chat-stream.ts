@@ -32,7 +32,9 @@ export function chatEventsPath(chatId: string, cursor: ChatCursor): string {
     params.set("lastEventId", String(cursor.lastEventId));
     params.set("revision", String(cursor.revision));
   }
-  return `/api/chats/${encodeURIComponent(chatId)}/events?${params.toString()}`;
+  const query = params.toString();
+  const path = `/api/chats/${encodeURIComponent(chatId)}/events`;
+  return query ? `${path}?${query}` : path;
 }
 
 export function openChatStream(options: ChatStreamOptions): SseStream {

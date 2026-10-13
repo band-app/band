@@ -42,8 +42,10 @@ name: S4 a turn streamed while in the background arrives complete
 - takeScreenshot: s4-complete
 - longPressOn:
     text: "END of the stream."
-# Maestro holds a long press for about 3 s, longer than the "Copied" note stays; the clipboard
-# check below is the proof.
+# The long press opens the message actions; Copy puts the text on the clipboard, which the check
+# below compares with the hub's.
+- tapOn:
+    text: "Copy"
 - runScript:
     file: scripts/hub-control.js
     env:

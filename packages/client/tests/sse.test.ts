@@ -106,7 +106,7 @@ describe("openChatStream", () => {
     );
     // 10 events at 3 per connection: 4 connections, each resuming after the last id.
     assert.equal(requests.length, 4);
-    assert.match(requests[0] ?? "", /^\/api\/chats\/chat%2F1\/events\?$/);
+    assert.match(requests[0] ?? "", /^\/api\/chats\/chat%2F1\/events$/);
     assert.match(requests[1] ?? "", /lastEventId=3&revision=0/);
     assert.match(requests[3] ?? "", /lastEventId=9&revision=0/);
   });

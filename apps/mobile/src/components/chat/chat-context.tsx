@@ -16,7 +16,9 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { Alert } from "react-native";
+import { ActionSheetIOS, Alert } from "react-native";
+import { messageActions, rowTime, timeAgo } from "../../lib/chat/message-actions";
+import { type ChatRow, copyText } from "../../lib/chat/rows";
 
 class OpenSet {
   private readonly open = new Set<string>();
@@ -52,8 +54,11 @@ interface ChatContextValue {
   openSet: OpenSet;
   onToggle: () => void;
   copy: (text: string) => void;
-  /** Copies what a long press on the row `key` copies, read from the current transcript. */
-  copyRow: (key: string) => void;
+  /**
+   * Opens the action sheet of the row `key` (Copy, and when the message was sent), read from the
+   * current transcript.
+   */
+  showActions: (key: string) => void;
   openFile: (path: string) => void;
 }
 
@@ -64,7 +69,7 @@ export function ChatProvider({
   token,
   onCopied,
   onToggle,
-  rowText,
+  rowFor,
   children,
 }: {
   hubUrl: string;
@@ -73,10 +78,10 @@ export function ChatProvider({
   /** Called when the user opens or closes a collapsible. */
   onToggle: () => void;
   /**
-   * The copy text of a row as the transcript holds it now. A memoized row can be stale: an
-   * earlier part of a message that is still growing doesn't re-render, but copies the whole message.
+   * A row as the transcript holds it now. A memoized row can be stale: an earlier part of a
+   * message that is still growing doesn't re-render, but copies the whole message.
    */
-  rowText: (key: string) => string;
+  rowFor: (key: string) => ChatRow | undefined;
   children: ReactNode;
 }) {
   const openSet = useRef(new OpenSet()).current;
@@ -84,8 +89,8 @@ export function ChatProvider({
   copiedRef.current = onCopied;
   const toggledRef = useRef(onToggle);
   toggledRef.current = onToggle;
-  const rowTextRef = useRef(rowText);
-  rowTextRef.current = rowText;
+  const rowForRef = useRef(rowFor);
+  rowForRef.current = rowFor;
   const value = useMemo<ChatContextValue>(() => {
     const copy = (text: string) => {
       if (!text) return;
@@ -100,7 +105,25 @@ export function ChatProvider({
       openSet,
       onToggle: () => toggledRef.current(),
       copy,
-      copyRow: (key) => copy(rowTextRef.current(key)),
+      showActions: (key) => {
+        const row = rowForRef.current(key);
+        if (!row) return;
+        const actions = messageActions(row);
+        const sent = rowTime(row);
+        if (actions.length === 0 && sent === undefined) return;
+        const text = copyText(row);
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            title: sent === undefined ? undefined : new Date(sent).toLocaleString(),
+            message: sent === undefined ? undefined : timeAgo(sent, Date.now()),
+            options: [...actions.map(() => "Copy"), "Cancel"],
+            cancelButtonIndex: actions.length,
+          },
+          (index) => {
+            if (actions[index] === "copy") copy(text);
+          },
+        );
+      },
       openFile: (path) => Alert.alert(path, "The file viewer comes in a later version."),
     };
   }, [hubUrl, token, openSet]);
