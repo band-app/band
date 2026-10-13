@@ -51,6 +51,15 @@ export type {
  */
 export const HISTORY_PAGE_SIZE = 20;
 
+/**
+ * Upper bound on the logged rows in one page. An agentic turn logs hundreds
+ * of rows (tool calls, usage updates, text chunks), so 20 turns alone can
+ * be thousands. A page keeps whole turns, newest first, and stops adding
+ * older ones once the next would pass this bound, but it always holds at
+ * least the newest turn.
+ */
+export const HISTORY_PAGE_MAX_ROWS = 300;
+
 // ---------------------------------------------------------------------------
 // Common shapes
 // ---------------------------------------------------------------------------

@@ -697,6 +697,18 @@ export class ChatPanePage {
     return () => [...urls];
   }
 
+  /** Start recording the older-page requests the page makes
+   *  (`/api/chats/<id>/history`). The getter returns their URLs. Call
+   *  BEFORE `goto`. */
+  trackHistoryRequests(): () => string[] {
+    const urls: string[] = [];
+    this.page.on("request", (req) => {
+      const url = new URL(req.url());
+      if (/^\/api\/chats\/[^/]+\/history$/.test(url.pathname)) urls.push(req.url());
+    });
+    return () => [...urls];
+  }
+
   /** Locator for a user-role message bubble carrying the given text.
    *  Scoped to the `chat-pane__user-message` data-testid container so a
    *  future change that renders user text inside an assistant bubble
