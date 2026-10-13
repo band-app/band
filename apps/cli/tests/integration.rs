@@ -864,6 +864,70 @@ fn worktrees_create_host_flag_conflicts_and_unknown_host() {
 }
 
 #[test]
+fn worktrees_set_origin_sets_clears_and_refuses_bad_input() {
+    let env = TestEnv::new();
+    for branch in ["feat/a", "feat/b"] {
+        let output = env.band(&["worktrees", "create", "my-repo", branch]);
+        assert!(output.status.success(), "stderr: {}", stderr(&output));
+    }
+    let origin_of = |id: &str| {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap_or_else(|| panic!("{id} in {listed}"))["origin"]
+            .clone()
+    };
+
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/b",
+        "--origin",
+        "my-repo-feat-a",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(origin_of("my-repo-feat-b")["worktreeId"], "my-repo-feat-a");
+
+    // A descendant cannot become its ancestor's parent.
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/a",
+        "--origin",
+        "my-repo-feat-b",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("descendant"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/a",
+        "--origin",
+        "no-such-worktree",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown origin worktree"),
+        "stderr: {}",
+        stderr(&output)
+    );
+
+    let output = env.band(&["worktrees", "set-origin", "my-repo", "feat/b", "--none"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(origin_of("my-repo-feat-b").is_null());
+}
+
+#[test]
 fn worktrees_create_records_the_origin_and_list_shows_it() {
     let env = TestEnv::new();
     for branch in ["feat/parent", "feat/other"] {
