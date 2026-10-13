@@ -47,6 +47,8 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("runners.")
     )
       continue;
+    // `worktree.previewUrl` returns a bearer URL for a worktree's files.
+    if (path === "worktree.previewUrl") continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
     // `repos.addFromWorker` reads folders on a worker the caller names.

@@ -100,6 +100,15 @@ import {
   useWorktreePath,
   type ViewMode,
 } from "@/dashboard";
+import {
+  BROWSER_LOAD_EVENT,
+  type BrowserLoadDetail,
+  HTML_PREVIEW_EVENT,
+  type HtmlPreviewDetail,
+  isHtmlFile,
+  isPreviewUrlFor,
+  previewHtmlInBrowser,
+} from "../dashboard/lib/html-preview";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import {
@@ -132,6 +141,7 @@ import {
   splitDirectionForKey,
 } from "../lib/dockview-section-actions";
 import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
+import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
 import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
@@ -1585,6 +1595,19 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
                 </button>
                 {viewMode !== "source" && <MarkdownWidthToggle />}
               </>
+            )}
+            {isDesktop && !external && !untitled && isHtmlFile(filePathRaw) && (
+              <button
+                type="button"
+                onClick={() =>
+                  previewHtmlInBrowser({ worktreeId: worktreeIdRaw, path: filePathRaw })
+                }
+                title="Preview in a browser tab"
+                data-testid="center-file-leaf__html-preview"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Globe className="size-3.5" />
+              </button>
             )}
             {fileActions?.canSave && fileActions.isDirty && (
               <button
@@ -4351,6 +4374,57 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       disposed = true;
       unlisten?.();
     };
+  }, [worktreeId]);
+
+  // The file viewer's HTML Preview button: open the file in a Band browser tab,
+  // or focus and reload the tab that already previews it.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const onPreview = (e: Event) => {
+      const detail = (e as CustomEvent<HtmlPreviewDetail>).detail;
+      if (!detail || detail.worktreeId !== worktreeId) return;
+      void (async () => {
+        const api = apiRef.current;
+        if (!api) return;
+        try {
+          const { url } = await trpc.worktree.previewUrl.query({
+            worktreeId,
+            path: detail.path,
+          });
+          const absolute = new URL(hubUrl(url), window.location.href).toString();
+          // The tab that previews this file is found by its saved URL, so a
+          // second click reuses it after a reload too.
+          const { browsers } = await trpc.browsers.list.query({ worktreeId });
+          const existing = browsers.find(
+            (b) => b.url && isPreviewUrlFor(b.url, worktreeId, detail.path),
+          )?.id;
+          const panel = existing ? api.getPanel(existing) : undefined;
+          if (existing && panel) {
+            panel.api.setActive();
+            await trpc.browsers.navigate.mutate({ browserId: existing, url: absolute });
+            window.dispatchEvent(
+              new CustomEvent<BrowserLoadDetail>(BROWSER_LOAD_EVENT, {
+                detail: { browserId: existing, url: absolute },
+              }),
+            );
+            return;
+          }
+          const id = newBrowserId();
+          markBrowserFresh(id);
+          addBrowserLeaf(api, worktreeId, id, absolute);
+          try {
+            await trpc.browsers.create.mutate({ worktreeId, id, url: absolute });
+          } catch (err) {
+            api.getPanel(id)?.api.close();
+            throw err;
+          }
+        } catch (err) {
+          console.error("[WorktreeCenterDockview] html preview failed:", err);
+        }
+      })();
+    };
+    window.addEventListener(HTML_PREVIEW_EVENT, onPreview);
+    return () => window.removeEventListener(HTML_PREVIEW_EVENT, onPreview);
   }, [worktreeId]);
 
   // Bring a specific chat/terminal leaf forward when "Add to Chat/Terminal" targets it.
