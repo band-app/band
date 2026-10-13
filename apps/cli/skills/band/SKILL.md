@@ -208,6 +208,15 @@ band settings
 
 Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON.
 
+### Show versions
+
+```sh
+band --version
+band version
+```
+
+`band --version` prints the CLI version and needs no hub. `band version` prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. With `--output json` it prints `{"cli": "...", "hub": "..." | null}`.
+
 ### Show tunnel status
 
 ```sh
