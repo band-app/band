@@ -10,8 +10,10 @@ import {
 import { Ellipsis, GitBranch, GitPullRequest, Loader, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { ChecksSection } from "./ChecksSection";
+import { CommentsSection } from "./CommentsSection";
 import { ReviewStateBadge } from "./check-status";
 import { MergeControl } from "./MergeControl";
+import { ReviewersSection } from "./ReviewersSection";
 
 // Poll faster while checks are still running, the way you watch CI.
 const POLL_RUNNING_MS = 30_000;
@@ -83,6 +85,7 @@ export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) 
       ) : (
         <BranchHeader branch={data.branch} checks={data.checks} refresh={refresh} />
       )}
+      {data.review?.reviewers && <ReviewersSection reviewers={data.review.reviewers} />}
       <ChecksSection
         worktreeId={worktreeId}
         branch={data.branch}
@@ -90,6 +93,9 @@ export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) 
         checks={data.checks}
         visible={visible}
       />
+      {data.review?.discussion && (
+        <CommentsSection worktreeId={worktreeId} discussion={data.review.discussion} />
+      )}
     </div>
   );
 }

@@ -36,6 +36,7 @@ import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
+import { AgentHooksSettings } from "./settings/AgentHooksSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
@@ -82,6 +83,7 @@ type SettingsSectionId =
   | "repos"
   | "credentials"
   | "mcp"
+  | "agent-hooks"
   | "runners"
   | "environment"
   | "labels"
@@ -158,6 +160,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "MCP",
     subtitle:
       "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
+    group: "AI capabilities",
+  },
+  {
+    id: "agent-hooks",
+    title: "Agent hooks",
+    subtitle: "Claude Code hooks that report what an agent in a terminal is doing.",
     group: "AI capabilities",
   },
   {
@@ -878,6 +886,13 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     </SettingsSection>
                   ) : null}
 
+                  {/* ── Agent hooks ────────────────────────────────── */}
+                  {active === "agent-hooks" ? (
+                    <SettingsSection title="Agent hooks">
+                      <AgentHooksSettings />
+                    </SettingsSection>
+                  ) : null}
+
                   {/* ── MCP ────────────────────────────────────────── */}
                   {active === "mcp" ? (
                     <SettingsSection title="MCP">
@@ -1359,8 +1374,8 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     <SettingsSection title="Notifications">
                       <SettingsRow
                         htmlFor="sound-needs-attention"
-                        label="Play sound on needs attention"
-                        description="Play a sound when an agent transitions from working to needs attention."
+                        label="Play sound when an agent needs you or finishes"
+                        description="Play a sound when an agent asks a question, finishes or fails. Loops and background work that keep running are silent."
                       >
                         <Switch
                           id="sound-needs-attention"

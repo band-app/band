@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link";
 import { diffService } from "../../services/diff-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
@@ -442,6 +443,16 @@ export const worktreeRouter = t.router({
       }),
     )
     .mutation(({ input }) => filesService.copyPath(input.worktreeId, input.fromPath, input.toPath)),
+
+  /** A signed, expiring URL for one worktree file, for a browser tab that cannot send the auth header. */
+  previewUrl: publicProcedure
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .query(({ input }) => {
+      if (!worktreeService.resolve(input.worktreeId)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Worktree not found" });
+      }
+      return { url: worktreePreviewUrl(input.worktreeId, input.path) };
+    }),
 
   searchFiles: publicProcedure
     .input(

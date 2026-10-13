@@ -22,10 +22,14 @@ import { type GhInvocation, type GhStub, ghStub } from "../../hub/tests/fixtures
 import {
   checkRunNode,
   checkSuiteNode,
+  commentNode,
   FAKE_REPO,
   jobUrl,
   pullRequestNode,
+  reviewNode,
   reviewQueryData,
+  reviewRequestNode,
+  reviewThreadNode,
 } from "../../hub/tests/fixtures/github-review-data";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
@@ -38,6 +42,7 @@ import {
   startServer,
 } from "./helpers/server";
 import { PrChecksPanelPage } from "./pages/PrChecksPanelPage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 // Wide viewport so the right sidepanel renders beside the center dockview.
 test.use({ viewport: { width: 1920, height: 900 } });
@@ -50,6 +55,7 @@ const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 const REFRESH_BRANCH = "feat/refresh";
 const GH_DOWN_BRANCH = "feat/gh-down";
 const RUNNING_BRANCH = "feat/running";
+const DISCUSSION_BRANCH = "feat/discussion";
 const RUNNING_STARTED_AT = "2026-01-01T10:00:00Z";
 const MERGE_FAIL_MESSAGE =
   "GraphQL: Pull request is not mergeable: the base branch policy prohibits the merge.";
@@ -112,12 +118,23 @@ test.beforeAll(async () => {
   git(repo, ["worktree", "add", "-b", PR_BRANCH, prWorktree]);
   const readyWorktree = join(tmpHome, "wt-ready");
   git(repo, ["worktree", "add", "-b", READY_BRANCH, readyWorktree]);
-  const worktrees = [MERGE_FAIL_BRANCH, REFRESH_BRANCH, GH_DOWN_BRANCH, RUNNING_BRANCH].map(
-    (branch) => {
-      const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
-      git(repo, ["worktree", "add", "-b", branch, path]);
-      return { name: branch, branch, path };
-    },
+  const worktrees = [
+    MERGE_FAIL_BRANCH,
+    REFRESH_BRANCH,
+    GH_DOWN_BRANCH,
+    RUNNING_BRANCH,
+    DISCUSSION_BRANCH,
+  ].map((branch) => {
+    const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
+    git(repo, ["worktree", "add", "-b", branch, path]);
+    return { name: branch, branch, path };
+  });
+  // The file an inline thread points at, untracked but on disk in its worktree.
+  const discussionPath = join(tmpHome, `wt-${DISCUSSION_BRANCH.replaceAll("/", "-")}`);
+  mkdirSync(join(discussionPath, "src"), { recursive: true });
+  writeFileSync(
+    join(discussionPath, "src", "login.ts"),
+    Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join("\n"),
   );
   const localOnly = join(tmpHome, "local-only");
   mkdirSync(localOnly, { recursive: true });
@@ -224,6 +241,77 @@ test.beforeAll(async () => {
   stub.setReviewQuery(FAKE_REPO, REFRESH_BRANCH, () => refreshAnswer);
   runningAnswer = runningChecks({ completedAt: null });
   stub.setReviewQuery(FAKE_REPO, RUNNING_BRANCH, () => runningAnswer);
+  stub.setReviewQuery(
+    FAKE_REPO,
+    DISCUSSION_BRANCH,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 720,
+          reviewRequests: [reviewRequestNode("carol")],
+          reviews: [
+            reviewNode({
+              id: "R1",
+              login: "bob",
+              state: "CHANGES_REQUESTED",
+              submittedAt: "2026-01-02T08:00:00Z",
+            }),
+            reviewNode({
+              id: "R2",
+              login: "bob",
+              state: "APPROVED",
+              submittedAt: "2026-01-02T10:00:00Z",
+              body: "Ship it.",
+            }),
+          ],
+          comments: [
+            commentNode({
+              id: "C1",
+              login: "alice",
+              body: "This **looks** good.\n\n<script>alert(1)</script>",
+              createdAt: "2026-01-02T07:00:00Z",
+            }),
+          ],
+          reviewThreads: [
+            reviewThreadNode({
+              id: "T1",
+              path: "src/login.ts",
+              line: 42,
+              comments: [
+                commentNode({
+                  id: "TC1",
+                  login: "bob",
+                  body: "Why not a `const`?",
+                  createdAt: "2026-01-02T09:00:00Z",
+                }),
+                commentNode({
+                  id: "TC2",
+                  login: "alice",
+                  body: "Done in the next commit.",
+                  createdAt: "2026-01-02T09:05:00Z",
+                }),
+              ],
+            }),
+            reviewThreadNode({
+              id: "T2",
+              path: "src/resolved.ts",
+              line: 7,
+              isResolved: true,
+              comments: [commentNode({ id: "TC3", login: "bob", body: "Fixed nit." })],
+            }),
+            reviewThreadNode({
+              id: "T3",
+              path: "src/outdated.ts",
+              line: 9,
+              isOutdated: true,
+              comments: [commentNode({ id: "TC4", login: "bob", body: "Old remark." })],
+            }),
+          ],
+          contexts: [checkRunNode({ id: 71, name: "Build", workflow: "CI", runId: 1100 })],
+        }),
+      ],
+    }),
+  );
   stub.setReviewQueryError(FAKE_REPO, GH_DOWN_BRANCH, "HTTP 401: Bad credentials\n");
   stub.setReviewQuery(
     FAKE_REPO,
@@ -434,4 +522,103 @@ test("a repo without an origin remote shows why the tab is empty", async ({ page
 
   await expect(panel.unavailable).toBeVisible();
   await expect(panel.root).toHaveCount(0);
+});
+
+test("the Reviewers section lists each reviewer's latest state above Checks", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, DISCUSSION_BRANCH, "local"));
+
+  await expect(panel.reviewersSummary).toHaveText("1/2 approved");
+  await expect(panel.reviewers).toHaveCount(2);
+  // bob requested changes and later approved: only Approved shows.
+  await expect(panel.reviewer("bob")).toHaveAttribute("data-reviewer-state", "approved");
+  await expect(panel.reviewer("carol")).toHaveAttribute("data-reviewer-state", "pending");
+
+  const reviewersTop = (await panel.sectionHeader("reviewers").boundingBox())?.y ?? 0;
+  const checksTop = (await panel.sectionHeader("checks").boundingBox())?.y ?? 0;
+  const commentsTop = (await panel.sectionHeader("comments").boundingBox())?.y ?? 0;
+  expect(reviewersTop).toBeLessThan(checksTop);
+  expect(checksTop).toBeLessThan(commentsTop);
+});
+
+test("the Comments section shows comments, review summaries and inline threads", async ({
+  page,
+}) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, DISCUSSION_BRANCH, "local"));
+
+  // One comment, one review summary and three threads; two are unresolved.
+  await expect(panel.commentsSummary).toHaveText("5, 2 unresolved");
+  await expect(panel.commentItems).toHaveCount(2);
+  await expect(panel.commentItems.first()).toContainText("alice");
+  // Markdown is rendered: the emphasis markers are gone from the text.
+  await expect(panel.commentItems.first()).toContainText("This looks good.");
+  await expect(panel.commentItems.first()).not.toContainText("**");
+  // Untrusted HTML in a body is not rendered as markup.
+  await expect(panel.commentBodyScripts()).toHaveCount(0);
+  await expect(panel.commentItems.nth(1)).toContainText("Ship it.");
+
+  const thread = panel.thread("src/login.ts:42");
+  await expect(thread).toContainText("Why not a");
+  await expect(thread).toContainText("Done in the next commit.");
+  await expect(panel.threadLinks("src/login.ts:42")).toHaveCount(2);
+});
+
+test("resolved and outdated threads start collapsed and expand on click", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, DISCUSSION_BRANCH, "local"));
+
+  const resolved = "src/resolved.ts:7";
+  const outdated = "src/outdated.ts:9";
+  await expect(panel.threadLabel(resolved)).toHaveText("Resolved");
+  await expect(panel.threadLabel(outdated)).toHaveText("Outdated");
+  await expect(panel.threadMessages(resolved)).toBeHidden();
+  await expect(panel.threadMessages(outdated)).toBeHidden();
+
+  await panel.toggleThread("src/resolved.ts:7");
+  await expect(panel.threadMessages(resolved)).toContainText("Fixed nit.");
+  await expect(panel.threadMessages(outdated)).toBeHidden();
+});
+
+test("clicking a thread's path:line opens that file in Band", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, DISCUSSION_BRANCH, "local"));
+
+  await panel.openThreadLocation("src/login.ts:42");
+
+  await expect(worktree.fileTab("src/login.ts")).toBeVisible();
+});
+
+test("each section keeps its own collapsed state across a reload", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktreeId = toWorktreeId(REPO, DISCUSSION_BRANCH, "local");
+  await panel.goto(worktreeId);
+
+  // Everything starts expanded.
+  for (const id of ["reviewers", "checks", "comments"] as const) {
+    await expect(panel.sectionHeader(id)).toHaveAttribute("aria-expanded", "true");
+  }
+
+  await panel.toggleSection("reviewers");
+  await panel.toggleSection("comments");
+  await expect(panel.reviewers.first()).toBeHidden();
+  await expect(panel.commentItems.first()).toBeHidden();
+  await expect(panel.list).toBeVisible();
+
+  await page.reload();
+  await panel.goto(worktreeId);
+
+  await expect(panel.sectionHeader("reviewers")).toHaveAttribute("aria-expanded", "false");
+  await expect(panel.sectionHeader("comments")).toHaveAttribute("aria-expanded", "false");
+  await expect(panel.sectionHeader("checks")).toHaveAttribute("aria-expanded", "true");
+});
+
+test("a branch with no pull request shows only the checks", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, "main", "local"));
+
+  await expect(panel.reviewersSummary).toHaveCount(0);
+  await expect(panel.commentsSummary).toHaveCount(0);
+  await expect(panel.checks).not.toHaveCount(0);
 });

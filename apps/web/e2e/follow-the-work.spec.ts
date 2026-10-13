@@ -319,16 +319,16 @@ test("messaging a worktree on an offline host offers B, continues there and deli
   expect((await worktreeRow("app", "feat-one", a.hostId))?.supersededBy).toBe(continuedId);
 });
 
-test("the header and the Host view show where the work came from (S5)", async ({ page }) => {
+test("the sidebar card and the Host view show where the work came from, the worktree view has no bar (S5)", async ({
+  page,
+}) => {
   const follow = new FollowPage(page);
   const app = new WorktreePage(page, server.url, TOKEN);
   const grouping = new SidebarGroupingPage(page);
   await app.goto(continuedId);
   await app.waitForReady();
 
-  await expect(follow.headerContinuedFrom).toContainText("Continued from box-a");
-  await expect(follow.headerContinuedFrom).toContainText("manual");
-  await expect(follow.headerContinuedFrom).toContainText("checkpoint");
+  await expect(follow.headerContinuedFrom).toHaveCount(0);
   await expect(follow.cardContinuedFrom(continuedId)).toContainText("Continued from box-a");
 
   await grouping.selectMode("host");

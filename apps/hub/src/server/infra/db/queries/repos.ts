@@ -679,7 +679,7 @@ export class RepoQueries {
    * Records where a worktree was started from, or clears it with `null`. Focused UPDATE, because
    * `saveAll` keeps the stored origin and never writes the one in its snapshot.
    */
-  setOrigin(repoName: string, name: string, origin: WorktreeOrigin | null): void {
+  setOrigin(repoName: string, name: string, origin: WorktreeOrigin | null, hostId?: string): void {
     getDb()
       .update(worktreesTable)
       .set({
@@ -687,7 +687,13 @@ export class RepoQueries {
         originChatId: origin?.chatId ?? null,
         originTerminalId: origin?.terminalId ?? null,
       })
-      .where(and(eq(worktreesTable.repoName, repoName), eq(worktreesTable.name, name)))
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
       .run();
   }
 

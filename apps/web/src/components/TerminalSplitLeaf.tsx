@@ -18,7 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { isMacPlatform } from "@/dashboard";
+import { AgentStateDot, isMacPlatform, useDashboardStore } from "@/dashboard";
 import { promptOnHostOffline } from "../lib/continue-prompt";
 import {
   cycleGridGroups,
@@ -139,8 +139,24 @@ function TerminalPaneHeader(props: IDockviewPanelHeaderProps<PaneParams>) {
   // A mousedown on a button must not start a dockview tab drag.
   const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
 
+  // This pane's own agent state, keyed by its terminal id.
+  const paneStatus = useDashboardStore(
+    (s) =>
+      s.statuses.get(props.params.worktreeId)?.tabStatuses?.find((t) => t.terminalId === terminalId)
+        ?.status,
+  );
+
   return (
     <div className="term-pane-header" data-testid={`term-pane-header__${terminalId}`}>
+      {paneStatus ? (
+        <span className="term-pane-header__status">
+          <AgentStateDot
+            status={paneStatus}
+            testId={`term-pane__status--${terminalId}`}
+            withTitle
+          />
+        </span>
+      ) : null}
       <div className="term-pane-header__actions" data-testid={`term-pane-actions__${terminalId}`}>
         <button
           type="button"

@@ -1,7 +1,6 @@
-import { useMediaQuery } from "./useMediaQuery";
+import { DESKTOP_QUERY, useMediaQuery } from "@band-app/ui";
 
-/** The viewport width at which the dashboard switches to its desktop layout. */
-export const DESKTOP_QUERY = "(min-width: 1024px)";
+export { DESKTOP_QUERY };
 
 export function useIsDesktop(): boolean {
   return useMediaQuery(DESKTOP_QUERY);
