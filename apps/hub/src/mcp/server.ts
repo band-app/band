@@ -44,7 +44,9 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("mcp.") ||
       (path.startsWith("hosts.") && path !== "hosts.forAgents") ||
       path.startsWith("hostRequests.") ||
-      path.startsWith("runners.")
+      path.startsWith("runners.") ||
+      // Writes ~/.claude/settings.json on a host; only a person's click may.
+      path.startsWith("hooks.")
     )
       continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
@@ -55,6 +57,8 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "repos.addByUrl") continue;
     // The add-repo previews read a worker's folders and contact a URL the caller names.
     if (path === "repos.inspectFolder" || path === "repos.resolveRemote") continue;
+    // Re-parenting a worktree is a person's decision, and an MCP call is not scoped to a worker.
+    if (path === "worktrees.setOrigin") continue;
     // `environment.build` runs commands from the repository on the builder host.
     if (path === "environment.build") continue;
 

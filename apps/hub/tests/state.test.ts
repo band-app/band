@@ -81,11 +81,11 @@ describe("upsertWorktreeStatus — identity healing", () => {
         repo: "",
         branch: "",
         worktreePath: "",
-        agentStatus: "waiting",
+        agentStatus: "idle",
       },
     ]);
 
-    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);
@@ -126,11 +126,11 @@ describe("upsertWorktreeStatus — identity healing", () => {
         repo: repoName,
         branch,
         worktreePath: "",
-        agentStatus: "waiting",
+        agentStatus: "idle",
       },
     ]);
 
-    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);
@@ -163,11 +163,11 @@ describe("upsertWorktreeStatus — identity healing", () => {
         repo: repoName,
         branch,
         worktreePath: staleButValidPath,
-        agentStatus: "waiting",
+        agentStatus: "idle",
       },
     ]);
 
-    const result = upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    const result = upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     // worktreePath stays at the (non-empty) seeded value — healing is
     // conservative and never overwrites correct data.
@@ -188,11 +188,11 @@ describe("upsertWorktreeStatus — identity healing", () => {
         repo: "",
         branch: "",
         worktreePath: "",
-        agentStatus: "waiting",
+        agentStatus: "idle",
       },
     ]);
 
-    const result = upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    const result = upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     expect(result.repo).toBe("");
     expect(result.branch).toBe("");
@@ -203,7 +203,7 @@ describe("upsertWorktreeStatus — identity healing", () => {
 // ---------------------------------------------------------------------------
 // upsertWorktreeStatus — no-op write skip.
 //
-// The status poller calls `upsertWorktreeStatus(_, { status: "waiting" })`
+// The status poller calls `upsertWorktreeStatus(_, { status: "idle" })`
 // on every tick for every idle worktree; without a no-op guard each tick
 // produces a WAL frame just to bump `updatedAt`, which nothing reads.
 // ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ describe("upsertWorktreeStatus — no-op write skip", () => {
         repo: repoName,
         branch,
         worktreePath: wtPath,
-        agentStatus: "waiting",
+        agentStatus: "idle",
         agentLastActivity: "",
       },
     ]);
@@ -260,7 +260,7 @@ describe("upsertWorktreeStatus — no-op write skip", () => {
     const before = readUpdatedAt(tmp, worktreeId);
     expect(before).toBeDefined();
 
-    upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     const after = readUpdatedAt(tmp, worktreeId);
     // updated_at must be byte-identical — no UPDATE was issued.
@@ -294,7 +294,7 @@ describe("upsertWorktreeStatus — no-op write skip", () => {
         repo: repoName,
         branch,
         worktreePath: wtPath,
-        agentStatus: "waiting",
+        agentStatus: "idle",
         updatedAt: 0,
       },
     ]);
@@ -364,11 +364,11 @@ describe("upsertWorktreeStatus — identity lookup with slashes in branch", () =
         repo: "",
         branch: "",
         worktreePath: "",
-        agentStatus: "waiting",
+        agentStatus: "idle",
       },
     ]);
 
-    const healed = upsertWorktreeStatus(worktreeId, { status: "waiting" });
+    const healed = upsertWorktreeStatus(worktreeId, { status: "idle" });
 
     expect(healed.repo).toBe(repoName);
     expect(healed.branch).toBe(branch);

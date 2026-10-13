@@ -56,7 +56,7 @@ const defaultLookups: ScopeLookups = {
     const chat = chatService.get(id);
     return chat?.worktreeId ?? null;
   },
-  worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
+  worktreeOfCwd: (cwd, hostId) => resolveWorktreeIdByCwd(cwd, hostId),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
   worktreeOfBrowser: (id) => browserService.get(id)?.worktreeId ?? null,
   worktreeOfSubscription: (id) =>

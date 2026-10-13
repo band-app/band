@@ -46,6 +46,7 @@ export type SettingsNavId =
   | "devices"
   | "credentials"
   | "mcp"
+  | "agent-hooks"
   | "context"
   | "runners"
   | "environment"
@@ -226,9 +227,44 @@ export class SettingsPage {
     return this.dialog.getByRole("button", { name: "Add label" });
   }
 
-  /** "Play sound on needs attention" toggle. */
+  /** The install banner for Claude Code hooks (`DashboardShell.tsx`). */
+  get hooksBanner(): Locator {
+    return this.page.getByTestId("hooks-banner");
+  }
+
+  /** The banner's Install button. */
+  get hooksBannerInstall(): Locator {
+    return this.page.getByTestId("hooks-banner__install");
+  }
+
+  /** The banner's dismiss (×) button. */
+  get hooksBannerDismiss(): Locator {
+    return this.page.getByTestId("hooks-banner__dismiss");
+  }
+
+  /** The Agent hooks row of one host (`AgentHooksSettings.tsx`). Its `data-state` is
+   *  `installed`, `outdated`, `not_installed` or `offline`. */
+  hooksHostRow(hostId: string): Locator {
+    return this.dialog
+      .getByTestId("settings__hooks-host")
+      .and(this.page.locator(`[data-host-id="${hostId}"]`));
+  }
+
+  /** Install or Reinstall on a host's Agent hooks row. */
+  hooksInstallButton(hostId: string): Locator {
+    return this.hooksHostRow(hostId).getByTestId("settings__hooks-install");
+  }
+
+  /** Remove on a host's Agent hooks row. */
+  hooksRemoveButton(hostId: string): Locator {
+    return this.hooksHostRow(hostId).getByTestId("settings__hooks-remove");
+  }
+
+  /** "Play sound when an agent needs you or finishes" toggle. */
   soundOnNeedsAttentionSwitch(): Locator {
-    return this.dialog.getByRole("switch", { name: "Play sound on needs attention" });
+    return this.dialog.getByRole("switch", {
+      name: "Play sound when an agent needs you or finishes",
+    });
   }
 
   /** The retired "Cached worktrees" number input. Kept as a locator only so

@@ -17,12 +17,12 @@ import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import {
-  acknowledgeWorktreeAttention,
-  chatStatusSource,
-  setWorktreeSourceStatus,
-  type WorktreeStatus,
-} from "./state";
-import { emit as emitStatusEvent } from "./watcher-service";
+  beginBandTurn,
+  endBandTurn,
+  observeAgentStatus,
+  setChatStatus,
+} from "./chat-status-service";
+import { acknowledgeWorktreeAttention, type WorktreeStatus } from "./state";
 // FRAGILE: ESM cycle leg — `worktree-service` imports `taskService` back
 // from this file. The cycle is safe only because every `worktreeService`
 // call below sits inside a function body — ESM live binding fills the
@@ -110,23 +110,6 @@ const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
 /** Tasks keyed by chatId — one running task per chat pane. */
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
-
-/**
- * A permission or elicitation request opening means the agent waits on the
- * user; its answer means the agent is working again. Registered on first
- * submit rather than at module load, because `agent-session-service` sits
- * in an import cycle with this module and isn't initialised yet then.
- */
-let observingPending = false;
-function observePending(): void {
-  if (observingPending) return;
-  observingPending = true;
-  agentSessionService.observePending((chatId, worktreeId) => {
-    if (tasks.get(chatId)?.status !== "running") return;
-    const waiting = agentSessionService.hasPendingRequest(chatId);
-    setScopeStatus(worktreeId, chatId, waiting ? "needs_attention" : "working");
-  });
-}
 
 function persistTask(task: InternalTask): void {
   const worktree = worktreeService.resolve(task.worktreeId);
@@ -262,12 +245,6 @@ function turnUsage(
 // Turn lifecycle
 // ---------------------------------------------------------------------------
 
-/** Records a chat's status on its worktree and broadcasts the worktree's new status. */
-function setScopeStatus(scope: string, chatId: string, status: string): void {
-  const updated = setWorktreeSourceStatus(scope, chatStatusSource(chatId), { status });
-  emitStatusEvent({ kind: "update", status: updated });
-}
-
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
   const { worktreeId, chatId, prompt, sessionId, mode, model, codingAgentId } = options;
 
@@ -279,7 +256,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
   if (existing?.status === "running") {
     throw new TaskConflictError(chatId);
   }
-  observePending();
+  observeAgentStatus(hasRunningTask);
 
   const task: InternalTask = {
     id: generateTaskId(),
@@ -342,7 +319,7 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
 async function runTask(task: InternalTask): Promise<void> {
   const { chatId } = task;
   chatService.updateStatus(chatId, "running");
-  setScopeStatus(task.worktreeId, chatId, "working");
+  beginBandTurn(task.worktreeId, chatId);
 
   // Prepare the chat: switch agent or session when this task asks for it.
   const chat = chatService.get(chatId);
@@ -464,7 +441,7 @@ async function runTask(task: InternalTask): Promise<void> {
       durationMs: Date.now() - task.startedAt,
       usage: turnUsage(chatId, res, previousCost),
     });
-    finishTask(task, res.stopReason === "cancelled" ? "cancelled" : "completed");
+    finishTask(task, res.stopReason === "cancelled" ? "cancelled" : "completed", res.stopReason);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     agentSessionService.record(chatId, {
@@ -491,13 +468,21 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
   }
 }
 
+/** Stop reasons that end a turn without an answer: the chat shows `failed`. */
+const FAILED_STOP_REASONS = new Set<string>(["refusal", "max_tokens", "max_turn_requests"]);
+
 /**
  * Settles a task: records its status, then either starts the next queued
- * message or hands the worktree back to the user. A turn that completed or
- * failed asks for the user's attention; one the user stopped (or that ended
- * while a stop was pending) doesn't, since the user already knows.
+ * message or sets the chat's status. A turn that completed shows `done`
+ * (`monitoring` while the agent still has background work), one that failed
+ * or ended with a refusal or a limit shows `failed`, and one the user
+ * stopped (or that ended while a stop was pending) shows `idle`.
  */
-function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cancelled"): void {
+function finishTask(
+  task: InternalTask,
+  outcome: "completed" | "failed" | "cancelled",
+  stopReason?: string,
+): void {
   if (task.status !== "running") return;
   const status = outcome === "completed" ? "completed" : "failed";
   task.status = status;
@@ -510,7 +495,9 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
-  setScopeStatus(task.worktreeId, task.chatId, stopped ? "waiting" : "needs_attention");
+  const failed =
+    outcome === "failed" || (stopReason !== undefined && FAILED_STOP_REASONS.has(stopReason));
+  endBandTurn(task.worktreeId, task.chatId, stopped ? "idle" : failed ? "failed" : "done");
 }
 
 /** Starts the chat's next queued message, if any. */
@@ -572,7 +559,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: s
   if (record) {
     // Tasks saved before chats existed have no chatId, and so no source.
     if (record.chatId) {
-      setScopeStatus(record.worktreeId, record.chatId, "waiting");
+      setChatStatus(record.worktreeId, record.chatId, "idle");
     }
     log.info({ taskId, worktreeId: record.worktreeId }, "orphaned task cancelled");
     return { cancelled: true, worktreeId: record.worktreeId };
@@ -620,13 +607,10 @@ export class TaskService {
     return getTask(chatId);
   }
 
-  /** Clears the worktree's attention status, except for chats whose agent
-   *  still waits on the user (a permission or elicitation request). */
+  /** Sets the worktree's finished chats (`done`, `failed`) back to `idle`. A
+   *  chat whose agent still waits on the user keeps its `question`. */
   acknowledgeAttention(worktreeId: string): WorktreeStatus | null {
-    return acknowledgeWorktreeAttention(
-      worktreeId,
-      agentSessionService.chatsWithPendingRequest(worktreeId),
-    );
+    return acknowledgeWorktreeAttention(worktreeId);
   }
 
   listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {
