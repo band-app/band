@@ -1,5 +1,7 @@
 /**
- * Ctrl+Tab / Ctrl+Shift+Tab cycle the center tabs, and after every press the
+ * Ctrl+Tab opens the most-recently-used switcher (see `center-tab-switcher.spec.ts`).
+ * Here the tests reach tabs through it (Ctrl+Shift+Tab opens it on the least
+ * recent tab), and after every switch the
  * new tab's own input holds keyboard focus: the terminal's xterm textarea (the
  * active pane's, in a split), the file's CodeMirror editor, the markdown
  * preview, the diff's scroller, the chat composer. Focus used to stay behind
@@ -103,9 +105,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Ctrl+Tab and Ctrl+Shift+Tab focus every kind of tab and can leave each one", async ({
-  page,
-}) => {
+test("Ctrl+Tab focuses every kind of tab and can leave each one", async ({ page }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const focus = new CenterTabFocus(page);
   const viewer = new FileViewerPage(page, worktreePage.fileLeafVisibilityMarker(true));
@@ -145,23 +145,21 @@ test("Ctrl+Tab and Ctrl+Shift+Tab focus every kind of tab and can leave each one
   // Opening the diff made it the active tab, and focused it.
   await expectShown(5);
 
-  // Forward twice around, so every tab is entered and left with Ctrl+Tab
-  // (the diff wraps to the terminal).
+  // Reaching the least recently used tab each time visits every tab in
+  // opening order, twice around, so each kind is entered and left.
   for (let step = 1; step <= cycle.length * 2; step++) {
-    await focus.pressNextTab();
+    await focus.switchToRecent(cycle.length - 1);
     await expectShown((5 + step) % cycle.length);
   }
 
-  // Backward once around.
-  for (let step = 1; step <= cycle.length; step++) {
-    await focus.pressPreviousTab();
-    await expectShown((5 + cycle.length - step) % cycle.length);
-  }
+  // A quick tap goes back to the tab just left.
+  await focus.pressNextTab();
+  await expectShown((5 + cycle.length * 2 - 1) % cycle.length);
 
   // Focus on <body> doesn't strand Ctrl+Tab.
   await focus.dropFocusToBody();
   await focus.pressNextTab();
-  await expectShown(0);
+  await expectShown((5 + cycle.length * 2) % cycle.length);
 });
 
 test("clicking a tab focuses its content", async ({ page }) => {
