@@ -1,5 +1,5 @@
 import { describeWatch, formatExpiry } from "@band-app/client/subscription-label";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSubscriptions } from "../../lib/chat/use-subscriptions";
 import { colors } from "../../theme";
@@ -9,7 +9,7 @@ import { colors } from "../../theme";
  * `ListeningPill`. Renders nothing when the chat has no subscriptions. Tapping the pill opens the
  * list, and each entry can be removed.
  */
-export function ListeningPill({ chatId }: { chatId: string }) {
+export const ListeningPill = memo(function ListeningPill({ chatId }: { chatId: string }) {
   const { subscriptions, remove } = useSubscriptions(chatId);
   const [open, setOpen] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -95,7 +95,7 @@ export function ListeningPill({ chatId }: { chatId: string }) {
       </Modal>
     </>
   );
-}
+});
 
 const styles = StyleSheet.create({
   pill: {
