@@ -1357,6 +1357,39 @@ export class WorktreePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** Double-click the `file` leaf tab for `path` (pins a preview tab). */
+  async doubleClickFileTab(path: string): Promise<void> {
+    await test.step(`Double-click the tab of ${path}`, async () => {
+      await this.fileTab(path).dblclick();
+    });
+  }
+
+  /** Double-click the `diff` leaf tab for `path` (pins a preview tab). */
+  async doubleClickDiffTab(path: string): Promise<void> {
+    await test.step(`Double-click the diff tab of ${path}`, async () => {
+      await this.diffTab(path).dblclick();
+    });
+  }
+
+  /** The italic title span of a file tab; italic means "preview". */
+  private tabTitle(tab: Locator): Locator {
+    return tab.locator("span").first();
+  }
+
+  /** Assert the `file` tab for `path` is (or is not) a preview tab. */
+  async expectFileTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.fileTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
+  }
+
+  /** Assert the `diff` tab for `path` is (or is not) a preview tab. */
+  async expectDiffTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.diffTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
+  }
+
   /** The close button on the `file` leaf tab for `path`. */
   fileTabCloseButton(path: string): Locator {
     return this.page.getByTestId(`center-file-tab__close--${path}`);

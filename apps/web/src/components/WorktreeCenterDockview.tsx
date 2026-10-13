@@ -335,6 +335,19 @@ function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: b
   return preview === true;
 }
 
+/** Pin a preview tab (clears its italic `preview` param). `params` are the
+ *  tab's props, because `api.getParameters()` can be empty on a freshly-added
+ *  panel's tab. A pinned tab is never picked as the preview to replace, because
+ *  the open paths re-read this param from the live panel instead of trusting
+ *  their id refs. */
+function pinTab<P extends { preview?: boolean }>(
+  api: IDockviewPanelHeaderProps["api"],
+  params: P,
+): void {
+  const cur = { ...params, ...api.getParameters<P>() };
+  if (cur.preview !== false) api.updateParameters({ ...cur, preview: false });
+}
+
 const bandTheme: DockviewTheme = {
   name: "band",
   // `dockview-center-tabs` scopes the unified-center tab CSS (title-sized
@@ -2642,11 +2655,18 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   // per-file store when that fires. Seeded synchronously so a restored dirty
   // file shows the dot immediately on mount.
   const [dirty, setDirty] = useState(() => isFileDirty(worktreeId, filePath));
+  const tabApi = props.api;
+  const tabParams = props.params;
   useEffect(() => {
-    const recheck = () => setDirty(isFileDirty(worktreeId, filePath));
+    const recheck = () => {
+      const nowDirty = isFileDirty(worktreeId, filePath);
+      setDirty(nowDirty);
+      // Editing a preview tab pins it, like VS Code.
+      if (nowDirty) pinTab(tabApi, tabParams);
+    };
     window.addEventListener("band:dirty-change", recheck);
     return () => window.removeEventListener("band:dirty-change", recheck);
-  }, [worktreeId, filePath]);
+  }, [worktreeId, filePath, tabApi, tabParams]);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
@@ -2662,7 +2682,11 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
       filePath={filePath}
       testidPrefix={`center-file-tab--${filePath}`}
     >
-      <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
+      <div
+        className={TAB_ROOT_CLASS}
+        data-testid={`center-file-tab--${filePath}`}
+        onDoubleClick={() => pinTab(tabApi, tabParams)}
+      >
         <div className={TAB_CONTENT_WRAP}>
           <FileTypeIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
@@ -2735,6 +2759,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
         className={TAB_ROOT_CLASS}
         data-testid={`center-diff-tab--${filePath}`}
         data-commit={commit}
+        onDoubleClick={() => pinTab(props.api, props.params)}
       >
         <div className={TAB_CONTENT_WRAP}>
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
@@ -3649,7 +3674,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so trust the live param over the id ref.
+        if (prev?.api.getParameters<{ preview?: boolean }>().preview) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
@@ -3709,7 +3736,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so trust the live param over the id ref.
+        if (prev?.api.getParameters<{ preview?: boolean }>().preview) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }

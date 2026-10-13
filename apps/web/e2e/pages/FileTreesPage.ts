@@ -122,6 +122,38 @@ export class FileTreesPage {
     });
   }
 
+  /** Single-click a Files-tree row (opens a preview tab) and wait for its tab. */
+  async clickFile(path: string): Promise<void> {
+    await test.step(`Single-click Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).click();
+      await this.worktree.fileTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Double-click a Files-tree row (opens or pins its tab) and wait for the tab. */
+  async doubleClickFile(path: string): Promise<void> {
+    await test.step(`Double-click Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).dblclick();
+      await this.worktree.fileTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Single-click a Changes-tree row (opens a preview diff tab). */
+  async clickChange(path: string): Promise<void> {
+    await test.step(`Single-click Changes-tree row ${path}`, async () => {
+      await this.changesTreeRow(path).click();
+      await this.worktree.diffTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Double-click a Changes-tree row (opens or pins its diff tab). */
+  async doubleClickChange(path: string): Promise<void> {
+    await test.step(`Double-click Changes-tree row ${path}`, async () => {
+      await this.changesTreeRow(path).dblclick();
+      await this.worktree.diffTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
   /** Wait for a Files-tree row to appear (e.g. after an external file was
    *  created and the watcher-driven tree refresh should surface it). */
   async waitForFileTreeRow(path: string): Promise<void> {
