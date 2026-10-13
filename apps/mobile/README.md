@@ -37,7 +37,7 @@ npx -y pnpm@10 build:web
 node apps/mobile/scripts/hub.mjs start
 ```
 
-The command prints the hub URL. The device token is in `apps/mobile/build/verify/hub.json`. `hub.mjs restart` boots the same home on the same port, and `hub.mjs clean` stops it and deletes the temp home. The hub starts empty. `verify.mjs` seeds it with the sample repos and chats the Maestro flows use.
+The command prints a JSON object with the hub `url`. The device token is the `deviceToken` field of `apps/mobile/build/verify/hub.json`. `hub.mjs restart` boots the same home on the same port, and `hub.mjs clean` stops it and deletes the temp home. The hub starts empty. `verify.mjs` seeds it with the sample repos and chats the Maestro flows use.
 
 ## Pair with a hub
 
