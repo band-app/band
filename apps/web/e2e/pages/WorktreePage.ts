@@ -48,6 +48,8 @@ interface TopRowDragGeometry {
   controls: (Rect & { label: string; inTopRowStrip: boolean; ownOps: number[] })[];
   sidebarTitleBar: Rect | null;
   stripVoids: Rect[];
+  /** The shown top-row strips' tab viewports (`.dv-scrollable`). */
+  tabViewports: Rect[];
 }
 
 /** Whether (x, y) is in the drag region Chromium builds from `ops`: walking
@@ -988,7 +990,15 @@ export class WorktreePage {
         .map((el) => el.getBoundingClientRect())
         .filter((rect) => rect.width > 4 && rect.height > 0)
         .map(box);
-      return { ops, controls, sidebarTitleBar, stripVoids };
+      const tabViewports = Array.from(
+        document.querySelectorAll(
+          ".band-worktree-entry:not([inert]) [data-band-top-row] > .dv-tabs-and-actions-container > .dv-scrollable",
+        ),
+      )
+        .map((el) => el.getBoundingClientRect())
+        .filter((rect) => rect.width > 4 && rect.height > 0)
+        .map(box);
+      return { ops, controls, sidebarTitleBar, stripVoids, tabViewports };
     });
   }
 
@@ -1017,6 +1027,28 @@ export class WorktreePage {
       if (hit) covered.push(rect.label);
     }
     return covered;
+  }
+
+  /** How many visible `drag` boxes overlap the shown top-row strips' tab
+   *  viewports, whatever `no-drag` boxes later cut out of them. A drag box
+   *  under the tabs made scrolling them depend on the `no-drag` cut being
+   *  current when Electron hit-tests a wheel event, so this must be 0. Throws
+   *  when no strip has a viewport, so it can't pass vacuously. */
+  async dragBoxesOverTabViewports(): Promise<number> {
+    const { ops, tabViewports } = await this.readTopRowDragGeometry();
+    if (tabViewports.length === 0) throw new Error("no top-row tab strip has a tab viewport");
+    return ops.filter(
+      (op) =>
+        op.drag &&
+        op.visible &&
+        tabViewports.some(
+          (v) =>
+            op.left < v.right - 0.5 &&
+            op.right > v.left + 0.5 &&
+            op.top < v.bottom - 0.5 &&
+            op.bottom > v.top + 0.5,
+        ),
+    ).length;
   }
 
   /** The center strip's tabs and buttons that don't cut themselves out of
