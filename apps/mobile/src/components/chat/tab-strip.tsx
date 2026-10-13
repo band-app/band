@@ -41,10 +41,14 @@ function StateDot({ id, state }: { id: string; state: TabState }) {
 
 export interface TabActions {
   select: (id: string) => void;
-  close: (id: string) => void;
+  close: (id: string) => Promise<void>;
   move: (id: string, delta: number) => void;
   rename: (id: string, name: string) => Promise<void>;
   create: (agentId: string | undefined) => Promise<void>;
+}
+
+function closeTab(actions: TabActions, id: string) {
+  actions.close(id).catch(() => Alert.alert("Couldn't close the chat"));
 }
 
 /** Rename, move and close for one tab, in the system's action sheet. */
@@ -71,7 +75,7 @@ function showTabMenu(tab: ChatTab, index: number, count: number, actions: TabAct
         );
       } else if (choice === 1) actions.move(tab.id, -1);
       else if (choice === 2) actions.move(tab.id, 1);
-      else if (choice === 3) actions.close(tab.id);
+      else if (choice === 3) closeTab(actions, tab.id);
     },
   );
 }
@@ -111,6 +115,10 @@ export function TabStrip({
   useEffect(() => {
     if (active) reveal(active, true);
   }, [active, reveal]);
+  useEffect(() => {
+    const ids = new Set(tabs.map((t) => t.id));
+    for (const id of offsets.current.keys()) if (!ids.has(id)) offsets.current.delete(id);
+  }, [tabs]);
 
   return (
     <View style={styles.bar} testID="tabs__strip">
@@ -134,8 +142,12 @@ export function TabStrip({
               onLongPress={() => showTabMenu(tab, i, tabs.length, actions)}
               onLayout={(e) => {
                 const { x, width } = e.nativeEvent.layout;
+                const before = offsets.current.get(tab.id);
                 offsets.current.set(tab.id, { x, width });
-                if (selected && scrolledTo.current !== tab.id) reveal(tab.id, false);
+                // Follow the shown tab when it is first laid out, and when a close or a move
+                // shifts it.
+                const moved = before?.x !== x || before?.width !== width;
+                if (selected && (scrolledTo.current !== tab.id || moved)) reveal(tab.id, false);
               }}
               style={[styles.tab, selected && styles.tabSelected]}
               testID={`tabs__tab-${tab.id}`}
@@ -244,7 +256,7 @@ function TabSwitcher({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Close ${tab.label}`}
-                onPress={() => actions.close(tab.id)}
+                onPress={() => closeTab(actions, tab.id)}
                 hitSlop={8}
                 testID={`tabs__sheet-close-${tab.id}`}
               >

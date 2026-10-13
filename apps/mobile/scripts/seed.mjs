@@ -317,21 +317,26 @@ export async function webEditTabs(state, worktreeId) {
   await trpc(state, "chats.create", { worktreeId, ...WEB_CHAT });
   const key = `band:center-tabs:${worktreeId}`;
   const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });
-  const entry = entries.find((e) => e.key === key);
-  const tabs = entry?.value?.tabs ?? [];
-  const lastChat = tabs.findLast((t) => t.kind === "chat");
-  const rest = tabs.filter((t) => t !== lastChat);
-  const result = await trpc(state, "clientState.set", {
-    key,
-    scope: "all",
-    baseVersion: entry?.version ?? 0,
-    clientId: "seed-web",
-    value: {
-      tabs: [...(lastChat ? [lastChat] : []), ...rest, { id: WEB_CHAT.id, kind: "chat" }],
-      active: entry?.value?.active ?? null,
-    },
-  });
-  if (!result.ok) throw new Error(`clientState.set was refused: version ${result.entry?.version}`);
+  let entry = entries.find((e) => e.key === key);
+  // A write the phone made in between makes the version stale: rebase on it, as the web does.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const tabs = (entry?.value?.tabs ?? []).filter((t) => t.id !== WEB_CHAT.id);
+    const lastChat = tabs.findLast((t) => t.kind === "chat");
+    const rest = tabs.filter((t) => t !== lastChat);
+    const result = await trpc(state, "clientState.set", {
+      key,
+      scope: "all",
+      baseVersion: entry?.version ?? 0,
+      clientId: "seed-web",
+      value: {
+        tabs: [...(lastChat ? [lastChat] : []), ...rest, { id: WEB_CHAT.id, kind: "chat" }],
+        active: entry?.value?.active ?? null,
+      },
+    });
+    if (result.ok) return;
+    entry = result.entry;
+  }
+  throw new Error(`clientState.set was refused three times: version ${entry?.version}`);
 }
 
 /** The shared tab list of a worktree as the hub holds it, and the chats the hub has there. */

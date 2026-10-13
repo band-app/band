@@ -39,7 +39,9 @@ const perf = args.includes("--perf");
 const E2E = join(APP_ROOT, "e2e");
 const allFlows = readdirSync(E2E)
   .filter((f) => f.endsWith(".yaml"))
-  .map((f) => f.replace(/\.yaml$/, ""));
+  .map((f) => f.replace(/\.yaml$/, ""))
+  // Sorted: the tab flows build on each other (t1 to t6), and readdir promises no order.
+  .sort();
 const wanted = args.filter((a) => !a.startsWith("--"));
 const flows = wanted.length ? wanted : allFlows.filter((f) => f.startsWith("perf-") === perf);
 for (const f of flows) {
@@ -139,7 +141,7 @@ async function checkTranscript(hub, chats, worktreeId, udid) {
 /**
  * Checks the shared tab list the hub holds for a worktree against a flow's expectations:
  * `chats=<n>` chat tabs (and as many chats on the hub), `keep=<id,id>` tabs that must still be
- * listed, `has=<id,id>` and `lacks=<id,id>` chat ids, `active=<id>` or `active=new` (a chat
+ * listed, `has=<id,id>` and `lacks=<id,id>` chat ids, `order=<id,id>`, `active=<id>` or `active=new` (a chat
  * tab not seeded), and `label=<id>:<name>` for a chat's name on the hub.
  */
 function checkTabs({ tabs, chats }, params) {
@@ -158,6 +160,10 @@ function checkTabs({ tabs, chats }, params) {
   for (const id of (params.get("lacks") ?? "").split(",").filter(Boolean)) {
     if (chatTabs.includes(id) || chats.some((c) => c.id === id)) problems.push(`chat ${id} is still there`);
   }
+  // `order=<id,...>` is the exact chat tab order, with `new` for a chat not seeded as `chat_tabs_*`.
+  const order = params.get("order");
+  const seen = chatTabs.map((id) => (/^chat_tabs_/.test(id) ? id : "new")).join(",");
+  if (order !== null && seen !== order) problems.push(`the chat tabs are in the order ${seen}, not ${order}`);
   const active = params.get("active");
   if (active === "new" && (!tabs?.active || /^chat_tabs_/.test(tabs.active) || !chatTabs.includes(tabs.active))) {
     problems.push(`the active tab is ${tabs?.active}, not a new chat`);

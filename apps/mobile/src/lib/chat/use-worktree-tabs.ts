@@ -11,9 +11,8 @@
 import { type CenterTabs, centerTabsKey, parseCenterTabs } from "@band-app/client/center-tabs";
 import { chatTabLabel } from "@band-app/client/chat-tab-label";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useHubSession } from "../hub-session";
-import { useStatusFeed } from "../use-hub-data";
 import {
   chatStatuses,
   keepAlive,
@@ -151,9 +150,11 @@ export function useWorktreeTabs(worktreeId: string) {
     [recent, active, view.chats],
   );
 
-  const { state: statusState } = useStatusFeed();
-  // An event for another worktree leaves this worktree's entry (and so `statuses`) unchanged.
-  const worktreeStatus = statusState.agents.get(worktreeId);
+  // Only this worktree's entry: an event for another worktree keeps its identity, so it doesn't
+  // re-render the tabs.
+  const worktreeStatus = useSyncExternalStore(feed.subscribe, () =>
+    feed.getSnapshot().state.agents.get(worktreeId),
+  );
   const statuses = useMemo(() => chatStatuses(worktreeStatus?.tabStatuses), [worktreeStatus]);
   const [unread, setUnread] = useState<ReadonlySet<string>>(new Set());
   const lastStatuses = useRef(statuses);
@@ -224,10 +225,11 @@ export function useWorktreeTabs(worktreeId: string) {
         list?.filter((c) => c.id !== id),
       );
       write(rest, nextActive);
-      // Closing a chat tab removes the chat, as the web's close does.
-      void client.chats.remove
+      // Closing a chat tab removes the chat, as the web's close does. A failed remove rejects, so
+      // the strip can say so; the refetch shows the chat again.
+      return client.chats.remove
         .mutate({ chatId: id })
-        .catch(() => {})
+        .then(() => {})
         .finally(() => queryClient.invalidateQueries({ queryKey: chatsKey }));
     },
     [active, write, client, queryClient, chatsKey],

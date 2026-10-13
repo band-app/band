@@ -1,7 +1,7 @@
 # t6: a change the web makes to the shared tab list while the worktree is open on the phone shows
 # there without reopening the screen: the web starts a chat ("From web", added at the end) and
 # moves its last chat tab first. Runs after t1-t5, so the tabs are Parser v2, Docs and the chat t2
-# started (the one id without the `chat_tabs_` prefix).
+# started (the one id without the `chat_tabs_` prefix). It cannot run on its own.
 appId: app.getband.mobile
 name: t6 the web's tab changes reach an open worktree
 ---
@@ -12,7 +12,7 @@ name: t6 the web's tab changes reach an open worktree
       WT: gamma-tabs
 - extendedWaitUntil:
     visible:
-      id: tabs__tab-chat_tabs_1
+      id: tabs__switcher
     timeout: 15000
 - runScript:
     file: scripts/hub-control.js
@@ -38,7 +38,13 @@ name: t6 the web's tab changes reach an open worktree
 - takeScreenshot: t6-live
 - tapOn:
     id: tabs__sheet-done
+# Long enough for a push from the phone (500 ms after a change) to land, so the check below
+# would see the phone writing its old order back over the web's.
 - runScript:
     file: scripts/hub-control.js
     env:
-      ACTION: check-tabs?wt=gamma-tabs&has=chat_tabs_1,chat_tabs_2,chat_tabs_web&keep=3f0c6a52-6a1e-4b5e-9d2a-1c1f0e7a9b10,browser_tabs_1
+      ACTION: sleep?ms=1500
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: check-tabs?wt=gamma-tabs&order=new,chat_tabs_1,chat_tabs_2,chat_tabs_web&lacks=chat_tabs_3&keep=3f0c6a52-6a1e-4b5e-9d2a-1c1f0e7a9b10,browser_tabs_1
