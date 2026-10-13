@@ -18,6 +18,8 @@ import {
 import { Worker } from "./worker.ts";
 
 const log = createLogger("band-worker");
+// The logger has opened the file. Terminals and agents inherit this environment and must not rotate it too.
+delete process.env.BAND_LOG_FILE;
 const argv = process.argv.slice(2);
 
 // Git runs this as its credential helper (see git-credentials.ts), so it must not start a worker.
