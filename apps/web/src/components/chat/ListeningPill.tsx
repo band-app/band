@@ -1,3 +1,4 @@
+import { describeWatch, formatExpiry } from "@band-app/client/subscription-label";
 import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio, Trash2 } from "lucide-react";
@@ -6,45 +7,8 @@ import { useAdapter } from "@/dashboard";
 import { trpc } from "../../lib/trpc-client";
 
 type SubscriptionList = Awaited<ReturnType<typeof trpc.subscriptions.list.query>>;
-type ChatSubscription = SubscriptionList[number];
 
 const listKey = (chatId: string) => ["subscriptions.list", chatId] as const;
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-/** "github:pr:o/r#3" becomes "PR o/r#3"; other sources name themselves. */
-function describeWatch(sub: ChatSubscription): { source: string; watches: string } {
-  const [kind, ...rest] = sub.filterKey.split(":");
-  const target = rest.join(":");
-  if (sub.source === "github" && kind === "github") {
-    const [type, ...path] = target.split(":");
-    const name = path.join(":");
-    if (type === "pr") return { source: "GitHub", watches: `PR ${name}` };
-    if (type === "ci") return { source: "GitHub", watches: `CI on ${name}` };
-  }
-  if (sub.source === "timer") {
-    if (sub.cron) return { source: "Timer", watches: `cron ${sub.cron}` };
-    if (sub.at !== undefined) {
-      return { source: "Timer", watches: `once at ${new Date(sub.at).toLocaleString()}` };
-    }
-    return { source: "Timer", watches: "timer" };
-  }
-  if (sub.source === "webhook") {
-    return { source: "Webhook", watches: `/api/hooks/${sub.id}` };
-  }
-  return { source: sub.source, watches: sub.filterKey };
-}
-
-/** How long until `expiresAt`, in the largest whole unit. */
-function formatExpiry(expiresAt: number, now: number): string {
-  const left = expiresAt - now;
-  if (left <= 0) return "expired";
-  if (left >= DAY_MS) return `expires in ${Math.floor(left / DAY_MS)}d`;
-  if (left >= HOUR_MS) return `expires in ${Math.floor(left / HOUR_MS)}h`;
-  return `expires in ${Math.max(1, Math.floor(left / MINUTE_MS))}m`;
-}
 
 /**
  * Shows that a chat is listening for events (plan step S.6) and lists what

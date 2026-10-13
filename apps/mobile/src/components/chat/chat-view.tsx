@@ -12,7 +12,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { buildRows, type ChatRow, copyText, rowType } from "../../lib/chat/rows";
+import { pendingRequest } from "../../lib/chat/pending-request";
+import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useChatActions } from "../../lib/chat/use-chat-actions";
 import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
@@ -23,6 +24,8 @@ import { ChatHeader } from "./chat-header";
 import { ChatRowView } from "./chat-row";
 import { Composer } from "./composer";
 import { FrameLog } from "./frame-log";
+import { ListeningPill } from "./listening-pill";
+import { PendingRequest } from "./pending-request";
 import { PlanCard } from "./plan-card";
 import { QueuedMessages } from "./queued-messages";
 
@@ -70,6 +73,8 @@ export const ChatView = memo(function ChatView({
     [state.messages, state.taskRunning],
   );
 
+  const request = useMemo(() => pendingRequest(state.messages), [state.messages]);
+
   const listRef = useRef<FlashListRef<ChatRow>>(null);
   const pinned = useRef(true);
   const dragging = useRef(false);
@@ -87,10 +92,7 @@ export const ChatView = memo(function ChatView({
 
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  const rowText = useCallback((key: string) => {
-    const row = rowsRef.current.find((r) => r.key === key);
-    return row ? copyText(row) : "";
-  }, []);
+  const rowFor = useCallback((key: string) => rowsRef.current.find((r) => r.key === key), []);
 
   const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     // Only the user moves the pin; the list's own scrolls (following output, keeping its place
@@ -140,7 +142,7 @@ export const ChatView = memo(function ChatView({
       token={hub.token}
       onCopied={onCopied}
       onToggle={onToggle}
-      rowText={rowText}
+      rowFor={rowFor}
     >
       <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
         <ChatHeader pickers={pickers} setConfigOption={actions.setConfigOption} />
@@ -208,8 +210,16 @@ export const ChatView = memo(function ChatView({
               <Text style={styles.toastText}>Copied</Text>
             </View>
           ) : null}
+          <ListeningPill chatId={chatId} />
           {process.env.EXPO_PUBLIC_BAND_PERF_LOG === "1" ? <FrameLog /> : null}
         </View>
+        {request ? (
+          <PendingRequest
+            entry={request}
+            onAnswerPermission={actions.answerPermission}
+            onAnswerElicitation={actions.answerElicitation}
+          />
+        ) : null}
         <PlanCard plan={state.plan} />
         <QueuedMessages
           messages={state.queue}
@@ -217,7 +227,7 @@ export const ChatView = memo(function ChatView({
           onEdit={actions.editQueued}
           onReorder={actions.reorderQueued}
         />
-        {active ? (
+        {active && request?.kind !== "elicitation" ? (
           <Composer
             worktreeId={worktreeId}
             running={state.taskRunning}

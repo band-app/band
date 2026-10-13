@@ -61,7 +61,10 @@ function answerText(entry: Extract<Entry, { kind: "permission" | "elicitation" }
   return picked?.name ?? entry.answer ?? "";
 }
 
-/** A permission or question the agent waits on. The answer forms come in a later version. */
+/**
+ * A permission or question in the transcript: what was asked and, once answered, the answer. The
+ * form to answer is pinned above the composer (`PendingRequest`).
+ */
 function Request({ entry }: { entry: Extract<Entry, { kind: "permission" | "elicitation" }> }) {
   const subject =
     entry.kind === "permission"
@@ -179,15 +182,15 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   return a.kind === "thinking";
 }
 
-/** One list row. A long press copies its message's text. */
+/** One list row. A long press opens the message's actions: copy, and when it was sent. */
 export const ChatRowView = memo(
   function ChatRowView({ row }: { row: ChatRow }) {
-    const { copyRow } = useChat();
+    const { showActions } = useChat();
     return (
       <Pressable
         // Not one accessibility element: the row's text, links and buttons stay reachable.
         accessible={false}
-        onLongPress={() => copyRow(row.key)}
+        onLongPress={() => showActions(row.key)}
         delayLongPress={350}
         style={styles.row}
         testID={`chat__row-${row.kind}`}

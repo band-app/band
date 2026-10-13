@@ -1,11 +1,13 @@
 /**
  * What the composer does to a chat, through the same calls the web chat makes
  * (`use-chat-subscription.ts`): `POST /api/chats/:id/messages` to send, `tasks.abort` to stop,
- * `chats.setConfigOption` for the model and mode, `queue.*` for queued messages.
+ * `chats.setConfigOption` for the model and mode, `queue.*` for queued messages, and
+ * `chat.answer` / `chat.answerElicitation` for the agent's permission requests and questions.
  *
  * The hub queues a message that arrives during a turn, so `send` is the same call either way.
  */
 
+import type { ElicitationValues } from "@band-app/client/elicitation";
 import type { TranscriptState } from "@band-app/client/transcript";
 import type { ChatEventFile, QueuedChatMessage, SessionState } from "@band-app/shared/chat-events";
 import { useCallback, useRef } from "react";
@@ -19,6 +21,13 @@ export interface ChatActions {
   send: (text: string, files?: ChatEventFile[]) => Promise<void>;
   stop: () => Promise<void>;
   setConfigOption: (configId: string, value: string) => Promise<void>;
+  /** Picks one of the options the agent offered, or `null` to cancel the request. */
+  answerPermission: (requestId: string, optionId: string | null) => Promise<void>;
+  answerElicitation: (
+    requestId: string,
+    action: "accept" | "decline" | "cancel",
+    content?: ElicitationValues,
+  ) => Promise<void>;
   removeQueued: (id: string) => void;
   editQueued: (id: string, text: string) => void;
   reorderQueued: (next: QueuedChatMessage[]) => void;
@@ -84,6 +93,32 @@ export function useChatActions(
     [client, dispatch, chatId, worktreeId],
   );
 
+  // The card shows the answer once the hub took it; a failed call rejects and leaves the question
+  // open for another try.
+  const answerPermission = useCallback(
+    async (requestId: string, optionId: string | null) => {
+      await client.chat.answer.mutate({ chatId, requestId, optionId });
+      dispatch({ type: "local-answer", requestId, answer: optionId ?? "cancelled" });
+    },
+    [client, dispatch, chatId],
+  );
+
+  const answerElicitation = useCallback(
+    async (
+      requestId: string,
+      action: "accept" | "decline" | "cancel",
+      content?: ElicitationValues,
+    ) => {
+      await client.chat.answerElicitation.mutate({ chatId, requestId, action, content });
+      dispatch({
+        type: "local-answer",
+        requestId,
+        answer: action === "cancel" ? "cancelled" : action,
+      });
+    },
+    [client, dispatch, chatId],
+  );
+
   const removeQueued = useCallback(
     (id: string) => {
       dispatch({
@@ -118,5 +153,14 @@ export function useChatActions(
     [client, dispatch, worktreeId, chatId],
   );
 
-  return { send, stop, setConfigOption, removeQueued, editQueued, reorderQueued };
+  return {
+    send,
+    stop,
+    setConfigOption,
+    answerPermission,
+    answerElicitation,
+    removeQueued,
+    editQueued,
+    reorderQueued,
+  };
 }

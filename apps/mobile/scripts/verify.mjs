@@ -16,6 +16,8 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import {
+  addSubscription,
+  chatSubscriptions,
   fillWorktrees,
   receivedPrompts,
   seedHub,
@@ -193,6 +195,8 @@ function checkTabs({ tabs, chats }, params) {
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
  * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
  * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
+ * /subscribe?wt=<id> makes the worktree's chat listen for a timer, and
+ * /expect-subscriptions?wt=<id>&n=<count> fails unless the hub holds that many for the chat.
  */
 function startControlServer(hub, chats, udid, notes) {
   const server = createServer(async (req, res) => {
@@ -224,6 +228,13 @@ function startControlServer(hub, chats, udid, notes) {
         if (!result.ok) throw new Error(result.note);
       }
       else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
+      else if (url.pathname === "/subscribe") await addSubscription(hub, chats, wt);
+      else if (url.pathname === "/expect-subscriptions") {
+        const want = Number(url.searchParams.get("n") ?? 0);
+        const subs = await chatSubscriptions(hub, chats, wt);
+        notes.push(`${wt}: subscriptions.list holds ${subs.length}`);
+        if (subs.length !== want) throw new Error(`the hub holds ${subs.length} subscriptions, expected ${want}`);
+      }
       else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
         const want = url.searchParams.get("value") ?? "";

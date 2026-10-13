@@ -25,12 +25,11 @@ export function PlanCard({ plan }: { plan: PlanEntry[] }) {
         accessibilityRole="button"
         accessibilityState={{ expanded: !collapsed }}
         onPress={() => setCollapsed((c) => !c)}
+        testID="chat__plan-toggle"
         style={styles.header}
       >
         <Text style={styles.title}>{collapsed ? "▸" : "▾"} Todos</Text>
-        <Text style={styles.count}>
-          {done}/{plan.length}
-        </Text>
+        <Text style={styles.count} testID="chat__plan-count">{`${done}/${plan.length}`}</Text>
       </Pressable>
       {collapsed
         ? null

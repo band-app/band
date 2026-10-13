@@ -144,6 +144,61 @@ function streamSteps() {
     { say: "END of the stream.", messageId },
   ];
 }
+/** What the "permit" turn asks: the three kinds of option the web shows. */
+const PERMIT_OPTIONS = [
+  { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+  { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+  { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+];
+
+/** A form with each field type the web supports: choice with a free-text box, multi, boolean, integer, text. */
+const FORM_SCHEMA = {
+  type: "object",
+  properties: {
+    color: {
+      type: "string",
+      description: "Which color?",
+      oneOf: [
+        { const: "red", title: "Red" },
+        { const: "blue", title: "Blue", description: "The cool one" },
+      ],
+    },
+    color_other: {
+      type: "string",
+      _meta: { _askUserQuestionCustomAnswer: { questionId: "color" } },
+    },
+    tags: {
+      type: "array",
+      description: "Which tags?",
+      items: { anyOf: [{ const: "ui", title: "UI" }, { const: "api", title: "API" }] },
+    },
+    agree: { type: "boolean", title: "Run the tests too", description: "Run the tests?" },
+    count: { type: "integer", description: "How many retries (1 to 5)?", minimum: 1, maximum: 5 },
+    name: { type: "string", description: "Name the change" },
+  },
+  required: ["count"],
+};
+
+/** The plan the "plan" turn walks through, 20 s apart, so a flow can watch the widget change. */
+function planSteps() {
+  const entries = (done) =>
+    ["Read the parser", "Patch the radix", "Run the tests"].map((content, i) => ({
+      content,
+      priority: "high",
+      status: i < done ? "completed" : i === done ? "in_progress" : "pending",
+    }));
+  return [
+    { update: { sessionUpdate: "plan", entries: entries(0) } },
+    { sleep: 20000 },
+    { update: { sessionUpdate: "plan", entries: entries(1) } },
+    { sleep: 20000 },
+    { update: { sessionUpdate: "plan", entries: entries(2) } },
+    { sleep: 20000 },
+    { update: { sessionUpdate: "plan", entries: entries(3) } },
+    { say: "Plan finished." },
+  ];
+}
+
 export const SCENARIO = {
   turns: [
     { match: "^work", steps: [{ say: "Working on it." }, { waitForCancel: true }] },
@@ -162,6 +217,35 @@ export const SCENARIO = {
         },
       ],
     },
+    {
+      match: "^permit",
+      steps: [
+        {
+          permission: {
+            toolCall: {
+              toolCallId: "tool-2",
+              title: "Run the test suite",
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: "pnpm test", description: "Run the tests" },
+            },
+            options: PERMIT_OPTIONS,
+          },
+          after: {
+            allow_once: [{ say: "Permission granted. Tests ran." }],
+            allow_always: [{ say: "Always allowed. Tests ran." }],
+            reject_once: [{ say: "Stopped by user." }],
+          },
+        },
+      ],
+    },
+    {
+      match: "^form",
+      steps: [
+        { elicitation: { message: "A few questions about the change.", requestedSchema: FORM_SCHEMA } },
+      ],
+    },
+    { match: "^plan", steps: planSteps() },
     // A turn of about 90 s that ends by itself, so a flow can queue messages behind it.
     { match: "^slow", steps: [{ say: "Thinking it over." }, { sleep: 90000 }, { say: "Slow turn finished." }] },
     { match: "^showcase", steps: showcaseSteps() },
@@ -190,6 +274,12 @@ export const WORKTREES = {
   GAMMA_SUGGEST: "gamma-suggest",
   GAMMA_SESSION: "gamma-session",
   GAMMA_KEYBOARD: "gamma-keyboard",
+  /** Empty chats for the interaction flows: permission allow and reject, the form, the plan, the listening pill. */
+  GAMMA_PERMIT_ALLOW: "gamma-permit-allow",
+  GAMMA_PERMIT_REJECT: "gamma-permit-reject",
+  GAMMA_FORM: "gamma-form",
+  GAMMA_PLAN: "gamma-plan",
+  GAMMA_LISTEN: "gamma-listen",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
@@ -260,7 +350,7 @@ export async function seedHub(state) {
     await trpc(state, "repos.add", { path: join(root, name) });
   }
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -447,6 +537,22 @@ export async function sessionState(state, chats, worktreeId) {
     chatId: chats[worktreeId],
   });
   return session;
+}
+
+/** Makes the chat listen for a timer an hour away, as an agent's `band subscriptions create` would. */
+export async function addSubscription(state, chats, worktreeId) {
+  await trpc(state, "subscriptions.create", {
+    source: "timer",
+    chatId: chats[worktreeId],
+    worktreeId,
+    at: Date.now() + 3_600_000,
+    createdBy: "agent",
+  });
+}
+
+/** The subscriptions the hub holds for a worktree's chat. */
+export async function chatSubscriptions(state, chats, worktreeId) {
+  return trpcQuery(state, "subscriptions.list", { chatId: chats[worktreeId] });
 }
 
 export async function stopTurn(state, chats, worktreeId) {

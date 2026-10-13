@@ -1,7 +1,6 @@
-# S5: a long press on a message copies its text. (S4 copies an agent message and compares it
-# with the hub's.)
+# A long press on a message opens its actions (web's message actions: Copy, and when it was sent).
 appId: app.getband.mobile
-name: S5 long press copies a message
+name: S4 long press opens the message actions
 ---
 - runFlow: subflows/pair-link.yaml
 - runFlow:
@@ -19,9 +18,15 @@ name: S5 long press copies a message
     timeout: 20000
 - longPressOn:
     text: "showcase: fix the parser radix"
-# Maestro holds a long press for about 3 s, longer than the "Copied" note stays; the clipboard
-# check below is the proof.
-- takeScreenshot: s5-copied
+# The sheet shows when the message was sent, and Copy.
+- assertVisible:
+    text: "Copy"
+- assertVisible:
+    text: ".*(just now|ago)"
+- takeScreenshot: s4-actions
+- tapOn:
+    text: "Copy"
+- takeScreenshot: s4-copied
 - runScript:
     file: scripts/hub-control.js
     env:
