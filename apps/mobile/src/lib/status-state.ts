@@ -9,6 +9,8 @@ export interface AgentStatusLike {
 }
 
 export interface TabStatusLike {
+  /** Set for a chat's agent; a terminal's agent has `terminalId` instead. */
+  chatId?: string;
   status: string;
 }
 

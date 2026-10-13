@@ -192,7 +192,23 @@ export const WORKTREES = {
   GAMMA_KEYBOARD: "gamma-keyboard",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
+  /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
+  GAMMA_TABS: "gamma-tabs",
 };
+
+/** The chats of `gamma-tabs`, in the shared tab order; the second is the active tab. */
+export const TAB_CHATS = [
+  { id: "chat_tabs_1", name: "Parser" },
+  { id: "chat_tabs_2", name: "Docs" },
+  { id: "chat_tabs_3", name: "Tests" },
+];
+/** The tabs of other kinds in `gamma-tabs`' shared list, which the phone must keep. */
+export const TAB_OTHERS = [
+  { id: "3f0c6a52-6a1e-4b5e-9d2a-1c1f0e7a9b10", kind: "term" },
+  { id: "browser_tabs_1", kind: "browser" },
+];
+/** Turns in the first tab's chat, more than one screen, so a flow can scroll it (t4). */
+const TAB_TURNS = 12;
 
 /** Turns in the history chat; the hub's first page holds `HISTORY_PAGE_SIZE` (20). */
 export const HISTORY_TURNS = 24;
@@ -244,8 +260,15 @@ export async function seedHub(state) {
     await trpc(state, "repos.add", { path: join(root, name) });
   }
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
+  }
+  // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
+  for (const chat of (await trpcQuery(state, "chats.list", { worktreeId: WORKTREES.GAMMA_TABS })).chats) {
+    await trpc(state, "chats.remove", { chatId: chat.id });
+  }
+  for (const chat of TAB_CHATS) {
+    await trpc(state, "chats.create", { worktreeId: WORKTREES.GAMMA_TABS, ...chat });
   }
   const chats = {};
   for (const id of Object.values(WORKTREES)) {
@@ -263,7 +286,31 @@ export async function seedHub(state) {
     const n = String(i).padStart(2, "0");
     await seedTurn(state, chats, WORKTREES.GAMMA_HISTORY, `turn ${n}: say done`);
   }
+  for (let i = 1; i <= TAB_TURNS; i++) {
+    await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
+  }
+  await seedTabs(state);
   return chats;
+}
+
+/** The shared tab list of `gamma-tabs`, written as the web writes it (`clientState.set`). */
+async function seedTabs(state) {
+  const [first, second, third] = TAB_CHATS.map((c) => ({ id: c.id, kind: "chat" }));
+  await trpc(state, "clientState.set", {
+    key: `band:center-tabs:${WORKTREES.GAMMA_TABS}`,
+    scope: "all",
+    baseVersion: 0,
+    clientId: "seed-web",
+    value: { tabs: [first, TAB_OTHERS[0], second, TAB_OTHERS[1], third], active: second.id },
+  });
+}
+
+/** The shared tab list of a worktree as the hub holds it, and the chats the hub has there. */
+export async function sharedTabs(state, worktreeId) {
+  const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });
+  const entry = entries.find((e) => e.key === `band:center-tabs:${worktreeId}`);
+  const { chats } = await trpcQuery(state, "chats.list", { worktreeId });
+  return { tabs: entry?.value ?? null, chats: chats.map((c) => ({ id: c.id, name: c.name })) };
 }
 
 /** A 96x64 PNG with a stripe, as a `data:` URL, for a prompt's attached image. */

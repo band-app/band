@@ -37,7 +37,19 @@ const keyOf = (row: ChatRow) => row.key;
  * the bottom the list follows new output; scrolling up stops that and shows "Jump to latest".
  * Older turns load when the user reaches the top, and the list keeps its place while they do.
  */
-export function ChatView({ chatId, worktreeId }: { chatId: string; worktreeId: string }) {
+export function ChatView({
+  chatId,
+  worktreeId,
+  active = true,
+}: {
+  chatId: string;
+  worktreeId: string;
+  /**
+   * False for a chat kept mounted behind the shown one. It keeps its stream and its place, but
+   * has no composer, because the worktree's draft belongs to the shown chat's composer.
+   */
+  active?: boolean;
+}) {
   const { hub } = useHubSession();
   const transcript = useChatTranscript(chatId);
   const { state, loaded, loadingOlder, loadOlder } = transcript;
@@ -205,13 +217,15 @@ export function ChatView({ chatId, worktreeId }: { chatId: string; worktreeId: s
           onEdit={actions.editQueued}
           onReorder={actions.reorderQueued}
         />
-        <Composer
-          worktreeId={worktreeId}
-          running={state.taskRunning}
-          skills={skills}
-          onSend={actions.send}
-          onStop={() => void actions.stop()}
-        />
+        {active ? (
+          <Composer
+            worktreeId={worktreeId}
+            running={state.taskRunning}
+            skills={skills}
+            onSend={actions.send}
+            onStop={() => void actions.stop()}
+          />
+        ) : null}
       </Animated.View>
     </ChatProvider>
   );

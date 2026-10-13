@@ -1,0 +1,44 @@
+# t3 (S3): a chat in a background tab asks for permission; its tab shows the needs-attention dot,
+# and switching to it shows the request.
+appId: app.getband.mobile
+name: t3 a background tab that needs attention
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-tabs
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+    timeout: 15000
+- runFlow:
+    file: subflows/select-tab.yaml
+    env:
+      CHAT: chat_tabs_1
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: ask?wt=gamma-tabs&chat=chat_tabs_3
+- extendedWaitUntil:
+    visible:
+      id: tabs__dot-chat_tabs_3-attention
+    timeout: 10000
+- assertNotVisible:
+    id: tabs__dot-chat_tabs_1-attention
+- takeScreenshot: t3-attention-dot
+- runFlow:
+    file: subflows/select-tab.yaml
+    env:
+      CHAT: chat_tabs_3
+- extendedWaitUntil:
+    visible:
+      text: "Waiting for permission"
+    timeout: 10000
+- assertVisible:
+    text: "Run the test suite"
+- takeScreenshot: t3-permission-request
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: halt?wt=gamma-tabs&chat=chat_tabs_3

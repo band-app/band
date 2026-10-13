@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { pickActiveChat } from "../src/lib/chat/active-chat.ts";
 import { buildRows, copyText, rowType } from "../src/lib/chat/rows.ts";
 
 let id = 0;
@@ -97,32 +96,5 @@ describe("buildRows", () => {
     const rows = buildRows(waiting.messages, true);
     assert.equal(rows[rows.length - 1].kind, "part");
     assert.ok(!rows.some((r) => r.kind === "thinking"));
-  });
-});
-
-describe("pickActiveChat", () => {
-  const chats = [{ id: "a" }, { id: "b" }, { id: "c" }];
-
-  it("opens the desktop's active tab when it is a chat", () => {
-    assert.equal(pickActiveChat(chats, { tabs: [{ id: "b", kind: "chat" }], active: "b" }), "b");
-  });
-
-  it("falls back to the first chat tab, then the first chat", () => {
-    assert.equal(
-      pickActiveChat(chats, {
-        tabs: [
-          { id: "t1", kind: "term" },
-          { id: "c", kind: "chat" },
-        ],
-        active: "t1",
-      }),
-      "c",
-    );
-    assert.equal(
-      pickActiveChat(chats, { tabs: [{ id: "gone", kind: "chat" }], active: "gone" }),
-      "a",
-    );
-    assert.equal(pickActiveChat(chats, null), "a");
-    assert.equal(pickActiveChat([], null), null);
   });
 });

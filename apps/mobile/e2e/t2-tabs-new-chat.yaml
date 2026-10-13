@@ -1,0 +1,41 @@
+# t2 (S2): a chat started on the phone opens as the active tab there and joins the shared tab
+# list the web reads, after the existing tabs, with the terminal and browser tabs kept.
+appId: app.getband.mobile
+name: t2 a new chat from the phone becomes a tab everywhere
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-tabs
+- extendedWaitUntil:
+    visible:
+      id: tabs__new
+    timeout: 15000
+- tapOn:
+    id: tabs__new
+- extendedWaitUntil:
+    visible:
+      id: new-chat__sheet
+    timeout: 5000
+- takeScreenshot: t2-agent-picker
+# The default agent is the first row, as in the web's "New agent" menu.
+- tapOn:
+    id: "new-chat__agent-.*"
+    index: 0
+- extendedWaitUntil:
+    notVisible:
+      id: new-chat__sheet
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: chat__empty
+    timeout: 10000
+- assertNotVisible:
+    id: tabs__tab-chat_tabs_2
+    selected: true
+- takeScreenshot: t2-new-tab
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: check-tabs?wt=gamma-tabs&chats=4&active=new&has=chat_tabs_1,chat_tabs_2,chat_tabs_3&keep=3f0c6a52-6a1e-4b5e-9d2a-1c1f0e7a9b10,browser_tabs_1
