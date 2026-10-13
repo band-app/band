@@ -214,7 +214,8 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
     const isRemote = (wt: WorktreeState) => wt.hostId !== undefined && wt.hostId !== "local";
     remoteWorktrees = repo.worktrees.filter(isRemote);
     // A path tracked as a remote worktree is not a local one, even when this
-    // machine's git can see it (a worker that shares the hub's disk).
+    // machine's git can see it (a worker that shares the hub's disk). A local
+    // row already at that path stays: two hosts can hold a worktree at one path.
     const remotePaths = new Set(remoteWorktrees.map((wt) => wt.path));
     const existingByPath = new Map(
       repo.worktrees.filter((wt) => !isRemote(wt)).map((wt) => [wt.path, wt]),
@@ -226,7 +227,7 @@ async function reconcileOneRepo(repo: RepoState): Promise<boolean> {
       .filter(
         (wt) =>
           !wt.isBare &&
-          !remotePaths.has(wt.path) &&
+          (!remotePaths.has(wt.path) || existingByPath.has(wt.path)) &&
           (!removingWorktrees.has(wt.path) ||
             (existingByPath.has(wt.path) && !removedWorktrees.has(wt.path))),
       )
