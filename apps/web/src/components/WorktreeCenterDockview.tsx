@@ -1480,9 +1480,52 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     (view: any) => {
       editorViewRef.current = view;
       setViews(view ? [view] : []);
+      // Track the position as the user scrolls: by the time a tab switch
+      // unmounts the leaf, the detached scroller already reads 0.
+      stopTrackingScrollRef.current?.();
+      stopTrackingScrollRef.current = null;
+      if (view) {
+        const scroller: HTMLElement = view.scrollDOM;
+        // One store write per frame: a scroll fires many events.
+        let scrollFrame = 0;
+        const onScroll = () => {
+          if (scrollFrame) return;
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            persistEditorStateRef.current();
+          });
+        };
+        scroller.addEventListener("scroll", onScroll, { passive: true });
+        // Switching tabs detaches the editor and puts it back at offset 0
+        // without a scroll event. When it has a size again, restore the stored
+        // offset; the browser clamps it until layout settles, so retry briefly.
+        let frame = 0;
+        const restore = (tries: number) => {
+          const saved = getFileTabState(worktreeIdRaw, filePathRaw)?.scrollTop;
+          if (!saved || scroller.clientHeight === 0) return;
+          scroller.scrollTop = saved;
+          if (Math.abs(scroller.scrollTop - saved) > 1 && tries < 30) {
+            frame = requestAnimationFrame(() => restore(tries + 1));
+          }
+        };
+        const observer = new ResizeObserver(() => {
+          if (scroller.clientHeight > 0 && scroller.scrollTop === 0) {
+            cancelAnimationFrame(frame);
+            restore(0);
+          }
+        });
+        observer.observe(scroller);
+        stopTrackingScrollRef.current = () => {
+          scroller.removeEventListener("scroll", onScroll);
+          cancelAnimationFrame(scrollFrame);
+          observer.disconnect();
+          cancelAnimationFrame(frame);
+        };
+      }
     },
-    [setViews],
+    [setViews, worktreeIdRaw, filePathRaw],
   );
+  const stopTrackingScrollRef = useRef<(() => void) | null>(null);
 
   // Capture the editor's cursor selection + scroll offset into the per-tab
   // store so reopening the file (or reloading) lands the user back where they
@@ -1492,7 +1535,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   // replay a stale copy of the file over newer content.
   const persistEditorState = useCallback(() => {
     const view = editorViewRef.current;
-    if (!view) return;
+    // A hidden or detached scroller reads scrollTop 0 — keep the last real one.
+    if (!view || view.scrollDOM.clientHeight === 0) return;
     try {
       const { selection, scrollTop } = serializeViewPosition(view);
       updateFileTabState(worktreeIdRaw, filePathRaw, { selection, scrollTop });
