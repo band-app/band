@@ -1,8 +1,8 @@
 /**
  * The idle stop of a chat's agent process.
  *
- * Band stops an agent process that has been idle for a while (15 minutes;
- * `BAND_AGENT_IDLE_TIMEOUT_MS` shortens it here). Work the agent runs on
+ * Band never stops an agent process for being idle, unless
+ * `BAND_AGENT_IDLE_TIMEOUT_MS` is set (the second block sets it to 2 s). Work the agent runs on
  * its own lives in that process: a background command, a Monitor, a
  * `ScheduleWakeup` (Claude Code's `/loop`), a cron job. Stopping it early
  * kills that work, so the loop's wakeup never fires. These tests boot the
@@ -23,6 +23,7 @@ import {
   type StubTurn,
   startAcpServer,
   stubRequests,
+  trpc,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { isAlive } from "./helpers/terminal-daemon";
@@ -71,7 +72,44 @@ async function outOfTurnText(
   });
 }
 
-describe("agent idle stop", () => {
+describe("agent with no idle stop set", () => {
+  it("keeps running and streams a turn it starts itself", async () => {
+    const server = await startAcpServer({
+      turns: [
+        {
+          steps: [{ say: "Scheduled." }, { afterMs: WORK_MS, later: [{ say: "Woke up." }] }],
+        },
+      ],
+    });
+    servers.push(server);
+    const chatId = newChatId();
+
+    const turn = await runTurn(server.url, chatId, "wake me later");
+    expect(agentText(turn)).toBe("Scheduled.");
+    const pid = chatAgentPid(server.home);
+
+    const later = await outOfTurnText(server, chatId, turn, "Woke up.");
+    expect(agentText(later)).toContain("Woke up.");
+    expect(isAlive(pid)).toBe(true);
+  });
+});
+
+describe("agent process ends with its chat", () => {
+  it("exits when the chat is removed, with no idle stop set", async () => {
+    const server = await startAcpServer({ turns: [{ steps: [{ say: "Done." }] }] });
+    servers.push(server);
+    const chatId = newChatId();
+
+    await runTurn(server.url, chatId, "hello");
+    const pid = chatAgentPid(server.home);
+    expect(isAlive(pid)).toBe(true);
+
+    await trpc(server.url, "chats.remove", { chatId });
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
+  });
+});
+
+describe("agent idle stop (BAND_AGENT_IDLE_TIMEOUT_MS set)", () => {
   it("stops an agent with no pending work after the idle timeout", async () => {
     const server = await boot([{ steps: [{ say: "Done." }] }]);
     const chatId = newChatId();
