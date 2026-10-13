@@ -173,7 +173,9 @@ export function renderLaunchdPlist(opts: {
   vars: Record<string, string>;
   logFile: string;
 }): string {
-  const env = Object.entries(opts.vars)
+  // launchd keeps its output file open and cannot rotate it, so the worker writes and rotates
+  // its own log (see `BAND_LOG_FILE` in @band-app/logger) and launchd's output goes nowhere.
+  const env = Object.entries({ ...opts.vars, BAND_LOG_FILE: opts.logFile })
     .map(([k, v]) => `    <key>${xml(k)}</key>\n    <string>${xml(v)}</string>`)
     .join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -198,9 +200,9 @@ ${env}
   <key>AbandonProcessGroup</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${xml(opts.logFile)}</string>
+  <string>/dev/null</string>
   <key>StandardErrorPath</key>
-  <string>${xml(opts.logFile)}</string>
+  <string>/dev/null</string>
 </dict>
 </plist>
 `;
