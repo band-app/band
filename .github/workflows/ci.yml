@@ -480,6 +480,29 @@ jobs:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
 
+  # The repo ruleset "Require CI active" requires a status check named exactly
+  # "Lint, Test & Build", the name of the job this split replaced. This job
+  # keeps that name and passes only when every split job succeeded. It carries
+  # the same fork gate as they do, so it is skipped when they are. A skipped
+  # needed job counts as a failure: none of them is path-filtered.
+  lint-test-build:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+    needs: [check, test-hub, test-packages, test-e2e, test-remote-loopback]
+    if: >
+      always() && (
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
+    steps:
+      - name: Require every split job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+
   # ---------------------------------------------------------------------------
   # macOS jobs.
   #
