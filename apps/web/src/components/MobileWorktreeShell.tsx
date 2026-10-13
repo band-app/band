@@ -456,6 +456,20 @@ function MobileWorktreeChrome({
     return () => window.removeEventListener("band:open-file", handler);
   }, [worktreeId]);
 
+  // Plugin UI and LSP jumps name an exact path and line, so open it directly.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{ filePath?: string; worktreeId?: string; line?: number; column?: number }>
+      ).detail;
+      if (!detail?.filePath) return;
+      if (detail.worktreeId && detail.worktreeId !== worktreeId) return;
+      openFileLeaf(detail.filePath, { line: detail.line, column: detail.column });
+    };
+    window.addEventListener("band:lsp-navigate", handler);
+    return () => window.removeEventListener("band:lsp-navigate", handler);
+  }, [worktreeId, openFileLeaf]);
+
   // Window-event triggers for the Quick Open / Search in Files dialogs. We use
   // a window event (rather than threading the setters through a React Context)
   // because the dispatchers live several levels down (file-tree toolbars, chat

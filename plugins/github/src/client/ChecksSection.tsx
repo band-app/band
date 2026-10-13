@@ -11,6 +11,7 @@ import {
   countChecks,
   isCountingUp,
 } from "./check-status";
+import { useSectionOpen } from "./section-state";
 
 function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[]): string {
   const subject = review ? `pull request #${review.number} (${review.title})` : `branch ${branch}`;
@@ -57,7 +58,7 @@ export function ChecksSection({
   visible: boolean;
 }) {
   const host = useClientPluginHost();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
   const [fixError, setFixError] = useState<string | null>(null);
@@ -131,6 +132,7 @@ export function ChecksSection({
             aria-expanded={open}
           >
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            <span className="font-semibold text-foreground">Checks</span>
             {counts.passing > 0 && (
               <SummaryCount state="success" count={counts.passing} label="passing" />
             )}
