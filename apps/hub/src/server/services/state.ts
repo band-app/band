@@ -297,18 +297,25 @@ export function upsertWorktreeStatus(
  * Map a working directory to the worktree it belongs to, or `null` if no
  * known worktree contains it. Used by the `statuses.resolve` and
  * `statuses.notify` procedures.
+ *
+ * With a `hostId`, only worktrees on that host match, because two hosts can hold
+ * a worktree at one path. Without one, any host matches and the hub's own
+ * machine wins a tie.
  */
-export function resolveWorktreeIdByCwd(cwd: string, hostId: string = LOCAL_HOST_ID): string | null {
+export function resolveWorktreeIdByCwd(cwd: string, hostId?: string): string | null {
   const state = loadState();
+  let other: string | null = null;
   for (const proj of state.repos) {
     for (const wt of proj.worktrees) {
-      if ((wt.hostId ?? LOCAL_HOST_ID) !== hostId) continue;
-      if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
-        return toWorktreeId(proj.name, wt.name, wt.hostId);
-      }
+      const wtHost = wt.hostId ?? LOCAL_HOST_ID;
+      if (hostId !== undefined && wtHost !== hostId) continue;
+      if (cwd !== wt.path && !cwd.startsWith(`${wt.path}/`)) continue;
+      const id = toWorktreeId(proj.name, wt.name, wt.hostId);
+      if (wtHost === LOCAL_HOST_ID) return id;
+      other ??= id;
     }
   }
-  return null;
+  return other;
 }
 
 // -----------------------------------------------------------------------------
