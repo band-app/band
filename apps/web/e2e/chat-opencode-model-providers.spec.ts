@@ -144,6 +144,31 @@ test.describe("OpenCode model picker", () => {
   });
 });
 
+test.describe("OpenCode model picker on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("each level drills in on one tap and the chosen model is selected", async ({ page }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorktreeId("providersopencode", "main", "local"));
+    await chatPane.waitForReady();
+    await chatPane.typeMessage("first");
+    await chatPane.tapSend();
+    await expect(chatPane.assistantMessage('Heard "first" on opencode/big-pickle.')).toBeVisible();
+
+    await chatPane.tapOpenModelMenu();
+    await chatPane.tapMoreModels();
+    await chatPane.providerSubmenu("lmstudio").tap();
+    await expect(chatPane.providerModelsContent("lmstudio")).toBeVisible();
+    // Back from the provider returns to the provider list.
+    await chatPane.tapBack();
+    await expect(chatPane.providerSubmenu("lmstudio")).toBeVisible();
+    await chatPane.providerSubmenu("lmstudio").tap();
+    await chatPane.providerModelOption("lmstudio", "Qwen3 Coder 30B").tap();
+    await expect(chatPane.modelMenuContent).toBeHidden();
+    await expect(chatPane.modelMenuModel).toHaveText("Qwen3 Coder 30B");
+  });
+});
+
 test.describe("Other agents' model picker", () => {
   test("keeps the flat More models list with full model names", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);

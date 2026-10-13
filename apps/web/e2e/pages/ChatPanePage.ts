@@ -411,6 +411,32 @@ export class ChatPanePage {
     });
   }
 
+  /** The "Back" row a phone shows at the top of a drilled-in submenu. */
+  get drillBack(): Locator {
+    return this.page.getByTestId("menu-drill__back").filter({ visible: true });
+  }
+
+  /** Phone variants: one touch tap each, never a mouse click. */
+  async tapOpenModelMenu(): Promise<void> {
+    await test.step("Tap the model settings trigger", async () => {
+      await this.modelMenuButton.tap();
+      await expect(this.modelMenuContent).toBeVisible();
+    });
+  }
+
+  async tapMoreModels(): Promise<void> {
+    await test.step("Tap More models", async () => {
+      await this.moreModelsSubmenu.tap();
+      await expect(this.moreModelsContent).toBeVisible();
+    });
+  }
+
+  async tapBack(): Promise<void> {
+    await test.step("Tap Back", async () => {
+      await this.drillBack.tap();
+    });
+  }
+
   /** Open the "More models" submenu of the open model settings menu. */
   async openMoreModels(): Promise<void> {
     await test.step("Open the More models submenu", async () => {

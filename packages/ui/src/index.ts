@@ -24,4 +24,5 @@ export * from "./components/spinner";
 export * from "./components/switch";
 export * from "./components/textarea";
 export * from "./components/tooltip";
+export { DESKTOP_QUERY, useMediaQuery } from "./use-media-query";
 export { cn } from "./utils";
