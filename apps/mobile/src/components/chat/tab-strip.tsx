@@ -108,18 +108,22 @@ export function TabStrip({
   // a close or a move shifted it), but not when only a label or a state dot changed its width.
   const idsKey = tabs.map((t) => t.id).join(",");
   const laidOutFor = useRef<string | null>(null);
+  /** Scrolls to tab `id`; false when it isn't laid out yet. */
   const reveal = useCallback((id: string, animated: boolean) => {
     const at = offsets.current.get(id);
-    if (at) scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
+    if (!at) return false;
+    scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
+    return true;
   }, []);
   const lastIdsKey = useRef(idsKey);
   useEffect(() => {
     if (!active) return;
-    reveal(active, true);
     // A select in an unchanged list is revealed here; the bold label resizing the tab must not
-    // jump on top of the animation. After a close or a move the offsets read here are stale, so
-    // the tab's next `onLayout` scrolls again.
-    if (lastIdsKey.current === idsKey) laidOutFor.current = `${active}|${idsKey}`;
+    // jump on top of the animation. After a close or a move the offsets read here are stale, and
+    // before the first layout there are none, so the tab's next `onLayout` scrolls again.
+    if (reveal(active, true) && lastIdsKey.current === idsKey) {
+      laidOutFor.current = `${active}|${idsKey}`;
+    }
     lastIdsKey.current = idsKey;
   }, [active, idsKey, reveal]);
   useEffect(() => {
@@ -149,9 +153,12 @@ export function TabStrip({
               onLongPress={() => showTabMenu(tab, i, tabs.length, actions)}
               onLayout={(e) => {
                 const { x, width } = e.nativeEvent.layout;
+                const before = offsets.current.get(tab.id);
                 offsets.current.set(tab.id, { x, width });
                 const layoutKey = `${tab.id}|${idsKey}`;
-                if (selected && laidOutFor.current !== layoutKey) {
+                // Only a new position counts: a wider label or a state dot leaves `x` alone.
+                const placed = before === undefined || before.x !== x;
+                if (selected && placed && laidOutFor.current !== layoutKey) {
                   laidOutFor.current = layoutKey;
                   reveal(tab.id, false);
                 }
