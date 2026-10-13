@@ -16,10 +16,14 @@ import { type GhInvocation, type GhStub, ghStub } from "./fixtures/gh-stub";
 import {
   checkRunNode,
   checkSuiteNode,
+  commentNode,
   FAKE_REPO,
   jobUrl,
   pullRequestNode,
+  reviewNode,
   reviewQueryData,
+  reviewRequestNode,
+  reviewThreadNode,
   statusContextNode,
 } from "./fixtures/github-review-data";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -83,6 +87,7 @@ const REPO = "widgets";
 const PR_BRANCH = "feat/login";
 const BRANCH_ONLY = "feat/no-pr";
 const FAILING_BRANCH = "feat/gh-down";
+const DISCUSSION_BRANCH = "feat/discussion";
 const MERGE_BRANCH = "feat/merge-me";
 const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 
@@ -103,6 +108,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     prWorktree = addWorktree(repo, tmpHome, PR_BRANCH);
     const branchOnlyWorktree = addWorktree(repo, tmpHome, BRANCH_ONLY);
     const failingWorktree = addWorktree(repo, tmpHome, FAILING_BRANCH);
+    const discussionWorktree = addWorktree(repo, tmpHome, DISCUSSION_BRANCH);
     mergeWorktree = addWorktree(repo, tmpHome, MERGE_BRANCH);
     const mergeFailWorktree = addWorktree(repo, tmpHome, MERGE_FAIL_BRANCH);
     const noRemote = createRepo(tmpHome, "local-only", null);
@@ -119,6 +125,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
             { name: PR_BRANCH, branch: PR_BRANCH, path: prWorktree },
             { name: BRANCH_ONLY, branch: BRANCH_ONLY, path: branchOnlyWorktree },
             { name: FAILING_BRANCH, branch: FAILING_BRANCH, path: failingWorktree },
+            { name: DISCUSSION_BRANCH, branch: DISCUSSION_BRANCH, path: discussionWorktree },
             { name: MERGE_BRANCH, branch: MERGE_BRANCH, path: mergeWorktree },
             { name: MERGE_FAIL_BRANCH, branch: MERGE_FAIL_BRANCH, path: mergeFailWorktree },
           ],
@@ -282,6 +289,8 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
         reviewDecision: "review_required",
         mergeState: "blocked",
         checks: expectedChecks,
+        reviewers: [],
+        discussion: { items: [], threads: [] },
       },
       checks: expectedChecks,
       fetchedAt: expect.any(String),
@@ -302,6 +311,136 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     expect(requests[0].cwd).toBe(ghCwd(prWorktree));
     expect(requests[0].env).toEqual({ GH_PROMPT_DISABLED: ghPromptDisabled });
     expect(stub.requests).toContainEqual(requests[0]);
+  });
+
+  it("returns reviewers with their latest state and the pull request's discussion", async () => {
+    stub.setReviewQuery(
+      FAKE_REPO,
+      DISCUSSION_BRANCH,
+      reviewQueryData({
+        pullRequests: [
+          pullRequestNode({
+            number: 720,
+            reviewRequests: [
+              reviewRequestNode("carol", { asCodeOwner: true }),
+              // Asked again after approving: pending wins.
+              reviewRequestNode("dave"),
+            ],
+            reviews: [
+              reviewNode({
+                id: "R1",
+                login: "bob",
+                state: "CHANGES_REQUESTED",
+                body: "Please **rename** this.",
+                submittedAt: "2026-01-02T08:00:00Z",
+              }),
+              reviewNode({
+                id: "R2",
+                login: "bob",
+                state: "APPROVED",
+                submittedAt: "2026-01-02T10:00:00Z",
+              }),
+              // A comment after an approval does not replace the verdict.
+              reviewNode({
+                id: "R3",
+                login: "bob",
+                state: "COMMENTED",
+                body: "One more thought.",
+                submittedAt: "2026-01-02T11:00:00Z",
+              }),
+              reviewNode({ id: "R4", login: "dave", state: "APPROVED" }),
+              reviewNode({ id: "R5", login: "erin", state: "PENDING", body: "draft" }),
+            ],
+            comments: [
+              commentNode({
+                id: "C1",
+                login: "alice",
+                body: "Looks `good`.",
+                createdAt: "2026-01-02T07:00:00Z",
+              }),
+            ],
+            reviewThreads: [
+              reviewThreadNode({
+                id: "T1",
+                path: "src/login.ts",
+                line: 42,
+                comments: [
+                  commentNode({
+                    id: "TC1",
+                    login: "bob",
+                    body: "Why not a const?",
+                    createdAt: "2026-01-02T09:00:00Z",
+                  }),
+                  commentNode({
+                    id: "TC2",
+                    login: "alice",
+                    body: "Done.",
+                    createdAt: "2026-01-02T09:05:00Z",
+                  }),
+                ],
+              }),
+              reviewThreadNode({
+                id: "T2",
+                path: "src/old.ts",
+                line: null,
+                isResolved: true,
+                isOutdated: true,
+                comments: [
+                  commentNode({
+                    id: "TC3",
+                    login: "bob",
+                    body: "Nit.",
+                    createdAt: "2026-01-02T09:30:00Z",
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const data = await forWorktree(server, testWorktreeId(REPO, DISCUSSION_BRANCH));
+    const review = data.review as {
+      reviewers: Array<Record<string, unknown>>;
+      discussion: {
+        items: Array<Record<string, unknown>>;
+        threads: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(review.reviewers.map((r) => [r.login, r.state, r.required ?? false])).toEqual([
+      ["bob", "approved", false],
+      ["dave", "pending", false],
+      ["carol", "pending", true],
+    ]);
+    expect(review.reviewers[0].avatarUrl).toBe("https://avatars.example.test/bob.png");
+
+    // Conversation comments and review summaries with a body, oldest first.
+    expect(review.discussion.items.map((i) => [i.id, i.kind, i.reviewState ?? null])).toEqual([
+      ["C1", "comment", null],
+      ["R1", "review", "changes_requested"],
+      ["R3", "review", "commented"],
+    ]);
+    expect(review.discussion.items[0].body).toBe("Looks `good`.");
+    expect(review.discussion.items[0].url).toBe(
+      "https://github.com/acme/widgets/pull/1#issuecomment-C1",
+    );
+
+    expect(review.discussion.threads).toMatchObject([
+      {
+        id: "T1",
+        path: "src/login.ts",
+        line: 42,
+        isResolved: false,
+        isOutdated: false,
+        comments: [
+          { id: "TC1", body: "Why not a const?", author: { login: "bob" } },
+          { id: "TC2", body: "Done.", author: { login: "alice" } },
+        ],
+      },
+      { id: "T2", path: "src/old.ts", isResolved: true, isOutdated: true },
+    ]);
   });
 
   it("returns the branch's GitHub Actions jobs when it has no pull request", async () => {
