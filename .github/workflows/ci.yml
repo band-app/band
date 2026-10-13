@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, Test & Build
+    name: Lint & Build
     runs-on: ubuntu-latest
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
@@ -177,74 +177,6 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
-      # Before the tests: the remote browser suites (hub and worker) skip when no Chromium is found.
-      # Keyed on the Playwright version, with no restore-keys, so a bump
-      # starts clean instead of carrying old browser builds forward.
-      - name: Resolve Playwright version
-        id: playwright
-        working-directory: apps/web
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Playwright browsers cache
-        id: cache-playwright
-        uses: actions/cache/restore@v5
-        with:
-          # When editing path/key here, mirror in "Save Playwright browsers cache".
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
-
-      # `--with-deps` still installs the apt packages on a cache hit; the hit
-      # only skips the browser download. WebKit runs the iPhone-profile specs
-      # (`e2e/mobile-document-scroll.spec.ts`).
-      - name: Install Playwright Chromium and WebKit
-        run: pnpm --filter @band-app/web exec playwright install --with-deps chromium webkit
-
-      - name: Save Playwright browsers cache
-        if: |
-          steps.cache-playwright.outputs.cache-hit != 'true' &&
-          ((github.event_name != 'pull_request' &&
-            github.event_name != 'pull_request_target') ||
-           github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          # When editing path/key here, mirror in "Restore Playwright browsers cache".
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
-
-      - name: Test (web)
-        env:
-          # The runner's user namespace policy can stop Chromium's sandbox from starting.
-          BAND_CHROMIUM_NO_SANDBOX: "1"
-        run: |
-          pnpm --filter @band-app/server test
-          pnpm --filter @band-app/web test
-          pnpm --filter @band-app/link test
-          pnpm --filter @band-app/environment test
-          pnpm --filter @band-app/shared test
-          pnpm --filter @band-app/host-local test
-          pnpm --filter @band-app/worker test
-
-      # A real Xvfb and x11vnc for `e2e/desktop-viewer-x11vnc.spec.ts`, which fails on Linux CI
-      # without them. Installed after the unit and hub tests so nothing else sees them.
-      - name: Install Xvfb and x11vnc
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc x11-utils
-
-      - name: Test e2e (web)
-        run: pnpm --filter @band-app/web test:e2e
-
-      # Playwright writes per-failure error-context.md snapshots (+ any traces)
-      # into test-results/. Without this upload a CI-only e2e flake leaves
-      # nothing to diagnose beyond the assertion message in the log.
-      - name: Upload Playwright failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-test-results
-          path: apps/web/test-results/
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
@@ -328,6 +260,127 @@ jobs:
 
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
+
+  # The test jobs run beside `check` and rebuild what they need (the CLI comes
+  # from the restored cargo cache, the web and hub bundles from the pretest
+  # hook or an explicit build), which costs less than waiting on an artifact
+  # hand-off from a serial build job. `check` owns the cache saves.
+  test-hub:
+    name: Test (hub) ${{ matrix.shard }}/${{ matrix.total }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total: [3]
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+      # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-node-rust
+
+      # The remote browser suites skip when no Chromium is found.
+      - uses: ./.github/actions/setup-playwright
+
+      - name: Test (hub)
+        env:
+          # The runner's user namespace policy can stop Chromium's sandbox from starting.
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        run: pnpm --filter @band-app/server test --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+  test-packages:
+    name: Test (web unit & packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-node-rust
+
+      - uses: ./.github/actions/setup-playwright
+
+      # The hub build the worker and host-local suites read from dist.
+      - name: Build web and hub
+        run: |
+          pnpm --filter @band-app/web build
+          pnpm --filter @band-app/server build
+
+      - name: Test (web unit & packages)
+        env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        run: |
+          pnpm --filter @band-app/web test
+          pnpm --filter @band-app/link test
+          pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/shared test
+          pnpm --filter @band-app/host-local test
+          pnpm --filter @band-app/worker test
+
+  test-e2e:
+    name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total: [3]
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-node-rust
+
+      - uses: ./.github/actions/setup-playwright
+
+      # A real Xvfb and x11vnc for `e2e/desktop-viewer-x11vnc.spec.ts`, which fails on Linux CI without them.
+      - name: Install Xvfb and x11vnc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc x11-utils
+
+      - name: Build web and hub
+        run: |
+          pnpm --filter @band-app/web build
+          pnpm --filter @band-app/server build
+
+      - name: Test e2e (web)
+        run: pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      # Playwright writes per-failure error-context.md snapshots (+ any traces)
+      # into test-results/. Without this upload a CI-only e2e flake leaves
+      # nothing to diagnose beyond the assertion message in the log.
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results-${{ matrix.shard }}
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The hub suite again, with every worktree on a real band-worker over
   # loopback (plan step 2.6; docs/integration-testing.md, "Host modes"). It runs
@@ -1289,7 +1342,7 @@ jobs:
     name: Deploy Docs
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: check
+    needs: [check, test-hub, test-packages, test-e2e]
 
     steps:
       - name: Checkout
