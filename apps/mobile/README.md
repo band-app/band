@@ -17,7 +17,7 @@ From the repo root:
 npx -y pnpm@10 install --frozen-lockfile
 ```
 
-If pnpm refuses a freshly published package because of the release-age rule, add `--config.minimum-release-age=0`. A cold install takes about 15 to 30 minutes.
+If pnpm refuses a freshly published package because of the release-age rule, add `--config.minimum-release-age=0`. A cold install takes about 15 to 30 minutes. If it stops with `ERR_PNPM_ENOENT` on a slow connection, run the same command again. pnpm reuses what it already downloaded.
 
 ## Run on the simulator
 
@@ -26,7 +26,7 @@ cd apps/mobile
 npx expo run:ios
 ```
 
-The first run generates `apps/mobile/ios`, installs the pods and builds the app (5 to 20 minutes, about 2.5 GB). It starts Metro for the debug build. The app opens on the pairing screen.
+The first run generates `apps/mobile/ios`, installs the pods and builds the app (5 to 20 minutes, about 2.5 GB). It starts Metro for the debug build, so leave that terminal open. With more than one simulator booted, pass `--device <UDID>` (list them with `xcrun simctl list devices | grep Booted`). The app opens on the pairing screen.
 
 ## Start a throwaway hub
 
@@ -45,7 +45,7 @@ Use any hub you have a device token for: the throwaway one above, or your real h
 
 - Manual: on the pairing screen, enter the hub URL and the token.
 - Camera: scan the QR code from Settings > Devices (a real iPhone only).
-- Deep link: `xcrun simctl openurl booted "band://pair?url=<url-encoded hub URL>&token=<token>"`. The app asks you to confirm the hub, then pairs.
+- Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&token=<token>"` (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
 
 The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub on another machine must be `https`, or on the local network.
 
