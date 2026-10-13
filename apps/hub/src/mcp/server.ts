@@ -44,7 +44,9 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("mcp.") ||
       (path.startsWith("hosts.") && path !== "hosts.forAgents") ||
       path.startsWith("hostRequests.") ||
-      path.startsWith("runners.")
+      path.startsWith("runners.") ||
+      // Writes ~/.claude/settings.json on a host; only a person's click may.
+      path.startsWith("hooks.")
     )
       continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.

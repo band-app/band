@@ -10,7 +10,6 @@ import type {
   FileListResult,
   FormatFileResult,
   GitStatus,
-  HooksStatus,
   ListWorktreeBranchesResult,
   RepoInfo,
   Settings,
@@ -178,10 +177,6 @@ export interface DashboardAdapter {
    * (see issue #384).
    */
   subscribeFileChanges?(worktreeId: string, handler: (path: string) => void): Unsubscribe;
-
-  // Hooks
-  checkHooks(): Promise<HooksStatus>;
-  installHooks(): Promise<void>;
 
   // CLI
   checkCli(): Promise<CliStatus>;

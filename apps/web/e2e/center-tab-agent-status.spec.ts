@@ -1,10 +1,10 @@
 /**
  * Agent status on center tabs.
  *
- * A chat or terminal tab that isn't shown carries its agent's status in the
- * slot at its end: a spinner while the agent works, a dot when it needs the
- * user. The shown tab, and any tab under the pointer, puts its close button in
- * that slot instead.
+ * A chat or terminal tab carries its agent's status in the slot at its end: a
+ * spinner while the agent works, a dot for the other states. This holds for the
+ * shown tab too. A tab under the pointer puts its close button in that slot
+ * instead.
  *
  * Real server, no tRPC mocking. The chat runs against the ACP stub agent,
  * whose "start" turn stays open until Band sends `session/cancel`. The
@@ -86,18 +86,17 @@ test("a hidden chat tab shows a spinner while its agent works", async ({ page })
   await chatPane.submit();
   await expect(chatPane.assistantMessage("working")).toBeVisible();
 
-  // The shown chat tab keeps its close button in the slot.
-  await expect(worktree.tabCloseButton("chat")).toBeVisible();
-  await expect(worktree.tabStatus("chat")).toHaveCount(0);
+  // The shown chat tab shows its status too; hovering swaps in the close button.
+  await expect(worktree.tabStatus("chat")).toHaveAttribute("data-status", "working");
+  await worktree.movePointerAway();
+  await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "0");
+  await worktree.hoverTab("chat");
+  await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "1");
 
   await worktree.activateTab("terminal");
   await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
   await expect(worktree.tabStatus("chat")).toHaveAttribute("data-status", "working");
   await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "0");
-
-  // Hovering swaps the spinner for the close button.
-  await worktree.hoverTab("chat");
-  await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "1");
 
   // A turn the user stopped leaves nothing to show.
   await worktree.activateTab("chat");
@@ -134,11 +133,12 @@ test("a hidden terminal tab shows its Claude Code session's status", async ({ pa
     sessionId: "tab-status-session",
     hook: { hook_event_name: "Stop" },
   });
-  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "needs_attention");
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "done");
 
-  // Showing the terminal puts its close button in the slot.
+  // Showing the terminal keeps its status in the slot.
   await worktree.activateTab("terminal");
   await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
-  await expect(worktree.tabCloseButton("terminal")).toBeVisible();
-  await expect(worktree.tabStatus("terminal")).toHaveCount(0);
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "done");
+  await worktree.hoverTab("terminal");
+  await expect(worktree.tabCloseButton("terminal")).toHaveCSS("opacity", "1");
 });

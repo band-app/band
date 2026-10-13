@@ -12,7 +12,7 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag } from "lucide-react";
+import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { trpc } from "../../lib/trpc-client";
@@ -108,7 +108,7 @@ export function DashboardShell({
   const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
   const capabilities = useCapabilities();
   const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
-  const { state: hooksState, install: installHooks } = useHooksSetup();
+  const hooksSetup = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
   const [appTitle, setAppTitle] = useState("Band");
@@ -533,14 +533,39 @@ export function DashboardShell({
         </div>
       )}
 
-      {hooksState.status === "needs_install" && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
+      {hooksSetup.visible && (
+        <div
+          role="status"
+          data-testid="hooks-banner"
+          className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2"
+        >
           <span className="text-blue-700 dark:text-blue-200">
-            Install Claude Code hooks for agent status detection
+            To get notifications from agents running in a terminal, Claude Code hooks need to be
+            installed.
+            {hooksSetup.error ? ` ${hooksSetup.error}` : ""}
           </span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installHooks}>
-            Install
-          </Button>
+          <span className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              disabled={hooksSetup.installing}
+              data-testid="hooks-banner__install"
+              onClick={hooksSetup.install}
+            >
+              Install
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Dismiss"
+              data-testid="hooks-banner__dismiss"
+              onClick={hooksSetup.dismiss}
+            >
+              <X className="size-4" />
+            </Button>
+          </span>
         </div>
       )}
 

@@ -310,6 +310,7 @@ export const WorktreeCard = memo(function WorktreeCard({
                   // than sitting beside it.
                   <AgentStatusIndicator
                     agent={status?.agent}
+                    tabStatuses={status?.tabStatuses}
                     isActive={isActive}
                     fallback={
                       <Home
@@ -319,7 +320,11 @@ export const WorktreeCard = memo(function WorktreeCard({
                     }
                   />
                 ) : (
-                  <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
+                  <AgentStatusIndicator
+                    agent={status?.agent}
+                    tabStatuses={status?.tabStatuses}
+                    isActive={isActive}
+                  />
                 )}
                 {showRepoName ? (
                   // Pinned section: stack the branch name over the repo name
