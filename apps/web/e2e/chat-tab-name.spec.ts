@@ -64,7 +64,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("a chat tab shows the agent's label, then the name the chat was given", async ({ page }) => {
+test("a chat tab shows the agent's label, then the given name after a reload", async ({ page }) => {
   const chatPane = new ChatPanePage(page, server.url, TOKEN);
   await chatPane.goto(WORKTREE);
   await chatPane.waitForReady();

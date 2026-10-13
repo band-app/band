@@ -38,7 +38,8 @@ name: t5 rename and close a tab
 - runScript:
     file: scripts/hub-control.js
     env:
-      ACTION: check-tabs?wt=gamma-tabs&label=chat_tabs_1:Parser v2
+      ACTION: check-tabs?wt=gamma-tabs
+      VALUE: "chat_tabs_1:Parser v2"
 # Close from the strip: show Tests so the strip scrolls it into view, then long-press it.
 - runFlow:
     file: subflows/select-tab.yaml

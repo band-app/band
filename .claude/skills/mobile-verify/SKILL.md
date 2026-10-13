@@ -112,6 +112,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `t3-tabs-attention.yaml` | A chat in a background tab asks for permission: its tab shows the needs-attention dot, and switching to it shows the request. |
 | `t4-tabs-switch.yaml` | Switching back to a tab shown a moment ago shows it at once, with no spinner, still scrolled to its first turn. |
 | `t5-tabs-close.yaml` | Rename names the chat on the hub; Close tab removes the chat and its tab and keeps the web's terminal and browser tabs in the shared list. |
+| `t6-tabs-live.yaml` | While the worktree is open, the web starts a chat and reorders the shared list (`/web-tabs`); the phone's tabs follow without reopening the screen. |
 | `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
@@ -119,7 +120,7 @@ The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`
 chat flows' worktrees: `gamma-main` (a finished "showcase" turn with an attached image),
 `gamma-long` (a finished turn of 1,610 replayed events), `gamma-history` (24 short turns, more
 than the 20 the hub sends on open), the empty `gamma-stream` and
-`gamma-resume`, one empty worktree per composer flow (`gamma-compose`, `-queue`, `-attach`, `-suggest`, `-session`, `-keyboard`), and `gamma-tabs` with three named chats (Parser, Docs, Tests; Parser has 12 turns) and a shared tab list that puts a terminal and a browser tab between them, with Docs active. The tab flows build on each other (t2 adds a chat, t5 closes one), so run them in order. The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
+`gamma-resume`, one empty worktree per composer flow (`gamma-compose`, `-queue`, `-attach`, `-suggest`, `-session`, `-keyboard`), and `gamma-tabs` with three named chats (Parser, Docs, Tests; Parser has 12 turns) and a shared tab list that puts a terminal and a browser tab between them, with Docs active. The tab flows build on each other (t2 adds a chat, t5 closes one, t6 adds one from the "web"), so run them in order. The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
 with `work` as a turn that runs until stopped, one starting with `ask` as a turn that waits for a
 permission answer, and one starting with `stream` as 90 numbered lines over 45 s, and one starting with `slow` as a 90 s turn that ends by itself.
 

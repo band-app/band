@@ -88,13 +88,14 @@ export function nextUnread(
   before: ReadonlyMap<string, string>,
   after: ReadonlyMap<string, string>,
   active: string | null,
-): Set<string> {
+): ReadonlySet<string> {
+  const ended = [...before]
+    .filter(([id, status]) => status === "working" && after.get(id) !== "working" && id !== active)
+    .map(([id]) => id);
+  // The same set when nothing changed, so React skips the update.
+  if (ended.every((id) => unread.has(id)) && !(active && unread.has(active))) return unread;
   const next = new Set(unread);
-  for (const [chatId, status] of before) {
-    if (status === "working" && after.get(chatId) !== "working" && chatId !== active) {
-      next.add(chatId);
-    }
-  }
+  for (const id of ended) next.add(id);
   if (active) next.delete(active);
   return next;
 }

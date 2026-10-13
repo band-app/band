@@ -72,7 +72,7 @@ function WorktreeScreen({ id }: { id: string }) {
 
 /**
  * The worktree's chat tabs and the shown chat. Memoized: the screen re-renders on every hub status
- * event. The last few chats shown stay mounted under the shown one, so switching back to one shows
+ * event, and this part only needs this worktree's. The last few chats shown stay mounted under the shown one, so switching back to one shows
  * it at once, at the place the user left it, with its stream still open.
  */
 const WorktreeChats = memo(function WorktreeChats({ worktreeId }: { worktreeId: string }) {

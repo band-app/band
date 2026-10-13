@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -99,12 +99,18 @@ export function TabStrip({
   const [switcher, setSwitcher] = useState(false);
   const [picker, setPicker] = useState(false);
 
-  // Keep the shown tab in view when it changes (from the sheet, or a new chat at the end).
+  // Keep the shown tab in view when it changes (from the sheet, or a new chat at the end). A tab
+  // not laid out yet (the shared active tab on open) scrolls into view from its `onLayout`.
+  const scrolledTo = useRef<string | null>(null);
+  const reveal = useCallback((id: string, animated: boolean) => {
+    const at = offsets.current.get(id);
+    if (!at) return;
+    scrolledTo.current = id;
+    scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
+  }, []);
   useEffect(() => {
-    if (!active) return;
-    const at = offsets.current.get(active);
-    if (at) scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated: true });
-  }, [active]);
+    if (active) reveal(active, true);
+  }, [active, reveal]);
 
   return (
     <View style={styles.bar} testID="tabs__strip">
@@ -129,6 +135,7 @@ export function TabStrip({
               onLayout={(e) => {
                 const { x, width } = e.nativeEvent.layout;
                 offsets.current.set(tab.id, { x, width });
+                if (selected && scrolledTo.current !== tab.id) reveal(tab.id, false);
               }}
               style={[styles.tab, selected && styles.tabSelected]}
               testID={`tabs__tab-${tab.id}`}

@@ -305,6 +305,35 @@ async function seedTabs(state) {
   });
 }
 
+/** The chat `webEditTabs` starts, as the web would. */
+const WEB_CHAT = { id: "chat_tabs_web", name: "From web" };
+
+/**
+ * Changes a worktree's shared tab list the way the web would while the phone shows it: starts
+ * `WEB_CHAT`, then moves the last chat tab to the front and adds the new chat at the end. The
+ * active tab and the tabs of other kinds stay as they are.
+ */
+export async function webEditTabs(state, worktreeId) {
+  await trpc(state, "chats.create", { worktreeId, ...WEB_CHAT });
+  const key = `band:center-tabs:${worktreeId}`;
+  const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });
+  const entry = entries.find((e) => e.key === key);
+  const tabs = entry?.value?.tabs ?? [];
+  const lastChat = tabs.findLast((t) => t.kind === "chat");
+  const rest = tabs.filter((t) => t !== lastChat);
+  const result = await trpc(state, "clientState.set", {
+    key,
+    scope: "all",
+    baseVersion: entry?.version ?? 0,
+    clientId: "seed-web",
+    value: {
+      tabs: [...(lastChat ? [lastChat] : []), ...rest, { id: WEB_CHAT.id, kind: "chat" }],
+      active: entry?.value?.active ?? null,
+    },
+  });
+  if (!result.ok) throw new Error(`clientState.set was refused: version ${result.entry?.version}`);
+}
+
 /** The shared tab list of a worktree as the hub holds it, and the chats the hub has there. */
 export async function sharedTabs(state, worktreeId) {
   const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });

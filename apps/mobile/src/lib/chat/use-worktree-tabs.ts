@@ -124,17 +124,22 @@ export function useWorktreeTabs(worktreeId: string) {
   // The shown tab: the shared active one on open, then the user's choice.
   const [active, setActive] = useState<string | null>(null);
   const chosen = useRef(false);
+  const prevChats = useRef<readonly string[]>([]);
   useEffect(() => {
     if (!ready) return;
+    const before = prevChats.current;
+    prevChats.current = view.chats;
     if (!chosen.current) {
       chosen.current = true;
       setActive(view.active ?? view.chats[0] ?? null);
       return;
     }
-    // The shown tab was closed elsewhere: show its neighbour.
-    setActive((current) =>
-      current && view.chats.includes(current) ? current : (view.chats[0] ?? null),
-    );
+    // The shown tab was closed elsewhere: show its neighbour, as a close here does.
+    setActive((current) => {
+      if (current && view.chats.includes(current)) return current;
+      const neighbour = current ? neighbourOf(before, current) : null;
+      return neighbour && view.chats.includes(neighbour) ? neighbour : (view.chats[0] ?? null);
+    });
   }, [ready, view]);
 
   const [recent, setRecent] = useState<string[]>([]);
@@ -147,10 +152,9 @@ export function useWorktreeTabs(worktreeId: string) {
   );
 
   const { state: statusState } = useStatusFeed();
-  const statuses = useMemo(
-    () => chatStatuses(statusState.agents.get(worktreeId)?.tabStatuses),
-    [statusState, worktreeId],
-  );
+  // An event for another worktree leaves this worktree's entry (and so `statuses`) unchanged.
+  const worktreeStatus = statusState.agents.get(worktreeId);
+  const statuses = useMemo(() => chatStatuses(worktreeStatus?.tabStatuses), [worktreeStatus]);
   const [unread, setUnread] = useState<ReadonlySet<string>>(new Set());
   const lastStatuses = useRef(statuses);
   useEffect(() => {
@@ -168,7 +172,7 @@ export function useWorktreeTabs(worktreeId: string) {
 
   const tabs = useMemo((): ChatTab[] => {
     const byId = new Map((chats.data ?? []).map((c) => [c.id, c]));
-    const defaultId = settings.data?.defaultCodingAgent;
+    const defaultId = settings.data?.defaultCodingAgent ?? settings.data?.codingAgents?.[0]?.id;
     return view.chats.map((id) => {
       const chat = byId.get(id);
       const agentId = chat?.agent ?? defaultId;
@@ -213,6 +217,12 @@ export function useWorktreeTabs(worktreeId: string) {
       const nextActive = active === id ? neighbourOf(chatsNow, id) : active;
       setActive(nextActive);
       setCreated((c) => c.filter((x) => x !== id));
+      // Drop it from the cached list now; until the remove lands it would come back as a chat
+      // the shared list lacks. A failed remove refetches it below.
+      void queryClient.cancelQueries({ queryKey: chatsKey });
+      queryClient.setQueryData(chatsKey, (list: { id: string }[] | undefined) =>
+        list?.filter((c) => c.id !== id),
+      );
       write(rest, nextActive);
       // Closing a chat tab removes the chat, as the web's close does.
       void client.chats.remove

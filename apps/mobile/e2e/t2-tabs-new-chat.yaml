@@ -31,6 +31,10 @@ name: t2 a new chat from the phone becomes a tab everywhere
     visible:
       id: chat__empty
     timeout: 10000
+# The selected tab is the new chat, not one of the seeded ones.
+- assertVisible:
+    id: "tabs__tab-(?!chat_tabs_).*"
+    selected: true
 - assertNotVisible:
     id: tabs__tab-chat_tabs_2
     selected: true

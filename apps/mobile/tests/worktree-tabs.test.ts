@@ -113,6 +113,12 @@ describe("tab state", () => {
     assert.deepEqual([...nextUnread(unread, after, after, "a")], []);
     assert.deepEqual([...nextUnread(new Set(), statuses, after, "a")], []);
   });
+
+  it("returns the same set when nothing became unread", () => {
+    const unread = new Set(["a"]);
+    const idle = new Map([["a", "idle"]]);
+    assert.equal(nextUnread(unread, idle, idle, "b"), unread);
+  });
 });
 
 describe("keep alive", () => {

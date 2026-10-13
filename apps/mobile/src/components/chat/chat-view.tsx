@@ -1,6 +1,6 @@
 import { sessionPickers } from "@band-app/client/session-pickers";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -37,7 +37,7 @@ const keyOf = (row: ChatRow) => row.key;
  * the bottom the list follows new output; scrolling up stops that and shows "Jump to latest".
  * Older turns load when the user reaches the top, and the list keeps its place while they do.
  */
-export function ChatView({
+export const ChatView = memo(function ChatView({
   chatId,
   worktreeId,
   active = true,
@@ -229,7 +229,7 @@ export function ChatView({
       </Animated.View>
     </ChatProvider>
   );
-}
+});
 
 const styles = StyleSheet.create({
   keyboard: { flex: 1 },

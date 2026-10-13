@@ -24,6 +24,7 @@ import {
   startTurn,
   STREAM_LINES,
   stopTurn,
+  webEditTabs,
 } from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
@@ -163,7 +164,8 @@ function checkTabs({ tabs, chats }, params) {
   } else if (active && active !== "new" && tabs?.active !== active) {
     problems.push(`the active tab is ${tabs?.active}, not ${active}`);
   }
-  const label = params.get("label");
+  // `label` in ACTION, or in VALUE when the name has spaces.
+  const label = params.get("label") ?? params.get("value");
   if (label) {
     const [id, name] = [label.slice(0, label.indexOf(":")), label.slice(label.indexOf(":") + 1)];
     const found = chats.find((c) => c.id === id)?.name;
@@ -177,7 +179,8 @@ function checkTabs({ tabs, chats }, params) {
  * A loopback server the flows call (`e2e/scripts/hub-control.js`) to drive the hub:
  * POST /stop and /start stop and restart it, /work?wt=<id>, /ask?wt=<id> and /halt?wt=<id>
  * make the scripted agent work, ask for permission or stop (in the chat `chat=<id>` names, else
- * the worktree's first), /check-tabs?wt=<id> checks the shared tab list (`checkTabs`),
+ * the worktree's first), /check-tabs?wt=<id> checks the shared tab list (`checkTabs`, retried
+ * for up to 10 s), /web-tabs?wt=<id> changes it as the web would (`webEditTabs`),
  * /stream?wt=<id> streams numbered
  * lines for 45 s, /fill adds worktrees, and /sleep?ms=<n> answers after n milliseconds (a
  * flow's way to wait while the app is away). /clipboard?value=<text> fails unless the
@@ -203,10 +206,18 @@ function startControlServer(hub, chats, udid, notes) {
       else if (url.pathname === "/ask") await startTurn(hub, target, wt, "ask before you run the tests");
       else if (url.pathname === "/halt") await stopTurn(hub, target, wt);
       else if (url.pathname === "/check-tabs") {
-        const result = checkTabs(await sharedTabs(hub, wt), url.searchParams);
+        // The phone pushes its tab list 500 ms after a change and removes a chat without waiting,
+        // so the hub may not have it yet: check again until it does or 10 s pass.
+        const deadline = Date.now() + 10_000;
+        let result = checkTabs(await sharedTabs(hub, wt), url.searchParams);
+        while (!result.ok && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 200));
+          result = checkTabs(await sharedTabs(hub, wt), url.searchParams);
+        }
         notes.push(`${wt}: ${result.note}`);
         if (!result.ok) throw new Error(result.note);
       }
+      else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
       else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
         const want = url.searchParams.get("value") ?? "";
