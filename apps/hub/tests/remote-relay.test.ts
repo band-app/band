@@ -349,7 +349,7 @@ beforeAll(async () => {
             worktreeId: WT_B,
             id: "b-owned-browser",
           }),
-          post("repos-remove", "/trpc/repos.remove", { name: "proj" }),
+          post("repos-unlisted", "/trpc/repos.futureProcedure", { name: "proj" }),
           post("tokens-list", "/trpc/tokens.list", {}),
           post("chats-unlisted", "/trpc/chats.continueInTerminal", {
             chatId: "b-owned-chat",
@@ -561,7 +561,7 @@ describe("what an agent may call, and which ids it may take", () => {
 
   it("refuses a procedure that is not on the list, even in a router the list uses", async () => {
     const by = (name: string) => httpLog(b).find((l) => l.name === name);
-    expect(by("repos-remove")?.status).toBe(403);
+    expect(by("repos-unlisted")?.status).toBe(403);
     expect(by("tokens-list")?.status).toBe(403);
     expect(by("chats-unlisted")?.status).toBe(403);
     expect(by("tasks-cancel")?.status).toBe(403);
@@ -625,6 +625,7 @@ describe("what an agent may call, and which ids it may take", () => {
       worktreeOfBrowser: () => null,
       worktreeOfSubscription: () => null,
       crossHostRefusal: () => null,
+      repoHostRefusal: () => null,
     };
     const other = checkRelayRequest(
       post("/trpc/worktrees.remove", { ...remove, hostId: "local" }),
@@ -632,6 +633,74 @@ describe("what an agent may call, and which ids it may take", () => {
       lookups,
     );
     expect(other.ok).toBe(false);
+  });
+
+  it("applies a repo's allowed hosts to repo management calls (S3 to S5)", async () => {
+    const { checkRelayRequest } = await import("../src/server/services/relay-scope");
+    const post = (path: string, payload: unknown) => ({
+      scope: { worktreeId: "proj-relay-a@h-w" },
+      method: "POST",
+      path,
+      headers: {},
+      body: Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
+    });
+    const limited: Record<string, string[]> = { only_b: ["h-b"] };
+    const lookups: Parameters<typeof checkRelayRequest>[2] = {
+      hostOfWorktree: () => "h-a",
+      worktreeOfChat: () => null,
+      worktreeOfCwd: () => null,
+      hostOfTerminal: () => null,
+      worktreeOfBrowser: () => null,
+      worktreeOfSubscription: () => null,
+      crossHostRefusal: () => null,
+      repoHostRefusal: (repo, host) =>
+        limited[repo] && !limited[repo].includes(host) ? `${repo} is limited to other hosts` : null,
+    };
+    const call = (host: string, procedure: string, input: object) =>
+      checkRelayRequest(post(`/trpc/${procedure}`, input), host, {
+        ...lookups,
+        hostOfWorktree: () => host,
+      });
+    for (const [procedure, input] of [
+      ["repos.update", { name: "only_b", allowedHostIds: null }],
+      ["repos.updateLabel", { name: "only_b", label: "x" }],
+      ["repos.remove", { name: "only_b" }],
+      ["repos.promoteToGit", { name: "only_b" }],
+    ] as const) {
+      const refused = call("h-a", procedure, input);
+      expect(refused.ok, procedure).toBe(false);
+      expect(!refused.ok && refused.status).toBe(403);
+      expect(!refused.ok && refused.reason).toContain("only_b");
+      expect(call("h-b", procedure, input).ok, procedure).toBe(true);
+      expect(call("h-a", procedure, { ...input, name: "open" }).ok, procedure).toBe(true);
+    }
+    expect(call("h-a", "repos.reorder", { names: ["only_b", "open"] }).ok).toBe(true);
+    expect(call("h-a", "repos.addByUrl", { remoteUrl: "https://example.com/o/r.git" }).ok).toBe(
+      true,
+    );
+    // Adding from another host, and outside its roots, is fine.
+    expect(
+      call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x", addRoot: true }).ok,
+    ).toBe(true);
+    expect(call("h-a", "repos.inspectFolder", { hostId: "h-b", path: "/x" }).ok).toBe(true);
+    // A repo limited to hosts that exclude the folder's host is refused.
+    const limitedAdd = call("h-a", "repos.addFromWorker", {
+      hostId: "h-a",
+      path: "/x",
+      allowedHostIds: ["h-b"],
+    });
+    expect(limitedAdd.ok).toBe(false);
+    expect(
+      call("h-a", "repos.addFromWorker", {
+        hostId: "h-a",
+        path: "/x",
+        allowedHostIds: ["h-a", "h-b"],
+      }).ok,
+    ).toBe(true);
+    // A re-add that names a repo limited to other hosts is refused.
+    expect(
+      call("h-a", "repos.addFromWorker", { hostId: "h-a", path: "/x", name: "only_b" }).ok,
+    ).toBe(false);
   });
 
   it("lists only procedures the hub has", async () => {
@@ -900,7 +969,6 @@ describe("the band CLI through the relay (S2)", () => {
 
   it.skipIf(!cli)("prints a clear error naming a refused procedure (S4)", async () => {
     for (const [args, name] of [
-      [["repos", "remove", "proj"], "repos.remove"],
       [["tokens", "list"], "tokens.list"],
       [["tunnel", "status"], "tunnel.status"],
     ] as const) {
@@ -965,6 +1033,54 @@ describe("the band CLI through the relay (S2)", () => {
     expect(result.code).toBe(1);
     await m("terminal.kill", { terminalId: hubTerminal.terminalId, worktreeId: "proj-main" });
   });
+
+  it.skipIf(!cli)(
+    "adds, edits and removes repos, limited only by a repo's allowed hosts (S1 to S4)",
+    async () => {
+      const names = (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map(
+        (r) => r.name,
+      );
+      const addedA = join(a.root, "agent-added-a");
+      makeRepo(addedA);
+      await ok("repos", "add", "--from", a.hostId, addedA);
+      const addedB = join(b.root, "agent-added-b");
+      makeRepo(addedB);
+      await ok("repos", "add", "--from", b.hostId, addedB);
+      // A worker looks under its home as well as its roots, so this folder is outside the roots only.
+      const outside = join(a.home, "outside-roots", "agent-outside");
+      makeRepo(outside);
+      await ok("repos", "add", "--from", a.hostId, outside, "--add-root");
+      const after = (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map(
+        (r) => r.name,
+      );
+      for (const name of ["agent-added-a", "agent-added-b", "agent-outside"]) {
+        expect(after, name).toContain(name);
+        expect(names).not.toContain(name);
+      }
+
+      // A repo limited to B refuses an agent on A, and says which repo.
+      await m("repos.update", { name: "agent-added-b", allowedHostIds: [b.hostId] });
+      for (const args of [
+        ["repos", "set", "agent-added-b", "--hosts", "all"],
+        ["repos", "remove", "agent-added-b"],
+      ]) {
+        const refused = await run(...args);
+        expect(refused.code, refused.out).not.toBe(0);
+        expect(refused.out).toContain("agent-added-b");
+        expect(refused.out).toContain("limited to other hosts");
+      }
+      expect(
+        (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map((r) => r.name),
+      ).toContain("agent-added-b");
+
+      // A repo open to every host can be changed and removed from any host.
+      await ok("repos", "set", "agent-added-a", "--meta", "true");
+      await ok("repos", "remove", "agent-added-a");
+      await ok("repos", "remove", "agent-outside");
+      await m("repos.remove", { name: "agent-added-b" });
+    },
+    120_000,
+  );
 
   it.skipIf(!cli)("has run every command in the list the drift check reads", () => {
     const missing = RELAY_CLI_COMMANDS.filter((c) => !succeeded.has(c));

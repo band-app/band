@@ -1874,7 +1874,7 @@ describe("tRPC — statuses", () => {
   it("statuses.update merges agent fields", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention" },
+      agent: { status: "done" },
     });
     expect(res.status).toBe(200);
 
@@ -1885,7 +1885,7 @@ describe("tRPC — statuses", () => {
       worktreeId: string;
       agent: { status: string; lastActivity: string };
     }>(getRes);
-    expect(data.agent.status).toBe("needs_attention");
+    expect(data.agent.status).toBe("done");
     // lastActivity should be preserved from previous update
     expect(data.agent.lastActivity).toBe("1234567890");
   });
@@ -1946,15 +1946,14 @@ describe("tRPC — system checks", () => {
     ]).toContain(data.status);
   });
 
-  it("hooks.check returns installed and other_hooks_exist booleans", async () => {
+  it("hooks.check returns installed and other_hooks_exist booleans, and a boot installs nothing", async () => {
     const res = await trpcQuery(server.url, "hooks.check");
     expect(res.status).toBe(200);
     const data = await trpcData<{ installed: boolean; other_hooks_exist: boolean }>(res);
     expect(typeof data.installed).toBe("boolean");
     expect(typeof data.other_hooks_exist).toBe("boolean");
-    // setup.ts auto-installs Claude hooks during server boot, so they
-    // should be present in the temp HOME by the time we query.
-    expect(data.installed).toBe(true);
+    // Nothing installs hooks on boot: only a person does, from the banner or Settings.
+    expect(data.installed).toBe(false);
   });
 });
 

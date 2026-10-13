@@ -2,49 +2,138 @@ import type { AgentHookStatus } from "./types.ts";
 
 /**
  * Claude Code tools that block on the user (`AskUserQuestion`,
- * `ExitPlanMode`). Every other tool is auto-approved by Band and never
- * blocks, so only these drive a `needs_attention` status.
+ * `ExitPlanMode`). A `PreToolUse` for one of them means the agent is about to
+ * wait on an answer.
  */
 const CLAUDE_CODE_INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+
+/** `background_tasks` entry statuses that mean the task is over. */
+const TERMINAL_TASK_STATUSES = new Set([
+  "idle",
+  "done",
+  "success",
+  "succeeded",
+  "complete",
+  "completed",
+  "finished",
+  "failed",
+  "error",
+  "terminated",
+  "exited",
+  "aborted",
+  "expired",
+  "skipped",
+  "crashed",
+  "killed",
+  "cancelled",
+  "canceled",
+  "timed_out",
+]);
+
+/**
+ * Whether a `Stop` payload says work outlives the turn: a scheduled cron in
+ * `session_crons`, or a `background_tasks` entry that has not finished.
+ * Teammate entries report "running" for good, so they don't count. An entry
+ * without a readable type or status counts as running, so the result fails
+ * toward `monitoring`.
+ */
+function hasBackgroundWork(payload: Record<string, unknown>): boolean {
+  const crons = payload.session_crons;
+  if (Array.isArray(crons) && crons.length > 0) return true;
+  const tasks = payload.background_tasks;
+  if (!Array.isArray(tasks)) return false;
+  return tasks.some((task) => {
+    if (typeof task !== "object" || task === null) return true;
+    const { type, status } = task as Record<string, unknown>;
+    if (typeof type === "string" && type.trim().toLowerCase() === "teammate") return false;
+    const state = typeof status === "string" ? status.trim().toLowerCase() : "";
+    return !TERMINAL_TASK_STATUSES.has(state);
+  });
+}
 
 /**
  * Translate a Claude Code hook payload (the JSON Claude Code pipes to
  * `band notify` on stdin via the hooks Band registers in
  * `~/.claude/settings.json`) into a Band worktree status.
  *
- * `needs_attention` means the ball is in the user's court — the agent either
- * finished its turn or is blocked waiting for the user to act:
+ *   - `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+ *     `SubagentStart`, `SubagentStop` → `working`.
+ *   - `PermissionRequest` (any tool) and `PreToolUse` for an interactive tool
+ *     → `question`. A terminal session is not auto-approved, so a permission
+ *     request always waits on the user.
+ *   - `Stop` → `done`, or `monitoring` while `session_crons` or
+ *     `background_tasks` show work that outlives the turn.
+ *   - `StopFailure` → `failed`.
+ *   - `PostCompact` with `trigger: "manual"` → `done`. A manual `/compact`
+ *     ends at an idle prompt and sends no `Stop`.
  *
- *   - `Stop`              → the agent finished/exited; it's the user's turn.
- *                           Tool-agnostic; fires once per turn.
- *   - `PreToolUse` / `PermissionRequest` for an interactive tool
- *                           (`CLAUDE_CODE_INTERACTIVE_TOOLS`) → the agent is
- *                           about to block on the user.
- *
- * The attention signal is the TOOL, not the hook event. `PermissionRequest`
- * fires *after* `PreToolUse` for every gated tool (Bash/Write/Edit/…), but
- * Band auto-approves those — they don't block the user — so they must stay
- * `working`. Mapping `PermissionRequest` to `needs_attention` unconditionally
- * chimed the "needs attention" sound on every tool call.
- *
- * Everything else (UserPromptSubmit, PostToolUse, and PreToolUse /
- * PermissionRequest for non-interactive tools) means the agent is actively
- * making progress → `working`.
+ * Any other event is unknown and counts as `working`: the agent is at least
+ * active.
  */
 export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): AgentHookStatus {
   const hookEvent = typeof payload.hook_event_name === "string" ? payload.hook_event_name : "";
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
 
-  if (hookEvent === "Stop") {
-    return "needs_attention";
+  switch (hookEvent) {
+    case "PermissionRequest":
+      return "question";
+    case "PreToolUse":
+      return CLAUDE_CODE_INTERACTIVE_TOOLS.has(toolName) ? "question" : "working";
+    case "Stop":
+      return hasBackgroundWork(payload) ? "monitoring" : "done";
+    case "StopFailure":
+      return "failed";
+    case "PostCompact":
+      return payload.trigger === "manual" ? "done" : "working";
+    default:
+      return "working";
   }
-  if (
-    (hookEvent === "PreToolUse" || hookEvent === "PermissionRequest") &&
-    CLAUDE_CODE_INTERACTIVE_TOOLS.has(toolName)
-  ) {
-    return "needs_attention";
+}
+
+/** Subagents of one hook session that are running, and the end of the turn they hold back. */
+export interface SubagentHold {
+  running: Set<string>;
+  /** The status the main agent's `Stop` reported while subagents still ran. */
+  deferred: AgentHookStatus | null;
+}
+
+/**
+ * Keep a session `working` while its subagents run after the main turn's
+ * `Stop`. `Stop` with subagents running defers its `done` or `monitoring`;
+ * the last `SubagentStop` releases it. Returns the status to record. `hold`
+ * is the session's state, kept by the caller and changed in place.
+ */
+export function foldSubagents(
+  hold: SubagentHold,
+  payload: Record<string, unknown>,
+  mapped: AgentHookStatus,
+): AgentHookStatus {
+  const hookEvent = typeof payload.hook_event_name === "string" ? payload.hook_event_name : "";
+  const agentId = typeof payload.agent_id === "string" ? payload.agent_id : "";
+  if (hookEvent === "SubagentStart") {
+    if (agentId) hold.running.add(agentId);
+    return hold.deferred ? "working" : mapped;
   }
-  return "working";
+  if (hookEvent === "SubagentStop") {
+    hold.running.delete(agentId);
+    if (hold.running.size === 0 && hold.deferred) {
+      const settled = hold.deferred;
+      hold.deferred = null;
+      return settled;
+    }
+    return mapped;
+  }
+  if ((hookEvent === "Stop" || hookEvent === "StopFailure") && !agentId) {
+    if (hold.running.size > 0 && (mapped === "done" || mapped === "monitoring")) {
+      hold.deferred = mapped;
+      return "working";
+    }
+    hold.deferred = null;
+    return mapped;
+  }
+  // A new prompt starts a turn of its own; a deferred end no longer applies.
+  if (hookEvent === "UserPromptSubmit") hold.deferred = null;
+  return mapped;
 }
 
 /**

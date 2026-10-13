@@ -58,7 +58,7 @@ import {
   findClaudeCliArgs,
   reportedClaudeDefaults,
 } from "./agents/claude-defaults";
-import { checkHooks, installHooks } from "./agents/hooks-install";
+import { checkHooks, installHooks, removeHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
@@ -177,6 +177,7 @@ export class LocalHost implements Host {
     installSkills: (options) => installSkills(options),
     hooksStatus: () => checkHooks(),
     installHooks: () => installHooks(),
+    removeHooks: () => removeHooks(),
   };
 
   constructor(private readonly options: LocalHostOptions) {

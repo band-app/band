@@ -14,7 +14,6 @@ import type {
   FileListResult,
   FormatFileResult,
   GitStatus,
-  HooksStatus,
   ListWorktreeBranchesResult,
   RepoInfo,
   Settings,
@@ -410,14 +409,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
       currentSub?.unsubscribe();
       currentSub = null;
     };
-  }
-
-  async checkHooks(): Promise<HooksStatus> {
-    return await this.trpc.hooks.check.query();
-  }
-
-  async installHooks(): Promise<void> {
-    await this.trpc.hooks.install.mutate();
   }
 
   async checkCli(): Promise<CliStatus> {
