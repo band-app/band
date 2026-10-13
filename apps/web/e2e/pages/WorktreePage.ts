@@ -1526,6 +1526,16 @@ export class WorktreePage {
     });
   }
 
+  /** Switch to the `file` leaf tab for `path` without touching its editor. */
+  async activateFileTab(path: string): Promise<void> {
+    await test.step(`Switch to the tab for ${path}`, async () => {
+      await this.fileTab(path).click();
+      await this.fileLeafVisibilityMarker(true)
+        .first()
+        .waitFor({ state: "visible", timeout: 20_000 });
+    });
+  }
+
   /** Type `text` at the end of the visible file leaf's editor. The caller
    *  activates the tab first (a click on desktop, a tap on a touch screen). */
   async appendToActiveFileEditor(text: string): Promise<void> {
@@ -1589,6 +1599,36 @@ export class WorktreePage {
     await test.step("Navigate away from the app (about:blank)", async () => {
       await this.page.goto("about:blank");
     });
+  }
+
+  /** Press Cmd+S (Ctrl+S off macOS) in the focused editor. */
+  async pressSaveShortcut(): Promise<void> {
+    await test.step("Press Cmd/Ctrl+S", async () => {
+      await this.page.keyboard.press(`${this.modifier}+s`);
+    });
+  }
+
+  /** Press Cmd+Z (Ctrl+Z off macOS) in the focused editor. */
+  async pressUndoShortcut(): Promise<void> {
+    await test.step("Press Cmd/Ctrl+Z", async () => {
+      await this.page.keyboard.press(`${this.modifier}+z`);
+    });
+  }
+
+  /** Text of the line holding the editor's cursor, read from the browser's
+   *  selection anchor (CodeMirror keeps it in sync with its own selection). */
+  async activeEditorLineText(): Promise<string> {
+    return await this.page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode ?? null;
+      const el = node instanceof Element ? node : (node?.parentElement ?? null);
+      return el?.closest(".cm-line")?.textContent ?? "";
+    });
+  }
+
+  /** The selected text of the page, which is the editor's selection while the
+   *  editor has focus. */
+  async selectedText(): Promise<string> {
+    return await this.page.evaluate(() => window.getSelection()?.toString() ?? "");
   }
 
   /** The scroll offset of the visible file leaf's CodeMirror scroller. 0 means

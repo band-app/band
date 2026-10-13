@@ -567,6 +567,8 @@ export function FileViewer({
       await save(editedContentRef.current);
       // Update the data state so isDirty resets
       const savedContent = editedContentRef.current;
+      // Update the ref now: the watcher's reload can run before React renders.
+      if (dataRef.current) dataRef.current = { ...dataRef.current, content: savedContent };
       setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
       // Clear edited content — saved content is now on disk
       setEditedContent(null);
@@ -837,10 +839,30 @@ export function FileViewer({
     // O(file_size) `doc.toString()` just to confirm what we already know.
     const view = editorViewRef.current;
     if (view && typeof result.content === "string") {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: result.content },
-        userEvent: "band.reload",
-      });
+      // A save's own watcher event lands here with bytes the editor already
+      // holds; replacing the document would reset scroll and selection. For a
+      // real change, replace only the differing middle so the view stays put.
+      const current = view.state.doc.toString();
+      const next = result.content;
+      if (current !== next) {
+        let start = 0;
+        const max = Math.min(current.length, next.length);
+        while (start < max && current.charCodeAt(start) === next.charCodeAt(start)) start++;
+        let endCur = current.length;
+        let endNext = next.length;
+        while (
+          endCur > start &&
+          endNext > start &&
+          current.charCodeAt(endCur - 1) === next.charCodeAt(endNext - 1)
+        ) {
+          endCur--;
+          endNext--;
+        }
+        view.dispatch({
+          changes: { from: start, to: endCur, insert: next.slice(start, endNext) },
+          userEvent: "band.reload",
+        });
+      }
     }
   }, [adapter, worktreeId, filePath, untitled, external]);
 
