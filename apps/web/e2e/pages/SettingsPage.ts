@@ -151,6 +151,13 @@ export class SettingsPage {
     return box;
   }
 
+  /** Bounding box of the "Back to app" button. */
+  async backBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await this.dialog.getByTestId("settings-page__back").boundingBox();
+    if (!box) throw new Error("The Back to app button has no bounding box (not visible)");
+    return box;
+  }
+
   /** Clicks "Back to app", which closes the settings. */
   async backToApp(): Promise<void> {
     await test.step("Go back to the app", async () => {
