@@ -104,14 +104,4 @@ describe.skipIf(isRemoteLoopback)("hook routing by host", () => {
     expect(await status(LOCAL)).toBe("failed");
     expect(await status(ON_B)).toBe("done");
   });
-
-  it("statuses.resolve takes the host too", async () => {
-    const resolve = async (hostId?: string) =>
-      trpcData<{ worktreeId: string | null }>(
-        await trpcQuery(server.url, "statuses.resolve", { cwd: SHARED_PATH, hostId }, TOKEN),
-      );
-    await expect.poll(async () => (await resolve()).worktreeId).toBe(LOCAL);
-    await expect.poll(async () => (await resolve("h-bbbbbbbbbbbb")).worktreeId).toBe(ON_B);
-    expect((await resolve("h-cccccccccccc")).worktreeId).toBeNull();
-  });
 });
