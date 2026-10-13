@@ -271,6 +271,69 @@ describe("UsageScannerService (issue #425)", () => {
     expect(watermark(tmpHome, worktreeId, "claude-code")).toBe(HOUR_A + 120_000);
   });
 
+  it("reads each worktree through its own host, retries an offline host, and never double counts", async () => {
+    const snapFor = (sessionId: string, input: number): SessionUsageSnapshot => ({
+      sessionId,
+      modelFallback: "claude-sonnet-4-6",
+      startedAt: HOUR_A + 1_000,
+      updatedAt: HOUR_A + 1_000,
+      turns: [
+        {
+          turnIndex: 0,
+          capturedAt: HOUR_A + 1_000,
+          inputTokens: input,
+          outputTokens: 1,
+          costUsd: 0.01,
+        },
+      ],
+    });
+    const readers: Record<string, UsageReader> = {
+      "h-mac": makeStubReader({
+        sessions: [{ sessionId: "mac", lastModified: HOUR_A + 1_000 }],
+        usageBySession: { mac: snapFor("mac", 100) },
+      }),
+      "h-contabo": makeStubReader({
+        sessions: [{ sessionId: "contabo", lastModified: HOUR_A + 2_000 }],
+        usageBySession: { contabo: snapFor("contabo", 200) },
+      }),
+    };
+    let contaboOnline = false;
+    const asked: Array<string | undefined> = [];
+
+    const scanner = new UsageScannerService({
+      usageEvents: new UsageEventQueries(),
+      scanState: new UsageScanStateQueries(),
+      listWorktrees: () => [
+        { worktreeId: "band-main@h-mac", repo, worktreePath: "/mac/band", hostId: "h-mac" },
+        {
+          worktreeId: "band-main@h-contabo",
+          repo,
+          worktreePath: "/srv/band",
+          hostId: "h-contabo",
+        },
+      ],
+      listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
+      getUsageReader: (_agent, hostId) => {
+        asked.push(hostId);
+        if (hostId === "h-contabo" && !contaboOnline) throw new Error("Host h-contabo is offline");
+        return readers[hostId ?? ""];
+      },
+    });
+
+    await scanner.tick();
+    expect(asked).toEqual(["h-mac", "h-contabo"]);
+    expect(selectAllUsageEvents(tmpHome).map((r) => r.worktree_id)).toEqual(["band-main@h-mac"]);
+
+    contaboOnline = true;
+    await scanner.tick();
+    await scanner.tick();
+    const rows = selectAllUsageEvents(tmpHome);
+    expect(rows.map((r) => [r.worktree_id, r.input_tokens])).toEqual([
+      ["band-main@h-mac", 100],
+      ["band-main@h-contabo", 200],
+    ]);
+  });
+
   it("splits turns crossing the hour boundary into separate rows", async () => {
     // One turn in hour A, one in hour B — two rows. Cross-midnight
     // sessions are correct by the same logic.

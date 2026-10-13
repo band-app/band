@@ -149,18 +149,19 @@ export interface UsageScannerDeps {
     worktreeId: string;
     repo: string;
     worktreePath: string;
+    /** Host the worktree lives on; absent means the hub's own host. */
+    hostId?: string;
   }>;
   /** Override for tests — defaults to enumerating settings.codingAgents.
    *  `command` is the definition's configured binary, if any. */
   listAgents?: () => Array<{ agentId: string; agentType: string; command?: string }>;
   /** Override for tests — defaults to the local host's
-   *  `agentEnv.usageReader`. Returns `undefined` for agents with no
+   *  `agentEnv.usageReader` of the worktree's host. Returns `undefined` for agents with no
    *  on-disk usage data. */
-  getUsageReader?: (agent: {
-    agentId: string;
-    agentType: string;
-    command?: string;
-  }) => UsageReader | undefined | Promise<UsageReader | undefined>;
+  getUsageReader?: (
+    agent: { agentId: string; agentType: string; command?: string },
+    hostId?: string,
+  ) => UsageReader | undefined | Promise<UsageReader | undefined>;
   /** Wall-clock — overridable for tests. */
   now?: () => number;
   /** Per-(worktree, agent) cap on sessions processed each tick.
@@ -358,12 +359,12 @@ export class UsageScannerService {
    * `lastModified > watermark` and will be processed then.
    */
   private async scanPair(
-    ws: { worktreeId: string; repo: string; worktreePath: string },
+    ws: { worktreeId: string; repo: string; worktreePath: string; hostId?: string },
     a: { agentId: string; agentType: string; command?: string },
   ): Promise<number> {
     let reader: UsageReader | undefined;
     try {
-      reader = await this.getUsageReader(a);
+      reader = await this.getUsageReader(a, ws.hostId);
     } catch (err) {
       // Broken config — log debug and bail; next tick will retry. We
       // don't punish all worktrees for one bad agent.
@@ -409,6 +410,9 @@ export class UsageScannerService {
           { err, sessionId: s.sessionId, agentType: a.agentType },
           "getSessionUsage failed",
         );
+        // A host that went offline mid-scan must not move the watermark
+        // past sessions it never read: stop here and retry next tick.
+        if (err instanceof Error && err.name === "HostOfflineError") break;
         // Still count the session as "processed" for watermark purposes —
         // a permanently broken session shouldn't block the watermark
         // forever. Next tick will retry only if the file is re-modified.
@@ -488,13 +492,15 @@ export class UsageScannerService {
  *  this module doesn't depend on the services tier. */
 function defaultListWorktrees(): ReturnType<NonNullable<UsageScannerDeps["listWorktrees"]>> {
   const repos = new RepoQueries().loadAll();
-  const out: Array<{ worktreeId: string; repo: string; worktreePath: string }> = [];
+  const out: Array<{ worktreeId: string; repo: string; worktreePath: string; hostId?: string }> =
+    [];
   for (const repo of repos) {
     for (const worktree of repo.worktrees) {
       out.push({
         worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
         repo: repo.name,
         worktreePath: worktree.path,
+        hostId: worktree.hostId,
       });
     }
   }
@@ -514,13 +520,15 @@ function defaultListAgents(): ReturnType<NonNullable<UsageScannerDeps["listAgent
   }));
 }
 
-/** Default reader lookup, through the local host's agent environment. */
-function defaultGetUsageReader(agent: {
-  agentId: string;
-  agentType: string;
-  command?: string;
-}): Promise<UsageReader | undefined> {
-  return hostRegistry.local.agentEnv.usageReader(agent);
+/** Default reader lookup, through the agent environment of the worktree's
+ *  host. A worker scans its own transcripts; an offline worker throws, which
+ *  `scanPair` treats as "retry next tick" with the watermark untouched. */
+function defaultGetUsageReader(
+  agent: { agentId: string; agentType: string; command?: string },
+  hostId?: string,
+): Promise<UsageReader | undefined> {
+  const host = hostId ? hostRegistry.hostById(hostId) : hostRegistry.local;
+  return host.agentEnv.usageReader(agent);
 }
 
 /**
