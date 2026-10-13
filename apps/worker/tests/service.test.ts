@@ -78,6 +78,10 @@ describe("render", () => {
     );
     assert.ok(plist.includes("<string>a&amp;b</string>"));
     assert.ok(plist.includes("<key>KeepAlive</key>\n  <true/>"));
+    // launchd cannot rotate its output file, so the worker writes and rotates /x/worker.log itself.
+    assert.ok(plist.includes("<key>BAND_LOG_FILE</key>\n    <string>/x/worker.log</string>"));
+    assert.ok(plist.includes("<key>StandardOutPath</key>\n  <string>/dev/null</string>"));
+    assert.ok(plist.includes("<key>StandardErrorPath</key>\n  <string>/dev/null</string>"));
   });
 });
 
