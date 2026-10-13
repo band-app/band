@@ -603,10 +603,15 @@
 .dockview-theme-band.dockview-center-desktop {
   --dv-tabs-and-actions-container-height: 38px;
 }
-.band-worktree-entry:not([inert])
-  .dockview-center-desktop
+/* Only the strip's empty space (dockview's void container) drags, not the
+ * whole strip. A drag box under the tab viewport relied on the `no-drag` cut
+ * below being current for every wheel and trackpad event, and Electron
+ * hit-tests those against the region map before the page sees them. With no
+ * drag box under the tabs, scrolling them never depends on that map. */
+.band-worktree-entry:not([inert]) .dockview-center-desktop
   [data-band-top-row]
-  > .dv-tabs-and-actions-container {
+  > .dv-tabs-and-actions-container
+  > .dv-void-container {
   -webkit-app-region: drag;
 }
 /* The tab viewport (the strip's scroll box, so only the tabs' visible part:

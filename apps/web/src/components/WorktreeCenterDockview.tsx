@@ -144,6 +144,13 @@ import {
   newTerminalId,
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
+import {
+  initialIndex,
+  orderByRecency,
+  recordActivation,
+  stepIndex,
+  type TabMru,
+} from "../lib/tab-mru";
 import { disposeTerminal, hasTerminal } from "../lib/terminal-cache";
 import {
   clearLeafOwners,
@@ -179,6 +186,7 @@ import { setPerWorktreeState } from "./per-worktree-state-store";
 // callbacks (call time, never module eval), so the live binding is always
 // populated by then — same pattern the legacy containers use.
 import { crossPanelHandlers } from "./SharedDockviewLayout";
+import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 
 // ---------------------------------------------------------------------------
@@ -3275,6 +3283,11 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   const adapter = useAdapter();
   const apiRef = useRef<DockviewApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Ctrl+Tab switcher: per-group recency order, and the open list (if any).
+  // `switcherRef` is what the key handlers read; `switcher` only drives render.
+  const tabMruRef = useRef<TabMru>(new Map());
+  const switcherRef = useRef<{ items: SwitcherItem[]; index: number } | null>(null);
+  const [switcher, setSwitcher] = useState<{ items: SwitcherItem[]; index: number } | null>(null);
   const isRestoringRef = useRef(false);
   // True while writeLayout runs. dockview's serialize() exits + re-adds the
   // maximized view, firing onDidMaximizedGroupChange mid-write — this flag stops
@@ -4139,7 +4152,10 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         flushPersist();
       });
       api.onDidAddGroup(() => flushPersist());
-      api.onDidRemoveGroup(() => flushPersist());
+      api.onDidRemoveGroup((group) => {
+        tabMruRef.current.delete(group.id);
+        flushPersist();
+      });
       // Maximize/restore isn't an onDidLayoutChange, so persist it explicitly
       // (immediately) — a maximized editor must survive a reload (#490).
       api.onDidMaximizedGroupChange(() => {
@@ -4148,7 +4164,13 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         if (isPersistingRef.current) return;
         flushPersist();
       });
+      const recordActive = () => {
+        const panel = api.activePanel;
+        if (panel) recordActivation(tabMruRef.current, panel.group.id, panel.id);
+      };
+      recordActive();
       api.onDidActivePanelChange(() => {
+        recordActive();
         if (!applyingSharedRef.current && !isRestoringRef.current) {
           pendingSharedOrderRef.current = false;
         }
@@ -4410,6 +4432,25 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     // ⌘[ / ⌘] it is still in the previous group's (visible) leaf, which the
     // active-panel listener in `onReady` leaves alone.
     const refocus = () => focusLeafOnDevice(true);
+    const updateSwitcher = (next: { items: SwitcherItem[]; index: number } | null) => {
+      switcherRef.current = next;
+      setSwitcher(next);
+    };
+    // Releasing Ctrl opens the highlighted tab. Losing the window (Alt+Tab
+    // away) closes the list without switching, since the keyup never arrives.
+    const onKeyUp = (e: KeyboardEvent) => {
+      const open = switcherRef.current;
+      if (!open || e.key !== "Control") return;
+      updateSwitcher(null);
+      const target = open.items[open.index];
+      const panel = target && apiRef.current?.getPanel(target.id);
+      if (!panel) return;
+      panel.api.setActive();
+      refocus();
+    };
+    const onBlur = () => {
+      if (switcherRef.current) updateSwitcher(null);
+    };
     const handler = (e: KeyboardEvent) => {
       const api = apiRef.current;
       if (!api) return;
@@ -4419,10 +4460,48 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       // Ctrl+Tab also works with focus on <body>: a leaf that lost focus (its
       // content unmounted, a dialog closed onto nothing) mustn't strand it.
       if (e.ctrlKey && !e.metaKey && !e.altKey && key === "tab") {
-        if (!containerRef.current?.contains(active) && active && active !== document.body) return;
+        if (
+          !switcherRef.current &&
+          !containerRef.current?.contains(active) &&
+          active &&
+          active !== document.body
+        ) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, refocus);
+        const open = switcherRef.current;
+        if (open) {
+          updateSwitcher({
+            items: open.items,
+            index: stepIndex(open.index, open.items.length, e.shiftKey),
+          });
+          return;
+        }
+        const group = api.activeGroup;
+        if (!group) return;
+        const byId = new Map(group.panels.map((p) => [p.id, p]));
+        const ids = orderByRecency(
+          tabMruRef.current,
+          group.id,
+          group.panels.map((p) => p.id),
+          group.activePanel?.id,
+        );
+        // One tab: nothing to switch to, so no list.
+        if (ids.length <= 1) return;
+        const items = ids.map((id) => ({
+          id,
+          title: byId.get(id)?.title ?? id,
+          kind: byId.get(id)?.api.component ?? "",
+        }));
+        updateSwitcher({ items, index: initialIndex(items.length, e.shiftKey) });
+        return;
+      }
+
+      if (switcherRef.current && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        updateSwitcher(null);
         return;
       }
 
@@ -4481,7 +4560,14 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       }
     };
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+      updateSwitcher(null);
+    };
   }, [visible, handleClose, handleSplit, focusLeafOnDevice]);
 
   // Focus the active leaf when the worktree becomes visible.
@@ -4598,6 +4684,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
+
+      {switcher && <TabSwitcher items={switcher.items} index={switcher.index} />}
 
       {/* Empty state: shown when every leaf is closed. Offers the same
           "New …" actions as the header "+" menu, centered in the vacant area,

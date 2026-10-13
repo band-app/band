@@ -4,10 +4,27 @@ import type {
   ChecksReport,
   ChecksState,
   MergeState,
+  ReviewComment,
+  ReviewConversationItem,
   ReviewDecision,
+  ReviewDiscussion,
+  Reviewer,
+  ReviewerState,
   ReviewInfo,
   ReviewState,
+  ReviewThread,
 } from "@band-app/plugin-api";
+
+// What one query fetches of the discussion. Past a cap the newest messages
+// win for comments and reviews, and the first ones for threads; the
+// discussion carries `truncated` so the panel can say so.
+export const MAX_COMMENTS = 50;
+export const MAX_REVIEWS = 50;
+export const MAX_THREADS = 50;
+export const MAX_THREAD_COMMENTS = 20;
+export const MAX_REVIEW_REQUESTS = 30;
+
+const ACTOR = "login avatarUrl";
 
 const CHECK_RUN_FIELDS = `
   databaseId
@@ -40,6 +57,41 @@ export const REVIEW_QUERY = `query($owner: String!, $name: String!, $branch: Str
         updatedAt
         mergeStateStatus
         reviewDecision
+        reviewRequests(first: ${MAX_REVIEW_REQUESTS}) {
+          nodes {
+            asCodeOwner
+            requestedReviewer {
+              __typename
+              ... on User { ${ACTOR} }
+              ... on Bot { ${ACTOR} }
+              ... on Mannequin { ${ACTOR} }
+              ... on Team { slug }
+            }
+          }
+        }
+        reviews(last: ${MAX_REVIEWS}) {
+          totalCount
+          nodes { id state body submittedAt url author { ${ACTOR} } }
+        }
+        comments(last: ${MAX_COMMENTS}) {
+          totalCount
+          nodes { id body createdAt url author { ${ACTOR} } }
+        }
+        reviewThreads(first: ${MAX_THREADS}) {
+          totalCount
+          nodes {
+            id
+            isResolved
+            isOutdated
+            path
+            line
+            originalLine
+            comments(first: ${MAX_THREAD_COMMENTS}) {
+              totalCount
+              nodes { id body createdAt url author { ${ACTOR} } }
+            }
+          }
+        }
         commits(last: 1) {
           nodes {
             commit {
@@ -102,6 +154,36 @@ interface StatusContextNode {
   createdAt: string | null;
 }
 
+interface ActorNode {
+  login: string;
+  avatarUrl: string | null;
+}
+
+interface CommentNode {
+  id: string;
+  body: string;
+  createdAt: string;
+  url: string | null;
+  author: ActorNode | null;
+}
+
+interface ReviewNode {
+  id: string;
+  state: string;
+  body: string;
+  submittedAt: string | null;
+  url: string | null;
+  author: ActorNode | null;
+}
+
+interface ReviewRequestNode {
+  asCodeOwner: boolean;
+  requestedReviewer:
+    | ({ __typename: "User" | "Bot" | "Mannequin" } & ActorNode)
+    | { __typename: "Team"; slug: string }
+    | null;
+}
+
 interface PullRequestNode {
   number: number;
   title: string;
@@ -112,6 +194,21 @@ interface PullRequestNode {
   updatedAt: string;
   mergeStateStatus: string | null;
   reviewDecision: string | null;
+  reviewRequests?: { nodes: ReviewRequestNode[] };
+  reviews?: { totalCount: number; nodes: ReviewNode[] };
+  comments?: { totalCount: number; nodes: CommentNode[] };
+  reviewThreads?: {
+    totalCount: number;
+    nodes: Array<{
+      id: string;
+      isResolved: boolean;
+      isOutdated: boolean;
+      path: string;
+      line: number | null;
+      originalLine: number | null;
+      comments: { totalCount: number; nodes: CommentNode[] };
+    }>;
+  };
   commits: {
     nodes: Array<{
       commit: {
@@ -176,7 +273,118 @@ export function parseReview(
     reviewDecision: reviewDecision(pr.reviewDecision),
     mergeState: mergeState(pr.mergeStateStatus),
     checks: report(head?.oid ?? null, checks),
+    reviewers: parseReviewers(pr),
+    discussion: parseDiscussion(pr),
   };
+}
+
+const REVIEWER_STATES: Record<string, ReviewerState> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes_requested",
+  COMMENTED: "commented",
+  DISMISSED: "dismissed",
+};
+
+const actorOf = (author: ActorNode | null): { login: string; avatarUrl: string | null } => ({
+  login: author?.login ?? "ghost",
+  avatarUrl: webUrl(author?.avatarUrl ?? null),
+});
+
+/**
+ * Everyone asked to review plus everyone who reviewed. A reviewer's state is
+ * their latest verdict (approved, changes requested or dismissed); a comment
+ * review only counts when they gave no verdict, as GitHub's own list does.
+ * Someone asked again after reviewing shows as pending. Built from the last
+ * MAX_REVIEWS reviews.
+ */
+function parseReviewers(pr: PullRequestNode): Reviewer[] {
+  const byLogin = new Map<string, Reviewer>();
+  const order = [...(pr.reviews?.nodes ?? [])].sort((a, b) =>
+    (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""),
+  );
+  for (const review of order) {
+    const state = REVIEWER_STATES[review.state];
+    if (!state || !review.author) continue; // PENDING drafts are the viewer's own
+    const existing = byLogin.get(review.author.login);
+    if (existing && state === "commented" && existing.state !== "commented") continue;
+    byLogin.set(review.author.login, {
+      ...actorOf(review.author),
+      state,
+      submittedAt: review.submittedAt,
+    });
+  }
+  for (const request of pr.reviewRequests?.nodes ?? []) {
+    const who = request.requestedReviewer;
+    if (!who) continue;
+    const actor =
+      who.__typename === "Team"
+        ? { login: who.slug, avatarUrl: null }
+        : actorOf({ login: who.login, avatarUrl: who.avatarUrl });
+    // A team slug can equal a user's login, so teams get their own key.
+    const key = who.__typename === "Team" ? `team:${actor.login}` : actor.login;
+    const previous = byLogin.get(key);
+    byLogin.set(key, {
+      ...actor,
+      state: "pending",
+      submittedAt: previous?.submittedAt ?? null,
+      ...(request.asCodeOwner ? { required: true } : {}),
+    });
+  }
+  return [...byLogin.values()];
+}
+
+function fromCommentNode(node: CommentNode): ReviewComment {
+  return {
+    id: node.id,
+    author: actorOf(node.author),
+    body: node.body,
+    createdAt: node.createdAt,
+    url: webUrl(node.url),
+  };
+}
+
+/** Conversation comments, review summaries with a body, and inline threads. */
+function parseDiscussion(pr: PullRequestNode): ReviewDiscussion {
+  const items: ReviewConversationItem[] = [];
+  for (const node of pr.comments?.nodes ?? []) {
+    items.push({ ...fromCommentNode(node), kind: "comment" });
+  }
+  for (const review of pr.reviews?.nodes ?? []) {
+    const state = REVIEWER_STATES[review.state];
+    if (!state || !review.body.trim() || !review.submittedAt) continue;
+    items.push({
+      id: review.id,
+      kind: "review",
+      reviewState: state,
+      author: actorOf(review.author),
+      body: review.body,
+      createdAt: review.submittedAt,
+      url: webUrl(review.url),
+    });
+  }
+  items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  const threads: ReviewThread[] = [];
+  for (const node of pr.reviewThreads?.nodes ?? []) {
+    const comments = node.comments.nodes.map(fromCommentNode);
+    if (comments.length === 0) continue;
+    threads.push({
+      id: node.id,
+      path: node.path,
+      line: node.line ?? node.originalLine,
+      isResolved: node.isResolved,
+      isOutdated: node.isOutdated,
+      comments,
+      ...(node.comments.totalCount > comments.length ? { truncated: true } : {}),
+    });
+  }
+  threads.sort((a, b) => a.comments[0].createdAt.localeCompare(b.comments[0].createdAt));
+
+  const truncated =
+    (pr.comments?.totalCount ?? 0) > (pr.comments?.nodes.length ?? 0) ||
+    (pr.reviews?.totalCount ?? 0) > (pr.reviews?.nodes.length ?? 0) ||
+    (pr.reviewThreads?.totalCount ?? 0) > (pr.reviewThreads?.nodes.length ?? 0);
+  return { items, threads, ...(truncated ? { truncated: true } : {}) };
 }
 
 /**
