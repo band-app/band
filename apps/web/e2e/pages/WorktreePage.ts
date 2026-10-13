@@ -2589,6 +2589,45 @@ export class WorktreePage {
     return this.page.getByTestId("right-sidepanel__header");
   }
 
+  /** The sidepanel's tab strip (`role="tablist"` in its header). */
+  get rightPanelTabList(): Locator {
+    return this.rightPanelHeader.getByRole("tablist");
+  }
+
+  /** Every tab button in the sidepanel's strip. */
+  get rightPanelTabs(): Locator {
+    return this.rightPanelTabList.getByRole("tab");
+  }
+
+  /** Drag the separator left of the sidepanel until the panel is `width` px wide. */
+  async resizeRightPanelTo(width: number): Promise<void> {
+    await test.step(`Resize the right sidepanel to ${width}px`, async () => {
+      const separator = this.page.getByRole("separator").last();
+      const handle = await this.boxOf(separator);
+      const panel = await this.boxOf(this.rightSidepanel);
+      const y = handle.y + handle.height / 2;
+      const x = handle.x + handle.width / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + (panel.width - width), y, { steps: 10 });
+      await this.page.mouse.up();
+      await expect
+        .poll(async () => Math.round((await this.boxOf(this.rightSidepanel)).width))
+        .toBeGreaterThan(width - 20);
+    });
+  }
+
+  /** True when no tab sticks out of the strip's box. */
+  async rightPanelTabsFitStrip(): Promise<boolean> {
+    return this.rightPanelTabList.evaluate((strip) => {
+      const bounds = strip.getBoundingClientRect();
+      return Array.from(strip.querySelectorAll('[role="tab"]')).every((tab) => {
+        const box = tab.getBoundingClientRect();
+        return box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5;
+      });
+    });
+  }
+
   /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
   get rightPanelToggleInHeader(): Locator {
     return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
