@@ -3675,8 +3675,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
         // A tab pinned from its own strip (double-click, edit) only flips its
-        // param, so trust the live param over the id ref.
-        if (prev?.api.getParameters<{ preview?: boolean }>().preview) {
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
@@ -3737,8 +3737,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
         // A tab pinned from its own strip (double-click, edit) only flips its
-        // param, so trust the live param over the id ref.
-        if (prev?.api.getParameters<{ preview?: boolean }>().preview) {
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
