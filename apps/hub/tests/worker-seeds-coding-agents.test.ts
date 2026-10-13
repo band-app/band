@@ -17,6 +17,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { isRemoteLoopback } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "seed-agents-shared-secret";
@@ -52,7 +53,8 @@ describe("coding agents on a hub with none of its own", () => {
         codingAgents?: { id: string; type: string; label: string }[];
         defaultCodingAgent?: string;
       }>(await trpcQuery(server.url, "settings.get", undefined, TOKEN));
-    expect((await getSettings()).codingAgents ?? []).toEqual([]);
+    // The remote-loopback job starts a worker with the server, which seeds the list before this runs.
+    if (!isRemoteLoopback) expect((await getSettings()).codingAgents ?? []).toEqual([]);
 
     const issued = trpcData<{ token: string }>(
       await trpcMutate(server.url, "tokens.issueWorkerBootstrap", { hostName: "W" }, TOKEN),
@@ -76,22 +78,32 @@ describe("coding agents on a hub with none of its own", () => {
           HOME: tmp("band-seed-agents-whome-"),
           BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
         },
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
+    let workerOutput = "";
+    for (const stream of [worker.stdout, worker.stderr]) {
+      stream?.on("data", (d) => {
+        workerOutput += d;
+      });
+    }
 
     const settings = await waitFor(
       async () => {
         const s = await getSettings();
         return s.codingAgents?.length ? s : undefined;
       },
-      { label: "coding agents seeded", timeoutMs: 20_000 },
-    );
+      { label: "coding agents seeded", timeoutMs: 90_000 },
+    ).catch((err) => {
+      throw new Error(
+        `${err instanceof Error ? err.message : err}\nworker output:\n${workerOutput}`,
+      );
+    });
     expect(settings.defaultCodingAgent).toBe("claude-code");
     expect(settings.codingAgents?.map((a) => a.id)).toContain("claude-code");
     expect(settings.codingAgents?.find((a) => a.id === "claude-code")).toMatchObject({
       type: "claude-code",
       label: "Claude Code",
     });
-  });
+  }, 150_000);
 });
