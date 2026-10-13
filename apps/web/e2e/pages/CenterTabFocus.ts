@@ -1,4 +1,4 @@
-import { type Page, test } from "@playwright/test";
+import { type Locator, type Page, test } from "@playwright/test";
 
 /** What holds keyboard focus in the center dockview, by the kind of surface. */
 export type FocusedSurface =
@@ -26,6 +26,50 @@ export class CenterTabFocus {
     await test.step("Press Ctrl+Tab", async () => {
       await this.page.keyboard.press("Control+Tab");
     });
+  }
+
+  /** The Ctrl+Tab list. */
+  switcher(): Locator {
+    return this.page.getByTestId("tab-switcher");
+  }
+
+  switcherItems(): Locator {
+    return this.page.getByTestId("tab-switcher__item");
+  }
+
+  /** Titles in the open list, top to bottom. */
+  async switcherTitles(): Promise<string[]> {
+    return (await this.switcherItems().allInnerTexts()).map((t) => t.trim());
+  }
+
+  /** Hold Ctrl and press Tab (or Shift+Tab) once, leaving Ctrl down. */
+  async openSwitcher(opts: { shift?: boolean } = {}): Promise<void> {
+    await test.step("Hold Ctrl and press Tab", async () => {
+      await this.page.keyboard.down("Control");
+      await this.page.keyboard.press(opts.shift ? "Shift+Tab" : "Tab");
+    });
+  }
+
+  /** Another Tab (or Shift+Tab) while Ctrl is held. */
+  async pressTabWhileHeld(opts: { shift?: boolean } = {}): Promise<void> {
+    await this.page.keyboard.press(opts.shift ? "Shift+Tab" : "Tab");
+  }
+
+  async pressEscapeWhileHeld(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+  }
+
+  async releaseControl(): Promise<void> {
+    await test.step("Release Ctrl", async () => {
+      await this.page.keyboard.up("Control");
+    });
+  }
+
+  /** Hold Ctrl, press Tab `presses` times, release: opens the nth most recent tab. */
+  async switchToRecent(presses: number): Promise<void> {
+    await this.openSwitcher();
+    for (let i = 1; i < presses; i++) await this.pressTabWhileHeld();
+    await this.releaseControl();
   }
 
   /** ⌘] / ⌘[ (Ctrl+] / Ctrl+[ off macOS): the next or previous group. */

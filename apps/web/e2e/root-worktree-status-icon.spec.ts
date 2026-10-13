@@ -3,7 +3,7 @@
  *
  * The default-branch ("root") worktree card shows a house icon as its
  * identity marker. When its agent has a live status ("working" /
- * "needs_attention") the status dot must REPLACE the house — occupying the
+ * "done" ...) the status dot must REPLACE the house — occupying the
  * same slot — exactly the way the branch glyph is replaced on every other
  * worktree card. The regression this guards against: the root card showed
  * the status dot AND the house side by side, instead of swapping.

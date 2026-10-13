@@ -171,7 +171,20 @@ test.describe("More models submenu on a phone", () => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     await chatPane.goto(toWorktreeId("submenumobile", "main", "local"));
     await chatPane.waitForReady();
-    await expectEveryModelReachable(chatPane, viewport);
+    await chatPane.typeMessage("first");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage(`Heard "first" on ${MODELS[0].value}.`)).toBeVisible();
+
+    // On a phone the submenu drills into the menu itself, so the one menu box
+    // is the thing that must fit and scroll.
+    await chatPane.openModelMenu();
+    await chatPane.openMoreModels();
+    await expectInsideViewport(chatPane.modelMenuContent, viewport);
+    const last = chatPane.moreModelsOption(LAST_MODEL);
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport({ ratio: 1 });
+    await chatPane.clickMoreModel(LAST_MODEL);
+    await expect(chatPane.modelMenuButton).toContainText(LAST_MODEL);
   });
 });
 

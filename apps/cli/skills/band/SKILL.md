@@ -86,6 +86,8 @@ band repos remove <name>
 
 Removes the repo from Band's registry (does not delete the repository).
 
+An agent running on a worker may use `repos add`, `repos set` and `repos remove` like a person. The only refusal is a repo limited to hosts that do not include the agent's own host (`band repos set <name> --hosts ...`), and adding a repo limited to hosts that exclude the host its folder is on.
+
 ### List worktrees, optionally filtered by repo
 
 ```sh
@@ -156,6 +158,14 @@ band repos set <repo> --auto-continue on|off
 
 When the host of a worktree is offline, the hub can continue the work on another host the repo may run on, from its latest checkpoint: the branch, uncommitted and untracked files, the agent sessions and the chats. The repo's setup runs on the new copy. `continue` does it on request (the hub picks the target unless `--to` names one). A chat message, a new terminal or an agent launch for such a worktree is refused with the same offer, unless the repo has `--auto-continue on` and the checkpoint is younger than 30 minutes (`BAND_AUTO_CONTINUE_MAX_AGE_MS`), in which case it continues by itself. Reading the worktree (changes, files, chat history) never triggers it. The command fails with a reason when the host is online (use `move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is missing on every other host. The old copy is never deleted: it is listed as superseded, and when its host returns the UI flags it diverged if it holds changes the checkpoint lacks. Ignored files and running processes are not carried over.
 
+### Set or remove a worktree's parent
+
+```sh
+band worktrees set-origin <repo> <name> [--host <host>] (--origin <worktree id> | --none)
+```
+
+The parent is the worktree this one was started from. The sidebar shows it in Group by: Origin. `--origin` sets a parent by hand (no chat or terminal is recorded), `--none` removes it. The hub refuses the worktree itself and any of its descendants as the parent, and an unknown worktree id.
+
 ### Remove a worktree (git worktree + state cleanup)
 
 ```sh
@@ -207,6 +217,15 @@ band settings
 ```
 
 Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON.
+
+### Show versions
+
+```sh
+band --version
+band version
+```
+
+`band --version` prints the CLI version and needs no hub. `band version` prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. With `--output json` it prints `{"cli": "...", "hub": "..." | null}`.
 
 ### Show tunnel status
 

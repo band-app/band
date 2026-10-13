@@ -1,5 +1,5 @@
 /**
- * The sidebar's Group by switch (Repo | Origin | Host) and the "Started from" link (plan step O.3).
+ * The sidebar's Group by switch (Repo | Origin | Host) and the manual Set parent / Remove parent items.
  *
  * Real production binary and a real `band-worker`. Origins are recorded the way an agent records
  * them: `worktrees.create` called with the caller's worktree and chat headers. Everything runs in
@@ -317,23 +317,66 @@ test("keyboard navigation steps through the rows of the Origin view", async ({ p
   await expect(page).toHaveURL(/\/worktree\/svc-alpha/);
 });
 
-test("the Started from link opens the origin chat (S4)", async ({ page }) => {
-  // Visit the origin first so its dockview lists the chat as a tab.
-  const sidebar = await open(page, "svc-alpha");
-  await expect(sidebar.centerChatTab(ORIGIN_CHAT)).toBeVisible();
-  await sidebar.waitForSavedTabs("svc-alpha", ORIGIN_CHAT);
-
-  await sidebar.repoModeCard("lib-gamma").click();
-  await expect(page).toHaveURL(/\/worktree\/lib-gamma/);
-  await expect(sidebar.startedFromLink).toHaveAttribute("data-origin-worktree", "svc-alpha");
-  await sidebar.startedFromLink.click();
-  await expect(page).toHaveURL(/\/worktree\/svc-alpha/);
-  await expect(sidebar.visibleChatComposer).toBeVisible();
-
-  // Top-level work has no link.
-  await sidebar.repoModeCard("borko-main").click();
-  await expect(page).toHaveURL(/\/worktree\/borko-main/);
+test("a worktree started from another shows no Started from bar (S1)", async ({ page }) => {
+  const sidebar = await open(page, "lib-gamma");
+  await sidebar.selectMode("origin");
+  await expect(sidebar.row("lib-gamma")).toHaveAttribute("data-depth", "2");
   await expect(sidebar.startedFrom).toHaveCount(0);
+});
+
+test("Set parent nests a worktree under the chosen one, and Remove parent undoes it (S3, S4)", async ({
+  page,
+}) => {
+  const sidebar = await open(page, "borko-main");
+  await sidebar.selectMode("origin");
+  // A second tab on the same hub follows without a reload.
+  const other = await page.context().newPage();
+  const otherSidebar = await open(other, "borko-main");
+  await otherSidebar.selectMode("origin");
+  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
+
+  // svc-solo has no parent: the menu offers Set parent only.
+  await sidebar.openMenu(sidebar.row("svc-solo"));
+  await expect(sidebar.removeParentItem).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await sidebar.openSetParent(sidebar.row("svc-solo"));
+  await sidebar.chooseParent("gamma", "lib-gamma");
+  await expect(sidebar.row("svc-solo")).toHaveAttribute("data-depth", "3");
+  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "3");
+
+  await sidebar.removeParent(sidebar.row("svc-solo"));
+  await expect(sidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
+  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
+  await other.close();
+});
+
+test("Set parent does not offer the worktree or its descendants, and the hub refuses them (S5)", async ({
+  page,
+}) => {
+  const sidebar = await open(page, "borko-main");
+  await sidebar.selectMode("origin");
+  // svc-alpha is the parent of lib-gamma.
+  await sidebar.openSetParent(sidebar.row("svc-alpha"));
+  await expect(sidebar.setParentItem("svc-alpha")).toHaveCount(0);
+  await expect(sidebar.setParentItem("lib-gamma")).toHaveCount(0);
+  await expect(sidebar.setParentItem("svc-beta")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(
+    trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
+      repo: "svc",
+      name: "alpha",
+      origin: "lib-gamma",
+    }),
+  ).rejects.toThrow(/descendant/);
+  await expect(
+    trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
+      repo: "svc",
+      name: "alpha",
+      origin: "svc-alpha",
+    }),
+  ).rejects.toThrow(/own parent/);
 });
 
 test("a worktree whose parent was deleted shows under its repo's main with a hint (S4)", async ({
@@ -346,7 +389,4 @@ test("a worktree whose parent was deleted shows under its repo's main with a hin
   await expect(sidebar.row("lib-orphan")).toHaveAttribute("data-depth", "1");
   await expect(sidebar.rowOrder()).resolves.toContainEqual({ id: "lib-main", depth: 0 });
   await expect(sidebar.parentRemovedHint("lib-orphan")).toBeVisible();
-
-  await sidebar.row("lib-orphan").click();
-  await expect(sidebar.startedFrom).toHaveAttribute("data-removed", "true");
 });

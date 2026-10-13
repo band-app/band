@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { branchStatusPoller } from "../../services/branch-status-poller";
 import {
+  acknowledgeWorktreeAttention,
   applyHookNotification,
   getWorktreeStatus,
   MANUAL_STATUS_SOURCE,
   resolveWorktreeIdByCwd,
   setWorktreeSourceStatus,
 } from "../../services/state";
-import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -71,14 +71,16 @@ export const statusesRouter = t.router({
   clearNeedsAttention: publicProcedure
     .input(z.object({ worktreeId: z.string() }))
     .mutation(({ input }) => {
-      const status = taskService.acknowledgeAttention(input.worktreeId);
+      const status = acknowledgeWorktreeAttention(input.worktreeId);
       if (status) emit({ kind: "update", status });
       return { ok: true };
     }),
 
-  resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
-    return { worktreeId: resolveWorktreeIdByCwd(input.cwd) };
-  }),
+  resolve: publicProcedure
+    .input(z.object({ cwd: z.string(), hostId: z.string().optional() }))
+    .query(({ input }) => {
+      return { worktreeId: resolveWorktreeIdByCwd(input.cwd, input.hostId) };
+    }),
 
   /**
    * Agent-agnostic entry point for coding-agent lifecycle notifications
@@ -101,6 +103,7 @@ export const statusesRouter = t.router({
         agent: z.string().max(64).optional(),
         dispatch: z.string().max(64).optional(),
         terminalId: z.string().max(256).optional(),
+        hostId: z.string().max(256).optional(),
       }),
     )
     .mutation(async ({ input }) => {

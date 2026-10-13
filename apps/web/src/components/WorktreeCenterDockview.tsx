@@ -67,7 +67,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  AGENT_STATE_INFO,
   AgentIcon,
+  AgentStateDot,
   buildLspWsUrl,
   type ChangeEntry,
   type ChangeSection,
@@ -100,6 +102,15 @@ import {
   useWorktreePath,
   type ViewMode,
 } from "@/dashboard";
+import {
+  BROWSER_LOAD_EVENT,
+  type BrowserLoadDetail,
+  HTML_PREVIEW_EVENT,
+  type HtmlPreviewDetail,
+  isHtmlFile,
+  isPreviewUrlFor,
+  previewHtmlInBrowser,
+} from "../dashboard/lib/html-preview";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import {
@@ -132,6 +143,7 @@ import {
   splitDirectionForKey,
 } from "../lib/dockview-section-actions";
 import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
+import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
 import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
@@ -142,6 +154,13 @@ import {
   newTerminalId,
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
+import {
+  initialIndex,
+  orderByRecency,
+  recordActivation,
+  stepIndex,
+  type TabMru,
+} from "../lib/tab-mru";
 import { disposeTerminal, hasTerminal } from "../lib/terminal-cache";
 import {
   clearLeafOwners,
@@ -177,6 +196,7 @@ import { setPerWorktreeState } from "./per-worktree-state-store";
 // callbacks (call time, never module eval), so the live binding is always
 // populated by then — same pattern the legacy containers use.
 import { crossPanelHandlers } from "./SharedDockviewLayout";
+import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 
 // ---------------------------------------------------------------------------
@@ -220,13 +240,16 @@ const TAB_ROOT_CLASS = "dv-default-tab group flex w-full items-center gap-1.5";
 // strip uncluttered while the active tab stays closable at a glance.
 const CLOSE_BTN_BASE =
   "absolute inset-0 inline-flex items-center justify-center rounded-sm transition-opacity hover:bg-accent";
-function closeButtonClass(isActive: boolean): string {
-  return `${CLOSE_BTN_BASE} ${isActive ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`;
+function closeButtonClass(isActive: boolean, hasIndicator: boolean): string {
+  // The active tab keeps its X at rest unless an indicator holds the slot.
+  const atRest = isActive && !hasIndicator;
+  return `${CLOSE_BTN_BASE} ${atRest ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`;
 }
 
-/** The slot at the end of a tab. An inactive tab shows its `indicator` (agent
- *  status, unsaved dot) at rest; the close X takes the same place on hover and
- *  on the active tab, so the tab's width never changes. */
+/** The slot at the end of a tab. A tab shows its `indicator` (agent status,
+ *  unsaved dot) at rest, active or not; the close X takes the same place on
+ *  hover, and at rest on an active tab with no indicator, so the tab's width
+ *  never changes. */
 function TabEndSlot({
   isActive,
   indicator,
@@ -242,14 +265,14 @@ function TabEndSlot({
 }) {
   return (
     <span className="relative ml-0.5 inline-flex size-4 shrink-0 items-center justify-center">
-      {indicator && !isActive ? (
+      {indicator ? (
         <span className="inline-flex items-center justify-center transition-opacity group-hover:opacity-0">
           {indicator}
         </span>
       ) : null}
       <button
         type="button"
-        className={closeButtonClass(isActive)}
+        className={closeButtonClass(isActive, Boolean(indicator))}
         onClick={onClose}
         title={closeTitle}
         data-testid={closeTestId}
@@ -262,28 +285,29 @@ function TabEndSlot({
 
 type TabAgentStatusKind = TabAgentStatus["status"];
 
-/** Spinner while the agent works, a dot when it needs the user. */
+/** Which of several panes' statuses a terminal tab shows: the higher rank. */
+const TAB_STATUS_RANK: Record<TabAgentStatusKind, number> = {
+  question: 5,
+  failed: 4,
+  working: 3,
+  monitoring: 2,
+  done: 1,
+};
+
+/** Spinner while the agent works; the dashboard's dot for every other state. */
 function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
   if (status === "working") {
     return (
       <Loader2
         role="img"
-        aria-label="Agent running"
+        aria-label={AGENT_STATE_INFO.working.label}
         data-testid={testId}
         data-status={status}
         className="size-3 animate-spin text-muted-foreground"
       />
     );
   }
-  return (
-    <span
-      role="img"
-      aria-label="Needs your attention"
-      data-testid={testId}
-      data-status={status}
-      className="size-2 rounded-full bg-status-needs-attention"
-    />
-  );
+  return <AgentStateDot status={status} testId={testId} withTitle />;
 }
 
 /** The agent status of a chat, from the worktree's status snapshot. */
@@ -300,8 +324,7 @@ function useTerminalTabStatus(worktreeId: string, leafId: string): TabAgentStatu
     let found: TabAgentStatusKind | undefined;
     for (const t of s.statuses.get(worktreeId)?.tabStatuses ?? []) {
       if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
-      if (t.status === "needs_attention") return t.status;
-      found = t.status;
+      if (!found || TAB_STATUS_RANK[t.status] > TAB_STATUS_RANK[found]) found = t.status;
     }
     return found;
   });
@@ -1598,6 +1621,19 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
                 </button>
                 {viewMode !== "source" && <MarkdownWidthToggle />}
               </>
+            )}
+            {isDesktop && !external && !untitled && isHtmlFile(filePathRaw) && (
+              <button
+                type="button"
+                onClick={() =>
+                  previewHtmlInBrowser({ worktreeId: worktreeIdRaw, path: filePathRaw })
+                }
+                title="Preview in a browser tab"
+                data-testid="center-file-leaf__html-preview"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Globe className="size-3.5" />
+              </button>
             )}
             {fileActions?.canSave && fileActions.isDirty && (
               <button
@@ -3295,6 +3331,11 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   const adapter = useAdapter();
   const apiRef = useRef<DockviewApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Ctrl+Tab switcher: per-group recency order, and the open list (if any).
+  // `switcherRef` is what the key handlers read; `switcher` only drives render.
+  const tabMruRef = useRef<TabMru>(new Map());
+  const switcherRef = useRef<{ items: SwitcherItem[]; index: number } | null>(null);
+  const [switcher, setSwitcher] = useState<{ items: SwitcherItem[]; index: number } | null>(null);
   const isRestoringRef = useRef(false);
   // True while writeLayout runs. dockview's serialize() exits + re-adds the
   // maximized view, firing onDidMaximizedGroupChange mid-write — this flag stops
@@ -4163,7 +4204,10 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         flushPersist();
       });
       api.onDidAddGroup(() => flushPersist());
-      api.onDidRemoveGroup(() => flushPersist());
+      api.onDidRemoveGroup((group) => {
+        tabMruRef.current.delete(group.id);
+        flushPersist();
+      });
       // Maximize/restore isn't an onDidLayoutChange, so persist it explicitly
       // (immediately) — a maximized editor must survive a reload (#490).
       api.onDidMaximizedGroupChange(() => {
@@ -4172,7 +4216,13 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         if (isPersistingRef.current) return;
         flushPersist();
       });
+      const recordActive = () => {
+        const panel = api.activePanel;
+        if (panel) recordActivation(tabMruRef.current, panel.group.id, panel.id);
+      };
+      recordActive();
       api.onDidActivePanelChange(() => {
+        recordActive();
         if (!applyingSharedRef.current && !isRestoringRef.current) {
           pendingSharedOrderRef.current = false;
         }
@@ -4382,6 +4432,57 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     };
   }, [worktreeId]);
 
+  // The file viewer's HTML Preview button: open the file in a Band browser tab,
+  // or focus and reload the tab that already previews it.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const onPreview = (e: Event) => {
+      const detail = (e as CustomEvent<HtmlPreviewDetail>).detail;
+      if (!detail || detail.worktreeId !== worktreeId) return;
+      void (async () => {
+        const api = apiRef.current;
+        if (!api) return;
+        try {
+          const { url } = await trpc.worktree.previewUrl.query({
+            worktreeId,
+            path: detail.path,
+          });
+          const absolute = new URL(hubUrl(url), window.location.href).toString();
+          // The tab that previews this file is found by its saved URL, so a
+          // second click reuses it after a reload too.
+          const { browsers } = await trpc.browsers.list.query({ worktreeId });
+          const existing = browsers.find(
+            (b) => b.url && isPreviewUrlFor(b.url, worktreeId, detail.path),
+          )?.id;
+          const panel = existing ? api.getPanel(existing) : undefined;
+          if (existing && panel) {
+            panel.api.setActive();
+            await trpc.browsers.navigate.mutate({ browserId: existing, url: absolute });
+            window.dispatchEvent(
+              new CustomEvent<BrowserLoadDetail>(BROWSER_LOAD_EVENT, {
+                detail: { browserId: existing, url: absolute },
+              }),
+            );
+            return;
+          }
+          const id = newBrowserId();
+          markBrowserFresh(id);
+          addBrowserLeaf(api, worktreeId, id, absolute);
+          try {
+            await trpc.browsers.create.mutate({ worktreeId, id, url: absolute });
+          } catch (err) {
+            api.getPanel(id)?.api.close();
+            throw err;
+          }
+        } catch (err) {
+          console.error("[WorktreeCenterDockview] html preview failed:", err);
+        }
+      })();
+    };
+    window.addEventListener(HTML_PREVIEW_EVENT, onPreview);
+    return () => window.removeEventListener(HTML_PREVIEW_EVENT, onPreview);
+  }, [worktreeId]);
+
   // Bring a specific chat/terminal leaf forward when "Add to Chat/Terminal" targets it.
   useEffect(() => {
     const onChatInsert = (e: Event) => {
@@ -4434,6 +4535,25 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     // ⌘[ / ⌘] it is still in the previous group's (visible) leaf, which the
     // active-panel listener in `onReady` leaves alone.
     const refocus = () => focusLeafOnDevice(true);
+    const updateSwitcher = (next: { items: SwitcherItem[]; index: number } | null) => {
+      switcherRef.current = next;
+      setSwitcher(next);
+    };
+    // Releasing Ctrl opens the highlighted tab. Losing the window (Alt+Tab
+    // away) closes the list without switching, since the keyup never arrives.
+    const onKeyUp = (e: KeyboardEvent) => {
+      const open = switcherRef.current;
+      if (!open || e.key !== "Control") return;
+      updateSwitcher(null);
+      const target = open.items[open.index];
+      const panel = target && apiRef.current?.getPanel(target.id);
+      if (!panel) return;
+      panel.api.setActive();
+      refocus();
+    };
+    const onBlur = () => {
+      if (switcherRef.current) updateSwitcher(null);
+    };
     const handler = (e: KeyboardEvent) => {
       const api = apiRef.current;
       if (!api) return;
@@ -4443,10 +4563,48 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       // Ctrl+Tab also works with focus on <body>: a leaf that lost focus (its
       // content unmounted, a dialog closed onto nothing) mustn't strand it.
       if (e.ctrlKey && !e.metaKey && !e.altKey && key === "tab") {
-        if (!containerRef.current?.contains(active) && active && active !== document.body) return;
+        if (
+          !switcherRef.current &&
+          !containerRef.current?.contains(active) &&
+          active &&
+          active !== document.body
+        ) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, refocus);
+        const open = switcherRef.current;
+        if (open) {
+          updateSwitcher({
+            items: open.items,
+            index: stepIndex(open.index, open.items.length, e.shiftKey),
+          });
+          return;
+        }
+        const group = api.activeGroup;
+        if (!group) return;
+        const byId = new Map(group.panels.map((p) => [p.id, p]));
+        const ids = orderByRecency(
+          tabMruRef.current,
+          group.id,
+          group.panels.map((p) => p.id),
+          group.activePanel?.id,
+        );
+        // One tab: nothing to switch to, so no list.
+        if (ids.length <= 1) return;
+        const items = ids.map((id) => ({
+          id,
+          title: byId.get(id)?.title ?? id,
+          kind: byId.get(id)?.api.component ?? "",
+        }));
+        updateSwitcher({ items, index: initialIndex(items.length, e.shiftKey) });
+        return;
+      }
+
+      if (switcherRef.current && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        updateSwitcher(null);
         return;
       }
 
@@ -4505,7 +4663,14 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       }
     };
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+      updateSwitcher(null);
+    };
   }, [visible, handleClose, handleSplit, focusLeafOnDevice]);
 
   // Focus the active leaf when the worktree becomes visible.
@@ -4622,6 +4787,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
+
+      {switcher && <TabSwitcher items={switcher.items} index={switcher.index} />}
 
       {/* Empty state: shown when every leaf is closed. Offers the same
           "New …" actions as the header "+" menu, centered in the vacant area,
