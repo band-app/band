@@ -2213,6 +2213,51 @@ export class WorktreePage {
     });
   }
 
+  /** Open the "+" menu's "New agent" submenu and return the submenu, without picking an agent. */
+  async openNewAgentMenu(worktreeId: string): Promise<Locator> {
+    await test.step("Open the New agent menu", async () => {
+      await this.newTabButton(worktreeId).first().focus();
+      await this.page.keyboard.press("Enter");
+      await this.page
+        .getByTestId("worktree-center__new-tab--agent")
+        .filter({ visible: true })
+        .first()
+        .click();
+    });
+    return this.page.getByTestId("worktree-center__new-agent-menu").filter({ visible: true });
+  }
+
+  /** One agent's item in the open "New agent" submenu. */
+  newAgentItem(agentId: string): Locator {
+    return this.page
+      .getByTestId("worktree-center__new-agent-menu")
+      .filter({ visible: true })
+      .getByTestId(`worktree-center__new-agent--${agentId}`);
+  }
+
+  /** The icon (an image named after the agent) inside a "New agent" item. */
+  newAgentItemIcon(agentId: string, iconName: string): Locator {
+    return this.newAgentItem(agentId).getByRole("img", { name: iconName, exact: true });
+  }
+
+  /** The generic "no agents configured" entry of the "New agent" submenu. */
+  newAgentFallbackItem(): Locator {
+    return this.page
+      .getByTestId("worktree-center__new-agent-menu")
+      .filter({ visible: true })
+      .getByTestId("worktree-center__new-agent");
+  }
+
+  /** The agent icon (an image named after the agent) in the first visible chat tab. */
+  chatTabAgentIcon(agentName: string): Locator {
+    return this.tab("chat").getByRole("img", { name: agentName, exact: true });
+  }
+
+  /** The title text of the first visible chat tab. */
+  chatTabTitle(): Locator {
+    return this.tab("chat").locator("[title]").first();
+  }
+
   /** Save this browser's agent mode, as the Settings page does. */
   async setDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
     await this.page.evaluate(([key, value]) => localStorage.setItem(key, value), [

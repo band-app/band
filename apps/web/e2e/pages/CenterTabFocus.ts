@@ -37,6 +37,26 @@ export class CenterTabFocus {
     return this.page.getByTestId("tab-switcher__item");
   }
 
+  /** The agent status mark of the list row whose item id (the panel id) is `itemId`. */
+  switcherStatus(itemId: string): Locator {
+    return this.page.getByTestId(`tab-switcher__status--${itemId}`);
+  }
+
+  /** The list row whose title contains `title`. */
+  switcherRow(title: string): Locator {
+    return this.switcherItems().filter({ hasText: title });
+  }
+
+  /** The agent icon (an image named after the agent) inside a list row. */
+  rowAgentIcon(row: Locator, agentName: string): Locator {
+    return row.getByRole("img", { name: agentName, exact: true });
+  }
+
+  /** The agent status mark inside a list row. */
+  rowStatus(row: Locator): Locator {
+    return row.getByTestId(/^tab-switcher__status--/);
+  }
+
   /** Titles in the open list, top to bottom. */
   async switcherTitles(): Promise<string[]> {
     return (await this.switcherItems().allInnerTexts()).map((t) => t.trim());
