@@ -15,10 +15,19 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
-import { fillWorktrees, seedHub, startTurn, STREAM_LINES, stopTurn } from "./seed.mjs";
+import {
+  fillWorktrees,
+  receivedPrompts,
+  seedHub,
+  sessionState,
+  startTurn,
+  STREAM_LINES,
+  stopTurn,
+} from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 import { buildRows, copyText } from "../src/lib/chat/rows.ts";
+import { sessionPickers } from "@band-app/client/session-pickers";
 import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
 
 const args = process.argv.slice(2);
@@ -169,7 +178,30 @@ function startControlServer(hub, chats, udid, notes) {
           throw new Error(`the longest JS frame gap was ${value}, over ${limit} ms`);
         }
       }
-      else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
+      else if (url.pathname === "/expect-prompt" || url.pathname === "/expect-no-prompt") {
+        // The agent received (or never received) a prompt holding `value`. `image=1` also needs an image part.
+        const want = url.searchParams.get("value") ?? "";
+        const prompts = receivedPrompts(hub).filter((p) => p.text.includes(want));
+        const image = url.searchParams.get("image") === "1";
+        if (url.pathname === "/expect-no-prompt") {
+          if (prompts.length > 0) throw new Error(`the agent received a prompt holding ${JSON.stringify(want)}`);
+        } else {
+          const hit = prompts.find((p) => !image || p.types.includes("image"));
+          if (!hit) throw new Error(`no prompt holding ${JSON.stringify(want)}${image ? " with an image part" : ""}; got ${JSON.stringify(receivedPrompts(hub))}`);
+          notes.push(`agent received ${JSON.stringify(want)}: part types ${hit.types.join(", ")}`);
+        }
+      } else if (url.pathname === "/expect-model") {
+        // `chats.sessionState` reports the model the user picked.
+        const pickers = sessionPickers(await sessionState(hub, chats, wt));
+        const want = url.searchParams.get("value") ?? "";
+        if (pickers.model !== want) throw new Error(`the session's model is ${pickers.model}, not ${want}`);
+        notes.push(`${wt}: chats.sessionState model ${pickers.model}, mode ${pickers.mode}`);
+      } else if (url.pathname === "/session-commands") {
+        const names = ((await sessionState(hub, chats, wt))?.commands ?? []).map((c) => `/${c.name}`);
+        notes.push(`${wt}: slash commands from the hub: ${names.join(" ")}`);
+        const want = url.searchParams.get("value");
+        if (want && !want.split(",").every((n) => names.includes(n))) throw new Error(`hub commands ${names}, expected ${want}`);
+      } else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
       } else {

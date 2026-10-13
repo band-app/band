@@ -34,6 +34,10 @@ name: S1 chat transcript renders the seeded history
     element:
       text: "Run the tests.*"
     timeout: 10000
+# The list ends above the plan card and the composer, but Maestro counts a row below that edge as
+# visible. Scroll once more so the row is inside the list before tapping it.
+- scroll
+- waitForAnimationToEnd
 - tapOn:
     text: "Run the tests.*"
 - scrollUntilVisible:

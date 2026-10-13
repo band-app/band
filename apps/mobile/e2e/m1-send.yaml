@@ -1,0 +1,34 @@
+# S1: a message typed on the phone reaches the agent and its reply streams in. Return adds a line.
+appId: app.getband.mobile
+name: S1 send a message from the phone
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- extendedWaitUntil:
+    visible:
+      id: composer__input
+    timeout: 15000
+- tapOn:
+    id: composer__input
+- inputText: "hello from the phone"
+- pressKey: Enter
+- inputText: "second line"
+- takeScreenshot: m1-typed
+# Return did not send: the field still holds both lines and the transcript is empty.
+- assertVisible:
+    id: chat__empty
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      text: "Done."
+    timeout: 20000
+- takeScreenshot: m1-reply
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: "hello from the phone"

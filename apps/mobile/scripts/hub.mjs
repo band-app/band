@@ -98,6 +98,7 @@ function boot({ home, port, adminToken }) {
       BAND_TEST_ACP_AGENT: join(HUB_ROOT, "tests/fixtures/acp-stub-agent.mjs"),
       BAND_TEST_ACP_SCENARIO: scenarioFile(home),
       BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
+      BAND_TEST_ACP_LOG: join(home, "acp-requests.jsonl"),
     },
     stdio: ["ignore", fd, fd],
     detached: true,

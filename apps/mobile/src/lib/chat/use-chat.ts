@@ -15,12 +15,14 @@ import {
   type TranscriptState,
   transcriptReducer,
 } from "@band-app/client/transcript";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type Dispatch, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useHubSession } from "../hub-session";
 
 export interface ChatTranscript {
   state: TranscriptState;
+  /** For the actions that show their effect before the hub confirms it. */
+  dispatch: Dispatch<Parameters<typeof transcriptReducer>[1]>;
   /** True while the event stream is open. */
   connected: boolean;
   /** True once the first replay arrived, so an empty transcript means an empty chat. */
@@ -88,5 +90,5 @@ export function useChatTranscript(chatId: string): ChatTranscript {
     }
   }, [hubFetch, chatId]);
 
-  return { state, connected, loaded, loadingOlder, loadOlder };
+  return { state, dispatch, connected, loaded, loadingOlder, loadOlder };
 }

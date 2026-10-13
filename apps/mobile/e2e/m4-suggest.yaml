@@ -1,0 +1,40 @@
+# S4: "/" lists the slash commands the hub reports for the agent; "@" plus text lists matching files.
+appId: app.getband.mobile
+name: S4 slash commands and file mentions
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-suggest
+- tapOn:
+    id: composer__input
+- inputText: "/"
+- extendedWaitUntil:
+    visible:
+      id: suggestions__slash
+    timeout: 15000
+- assertVisible:
+    id: suggestions__command-echo
+- assertVisible:
+    id: suggestions__command-review
+- takeScreenshot: m4-slash
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: session-commands?wt=gamma-suggest&value=/echo,/review
+- tapOn:
+    id: suggestions__command-review
+- assertNotVisible:
+    id: suggestions__slash
+- eraseText: 40
+- inputText: "look at @READ"
+- extendedWaitUntil:
+    visible:
+      id: suggestions__file-README.md
+    timeout: 15000
+- takeScreenshot: m4-mention
+- tapOn:
+    id: suggestions__file-README.md
+- assertNotVisible:
+    id: suggestions__files
