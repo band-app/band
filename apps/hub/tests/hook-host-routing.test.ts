@@ -87,6 +87,28 @@ describe.skipIf(isRemoteLoopback)("hook routing by host", () => {
     return data?.agent?.status;
   }
 
+  const resolve = async (input: Record<string, unknown>) => {
+    const res = await trpcQuery(
+      server.url,
+      "statuses.resolve",
+      { cwd: SHARED_PATH, ...input },
+      TOKEN,
+    );
+    return (await trpcData<{ worktreeId: string | null }>(res)).worktreeId;
+  };
+
+  // The hub syncs its worktrees with git a moment after boot (and on every poll). A sync once
+  // dropped the hub's row because host B tracked the same path, so every later hook found nothing.
+  // Running first, this case holds the other three back until that boot sync has finished.
+  it("both hosts' worktrees at one path survive the sync that follows boot", async () => {
+    const deadline = Date.now() + 3_000;
+    do {
+      expect(await resolve({})).toBe(LOCAL);
+      expect(await resolve({ hostId: "h-bbbbbbbbbbbb" })).toBe(ON_B);
+      await new Promise((done) => setTimeout(done, 100));
+    } while (Date.now() < deadline);
+  });
+
   it("a hook from host B sets host B's worktree and not the local one at the same path", async () => {
     expect((await notify({ hostId: "h-bbbbbbbbbbbb" })).status).toBe(200);
     expect(await status(ON_B)).toBe("done");
