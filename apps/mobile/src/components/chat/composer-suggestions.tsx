@@ -63,7 +63,7 @@ function SlashList({
   skills: SlashCommandSkill[];
   onPick: (result: SuggestionResult) => void;
 }) {
-  const matches = useMemo(() => filterSkills(skills, query), [skills, query]);
+  const matches = useMemo(() => filterSkills(skills, query).slice(0, 30), [skills, query]);
   if (matches.length === 0) return null;
   return (
     <Panel label="Slash commands" testID="suggestions__slash">

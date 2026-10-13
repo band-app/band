@@ -1,6 +1,6 @@
 import type { SlashCommandSkill } from "@band-app/client/composer";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -17,6 +17,8 @@ import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
 import { useDraft } from "../../lib/composer/use-draft";
 import { chatColors, colors } from "../../theme";
 import { ComposerSuggestions } from "./composer-suggestions";
+
+const MAX_ATTACHMENTS = 10;
 
 /**
  * The message box at the bottom of a chat: a multiline field that grows, attachments (photo
@@ -40,6 +42,10 @@ export function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [hint, setHint] = useState<string | null>(null);
   const picker = useAttachmentPicker();
+  const textRef = useRef(text);
+  textRef.current = text;
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
 
@@ -53,8 +59,8 @@ export function Composer({
       await onSend(sent.text, toWireFiles(sent.attachments));
     } catch (err) {
       // Put the message back so nothing typed is lost.
-      setText(sent.text);
-      setAttachments(sent.attachments);
+      setText(textRef.current ? `${sent.text}\n${textRef.current}` : sent.text);
+      setAttachments((current) => [...sent.attachments, ...current]);
       Alert.alert("Couldn't send", err instanceof Error ? err.message : "Try again.");
     }
   }, [canSend, text, attachments, onSend, setText]);
@@ -62,7 +68,12 @@ export function Composer({
   const addFrom = useCallback(async (pick: () => Promise<Attachment[]>) => {
     try {
       const added = await pick();
-      if (added.length > 0) setAttachments((current) => [...current, ...added]);
+      if (added.length > 0) {
+        setAttachments((current) => [...current, ...added].slice(0, MAX_ATTACHMENTS));
+        if (attachmentsRef.current.length + added.length > MAX_ATTACHMENTS) {
+          Alert.alert("Too many attachments", `A message can carry up to ${MAX_ATTACHMENTS}.`);
+        }
+      }
     } catch (err) {
       Alert.alert("Couldn't attach", err instanceof Error ? err.message : "Try again.");
     }
