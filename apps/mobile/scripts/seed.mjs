@@ -13,7 +13,7 @@
  * once.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 
@@ -162,6 +162,8 @@ export const SCENARIO = {
         },
       ],
     },
+    // A turn of about 90 s that ends by itself, so a flow can queue messages behind it.
+    { match: "^slow", steps: [{ say: "Thinking it over." }, { sleep: 90000 }, { say: "Slow turn finished." }] },
     { match: "^showcase", steps: showcaseSteps() },
     { match: "^long", steps: longSteps() },
     { match: "^stream", steps: streamSteps() },
@@ -181,6 +183,13 @@ export const WORKTREES = {
   /** Empty chats a flow streams a turn into (S2, S4). */
   GAMMA_STREAM: "gamma-stream",
   GAMMA_RESUME: "gamma-resume",
+  /** Empty chats for the composer flows: send, queue, attach, suggestions, model and keyboard. */
+  GAMMA_COMPOSE: "gamma-compose",
+  GAMMA_QUEUE: "gamma-queue",
+  GAMMA_ATTACH: "gamma-attach",
+  GAMMA_SUGGEST: "gamma-suggest",
+  GAMMA_SESSION: "gamma-session",
+  GAMMA_KEYBOARD: "gamma-keyboard",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
 };
@@ -235,7 +244,7 @@ export async function seedHub(state) {
     await trpc(state, "repos.add", { path: join(root, name) });
   }
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
-  for (const branch of ["long", "stream", "resume", "history"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   const chats = {};
@@ -326,6 +335,37 @@ export async function startTurn(state, chats, worktreeId, text, files) {
     body: JSON.stringify({ worktreeId, text, ...(files && { files }) }),
   });
   if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`);
+}
+
+/** The ACP requests the stub agent logged (`BAND_TEST_ACP_LOG`), one parsed object per line. */
+export function acpRequests(state) {
+  const file = join(state.home, "acp-requests.jsonl");
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** The prompts the agent received: `{ text, types }` for each `session/prompt`. */
+export function receivedPrompts(state) {
+  return acpRequests(state)
+    .filter((r) => r.method === "session/prompt")
+    .map((r) => {
+      const parts = r.params?.prompt ?? [];
+      return {
+        text: parts.filter((p) => p.type === "text").map((p) => p.text).join("\n"),
+        types: parts.map((p) => p.type),
+      };
+    });
+}
+
+/** The session settings the hub reports for a worktree's chat (`chats.sessionState`). */
+export async function sessionState(state, chats, worktreeId) {
+  const { state: session } = await trpcQuery(state, "chats.sessionState", {
+    chatId: chats[worktreeId],
+  });
+  return session;
 }
 
 export async function stopTurn(state, chats, worktreeId) {

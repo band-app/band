@@ -1,3 +1,4 @@
+import { ACCEPTED_MEDIA_TYPES, MAX_ATTACHMENT_BYTES } from "@band-app/client/composer";
 import { cn } from "@band-app/ui";
 import { CircleStop, CornerDownLeft, FileIcon, Loader2, Plus, X } from "lucide-react";
 import type {
@@ -20,23 +21,9 @@ interface FileEntry {
   file: File;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = MAX_ATTACHMENT_BYTES;
 
-const ACCEPTED_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-  "application/xml",
-  "text/xml",
-  "text/yaml",
-  "application/x-yaml",
-].join(",");
+const ACCEPTED_TYPES = ACCEPTED_MEDIA_TYPES.join(",");
 
 export interface PromptInputMessage {
   text: string;

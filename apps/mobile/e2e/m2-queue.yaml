@@ -1,0 +1,71 @@
+# S2: a message sent during a running turn joins the queue, is delivered when the turn ends, and a
+# removed one never is.
+appId: app.getband.mobile
+name: S2 queue messages while a turn runs
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-queue
+- tapOn:
+    id: composer__input
+- inputText: "slow: take your time"
+- tapOn:
+    id: composer__send
+# Running: the empty composer offers Stop.
+- extendedWaitUntil:
+    visible:
+      id: composer__stop
+    timeout: 15000
+- tapOn:
+    id: composer__input
+- inputText: "keep this one"
+- tapOn:
+    id: composer__send
+- tapOn:
+    id: composer__input
+- inputText: "drop this one"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      id: queue__list
+    timeout: 5000
+- assertVisible: "keep this one"
+- assertVisible: "drop this one"
+- takeScreenshot: m2-queued
+# Move the second message up, then delete it, which is now the first in the list.
+- tapOn:
+    id: queue__up
+    index: 1
+- tapOn:
+    id: queue__delete
+    index: 0
+- assertNotVisible: "drop this one"
+- assertVisible: "keep this one"
+- takeScreenshot: m2-after-remove
+# The turn ends by itself and the queued message goes out.
+- extendedWaitUntil:
+    visible:
+      text: "Slow turn finished."
+    timeout: 150000
+- extendedWaitUntil:
+    notVisible:
+      id: queue__list
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      text: "Done."
+    timeout: 20000
+- takeScreenshot: m2-delivered
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: "keep this one"
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-no-prompt
+      VALUE: "drop this one"

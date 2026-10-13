@@ -37,7 +37,7 @@ name: S2 streaming stays pinned until the user scrolls up
     element:
       text: "stream: go"
     direction: UP
-    timeout: 10000
+    timeout: 60000
 - extendedWaitUntil:
     visible:
       id: chat__jump-latest

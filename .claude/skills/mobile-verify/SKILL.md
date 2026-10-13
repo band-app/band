@@ -100,16 +100,23 @@ Check each tool first and install only what is missing. All of it is user space 
 | `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
 | `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
 | `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
+| `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
+| `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
+| `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
+| `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
+| `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet shows in the header and in `chats.sessionState`. |
+| `m6-keyboard.yaml` | With the keyboard open, the last message and the composer are both on screen. Run it on other simulators with `BAND_SIM_UDID`. |
+| `m7-draft.yaml` | An unsent draft survives leaving the screen and the app going to the background. |
 | `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
 `alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The repo `gamma` holds the
 chat flows' worktrees: `gamma-main` (a finished "showcase" turn with an attached image),
 `gamma-long` (a finished turn of 1,610 replayed events), `gamma-history` (24 short turns, more
-than the 20 the hub sends on open), and the empty `gamma-stream` and
-`gamma-resume`. The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
+than the 20 the hub sends on open), the empty `gamma-stream` and
+`gamma-resume`, and one empty worktree per composer flow (`gamma-compose`, `-queue`, `-attach`, `-suggest`, `-session`, `-keyboard`). The stub agent's scenario (`SCENARIO` in the same file) treats a prompt starting
 with `work` as a turn that runs until stopped, one starting with `ask` as a turn that waits for a
-permission answer, and one starting with `stream` as 90 numbered lines over 45 s.
+permission answer, and one starting with `stream` as 90 numbered lines over 45 s, and one starting with `slow` as a 90 s turn that ends by itself.
 
 Flows drive the hub through a loopback control server that `verify.mjs` runs
 (`e2e/scripts/hub-control.js`, `ACTION` is a path with its query): `stop` and `start` stop and

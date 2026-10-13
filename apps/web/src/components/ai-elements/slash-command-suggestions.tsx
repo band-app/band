@@ -1,70 +1,11 @@
+import { filterSkills, getCommandContext, type SlashCommandSkill } from "@band-app/client/composer";
 import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";
 
-export interface SlashCommandSkill {
-  name: string;
-  description: string;
-  argumentHint?: string;
-}
-
 interface SlashCommandSuggestionsProps {
   skills: SlashCommandSkill[];
-}
-
-/**
- * Find the slash-command token being typed. The command can appear anywhere
- * in the text — at the beginning or after a space.
- *
- * Returns `{ prefix, query }` where:
- *   - `prefix` is everything before the `/`
- *   - `query` is the partial command name (without the `/`)
- *
- * Returns `null` when no command is being typed (e.g. cursor past a space
- * after the command, or no `/` present).
- */
-function getCommandContext(inputValue: string): { prefix: string; query: string } | null {
-  // Find the last `/` that is at position 0 or preceded by whitespace
-  for (let i = inputValue.length - 1; i >= 0; i--) {
-    if (inputValue[i] === "/") {
-      if (i === 0 || /\s/.test(inputValue[i - 1])) {
-        const afterSlash = inputValue.slice(i + 1);
-        // Still typing the command name — no spaces after the slash
-        if (/\s/.test(afterSlash)) return null;
-        return { prefix: inputValue.slice(0, i), query: afterSlash };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Commands matching the partial name, best first, ranked the way Claude
- * Code's own picker ranks them: an exact name, then names starting with the
- * query (shortest first), then names containing it, then descriptions
- * containing it. Codex prefixes skills with `$`, so `/tdd` still finds
- * `$tdd` as an exact or prefix match. Ties keep the agent's order.
- */
-function filterSkills(skills: SlashCommandSkill[], query: string): SlashCommandSkill[] {
-  if (!query) return skills;
-  const q = query.toLowerCase();
-  const rank = (skill: SlashCommandSkill): [number, number] => {
-    const name = skill.name.toLowerCase();
-    const bare = name.replace(/^\$/, "");
-    if (name === q || bare === q) return [0, 0];
-    if (name.startsWith(q) || bare.startsWith(q)) return [1, bare.length];
-    if (name.includes(q)) return [2, 0];
-    // Two letters appear in half of all descriptions ("un" in "run"), so
-    // descriptions only count once the query says something.
-    if (q.length >= 3 && skill.description.toLowerCase().includes(q)) return [3, 0];
-    return [-1, 0];
-  };
-  return skills
-    .map((skill, index) => ({ skill, index, rank: rank(skill) }))
-    .filter((m) => m.rank[0] >= 0)
-    .sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.index - b.index)
-    .map((m) => m.skill);
 }
 
 export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps) {

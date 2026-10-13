@@ -45,11 +45,7 @@ function WorktreeScreen({ id }: { id: string }) {
   }
 
   return (
-    <SafeAreaView
-      style={local.screen}
-      edges={["bottom", "left", "right"]}
-      testID="worktree__screen"
-    >
+    <SafeAreaView style={local.screen} edges={["left", "right"]} testID="worktree__screen">
       <Stack.Screen options={{ title: row.name }} />
       <View style={local.bar}>
         <View style={local.names}>
@@ -76,7 +72,7 @@ function WorktreeScreen({ id }: { id: string }) {
 /** Memoized: the screen re-renders on every hub status event, the chat only on its own data. */
 const WorktreeChat = memo(function WorktreeChat({ worktreeId }: { worktreeId: string }) {
   const { chatId, loading, error } = useActiveChat(worktreeId);
-  if (chatId) return <ChatView key={chatId} chatId={chatId} />;
+  if (chatId) return <ChatView key={chatId} chatId={chatId} worktreeId={worktreeId} />;
   return (
     <Centered>
       {loading ? (

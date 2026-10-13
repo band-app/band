@@ -1,7 +1,10 @@
+import { sessionPickers } from "@band-app/client/session-pickers";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Keyboard,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -11,12 +14,17 @@ import {
 } from "react-native";
 import { buildRows, type ChatRow, copyText, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
+import { useChatActions } from "../../lib/chat/use-chat-actions";
+import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
 import { ChatProvider } from "./chat-context";
+import { ChatHeader } from "./chat-header";
 import { ChatRowView } from "./chat-row";
+import { Composer } from "./composer";
 import { FrameLog } from "./frame-log";
 import { PlanCard } from "./plan-card";
+import { QueuedMessages } from "./queued-messages";
 
 /** Within this many points of the end counts as "at the bottom". */
 const BOTTOM_SLOP = 48;
@@ -29,9 +37,22 @@ const keyOf = (row: ChatRow) => row.key;
  * the bottom the list follows new output; scrolling up stops that and shows "Jump to latest".
  * Older turns load when the user reaches the top, and the list keeps its place while they do.
  */
-export function ChatView({ chatId }: { chatId: string }) {
+export function ChatView({ chatId, worktreeId }: { chatId: string; worktreeId: string }) {
   const { hub } = useHubSession();
-  const { state, loaded, loadingOlder, loadOlder } = useChatTranscript(chatId);
+  const transcript = useChatTranscript(chatId);
+  const { state, loaded, loadingOlder, loadOlder } = transcript;
+  const actions = useChatActions(worktreeId, chatId, transcript);
+  const { inset } = useKeyboardInset();
+  const pickers = useMemo(() => sessionPickers(state.session), [state.session]);
+  const skills = useMemo(
+    () =>
+      (state.session?.commands ?? []).map((c) => ({
+        name: c.name,
+        description: c.description,
+        argumentHint: c.input && "hint" in c.input ? c.input.hint : undefined,
+      })),
+    [state.session?.commands],
+  );
   const rows = useMemo(
     () => buildRows(state.messages, state.taskRunning),
     [state.messages, state.taskRunning],
@@ -85,6 +106,12 @@ export function ChatView({ chatId }: { chatId: string }) {
     if (pinned.current && !toggled.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
+  // The keyboard shortens the list. Keep the last message in view when it was in view before.
+  useEffect(() => {
+    const sub = Keyboard.addListener("keyboardDidShow", followOutput);
+    return () => sub.remove();
+  }, [followOutput]);
+
   const jumpToLatest = useCallback(() => {
     pinned.current = true;
     setShowJump(false);
@@ -103,76 +130,95 @@ export function ChatView({ chatId }: { chatId: string }) {
       onToggle={onToggle}
       rowText={rowText}
     >
-      <View style={styles.root} testID="chat__view">
-        {!loaded ? (
-          <View style={styles.center} testID="chat__loading">
-            <ActivityIndicator color={colors.mutedForeground} />
-          </View>
-        ) : rows.length === 0 ? (
-          <View style={styles.center}>
-            <Text style={styles.muted} testID="chat__empty">
-              No messages yet.
-            </Text>
-          </View>
-        ) : (
-          <FlashList
-            ref={listRef}
-            data={rows}
-            renderItem={renderRow}
-            keyExtractor={keyOf}
-            getItemType={rowType}
-            initialScrollIndex={rows.length - 1}
-            maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
-            onStartReached={onStartReached}
-            onStartReachedThreshold={0.5}
-            onScroll={onScroll}
-            scrollEventThrottle={32}
-            onScrollBeginDrag={() => {
-              dragging.current = true;
-            }}
-            onMomentumScrollEnd={() => {
-              dragging.current = false;
-            }}
-            onScrollEndDrag={(e) => {
-              // Without momentum the drag is the whole scroll.
-              if ((e.nativeEvent.velocity?.y ?? 0) === 0) dragging.current = false;
-            }}
-            onContentSizeChange={followOutput}
-            ListHeaderComponent={
-              loadingOlder ? (
-                <View style={styles.older} testID="chat__loading-older">
-                  <ActivityIndicator size="small" color={colors.mutedForeground} />
-                </View>
-              ) : null
-            }
-            contentContainerStyle={styles.content}
-            testID="chat__list"
-          />
-        )}
-        {showJump ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Jump to latest"
-            onPress={jumpToLatest}
-            style={styles.jump}
-            testID="chat__jump-latest"
-          >
-            <Text style={styles.jumpText}>↓ Jump to latest</Text>
-          </Pressable>
-        ) : null}
-        {copied ? (
-          <View style={styles.toast} pointerEvents="none" testID="chat__copied">
-            <Text style={styles.toastText}>Copied</Text>
-          </View>
-        ) : null}
-        {process.env.EXPO_PUBLIC_BAND_PERF_LOG === "1" ? <FrameLog /> : null}
-      </View>
-      <PlanCard plan={state.plan} />
+      <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
+        <ChatHeader pickers={pickers} setConfigOption={actions.setConfigOption} />
+        <View style={styles.root} testID="chat__view">
+          {!loaded ? (
+            <View style={styles.center} testID="chat__loading">
+              <ActivityIndicator color={colors.mutedForeground} />
+            </View>
+          ) : rows.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={styles.muted} testID="chat__empty">
+                No messages yet.
+              </Text>
+            </View>
+          ) : (
+            <FlashList
+              ref={listRef}
+              data={rows}
+              renderItem={renderRow}
+              keyExtractor={keyOf}
+              getItemType={rowType}
+              initialScrollIndex={rows.length - 1}
+              maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+              onStartReached={onStartReached}
+              onStartReachedThreshold={0.5}
+              onScroll={onScroll}
+              scrollEventThrottle={32}
+              onScrollBeginDrag={() => {
+                dragging.current = true;
+              }}
+              onMomentumScrollEnd={() => {
+                dragging.current = false;
+              }}
+              onScrollEndDrag={(e) => {
+                // Without momentum the drag is the whole scroll.
+                if ((e.nativeEvent.velocity?.y ?? 0) === 0) dragging.current = false;
+              }}
+              onContentSizeChange={followOutput}
+              ListHeaderComponent={
+                loadingOlder ? (
+                  <View style={styles.older} testID="chat__loading-older">
+                    <ActivityIndicator size="small" color={colors.mutedForeground} />
+                  </View>
+                ) : null
+              }
+              contentContainerStyle={styles.content}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              testID="chat__list"
+            />
+          )}
+          {showJump ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Jump to latest"
+              onPress={jumpToLatest}
+              style={styles.jump}
+              testID="chat__jump-latest"
+            >
+              <Text style={styles.jumpText}>↓ Jump to latest</Text>
+            </Pressable>
+          ) : null}
+          {copied ? (
+            <View style={styles.toast} pointerEvents="none" testID="chat__copied">
+              <Text style={styles.toastText}>Copied</Text>
+            </View>
+          ) : null}
+          {process.env.EXPO_PUBLIC_BAND_PERF_LOG === "1" ? <FrameLog /> : null}
+        </View>
+        <PlanCard plan={state.plan} />
+        <QueuedMessages
+          messages={state.queue}
+          onRemove={actions.removeQueued}
+          onEdit={actions.editQueued}
+          onReorder={actions.reorderQueued}
+        />
+        <Composer
+          worktreeId={worktreeId}
+          running={state.taskRunning}
+          skills={skills}
+          onSend={actions.send}
+          onStop={() => void actions.stop()}
+        />
+      </Animated.View>
     </ChatProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboard: { flex: 1 },
   root: { flex: 1 },
   center: { alignItems: "center", flex: 1, justifyContent: "center" },
   muted: { color: colors.mutedForeground, fontSize: 15 },
