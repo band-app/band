@@ -174,7 +174,8 @@ describe("Claude Code hooks per host", () => {
 
   it("lists every host with its own status", async () => {
     const all = await hosts();
-    expect(all.map((h) => h.hostId).sort()).toEqual(["local", workerId].sort());
+    // The remote-loopback CI job adds its own worker next to these two.
+    expect(all.map((h) => h.hostId)).toEqual(expect.arrayContaining(["local", workerId]));
     for (const host of all) {
       expect(host.online).toBe(true);
       expect(host.status).toMatchObject({ installed: false, outdated: false });

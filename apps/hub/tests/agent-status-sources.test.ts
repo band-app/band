@@ -24,6 +24,7 @@ import {
 } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import type { ServerHandle } from "./helpers/server";
+import { HOOK_HOST_ID } from "./helpers/test-host";
 
 let seq = 0;
 const newChatId = () => `status-chat-${Date.now()}-${seq++}`;
@@ -39,7 +40,7 @@ async function worktreeStatus(url: string): Promise<string | undefined> {
 }
 
 async function notify(url: string, input: Record<string, unknown>): Promise<void> {
-  await trpc(url, "statuses.notify", input);
+  await trpc(url, "statuses.notify", { hostId: HOOK_HOST_ID, ...input });
 }
 
 async function clearAttention(url: string): Promise<void> {

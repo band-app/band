@@ -9,7 +9,7 @@ import {
   type ServerHandle,
   startServer as startCanonicalServer,
 } from "./helpers/server";
-import { testWorktreeId } from "./helpers/test-host";
+import { HOOK_HOST_ID, testWorktreeId } from "./helpers/test-host";
 import { removeTmpHome } from "./helpers/tmp-home";
 
 const DEFAULT_TOKEN = "needs-attention-test-token";
@@ -563,7 +563,11 @@ describe("statuses.notify — agent hook mapping", () => {
   });
 
   async function notifyStatus(payload: Record<string, unknown>): Promise<string | undefined> {
-    const res = await trpcMutate(server.url, "statuses.notify", { cwd: repoPath, payload });
+    const res = await trpcMutate(server.url, "statuses.notify", {
+      cwd: repoPath,
+      payload,
+      hostId: HOOK_HOST_ID,
+    });
     // Surface a server-side failure at its root cause rather than letting it
     // masquerade as a wrong-status assertion failure at the call site.
     if (res.status !== 200) {

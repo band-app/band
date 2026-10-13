@@ -16,12 +16,16 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { isRemoteLoopback } from "./helpers/test-host";
 
 const TOKEN = "hook-host-routing-token";
 const LOCAL = toWorktreeId("proj", "main", "local");
 const ON_B = toWorktreeId("proj", "main", "h-bbbbbbbbbbbb");
 
-describe("hook routing by host", () => {
+// The remote-loopback CI job runs the hub with no local host, so there is no hub-side worktree to
+// share a path with host B's. That job runs the host-aware cases through the relay in
+// `remote-relay.test.ts`.
+describe.skipIf(isRemoteLoopback)("hook routing by host", () => {
   let server: ServerHandle;
   let home: string;
   let SHARED_PATH: string;
@@ -106,8 +110,8 @@ describe("hook routing by host", () => {
       trpcData<{ worktreeId: string | null }>(
         await trpcQuery(server.url, "statuses.resolve", { cwd: SHARED_PATH, hostId }, TOKEN),
       );
-    expect((await resolve()).worktreeId).toBe(LOCAL);
-    expect((await resolve("h-bbbbbbbbbbbb")).worktreeId).toBe(ON_B);
+    await expect.poll(async () => (await resolve()).worktreeId).toBe(LOCAL);
+    await expect.poll(async () => (await resolve("h-bbbbbbbbbbbb")).worktreeId).toBe(ON_B);
     expect((await resolve("h-cccccccccccc")).worktreeId).toBeNull();
   });
 });
