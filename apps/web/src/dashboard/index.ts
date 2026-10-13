@@ -9,7 +9,11 @@ export { toWorktreeId } from "@band-app/shared/worktree-id";
 // Adapter
 export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
 // Components
-export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
+export {
+  AGENT_STATE_INFO,
+  AgentStateDot,
+  AgentStatusIndicator,
+} from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
@@ -67,7 +71,7 @@ export {
   type UseEditorHistoryReturn,
   useEditorHistory,
 } from "./hooks/use-editor-history";
-export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
+export { useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
 export { LABEL_FILTER_KEY, useLabelFilter } from "./hooks/use-label-filter";
 export {
@@ -177,6 +181,7 @@ export type {
   GitStatus,
   GitSyncState,
   HooksStatus,
+  HostHooks,
   LabelDefinition,
   ListWorktreeBranchesResult,
   NotificationSettings,

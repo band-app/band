@@ -181,6 +181,27 @@ let transientId = -1_000_000_000;
 
 let pendingObserver: ((chatId: string, worktreeId: string) => void) | null = null;
 
+/** Updates that show the agent working: text, thoughts, tool calls, plans. Titles, usage and
+ *  command lists also arrive after a turn ends and say nothing about work. */
+const AGENT_WORK_UPDATES = new Set<string>([
+  "user_message_chunk",
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+]);
+
+/** What the agent did on its own, outside a turn Band started. */
+export type AgentActivityKind =
+  /** A `session/update` arrived: the agent runs a turn of its own. */
+  | "update"
+  /** Background work started or ended (an AIR async task update). */
+  | "work";
+let activityObserver:
+  | ((chatId: string, worktreeId: string, kind: AgentActivityKind) => void)
+  | null = null;
+
 function emptyLive(): LiveState {
   return { configOptions: [], modes: null, models: null, commands: [], usage: null, title: null };
 }
@@ -509,6 +530,9 @@ function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
   if (!rt.attaching) {
     rt.work.observeUpdate(update, rt.inTurn);
     agentActive(rt);
+    if (!rt.inTurn && rt.routing === "log" && AGENT_WORK_UPDATES.has(update.sessionUpdate)) {
+      activityObserver?.(rt.chatId, rt.worktreeId, "update");
+    }
   }
   if (rt.routing === "drop") return;
   if (update.sessionUpdate === "user_message_chunk") {
@@ -603,6 +627,7 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
       if (n.sessionId !== rt.sessionId || rt.attaching) return;
       rt.work.observeAsyncTask(n.update);
       agentActive(rt);
+      activityObserver?.(rt.chatId, rt.worktreeId, "work");
     },
     onPermission: (req, signal) => requestPermission(rt, req, signal),
     onElicitation: (req, signal) => requestElicitation(rt, req, signal),
@@ -1017,6 +1042,20 @@ export class AgentSessionService {
    *  so task-service can flip the chat's attention status. */
   observePending(observer: (chatId: string, worktreeId: string) => void): void {
     pendingObserver = observer;
+  }
+
+  /** Called when the agent acts outside a turn Band started: an update from
+   *  a turn of its own, or a background task starting or ending. */
+  observeActivity(
+    observer: (chatId: string, worktreeId: string, kind: AgentActivityKind) => void,
+  ): void {
+    activityObserver = observer;
+  }
+
+  /** The soonest time one of the chat's pending-work holds lapses, or null with none. */
+  nextWorkDeadline(chatId: string): number | null {
+    const holds = runtimes.get(chatId)?.work.outstanding() ?? [];
+    return holds.length > 0 ? Math.min(...holds.map((h) => h.until)) : null;
   }
 
   /**

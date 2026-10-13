@@ -169,10 +169,10 @@ function wsSubscribe(
 }
 
 // ---------------------------------------------------------------------------
-// Tests: needs_attention clearing via statuses.update
+// Tests: finished-status clearing via statuses.update
 // ---------------------------------------------------------------------------
 
-describe("needs_attention — clearing via statuses.update", () => {
+describe("finished status — clearing via statuses.update", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -202,10 +202,10 @@ describe("needs_attention — clearing via statuses.update", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("sets needs_attention status", async () => {
+  it("sets done status", async () => {
     const res = await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention", lastActivity: "user input needed" },
+      agent: { status: "done", lastActivity: "user input needed" },
     });
     expect(res.status).toBe(200);
 
@@ -213,14 +213,14 @@ describe("needs_attention — clearing via statuses.update", () => {
       worktreeId: testWorktreeId("myrepo", "main"),
     });
     const data = await trpcData<{ agent: { status: string } }>(getRes);
-    expect(data.agent.status).toBe("needs_attention");
+    expect(data.agent.status).toBe("done");
   });
 
-  it("clears needs_attention via clearNeedsAttention", async () => {
-    // Set needs_attention first
+  it("clears done via clearNeedsAttention", async () => {
+    // Set done first
     await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention" },
+      agent: { status: "done" },
     });
 
     // Clear it via the dedicated endpoint
@@ -233,16 +233,16 @@ describe("needs_attention — clearing via statuses.update", () => {
       worktreeId: testWorktreeId("myrepo", "main"),
     });
     const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(getRes);
-    expect(data.agent.status).toBe("waiting");
+    expect(data.agent.status).toBe("idle");
     // lastActivity should be preserved from earlier update
     expect(data.agent.lastActivity).toBe("user input needed");
   });
 
-  it("preserves other fields when clearing needs_attention", async () => {
+  it("preserves other fields when clearing done", async () => {
     // Set up with full agent info
     await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention", lastActivity: "waiting for approval" },
+      agent: { status: "done", lastActivity: "waiting for approval" },
     });
 
     // Clear via the dedicated endpoint
@@ -262,7 +262,7 @@ describe("needs_attention — clearing via statuses.update", () => {
     expect(data.worktreeId).toBe(testWorktreeId("myrepo", "main"));
     expect(data.repo).toBe("myrepo");
     expect(data.branch).toBe("main");
-    expect(data.agent.status).toBe("waiting");
+    expect(data.agent.status).toBe("idle");
     expect(data.agent.lastActivity).toBe("waiting for approval");
   });
 
@@ -293,8 +293,8 @@ describe("needs_attention — clearing via statuses.update", () => {
 // Tests: resetAgentStatuses on server startup
 // ---------------------------------------------------------------------------
 
-describe("needs_attention — reset on server startup", () => {
-  it("resets needs_attention to waiting on server startup", async () => {
+describe("finished status — reset on server startup", () => {
+  it("resets question to idle on server startup", async () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
@@ -311,26 +311,26 @@ describe("needs_attention — reset on server startup", () => {
       tokenSecret: DEFAULT_TOKEN,
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
-    // Seed a worktree status with needs_attention BEFORE starting server
+    // Seed a worktree status with question BEFORE starting server
     seedWorktreeStatuses(tmpHome, [
       {
         worktreeId: testWorktreeId("myrepo", "main"),
         repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
-        agentStatus: "needs_attention",
+        agentStatus: "question",
         agentLastActivity: "stale input request",
       },
     ]);
 
     const server = await startServer({ tmpHome });
     try {
-      // After startup, resetAgentStatuses should have cleared needs_attention
+      // After startup, resetAgentStatuses should have cleared question
       const res = await trpcQuery(server.url, "statuses.get", {
         worktreeId: testWorktreeId("myrepo", "main"),
       });
       const data = await trpcData<{ agent: { status: string; lastActivity: string } }>(res);
-      expect(data.agent.status).toBe("waiting");
+      expect(data.agent.status).toBe("idle");
       // lastActivity should still be preserved
       expect(data.agent.lastActivity).toBe("stale input request");
     } finally {
@@ -339,7 +339,7 @@ describe("needs_attention — reset on server startup", () => {
     }
   });
 
-  it("resets working to waiting on server startup", async () => {
+  it("resets working to idle on server startup", async () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
@@ -373,14 +373,14 @@ describe("needs_attention — reset on server startup", () => {
         worktreeId: testWorktreeId("myrepo", "main"),
       });
       const data = await trpcData<{ agent: { status: string } }>(res);
-      expect(data.agent.status).toBe("waiting");
+      expect(data.agent.status).toBe("idle");
     } finally {
       await server.close();
       removeTmpHome(tmpHome);
     }
   });
 
-  it("does not reset waiting status on server startup", async () => {
+  it("keeps done status on server startup", async () => {
     const tmpHome = createTmpHome();
     const repoPath = createGitRepo(tmpHome, "myrepo");
     seedState(tmpHome, {
@@ -403,7 +403,7 @@ describe("needs_attention — reset on server startup", () => {
         repo: "myrepo",
         branch: "main",
         worktreePath: repoPath,
-        agentStatus: "waiting",
+        agentStatus: "done",
       },
     ]);
 
@@ -413,7 +413,7 @@ describe("needs_attention — reset on server startup", () => {
         worktreeId: testWorktreeId("myrepo", "main"),
       });
       const data = await trpcData<{ agent: { status: string } }>(res);
-      expect(data.agent.status).toBe("waiting");
+      expect(data.agent.status).toBe("done");
     } finally {
       await server.close();
       removeTmpHome(tmpHome);
@@ -422,10 +422,10 @@ describe("needs_attention — reset on server startup", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: WebSocket status stream reflects needs_attention clearing
+// Tests: WebSocket status stream reflects clearing a finished status
 // ---------------------------------------------------------------------------
 
-describe("needs_attention — status stream via WebSocket", () => {
+describe("finished status — status stream via WebSocket", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoPath: string;
@@ -455,17 +455,17 @@ describe("needs_attention — status stream via WebSocket", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("WebSocket snapshot reflects current status after clearing needs_attention", async () => {
-    // Set needs_attention, then clear it
+  it("WebSocket snapshot reflects current status after clearing done", async () => {
+    // Set done, then clear it
     await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention" },
+      agent: { status: "done" },
     });
     await trpcMutate(server.url, "statuses.clearNeedsAttention", {
       worktreeId: testWorktreeId("myrepo", "main"),
     });
 
-    // Subscribe — snapshot should show "waiting", not "needs_attention"
+    // Subscribe — snapshot should show "idle", not "done"
     const sub = wsSubscribe(server.url, "status.stream", {});
     try {
       const snapshot = await sub.waitForEvent(
@@ -480,17 +480,17 @@ describe("needs_attention — status stream via WebSocket", () => {
         (s: { worktreeId?: string }) => s.worktreeId === testWorktreeId("myrepo", "main"),
       );
       expect(ws).toBeDefined();
-      expect(ws!.agent.status).toBe("waiting");
+      expect(ws!.agent.status).toBe("idle");
     } finally {
       sub.close();
     }
   });
 
-  it("WebSocket receives update event when needs_attention is cleared", async () => {
-    // Set needs_attention
+  it("WebSocket receives update event when done is cleared", async () => {
+    // Set done
     await trpcMutate(server.url, "statuses.update", {
       worktreeId: testWorktreeId("myrepo", "main"),
-      agent: { status: "needs_attention" },
+      agent: { status: "done" },
     });
 
     // Subscribe to get the snapshot, then clear
@@ -507,7 +507,7 @@ describe("needs_attention — status stream via WebSocket", () => {
       const updateEvent = await sub.waitForEvent(
         (data) =>
           (data as { kind: string }).kind === "update" &&
-          (data as { status?: { agent?: { status: string } } }).status?.agent?.status === "waiting",
+          (data as { status?: { agent?: { status: string } } }).status?.agent?.status === "idle",
       );
 
       const eventData = updateEvent as {
@@ -516,7 +516,7 @@ describe("needs_attention — status stream via WebSocket", () => {
       };
       expect(eventData.kind).toBe("update");
       expect(eventData.status.worktreeId).toBe(testWorktreeId("myrepo", "main"));
-      expect(eventData.status.agent.status).toBe("waiting");
+      expect(eventData.status.agent.status).toBe("idle");
     } finally {
       sub.close();
     }
@@ -576,84 +576,100 @@ describe("statuses.notify — agent hook mapping", () => {
     return data?.agent?.status;
   }
 
-  it("maps Stop → needs_attention", async () => {
-    // Pre-drive to a working baseline so the assertion proves Stop raises
-    // needs_attention from a non-attention state, consistent with the
-    // self-contained pattern used by every other test in this block.
+  it("maps Stop → done", async () => {
     await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
-    expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("needs_attention");
+    expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("done");
   });
 
-  // Regression (#571): PermissionRequest fires after PreToolUse for every
-  // gated tool (Bash/Write/Edit/…). Band auto-approves those — they don't
-  // block the user — so they must stay `working`. Mapping PermissionRequest
-  // to needs_attention unconditionally chimed the attention sound per tool
-  // call. We drive to needs_attention via Stop first so a `working` result
-  // proves the gated tool actively cleared attention rather than the status
-  // having been `working` already.
-  it("maps PermissionRequest + Bash → working (auto-approved, does not block)", async () => {
-    await notifyStatus({ hook_event_name: "Stop" });
+  it("maps Stop with session_crons → monitoring", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
+    expect(
+      await notifyStatus({
+        hook_event_name: "Stop",
+        session_crons: [{ id: "c1", cron: "*/5 * * * *" }],
+      }),
+    ).toBe("monitoring");
+  });
+
+  it("maps Stop with a running background task → monitoring", async () => {
+    expect(
+      await notifyStatus({
+        hook_event_name: "Stop",
+        background_tasks: [{ id: "t1", type: "bash", status: "running" }],
+      }),
+    ).toBe("monitoring");
+  });
+
+  it("maps Stop with only finished background tasks → done", async () => {
+    expect(
+      await notifyStatus({
+        hook_event_name: "Stop",
+        session_crons: [],
+        background_tasks: [{ id: "t1", type: "bash", status: "completed" }],
+      }),
+    ).toBe("done");
+  });
+
+  it("maps StopFailure → failed", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
+    expect(await notifyStatus({ hook_event_name: "StopFailure" })).toBe("failed");
+  });
+
+  it("maps PostCompact (manual) → done and PostCompact (auto) → working", async () => {
+    expect(await notifyStatus({ hook_event_name: "PostCompact", trigger: "manual" })).toBe("done");
+    expect(await notifyStatus({ hook_event_name: "PostCompact", trigger: "auto" })).toBe("working");
+  });
+
+  // A terminal session is not auto-approved, so any permission request waits on the user.
+  it("maps PermissionRequest + Bash → question", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Bash" })).toBe(
-      "working",
+      "question",
     );
   });
 
-  it("maps PermissionRequest + Write → working (auto-approved, does not block)", async () => {
-    await notifyStatus({ hook_event_name: "Stop" });
-    expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Write" })).toBe(
-      "working",
-    );
-  });
-
-  // Each interactive-tool case drives the status to `working` first (via a
-  // non-interactive PostToolUse) so the assertion proves the hook raises
-  // needs_attention from a working baseline, rather than passing on a
-  // pre-existing needs_attention left by the previous test. notify always
-  // writes the freshly-mapped status, so the pre-drive keeps each test
-  // self-contained and order-independent.
-  it("maps PermissionRequest + AskUserQuestion → needs_attention", async () => {
+  it("maps PermissionRequest + AskUserQuestion → question", async () => {
     await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }),
-    ).toBe("needs_attention");
+    ).toBe("question");
   });
 
-  it("maps PermissionRequest + ExitPlanMode → needs_attention", async () => {
-    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
-    expect(
-      await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode" }),
-    ).toBe("needs_attention");
-  });
-
-  it("maps PreToolUse + ExitPlanMode → needs_attention", async () => {
+  it("maps PreToolUse + ExitPlanMode → question", async () => {
     await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "ExitPlanMode" })).toBe(
-      "needs_attention",
+      "question",
     );
   });
 
-  it("maps PreToolUse + AskUserQuestion → needs_attention", async () => {
+  it("maps PreToolUse + AskUserQuestion → question", async () => {
     await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion" }),
-    ).toBe("needs_attention");
+    ).toBe("question");
   });
 
-  it("maps PreToolUse + regular tool → working", async () => {
-    // Pre-drive to needs_attention so a `working` result proves the regular
-    // tool actively cleared attention, matching the rest of the block.
+  it.each([
+    ["UserPromptSubmit", {}],
+    ["PreToolUse", { tool_name: "Read" }],
+    ["PostToolUse", { tool_name: "Read" }],
+    ["PostToolUseFailure", { tool_name: "Bash" }],
+  ])("maps %s → working", async (hook_event_name, extra) => {
     await notifyStatus({ hook_event_name: "Stop" });
-    expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "Read" })).toBe(
-      "working",
-    );
+    expect(await notifyStatus({ hook_event_name, ...extra })).toBe("working");
   });
 
-  it("maps PostToolUse → working", async () => {
-    // Drive to needs_attention first, then confirm PostToolUse restores working.
-    await notifyStatus({ hook_event_name: "Stop" });
-    expect(await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" })).toBe(
-      "working",
-    );
+  it("keeps working while subagents run after the main Stop", async () => {
+    // Sources of the cases above would hide the session's own status.
+    await notifyStatus({ hook_event_name: "SessionEnd" });
+    const session = { session_id: "s-sub" };
+    await notifyStatus({ ...session, hook_event_name: "UserPromptSubmit" });
+    await notifyStatus({ ...session, hook_event_name: "SubagentStart", agent_id: "a1" });
+    expect(await notifyStatus({ ...session, hook_event_name: "Stop" })).toBe("working");
+    expect(
+      await notifyStatus({ ...session, hook_event_name: "SubagentStop", agent_id: "a1" }),
+    ).toBe("done");
+    await notifyStatus({ ...session, hook_event_name: "SessionEnd" });
   });
 
   it("stamps a recent lastActivity timestamp", async () => {

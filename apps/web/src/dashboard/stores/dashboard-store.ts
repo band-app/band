@@ -151,8 +151,9 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     setActiveWorktree: (worktreeId: string | null) => {
       if (get().activeWorktreeId === worktreeId) return;
       set({ activeWorktreeId: worktreeId });
-      // When the user navigates to a worktree, clear any pending
-      // needs-attention indicator — they're now looking at it.
+      // When the user navigates to a worktree, ask the hub to clear its stored
+      // attention flag. Agent states (question, done, failed) are not cleared
+      // here; they follow the agent.
       if (worktreeId) {
         get().clearNeedsAttention(worktreeId);
       }

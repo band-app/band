@@ -842,6 +842,11 @@ fn main() {
     let cli = Cli::parse();
     let json_output = cli.output == "json";
 
+    // Hooks call notify: it answers with nothing and always exits 0.
+    if let Commands::Notify { ref agent } = cli.command {
+        run_notify_silently(agent.clone());
+    }
+
     // Schema always outputs JSON, handle separately
     if let Commands::Schema { ref command } = cli.command {
         handle_schema(command.as_deref());
@@ -1218,8 +1223,7 @@ fn main() {
             worktree,
             no_focus,
         } => cmd_open(&file_path, worktree.as_deref(), !no_focus),
-        Commands::Notify { agent } => cmd_notify(agent.as_deref()),
-        Commands::Schema { .. } => unreachable!(),
+        Commands::Notify { .. } | Commands::Schema { .. } => unreachable!(),
         Commands::Skills { cmd } => match cmd {
             SkillsCmd::Install { home, filter } => {
                 skills::install_skills(home.as_deref(), filter.as_deref())
@@ -5020,32 +5024,43 @@ fn cmd_open(file_path: &str, worktree: Option<&str>, focus: bool) -> Result<Comm
 
 // --- Notify command ---
 
-fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
+/// Longest `band notify` takes in total, whatever the hub or stdin does.
+const NOTIFY_DEADLINE: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// `band notify` runs from agent hooks and must never disturb the agent: it
+/// prints nothing, exits 0 whatever happens (no `band` setup, hub down, bad or
+/// empty stdin, a hub that hangs, even a panic) and returns within
+/// `NOTIFY_DEADLINE`. The work runs on a thread so a stdin that never closes
+/// or a stuck connection cannot hold the process.
+fn run_notify_silently(agent: Option<String>) -> ! {
+    std::panic::set_hook(Box::new(|_| {}));
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let _ = std::panic::catch_unwind(|| notify_forward(agent.as_deref()));
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(NOTIFY_DEADLINE);
+    process::exit(0);
+}
+
+/// Forwards the hook payload on stdin to the hub. Every failure is dropped.
+fn notify_forward(agent: Option<&str>) {
     use std::io::Read;
 
     // The CLI is intentionally agent-agnostic: it forwards the raw hook
     // payload to the server and lets the server dispatch to the relevant
     // coding-agent adapter to decide the worktree status. Adding hook
     // support for a new agent therefore never requires changing this command.
-
-    let ok = || {
-        Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        })
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&input) else {
+        return;
     };
 
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|e| format!("Failed to read stdin: {e}"))?;
-
-    let payload: serde_json::Value = serde_json::from_str(&input)
-        .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
-
-    // `cwd` tells the server which worktree this notification is for — that's
-    // about routing, not about interpreting the agent's behavior. Prefer the
-    // payload's cwd (agents include it), falling back to the process cwd.
+    // `cwd` tells the server which worktree this notification is for. Prefer
+    // the payload's cwd (agents include it), falling back to the process cwd.
     let cwd = payload
         .get("cwd")
         .and_then(|v| v.as_str())
@@ -5057,10 +5072,8 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
         })
         .unwrap_or_default();
 
-    // All API calls for notify are fire-and-forget — fail silently
-    // because this runs from agent hooks and must not break the agent.
-    let Ok(client) = api::ApiClient::from_settings() else {
-        return ok();
+    let Ok(client) = api::ApiClient::from_settings_with_timeout(NOTIFY_DEADLINE) else {
+        return;
     };
 
     let mut body = serde_json::json!({
@@ -5070,13 +5083,15 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     // Who sent the hook, so the server reads it with that agent's rules and
     // keeps one status per agent session. `BAND_DISPATCH` is `chat` inside a
     // chat pane's agent and `terminal` inside a Band terminal, which also
-    // sets `BAND_TERMINAL_ID`.
+    // sets `BAND_TERMINAL_ID`. `BAND_HOST_ID` names the host when it is set;
+    // a worker's relay writes it in either way.
     if let Some(agent) = agent {
         body["agent"] = serde_json::json!(agent);
     }
     for (env_var, field) in [
         ("BAND_DISPATCH", "dispatch"),
         ("BAND_TERMINAL_ID", "terminalId"),
+        ("BAND_HOST_ID", "hostId"),
     ] {
         if let Ok(value) = std::env::var(env_var) {
             if !value.is_empty() {
@@ -5086,8 +5101,6 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     }
 
     let _ = client.trpc_mutate("statuses.notify", &body);
-
-    ok()
 }
 
 // --- Table formatting ---
@@ -5728,7 +5741,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree."},
             ],
-            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard (`band notify --agent claude-code`). Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
+            "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
         }),
         serde_json::json!({
             "name": "schema",

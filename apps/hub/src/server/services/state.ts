@@ -1,8 +1,11 @@
 import {
+  type AgentHookStatus,
   detectHookAgentType,
+  foldSubagents,
   hookSessionId,
   isHookSessionEnd,
   mapHookPayloadToStatus,
+  type SubagentHold,
 } from "@band-app/coding-agent";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
@@ -231,7 +234,7 @@ export function upsertWorktreeStatus(
     }
 
     // Skip the write when the row is already in the desired state.
-    // The poller calls `upsertWorktreeStatus(_, { status: "waiting" })`
+    // The poller calls `upsertWorktreeStatus(_, { status: "idle" })`
     // on every tick for every idle worktree; without this guard each
     // tick produces a WAL frame just to bump `updatedAt`, which nothing
     // reads. `agentName`/`agentSummary` are computed from `existing`
@@ -295,10 +298,11 @@ export function upsertWorktreeStatus(
  * known worktree contains it. Used by the `statuses.resolve` and
  * `statuses.notify` procedures.
  */
-export function resolveWorktreeIdByCwd(cwd: string): string | null {
+export function resolveWorktreeIdByCwd(cwd: string, hostId: string = LOCAL_HOST_ID): string | null {
   const state = loadState();
   for (const proj of state.repos) {
     for (const wt of proj.worktrees) {
+      if ((wt.hostId ?? LOCAL_HOST_ID) !== hostId) continue;
       if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
         return toWorktreeId(proj.name, wt.name, wt.hostId);
       }
@@ -327,7 +331,16 @@ export function resolveWorktreeIdByCwd(cwd: string): string | null {
 const STALE_HOOK_WORKING_MS = 15 * 60_000;
 
 /** Higher wins when sources disagree; statuses not listed rank lowest. */
-const STATUS_PRIORITY: Record<string, number> = { needs_attention: 3, working: 2, waiting: 1 };
+const LOCAL_HOST_ID = "local";
+
+const STATUS_PRIORITY: Record<string, number> = {
+  question: 6,
+  failed: 5,
+  working: 4,
+  monitoring: 3,
+  done: 2,
+  idle: 1,
+};
 
 const CHAT_SOURCE_PREFIX = "chat:";
 
@@ -357,7 +370,7 @@ function deriveWorktreeStatus(worktreeId: string): string {
       best = status;
     }
   }
-  return best ?? "waiting";
+  return best ?? "idle";
 }
 
 /**
@@ -371,13 +384,14 @@ function toTabStatuses(sources: WorktreeStatusSourceRow[]): TabAgentStatus[] {
   const byTab = new Map<string, TabAgentStatus>();
   for (const source of sources) {
     const { status } = source;
-    if (status !== "working" && status !== "needs_attention") continue;
+    if (status === "idle" || !(status in STATUS_PRIORITY)) continue;
     if (isStaleSource(source, staleBefore)) continue;
+    const tabStatus = status as TabAgentStatus["status"];
     let tab: TabAgentStatus;
     if (source.sourceId.startsWith(CHAT_SOURCE_PREFIX)) {
-      tab = { chatId: source.sourceId.slice(CHAT_SOURCE_PREFIX.length), status };
+      tab = { chatId: source.sourceId.slice(CHAT_SOURCE_PREFIX.length), status: tabStatus };
     } else if (source.terminalId) {
-      tab = { terminalId: source.terminalId, status };
+      tab = { terminalId: source.terminalId, status: tabStatus };
     } else {
       continue;
     }
@@ -430,18 +444,14 @@ export function removeWorktreeSource(worktreeId: string, sourceId: string): Work
 }
 
 /**
- * The user has seen the worktree: every source asking for attention goes
- * back to `waiting`, except the chats in `pendingChatIds`, whose agent still
- * waits on a permission or elicitation answer (answering it clears them).
+ * The user has seen the worktree: every source that finished (`done` or
+ * `failed`) goes back to `idle`. A `question` stays until it is answered.
  * Returns the worktree snapshot to broadcast, or `null` when it has none.
  */
-export function acknowledgeWorktreeAttention(
-  worktreeId: string,
-  pendingChatIds: string[],
-): WorktreeStatus | null {
+export function acknowledgeWorktreeAttention(worktreeId: string): WorktreeStatus | null {
   const existing = getWorktreeStatus(worktreeId);
-  if (existing?.agent?.status !== "needs_attention") return existing;
-  statusSourceQueries.acknowledge(worktreeId, pendingChatIds.map(chatStatusSource), Date.now());
+  if (!existing) return null;
+  if (statusSourceQueries.acknowledge(worktreeId, Date.now()) === 0) return existing;
   return upsertWorktreeStatus(worktreeId, { status: deriveWorktreeStatus(worktreeId) });
 }
 
@@ -477,6 +487,25 @@ export interface HookNotification {
   dispatch?: string;
   /** The Band terminal the agent runs in (`BAND_TERMINAL_ID`). */
   terminalId?: string;
+  /** The host the agent runs on (`BAND_HOST_ID`); `local` when absent. */
+  hostId?: string;
+}
+
+/** Subagents a hook session still runs, by source id. */
+const subagentHolds = new Map<string, SubagentHold>();
+
+function subagentHold(worktreeId: string, sourceId: string): SubagentHold {
+  const key = `${worktreeId}\0${sourceId}`;
+  let hold = subagentHolds.get(key);
+  if (!hold) {
+    hold = { running: new Set(), deferred: null };
+    subagentHolds.set(key, hold);
+  }
+  return hold;
+}
+
+function dropSubagentHold(worktreeId: string, sourceId: string): void {
+  subagentHolds.delete(`${worktreeId}\0${sourceId}`);
 }
 
 /**
@@ -497,7 +526,7 @@ export async function applyHookNotification(
 ): Promise<WorktreeStatus | null> {
   const { payload } = notification;
   if (notification.dispatch === "chat") return null;
-  const worktreeId = resolveWorktreeIdByCwd(notification.cwd);
+  const worktreeId = resolveWorktreeIdByCwd(notification.cwd, notification.hostId ?? LOCAL_HOST_ID);
   if (!worktreeId) return null;
 
   const agentType =
@@ -507,10 +536,14 @@ export async function applyHookNotification(
   const sourceId = `hook:${hookSessionId(payload) ?? agentType}`;
 
   if (isHookSessionEnd(agentType, payload)) {
+    dropSubagentHold(worktreeId, sourceId);
     return removeWorktreeSource(worktreeId, sourceId);
   }
 
-  const status = await mapHookPayloadToStatus(agentType, payload);
+  let status: AgentHookStatus = await mapHookPayloadToStatus(agentType, payload);
+  if (agentType === "claude-code") {
+    status = foldSubagents(subagentHold(worktreeId, sourceId), payload, status);
+  }
   return setWorktreeSourceStatus(worktreeId, sourceId, {
     status,
     lastActivity: new Date().toISOString(),
@@ -519,15 +552,16 @@ export async function applyHookNotification(
 }
 
 /**
- * Reset stale agent statuses to "waiting" and drop every status source.
- * Called on server startup — no agent can be running if the server just
- * started, and any pending input requests are lost so "needs_attention"
- * is also stale. A CLI session that outlived the restart reports again
- * with its next hook.
+ * Reset stale agent statuses to "idle". Called on server startup: no agent
+ * can be running if the server just started, and any pending input requests
+ * are lost, so `working`, `monitoring` and `question` are stale. `done` and
+ * `failed` stay, so a restart does not hide that something finished. A CLI
+ * session that outlived the restart reports again with its next hook.
  */
 export function resetAgentStatuses(): number {
-  statusSourceQueries.removeAll();
-  return worktreeStatusQueries.resetActiveToWaiting(Date.now());
+  subagentHolds.clear();
+  statusSourceQueries.removeActive();
+  return worktreeStatusQueries.resetActiveToIdle(Date.now());
 }
 
 function resolveWorktreeIdentity(worktreeId: string): WorktreeIdentity | null {

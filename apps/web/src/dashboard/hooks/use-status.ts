@@ -37,7 +37,13 @@ export function useStatusWatcher() {
           previousStatuses.current.delete(wsId);
         }
 
-        if (prevAgentStatus === "working" && newAgentStatus === "needs_attention") {
+        // A turn that needs the user or ended chimes; `monitoring` does not.
+        if (
+          prevAgentStatus !== newAgentStatus &&
+          (newAgentStatus === "question" ||
+            newAgentStatus === "done" ||
+            newAgentStatus === "failed")
+        ) {
           const settings = queryClient.getQueryData<Settings>(queryKeys.settings);
           const notifications = settings?.notifications;
           if (notifications?.soundOnNeedsAttention) {

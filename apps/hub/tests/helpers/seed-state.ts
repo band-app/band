@@ -140,7 +140,7 @@ export function seedWorktreeStatuses(tmpHome: string, statuses: WorktreeStatusDa
           branch: s.branch,
           worktreePath: s.worktreePath,
           agentName: s.agentName ?? "claude-code",
-          agentStatus: s.agentStatus ?? "waiting",
+          agentStatus: s.agentStatus ?? "idle",
           agentLastActivity: s.agentLastActivity ?? "",
           agentSummary: s.agentSummary ?? null,
           codingAgentId: s.codingAgentId ?? null,

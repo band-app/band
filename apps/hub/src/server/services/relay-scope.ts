@@ -72,7 +72,13 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
 ]);
 
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
-const UNBATCHABLE = new Set(["repos.list", "hosts.list", "worktrees.create", "worktrees.remove"]);
+const UNBATCHABLE = new Set([
+  "repos.list",
+  "hosts.list",
+  "worktrees.create",
+  "worktrees.remove",
+  "statuses.notify",
+]);
 
 /** `input` with `hostId` set to the worker's, or left alone when `keep` and the call named a host. */
 function pinHost(input: unknown, workerId: string, keep: boolean): object {
@@ -86,7 +92,8 @@ function pinHost(input: unknown, workerId: string, keep: boolean): object {
  * that `checkCall` approved (`crossHostRefusal`). `worktrees.remove` removes the one of that name on
  * the worker, because the same repo and branch can live on several hosts. The check refuses another
  * `hostId` for a remove, and this puts the caller's own into the body the hub sees, so a call that
- * names no host cannot land on the hub's machine.
+ * names no host cannot land on the hub's machine. `statuses.notify` gets the worker's id the same
+ * way, so a hook is matched to a worktree on the host it ran on.
  */
 export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
   if (request.method !== "POST") return request;
@@ -98,7 +105,10 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
   } catch {
     return request;
   }
-  const isTrpc = call === "/trpc/worktrees.create" || call === "/trpc/worktrees.remove";
+  const isTrpc =
+    call === "/trpc/worktrees.create" ||
+    call === "/trpc/worktrees.remove" ||
+    call === "/trpc/statuses.notify";
   const isMcp = call === "/mcp";
   if (!isTrpc && !isMcp) return request;
   const parsed = parseJson(bodyText(request.body));
@@ -251,7 +261,8 @@ export interface ScopeLookups {
   /** The worktree a chat belongs to, or null when the chat does not exist. */
   worktreeOfChat(chatId: string): string | null;
   /** The worktree whose worktree contains `cwd`, or null. */
-  worktreeOfCwd(cwd: string): string | null;
+  /** The worktree on host `hostId` that contains `cwd`. */
+  worktreeOfCwd(cwd: string, hostId: string): string | null;
   /** The host a terminal runs on, or null when there is no such terminal. */
   hostOfTerminal(terminalId: string): string | null;
   /** The worktree a browser tab belongs to, or null when there is no such tab. */
@@ -343,7 +354,7 @@ function checkNamed(
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const cwd of named.cwds) {
-    const worktree = lookups.worktreeOfCwd(path.resolve(cwd));
+    const worktree = lookups.worktreeOfCwd(path.resolve(cwd), workerId);
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const id of named.terminals) {

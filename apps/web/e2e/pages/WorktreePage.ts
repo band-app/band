@@ -131,7 +131,7 @@ export class WorktreePage {
 
   /** The agent status dot inside a worktree card. `data-testid` set on the
    *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
-   *  is "working" / "needs_attention". Scoped to the card. */
+   *  is not idle. Its `data-status` is the state. Scoped to the card. */
   agentStatusDot(worktreeId: string): Locator {
     return this.worktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
   }
@@ -1298,17 +1298,63 @@ export class WorktreePage {
   /** The agent status indicator in the end slot of the first visible chat or
    *  terminal tab (`center-chat-tab__status--<id>` /
    *  `center-term-tab__status--<id>`). Its `data-status` is `working` (a
-   *  spinner) or `needs_attention` (a dot). Rendered only while the tab is
-   *  inactive. */
+   *  spinner), or `monitoring`, `question`, `done` or `failed` (a mark). Shown
+   *  on the shown tab as well; hovering the tab swaps it for the close button. */
   tabStatus(panelComponent: "chat" | "terminal"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent).replace(/--$/, "__status--");
     return this.tab(panelComponent).getByTestId(new RegExp(`^${prefix}`));
+  }
+
+  /** The agent status indicator of one chat tab, by chat id. */
+  chatTabStatusById(chatId: string): Locator {
+    return this.page.getByTestId(`center-chat-tab__status--${chatId}`).filter({ visible: true });
+  }
+
+  /** The agent status indicator of one terminal tab, by terminal (tab) id. */
+  terminalTabStatusById(terminalId: string): Locator {
+    return this.page
+      .getByTestId(`center-term-tab__status--${terminalId}`)
+      .filter({ visible: true });
+  }
+
+  /** The agent state marker in one split pane's header, by the pane's terminal id. */
+  paneStatus(terminalId: string): Locator {
+    return this.page.getByTestId(`term-pane__status--${terminalId}`).filter({ visible: true });
+  }
+
+  /** The id of the first visible chat tab, read from its `center-chat-tab--<id>` testid. */
+  async firstChatTabId(): Promise<string> {
+    const testid = await this.tab("chat").getAttribute("data-testid");
+    return (testid ?? "").slice(this.centerTabTestidPrefix("chat").length);
+  }
+
+  /** The tooltip a worktree card's status mark shows on hover; it lists the
+   *  card's chats and terminals with their states. Hovers the mark first. */
+  async agentStatusTooltip(worktreeId: string): Promise<Locator> {
+    await test.step(`Hover the status mark of ${worktreeId}`, async () => {
+      await this.agentStatusDot(worktreeId).hover();
+    });
+    return this.page.getByTestId("worktree-card__agent-status-tooltip");
   }
 
   /** The close (×) button of the first visible chat or terminal tab. */
   tabCloseButton(panelComponent: "chat" | "terminal"): Locator {
     const name = panelComponent === "chat" ? "Close tab" : "Close terminal";
     return this.tab(panelComponent).getByRole("button", { name });
+  }
+
+  /** Show one chat tab, by chat id. */
+  async activateChatTab(chatId: string): Promise<void> {
+    await test.step(`Show chat tab ${chatId}`, async () => {
+      await this.page.getByTestId(`center-chat-tab--${chatId}`).filter({ visible: true }).click();
+    });
+  }
+
+  /** Move the pointer to the page corner, off every tab and card. */
+  async movePointerAway(): Promise<void> {
+    await test.step("Move the pointer away", async () => {
+      await this.page.mouse.move(0, 0);
+    });
   }
 
   /** Hover the first visible tab of a kind. */

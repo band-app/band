@@ -108,7 +108,7 @@ import type {
   WorktreeBranchStatus,
   WorktreeStatus,
 } from "../types";
-import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { AgentStatusIndicator, isActiveAgentStatus } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { GroupedWorktrees, MetaBadge } from "./GroupedWorktrees";
 import { MainMissingRow } from "./MainMissingRow";
@@ -409,9 +409,12 @@ function SortableRepo({
                 // icon can match a git repo's folder size — using the
                 // indicator's size-3 fallback would make plain headers
                 // read as nested worktree cards (see #427 review).
-                plainAgent &&
-                (plainAgent.status === "working" || plainAgent.status === "needs_attention") ? (
-                  <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+                plainAgent && isActiveAgentStatus(plainAgent.status) ? (
+                  <AgentStatusIndicator
+                    agent={plainAgent}
+                    tabStatuses={statuses.get(plainWorktreeId)?.tabStatuses}
+                    isActive={plainIsActive}
+                  />
                 ) : (
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )

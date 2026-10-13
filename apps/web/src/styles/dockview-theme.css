@@ -485,6 +485,18 @@
   height: 100%;
 }
 
+/* Agent state marker of this pane: top-LEFT, opposite the action cluster. */
+.dockview-terminal-split .term-pane-header__status {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  background: var(--terminal-background);
+}
+
 /* Action cluster: top-RIGHT corner, nudged a touch in from the edge and down so
    the icons sit comfortably over the terminal's top-right rather than jammed
    into the very corner. It floats over the terminal's top rows, so it paints the

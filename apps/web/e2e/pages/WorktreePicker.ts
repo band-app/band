@@ -41,6 +41,11 @@ export class WorktreePicker {
     return this.page.getByTestId(`worktree-picker__item--${worktreeId}`);
   }
 
+  /** The agent status mark of a row (absent while the agent is idle). Its `data-status` is the state. */
+  agentStatus(worktreeId: string): Locator {
+    return this.item(worktreeId).getByTestId("worktree-card__agent-status");
+  }
+
   pinButton(worktreeId: string): Locator {
     return this.page.getByTestId(`worktree-picker__pin--${worktreeId}`);
   }
