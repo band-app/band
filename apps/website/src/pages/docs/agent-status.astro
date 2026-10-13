@@ -15,20 +15,28 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
   <ul>
     <li>
-      <strong>Waiting (no indicator)</strong> &mdash; The agent is idle. No task is running and no
-      agent activity has been detected. No indicator dot is shown in this state.
+      <strong>Idle (no indicator)</strong> &mdash; Nothing is running. A turn you stopped also
+      shows no indicator.
     </li>
     <li>
-      <strong>Working (animated dot)</strong> &mdash; The agent is actively executing a task.
-      The indicator uses the <code>bg-status-working</code> color and pulses while the agent
-      is making progress &mdash; reading files, writing code, or running commands.
+      <strong>Working (yellow dot)</strong> &mdash; The agent is executing a task: reading files,
+      writing code or running commands.
     </li>
     <li>
-      <strong>Needs attention (static dot)</strong> &mdash; The agent has finished its current
-      task or requires human input (for example, it called <code>AskUserQuestion</code> or
-      <code>ExitPlanMode</code>). The indicator uses the
-      <code>bg-status-needs-attention</code> color. Review the agent's output and either
-      provide input, approve changes, or start a new task.
+      <strong>Monitoring (yellow ring)</strong> &mdash; The turn is over but a loop, a cron job
+      or a background command is still running.
+    </li>
+    <li>
+      <strong>Question (amber "?")</strong> &mdash; The agent waits for your answer: a
+      permission request, <code>AskUserQuestion</code> or <code>ExitPlanMode</code>.
+    </li>
+    <li>
+      <strong>Done (green dot)</strong> &mdash; The agent finished its turn. Opening the
+      worktree sets it back to idle.
+    </li>
+    <li>
+      <strong>Failed (red dot)</strong> &mdash; The turn ended in an error, a refusal or a
+      limit. Opening the worktree sets it back to idle.
     </li>
   </ul>
 
@@ -84,15 +92,22 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h3>Hook Events</h3>
   <p>
-    Five Claude Code hook events are wired up on first launch (see
-    <code>apps/hub/src/server/services/hooks.ts</code>):
+    Chats in Band report their state through the Agent Client Protocol and need no hooks. Claude
+    Code in a terminal reports through hooks, which you install yourself: Band shows a banner
+    when a host has Claude Code and no hooks, and <strong>Settings &gt; Agent hooks</strong>
+    installs, reinstalls or removes them per host. Band never edits
+    <code>~/.claude/settings.json</code> on its own, and Remove deletes only Band's entries. Each
+    hook ends with <code>&gt;/dev/null 2&gt;&amp;1 || true</code>, runs in the background and
+    always exits 0, so a hook can never interrupt your agent.
   </p>
   <ul>
-    <li><strong>UserPromptSubmit</strong> &mdash; A new prompt has been sent. Transitions to <em>working</em>.</li>
-    <li><strong>PreToolUse</strong> &mdash; A tool call is about to run. Stays <em>working</em> in general; switches to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>, since both require a human reply.</li>
-    <li><strong>PermissionRequest</strong> &mdash; The agent needs permission to proceed (e.g. plan approval or an unapproved tool). Transitions to <em>needs attention</em>, since the agent is blocked until the user approves or denies. This event fires after <code>PreToolUse</code>, so it must also resolve to <em>needs attention</em> &mdash; otherwise it would overwrite the value set by <code>PreToolUse</code> for plan-approval and question flows.</li>
-    <li><strong>PostToolUse</strong> &mdash; A tool call has finished. Stays <em>working</em>.</li>
-    <li><strong>Stop</strong> &mdash; The agent has stopped (task completed or exited). Transitions to <em>needs attention</em>.</li>
+    <li><strong>UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure</strong> &mdash; <em>working</em>. <code>PreToolUse</code> for <code>AskUserQuestion</code> or <code>ExitPlanMode</code> is a <em>question</em>.</li>
+    <li><strong>PermissionRequest</strong> &mdash; <em>question</em>, for every tool.</li>
+    <li><strong>Stop</strong> &mdash; <em>done</em>, or <em>monitoring</em> while <code>session_crons</code> or <code>background_tasks</code> show work that outlives the turn.</li>
+    <li><strong>StopFailure</strong> &mdash; <em>failed</em>.</li>
+    <li><strong>SubagentStart, SubagentStop</strong> &mdash; the session stays <em>working</em> while subagents run after the main turn.</li>
+    <li><strong>PostCompact</strong> &mdash; a manual <code>/compact</code> is <em>done</em>.</li>
+    <li><strong>SessionEnd</strong> &mdash; the session stops counting.</li>
   </ul>
 
   <h2>Status Display</h2>
@@ -106,8 +121,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>Notification Sounds</h2>
   <p>
-    Band can play a notification sound when an agent transitions from <em>working</em> to
-    <em>needs attention</em>. This is useful when you have multiple agents running and want
+    Band can play a notification sound when an agent asks a question, finishes or fails.
+    <em>Monitoring</em> is silent. This is useful when you have multiple agents running and want
     to know when one finishes without constantly watching the dashboard.
   </p>
   <p>

@@ -1,12 +1,14 @@
 import { TRPCError } from "@trpc/server";
 import { BranchOnOtherHostError, RepoHostNotAllowedError } from "../../errors";
 import {
+  InvalidOriginError,
   PlainRepoError,
   worktreeCreateInput,
   worktreeGitInput,
   worktreeRemoveInput,
   worktreeRunScriptInput,
   worktreeService,
+  worktreeSetOriginInput,
   worktreeSetPinnedInput,
 } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
@@ -51,6 +53,14 @@ export const worktreesRouter = t.router({
   setPinned: publicProcedure.input(worktreeSetPinnedInput).mutation(({ input }) => {
     try {
       return worktreeService.setPinned(input);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  setOrigin: publicProcedure.input(worktreeSetOriginInput).mutation(({ input }) => {
+    try {
+      return worktreeService.setOrigin(input);
     } catch (err) {
       throwAsTrpcError(err);
     }
@@ -109,7 +119,7 @@ export type WorktreesRouter = typeof worktreesRouter;
  * follow-up that updates the tests together.
  */
 function throwAsTrpcError(err: unknown): never {
-  if (err instanceof PlainRepoError) {
+  if (err instanceof PlainRepoError || err instanceof InvalidOriginError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
   if (err instanceof RepoHostNotAllowedError) {

@@ -29,7 +29,7 @@ export function useWorktreeRoute(decoded: string | null): void {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [decoded, refreshBranchStatus]);
 
-  // Clear needs_attention status when viewing this worktree
+  // Clear the stored attention flag when viewing this worktree
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   useEffect(() => {
     if (decoded) clearNeedsAttention(decoded);

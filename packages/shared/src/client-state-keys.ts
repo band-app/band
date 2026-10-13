@@ -144,6 +144,8 @@ const RULES: KeyRule[] = [
   exact("band.repos-list.collapsed-pinned", [jsonPart("all")]),
   exact("band.repos-list.label-filter", [rawPart("all")]),
   exact("band.repos-list.label-last-worktree", [jsonPart("all")]),
+  // The hooks version whose install banner the user dismissed.
+  exact("band:agent-hooks-banner-dismissed", [rawPart("all")]),
   perWorktree(CENTER_TABS_PREFIX, [jsonPart("all")]),
   perWorktreeLeaf("band:term-split:", [jsonPart("all")]),
   perWorktree("band:diff-compare-branch:", [rawPart("all")]),

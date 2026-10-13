@@ -300,6 +300,7 @@ export class RemoteHost implements Host {
     installSkills: (): Promise<InstallSkillsResult> => this.rpc.call("agentEnv.installSkills"),
     hooksStatus: () => this.rpc.call("agentEnv.hooksStatus"),
     installHooks: () => this.rpc.call("agentEnv.installHooks"),
+    removeHooks: () => this.rpc.call("agentEnv.removeHooks"),
   };
 
   // ---- fs -----------------------------------------------------------------

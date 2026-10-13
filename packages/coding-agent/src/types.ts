@@ -64,14 +64,18 @@ export type CliInvocation =
     };
 
 /**
- * Worktree status an agent's lifecycle notification resolves to.
+ * Worktree status an agent reports, from an ACP turn or a hook.
  *
- *   - `working`         → the agent is actively making progress.
- *   - `needs_attention` → the ball is in the user's court: the agent finished
- *                         its turn or is blocked waiting for the user to act.
+ *   - `working`    → the agent is actively making progress.
+ *   - `monitoring` → the turn is over but a loop or background work still runs.
+ *   - `question`   → the agent waits on the user (permission, AskUserQuestion,
+ *                    ExitPlanMode).
+ *   - `done`       → the turn finished.
+ *   - `failed`     → the turn ended in an error.
+ *   - `idle`       → nothing is running (a stopped turn counts).
  *
  * `hook-status.ts` owns the translation from each agent's notification/hook
  * payload to one of these values (e.g. `mapClaudeCodeHookStatus`), so adding
  * a new agent never requires touching the Band CLI.
  */
-export type AgentHookStatus = "working" | "needs_attention";
+export type AgentHookStatus = "working" | "monitoring" | "question" | "done" | "failed" | "idle";

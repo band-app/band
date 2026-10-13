@@ -65,11 +65,6 @@ import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
 
-/** An agent process with no turn running, nothing pending and no work of
- *  its own (see `PendingWork`) is stopped after it sends nothing for this
- *  long. The next prompt reattaches its session. `BAND_AGENT_IDLE_TIMEOUT_MS`
- *  overrides it. */
-const IDLE_TIMEOUT_MS = 15 * 60_000;
 /** After `session/cancel`, how long a turn gets to stop before its agent
  *  process is killed. */
 const CANCEL_GRACE_MS = 15_000;
@@ -181,6 +176,27 @@ let transientId = -1_000_000_000;
 
 let pendingObserver: ((chatId: string, worktreeId: string) => void) | null = null;
 
+/** Updates that show the agent working: text, thoughts, tool calls, plans. Titles, usage and
+ *  command lists also arrive after a turn ends and say nothing about work. */
+const AGENT_WORK_UPDATES = new Set<string>([
+  "user_message_chunk",
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+]);
+
+/** What the agent did on its own, outside a turn Band started. */
+export type AgentActivityKind =
+  /** A `session/update` arrived: the agent runs a turn of its own. */
+  | "update"
+  /** Background work started or ended (an AIR async task update). */
+  | "work";
+let activityObserver:
+  | ((chatId: string, worktreeId: string, kind: AgentActivityKind) => void)
+  | null = null;
+
 function emptyLive(): LiveState {
   return { configOptions: [], modes: null, models: null, commands: [], usage: null, title: null };
 }
@@ -289,16 +305,25 @@ function stopRuntime(rt: Runtime): void {
   mcpProxyService.revokeSession(rt.chatId);
 }
 
-function idleTimeoutMs(): number {
+/** The opt-in idle stop, from `BAND_AGENT_IDLE_TIMEOUT_MS`. Unset (the
+ *  default) means an agent process runs until the chat, its worktree, the
+ *  agent or the hub ends it, as the same agent does in a terminal. With a
+ *  positive value, a process with no turn running, nothing pending and no work
+ *  of its own (see `PendingWork`) is stopped after it sends nothing for that
+ *  long. The next prompt reattaches its session. */
+function idleTimeoutMs(): number | null {
   const override = Number(process.env.BAND_AGENT_IDLE_TIMEOUT_MS);
-  return Number.isFinite(override) && override > 0 ? override : IDLE_TIMEOUT_MS;
+  return Number.isFinite(override) && override > 0 ? override : null;
 }
 
-/** (Re)starts the idle countdown. Every update from the agent restarts it,
- *  so a turn the agent started itself is never cut off. */
-function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
+/** (Re)starts the idle countdown, when the opt-in is set. Every update from
+ *  the agent restarts it, so a turn the agent started itself is never cut off. */
+function scheduleIdle(rt: Runtime, delayMs?: number): void {
   if (rt.idleTimer) clearTimeout(rt.idleTimer);
-  const delay = Math.min(delayMs, MAX_TIMER_MS);
+  rt.idleTimer = null;
+  const timeout = idleTimeoutMs();
+  if (timeout === null) return;
+  const delay = Math.min(delayMs ?? timeout, MAX_TIMER_MS);
   rt.idleTimer = setTimeout(() => {
     rt.idleTimer = null;
     if (rt.inTurn || rt.pending.size > 0 || rt.attaching) return;
@@ -315,7 +340,7 @@ function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
         },
         "idle agent has pending work; not stopping it",
       );
-      scheduleIdle(rt, until - now + idleTimeoutMs());
+      scheduleIdle(rt, until - now + timeout);
       return;
     }
     log.info({ chatId: rt.chatId }, "stopping idle agent");
@@ -509,6 +534,9 @@ function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
   if (!rt.attaching) {
     rt.work.observeUpdate(update, rt.inTurn);
     agentActive(rt);
+    if (!rt.inTurn && rt.routing === "log" && AGENT_WORK_UPDATES.has(update.sessionUpdate)) {
+      activityObserver?.(rt.chatId, rt.worktreeId, "update");
+    }
   }
   if (rt.routing === "drop") return;
   if (update.sessionUpdate === "user_message_chunk") {
@@ -603,6 +631,7 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
       if (n.sessionId !== rt.sessionId || rt.attaching) return;
       rt.work.observeAsyncTask(n.update);
       agentActive(rt);
+      activityObserver?.(rt.chatId, rt.worktreeId, "work");
     },
     onPermission: (req, signal) => requestPermission(rt, req, signal),
     onElicitation: (req, signal) => requestElicitation(rt, req, signal),
@@ -1017,6 +1046,20 @@ export class AgentSessionService {
    *  so task-service can flip the chat's attention status. */
   observePending(observer: (chatId: string, worktreeId: string) => void): void {
     pendingObserver = observer;
+  }
+
+  /** Called when the agent acts outside a turn Band started: an update from
+   *  a turn of its own, or a background task starting or ending. */
+  observeActivity(
+    observer: (chatId: string, worktreeId: string, kind: AgentActivityKind) => void,
+  ): void {
+    activityObserver = observer;
+  }
+
+  /** The soonest time one of the chat's pending-work holds lapses, or null with none. */
+  nextWorkDeadline(chatId: string): number | null {
+    const holds = runtimes.get(chatId)?.work.outstanding() ?? [];
+    return holds.length > 0 ? Math.min(...holds.map((h) => h.until)) : null;
   }
 
   /**
@@ -1445,7 +1488,7 @@ export class AgentSessionService {
       if (proc.canList) agentSessions = await proc.listSessions(location.cwd);
     } catch (err) {
       log.warn({ chatId, err }, "session/list failed; using Band's log");
-      // Let the idle timer drop a runtime that never got a process.
+      // With the opt-in idle stop set, its timer drops a runtime that never got a process.
       if (!rt.inTurn) scheduleIdle(rt);
     }
 

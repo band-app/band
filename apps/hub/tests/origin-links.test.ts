@@ -198,3 +198,72 @@ describe("explicit origins", () => {
     expect((await worktree("borko-root"))?.children).toEqual(["svc-free"]);
   });
 });
+
+describe("setting the parent by hand", () => {
+  const set = (repo: string, name: string, origin: string | null) =>
+    trpcMutate(server.url, "worktrees.setOrigin", { repo, name, origin }, TOKEN);
+
+  it("sets a parent with no chat or terminal, and clears it again", async () => {
+    await m("worktrees.create", { repo: "borko", branch: "set-a", noOrigin: true });
+    await m("worktrees.create", { repo: "svc", branch: "set-b", noOrigin: true });
+    await m("worktrees.create", { repo: "borko", branch: "set-c", noOrigin: true });
+
+    expect((await set("svc", "set-b", "borko-set-a")).status).toBe(200);
+    expect(await worktree("svc-set-b")).toMatchObject({
+      origin: { worktreeId: "borko-set-a", removed: false, repo: "borko", branch: "set-a" },
+    });
+    expect((await worktree("svc-set-b"))?.origin).not.toHaveProperty("chatId");
+    expect((await worktree("borko-set-a"))?.children).toEqual(["svc-set-b"]);
+
+    // A new parent replaces the old one.
+    expect((await set("svc", "set-b", "borko-set-c")).status).toBe(200);
+    expect((await worktree("borko-set-a"))?.children).toEqual([]);
+    expect((await worktree("borko-set-c"))?.children).toEqual(["svc-set-b"]);
+
+    expect((await set("svc", "set-b", null)).status).toBe(200);
+    expect((await worktree("svc-set-b"))?.origin).toBeNull();
+    expect((await worktree("borko-set-c"))?.children).toEqual([]);
+  });
+
+  it("refuses the worktree itself, a descendant, an unknown parent and an unknown worktree", async () => {
+    await m("worktrees.create", { repo: "borko", branch: "cyc-a", noOrigin: true });
+    await m("worktrees.create", { repo: "svc", branch: "cyc-b", origin: "borko-cyc-a" });
+    await m("worktrees.create", { repo: "borko", branch: "cyc-c", origin: "svc-cyc-b" });
+
+    for (const [repo, name, origin, message] of [
+      ["borko", "cyc-a", "borko-cyc-a", "own parent"],
+      ["borko", "cyc-a", "svc-cyc-b", "descendant"],
+      ["borko", "cyc-a", "borko-cyc-c", "descendant"],
+      ["borko", "cyc-a", "borko-missing", "Unknown origin worktree"],
+      ["borko", "no-such", "borko-cyc-a", "no-such"],
+    ] as const) {
+      const res = await set(repo, name, origin);
+      expect(res.status, `${name} -> ${origin}`).toBe(name === "no-such" ? 500 : 400);
+      expect(await res.text()).toContain(message);
+    }
+    expect((await worktree("borko-cyc-a"))?.origin).toBeNull();
+  });
+
+  it("addresses the row by an explicit hostId", async () => {
+    // Two copies of one repo and name need a second registered host, which this suite lacks.
+    await m("worktrees.create", { repo: "borko", branch: "host-a", noOrigin: true });
+    await m("worktrees.create", { repo: "svc", branch: "host-b", noOrigin: true });
+    const res = await trpcMutate(
+      server.url,
+      "worktrees.setOrigin",
+      { repo: "svc", name: "host-b", hostId: "local", origin: "borko-host-a" },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect((await worktree("svc-host-b"))?.origin).toMatchObject({ worktreeId: "borko-host-a" });
+  });
+
+  it("is refused without a token", async () => {
+    const res = await fetch(`${server.url}/trpc/worktrees.setOrigin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: "svc", name: "set-b", origin: null }),
+    });
+    expect(res.status).toBe(401);
+  });
+});

@@ -1,6 +1,6 @@
 /**
- * Page object for the sidebar's Group by dropdown (Repo | Origin | Host) and the "Started from"
- * link above a worktree that another worktree started.
+ * Page object for the sidebar's Group by dropdown (Repo | Origin | Host) and the Set parent /
+ * Remove parent items of a worktree card's context menu.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -9,11 +9,9 @@ export type GroupByMode = "repo" | "origin" | "host";
 
 export class SidebarGroupingPage {
   readonly startedFrom: Locator;
-  readonly startedFromLink: Locator;
 
   constructor(private readonly page: Page) {
     this.startedFrom = page.getByTestId("started-from").filter({ visible: true });
-    this.startedFromLink = page.getByTestId("started-from__link").filter({ visible: true });
   }
 
   /** The header's Group by dropdown trigger. */
@@ -109,25 +107,46 @@ export class SidebarGroupingPage {
     return this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
   }
 
-  /** Waits until the worktree's open tabs are saved (the link reads them to pick the chat). */
-  async waitForSavedTabs(worktreeId: string, tabId: string): Promise<void> {
-    await expect
-      .poll(() =>
-        this.page.evaluate(
-          ([key]) => window.localStorage.getItem(key) ?? "",
-          [`band:center-tabs:${worktreeId}`],
-        ),
-      )
-      .toContain(tabId);
+  /** Right-clicks a worktree's row or card and opens the Set parent dialog. */
+  async openSetParent(target: Locator): Promise<void> {
+    await test.step("Open Set parent from the context menu", async () => {
+      await this.openMenu(target);
+      await this.page.getByTestId("worktree-card__set-parent").click();
+      await expect(this.setParentDialog).toBeVisible();
+    });
   }
 
-  centerChatTab(chatId: string): Locator {
-    return this.page.getByTestId(`center-chat-tab--${chatId}`);
+  get setParentDialog(): Locator {
+    return this.page.getByTestId("set-parent__dialog");
   }
 
-  /** The composer of the chat pane that is on screen (a hidden dockview panel is not visible). */
-  get visibleChatComposer(): Locator {
-    return this.page.getByTestId("chat-pane__composer").filter({ visible: true });
+  setParentItem(worktreeId: string): Locator {
+    return this.page.getByTestId(`set-parent__item--${worktreeId}`);
+  }
+
+  /** Types into the dialog's search box and picks a worktree. */
+  async chooseParent(search: string, worktreeId: string): Promise<void> {
+    await test.step(`Pick ${worktreeId} as the parent`, async () => {
+      await this.setParentDialog.getByRole("combobox").fill(search);
+      await this.setParentItem(worktreeId).click();
+      await expect(this.setParentDialog).toBeHidden();
+    });
+  }
+
+  get removeParentItem(): Locator {
+    return this.page.getByTestId("worktree-card__remove-parent");
+  }
+
+  /** Right-clicks the target and opens the menu without choosing anything. */
+  async openMenu(target: Locator): Promise<void> {
+    await target.click({ button: "right" });
+  }
+
+  async removeParent(target: Locator): Promise<void> {
+    await test.step("Remove the parent from the context menu", async () => {
+      await this.openMenu(target);
+      await this.removeParentItem.click();
+    });
   }
 
   async reload(): Promise<void> {
