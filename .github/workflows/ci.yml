@@ -387,9 +387,14 @@ jobs:
   # beside `check` so the existing jobs don't get longer. The worker runs from
   # its bundle, so the packed package is what the hub talks to.
   test-remote-loopback:
-    name: Test (remote-loopback)
+    name: Test (remote-loopback) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total: [3]
     if: >
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
@@ -470,7 +475,7 @@ jobs:
         run: pnpm --filter @band-app/web exec playwright install --with-deps chromium
 
       - name: Test hub (remote-loopback)
-        run: pnpm --filter @band-app/server exec vitest run
+        run: pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
         env:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
