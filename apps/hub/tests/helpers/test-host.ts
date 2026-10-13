@@ -329,3 +329,10 @@ export async function settleWorktreesOnHost(home: string, hostId: string): Promi
     }
   }
 }
+
+/**
+ * The host a hook reports from when it runs next to a seeded worktree: the loopback worker in
+ * `remote-loopback` mode (the hub's relay writes it for a real agent), else none, which means the
+ * hub's own machine.
+ */
+export const HOOK_HOST_ID: string | undefined = isRemoteLoopback ? LOOPBACK_HOST_ID : undefined;

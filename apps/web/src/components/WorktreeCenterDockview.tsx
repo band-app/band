@@ -67,7 +67,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  AGENT_STATE_INFO,
   AgentIcon,
+  AgentStateDot,
   buildLspWsUrl,
   type ChangeEntry,
   type ChangeSection,
@@ -238,13 +240,16 @@ const TAB_ROOT_CLASS = "dv-default-tab group flex w-full items-center gap-1.5";
 // strip uncluttered while the active tab stays closable at a glance.
 const CLOSE_BTN_BASE =
   "absolute inset-0 inline-flex items-center justify-center rounded-sm transition-opacity hover:bg-accent";
-function closeButtonClass(isActive: boolean): string {
-  return `${CLOSE_BTN_BASE} ${isActive ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`;
+function closeButtonClass(isActive: boolean, hasIndicator: boolean): string {
+  // The active tab keeps its X at rest unless an indicator holds the slot.
+  const atRest = isActive && !hasIndicator;
+  return `${CLOSE_BTN_BASE} ${atRest ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`;
 }
 
-/** The slot at the end of a tab. An inactive tab shows its `indicator` (agent
- *  status, unsaved dot) at rest; the close X takes the same place on hover and
- *  on the active tab, so the tab's width never changes. */
+/** The slot at the end of a tab. A tab shows its `indicator` (agent status,
+ *  unsaved dot) at rest, active or not; the close X takes the same place on
+ *  hover, and at rest on an active tab with no indicator, so the tab's width
+ *  never changes. */
 function TabEndSlot({
   isActive,
   indicator,
@@ -260,14 +265,14 @@ function TabEndSlot({
 }) {
   return (
     <span className="relative ml-0.5 inline-flex size-4 shrink-0 items-center justify-center">
-      {indicator && !isActive ? (
+      {indicator ? (
         <span className="inline-flex items-center justify-center transition-opacity group-hover:opacity-0">
           {indicator}
         </span>
       ) : null}
       <button
         type="button"
-        className={closeButtonClass(isActive)}
+        className={closeButtonClass(isActive, Boolean(indicator))}
         onClick={onClose}
         title={closeTitle}
         data-testid={closeTestId}
@@ -280,28 +285,29 @@ function TabEndSlot({
 
 type TabAgentStatusKind = TabAgentStatus["status"];
 
-/** Spinner while the agent works, a dot when it needs the user. */
+/** Which of several panes' statuses a terminal tab shows: the higher rank. */
+const TAB_STATUS_RANK: Record<TabAgentStatusKind, number> = {
+  question: 5,
+  failed: 4,
+  working: 3,
+  monitoring: 2,
+  done: 1,
+};
+
+/** Spinner while the agent works; the dashboard's dot for every other state. */
 function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
   if (status === "working") {
     return (
       <Loader2
         role="img"
-        aria-label="Agent running"
+        aria-label={AGENT_STATE_INFO.working.label}
         data-testid={testId}
         data-status={status}
         className="size-3 animate-spin text-muted-foreground"
       />
     );
   }
-  return (
-    <span
-      role="img"
-      aria-label="Needs your attention"
-      data-testid={testId}
-      data-status={status}
-      className="size-2 rounded-full bg-status-needs-attention"
-    />
-  );
+  return <AgentStateDot status={status} testId={testId} withTitle />;
 }
 
 /** The agent status of a chat, from the worktree's status snapshot. */
@@ -318,8 +324,7 @@ function useTerminalTabStatus(worktreeId: string, leafId: string): TabAgentStatu
     let found: TabAgentStatusKind | undefined;
     for (const t of s.statuses.get(worktreeId)?.tabStatuses ?? []) {
       if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
-      if (t.status === "needs_attention") return t.status;
-      found = t.status;
+      if (!found || TAB_STATUS_RANK[t.status] > TAB_STATUS_RANK[found]) found = t.status;
     }
     return found;
   });
