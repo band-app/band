@@ -11,7 +11,7 @@
  * SQL leaves `services/state.ts` too.
  */
 
-import { and, eq, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or } from "drizzle-orm";
 import type { WorktreeStatusSnapshot } from "../../events/status-event-bus";
 import { getDb } from "../connection";
 import {
@@ -132,19 +132,20 @@ export class WorktreeStatusQueries {
   }
 
   /**
-   * Reset every "working" / "needs_attention" row back to "waiting" and
+   * Reset every row that is not "done" or "failed" back to "idle" and
    * return the count of affected rows. Used at server startup to clean
    * up stale state from the previous run.
    */
-  resetActiveToWaiting(now: number): number {
+  resetActiveToIdle(now: number): number {
     const db = getDb();
     const result = db
       .update(worktreeStatusesTable)
-      .set({ agentStatus: "waiting", updatedAt: now })
+      .set({ agentStatus: "idle", updatedAt: now })
       .where(
         or(
           eq(worktreeStatusesTable.agentStatus, "working"),
-          eq(worktreeStatusesTable.agentStatus, "needs_attention"),
+          eq(worktreeStatusesTable.agentStatus, "monitoring"),
+          eq(worktreeStatusesTable.agentStatus, "question"),
         ),
       )
       .run();
@@ -223,25 +224,29 @@ export class WorktreeStatusSourceQueries {
       .run();
   }
 
-  /** Delete every source. Used at server startup: no agent state survives it. */
-  removeAll(): void {
-    getDb().delete(worktreeStatusSourcesTable).run();
+  /**
+   * Delete every source that is not `done` or `failed`. Used at server
+   * startup: no running agent survives it, but a finished one stays.
+   */
+  removeActive(): void {
+    getDb()
+      .delete(worktreeStatusSourcesTable)
+      .where(notInArray(worktreeStatusSourcesTable.status, ["done", "failed"]))
+      .run();
   }
 
-  /**
-   * Set the worktree's `needs_attention` sources to `waiting`, except the
-   * ones in `keep`.
-   */
-  acknowledge(worktreeId: string, keep: string[], now: number): void {
-    const db = getDb();
-    const conditions = [
-      eq(worktreeStatusSourcesTable.worktreeId, worktreeId),
-      eq(worktreeStatusSourcesTable.status, "needs_attention"),
-    ];
-    if (keep.length > 0) conditions.push(notInArray(worktreeStatusSourcesTable.sourceId, keep));
-    db.update(worktreeStatusSourcesTable)
-      .set({ status: "waiting", updatedAt: now })
-      .where(and(...conditions))
+  /** Set the worktree's `done` and `failed` sources to `idle`. Returns how many changed. */
+  acknowledge(worktreeId: string, now: number): number {
+    const result = getDb()
+      .update(worktreeStatusSourcesTable)
+      .set({ status: "idle", updatedAt: now })
+      .where(
+        and(
+          eq(worktreeStatusSourcesTable.worktreeId, worktreeId),
+          inArray(worktreeStatusSourcesTable.status, ["done", "failed"]),
+        ),
+      )
       .run();
+    return Number(result.changes);
   }
 }

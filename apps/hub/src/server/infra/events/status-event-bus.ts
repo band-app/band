@@ -48,8 +48,8 @@ export interface WorktreeStatusSnapshot {
   worktreePath: string;
   agent?: WorktreeAgentInfo;
   /**
-   * The chats and terminals in the worktree whose agent is `working` or
-   * `needs_attention`, for the center tab strip. Absent where the snapshot
+   * The chats and terminals in the worktree whose agent is not `idle`, for
+   * the center tab strip. Absent where the snapshot
    * comes straight from the row (the repos list).
    */
   tabStatuses?: TabAgentStatus[];
@@ -63,7 +63,7 @@ export interface WorktreeStatusSnapshot {
 export interface TabAgentStatus {
   chatId?: string;
   terminalId?: string;
-  status: "working" | "needs_attention";
+  status: "working" | "monitoring" | "question" | "done" | "failed";
 }
 
 interface GitStatus {
@@ -104,6 +104,7 @@ export interface StatusEvent {
     | "subscription-created"
     | "subscription-delivered"
     | "subscription-removed"
+    | "worktree-origin-changed"
     | "open-file";
   status?: WorktreeStatusSnapshot;
   statuses?: WorktreeStatusSnapshot[];

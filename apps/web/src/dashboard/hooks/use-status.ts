@@ -37,7 +37,13 @@ export function useStatusWatcher() {
           previousStatuses.current.delete(wsId);
         }
 
-        if (prevAgentStatus === "working" && newAgentStatus === "needs_attention") {
+        // A turn that needs the user or ended chimes; `monitoring` does not.
+        if (
+          prevAgentStatus !== newAgentStatus &&
+          (newAgentStatus === "question" ||
+            newAgentStatus === "done" ||
+            newAgentStatus === "failed")
+        ) {
           const settings = queryClient.getQueryData<Settings>(queryKeys.settings);
           const notifications = settings?.notifications;
           if (notifications?.soundOnNeedsAttention) {
@@ -81,6 +87,20 @@ export function useBranchStatusWatcher() {
 
     return unsubscribe;
   }, [adapter, updateGitStatus, updateCIStatus]);
+}
+
+/** A parent set or removed from another device or the CLI changes the Origin tree. */
+export function useOriginChangeWatcher() {
+  const adapter = useAdapter();
+  useEffect(
+    () =>
+      adapter.subscribeStatusEvents((event) => {
+        if (event.kind === "worktree-origin-changed") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+        }
+      }),
+    [adapter],
+  );
 }
 
 export function useSetupStatusWatcher() {

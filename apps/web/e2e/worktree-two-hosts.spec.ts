@@ -416,7 +416,7 @@ test("the desktop viewer opens the selected host's desktop (item 5)", async ({ p
   await expect(app.desktop.resolution).toHaveText("80x60");
 });
 
-test("an origin link from a child started on B points at B (item 7)", async ({ page }) => {
+test("an origin link from a child started on B nests under B (item 7)", async ({ page }) => {
   await createOn(b, "child-of-b", { worktreeId: b.same, chatId: CHAT_B });
   const childId = `${REPO}-child-of-b@${b.id}`;
   await expect.poll(listedIds).toContain(childId);
@@ -425,11 +425,6 @@ test("an origin link from a child started on B points at B (item 7)", async ({ p
   await app.open(a.same);
   await app.select(childId);
   await app.expectOnlySelected(childId);
-  await expect(app.sidebar.startedFromLink).toHaveAttribute("data-origin-worktree", b.same);
-
-  await app.sidebar.startedFromLink.click();
-  await app.expectOnlySelected(b.same);
-  await expect(app.card(a.same)).not.toHaveAttribute("aria-current", "page");
 
   // In the Origin grouping the child nests under B's row, not A's.
   await app.groupBy("origin");

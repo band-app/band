@@ -52,7 +52,7 @@ export const worktreeStatuses = sqliteTable("worktree_statuses", {
 // One row per agent reporting into a worktree: `chat:<chatId>` for a chat
 // pane's ACP turns, `hook:<sessionId>` for a hook-reporting CLI session,
 // `manual` for `statuses.update`. `worktree_statuses.agent_status` is
-// derived from these rows (needs_attention > working > waiting).
+// derived from these rows (question > failed > working > monitoring > done > idle).
 // `terminal_id` is set when the hook came from a Band terminal, so closing
 // that terminal drops the row.
 export const worktreeStatusSources = sqliteTable(
