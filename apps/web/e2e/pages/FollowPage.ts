@@ -2,7 +2,7 @@
  * Page object for follow-the-work: the "host is offline, continue elsewhere?" dialog, the
  * "Continued from" line in the worktree header and on the sidebar card, the Diverged badge on the
  * old copy, and the divergence panel. Locators use the test ids set in `ContinueOnHostDialog.tsx`,
- * `ContinuedFromLine.tsx`, `StartedFromBar.tsx`, `WorktreeCard.tsx` and `DivergencePanel.tsx`.
+ * `ContinuedFromLine.tsx`, `WorktreeCard.tsx` and `DivergencePanel.tsx`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -45,8 +45,9 @@ export class FollowPage {
 
   // ---- the record of the move -----------------------------------------------------
 
+  /** The bar that used to sit in the worktree header. It must stay absent. */
   get headerContinuedFrom(): Locator {
-    return this.page.getByTestId("worktree-header__continued-from").filter({ visible: true });
+    return this.page.getByTestId("worktree-header__continued-from");
   }
 
   card(worktreeId: string): Locator {

@@ -28,7 +28,6 @@ import { ChangesSections } from "./ChangesSections";
 import { DesktopDragRegion } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
 import { OfflineCheckpointBar } from "./OfflineCheckpoint";
-import { StartedFromBar } from "./StartedFromBar";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "./ToolbarButtons";
 import { getWorktreeLeafActions, WorktreeCenterDockview } from "./WorktreeCenterDockview";
 
@@ -233,7 +232,6 @@ export function MobileWorktreeShell() {
         <MultiWorktreePanelHost emptyState={null}>
           {(worktreeId, wsActive) => (
             <div className="flex h-full w-full flex-col">
-              <StartedFromBar worktreeId={worktreeId} />
               <OfflineCheckpointBar worktreeId={worktreeId} />
               <div className="relative min-h-0 flex-1">
                 <WorktreeCenterDockview

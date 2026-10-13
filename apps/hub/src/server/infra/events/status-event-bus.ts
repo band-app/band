@@ -104,6 +104,7 @@ export interface StatusEvent {
     | "subscription-created"
     | "subscription-delivered"
     | "subscription-removed"
+    | "worktree-origin-changed"
     | "open-file";
   status?: WorktreeStatusSnapshot;
   statuses?: WorktreeStatusSnapshot[];
