@@ -1,5 +1,6 @@
 import { createElement, type FC } from "react";
 import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-icon-resolve";
+import { buildSymbolMarkup } from "./file-icon-symbol";
 
 // All material-icon-theme SVGs inlined as raw strings, then assembled into a
 // single hidden <svg> sprite parsed via DOMParser and appended to <body>.
@@ -71,10 +72,8 @@ function buildSpriteMarkup(): string {
   for (const [path, src] of Object.entries(iconSources)) {
     const file = path.split("/").pop();
     if (!file) continue;
-    const viewBox = src.match(/viewBox="([^"]+)"/)?.[1] ?? "0 0 32 32";
-    const inner = src.match(/<svg[^>]*>([\s\S]*?)<\/svg>\s*$/)?.[1];
-    if (!inner) continue;
-    parts.push(`<symbol id="${symbolByBasename[file]}" viewBox="${viewBox}">${inner}</symbol>`);
+    const symbol = buildSymbolMarkup(symbolByBasename[file] ?? "", src);
+    if (symbol) parts.push(symbol);
   }
   parts.push("</svg>");
   return parts.join("");
