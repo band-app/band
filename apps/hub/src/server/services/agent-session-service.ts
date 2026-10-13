@@ -65,11 +65,6 @@ import { worktreeService } from "./worktree-service";
 
 const log = createLogger("agent-sessions");
 
-/** An agent process with no turn running, nothing pending and no work of
- *  its own (see `PendingWork`) is stopped after it sends nothing for this
- *  long. The next prompt reattaches its session. `BAND_AGENT_IDLE_TIMEOUT_MS`
- *  overrides it. */
-const IDLE_TIMEOUT_MS = 15 * 60_000;
 /** After `session/cancel`, how long a turn gets to stop before its agent
  *  process is killed. */
 const CANCEL_GRACE_MS = 15_000;
@@ -310,16 +305,25 @@ function stopRuntime(rt: Runtime): void {
   mcpProxyService.revokeSession(rt.chatId);
 }
 
-function idleTimeoutMs(): number {
+/** The opt-in idle stop, from `BAND_AGENT_IDLE_TIMEOUT_MS`. Unset (the
+ *  default) means an agent process runs until the chat, its worktree, the
+ *  agent or the hub ends it, as the same agent does in a terminal. With a
+ *  positive value, a process with no turn running, nothing pending and no work
+ *  of its own (see `PendingWork`) is stopped after it sends nothing for that
+ *  long. The next prompt reattaches its session. */
+function idleTimeoutMs(): number | null {
   const override = Number(process.env.BAND_AGENT_IDLE_TIMEOUT_MS);
-  return Number.isFinite(override) && override > 0 ? override : IDLE_TIMEOUT_MS;
+  return Number.isFinite(override) && override > 0 ? override : null;
 }
 
-/** (Re)starts the idle countdown. Every update from the agent restarts it,
- *  so a turn the agent started itself is never cut off. */
-function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
+/** (Re)starts the idle countdown, when the opt-in is set. Every update from
+ *  the agent restarts it, so a turn the agent started itself is never cut off. */
+function scheduleIdle(rt: Runtime, delayMs?: number): void {
   if (rt.idleTimer) clearTimeout(rt.idleTimer);
-  const delay = Math.min(delayMs, MAX_TIMER_MS);
+  rt.idleTimer = null;
+  const timeout = idleTimeoutMs();
+  if (timeout === null) return;
+  const delay = Math.min(delayMs ?? timeout, MAX_TIMER_MS);
   rt.idleTimer = setTimeout(() => {
     rt.idleTimer = null;
     if (rt.inTurn || rt.pending.size > 0 || rt.attaching) return;
@@ -336,7 +340,7 @@ function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
         },
         "idle agent has pending work; not stopping it",
       );
-      scheduleIdle(rt, until - now + idleTimeoutMs());
+      scheduleIdle(rt, until - now + timeout);
       return;
     }
     log.info({ chatId: rt.chatId }, "stopping idle agent");
@@ -1484,7 +1488,7 @@ export class AgentSessionService {
       if (proc.canList) agentSessions = await proc.listSessions(location.cwd);
     } catch (err) {
       log.warn({ chatId, err }, "session/list failed; using Band's log");
-      // Let the idle timer drop a runtime that never got a process.
+      // With the opt-in idle stop set, its timer drops a runtime that never got a process.
       if (!rt.inTurn) scheduleIdle(rt);
     }
 
