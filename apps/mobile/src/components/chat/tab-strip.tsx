@@ -112,9 +112,16 @@ export function TabStrip({
     const at = offsets.current.get(id);
     if (at) scroll.current?.scrollTo({ x: Math.max(0, at.x - 24), animated });
   }, []);
+  const lastIdsKey = useRef(idsKey);
   useEffect(() => {
-    if (active) reveal(active, true);
-  }, [active, reveal]);
+    if (!active) return;
+    reveal(active, true);
+    // A select in an unchanged list is revealed here; the bold label resizing the tab must not
+    // jump on top of the animation. After a close or a move the offsets read here are stale, so
+    // the tab's next `onLayout` scrolls again.
+    if (lastIdsKey.current === idsKey) laidOutFor.current = `${active}|${idsKey}`;
+    lastIdsKey.current = idsKey;
+  }, [active, idsKey, reveal]);
   useEffect(() => {
     const ids = new Set(tabs.map((t) => t.id));
     for (const id of offsets.current.keys()) if (!ids.has(id)) offsets.current.delete(id);
