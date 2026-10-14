@@ -19,12 +19,12 @@ import {
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
-import { loadState } from "./state";
+import { RepoQueries } from "../infra/db/queries/repos";
 import { tokenService } from "./token-service";
 
 const log = createLogger("worker-lease");
-const LOCAL_HOST_ID = "local";
 
+const RENEW_TIMEOUT_MS = 10_000;
 export const DEFAULT_LEASE_MS = 5 * 60_000;
 
 /** The lease time: `BAND_WORKER_LEASE_MS`, read on every call. */
@@ -44,10 +44,13 @@ interface Entry {
   /** `false` once the worker answered that it has no lease method (an older worker). */
   supported: boolean | null;
   lastAckAt: number;
+  /** When the latest renewal was sent, acknowledged or not. */
+  lastAttemptAt: number;
 }
 
 export class WorkerLeaseService {
   private readonly entries = new Map<string, Entry>();
+  private readonly repos = new RepoQueries();
 
   /** A worker's link session started. Renewals begin when it is connected. */
   attach(session: ServerSession): void {
@@ -62,6 +65,7 @@ export class WorkerLeaseService {
       timer,
       supported: old?.supported ?? null,
       lastAckAt: old?.lastAckAt ?? 0,
+      lastAttemptAt: old?.lastAttemptAt ?? 0,
     });
   }
 
@@ -84,21 +88,16 @@ export class WorkerLeaseService {
 
   /** Folders on `hostId` that a continuation superseded: the worker starts nothing in them. */
   private blockedPaths(hostId: string): string[] {
-    const out: string[] = [];
-    for (const repo of loadState().repos) {
-      for (const wt of repo.worktrees) {
-        if ((wt.hostId ?? LOCAL_HOST_ID) === hostId && wt.supersededBy) out.push(wt.path);
-      }
-    }
-    return out;
+    return this.repos.supersededPaths(hostId);
   }
 
   private async renew(hostId: string): Promise<void> {
     const entry = this.entries.get(hostId);
     if (!entry || entry.supported === false || !entry.session.attached) return;
     const params: LeaseRenewParams = { ttlMs: leaseMs(), blockedPaths: this.blockedPaths(hostId) };
+    entry.lastAttemptAt = Date.now();
     try {
-      await entry.session.request(METHOD_LEASE_RENEW, params, { timeoutMs: 10_000 });
+      await entry.session.request(METHOD_LEASE_RENEW, params, { timeoutMs: RENEW_TIMEOUT_MS });
       entry.supported = true;
       entry.lastAckAt = Date.now();
       tokenService.touchHost(hostId, entry.lastAckAt);
@@ -123,7 +122,13 @@ export class WorkerLeaseService {
     const entry = this.entries.get(hostId);
     if (entry?.supported === false) return null;
     const seen = tokenService.hostSeen(hostId)?.lastSeenAt ?? null;
-    if (entry && entry.lastAckAt > 0) return Math.max(entry.lastAckAt, seen ?? 0) + leaseMs();
+    // A renewal the worker received but whose answer was lost counts from when it was sent, plus
+    // the time the hub waits for the answer.
+    if (entry && entry.lastAckAt > 0) {
+      const attempt =
+        entry.lastAttemptAt > entry.lastAckAt ? entry.lastAttemptAt + RENEW_TIMEOUT_MS : 0;
+      return Math.max(entry.lastAckAt, attempt, seen ?? 0) + leaseMs();
+    }
     if (seen === null) return null;
     return seen + leaseMs() + renewEveryMs();
   }

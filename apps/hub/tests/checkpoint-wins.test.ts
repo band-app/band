@@ -70,7 +70,7 @@ describe("opening a worktree on a host that has an older copy", () => {
     writeFileSync(join(bPath, "from-b.txt"), "written on B\n");
     await w.m("checkpoints.take", { worktreeId: onB });
     await w.killWorker(b);
-    const back = await w.m<ContinueReply & { backupRefs?: string[] }>("follow.continue", {
+    const back = await w.m<ContinueReply>("follow.continue", {
       worktreeId: onB,
       toHostId: a.hostId,
     });

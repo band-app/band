@@ -235,6 +235,7 @@ export class FollowService {
           `${hostName} may still be running ${worktreeId}. It stops all work when its lease ends, in ${formatAge(leaseLeft)}, and then this worktree can be opened on another host.`,
         ),
         leaseExpiresAt: Date.now() + leaseLeft,
+        leaseRemainingMs: leaseLeft,
         checkpointId: checkpoint.id,
         checkpointAt: checkpoint.createdAt,
         checkpointAgeMs: Date.now() - checkpoint.createdAt,
@@ -737,10 +738,6 @@ export class FollowService {
   }
 
   /**
-   * Removes the old copy. Only after `confirm` is true: this deletes files on its host. A host
-   * that is offline removes the checkout the next time it connects.
-   */
-  /**
    * "Discard" for a superseded default-branch copy: the folder stays, and the branch goes back to
    * the latest of its remote, with local changes and untracked files dropped. The superseded mark
    * is cleared, because the folder is the repo's checkout again.
@@ -749,6 +746,20 @@ export class FollowService {
     const host = hostRegistry.hostById(old.hostId);
     const git = gitIn(host, old.worktree.path);
     const branch = old.repo.defaultBranch;
+    // What the folder holds is kept under a backup ref before it is reset.
+    const [root] = (await host.info()).roots;
+    if (root) {
+      const oldId = idOf(old);
+      const snap = await buildSnapshot(
+        host,
+        old.worktree.path,
+        posix.join(root, WIP_DIR),
+        `${oldId}.discard`,
+        `band: backup of ${old.worktree.path} before it is reset`,
+        true,
+      );
+      await git(["update-ref", `refs/band/backup/${oldId}/${Date.now()}`, snap.snapshotSha]);
+    }
     await git(["fetch", "origin", branch]).catch(() => undefined);
     const target =
       (await git(["rev-parse", "--verify", "--quiet", `origin/${branch}`]).catch(() => "")) ||
@@ -761,6 +772,10 @@ export class FollowService {
     this.repos.setContinuedFrom(old.repo.name, old.worktree.name, old.hostId, null);
   }
 
+  /**
+   * Removes the old copy. Only after `confirm` is true: this deletes files on its host. A host
+   * that is offline removes the checkout the next time it connects.
+   */
   async discardOld(oldId: string, confirm: boolean, discardChanges = false): Promise<{ ok: true }> {
     if (!confirm) {
       throw new CheckpointError(

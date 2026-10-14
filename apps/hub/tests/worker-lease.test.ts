@@ -64,6 +64,10 @@ describe("the old owner's lease", () => {
   }, 60_000);
 
   it("keeps the superseded copy stopped when its worker comes back", async () => {
+    await waitFor(async () => ((await offer()).blocked === undefined ? true : undefined), {
+      label: "the lease to end",
+      timeoutMs: 15_000,
+    });
     const result = await w.m<{ worktreeId: string }>("follow.continue", {
       worktreeId: aId,
       toHostId: b.hostId,

@@ -144,7 +144,6 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   // Stdio is one channel (hub writes stdin, worker writes stdout) and stderr is another.
   // The hub ending its side closes stdin. Resetting the stdio channel kills the agent.
   r.raw("acp.spawn", async (a) => {
-    ctx.lease.assertMayRun(str(a, "cwd"));
     const env = strRecord(a, "env");
     // The hub's `band` CLI goes first, so an agent's shell tool finds it.
     const cliDir = await ctx.cli?.dir();
@@ -155,7 +154,9 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       args: strArray(a, "args"),
       env,
     };
-    const stdio = await host.acp.spawn(launch, await path(a, "cwd"));
+    const cwd = await path(a, "cwd");
+    ctx.lease.assertMayRun(cwd);
+    const stdio = await host.acp.spawn(launch, cwd);
     const agentId = `a-${stdio.pid ?? "x"}-${agents.size}-${Date.now().toString(36)}`;
     agents.set(agentId, { stdio });
 
@@ -309,8 +310,8 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   const pty = host.pty;
 
   r.json("pty.spawn", async (a) => {
-    ctx.lease.assertMayRun(str(a, "worktreeRoot"));
     const worktreeRoot = await path(a, "worktreeRoot");
+    ctx.lease.assertMayRun(worktreeRoot);
     const o = optObj(a, "options");
     let options: SpawnOptions | undefined = o && {
       command: optStr(o, "command"),

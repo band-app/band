@@ -40,6 +40,8 @@ const safeName = (path: string) => path.replace(/[^A-Za-z0-9._-]/g, "_").replace
  */
 export class LeaseGuard {
   private expiresAt: number | null = null;
+  /** The same expiry on the wall clock, which keeps counting while the machine sleeps. */
+  private expiresAtWall: number | null = null;
   private fenced = false;
   private fencing: Promise<void> | null = null;
   private lastSnapshots = 0;
@@ -57,9 +59,12 @@ export class LeaseGuard {
 
   /** The hub's renewal: extends the lease, lifts a fence and records the folders another host owns. */
   async renew(ttlMs: number, blockedPaths: string[]): Promise<LeaseRenewReply> {
+    // A renewal never lands between a fence's snapshot and its kills.
+    await this.fencing;
     this.blocked = await Promise.all(blockedPaths.map((p) => realpath(p).catch(() => resolve(p))));
     this.ttlMs = ttlMs;
     this.expiresAt = performance.now() + ttlMs;
+    this.expiresAtWall = Date.now() + ttlMs;
     const reply = { fenced: this.fenced, snapshots: this.fenced ? this.lastSnapshots : 0 };
     if (this.fenced) {
       this.options.log.info("the hub renewed the lease, new work may start again");
@@ -71,6 +76,7 @@ export class LeaseGuard {
 
   /** Throws when a process may not start in `cwd`: the lease ran out, or another host owns the folder. */
   assertMayRun(cwd: string): void {
+    // `cwd` is the path the worker's policy resolved, so symlinks are already followed.
     if (this.fenced) {
       throw new Error("This worker lost the hub's lease and stopped its work. Wait for the hub.");
     }
@@ -91,7 +97,11 @@ export class LeaseGuard {
     if (this.timer) return;
     const every = Math.min(1000, Math.max(50, this.ttlMs / 4));
     this.timer = setInterval(() => {
-      if (this.expiresAt !== null && performance.now() >= this.expiresAt && !this.fenced) {
+      const over =
+        this.expiresAt !== null &&
+        this.expiresAtWall !== null &&
+        (performance.now() >= this.expiresAt || Date.now() >= this.expiresAtWall);
+      if (over && !this.fenced) {
         void this.fence();
       }
     }, every);

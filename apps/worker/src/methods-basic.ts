@@ -249,8 +249,9 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   });
   // A plan lives on the worker until `scripts.dispose`. Its exit comes back as a `scripts.exited` notification.
   r.json("scripts.prepare", async (a) => {
-    ctx.lease.assertMayRun(str(a, "worktreePath"));
-    const plan = await host.scripts.prepare({ ...(await worktreePaths(a)), label: label(a) });
+    const paths = await worktreePaths(a);
+    ctx.lease.assertMayRun(paths.worktreePath);
+    const plan = await host.scripts.prepare({ ...paths, label: label(a) });
     if (!plan) return null;
     const planId = randomUUID();
     plans.set(planId, plan);

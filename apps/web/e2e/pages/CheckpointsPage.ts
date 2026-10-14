@@ -70,6 +70,11 @@ export class CheckpointsPage {
     return this.page.getByTestId("worktree-card__move-reason");
   }
 
+  /** The open context menu. */
+  get cardMenu(): Locator {
+    return this.page.getByRole("menu");
+  }
+
   async closeCardMenu(): Promise<void> {
     await this.page.keyboard.press("Escape");
     await expect(this.moveItem()).toHaveCount(0);

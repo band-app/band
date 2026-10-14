@@ -1049,7 +1049,9 @@ export class CheckpointService {
       const stateRepo = state.repos.find((r) => r.name === repo.name);
       if (!stateRepo) throw new CheckpointError("invalid", `Repo ${repo.name} is gone.`);
       // An older copy the target held under this name is replaced by the restored one.
-      stateRepo.worktrees = stateRepo.worktrees.filter((w) => w !== onTarget);
+      stateRepo.worktrees = stateRepo.worktrees.filter(
+        (w) => !(w.name === worktree.name && (w.hostId ?? LOCAL_HOST_ID) === toHostId),
+      );
       stateRepo.worktrees.push({
         name: worktree.name,
         branch: row.branch || worktree.branch,

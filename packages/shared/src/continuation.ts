@@ -107,6 +107,8 @@ export interface ContinueOffer {
    * work cannot continue elsewhere (`blocked.reason` is `lease-active`). The UI counts down to it.
    */
   leaseExpiresAt?: number;
+  /** The same moment as milliseconds left when the hub answered, so a client clock that is off cannot skew a countdown. */
+  leaseRemainingMs?: number;
   checkpointId?: string;
   checkpointAt?: number;
   /** Age of the checkpoint in ms, at the time of the offer. */

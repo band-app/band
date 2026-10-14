@@ -1,7 +1,7 @@
 import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { CloudOff, File as FileIcon, FolderOpen, GitCompare } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toWorktreeId, useRepos } from "@/dashboard";
 import { ContinueOnHostDialog } from "../dashboard/components/ContinueOnHostDialog";
 import { timeAgo, useHostSeen } from "../dashboard/hooks/use-host-status";
@@ -116,14 +116,23 @@ export function OfflineWorktreeNotice({
   });
   const offer = offerQuery.data;
   const blocked = offer?.blocked;
-  const leaseEndsAt = blocked?.reason === "lease-active" ? (offer?.leaseExpiresAt ?? null) : null;
+  // The end is the hub's answer time plus the time it said was left, so this clock may be off.
+  const leaseEndsAt =
+    blocked?.reason === "lease-active" && offer?.leaseRemainingMs !== undefined
+      ? offerQuery.dataUpdatedAt + offer.leaseRemainingMs
+      : null;
   const now = useNow(leaseEndsAt !== null ? 1000 : null);
   const leaseLeftMs = leaseEndsAt !== null ? leaseEndsAt - now : null;
   const refetchOffer = offerQuery.refetch;
   // When the countdown reaches zero, ask again: the button turns into the real one.
+  const askedFor = useRef(0);
   useEffect(() => {
-    if (leaseLeftMs !== null && leaseLeftMs <= 0) void refetchOffer();
-  }, [leaseLeftMs, refetchOffer]);
+    if (leaseLeftMs === null || leaseLeftMs > 0 || askedFor.current === offerQuery.dataUpdatedAt) {
+      return;
+    }
+    askedFor.current = offerQuery.dataUpdatedAt;
+    void refetchOffer();
+  }, [leaseLeftMs, offerQuery.dataUpdatedAt, refetchOffer]);
   if (!offline) return null;
   return (
     <div
