@@ -119,6 +119,11 @@ export class TokenQueries {
       .run();
   }
 
+  /** Records that the worker was heard from at `at`, without changing its status. */
+  touchHost(id: string, at: number): void {
+    this.db().update(hosts).set({ lastSeenAt: at }).where(eq(hosts.id, id)).run();
+  }
+
   /** How many worktrees (worktree rows) live on a host. */
   countWorktreesOnHost(id: string): number {
     const row = this.db()

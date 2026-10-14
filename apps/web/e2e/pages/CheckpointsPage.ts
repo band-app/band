@@ -70,6 +70,11 @@ export class CheckpointsPage {
     return this.page.getByTestId("worktree-card__move-reason");
   }
 
+  /** The open context menu. */
+  get cardMenu(): Locator {
+    return this.page.getByRole("menu");
+  }
+
   async closeCardMenu(): Promise<void> {
     await this.page.keyboard.press("Escape");
     await expect(this.moveItem()).toHaveCount(0);
@@ -92,6 +97,11 @@ export class CheckpointsPage {
   /** The right panel of an offline worktree, before the checkpoint is chosen. */
   get sidepanelPlaceholder(): Locator {
     return this.page.getByTestId("offline-sidepanel");
+  }
+
+  /** The time left before the old host's lease ends and the button turns on. */
+  get leaseCountdown(): Locator {
+    return this.notice.getByTestId("offline-notice__countdown");
   }
 
   get openElsewhereButton(): Locator {

@@ -202,6 +202,7 @@ const stubMethods = (w: Worker): string[] => {
 let openId = "";
 let lockedId = "";
 let buttonId = "";
+let soloMainId = "";
 let noCheckpointId = "";
 let continuedId = "";
 
@@ -210,12 +211,14 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({
     tmpHome,
-    env: { BAND_LOCAL_HOST: "off", ...acpStubEnv(tmpHome) },
+    // A short lease: A's worktrees open elsewhere two seconds after it drops.
+    env: { BAND_LOCAL_HOST: "off", BAND_WORKER_LEASE_MS: "2000", ...acpStubEnv(tmpHome) },
   });
   a = await addWorker("box-a");
   b = await addWorker("box-b");
   await addRepo("app", [a, b]);
   await addRepo("locked", [a]);
+  await addRepo("solo", [a]);
   // B holds the repo once it has a worktree of it, which a restore needs.
   await createWorktree(b, "app", "seed-b");
 
@@ -223,6 +226,13 @@ test.beforeAll(async () => {
   buttonId = await createWorktree(a, "app", "feat-button");
   noCheckpointId = await createWorktree(a, "app", "feat-bare");
   lockedId = await createWorktree(a, "locked", "feat-lock");
+  // The repo's own checkout of main on A is a worktree too, once A reports the clone.
+  await createWorktree(a, "solo", "feat-solo");
+  await trpcMutateData(server.url, TOKEN, "repos.addFromWorker", {
+    hostId: a.hostId,
+    path: join(a.root, "solo"),
+  });
+  soloMainId = `solo-main@${a.hostId}`;
   await trpcMutateData(server.url, TOKEN, "repos.update", {
     name: "locked",
     allowedHostIds: [a.hostId],
@@ -268,12 +278,25 @@ test("a finished turn and an uncommitted file give feat-one a checkpoint with th
   const buttonPath = (await worktreeRow("app", "feat-button", a.hostId))?.path ?? "";
   writeFileSync(join(buttonPath, "hello.txt"), "edited for the button flow\n");
   await trpcMutateData(server.url, TOKEN, "checkpoints.take", { worktreeId: buttonId });
+  await trpcMutateData(server.url, TOKEN, "checkpoints.take", { worktreeId: soloMainId });
   // The limited repo needs a checkpoint too, so only the restriction can stop it.
   await trpcMutateData(server.url, TOKEN, "checkpoints.take", { worktreeId: lockedId }).catch(
     () => undefined,
   );
   await a.handle.kill();
   await expect.poll(() => hostStatus(a.hostId), { timeout: 30_000 }).not.toBe("online");
+  // The old owner's lease must be over before the offer opens up.
+  await expect
+    .poll(
+      async () =>
+        (
+          await trpcQuery<{ blocked?: { reason: string } }>(server.url, TOKEN, "follow.offer", {
+            worktreeId: openId,
+          })
+        ).blocked?.reason,
+      { timeout: 30_000 },
+    )
+    .not.toBe("lease-active");
 });
 
 test("a repo limited to the offline host says so, with no host to choose (S3)", async ({
@@ -308,6 +331,11 @@ test("offline worktrees are faded with an icon, and their menu offers Open on an
   await expect(checkpoints.offlineDetails).toContainText("Last checkpoint");
 
   await checkpoints.openCardMenu(openId);
+  await expect(checkpoints.moveItem()).toBeEnabled();
+  await checkpoints.closeCardMenu();
+
+  // The default branch is offered too while its host is offline.
+  await checkpoints.openCardMenu(soloMainId);
   await expect(checkpoints.moveItem()).toBeEnabled();
   await checkpoints.closeCardMenu();
 
@@ -425,6 +453,13 @@ test("when A returns with a newer change, the old copy is Diverged and the chang
   await app.goto(continuedId);
   await app.waitForReady();
   await expect(follow.divergedBadge(oldId)).toBeVisible();
+
+  // With A online again, its own checkout of main is not offered for a move.
+  const checkpoints = new CheckpointsPage(page);
+  await checkpoints.openCardMenu(soloMainId);
+  await expect(checkpoints.cardMenu).toBeVisible();
+  await expect(checkpoints.moveItem()).toHaveCount(0);
+  await checkpoints.closeCardMenu();
   await follow.openDivergence(oldId);
   await expect(follow.panelFile("after.txt")).toBeVisible();
   await follow.panelFile("after.txt").click();

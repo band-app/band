@@ -412,6 +412,11 @@ export class TokenService {
     return this.queries.findHost(id)?.status ?? null;
   }
 
+  /** Records a sign of life from a worker, such as an acknowledged lease renewal. */
+  touchHost(id: string, at: number): void {
+    this.queries.touchHost(id, at);
+  }
+
   /** A host's status and when the hub last saw its worker, or null when there is no such host. */
   hostSeen(id: string): { status: string; lastSeenAt: number | null } | null {
     const host = this.queries.findHost(id);
