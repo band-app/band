@@ -310,6 +310,9 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   });
   // The `home` override is for tests, so the hub may not set it.
   r.json("agentEnv.installSkills", () => host.agentEnv.installSkills());
+  r.json("agentEnv.accountUsage", (a) =>
+    host.agentEnv.accountUsage({ refresh: optBool(a, "refresh") }),
+  );
   r.json("agentEnv.hooksStatus", () => host.agentEnv.hooksStatus());
   r.json("agentEnv.installHooks", () => host.agentEnv.installHooks());
   r.json("agentEnv.removeHooks", () => host.agentEnv.removeHooks());
