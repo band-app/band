@@ -5,7 +5,8 @@
  * with `git.credential`. The hub answers only for a remote of a repository
  * placed on that worker: a repo with a checkout or a worktree on the
  * worker (its remotes: the URL the hub stored for the repo and those of
- * the hub's checkout, never the worker's own, which its agents can edit), or a clone the hub is about to make there (`expectRemote`). Anything
+ * the hub's checkout, never the worker's own, which its agents can edit), or a
+ * clone the hub is about to make there (`expectRemote`). Anything
  * else is refused, so a worker cannot fish for the token of a repository it
  * does not serve.
  *
