@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { getDb } from "../connection";
 import {
   repoHosts as repoHostsTable,
@@ -594,6 +594,16 @@ export class RepoQueries {
       .where(eq(reposTable.name, name))
       .get();
     return row ? (row.checkpointsEnabled ?? null) : undefined;
+  }
+
+  /** The folders on `hostId` that a continuation superseded: nothing may start in them. */
+  supersededPaths(hostId: string): string[] {
+    return getDb()
+      .select({ path: worktreesTable.path })
+      .from(worktreesTable)
+      .where(and(eq(worktreesTable.hostId, hostId), isNotNull(worktreesTable.supersededBy)))
+      .all()
+      .map((r) => r.path);
   }
 
   /**

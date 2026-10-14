@@ -18,7 +18,9 @@ import { publicProcedure, t } from "../trpc";
 
 export const settingsRouter = t.router({
   get: publicProcedure.query(() => {
-    return settingsService.get();
+    // The shared token secret is an admin credential, so no caller gets it back.
+    const { tokenSecret: _tokenSecret, ...settings } = settingsService.get();
+    return settings;
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
@@ -35,6 +37,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing runners needs an admin token.",
+      });
+    }
+    if (input.tokenSecret !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing tokenSecret needs an admin token.",
       });
     }
     settingsService.update(input);

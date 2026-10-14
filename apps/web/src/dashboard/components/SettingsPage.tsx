@@ -638,7 +638,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
-      tokenSecret: settings.tokenSecret,
       // Always send explicit booleans rather than `value || undefined`.
       // `saveSettings` does a shallow merge with the on-disk file, so
       // sending `undefined` (or omitting the key) keeps whatever value

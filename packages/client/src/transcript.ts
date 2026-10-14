@@ -110,6 +110,8 @@ export interface TranscriptState {
   plan: PlanEntry[];
   hasOlder: boolean;
   oldestEventId: number | undefined;
+  /** True once the cold replay's `history-meta` arrived: the window is complete. */
+  replayed: boolean;
   errorMessage: string | undefined;
 }
 
@@ -126,6 +128,7 @@ export const INITIAL_TRANSCRIPT: TranscriptState = {
   plan: [],
   hasOlder: false,
   oldestEventId: undefined,
+  replayed: false,
   errorMessage: undefined,
 };
 
@@ -502,6 +505,7 @@ export function transcriptReducer(
         ...state,
         hasOlder: action.hasOlder,
         oldestEventId: action.oldestEventId || undefined,
+        replayed: true,
       };
 
     default:

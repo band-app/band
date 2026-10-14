@@ -48,7 +48,9 @@ When it is off the hub stores nothing for the repo, and `checkpoints.take` refus
 
 ## Offline worktrees
 
-When a worktree's host is offline and it has a checkpoint, the card says "Offline, last checkpoint <time>" and the worktree opens read-only from the checkpoint:
+When a worktree's host is offline its card shows an offline icon and fades. The tooltip (hover; the icon also carries an `aria-label`) has the host's last seen time and the checkpoint age, or "No checkpoint". The card's menu has one item, **Open on another host…**, for a worktree on a worker. It is disabled with its reason when the hub has no checkpoint, and when the repo is limited to that one host ("Only available on <host>"). While the host is online the same item moves the worktree (see Move to host below); while it is offline it opens the [continue dialog](follow-the-work.md), which says that ignored files (`.env`, `node_modules`) are not carried over.
+
+Opening the worktree shows a notice above it: "<host> is offline (last seen …). Last checkpoint …", with an **Open on another host** button (`follow.offer` and `follow.continue`). When the offer is blocked the notice shows the reason and no button. The right panel then says the host is offline, with a link to **View checkpoint (read-only)**; the same link is in the notice. The checkpoint view shows:
 
 - Changes shows the diff of the checkpoint against its branch head.
 - Files lists and opens the files as the checkpoint holds them.
@@ -56,9 +58,13 @@ When a worktree's host is offline and it has a checkpoint, the card says "Offlin
 
 Terminals, the desktop, dev servers and the browser need the host and show "host offline". The hub reads the checkpoint with git on a bare repo it builds from the bundles under `view.git` in the worktree's checkpoint directory. It fetches the repo's history from the hub's checkout or remote URL first, because a bundle only has what the remotes lack. If the hub can reach neither, the view fails with a message that says so.
 
+## Who may store a checkpoint
+
+A checkpoint is stored only for a worktree's current owner: its row is not superseded, it lives on the sending worker, and that worker's link is the one the snapshot was read over. The check runs when `checkpoints.take`, a trigger or `lifecycle.shutdown` starts one and again just before the row is written, so a late shutdown checkpoint that races a continuation is rejected ("... was continued as ..., so ... no longer owns it"). A worker whose lease ran out snapshots locally and does not upload (see [Follow the work](follow-the-work.md#the-old-hosts-lease)).
+
 ## Restore on another host
 
-`band worktrees restore <id> --to <host>` (Restore on another host in the worktree menu) uses the newest checkpoint, or `--checkpoint <id>`:
+`band worktrees restore <id> --to <host>` uses the newest checkpoint, or `--checkpoint <id>`:
 
 1. The target host must be online and allowed for the repo. If it is not allowed, the call is refused with `<repo> is only available on ...`. An admin can add the host in the same call (`--add-host`, the checkbox in the dialog).
 2. The hub makes sure the target has the repo, fetches what origin has, sends the bundle, and runs `git worktree add -B <branch>` with the working tree of the checkpoint. The edits are uncommitted again.
@@ -66,7 +72,7 @@ Terminals, the desktop, dev servers and the browser need the host and show "host
 4. The agent session files are written on the target. The next message in each chat resumes the session (`session/resume`, or `session/load` when the agent cannot resume).
 5. The worktree on the new host gets the id `<repo>-<branch>@<new host>`. Chats, terminal records, tasks, cron jobs, subscriptions and browser history move to it.
 
-The old copy is marked superseded and nothing is deleted on the old host. When that host comes back, Band does not run both: it takes no checkpoints of the superseded copy, lists it as "Superseded by <id>" and leaves the files untouched. Remove it from its card when you no longer need it. That is the only step that deletes files.
+If the target already holds a copy under that name, the checkpoint replaces it and the old state is kept under `refs/band/backup/<worktree id>/<time>` (see [Follow the work](follow-the-work.md#when-the-target-already-has-a-copy)). Restoring from an offline host waits until its lease is over. The old copy is marked superseded and nothing is deleted on the old host. When that host comes back, Band does not run both: it takes no checkpoints of the superseded copy, lists it as "Superseded by <id>" and leaves the files untouched. Remove it from its card when you no longer need it. That is the only step that deletes files.
 
 If a repo has no remote URL, the target must already know the repo, or the call must name where it keeps it (`hostRepoPath` in tRPC).
 

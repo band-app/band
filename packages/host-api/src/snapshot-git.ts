@@ -93,6 +93,13 @@ export async function checkoutSnapshot(
   repoPath: string,
   worktreePath: string,
   snapshot: { branch: string; baseSha: string; snapshotSha: string },
+  options: {
+    /**
+     * Called with the branch's tip when this host's branch has commits the snapshot lacks, so the
+     * caller can keep them under a ref. Without it that case throws. The branch is reset either way.
+     */
+    onDivergentTip?: (tip: string) => Promise<void>;
+  } = {},
 ): Promise<void> {
   const git = gitIn(host, repoPath);
   await host.fs.mkdir(posix.dirname(worktreePath), { recursive: true });
@@ -110,7 +117,8 @@ export async function checkoutSnapshot(
         () => true,
         () => false,
       );
-      if (!ancestor) {
+      if (!ancestor && options.onDivergentTip) await options.onDivergentTip(tip);
+      else if (!ancestor) {
         throw new Error(
           `Branch ${snapshot.branch} on this host has commits that the checkpoint does not contain.`,
         );
@@ -126,5 +134,30 @@ export async function checkoutSnapshot(
     const inTree = gitIn(host, worktreePath);
     await inTree(["read-tree", "-u", "--reset", snapshot.snapshotSha]);
     await inTree(["reset", "-q"]);
+  }
+}
+
+/**
+ * Makes the checkout at `path` (a repo's own folder, such as the default branch) hold a snapshot:
+ * the branch (or a detached HEAD) at `baseSha`, every local change and untracked file dropped,
+ * and the snapshot's files back as uncommitted changes. Ignored files stay. The caller backs up
+ * what the folder holds first, because this discards it.
+ */
+export async function resetCheckoutToSnapshot(
+  host: Host,
+  path: string,
+  snapshot: { branch: string; baseSha: string; snapshotSha: string },
+): Promise<void> {
+  const git = gitIn(host, path);
+  await git(
+    snapshot.branch
+      ? ["checkout", "-q", "-f", "-B", snapshot.branch, snapshot.baseSha]
+      : ["checkout", "-q", "-f", "--detach", snapshot.baseSha],
+  );
+  await git(["reset", "-q", "--hard", snapshot.baseSha]);
+  await git(["clean", "-q", "-fd"]);
+  if (snapshot.snapshotSha !== snapshot.baseSha) {
+    await git(["read-tree", "-u", "--reset", snapshot.snapshotSha]);
+    await git(["reset", "-q"]);
   }
 }

@@ -53,6 +53,7 @@ export interface UseChatSubscriptionResult
     | "taskRunning"
     | "errorMessage"
     | "hasOlder"
+    | "replayed"
   > {
   /** True while the event stream is connected. */
   isConnected: boolean;
@@ -323,6 +324,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     taskRunning: state.taskRunning,
     errorMessage: state.errorMessage,
     hasOlder: state.hasOlder,
+    replayed: state.replayed,
     isConnected,
     send,
     cancel,
