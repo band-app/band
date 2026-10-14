@@ -36,25 +36,22 @@ export function useOfflineWorktree(worktreeId: string): {
 // reload starts from the notice again.
 const viewing = new Set<string>();
 const viewingListeners = new Set<() => void>();
-let viewingVersion = 0;
 
 function setViewingCheckpoint(worktreeId: string, on: boolean): void {
   if (viewing.has(worktreeId) === on) return;
   if (on) viewing.add(worktreeId);
   else viewing.delete(worktreeId);
-  viewingVersion++;
   for (const listener of viewingListeners) listener();
 }
 
 function useViewingCheckpoint(worktreeId: string): boolean {
-  useSyncExternalStore(
+  return useSyncExternalStore(
     (listener) => {
       viewingListeners.add(listener);
       return () => viewingListeners.delete(listener);
     },
-    () => viewingVersion,
+    () => viewing.has(worktreeId),
   );
-  return viewing.has(worktreeId);
 }
 
 /**
@@ -81,15 +78,23 @@ function Ago({ at }: { at: number }) {
  * checkpointed, and a button to open it on another host. When the offer is blocked it says why and
  * shows no button. The read-only view of the checkpoint stays behind a link.
  */
-export function OfflineWorktreeNotice({ worktreeId }: { worktreeId: string }) {
+export function OfflineWorktreeNotice({
+  worktreeId,
+  active = true,
+}: {
+  worktreeId: string;
+  /** Whether the worktree is on screen. Hidden worktrees do not poll the hub. */
+  active?: boolean;
+}) {
   const { offline, hostName, lastSeenAt, checkpointAt } = useOfflineWorktree(worktreeId);
   const chosen = useViewingCheckpoint(worktreeId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const offerQuery = useQuery({
     queryKey: ["follow.offer", worktreeId],
     queryFn: () => trpc.follow.offer.query({ worktreeId }),
-    enabled: offline,
-    refetchInterval: 15_000,
+    enabled: offline && active,
+    refetchInterval: active ? 15_000 : false,
+    staleTime: 10_000,
   });
   if (!offline) return null;
   const offer = offerQuery.data;

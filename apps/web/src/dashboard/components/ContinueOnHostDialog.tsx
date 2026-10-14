@@ -77,7 +77,7 @@ export function ContinueOnHostDialog({
   const [chosen, setChosen] = useState(recommended);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const blocked = blockedMessage !== undefined || offer.blocked !== undefined;
+  const blocked = blockedMessage !== undefined || !!offer.blocked;
 
   const cancel = () => {
     if (busy) return;

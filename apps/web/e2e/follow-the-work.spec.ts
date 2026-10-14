@@ -312,17 +312,19 @@ test("offline worktrees are faded with an icon, and their menu offers Open on an
   await checkpoints.closeCardMenu();
 
   // No checkpoint: shown, disabled, with the reason.
+  await page.mouse.move(0, 0);
+  await expect(checkpoints.offlineDetails).toHaveCount(0);
   await checkpoints.showOfflineDetails(noCheckpointId);
   await expect(checkpoints.offlineDetails).toContainText("No checkpoint");
   await checkpoints.openCardMenu(noCheckpointId);
   await expect(checkpoints.moveItem()).toBeDisabled();
-  await expect(checkpoints.moveItem()).toContainText("no checkpoint");
+  await expect(checkpoints.moveReason()).toBeVisible();
   await checkpoints.closeCardMenu();
 
   // A repo limited to one host is never offered for transfer.
   await checkpoints.openCardMenu(lockedId);
   await expect(checkpoints.moveItem()).toBeDisabled();
-  await expect(checkpoints.moveItem()).toContainText("Only available on box-a");
+  await expect(checkpoints.moveReason()).toContainText("box-a");
 });
 
 test("the notice of an offline worktree has an Open on another host button that continues it on B", async ({

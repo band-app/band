@@ -1,7 +1,7 @@
 /**
  * Page object for the checkpoint surfaces: the "Checkpoints on the hub" switch in Settings >
- * Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…" menu item, the offline notice, and the
- * read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
+ * Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…"
+ * menu item, the offline notice, and the read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
  * `ReposSettings.tsx`, `WorktreeCard.tsx` and `OfflineCheckpoint.tsx`.
  */
 
@@ -65,6 +65,11 @@ export class CheckpointsPage {
     });
   }
 
+  /** The reason a disabled "Open on another host…" item gives. */
+  moveReason(): Locator {
+    return this.page.getByTestId("worktree-card__move-reason");
+  }
+
   async closeCardMenu(): Promise<void> {
     await this.page.keyboard.press("Escape");
     await expect(this.moveItem()).toHaveCount(0);
@@ -82,6 +87,11 @@ export class CheckpointsPage {
 
   get noticeBlocked(): Locator {
     return this.notice.getByTestId("offline-notice__blocked");
+  }
+
+  /** The right panel of an offline worktree, before the checkpoint is chosen. */
+  get sidepanelPlaceholder(): Locator {
+    return this.page.getByTestId("offline-sidepanel");
   }
 
   get openElsewhereButton(): Locator {

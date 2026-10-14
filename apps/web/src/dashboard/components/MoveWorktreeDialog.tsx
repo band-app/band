@@ -93,8 +93,10 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: P
           <DialogDescription>
             Takes a fresh checkpoint of {worktree.name}, recreates it on the chosen host with its
             uncommitted files and agent sessions, then removes the copy on {hostName(currentHost)}.
-            Ignored files (node_modules, build output, .env) are not carried over.
           </DialogDescription>
+          <p className="text-xs text-muted-foreground" data-testid="move-worktree__ignored-files">
+            Ignored files (node_modules, build output, .env) are not carried over.
+          </p>
         </DialogHeader>
         {result ? (
           <div className="space-y-2" data-testid="move-worktree__result">

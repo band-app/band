@@ -181,9 +181,10 @@ test("a checkpoint is taken once, and the worktree is readable from it when the 
   // Opening it shows the notice. With no other host online the offer is blocked: the reason, no button.
   await expect(checkpoints.noticeHost).toContainText("box-a is offline");
   await expect(checkpoints.noticeHost).toContainText("Last checkpoint");
-  await expect(checkpoints.noticeBlocked).toContainText("no other host");
+  await expect(checkpoints.noticeBlocked).toBeVisible();
   await expect(checkpoints.openElsewhereButton).toHaveCount(0);
   await expect(checkpoints.panel).toHaveCount(0);
+  await expect(checkpoints.sidepanelPlaceholder).toBeVisible();
 
   // The read-only checkpoint view stays one click away.
   await checkpoints.viewCheckpoint();

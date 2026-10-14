@@ -232,7 +232,7 @@ export function MobileWorktreeShell() {
         <MultiWorktreePanelHost emptyState={null}>
           {(worktreeId, wsActive) => (
             <div className="flex h-full w-full flex-col">
-              <OfflineWorktreeNotice worktreeId={worktreeId} />
+              <OfflineWorktreeNotice worktreeId={worktreeId} active={wsActive} />
               <div className="relative min-h-0 flex-1">
                 <WorktreeCenterDockview
                   worktreeId={worktreeId}

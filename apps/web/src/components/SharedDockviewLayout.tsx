@@ -743,7 +743,7 @@ export function SharedDockviewLayout() {
             // Only the shown worktree puts app-regions on the page.
             <WindowDragContext.Provider value={wsActive}>
               <div className="flex h-full w-full flex-col">
-                <OfflineWorktreeNotice worktreeId={worktreeId} />
+                <OfflineWorktreeNotice worktreeId={worktreeId} active={wsActive} />
                 <div className="relative min-h-0 flex-1">
                   <WorktreeCenterDockview
                     worktreeId={worktreeId}
