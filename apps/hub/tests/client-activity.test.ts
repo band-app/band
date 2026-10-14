@@ -125,6 +125,7 @@ describe("client activity drives the poller cadence", () => {
       clearInterval(keepAlive);
     }
     // Once everyone is silent for the expiry, the level is the fallback: idle.
+    await release("chatty");
     await report("gone", "background");
     await expectLevel("background");
     await expectLevel("idle", TTL_MS + 5_000);
