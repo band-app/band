@@ -108,14 +108,17 @@ export function applyStatusEvent(state: StatusState, event: StatusEvent): Status
 export type AgentState = "running" | "attention" | "idle";
 
 /** Hub statuses that wait for the user: a question, a finished turn or a failed one. */
-function isAttention(status: string | undefined): boolean {
+export function isAttention(status: string | undefined): boolean {
   return (
-    status === "question" || status === "done" || status === "failed" || status === "needs_attention"
+    status === "question" ||
+    status === "done" ||
+    status === "failed" ||
+    status === "needs_attention"
   );
 }
 
 /** Hub statuses that mean an agent is busy, or watching background work. */
-function isRunning(status: string | undefined): boolean {
+export function isRunning(status: string | undefined): boolean {
   return status === "working" || status === "monitoring";
 }
 

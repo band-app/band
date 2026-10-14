@@ -11,6 +11,7 @@
 
 import type { CenterTab, CenterTabs } from "@band-app/client/center-tabs";
 import { keepHiddenTabs } from "@band-app/client/center-tabs";
+import { isAttention, isRunning } from "../status-state.ts";
 
 export interface PhoneTabs {
   /** Chat ids in the shared order. */
@@ -106,15 +107,8 @@ export function tabState(
   unread: ReadonlySet<string>,
 ): TabState {
   const status = statuses.get(chatId);
-  if (
-    status === "question" ||
-    status === "done" ||
-    status === "failed" ||
-    status === "needs_attention"
-  ) {
-    return "attention";
-  }
-  if (status === "working" || status === "monitoring") return "running";
+  if (isAttention(status)) return "attention";
+  if (isRunning(status)) return "running";
   return unread.has(chatId) ? "unread" : "idle";
 }
 
