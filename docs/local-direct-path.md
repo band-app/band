@@ -61,6 +61,6 @@ The terminal socket (`lib/terminal-cache.ts`) asks for a direct target before ea
 ## Tests
 
 - `apps/hub/tests/direct-path.test.ts`: a real hub and a real `band-worker`. It types, resizes and reattaches over the direct terminal socket, compares every direct procedure's answer with the hub's for the same worktree, covers the refusals (no token, unknown, expired, another worktree, a path outside the worktree, a non-loopback interface, a foreign `Host` or `Origin`) and a worker restart with its shell kept in the terminal daemon.
-- `apps/web/e2e-desktop/desktop-direct-path.spec.ts`: the real desktop app with this Mac added as a worker. The terminal socket goes to `127.0.0.1`, the file tree and a file read go there and not to the hub, a worker restart falls back to the hub with the screen kept, a file opened after the restart is read through the hub, and a later connection uses the worker again.
+- `apps/web/e2e-desktop/desktop-direct-path.spec.ts`: the real desktop app with this Mac added as a worker. The terminal socket goes to `127.0.0.1`, the file tree and a file read go there and not to the hub, a worker restart falls back to the hub with the screen kept, a file opened after the restart reads without an error, and a later connection uses the worker again.
 
 Not measured automatically: terminal echo latency over a slow link to the hub. Check it with macOS Network Link Conditioner (about 300 ms RTT) and the packaged app.

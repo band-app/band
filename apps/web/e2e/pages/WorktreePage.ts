@@ -1403,6 +1403,14 @@ export class WorktreePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** Close the `file` leaf tab for `path` with its "Close file" (×) button. */
+  async closeFileTab(path: string): Promise<void> {
+    await test.step(`Close the tab of ${path}`, async () => {
+      await this.fileTab(path).getByRole("button", { name: "Close file" }).click();
+      await expect(this.fileTab(path)).toHaveCount(0);
+    });
+  }
+
   /** Double-click the `file` leaf tab for `path` (pins a preview tab). */
   async doubleClickFileTab(path: string): Promise<void> {
     await test.step(`Double-click the tab of ${path}`, async () => {
