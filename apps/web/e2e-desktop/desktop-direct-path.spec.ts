@@ -160,6 +160,8 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
     hubPort: localPort,
     env: { BAND_LAUNCHCTL_BIN: FAKE_LAUNCHCTL, BAND_FAKE_LAUNCHD_DIR: join(home, "fake-launchd") },
   });
+  // The tab strip below needs room: docked DevTools leave the page too narrow on the CI Mac.
+  await desktop.closeDevTools();
 
   // Make this Mac a worker of the remote hub, and put a worktree on it.
   const thisComputer = new ThisComputerPage(desktop.window);
@@ -239,9 +241,8 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   await worktreePage.selectRightPanelTab("explorer");
   expect(directCalls().every((u) => portOf(u) === portOf(directSockets()[0] as string))).toBe(true);
 
-  // Back to the terminal for the restart. The file tab is closed first: a narrow window (the
-  // CI Mac, with DevTools docked) overflows the tab strip, and the shared tab list may make an
-  // open file tab the active one again while the worker is away.
+  // Back to the terminal for the restart. The file tab is closed first: the shared tab list may
+  // make an open file tab the active one again while the worker is away.
   await worktreePage.closeFileTab("README.md");
   await showTerminal();
 

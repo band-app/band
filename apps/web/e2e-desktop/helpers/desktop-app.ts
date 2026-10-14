@@ -2,7 +2,12 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Page,
+} from "@playwright/test";
 
 const DESKTOP_DIR = join(import.meta.dirname, "../../../desktop");
 
@@ -44,6 +49,12 @@ export interface LaunchedDesktop {
   stubOpenDialog: (paths: string[]) => Promise<void>;
   /** How many windows the app has open. */
   windowCount: () => number;
+  /**
+   * Close the DevTools an unpackaged run docks into the window, so the page gets the whole
+   * window as in a packaged app. On a small screen (the CI Mac) docked DevTools leave the page
+   * a few hundred pixels wide.
+   */
+  closeDevTools: () => Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -131,6 +142,25 @@ export async function launchDesktop(opts: {
       }, paths);
     },
     windowCount: () => app.windows().length,
+    closeDevTools: async () => {
+      // The app opens them on `ready-to-show`, which may come after the window is found.
+      await expect
+        .poll(
+          () =>
+            app.evaluate(({ BrowserWindow }) => {
+              let open = false;
+              for (const w of BrowserWindow.getAllWindows()) {
+                if (w.webContents.isDevToolsOpened()) {
+                  w.webContents.closeDevTools();
+                  open = true;
+                }
+              }
+              return open;
+            }),
+          { timeout: 15_000, intervals: [250, 500, 1000] },
+        )
+        .toBe(false);
+    },
     close: async () => {
       // Quitting waits out the local hub's 3 s shutdown grace. If it hangs,
       // kill the app: a test must never leave an Electron process behind.
