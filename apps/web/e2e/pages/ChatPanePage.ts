@@ -828,6 +828,13 @@ export class ChatPanePage {
     );
   }
 
+  /** How far the visible chat transcript is from its bottom, in CSS px. */
+  async distanceFromBottom(): Promise<number> {
+    return await this.scroller
+      .filter({ visible: true })
+      .evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+  }
+
   /** Scroll the chat container to the bottom — used to verify stick-to-bottom
    *  still reaches the latest message after older pages have prepended. */
   async scrollToBottom(): Promise<void> {
