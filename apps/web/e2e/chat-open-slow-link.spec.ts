@@ -96,9 +96,8 @@ test("a long chat opened over a slow link starts at its end and loads no older p
   await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
     timeout: 30_000,
   });
-  // Let the rest of the replay and any follow-up request land.
-  // Keep watching for a couple of seconds of revealed frames, long enough for
-  // a stray older-page request to show up.
+  // Observe more than 150 revealed frames, so a late jump or a stray
+  // older-page request would show up.
   await expect
     .poll(async () => (await chatPane.readOpenSamples()).filter((s) => s.revealed).length, {
       timeout: 15_000,

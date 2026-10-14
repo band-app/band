@@ -89,6 +89,9 @@ export interface VirtualizedMessageListProps<T> {
   ready?: boolean;
 }
 
+/** How long the reveal gate waits for the end-of-replay marker. */
+const REPLAY_WAIT_MS = 4000;
+
 export function VirtualizedMessageList<T>({
   items,
   getKey,
@@ -127,13 +130,23 @@ export function VirtualizedMessageList<T>({
   //
   // This arms ONCE per component instance, when `ready` first holds:
   // `revealed` is instance state, so streaming text-deltas (which re-render
-  // this component ~30×/sec without remounting it) never re-gate. A session switch remounts `ChatView`
-  // and therefore this component, which re-arms the gate for the next
-  // freshly-loaded conversation.
+  // this component ~30×/sec without remounting it) never re-gate. A session
+  // switch remounts `ChatView` and therefore this component, which re-arms
+  // the gate for the next freshly-loaded conversation.
   const [revealed, setRevealed] = useState(false);
+  // The hub sends the end-of-replay marker only on a cold subscribe. A stream
+  // that drops mid-replay reopens warm and never sends it, so after this wait
+  // the gate arms anyway and the list cannot stay hidden.
+  const [replayWaitOver, setReplayWaitOver] = useState(false);
+  useEffect(() => {
+    if (ready) return;
+    const t = setTimeout(() => setReplayWaitOver(true), REPLAY_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [ready]);
+  const armed = ready || replayWaitOver;
   // biome-ignore lint/correctness/useExhaustiveDependencies: must arm once `ready` holds, never on `scrollToBottom`/`scrollRef` identity changes
   useEffect(() => {
-    if (!ready || revealed) return;
+    if (!armed || revealed) return;
     let raf = 0;
     let frames = 0;
     let stableFrames = 0;
@@ -180,7 +193,7 @@ export function VirtualizedMessageList<T>({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [ready]);
+  }, [armed]);
 
   // Hoist the virtualizer callbacks so their identity is stable across
   // re-renders — during streaming `ChatView` re-renders ~30×/sec and
