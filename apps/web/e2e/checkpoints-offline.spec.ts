@@ -72,7 +72,11 @@ const worktreeRow = async () =>
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedSettings(tmpHome, { tokenSecret: TOKEN });
-  server = await startServer({ tmpHome, env: { BAND_LOCAL_HOST: "off" } });
+  // A short lease, so the test sees the countdown and its end.
+  server = await startServer({
+    tmpHome,
+    env: { BAND_LOCAL_HOST: "off", BAND_WORKER_LEASE_MS: "12000" },
+  });
 
   const issued = await trpcMutateData<{ token: string; hostId: string }>(
     server.url,
@@ -170,12 +174,29 @@ test("a checkpoint is taken once, and the worktree is readable from it when the 
   await app.goto(worktreeId);
   await app.waitForReady();
 
-  await expect(checkpoints.offlineBadge(worktreeId)).toContainText("last checkpoint", {
-    timeout: 30_000,
-  });
-  await expect(checkpoints.banner).toContainText("Showing the checkpoint from");
-  await expect(checkpoints.banner).toContainText("read-only");
+  // The card shows an icon, faded, with the details in its tooltip.
+  await expect(checkpoints.offlineIcon(worktreeId)).toBeVisible({ timeout: 30_000 });
+  await expect(checkpoints.offlineIcon(worktreeId)).not.toContainText("checkpoint");
+  await expect(checkpoints.card(worktreeId)).toHaveCSS("opacity", "0.6");
+  await checkpoints.showOfflineDetails(worktreeId);
+  await expect(checkpoints.offlineDetails).toContainText("Last seen");
+  await expect(checkpoints.offlineDetails).toContainText("Last checkpoint");
 
+  // Opening it shows the notice. The old host may still be running until its lease ends, so the
+  // button counts down and cannot be pressed yet.
+  await expect(checkpoints.noticeHost).toContainText("box-a is offline");
+  await expect(checkpoints.noticeHost).toContainText("Last checkpoint");
+  await expect(checkpoints.noticeBlocked).toBeVisible();
+  await expect(checkpoints.leaseCountdown).toBeVisible();
+  await expect(checkpoints.openElsewhereButton).toBeDisabled();
+  // Once it ends, no other host is online: the reason stays, and there is no button.
+  await expect(checkpoints.openElsewhereButton).toHaveCount(0, { timeout: 30_000 });
+  await expect(checkpoints.noticeBlocked).toBeVisible();
+  await expect(checkpoints.panel).toHaveCount(0);
+  await expect(checkpoints.sidepanelPlaceholder).toBeVisible();
+
+  // The read-only checkpoint view stays one click away.
+  await checkpoints.viewCheckpoint();
   await checkpoints.openChanges();
   await expect(checkpoints.change("hello.txt")).toBeVisible();
   await expect(checkpoints.change("notes.md")).toBeVisible();

@@ -6,10 +6,12 @@ import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import {
   type Channel,
+  type LeaseRenewParams,
   type LifecycleIdleReply,
   type LifecyclePolicy,
   LinkClient,
   type LinkClientOptions,
+  METHOD_LEASE_RENEW,
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_POLICY,
   METHOD_LIFECYCLE_SHUTDOWN,
@@ -26,6 +28,7 @@ import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
+import { LeaseGuard } from "./lease.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
@@ -156,11 +159,12 @@ export class Worker {
         ...(config.reposDir ? { reposDir: () => config.reposDir as string } : {}),
       },
     });
+    const repoPaths = async () => [
+      ...(await host.repos.list()).map((m) => m.path),
+      ...(await gitReposAtRoots(policy.rootPaths)),
+    ];
     policy.useWorktrees({
-      repoPaths: async () => [
-        ...(await host.repos.list()).map((m) => m.path),
-        ...(await gitReposAtRoots(policy.rootPaths)),
-      ],
+      repoPaths,
       worktreePaths: async (repo) => (await host.worktree.list(repo)).map((w) => w.path),
     });
     // The hello carries the capability report, so the first probe finishes before it.
@@ -193,6 +197,18 @@ export class Worker {
       session: client.session,
       policy,
       activity: new ActivityTracker(),
+      lease: new LeaseGuard({
+        host,
+        stateDir: config.stateDir,
+        log,
+        worktreePaths: async () => {
+          const out = new Set<string>();
+          for (const repo of new Set(await repoPaths())) {
+            for (const w of await host.worktree.list(repo).catch(() => [])) out.add(w.path);
+          }
+          return [...out];
+        },
+      }),
       log,
       labels: config.labels,
       stateDir: config.stateDir,
@@ -200,6 +216,17 @@ export class Worker {
       cli: new CliCache(client.session, config.stateDir, log),
     };
     const registrar = new Registrar(ctx);
+    registrar.json(METHOD_LEASE_RENEW, (a) => {
+      const p = a as unknown as LeaseRenewParams;
+      if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {
+        throw new Error("lease.renew needs a positive ttlMs");
+      }
+      return ctx.lease.renew(
+        p.ttlMs,
+        Array.isArray(p.blockedPaths) ? p.blockedPaths.filter((x) => typeof x === "string") : [],
+      );
+    });
+    worker.disposers.push(() => ctx.lease.close());
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));

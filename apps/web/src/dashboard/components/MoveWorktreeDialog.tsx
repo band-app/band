@@ -27,16 +27,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   repoName: string;
   worktree: Pick<WorktreeInfo, "name" | "hostId">;
-  /** `move` while the worktree's host is online, `restore` from the last checkpoint when it is offline. */
-  mode: "move" | "restore";
 }
 
 /**
- * Moves a worktree to another host, or restores it there from its last checkpoint. A host the
- * repo is not allowed on is offered with "add it to the allowed hosts", which needs an admin
- * token.
+ * Moves a worktree whose host is online to another host ("Open on another host"). A host the repo
+ * is not allowed on is offered with "add it to the allowed hosts", which needs an admin token. An
+ * offline host goes through `ContinueOnHostDialog` instead.
  */
-export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree, mode }: Props) {
+export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: Props) {
   const { repos } = useRepos();
   const repo = {
     name: repoName,
@@ -63,18 +61,13 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree, mod
   const allowed = repo.allowedHostIds ?? null;
   const notAllowed = chosen !== "" && allowed !== null && !allowed.includes(chosen);
   const hostName = (id: string) => hosts.find((h) => h.id === id)?.name || id;
-  const verb = mode === "move" ? "Move" : "Restore";
 
   const run = async () => {
     setBusy(true);
     setError(null);
     try {
       const input = { worktreeId, toHostId: chosen, ...(addHost ? { addHost: true } : {}) };
-      const res =
-        mode === "move"
-          ? await trpc.checkpoints.move.mutate(input)
-          : await trpc.checkpoints.restore.mutate(input);
-      setResult(res as MoveResult);
+      setResult(await trpc.checkpoints.move.mutate(input));
       await queryClient.invalidateQueries({ queryKey: ["repos"] });
     } catch (err) {
       setError(errorText(err));
@@ -96,17 +89,19 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree, mod
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]" data-testid="move-worktree__dialog">
         <DialogHeader>
-          <DialogTitle>{mode === "move" ? "Move to host" : "Restore on another host"}</DialogTitle>
+          <DialogTitle>Open on another host</DialogTitle>
           <DialogDescription>
-            {mode === "move"
-              ? `Takes a fresh checkpoint of ${worktree.name}, recreates it on the chosen host with its uncommitted files and agent sessions, then removes the copy on ${hostName(currentHost)}.`
-              : `${hostName(currentHost)} is offline. This recreates ${worktree.name} from its last checkpoint on the chosen host. The copy on ${hostName(currentHost)} stays untouched and is listed as superseded when it comes back.`}
+            Takes a fresh checkpoint of {worktree.name}, recreates it on the chosen host with its
+            uncommitted files and agent sessions, then removes the copy on {hostName(currentHost)}.
           </DialogDescription>
+          <p className="text-xs text-muted-foreground" data-testid="move-worktree__ignored-files">
+            Ignored files (node_modules, build output, .env) are not carried over.
+          </p>
         </DialogHeader>
         {result ? (
           <div className="space-y-2" data-testid="move-worktree__result">
             <p className="text-sm">
-              {mode === "move" ? "Moved" : "Restored"} to {hostName(result.hostId)} as{" "}
+              Moved to {hostName(result.hostId)} as{" "}
               <span className="font-mono">{result.worktreeId}</span>.
             </p>
             {result.warning ? (
@@ -199,7 +194,7 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree, mod
                 onClick={() => void run()}
               >
                 {busy ? <Spinner className="size-3" /> : null}
-                {verb}
+                Open on another host
               </Button>
             </div>
           </div>

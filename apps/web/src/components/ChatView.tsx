@@ -795,6 +795,7 @@ export function ChatView({
 
             {messages.length > 0 && (
               <VirtualizedMessageList
+                ready={subscription.replayed}
                 items={messages}
                 getKey={getMessageKey}
                 renderItem={renderMessageItem}

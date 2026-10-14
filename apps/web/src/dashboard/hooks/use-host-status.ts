@@ -26,6 +26,25 @@ export function useHostOffline(hostId: string | null | undefined): boolean {
   return host !== undefined && host.status !== "online";
 }
 
+/** What the card and the notice of an offline worktree say about its host. */
+export interface HostSeen {
+  offline: boolean;
+  name: string;
+  /** Epoch ms the hub last saw the worker, or null when it never did. */
+  lastSeenAt: number | null;
+}
+
+/** The host's name and when the hub last saw it, with the same "up until proven offline" rule as `useHostOffline`. */
+export function useHostSeen(hostId: string | null | undefined): HostSeen {
+  const hosts = useHostList();
+  const host = !hostId || hostId === "local" ? undefined : hosts.find((h) => h.id === hostId);
+  return {
+    offline: host !== undefined && host.status !== "online",
+    name: host?.name || hostId || "",
+    lastSeenAt: host?.lastSeenAt ?? null,
+  };
+}
+
 /** "3 minutes ago" style text for a timestamp. */
 export function timeAgo(at: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - at) / 1000));
