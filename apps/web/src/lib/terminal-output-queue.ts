@@ -1,3 +1,5 @@
+import { isBackgroundSaver } from "./power-state";
+
 // ---------------------------------------------------------------------------
 // Output scheduling for cached terminals (ported from orca's
 // `pane-terminal-output-scheduler`).
@@ -143,6 +145,8 @@ interface QueueState {
   /** `held` starts with a frame's begin marker (not just a cut-off marker). */
   frameOpen: boolean;
   holdTimer: ReturnType<typeof setTimeout> | null;
+  /** Drops the queued output and marks the queue overflowed (see `parkedParsingPaused`). */
+  overflow?: () => void;
 }
 
 /** Where DEC 2026 markers sit in a run of output bytes. */
@@ -175,6 +179,16 @@ function scanSyncMarkers(bytes: Uint8Array): SyncScan {
     }
   }
   return scan;
+}
+
+/**
+ * On battery or with the page hidden, a parked terminal stops parsing: its output is dropped (and
+ * acknowledged, so the server's flow control keeps moving) and the queue counts as overflowed, so
+ * `flush` makes the caller resync it from the server's snapshot when it is shown. Draining it every
+ * 50 ms would wake the renderer for output nobody sees.
+ */
+function parkedParsingPaused(): boolean {
+  return isBackgroundSaver();
 }
 
 /** Parked queues with pending output, in the order they became pending. */
@@ -241,6 +255,11 @@ function writeChunk(queue: QueueState, data: Chunk, done: OutputCallbacks | unde
 
 function drain(): void {
   drainTimer = null;
+  if (parkedParsingPaused()) {
+    for (const queue of pending) queue.overflow?.();
+    pending.clear();
+    return;
+  }
   const startedAt = performance.now();
   let writes = 0;
   // Round-robin: each queue that writes goes to the back of the line.
@@ -326,6 +345,11 @@ export function createTerminalOutputQueue(
     state.chunks = [];
     state.bytes = 0;
     for (const chunk of dropped) chunk.callbacks?.onConsumed?.();
+  };
+
+  state.overflow = () => {
+    reset();
+    state.overflowed = true;
   };
 
   const enqueue = (data: Chunk, callbacks: OutputCallbacks | undefined) => {
@@ -430,8 +454,13 @@ export function createTerminalOutputQueue(
         writeWhileRoom();
         return;
       }
-      if (state.overflowed) {
+      if (state.overflowed || parkedParsingPaused()) {
         for (const piece of takeHeld()) piece.callbacks?.onConsumed?.();
+        if (!state.overflowed) {
+          // Output already queued is dropped too: the snapshot replay covers all of it.
+          reset();
+          state.overflowed = true;
+        }
         callbacks?.onConsumed?.();
         return;
       }

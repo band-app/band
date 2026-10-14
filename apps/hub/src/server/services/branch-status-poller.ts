@@ -19,6 +19,7 @@ import {
   parseBatchedCIResponse,
 } from "./_utils/github-graphql";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
+import { clientActivityService } from "./client-activity-service";
 import { githubPollService } from "./github-poll-service";
 import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
@@ -55,11 +56,12 @@ interface WorktreeInfo {
 }
 
 /**
- * Activity level controls how aggressively we poll git/CI status. The Electron
- * main process drives this via the `services.setActivity` tRPC mutation when
- * the window gains/loses focus or the laptop transitions on/off battery —
- * see `apps/desktop/src/main/services/activity-monitor.ts`. Other clients
- * (CLI, web-only deployments) can leave it at the default `"active"`.
+ * Activity level controls how aggressively we poll git/CI status. Each UI
+ * reports its own through `services.setActivity` (window focus and power
+ * state, see `apps/web/src/lib/activity-reporter.ts`); `clientActivityService`
+ * keeps one entry per client, drops one that stops reporting, and the poller
+ * follows the most active live client. With no live client the level is
+ * `"idle"`.
  */
 export type ActivityLevel = "active" | "idle" | "background";
 
@@ -91,7 +93,7 @@ const pollerState = {
   tickCount: 0,
   /** A tick is running (see `runTick`). */
   ticking: false,
-  activity: "active" as ActivityLevel,
+  activity: "idle" as ActivityLevel,
   /**
    * Set by `startBranchStatusPoller`: the next tick asks GitHub too (without
    * the fetch), so the PR badges are current as soon as a client connects
@@ -389,6 +391,46 @@ export async function getBatchedCIStatuses(
   return allResults;
 }
 
+/** How long a host's power reading is reused before the poller asks the host again. */
+const POWER_CHECK_MS = 60_000;
+const powerByHost = new Map<string, { at: number; onBattery: boolean }>();
+/** When each worktree was last polled, for the ones on a battery host that skip ticks. */
+const lastPolledAt = new Map<string, number>();
+/** When each battery host last had its CI status queried. */
+const lastCIQueryAt = new Map<string, number>();
+
+function hostKey(ws: Pick<WorktreeInfo, "hostId">): string {
+  return ws.hostId ?? "local";
+}
+
+/**
+ * Whether the machine a worktree lives on runs on battery, as the host reports it in `host.info`.
+ * The answer is reused for a minute, so a tick over many worktrees asks each host once. An
+ * unreachable host or one that does not say counts as plugged in.
+ */
+async function refreshHostPower(worktrees: readonly WorktreeInfo[], now: number): Promise<void> {
+  const seen = new Map<string, WorktreeInfo>();
+  for (const ws of worktrees) seen.set(hostKey(ws), ws);
+  for (const key of [...powerByHost.keys()]) if (!seen.has(key)) powerByHost.delete(key);
+  await Promise.all(
+    [...seen].map(async ([key, ws]) => {
+      const known = powerByHost.get(key);
+      if (known && now - known.at < POWER_CHECK_MS) return;
+      let onBattery = false;
+      try {
+        onBattery = (await hostOf(ws).info()).onBattery === true;
+      } catch {
+        onBattery = known?.onBattery ?? false;
+      }
+      powerByHost.set(key, { at: now, onBattery });
+    }),
+  );
+}
+
+function isOnBatteryHost(ws: Pick<WorktreeInfo, "hostId">): boolean {
+  return powerByHost.get(hostKey(ws))?.onBattery === true;
+}
+
 let pollCount = 0;
 /** The newest poll started for each worktree (see `pollWorktree`). */
 const latestPollByWorktree = new Map<string, number>();
@@ -536,8 +578,29 @@ async function pollTick() {
     await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
-  const worktrees = getWorktrees();
+  const allWorktrees = getWorktrees();
 
+  if (allWorktrees.length === 0) return;
+
+  // A host on battery is polled at the slowest cadence whatever the clients do, and never
+  // fetched. The tick runs at the clients' cadence, so such a worktree skips ticks until due.
+  const now = Date.now();
+  await refreshHostPower(allWorktrees, now);
+  const background = INTERVALS.background;
+  const batteryDueMs = background.pollMs - INTERVALS[pollerState.activity].pollMs / 2;
+  const worktrees = allWorktrees.filter((ws) => {
+    if (!isOnBatteryHost(ws)) return true;
+    const last = lastPolledAt.get(ws.worktreeId);
+    return last === undefined || now - last >= batteryDueMs;
+  });
+  for (const ws of worktrees) lastPolledAt.set(ws.worktreeId, now);
+  const batteryCIDueMs =
+    background.pollMs * background.ciTicks - INTERVALS[pollerState.activity].pollMs / 2;
+  const ciDue = (ws: WorktreeInfo): boolean => {
+    if (!isOnBatteryHost(ws)) return true;
+    const last = lastCIQueryAt.get(hostKey(ws));
+    return last === undefined || now - last >= batteryCIDueMs;
+  };
   if (worktrees.length === 0) return;
 
   // On CI ticks, git fetch each unique repo path. A fetch waits on the
@@ -546,7 +609,9 @@ async function pollTick() {
   let fetches: Promise<void> = Promise.resolve();
   if (isCITick) {
     const fetchTargets = new Map(
-      worktrees.map((w) => [`${w.hostId ?? "local"}\0${w.repoPath}`, w]),
+      worktrees
+        .filter((w) => !isOnBatteryHost(w))
+        .map((w) => [`${w.hostId ?? "local"}\0${w.repoPath}`, w]),
     );
     fetches = forEachLimited([...fetchTargets.values()], async (ws) => {
       await gitRunner(hostOf(ws))(["fetch", "--quiet", "--all"], ws.repoPath).catch(() => {});
@@ -566,9 +631,10 @@ async function pollTick() {
   // PR, and the rows show neither the PR badge nor the CI icon.
   let ciStatuses = new Map<string, CIStatus>();
   if (queryCI && pluginHost.isEnabled("github")) {
-    const ciWorktrees = worktrees.filter((w) => w.hasOrigin);
+    const ciWorktrees = worktrees.filter((w) => w.hasOrigin && ciDue(w));
     if (ciWorktrees.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorktrees);
+      for (const w of ciWorktrees) if (isOnBatteryHost(w)) lastCIQueryAt.set(hostKey(w), now);
     }
   }
 
@@ -580,8 +646,14 @@ async function pollTick() {
       .catch((err) => log.warn({ err }, "github subscription poll failed"));
   }
 
+  // A battery host's worktree whose CI query is not due keeps its stored CI status.
   await forEachLimited(worktrees, (ws) =>
-    pollWorktree(ws, queryCI ? (ciStatuses.get(ws.worktreeId) ?? { state: "none" }) : null),
+    pollWorktree(
+      ws,
+      queryCI && !(ws.hasOrigin && !ciDue(ws))
+        ? (ciStatuses.get(ws.worktreeId) ?? { state: "none" })
+        : null,
+    ),
   );
 
   await fetches;
@@ -604,6 +676,9 @@ function runTick() {
 
 export function startBranchStatusPoller() {
   if (pollerState.timer) return;
+  // Follow the clients: the level changes when one reports and when a silent one expires.
+  clientActivityService.onChange((level) => setPollerActivity(level));
+  pollerState.activity = clientActivityService.effective();
   pollerState.tickCount = 0;
   pollerState.queryCIOnNextTick = true;
 

@@ -6,6 +6,7 @@ import {
   useDiffTarget,
   type WorktreeChanges,
 } from "@/dashboard";
+import { usePollInterval } from "../lib/poll-interval";
 import { trpc } from "../lib/trpc-client";
 
 /** Sections in the order the Changes view renders them (orca's default,
@@ -47,7 +48,8 @@ export function useWorktreeChanges(
   const { compareBranch } = useDiffTarget(worktreeId);
   const queryClient = useQueryClient();
   const enabled = !!worktreeId && (options.enabled ?? true);
-  const interval = options.refetchInterval ?? false;
+  // Paused while the window is blurred or hidden, slower on battery (lib/poll-interval.ts).
+  const interval = usePollInterval(options.refetchInterval ?? false);
   const query = useQuery({
     queryKey: ["worktreeChanges", worktreeId, compareBranch],
     queryFn: (): Promise<WorktreeChanges> =>

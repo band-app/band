@@ -20,11 +20,12 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, screen, shell } from "electron";
+import { app, BrowserWindow, powerMonitor, screen, shell } from "electron";
 import { type HubFallbackAction, hubFallbackAction } from "./hub-unreachable.js";
 import { resolveAppIcon } from "./icon.js";
 import { decideNavigation, decideOpen } from "./navigation-guard.js";
 import { createLogger } from "./services/log.js";
+import { applyPowerToWindow } from "./services/window-power.js";
 import {
   fitToDisplays,
   loadWindowState,
@@ -173,6 +174,8 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     if (decideOpen(url) === "external") void shell.openExternal(url);
     return { action: "deny" };
   });
+
+  applyPowerToWindow(win, powerMonitor.isOnBatteryPower());
 
   const saved = restoreWindowState(win);
   trackWindowState(win);

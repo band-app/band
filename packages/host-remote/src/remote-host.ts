@@ -348,7 +348,7 @@ export class RemoteHost implements Host {
     return (async function* () {
       const reply = await self.rpc.request<{ chan: number }>(
         "fs.watch",
-        { root, recursive: options?.recursive },
+        { root, recursive: options?.recursive, ignore: options?.ignore },
         { signal: options?.signal },
       );
       yield* channelJsonLines<FileChange>(self.rpc.channel(reply.chan), options?.signal);

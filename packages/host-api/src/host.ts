@@ -113,6 +113,12 @@ export interface HostInfo {
    * out. A repo's `requires` in `.band/environment.json` is checked against it.
    */
   tools: Record<string, string>;
+  /**
+   * Whether the machine runs on battery power. Absent or `null` is unknown (no battery, an
+   * unsupported platform) and counts as plugged in. The hub polls the host's worktrees at the
+   * slowest cadence while this is true.
+   */
+  onBattery?: boolean | null;
   capabilities: HostCapabilities;
   /** Installed and logged-in state of each coding agent, `gh` and `git`. */
   report?: CapabilityReport;
@@ -300,6 +306,11 @@ export interface WatchOptions {
   recursive?: boolean;
   /** Ends the stream when aborted. */
   signal?: AbortSignal;
+  /**
+   * Directory or file names (single path segments, such as `node_modules`) whose events the
+   * host drops at the source, at any depth, so they never cross a link.
+   */
+  ignore?: string[];
 }
 
 export interface HostFs {

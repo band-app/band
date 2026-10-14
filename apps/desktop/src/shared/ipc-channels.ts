@@ -16,6 +16,9 @@ export const Channels = {
   // Per-process Electron/Chromium resource metrics (app.getAppMetrics()).
   // Surfaced on the Resources page's "Desktop app (Electron)" card.
   getAppMetrics: "get_app_metrics",
+  // AC / battery state from Electron's powerMonitor. The renderer reads it once and then
+  // follows `power-state-changed`.
+  getPowerState: "get_power_state",
 
   // Hub picker: which hub the app talks to (local, or a remote URL + token).
   // `hubGetChoice` returns the saved choice without its token; `hubSetChoice`
@@ -105,6 +108,8 @@ export const Events = {
    *  memory in the meantime. WebGL surfaces (terminal glyph atlases)
    *  subscribe to repair themselves. */
   systemResumed: "system-resumed",
+  /** Pushed with `{ onBattery }` when the Mac moves between AC and battery power. */
+  powerStateChanged: "power-state-changed",
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
   /** Emitted when a tab's page WebContents goes away (its `<webview>` was

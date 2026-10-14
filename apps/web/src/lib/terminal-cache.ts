@@ -6,12 +6,15 @@ import { listen as desktopListen } from "./desktop-ipc";
 import { HubWebSocket, hubWsUrl } from "./hub-config";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
+import { getPowerState, isSaver, subscribePowerState } from "./power-state";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
 import { createTerminalInputQueue } from "./terminal-input-queue";
 import { trackMouseEncoding } from "./terminal-mouse-report";
 import { attachTerminalMouseWheel } from "./terminal-mouse-wheel";
 import { createTerminalOutputQueue } from "./terminal-output-queue";
 import {
+  coldParkDelayMs,
+  hotRetainMs,
   selectIdsBeyondHotRetain,
   TERMINAL_TAB_COLD_PARK_DELAY_MS,
   TERMINAL_TAB_HOT_RETAIN_LIMIT,
@@ -419,7 +422,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     const term = new XTerm({
       allowProposedApi: true,
-      cursorBlink: true,
+      // A blinking cursor repaints the terminal twice a second. Off on battery and while blurred.
+      cursorBlink: !isSaver(getPowerState()),
       fontSize: BASE_FONT_SIZE * getCurrentZoomLevel(),
       fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
       // 1.2 row spacing is only safe under WebGL (redraws continuous glyphs at
@@ -435,6 +439,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // All output reaches xterm through this queue: paced while the terminal is
     // visible, budgeted while it is parked (terminal-output-queue.ts).
     const output = createTerminalOutputQueue((data, onParsed) => term.write(data, onParsed));
+
+    const unsubscribePower = subscribePowerState(() => {
+      term.options.cursorBlink = !isSaver(getPowerState());
+    });
 
     const themeObserver = new MutationObserver(() => {
       term.options.theme = getTerminalTheme();
@@ -1250,6 +1258,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       document.removeEventListener("visibilitychange", handleVisibility);
       unlistenSystemResumed?.();
       themeObserver.disconnect();
+      unsubscribePower();
       resizeObserver.disconnect();
       searchResultsDisposable.dispose();
       selectionResizeDisposable.dispose();
@@ -1524,6 +1533,17 @@ function nextActivationSeq(): number {
   return state.activationSeq;
 }
 
+// A move between AC and battery changes the retention times, so look again.
+if (typeof window !== "undefined") {
+  let wasOnBattery = getPowerState().onBattery;
+  subscribePowerState(() => {
+    const now = getPowerState().onBattery;
+    if (now === wasOnBattery) return;
+    wasOnBattery = now;
+    scheduleParkingPass();
+  });
+}
+
 /** Run the pass in a microtask. A worktree switch detaches several terminals
  *  in one React commit; batching them keeps it to one pass. The pass must not
  *  run synchronously inside `detach` anyway: it can dispose entries, and
@@ -1554,6 +1574,10 @@ function runParkingPass(): void {
   }
 
   let nextDeadline = Number.POSITIVE_INFINITY;
+  // On battery a hidden terminal stays warm for less time (terminal-park-policy.ts).
+  const onBattery = getPowerState().onBattery;
+  const tabColdParkDelay = coldParkDelayMs(TERMINAL_TAB_COLD_PARK_DELAY_MS, onBattery);
+  const tabHotRetain = hotRetainMs(TERMINAL_TAB_HOT_RETAIN_MS, onBattery);
   for (const [worktreeId, entries] of byWorktree) {
     let remaining = entries;
     if (isWorktreeColdParked(worktreeId)) {
@@ -1596,19 +1620,16 @@ function runParkingPass(): void {
         lastActivatedSeq = Math.max(lastActivatedSeq, pane.getActivatedSeq());
       }
       if (attached) continue;
-      for (const deadline of [
-        hiddenSinceMs + TERMINAL_TAB_COLD_PARK_DELAY_MS,
-        hiddenSinceMs + TERMINAL_TAB_HOT_RETAIN_MS,
-      ]) {
+      for (const deadline of [hiddenSinceMs + tabColdParkDelay, hiddenSinceMs + tabHotRetain]) {
         if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
       }
-      if (nowMs - hiddenSinceMs >= TERMINAL_TAB_COLD_PARK_DELAY_MS) {
+      if (nowMs - hiddenSinceMs >= tabColdParkDelay) {
         tabCandidates.push({ id: tabId, hiddenSinceMs, lastActivatedSeq });
       }
     }
     const parkedTabs = selectIdsBeyondHotRetain(tabCandidates, {
       nowMs,
-      hotRetainMs: TERMINAL_TAB_HOT_RETAIN_MS,
+      hotRetainMs: tabHotRetain,
       hotRetainLimit: TERMINAL_TAB_HOT_RETAIN_LIMIT,
     });
     for (const tabId of parkedTabs) {

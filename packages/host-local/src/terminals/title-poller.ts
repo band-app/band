@@ -18,8 +18,16 @@ export class TitlePoller {
   private readonly listeners = new Map<string, Set<(title: string) => void>>();
   private timer: NodeJS.Timeout | null = null;
   private polling = false;
+  private tick = 0;
 
-  constructor(private readonly listAll: () => Promise<TerminalListEntry[]>) {}
+  /**
+   * `every` says how many timer ticks pass between polls: 1 polls each tick, 5 every fifth, and 0
+   * pauses polling (no UI is looking, or it is in the background on battery). It is read on every tick.
+   */
+  constructor(
+    private readonly listAll: () => Promise<TerminalListEntry[]>,
+    private readonly every: () => number = () => 1,
+  ) {}
 
   /** Call `listener` with `terminalId`'s title every tick. Returns an unsubscribe function. */
   watch(terminalId: string, listener: (title: string) => void): () => void {
@@ -43,6 +51,9 @@ export class TitlePoller {
   }
 
   private poll(): void {
+    const every = this.every();
+    if (every <= 0) return;
+    if (++this.tick % every !== 0) return;
     // Skip a tick rather than stack polls behind a slow backend.
     if (this.polling) return;
     this.polling = true;
