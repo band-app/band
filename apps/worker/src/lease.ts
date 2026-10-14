@@ -65,6 +65,11 @@ export class LeaseGuard {
     // A renewal never lands between a fence's snapshot and its kills.
     await this.fencing;
     this.blocked = await Promise.all(blockedPaths.map((p) => realpath(p).catch(() => resolve(p))));
+    if (ttlMs !== this.ttlMs && this.timer) {
+      // The poll interval follows the lease time, so a new time needs a new interval.
+      clearInterval(this.timer);
+      this.timer = null;
+    }
     this.ttlMs = ttlMs;
     this.expiresAt = performance.now() + ttlMs;
     this.expiresAtWall = Date.now() + ttlMs;

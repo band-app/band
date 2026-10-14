@@ -4,8 +4,9 @@
 // repo and is replaced the same way. Discarding the superseded default-branch copy resets it to
 // the latest remote branch instead of removing the folder. Real hub, real workers.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { git, startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 
@@ -91,6 +92,14 @@ describe("opening a worktree on a host that has an older copy", () => {
     expect(git(aPath, "show", `${folder}:a-commit.txt`)).toBe("committed on A\n");
     expect(git(aPath, "log", "--format=%s", branch as string)).toContain("a-commit");
 
+    // Nothing is deleted: the older folder, ignored files included, sits beside the restored one.
+    const aside = readdirSync(dirname(aPath)).filter((f) => f.startsWith("feat-w.band-backup-"));
+    expect(aside).toHaveLength(1);
+    expect(readFileSync(join(dirname(aPath), aside[0] as string, "a-only.txt"), "utf8")).toBe(
+      "only on A\n",
+    );
+    expect(git(aPath, "worktree", "list", "--porcelain")).not.toContain("band-backup-");
+
     // The row on A is a live copy again, and the copy on B is the superseded one.
     const rowA = await rowOn("feat-w", a);
     expect(rowA?.supersededBy).toBeUndefined();
@@ -147,5 +156,19 @@ describe("the default branch", () => {
     expect(existsSync(join(aRoot, "root-change.txt"))).toBe(false);
     expect(git(aRoot, "status", "--porcelain").trim()).toBe("");
     expect((await offerFor()).blocked?.reason).not.toBe("already-continued");
+  }, 240_000);
+
+  it("is not opened over a default-branch worktree that has a terminal running", async () => {
+    const mainA = `proj-main@${a.hostId}`;
+    const mainB = `proj-main@${b.hostId}`;
+    writeFileSync(join(a.root, "proj", "late-change.txt"), "changed again on A\n");
+    await w.m("checkpoints.take", { worktreeId: mainA });
+    await w.m("terminal.create", { worktreeId: mainB, id: randomUUID() });
+    await w.killWorker(a);
+
+    const refused = await w.mFail("follow.continue", { worktreeId: mainA, toHostId: b.hostId });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.body).toContain("Stop it first");
+    expect(existsSync(join(b.root, "proj", "late-change.txt"))).toBe(false);
   }, 240_000);
 });

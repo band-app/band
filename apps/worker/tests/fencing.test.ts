@@ -67,6 +67,12 @@ describe("lease and fencing", () => {
     assert.equal(git(repo, "status", "--porcelain").trim(), "?? work.txt");
   });
 
+  it("refuses a renewal without a positive ttlMs", async () => {
+    for (const ttlMs of [0, -5, Number.NaN]) {
+      await assert.rejects(renew(ttlMs), /positive ttlMs/);
+    }
+  });
+
   it("starts again after the hub renews, and reports that it had fenced", async () => {
     const reply = await renew(60_000);
     assert.equal(reply.fenced, true);
