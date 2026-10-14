@@ -955,7 +955,8 @@ async function main() {
     // A local upload is `/api/uploads/<name>`. One on a remote worktree's
     // worker is `/api/uploads/<worktreeId>/<name>`.
     if (req.url?.startsWith("/api/uploads/")) {
-      const rest = req.url.slice("/api/uploads/".length);
+      // Drop the query string: an `<img>` against a remote hub carries `?token=`.
+      const rest = req.url.slice("/api/uploads/".length).split("?")[0];
       const slashIdx = rest.indexOf("/");
       if (slashIdx !== -1) {
         let wId: string;
@@ -1007,7 +1008,8 @@ async function main() {
 
     // Serve agent-shared files — URL: /api/shared/<worktreeId>/<filename>
     if (req.url?.startsWith("/api/shared/")) {
-      const rest = req.url.slice("/api/shared/".length);
+      // Drop the query string: an `<img>` against a remote hub carries `?token=`.
+      const rest = req.url.slice("/api/shared/".length).split("?")[0];
       const slashIdx = rest.indexOf("/");
       if (slashIdx === -1) {
         res.writeHead(400);
