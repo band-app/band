@@ -200,7 +200,8 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   /** Make the terminal the shown tab, and wait until its input is on screen. */
   const showTerminal = () =>
     expect(async () => {
-      if (!(await terminal.input.isVisible())) await worktreePage.openTerminalTab();
+      if (!(await terminal.input.isVisible()))
+        await worktreePage.activateTabInNarrowWindow("terminal");
       await expect(terminal.input).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
   await expect(async () => {
@@ -270,7 +271,7 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   // (no reload, which would forget the pause) connects to the worker again.
   const directBefore = directSockets().length;
   await expect(async () => {
-    await worktreePage.clickTerminalAddTab(worktreeId);
+    await worktreePage.pressNewTerminalShortcut();
     await expect
       .poll(() => directSockets().length, { timeout: 5_000 })
       .toBeGreaterThan(directBefore);
