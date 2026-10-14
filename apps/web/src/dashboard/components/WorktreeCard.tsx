@@ -636,7 +636,8 @@ export const WorktreeCard = memo(function WorktreeCard({
         {/* Plain repos have a single implicit worktree; removing it
             would orphan the repo, so the user is steered toward
             removing the repo itself instead. */}
-        {moveMode && !isPlain && worktree.name !== defaultBranch && (
+        {/* The default branch is the repo's own checkout: it is not moved while its host is up. */}
+        {moveMode && !isPlain && (moveMode === "offline" || worktree.name !== defaultBranch) && (
           <ContextMenuItem
             data-testid="worktree-card__move"
             disabled={moveDisabledReason !== null}

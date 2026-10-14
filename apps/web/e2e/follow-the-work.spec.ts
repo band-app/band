@@ -210,7 +210,8 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({
     tmpHome,
-    env: { BAND_LOCAL_HOST: "off", ...acpStubEnv(tmpHome) },
+    // A short lease: A's worktrees open elsewhere two seconds after it drops.
+    env: { BAND_LOCAL_HOST: "off", BAND_WORKER_LEASE_MS: "2000", ...acpStubEnv(tmpHome) },
   });
   a = await addWorker("box-a");
   b = await addWorker("box-b");
@@ -274,6 +275,18 @@ test("a finished turn and an uncommitted file give feat-one a checkpoint with th
   );
   await a.handle.kill();
   await expect.poll(() => hostStatus(a.hostId), { timeout: 30_000 }).not.toBe("online");
+  // The old owner's lease must be over before the offer opens up.
+  await expect
+    .poll(
+      async () =>
+        (
+          await trpcQuery<{ blocked?: { reason: string } }>(server.url, TOKEN, "follow.offer", {
+            worktreeId: openId,
+          })
+        ).blocked?.reason,
+      { timeout: 30_000 },
+    )
+    .not.toBe("lease-active");
 });
 
 test("a repo limited to the offline host says so, with no host to choose (S3)", async ({

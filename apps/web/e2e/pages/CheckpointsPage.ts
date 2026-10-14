@@ -94,6 +94,11 @@ export class CheckpointsPage {
     return this.page.getByTestId("offline-sidepanel");
   }
 
+  /** The time left before the old host's lease ends and the button turns on. */
+  get leaseCountdown(): Locator {
+    return this.notice.getByTestId("offline-notice__countdown");
+  }
+
   get openElsewhereButton(): Locator {
     return this.notice.getByTestId("offline-notice__open-elsewhere");
   }

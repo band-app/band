@@ -1,7 +1,7 @@
 import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { CloudOff, File as FileIcon, FolderOpen, GitCompare } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { toWorktreeId, useRepos } from "@/dashboard";
 import { ContinueOnHostDialog } from "../dashboard/components/ContinueOnHostDialog";
 import { timeAgo, useHostSeen } from "../dashboard/hooks/use-host-status";
@@ -68,6 +68,24 @@ export function useOfflineCheckpoint(worktreeId: string): {
   return { active: offline && checkpointAt !== null && chosen, offline, at: checkpointAt };
 }
 
+/** The current time, ticking every `everyMs`, or frozen while `everyMs` is null. */
+function useNow(everyMs: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (everyMs === null) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(id);
+  }, [everyMs]);
+  return now;
+}
+
+/** "4:32" for 272 seconds. */
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 /** The age text of a timestamp, with the exact time on hover. */
 function Ago({ at }: { at: number }) {
   return <span title={new Date(at).toLocaleString()}>{timeAgo(at)}</span>;
@@ -96,9 +114,17 @@ export function OfflineWorktreeNotice({
     refetchInterval: active ? 15_000 : false,
     staleTime: 10_000,
   });
-  if (!offline) return null;
   const offer = offerQuery.data;
   const blocked = offer?.blocked;
+  const leaseEndsAt = blocked?.reason === "lease-active" ? (offer?.leaseExpiresAt ?? null) : null;
+  const now = useNow(leaseEndsAt !== null ? 1000 : null);
+  const leaseLeftMs = leaseEndsAt !== null ? leaseEndsAt - now : null;
+  const refetchOffer = offerQuery.refetch;
+  // When the countdown reaches zero, ask again: the button turns into the real one.
+  useEffect(() => {
+    if (leaseLeftMs !== null && leaseLeftMs <= 0) void refetchOffer();
+  }, [leaseLeftMs, refetchOffer]);
+  if (!offline) return null;
   return (
     <div
       data-testid="offline-notice"
@@ -147,6 +173,13 @@ export function OfflineWorktreeNotice({
           onClick={() => setDialogOpen(true)}
         >
           Open on another host
+        </Button>
+      ) : null}
+      {leaseLeftMs !== null && leaseLeftMs > 0 ? (
+        // The old host may still be running the worktree until its lease ends.
+        <Button size="sm" disabled data-testid="offline-notice__open-elsewhere">
+          Open on another host in{" "}
+          <span data-testid="offline-notice__countdown">{formatCountdown(leaseLeftMs)}</span>
         </Button>
       ) : null}
       {dialogOpen && offer ? (
