@@ -56,7 +56,7 @@ describe("coding agents on a hub with none of its own", () => {
     // The remote-loopback job starts a worker with the server, which seeds the list before this runs.
     if (!isRemoteLoopback) expect((await getSettings()).codingAgents ?? []).toEqual([]);
 
-    const issued = trpcData<{ token: string }>(
+    const issued = trpcData<{ token: string; hostId: string }>(
       await trpcMutate(server.url, "tokens.issueWorkerBootstrap", { hostName: "W" }, TOKEN),
     );
     worker = spawn(
@@ -67,6 +67,8 @@ describe("coding agents on a hub with none of its own", () => {
         server.url,
         "--token",
         issued.token,
+        "--worker-id",
+        issued.hostId,
         "--root",
         tmp("band-seed-agents-root-"),
         "--state-dir",
