@@ -80,6 +80,13 @@ export interface VirtualizedMessageListProps<T> {
    */
   overscan?: number;
   listRef?: Ref<VirtualizedMessageListHandle>;
+  /**
+   * False while the opening replay is still arriving. The first-paint reveal
+   * gate waits for it: on a slow link the replay reaches the browser in
+   * several batches, and a gate armed by the first batch settles and reveals
+   * between two of them, so every later batch shows as a jump.
+   */
+  ready?: boolean;
 }
 
 export function VirtualizedMessageList<T>({
@@ -89,6 +96,7 @@ export function VirtualizedMessageList<T>({
   estimateSize = 220,
   overscan = 5,
   listRef,
+  ready = true,
 }: VirtualizedMessageListProps<T>) {
   const { scrollRef, scrollToBottom } = useStickToBottomContext();
 
@@ -117,15 +125,15 @@ export function VirtualizedMessageList<T>({
   // jump. `visibility` (not `display:none`) keeps the rows in layout so
   // their ResizeObservers still fire and measurement completes off-screen.
   //
-  // This arms ONCE per component instance: `revealed` is instance state
-  // and the effect has an empty dependency list, so streaming
-  // text-deltas (which re-render this component ~30×/sec without
-  // remounting it) never re-gate. A session switch remounts `ChatView`
+  // This arms ONCE per component instance, when `ready` first holds:
+  // `revealed` is instance state, so streaming text-deltas (which re-render
+  // this component ~30×/sec without remounting it) never re-gate. A session switch remounts `ChatView`
   // and therefore this component, which re-arms the gate for the next
   // freshly-loaded conversation.
   const [revealed, setRevealed] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only gate — must arm exactly once per instance, never on `scrollToBottom`/`scrollRef` identity changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: must arm once `ready` holds, never on `scrollToBottom`/`scrollRef` identity changes
   useEffect(() => {
+    if (!ready || revealed) return;
     let raf = 0;
     let frames = 0;
     let stableFrames = 0;
@@ -172,7 +180,7 @@ export function VirtualizedMessageList<T>({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [ready]);
 
   // Hoist the virtualizer callbacks so their identity is stable across
   // re-renders — during streaming `ChatView` re-renders ~30×/sec and
