@@ -274,26 +274,22 @@ export function SidebarGutter() {
   );
 }
 
-/** Draggable top row for the center column when it has no tab strip: no
- *  worktree is active, or the active one has every tab closed. Carries the
- *  same controls the tab strip would (the sidebar gutter, and the right
- *  sidepanel's expand button while it is collapsed) and no title. */
+/** Top row for the center column when it has no tab strip: no worktree is
+ *  active, or the active one has every tab closed. Carries the same controls
+ *  the tab strip would (the sidebar gutter, and the right sidepanel's expand
+ *  button while it is collapsed) and no title. It does not drag the window;
+ *  only the sidebars do. */
 export function CenterDragBar({ className = "" }: { className?: string }) {
   const chrome = useWorktreeChrome();
   const onToggleRightPanel = chrome?.onToggleRightPanel;
-  const drag = useWindowDrag();
   return (
     <div
       data-testid="worktree-center__drag-bar"
       className={`flex h-[38px] shrink-0 items-center border-b border-border bg-background pr-2 ${className}`}
-      style={drag ? DRAG_STYLE : undefined}
     >
       <SidebarGutter />
       {onToggleRightPanel && !chrome.rightPanelVisible && (
-        <div
-          className="ml-auto flex shrink-0 items-center"
-          style={drag ? NO_DRAG_STYLE : undefined}
-        >
+        <div className="ml-auto flex shrink-0 items-center">
           <RightPanelToggle onToggle={onToggleRightPanel} visible={false} />
         </div>
       )}

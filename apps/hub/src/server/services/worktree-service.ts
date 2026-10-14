@@ -234,6 +234,16 @@ export const worktreeSetPinnedInput = z.object({
 });
 export type WorktreeSetPinnedInput = z.infer<typeof worktreeSetPinnedInput>;
 
+export const worktreeSetOriginInput = z.object({
+  repo: z.string(),
+  // Worktree identity (immutable `name`), not the live git branch.
+  name: z.string(),
+  hostId: z.string().optional(),
+  // The parent worktree's id, or null to remove the parent.
+  origin: z.string().min(1).nullable(),
+});
+export type WorktreeSetOriginInput = z.infer<typeof worktreeSetOriginInput>;
+
 export const worktreeGitInput = z.object({
   repo: z.string(),
   // Worktree identity (immutable `name`), not the live git branch.
@@ -279,6 +289,14 @@ export class RepoNotFoundError extends Error {
  * (worktrees stays 500 to honor the pinned legacy contract).
  */
 export { WorktreeNotFoundError };
+
+/** A manual parent that would be the worktree itself, one of its descendants, or does not exist. */
+export class InvalidOriginError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidOriginError";
+  }
+}
 
 /**
  * Worktree mutation invoked on a plain (non-git) repo. Plain repos
@@ -1324,6 +1342,53 @@ export class WorktreeService {
     }
     worktree.pinned = input.pinned;
     saveState(state);
+    return { ok: true };
+  }
+
+  /**
+   * Sets a worktree's parent (its origin) by hand, or removes it with `null`. A manual parent
+   * carries no chat or terminal. Rejects the worktree itself and any descendant of it, since
+   * either would make a cycle.
+   */
+  setOrigin(input: WorktreeSetOriginInput): { ok: true } {
+    const state = loadState();
+    const repo = state.repos.find((p) => p.name === input.repo);
+    if (!repo) throw new RepoNotFoundError(input.repo);
+    const target = findWorktreeRow(repo.worktrees, input.name, input.hostId);
+    if (!target) throw new WorktreeNotFoundError(input.name);
+    const targetHostId = target.hostId ?? "local";
+    const worktreeId = toWorktreeId(repo.name, target.name, target.hostId);
+    if (input.origin !== null) {
+      const origins = new Map<string, string | undefined>();
+      for (const r of state.repos) {
+        for (const wt of r.worktrees) {
+          origins.set(toWorktreeId(r.name, wt.name, wt.hostId), wt.origin?.worktreeId);
+        }
+      }
+      if (!origins.has(input.origin)) {
+        throw new InvalidOriginError(`Unknown origin worktree: ${input.origin}`);
+      }
+      if (input.origin === worktreeId) {
+        throw new InvalidOriginError("A worktree cannot be its own parent.");
+      }
+      const seen = new Set<string>();
+      for (let id: string | undefined = input.origin; id && !seen.has(id); ) {
+        if (id === worktreeId) {
+          throw new InvalidOriginError(
+            "That worktree is a descendant of this one, so it cannot be its parent.",
+          );
+        }
+        seen.add(id);
+        id = origins.get(id);
+      }
+    }
+    this.repoQueries.setOrigin(
+      repo.name,
+      target.name,
+      input.origin === null ? null : { worktreeId: input.origin },
+      targetHostId,
+    );
+    emit({ kind: "worktree-origin-changed", worktreeId });
     return { ok: true };
   }
 

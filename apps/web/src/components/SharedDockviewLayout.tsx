@@ -23,7 +23,6 @@ import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
 import { OfflineCheckpointBar } from "./OfflineCheckpoint";
 import { getPerWorktreeState, subscribePerWorktreeState } from "./per-worktree-state-store";
-import { StartedFromBar } from "./StartedFromBar";
 import {
   firstLeafOfKind,
   getWorktreeDockviewApi,
@@ -444,11 +443,11 @@ export function SharedDockviewLayout() {
 
       // Off macOS the modifier is Ctrl, and a focused terminal keeps Ctrl chords
       // for the shell (Ctrl+T transposes, Ctrl+B moves back). The shell has no
-      // use for Ctrl+Shift+N / B / P or Ctrl+Alt+I, so new chat, new browser,
-      // the command palette and show chat still work there.
+      // use for Ctrl+Shift+N / B / P / M or Ctrl+Alt+I, so new chat, new browser,
+      // the command palette, maximize and show chat still work there.
       const shellFreeChord =
         !isMacPlatform() &&
-        ((e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p")) ||
+        ((e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p" || key === "m")) ||
           (e.altKey && !e.shiftKey && e.code === "KeyI"));
       if (terminalFocused && !e.metaKey && !shellFreeChord) return;
 
@@ -744,7 +743,6 @@ export function SharedDockviewLayout() {
             // Only the shown worktree puts app-regions on the page.
             <WindowDragContext.Provider value={wsActive}>
               <div className="flex h-full w-full flex-col">
-                <StartedFromBar worktreeId={worktreeId} />
                 <OfflineCheckpointBar worktreeId={worktreeId} />
                 <div className="relative min-h-0 flex-1">
                   <WorktreeCenterDockview

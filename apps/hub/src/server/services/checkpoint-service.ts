@@ -230,6 +230,21 @@ export class CheckpointService {
     };
   }
 
+  /** Whether a worker's link is up. The hub's own machine is never a checkpoint host. */
+  isHostOnline(hostId: string): boolean {
+    return this.sessions.get(hostId)?.attached === true;
+  }
+
+  /** Whether a worker is ephemeral: it sleeps and wakes instead of being continued elsewhere. */
+  isHostEphemeral(hostId: string): boolean {
+    return this.sessions.get(hostId)?.hello.mode === "ephemeral";
+  }
+
+  /** The stored row of a checkpoint, for the follow-the-work comparison of trees. */
+  row(checkpointId: string): CheckpointRow | undefined {
+    return this.rows.get(checkpointId);
+  }
+
   /** Whether the worktree's repo keeps checkpoints on the hub. */
   isEnabled(repoName: string): boolean {
     const state = loadState().repos.find((r) => r.name === repoName);

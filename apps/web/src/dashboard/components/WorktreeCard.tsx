@@ -10,10 +10,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clipboard,
+  CornerUpLeft,
   Folder,
   FolderOpen,
   Home,
@@ -25,12 +27,15 @@ import {
   Play,
   Square,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { timeAgo, useHostOffline } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
+import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
@@ -44,10 +49,13 @@ import type {
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
+import { ContinuedFromLine } from "./ContinuedFromLine";
+import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
+import { SetParentDialog } from "./SetParentDialog";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
 
@@ -158,6 +166,11 @@ export const WorktreeCard = memo(function WorktreeCard({
   const superseded = worktree.supersededBy;
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
+  const [parentOpen, setParentOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+  const [divergenceOpen, setDivergenceOpen] = useState(false);
+  const diverged = worktree.divergence?.state === "diverged";
   // Move needs the host online. Restore needs a checkpoint to restore from.
   const moveMode: "move" | "restore" | null =
     !worktree.hostId || worktree.hostId === "local" || superseded
@@ -252,6 +265,13 @@ export const WorktreeCard = memo(function WorktreeCard({
   const isDirty = branchStatus?.git.dirty ?? false;
   const hasUnpushedCommits = (branchStatus?.git.ahead ?? 0) > 0;
 
+  const removeParent = () => {
+    trpc.worktrees.setOrigin
+      .mutate({ repo: repoName, name: worktree.name, hostId: worktree.hostId, origin: null })
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.repos }))
+      .catch((err) => setError(err));
+  };
+
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
       removeWorktreeMutation.mutate({
@@ -290,6 +310,7 @@ export const WorktreeCard = memo(function WorktreeCard({
                   // than sitting beside it.
                   <AgentStatusIndicator
                     agent={status?.agent}
+                    tabStatuses={status?.tabStatuses}
                     isActive={isActive}
                     fallback={
                       <Home
@@ -299,7 +320,11 @@ export const WorktreeCard = memo(function WorktreeCard({
                     }
                   />
                 ) : (
-                  <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
+                  <AgentStatusIndicator
+                    agent={status?.agent}
+                    tabStatuses={status?.tabStatuses}
+                    isActive={isActive}
+                  />
                 )}
                 {showRepoName ? (
                   // Pinned section: stack the branch name over the repo name
@@ -395,6 +420,14 @@ export const WorktreeCard = memo(function WorktreeCard({
                 : "Host offline"}
             </span>
           )}
+          {/* The work of this worktree continued here from another host's checkpoint. */}
+          {worktree.continuedFrom && !isDeleting && (
+            <ContinuedFromLine
+              from={worktree.continuedFrom}
+              testId="worktree-card__continued-from"
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            />
+          )}
           {/* This copy was restored on another host. Its files are untouched until a person removes it. */}
           {superseded && !isDeleting && (
             <span
@@ -404,6 +437,19 @@ export const WorktreeCard = memo(function WorktreeCard({
               className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
             >
               Superseded by {superseded}
+              {diverged && (
+                <button
+                  type="button"
+                  data-testid="worktree-card__diverged"
+                  className="rounded bg-destructive/15 px-1 text-destructive underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDivergenceOpen(true);
+                  }}
+                >
+                  Diverged
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="worktree-card__remove-superseded"
@@ -492,6 +538,19 @@ export const WorktreeCard = memo(function WorktreeCard({
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
         </ContextMenuItem>
+        <ContextMenuItem
+          data-testid="worktree-card__set-parent"
+          onClick={() => setParentOpen(true)}
+        >
+          <CornerUpLeft />
+          Set parent…
+        </ContextMenuItem>
+        {worktree.origin && (
+          <ContextMenuItem data-testid="worktree-card__remove-parent" onClick={removeParent}>
+            <Unlink />
+            Remove parent
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         {capabilities.copyPath && (
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(worktree.path)}>
@@ -545,6 +604,21 @@ export const WorktreeCard = memo(function WorktreeCard({
           </ContextMenuItem>
         )}
       </ContextMenuContent>
+      {superseded && divergenceOpen && (
+        <DivergencePanel
+          open={divergenceOpen}
+          onOpenChange={setDivergenceOpen}
+          worktreeId={worktreeId}
+        />
+      )}
+      {parentOpen && (
+        <SetParentDialog
+          open={parentOpen}
+          onOpenChange={setParentOpen}
+          repoName={repoName}
+          worktree={worktree}
+        />
+      )}
       {moveMode && moveOpen && (
         <MoveWorktreeDialog
           open={moveOpen}

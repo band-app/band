@@ -633,10 +633,14 @@ export interface InstallSkillsResult {
 }
 
 export interface HooksStatus {
-  /** Band's hook is present for every hook event. */
+  /** Band's current hook is present for every hook event. */
   installed: boolean;
+  /** Band has hooks, but not the current set (fewer events, or an older command). */
+  outdated: boolean;
   /** The settings also hold hooks that are not Band's. */
   other_hooks_exist: boolean;
+  /** The version of the hook set this build installs. */
+  version: number;
 }
 
 export interface HostAgentEnv {
@@ -676,6 +680,8 @@ export interface HostAgentEnv {
   hooksStatus(): Promise<HooksStatus>;
   /** Installs Band's agent hooks into the host's Claude Code settings. Rejects when the host has no `band` CLI. */
   installHooks(): Promise<void>;
+  /** Removes Band's entries from the host's Claude Code settings and leaves everything else. */
+  removeHooks(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

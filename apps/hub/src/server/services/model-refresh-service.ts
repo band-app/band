@@ -105,6 +105,12 @@ export class ModelRefreshService {
     return hostRegistry.local;
   }
 
+  /** Why the agent cannot start on `hostId`, or null when it can. */
+  async launchProblemOn(hostId: string, agentId?: string): Promise<string | null> {
+    const def = resolveAgentDefinition(this.queries.load(), agentId);
+    return launchProblem(hostRegistry.hostById(hostId), def);
+  }
+
   /**
    * Whether each configured agent can start on each host that is up (the local
    * host, and workers that are online). The Settings page shows it per host.

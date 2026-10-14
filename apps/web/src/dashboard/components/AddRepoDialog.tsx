@@ -24,9 +24,9 @@ const OUTSIDE_ROOTS = "OUTSIDE_ROOTS:";
 
 /**
  * The action row of each step. The dialog scrolls, so the row sticks to its bottom edge (the
- * negative margins cancel the dialog's p-6) and the button stays visible above the fields.
+ * negative margins cancel the dialog's p-6, and a sticky offset is measured inside the padding, hence -bottom-6) and the button stays visible above the fields.
  */
-const ACTION_ROW = "sticky bottom-0 -mx-6 -mb-6 border-t border-border bg-background px-6 py-3";
+const ACTION_ROW = "sticky -bottom-6 -mx-6 -mb-6 border-t border-border bg-background px-6 py-3";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -84,6 +84,13 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [outsideRoots, setOutsideRoots] = useState<string | null>(null);
+  // Set when the folder's repo was already in Band: its clone on this host was registered.
+  const [existing, setExisting] = useState<{
+    name: string;
+    hostId: string;
+    hostName: string;
+    primary: boolean;
+  } | null>(null);
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
@@ -182,6 +189,19 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         allowedHostIds: hostsValue.allowedHostIds,
         ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });
+      if (repo.existed && repo.clone) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+          queryClient.invalidateQueries({ queryKey: ["repos"] }),
+        ]);
+        setExisting({
+          name: repo.name,
+          hostId: repo.clone.hostId,
+          hostName: repo.clone.hostName,
+          primary: repo.primaryHostId === repo.clone.hostId,
+        });
+        return;
+      }
       await finish(repo.name);
     } catch (err) {
       const message = errorText(err);
@@ -191,6 +211,21 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
       } else {
         setError(message);
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const makePrimary = async () => {
+    if (!existing) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await trpc.repos.update.mutate({ name: existing.name, primaryHostId: existing.hostId });
+      setExisting({ ...existing, primary: true });
+      await queryClient.invalidateQueries({ queryKey: ["repos"] });
+    } catch (err) {
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -265,7 +300,47 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
         ))}
       </div>
 
-      {mode === "worker" ? (
+      {existing ? (
+        <div className="space-y-3" data-testid="add-repo__existing">
+          <p
+            className="text-sm"
+            data-testid="add-repo__existing-message"
+            data-repo={existing.name}
+            data-host-id={existing.hostId}
+          >
+            {existing.name} is already in Band; added {existing.hostName} as a clone.
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            {existing.primary ? (
+              <p className="mr-auto text-sm text-muted-foreground">
+                {existing.hostName} is the primary host.
+              </p>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                data-testid="add-repo__make-primary"
+                onClick={makePrimary}
+              >
+                Make {existing.hostName} the primary host
+              </Button>
+            )}
+            <Button
+              size="sm"
+              data-testid="add-repo__existing-done"
+              onClick={() => {
+                const name = existing.name;
+                setExisting(null);
+                setSelected(null);
+                onAdded?.(name);
+              }}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      ) : mode === "worker" ? (
         hosts.isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner className="size-4" /> Looking for workers
@@ -493,7 +568,11 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <ul className="max-h-60 overflow-auto rounded-md border" aria-label="Folders">
+                <ul
+                  className="h-[clamp(240px,calc(45dvh/var(--app-zoom,1)),420px)] shrink-0 overflow-auto rounded-md border"
+                  aria-label="Folders"
+                  data-testid="add-repo__folders"
+                >
                   {data.parent ? (
                     <li>
                       <button

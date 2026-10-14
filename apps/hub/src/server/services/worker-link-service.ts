@@ -26,7 +26,9 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { checkpointService } from "./checkpoint-service";
+import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
@@ -217,8 +219,17 @@ export class WorkerLinkService {
     };
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
+    try {
+      seedCodingAgentsFromTypes(hello.agents);
+    } catch (err) {
+      log.warn(`could not seed coding agents: ${err instanceof Error ? err.message : err}`);
+    }
     this.publish(workerId, "online");
     void ephemeralLifecycleService.onConnected(session);
+    // A copy this host kept while its work continued elsewhere is compared with that checkpoint.
+    void followService.onHostReturned(workerId).catch((err) => {
+      log.warn(`follow check on ${workerId}: ${err instanceof Error ? err.message : err}`);
+    });
     // A request a runner fulfilled with this host can finish now.
     placementService.onHostOnline(workerId);
     // Worktrees removed while the worker was away still have a checkout on it.

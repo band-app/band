@@ -46,6 +46,7 @@ export type SettingsNavId =
   | "devices"
   | "credentials"
   | "mcp"
+  | "agent-hooks"
   | "context"
   | "runners"
   | "environment"
@@ -151,6 +152,13 @@ export class SettingsPage {
     return box;
   }
 
+  /** Bounding box of the "Back to app" button. */
+  async backBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await this.dialog.getByTestId("settings-page__back").boundingBox();
+    if (!box) throw new Error("The Back to app button has no bounding box (not visible)");
+    return box;
+  }
+
   /** Clicks "Back to app", which closes the settings. */
   async backToApp(): Promise<void> {
     await test.step("Go back to the app", async () => {
@@ -206,6 +214,11 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "Code intelligence (LSP)" });
   }
 
+  /** Settings > Agents: whether an agent on a worker may start worktrees on other hosts. */
+  crossHostWorktreesSwitch(): Locator {
+    return this.dialog.getByRole("switch", { name: "Agents may start worktrees on other hosts" });
+  }
+
   /** Browser CDP experimental toggle. */
   webBrowserCdpSwitch(): Locator {
     return this.dialog.getByRole("switch", {
@@ -221,9 +234,44 @@ export class SettingsPage {
     return this.dialog.getByRole("button", { name: "Add label" });
   }
 
-  /** "Play sound on needs attention" toggle. */
+  /** The install banner for Claude Code hooks (`DashboardShell.tsx`). */
+  get hooksBanner(): Locator {
+    return this.page.getByTestId("hooks-banner");
+  }
+
+  /** The banner's Install button. */
+  get hooksBannerInstall(): Locator {
+    return this.page.getByTestId("hooks-banner__install");
+  }
+
+  /** The banner's dismiss (×) button. */
+  get hooksBannerDismiss(): Locator {
+    return this.page.getByTestId("hooks-banner__dismiss");
+  }
+
+  /** The Agent hooks row of one host (`AgentHooksSettings.tsx`). Its `data-state` is
+   *  `installed`, `outdated`, `not_installed` or `offline`. */
+  hooksHostRow(hostId: string): Locator {
+    return this.dialog
+      .getByTestId("settings__hooks-host")
+      .and(this.page.locator(`[data-host-id="${hostId}"]`));
+  }
+
+  /** Install or Reinstall on a host's Agent hooks row. */
+  hooksInstallButton(hostId: string): Locator {
+    return this.hooksHostRow(hostId).getByTestId("settings__hooks-install");
+  }
+
+  /** Remove on a host's Agent hooks row. */
+  hooksRemoveButton(hostId: string): Locator {
+    return this.hooksHostRow(hostId).getByTestId("settings__hooks-remove");
+  }
+
+  /** "Play sound when an agent needs you or finishes" toggle. */
   soundOnNeedsAttentionSwitch(): Locator {
-    return this.dialog.getByRole("switch", { name: "Play sound on needs attention" });
+    return this.dialog.getByRole("switch", {
+      name: "Play sound when an agent needs you or finishes",
+    });
   }
 
   /** The retired "Cached worktrees" number input. Kept as a locator only so

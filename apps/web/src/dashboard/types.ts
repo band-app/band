@@ -1,4 +1,5 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
+import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 
 export type { FormatFileResult } from "@band-app/shared/format-file-result";
 export type {
@@ -7,7 +8,12 @@ export type {
   WorktreeTerminalConfig,
 } from "@band-app/shared/terminal-config";
 
-export type AgentStatusType = "working" | "needs_attention" | "waiting";
+/**
+ * What an agent is doing: `working`, `monitoring` (the turn is over but a
+ * loop or background work runs), `question` (waits for the user), `done`,
+ * `failed` or `idle`.
+ */
+export type AgentStatusType = "working" | "monitoring" | "question" | "done" | "failed" | "idle";
 
 export interface AgentInfo {
   name: string;
@@ -20,7 +26,7 @@ export interface AgentInfo {
 export interface TabAgentStatus {
   chatId?: string;
   terminalId?: string;
-  status: "working" | "needs_attention";
+  status: Exclude<AgentStatusType, "idle">;
 }
 
 export interface WorktreeStatus {
@@ -29,7 +35,7 @@ export interface WorktreeStatus {
   branch: string;
   worktreePath: string;
   agent?: AgentInfo;
-  /** Chats and terminals whose agent is working or needs attention. */
+  /** Chats and terminals whose agent is not idle. */
   tabStatuses?: TabAgentStatus[];
 }
 
@@ -78,10 +84,14 @@ export interface RepoInfo {
   allowedHostIds?: string[] | null;
   /** The host whose default-branch checkout is listed as a worktree. */
   primaryHostId?: string | null;
+  /** Set when no host lists the default branch: the primary host, whose clone is not on it. */
+  mainMissing?: { hostId: string } | null;
   /** Whether the hub keeps checkpoints of this repo's worktrees (the stored choice, else the default). */
   checkpointsEnabled?: boolean;
   /** The stored choice, or null when the repo follows the default. */
   checkpointsSetting?: boolean | null;
+  /** Whether a worktree whose host is offline continues on another host without asking. */
+  autoContinue?: boolean;
 }
 
 export interface RepoAvatarInfo {
@@ -120,6 +130,10 @@ export interface WorktreeInfo {
   supersededBy?: string;
   /** When the hub took the newest checkpoint of this worktree, or null when it has none. */
   lastCheckpointAt?: number | null;
+  /** Set on a copy a continuation created: where the work came from. */
+  continuedFrom?: ContinuedFrom;
+  /** Set on a superseded copy once its host is back: whether it holds changes the continuation missed. */
+  divergence?: Divergence;
   /** Where the worktree was started from, or null for top-level work. */
   origin?: WorktreeOrigin | null;
   /** Ids of the worktrees started from this one, on any repo and host. */
@@ -242,7 +256,7 @@ export interface Settings {
    * the caller has no device mode of its own (the CLI, cronjobs, MCP).
    * Browsers use their per-device mode (`dashboard/lib/agent-mode.ts`).
    */
-  agents?: { defaultMode?: AgentMode };
+  agents?: { defaultMode?: AgentMode; crossHostWorktrees?: boolean };
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
@@ -305,8 +319,23 @@ export interface Settings {
 }
 
 export interface HooksStatus {
+  /** Band's current hook is present for every event. */
   installed: boolean;
+  /** Band has hooks, but not the current set. */
+  outdated: boolean;
   other_hooks_exist: boolean;
+  /** The version of the hook set this build installs. */
+  version: number;
+}
+
+/** One host's Claude Code hooks (`hooks.hosts`). */
+export interface HostHooks {
+  hostId: string;
+  name: string;
+  online: boolean;
+  hasClaudeCode: boolean;
+  status: HooksStatus | null;
+  error?: string;
 }
 
 export type CliStatus =

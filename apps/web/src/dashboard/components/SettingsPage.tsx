@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
@@ -35,6 +36,7 @@ import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
+import { AgentHooksSettings } from "./settings/AgentHooksSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
@@ -81,6 +83,7 @@ type SettingsSectionId =
   | "repos"
   | "credentials"
   | "mcp"
+  | "agent-hooks"
   | "runners"
   | "environment"
   | "labels"
@@ -157,6 +160,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "MCP",
     subtitle:
       "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
+    group: "AI capabilities",
+  },
+  {
+    id: "agent-hooks",
+    title: "Agent hooks",
+    subtitle: "Claude Code hooks that report what an agent in a terminal is doing.",
     group: "AI capabilities",
   },
   {
@@ -251,7 +260,13 @@ function formatLastRefreshed(epochMs: number): string {
   }
 }
 
+// Inline app-region styles: importing them from `components/DesktopTitleBar` would pull
+// its asset imports into every module that loads this page (the e2e page objects do).
+const DRAG_STYLE = { WebkitAppRegion: "drag" } as React.CSSProperties;
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
+
 export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
+  const titleBarOffset = useTitleBarOffset();
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
   const restartTerminalDaemonMutation = useRestartTerminalDaemon();
@@ -284,6 +299,9 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const [defaultAgentId, setDefaultAgentId] = useState(settings.defaultCodingAgent ?? "");
   const [defaultAgentMode, setDefaultAgentMode] = useState<AgentMode>(
     settings.agents?.defaultMode ?? "gui",
+  );
+  const [crossHostWorktrees, setCrossHostWorktrees] = useState(
+    settings.agents?.crossHostWorktrees !== false,
   );
   const [deviceAgentMode, setDeviceAgentMode] = useAgentMode();
   const [webServerPort, setWebServerPort] = useState(settings.webServerPort?.toString() ?? "");
@@ -513,6 +531,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       return true;
     if (defaultAgentId !== (settings.defaultCodingAgent ?? "")) return true;
     if (defaultAgentMode !== (settings.agents?.defaultMode ?? "gui")) return true;
+    if (crossHostWorktrees !== (settings.agents?.crossHostWorktrees !== false)) return true;
     if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
       return true;
@@ -533,6 +552,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     codingAgents,
     defaultAgentId,
     defaultAgentMode,
+    crossHostWorktrees,
     webServerPort,
     soundOnNeedsAttention,
     selectedSound,
@@ -554,6 +574,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     setCodingAgents(Array.isArray(settings.codingAgents) ? settings.codingAgents : []);
     setDefaultAgentId(settings.defaultCodingAgent ?? "");
     setDefaultAgentMode(settings.agents?.defaultMode ?? "gui");
+    setCrossHostWorktrees(settings.agents?.crossHostWorktrees !== false);
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
@@ -613,7 +634,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       worktreesDir: worktreesDir.trim() || null,
       codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
       defaultCodingAgent: defaultAgentId || undefined,
-      agents: { ...settings.agents, defaultMode: defaultAgentMode },
+      agents: { ...settings.agents, defaultMode: defaultAgentMode, crossHostWorktrees },
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
@@ -654,17 +675,27 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
             data-testid="settings-page__nav"
             className="flex shrink-0 flex-col gap-2 border-border border-b bg-muted/20 p-3 max-lg:flex-row max-lg:items-center max-lg:overflow-x-auto lg:w-60 lg:overflow-y-auto lg:border-r lg:border-b-0"
           >
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="shrink-0 justify-start gap-2"
-              data-testid="settings-page__back"
-              onClick={() => onOpenChange(false)}
+            <div
+              data-testid="settings-page__top-row"
+              className={cn(
+                "flex shrink-0 items-center",
+                isDesktop && `-mx-3 -mt-3 h-[38px] lg:max-w-none ${titleBarOffset}`,
+              )}
+              style={isDesktop ? DRAG_STYLE : undefined}
             >
-              <ArrowLeft className="size-4" />
-              Back to app
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0 justify-start gap-2"
+                style={isDesktop ? NO_DRAG_STYLE : undefined}
+                data-testid="settings-page__back"
+                onClick={() => onOpenChange(false)}
+              >
+                <ArrowLeft className="size-4" />
+                Back to app
+              </Button>
+            </div>
             <Input
               aria-label="Search settings"
               placeholder="Search settings"
@@ -855,6 +886,13 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     </SettingsSection>
                   ) : null}
 
+                  {/* ── Agent hooks ────────────────────────────────── */}
+                  {active === "agent-hooks" ? (
+                    <SettingsSection title="Agent hooks">
+                      <AgentHooksSettings />
+                    </SettingsSection>
+                  ) : null}
+
                   {/* ── MCP ────────────────────────────────────────── */}
                   {active === "mcp" ? (
                     <SettingsSection title="MCP">
@@ -1001,6 +1039,17 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                           </Select>
                         </SettingsRow>
                       )}
+                      <SettingsRow
+                        htmlFor="cross-host-worktrees"
+                        label="Agents may start worktrees on other hosts"
+                        description="An agent on a worker can create a worktree on another online worker, when the repo allows that host. The new worktree records the agent's worktree as its origin. Agents never start runner machines this way."
+                      >
+                        <Switch
+                          id="cross-host-worktrees"
+                          checked={crossHostWorktrees}
+                          onCheckedChange={setCrossHostWorktrees}
+                        />
+                      </SettingsRow>
                       <SettingsRow
                         variant="responsive"
                         label="Open agents on this device as"
@@ -1325,8 +1374,8 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     <SettingsSection title="Notifications">
                       <SettingsRow
                         htmlFor="sound-needs-attention"
-                        label="Play sound on needs attention"
-                        description="Play a sound when an agent transitions from working to needs attention."
+                        label="Play sound when an agent needs you or finishes"
+                        description="Play a sound when an agent asks a question, finishes or fails. Loops and background work that keep running are silent."
                       >
                         <Switch
                           id="sound-needs-attention"

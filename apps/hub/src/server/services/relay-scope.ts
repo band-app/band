@@ -58,6 +58,19 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "statuses.notify",
   "statuses.clearNeedsAttention",
   "repos.list",
+  "repos.add",
+  "repos.addFromWorker",
+  "repos.addByUrl",
+  "repos.inspectFolder",
+  "repos.resolveRemote",
+  "repos.gitInit",
+  "repos.promoteToGit",
+  "repos.update",
+  "repos.updateLabel",
+  "repos.reorder",
+  "repos.remove",
+  "hosts.list",
+  "hosts.forAgents",
   "cronjobs.list",
   "cronjobs.create",
   "cronjobs.update",
@@ -70,13 +83,28 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
 ]);
 
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
-const UNBATCHABLE = new Set(["repos.list", "worktrees.create", "worktrees.remove"]);
+const UNBATCHABLE = new Set([
+  "repos.list",
+  "hosts.list",
+  "worktrees.create",
+  "worktrees.remove",
+  "statuses.notify",
+]);
+
+/** `input` with `hostId` set to the worker's, or left alone when `keep` and the call named a host. */
+function pinHost(input: unknown, workerId: string, keep: boolean): object {
+  const base =
+    input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  return keep && typeof base.hostId === "string" ? base : { ...base, hostId: workerId };
+}
 
 /**
- * `worktrees.create` from a worker makes the worktree on that worker, and `worktrees.remove` removes the
- * one of that name on it, because the same repo and branch can live on several hosts. The
- * check refuses another `hostId`, and this puts the caller's own into the body
- * the hub sees, so a call that names no host cannot land on the hub's machine.
+ * `worktrees.create` from a worker makes the worktree on that worker unless it names another host
+ * that `checkCall` approved (`crossHostRefusal`). `worktrees.remove` removes the one of that name on
+ * the worker, because the same repo and branch can live on several hosts. The check refuses another
+ * `hostId` for a remove, and this puts the caller's own into the body the hub sees, so a call that
+ * names no host cannot land on the hub's machine. `statuses.notify` gets the worker's id the same
+ * way, so a hook is matched to a worktree on the host it ran on.
  */
 export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
   if (request.method !== "POST") return request;
@@ -88,14 +116,18 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
   } catch {
     return request;
   }
-  const isTrpc = call === "/trpc/worktrees.create" || call === "/trpc/worktrees.remove";
+  const isTrpc =
+    call === "/trpc/worktrees.create" ||
+    call === "/trpc/worktrees.remove" ||
+    call === "/trpc/statuses.notify";
   const isMcp = call === "/mcp";
   if (!isTrpc && !isMcp) return request;
   const parsed = parseJson(bodyText(request.body));
   if (!parsed.ok || parsed.value === null || typeof parsed.value !== "object") return request;
   let value: unknown;
   if (isTrpc) {
-    value = { ...(parsed.value as object), hostId: workerId };
+    const keep = call === "/trpc/worktrees.create";
+    value = pinHost(parsed.value, workerId, keep);
   } else {
     // The same tools through the MCP endpoint, as `tools/call` messages (one or a batch).
     const pin = (message: unknown): unknown => {
@@ -107,9 +139,11 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
       ) {
         return message;
       }
-      const args = params.arguments;
-      const base = args !== null && typeof args === "object" ? (args as object) : {};
-      return { ...message, params: { ...params, arguments: { ...base, hostId: workerId } } };
+      const keep = params.name === "band_worktrees_create";
+      return {
+        ...message,
+        params: { ...params, arguments: pinHost(params.arguments, workerId, keep) },
+      };
     };
     value = Array.isArray(parsed.value) ? parsed.value.map(pin) : pin(parsed.value);
   }
@@ -123,7 +157,13 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
  * service cuts its answer down to the worker's own worktrees
  * (`filterRelayReply`).
  */
-const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "repos.list"]);
+const SCOPE_FROM_HEADERS = new Set([
+  "subscriptions.create",
+  "subscriptions.list",
+  "repos.list",
+  "hosts.list",
+  "hosts.forAgents",
+]);
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
 
@@ -179,6 +219,50 @@ export function filterReposReply(data: unknown, workerId: string): unknown {
   return { ...data, result: { ...result, data: { ...result?.data, repos: kept } } };
 }
 
+/** What an agent may know about a host. No roots, home, tools, report, runner settings or tokens. */
+export interface AgentHostView {
+  id: string;
+  name: string;
+  status: string;
+  mode: string;
+  os: string | null;
+  arch: string | null;
+  agents: string[];
+  capabilities: string[];
+  labels: string[];
+}
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+/** The redacted view of one `hosts.list` row. Lists the fields it keeps, so a field added later stays hidden. */
+export function agentHostView(host: Record<string, unknown>): AgentHostView {
+  const info = (host.info ?? {}) as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    id: String(host.id ?? ""),
+    name: String(host.name ?? ""),
+    status: String(host.status ?? ""),
+    mode: String(host.mode ?? ""),
+    os: text(info.os),
+    arch: text(info.arch),
+    agents: strings(host.agents),
+    capabilities: strings(host.capabilities),
+    labels: strings(host.labels),
+  };
+}
+
+/** Cuts a `hosts.list` answer down to `agentHostView` rows. A reply of another shape becomes empty. */
+export function redactHostsReply(data: unknown): unknown {
+  if (data === null || typeof data !== "object") return data;
+  const result = (data as { result?: { data?: { hosts?: unknown } } }).result;
+  const hosts = result?.data?.hosts;
+  const view = Array.isArray(hosts)
+    ? hosts.map((h) => agentHostView((h ?? {}) as Record<string, unknown>))
+    : [];
+  return { ...data, result: { ...result, data: { ...result?.data, hosts: view } } };
+}
+
 const CHAT_ROUTE = /^\/api\/chats\/([^/]+)\/(events|history|messages)$/;
 const MAX_DEPTH = 8;
 
@@ -188,13 +272,18 @@ export interface ScopeLookups {
   /** The worktree a chat belongs to, or null when the chat does not exist. */
   worktreeOfChat(chatId: string): string | null;
   /** The worktree whose worktree contains `cwd`, or null. */
-  worktreeOfCwd(cwd: string): string | null;
+  /** The worktree on host `hostId` that contains `cwd`. */
+  worktreeOfCwd(cwd: string, hostId: string): string | null;
   /** The host a terminal runs on, or null when there is no such terminal. */
   hostOfTerminal(terminalId: string): string | null;
   /** The worktree a browser tab belongs to, or null when there is no such tab. */
   worktreeOfBrowser(browserId: string): string | null;
   /** The worktree a subscription belongs to, or null when there is no such subscription. */
   worktreeOfSubscription(subscriptionId: string): string | null;
+  /** Why an agent on `callerHostId` may not create a worktree of `repo` on `hostId`, or null when it may. */
+  crossHostRefusal(repo: string, hostId: string, callerHostId: string): string | null;
+  /** Why an agent on `callerHostId` may not act on `repo`, or null when it may (or the repo does not exist). */
+  repoHostRefusal(repo: string, callerHostId: string): string | null;
 }
 
 export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
@@ -278,7 +367,7 @@ function checkNamed(
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const cwd of named.cwds) {
-    const worktree = lookups.worktreeOfCwd(path.resolve(cwd));
+    const worktree = lookups.worktreeOfCwd(path.resolve(cwd), workerId);
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const id of named.terminals) {
@@ -317,6 +406,50 @@ function checkChosenId(procedure: string, input: unknown, lookups: ScopeLookups)
   return { ok: true };
 }
 
+/** Repo procedures that act on one existing repo, by the `name` in their input. */
+const REPO_BY_NAME_PROCEDURES = new Set([
+  "repos.update",
+  "repos.updateLabel",
+  "repos.remove",
+  "repos.promoteToGit",
+]);
+
+/**
+ * Repo management from a worker. The one limit is a repo's allowed hosts: an agent may not act on a
+ * repo limited to hosts that exclude its own, nor add a repo limited to hosts that exclude the host
+ * the folder is on. These calls name a repo or a host, not a worktree, so they skip `checkNamed`.
+ */
+function checkRepoCall(
+  procedure: string,
+  input: unknown,
+  workerId: string,
+  lookups: ScopeLookups,
+): RelayVerdict {
+  const record = (input ?? {}) as Record<string, unknown>;
+  if (REPO_BY_NAME_PROCEDURES.has(procedure)) {
+    if (typeof record.name !== "string") return deny(400, `${procedure} needs a repo name`);
+    const refusal = lookups.repoHostRefusal(record.name, workerId);
+    return refusal === null ? { ok: true } : deny(403, `${procedure}: ${refusal}`);
+  }
+  if (procedure === "repos.addFromWorker") {
+    const { hostId, name, allowedHostIds } = record;
+    if (typeof hostId !== "string") return deny(400, `${procedure} needs a hostId`);
+    if (Array.isArray(allowedHostIds) && !allowedHostIds.includes(hostId)) {
+      return deny(
+        403,
+        `${procedure}: The repo would be limited to hosts that exclude ${hostId}, where the folder is`,
+      );
+    }
+    // An existing repo named by the call is checked here. One found by the folder's remote is
+    // checked against the folder's host in the service (`assertHostAllowed`).
+    if (typeof name === "string") {
+      const refusal = lookups.repoHostRefusal(name, workerId);
+      if (refusal !== null) return deny(403, `${procedure}: ${refusal}`);
+    }
+  }
+  return { ok: true };
+}
+
 /** One procedure call: allowed, and tied to this host by what it names (or by the token's scope). */
 function checkCall(
   procedure: string,
@@ -325,6 +458,9 @@ function checkCall(
   lookups: ScopeLookups,
 ): RelayVerdict {
   if (!RELAY_PROCEDURES.has(procedure)) return deny(403, `${procedure} is not available to agents`);
+  if (procedure.startsWith("repos.") && procedure !== "repos.list") {
+    return checkRepoCall(procedure, input, workerId, lookups);
+  }
   let named = input;
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
@@ -350,7 +486,16 @@ function checkCall(
       return deny(403, `${procedure}: The origin is not a worktree on this host`);
     }
     if (hostId !== undefined && hostId !== workerId) {
-      return deny(403, `${procedure}: A worktree made from a worker is created on that worker`);
+      if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
+      const refusal = lookups.crossHostRefusal(repo, hostId, workerId);
+      if (refusal !== null) return deny(403, `${procedure}: ${refusal}`);
+      const { hostRepoPath, placement } = (input ?? {}) as Record<string, unknown>;
+      if (hostRepoPath !== undefined || placement !== undefined) {
+        return deny(
+          403,
+          `${procedure}: hostRepoPath and placement cannot be set for another host from a worker`,
+        );
+      }
     }
     return { ok: true };
   }

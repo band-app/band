@@ -193,8 +193,9 @@ export async function call<T = unknown>(
   session: ServerSession,
   method: string,
   params?: unknown,
+  opts?: { timeoutMs?: number },
 ): Promise<T> {
-  const enc = (await session.request(method, params)) as Encoded;
+  const enc = (await session.request(method, params, opts)) as Encoded;
   return decode(session, enc) as Promise<T>;
 }
 

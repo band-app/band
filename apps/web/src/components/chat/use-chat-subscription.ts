@@ -22,7 +22,9 @@ import {
   transcriptReducer,
 } from "@band-app/client/transcript";
 import type { ChatEventFile, SessionState } from "@band-app/shared/chat-events";
+import type { HostOfflineAnswer } from "@band-app/shared/continuation";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { announceContinued, requestContinue } from "../../lib/continue-prompt";
 import { hubFetch } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 
@@ -180,22 +182,50 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
           createdAt: Date.now(),
         });
       }
-      const res = await hubFetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          worktreeId: agentRef.current.worktreeId,
-          text,
-          ...(wireFiles && { files: wireFiles }),
-          ...(agentRef.current.codingAgentId && { codingAgentId: agentRef.current.codingAgentId }),
-        }),
-      });
+      const post = (worktreeId: string) =>
+        hubFetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            worktreeId,
+            text,
+            ...(wireFiles && { files: wireFiles }),
+            ...(agentRef.current.codingAgentId && {
+              codingAgentId: agentRef.current.codingAgentId,
+            }),
+          }),
+        });
+      let res = await post(agentRef.current.worktreeId);
+      if (res.status === 409) {
+        // The worktree's host is offline. The hub says who could take the work, or why nobody can.
+        const answer = (await res
+          .clone()
+          .json()
+          .catch(() => null)) as HostOfflineAnswer | null;
+        if (answer?.offer) {
+          const continued = await requestContinue(answer, chatId);
+          if (!continued) {
+            const message =
+              answer.code === "CONTINUE_NOT_POSSIBLE" ? answer.error : "The host is offline.";
+            if (!willQueue) dispatch({ type: "local-send-failed", message });
+            throw new Error(message);
+          }
+          // Same message, now to the chat in the worktree the work continues in.
+          res = await post(continued.worktreeId);
+        }
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         const message = body.error ?? `send failed: HTTP ${res.status}`;
         if (!willQueue) dispatch({ type: "local-send-failed", message });
         throw new Error(message);
       }
+      // The repo continues on another host by itself: the hub moved the chat, so the UI follows.
+      const sentTo = (await res
+        .clone()
+        .json()
+        .catch(() => null)) as { worktreeId?: string; continued?: unknown } | null;
+      if (sentTo?.continued && sentTo.worktreeId) announceContinued(sentTo.worktreeId);
     },
     [chatId],
   );

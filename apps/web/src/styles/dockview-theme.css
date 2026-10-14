@@ -485,6 +485,18 @@
   height: 100%;
 }
 
+/* Agent state marker of this pane: top-LEFT, opposite the action cluster. */
+.dockview-terminal-split .term-pane-header__status {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  background: var(--terminal-background);
+}
+
 /* Action cluster: top-RIGHT corner, nudged a touch in from the edge and down so
    the icons sit comfortably over the terminal's top-right rather than jammed
    into the very corner. It floats over the terminal's top rows, so it paints the
@@ -537,87 +549,68 @@
 
 /* ---------------------------------------------------------------------------
  * Mobile layout (`dockview-center-mobile`, WorktreeCenterDockview's theme on
- * a phone): each tab and the strip's "+" and "Tab actions" buttons are 44px
- * tall, iOS's minimum tap target. The strip is 53px: 44px of tab, its 4px
- * inset above and below, and the strip's 1px bottom border. `zoom` scales a
- * tab's label and icons together (12px text becomes about 14px) without
- * restyling each tab kind.
+ * a phone): a compact strip. Each tab and the strip's "+" and "Tab actions"
+ * buttons are 34px tall, with 3px above and below each tab and the strip's 1px
+ * bottom border, so the strip is 41px.
+ *
+ * Do not scale the tabs with `zoom`. dockview's scrollbar (`Scrollbar` in
+ * dockview-core) answers every `scroll` event by clamping the list to its
+ * `scrollWidth` minus the `.dv-scrollable` wrapper's `clientWidth` (both
+ * rounded to integers) and writing `scrollLeft` back. Under the old
+ * `zoom: 1.2`, that write snapped the list back at the end of a swipe, fired
+ * another scroll event, and cut the fling short. The clamp keeps running when
+ * the bar is hidden: hiding it does not stop the writes.
+ * `overscroll-behavior-x: none` also removes the bounce / glow at the ends
+ * that `contain` still allows, and `touch-action: pan-x` keeps the strip from
+ * starting a vertical pan. dockview's own 4px bar is hidden because it is a
+ * mouse affordance with no use on a phone.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-mobile {
-  --dv-tabs-and-actions-container-height: 53px;
+  --dv-tabs-and-actions-container-height: 41px;
 }
 .dockview-center-mobile .dv-tab {
-  margin-top: 4px;
-  margin-bottom: 4px;
-  min-width: 120px;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  min-width: 104px;
 }
-.dockview-center-mobile .dv-tab .dv-default-tab {
-  zoom: 1.2;
+.dockview-center-mobile .dv-scrollable > .dv-tabs-container {
+  overscroll-behavior-x: none;
+  touch-action: pan-x;
+}
+.dockview-center-mobile .dv-scrollable > .dv-scrollbar {
+  display: none;
 }
 .dockview-center-mobile .dv-left-actions-container button,
 .dockview-center-mobile .dv-right-actions-container button {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
 }
 .dockview-center-mobile .dv-left-actions-container button svg,
 .dockview-center-mobile .dv-right-actions-container button svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 
 /* ---------------------------------------------------------------------------
  * Desktop layout (`dockview-center-desktop`, WorktreeCenterDockview's theme
  * when not mobile): there is no title bar over the center column, so the tab
  * strip is the window's top row. It matches the 38px height of the sidebar's
- * title bar and the right sidepanel's header, and the empty strip space of the
- * top-row groups (marked `data-band-top-row` by `useGroupEdges`) drags the
- * window in the desktop app. These rules stop at the group's own header, so a
- * nested dockview (TerminalSplitLeaf) keeps its own strip.
+ * title bar and the right sidepanel's header. The strip itself does not drag the
+ * window: only the sidebars do (see the drag map below). These rules stop at
+ * the group's own header, so a nested dockview (TerminalSplitLeaf) keeps its
+ * own strip.
  * --------------------------------------------------------------------------- */
 .dockview-theme-band.dockview-center-desktop {
   --dv-tabs-and-actions-container-height: 38px;
 }
-.band-worktree-entry:not([inert])
-  .dockview-center-desktop
-  [data-band-top-row]
-  > .dv-tabs-and-actions-container {
-  -webkit-app-region: drag;
-}
-/* The tab viewport (the strip's scroll box, so only the tabs' visible part:
- * a tab scrolled out under the sidebar cuts nothing out of the sidebar's title
- * bar), the left and right action clusters (whole, so the padding between
- * their buttons doesn't drag) and every strip button are `no-drag`. They are
- * descendants of the strip, so they come after its `drag` box in document
- * order and cut themselves out of it, and out of every drag box before the
- * strip (the sidebar's title bar and gutter), even one that reaches past its
- * drawn place, as long as Chromium puts the `no-drag` box where the control
- * is drawn. */
-.band-worktree-entry:not([inert]) .dockview-center-desktop
-  [data-band-top-row]
-  > .dv-tabs-and-actions-container
-  > .dv-scrollable,
-.band-worktree-entry:not([inert])
-  .dockview-center-desktop
-  [data-band-top-row]
-  > .dv-tabs-and-actions-container
-  > :is(.dv-left-actions-container, .dv-right-actions-container)
-  > *,
-.band-worktree-entry:not([inert])
-  .dockview-center-desktop
-  [data-band-top-row]
-  > .dv-tabs-and-actions-container
-  button {
-  -webkit-app-region: no-drag;
-}
-
 /* How the desktop window's drag region works (Electron 42, Chromium 148).
  * Drag: the sidebar title bar, the sidebar gutter in the strip while the
- * sidebar is collapsed, each top-row group's strip (the rules above), the
- * right sidepanel's header and the center drag bar. No-drag: the nav cluster,
- * the strip's tab viewport, action clusters and buttons, the sidepanel's tabs
+ * sidebar is collapsed, and the right sidepanel's header. Nothing in the
+ * center column drags: not the tab strip, its empty space, the empty state or
+ * the no-worktree center. No-drag: the nav cluster and the sidepanel's tabs
  * and header actions. A drag box that comes after a top-row control in
- * document order (the right sidepanel's header, a later group's strip) must
- * not overlap it, because it would cover the control again.
+ * document order (the right sidepanel's header) must not overlap it, because
+ * it would cover the control again.
  * Chromium walks the layout tree in document order, adds each `drag` border
  * box whose `visibility` is `visible` and cuts out each `no-drag` one.
  * Clipping, z-index, `pointer-events` and `inert` don't count, so a box can
@@ -626,6 +619,5 @@
  * transform-only change. Electron hit-tests every mouse-down against the
  * result before the page sees it. Hidden worktrees stay mounted and laid out
  * at the same place as the shown one, so only the shown worktree sets any
- * app-region: the rules above match only a non-`inert` worktree entry, and
- * the sidebar gutter and center drag bar read `WindowDragContext`
+ * app-region: the sidebar gutter reads `WindowDragContext`
  * (`DesktopTitleBar.tsx`), which is false inside a hidden entry. */

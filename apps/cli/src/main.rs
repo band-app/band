@@ -11,7 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "band", about = "Band CLI — programmatic worktree management")]
+#[command(
+    name = "band",
+    about = "Band CLI — programmatic worktree management",
+    version
+)]
 struct Cli {
     /// Output format: text or json
     #[arg(long, global = true, default_value = "text", env = "BAND_OUTPUT")]
@@ -94,6 +98,8 @@ enum Commands {
     },
     /// Show current settings
     Settings,
+    /// Print the CLI version and, when the hub answers, the hub version
+    Version,
     /// Manage the remote tunnel
     Tunnel {
         #[command(subcommand)]
@@ -186,6 +192,9 @@ enum ReposCmd {
         /// Whether the hub keeps checkpoints of the repo's worktrees on workers
         #[arg(long, value_name = "on|off|default")]
         checkpoints: Option<String>,
+        /// Whether a worktree on an offline host continues on another host without asking
+        #[arg(long, value_name = "on|off")]
+        auto_continue: Option<String>,
     },
     /// Unregister a repo
     Remove {
@@ -253,6 +262,12 @@ enum WorktreesCmd {
         /// first time the repo is used there).
         #[arg(long)]
         host_repo_path: Option<String>,
+        /// Create it on this host (id or name, see `band hosts list`). Inside
+        /// a worker's agent, only an online, static worker the repo allows,
+        /// and only when the hub setting "Agents may start worktrees on other
+        /// hosts" is on. Without it the worktree goes where the caller runs.
+        #[arg(long, conflicts_with_all = ["labels", "requires", "any_host", "isolation"])]
+        host: Option<String>,
         /// Worktree id to record as the origin (where this work was started
         /// from). Inside a Band chat or terminal the origin defaults to that
         /// worktree, and through a worker's relay also to the chat or terminal.
@@ -297,6 +312,30 @@ enum WorktreesCmd {
         /// Add the target host to the repo's allowed hosts when it is missing (admin token)
         #[arg(long)]
         add_host: bool,
+    },
+    /// Continue a worktree on another host from its latest checkpoint when its host is offline. The old copy stays, superseded
+    Continue {
+        /// Worktree ID
+        id: String,
+        /// Target host (id or name, see `band hosts list`). Default: the host the hub recommends
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Set or remove a worktree's parent (the worktree it was started from)
+    SetOrigin {
+        /// Repo name
+        repo: String,
+        /// Worktree name (the branch it was created on)
+        name: String,
+        /// Host the worktree is on (default: local)
+        #[arg(long)]
+        host: Option<String>,
+        /// Parent worktree ID
+        #[arg(long, conflicts_with = "none", required_unless_present = "none")]
+        origin: Option<String>,
+        /// Remove the parent
+        #[arg(long)]
+        none: bool,
     },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
@@ -825,6 +864,11 @@ fn main() {
     let cli = Cli::parse();
     let json_output = cli.output == "json";
 
+    // Hooks call notify: it answers with nothing and always exits 0.
+    if let Commands::Notify { ref agent } = cli.command {
+        run_notify_silently(agent.clone());
+    }
+
     // Schema always outputs JSON, handle separately
     if let Commands::Schema { ref command } = cli.command {
         handle_schema(command.as_deref());
@@ -901,12 +945,14 @@ fn main() {
                 hosts,
                 primary,
                 checkpoints,
+                auto_continue,
             } => cmd_repos_set(
                 &name,
                 meta,
                 hosts.as_deref(),
                 primary.as_deref(),
                 checkpoints.as_deref(),
+                auto_continue.as_deref(),
             ),
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
@@ -926,6 +972,7 @@ fn main() {
                 any_host,
                 isolation,
                 host_repo_path,
+                host,
                 origin,
                 no_origin,
             } => cmd_worktrees_create(
@@ -943,6 +990,7 @@ fn main() {
                     any_host,
                     isolation: isolation.as_deref(),
                     host_repo_path: host_repo_path.as_deref(),
+                    host: host.as_deref(),
                 },
                 origin.as_deref(),
                 no_origin,
@@ -957,6 +1005,14 @@ fn main() {
                 checkpoint,
                 add_host,
             } => cmd_worktrees_restore(&id, &to, checkpoint.as_deref(), add_host),
+            WorktreesCmd::Continue { id, to } => cmd_worktrees_continue(&id, to.as_deref()),
+            WorktreesCmd::SetOrigin {
+                repo,
+                name,
+                host,
+                origin,
+                none,
+            } => cmd_worktrees_set_origin(&repo, &name, host.as_deref(), origin.as_deref(), none),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1186,6 +1242,7 @@ fn main() {
             McpCmd::Remove { name } => cmd_mcp_remove(&name),
         },
         Commands::Settings => cmd_settings(json_output),
+        Commands::Version => Ok(cmd_version(json_output)),
         Commands::Tunnel { cmd } => match cmd {
             TunnelCmd::Status => cmd_tunnel_status(),
             TunnelCmd::Start => cmd_tunnel_start(),
@@ -1196,8 +1253,7 @@ fn main() {
             worktree,
             no_focus,
         } => cmd_open(&file_path, worktree.as_deref(), !no_focus),
-        Commands::Notify { agent } => cmd_notify(agent.as_deref()),
-        Commands::Schema { .. } => unreachable!(),
+        Commands::Notify { .. } | Commands::Schema { .. } => unreachable!(),
         Commands::Skills { cmd } => match cmd {
             SkillsCmd::Install { home, filter } => {
                 skills::install_skills(home.as_deref(), filter.as_deref())
@@ -1299,6 +1355,9 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             Some(false) => "off",
             None => "-",
         };
+        let auto_continue = proj
+            .get("autoContinue")
+            .and_then(serde_json::Value::as_bool);
         let clones = proj
             .get("clones")
             .and_then(|c| c.as_array())
@@ -1346,6 +1405,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "allowedHostIds": allowed_hosts,
             "primaryHostId": primary_host,
             "checkpointsEnabled": checkpoints,
+            "autoContinue": auto_continue,
         }));
     }
 
@@ -1457,17 +1517,79 @@ fn resolve_host_id(hosts: &[serde_json::Value], given: &str) -> Result<String, S
         .ok_or_else(|| format!("Unknown host \"{given}\". See `band hosts list`."))
 }
 
+/// Reads `--checkpoints on|off|default` into the `repos.update` input and the report lines.
+fn apply_checkpoints_flag(
+    name: &str,
+    value: &str,
+    input: &mut serde_json::Value,
+    lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => {
+            input["checkpointsEnabled"] = serde_json::json!(true);
+            lines.push(format!("{name} keeps checkpoints on the hub"));
+        }
+        "off" => {
+            input["checkpointsEnabled"] = serde_json::json!(false);
+            lines.push(format!("{name} keeps no checkpoints on the hub"));
+        }
+        "default" => {
+            input["checkpointsEnabled"] = serde_json::Value::Null;
+            lines.push(format!(
+                "{name} follows the default (on, unless the repo is limited to chosen hosts)"
+            ));
+        }
+        other => {
+            return Err(format!(
+                "--checkpoints takes on, off or default, not \"{other}\""
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reads `--auto-continue on|off` into the `repos.update` input and the report lines.
+fn apply_auto_continue_flag(
+    name: &str,
+    value: &str,
+    input: &mut serde_json::Value,
+    lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => {
+            input["autoContinue"] = serde_json::json!(true);
+            lines.push(format!(
+                "{name} continues on another host by itself when its host is offline and the checkpoint is young"
+            ));
+        }
+        "off" => {
+            input["autoContinue"] = serde_json::json!(false);
+            lines.push(format!("{name} asks before it continues on another host"));
+        }
+        other => {
+            return Err(format!("--auto-continue takes on or off, not \"{other}\""));
+        }
+    }
+    Ok(())
+}
+
 fn cmd_repos_set(
     name: &str,
     meta: Option<bool>,
     hosts: Option<&str>,
     primary: Option<&str>,
     checkpoints: Option<&str>,
+    auto_continue: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(name, "Repo name")?;
-    if meta.is_none() && hosts.is_none() && primary.is_none() && checkpoints.is_none() {
+    if meta.is_none()
+        && hosts.is_none()
+        && primary.is_none()
+        && checkpoints.is_none()
+        && auto_continue.is_none()
+    {
         return Err(
-            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host> or --checkpoints on|off|default"
+            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host>, --checkpoints on|off|default or --auto-continue on|off"
                 .to_string(),
         );
     }
@@ -1479,27 +1601,10 @@ fn cmd_repos_set(
     }
     let mut lines = Vec::new();
     if let Some(value) = checkpoints {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "on" => {
-                input["checkpointsEnabled"] = serde_json::json!(true);
-                lines.push(format!("{name} keeps checkpoints on the hub"));
-            }
-            "off" => {
-                input["checkpointsEnabled"] = serde_json::json!(false);
-                lines.push(format!("{name} keeps no checkpoints on the hub"));
-            }
-            "default" => {
-                input["checkpointsEnabled"] = serde_json::Value::Null;
-                lines.push(format!(
-                    "{name} follows the default (on, unless the repo is limited to chosen hosts)"
-                ));
-            }
-            other => {
-                return Err(format!(
-                    "--checkpoints takes on, off or default, not \"{other}\""
-                ));
-            }
-        }
+        apply_checkpoints_flag(name, value, &mut input, &mut lines)?;
+    }
+    if let Some(value) = auto_continue {
+        apply_auto_continue_flag(name, value, &mut input, &mut lines)?;
     }
     if hosts.is_some() || primary.is_some() {
         let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
@@ -1553,6 +1658,7 @@ fn cmd_repos_set(
             "allowedHostIds": input.get("allowedHostIds"),
             "primaryHostId": input.get("primaryHostId"),
             "checkpointsEnabled": input.get("checkpointsEnabled"),
+            "autoContinue": input.get("autoContinue"),
         }),
     })
 }
@@ -1693,6 +1799,56 @@ fn cmd_worktrees_move(id: &str, to: &str, add_host: bool) -> Result<CommandResul
     Ok(CommandResult {
         text: restore_text(&data, "Moved", id),
         json: data,
+    })
+}
+
+fn cmd_worktrees_continue(id: &str, to: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"worktreeId": id});
+    if let Some(to) = to {
+        input["toHostId"] = serde_json::json!(target_host_id(&client, to)?);
+    }
+    let data = client.trpc_mutate("follow.continue", &input)?;
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let out = format!(
+        "Continued {id} as {} on {} (host {})\nThe copy {id} is left untouched on its host and listed as superseded\n",
+        text("worktreeId"),
+        text("hostName"),
+        text("hostId")
+    );
+    Ok(CommandResult {
+        text: out,
+        json: data,
+    })
+}
+
+fn cmd_worktrees_set_origin(
+    repo: &str,
+    name: &str,
+    host: Option<&str>,
+    origin: Option<&str>,
+    none: bool,
+) -> Result<CommandResult, String> {
+    validate::validate_name(repo, "Repo name")?;
+    validate::validate_name(name, "Worktree name")?;
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "repo": repo,
+        "name": name,
+        "origin": if none { None } else { origin },
+    });
+    if let Some(host) = host {
+        validate::validate_name(host, "Host id")?;
+        input["hostId"] = serde_json::json!(host);
+    }
+    client.trpc_mutate("worktrees.setOrigin", &input)?;
+    let text = match origin {
+        Some(origin) if !none => format!("Parent of {repo}/{name} set to {origin}\n"),
+        _ => format!("Parent of {repo}/{name} removed\n"),
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true}),
     })
 }
 
@@ -1840,6 +1996,8 @@ struct Placement<'a> {
     any_host: bool,
     isolation: Option<&'a str>,
     host_repo_path: Option<&'a str>,
+    /// A host id or name to create on.
+    host: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1934,6 +2092,9 @@ fn cmd_worktrees_create(
     }
     if let Some(path) = placement.host_repo_path {
         input["hostRepoPath"] = serde_json::json!(path);
+    }
+    if let Some(host) = placement.host {
+        input["hostId"] = serde_json::json!(target_host_id(&client, host)?);
     }
     // The origin is the worktree this one is started from. An explicit
     // `--origin` wins, `--no-origin` clears it, and otherwise a command run
@@ -4711,6 +4872,30 @@ fn cmd_settings(json_output: bool) -> Result<CommandResult, String> {
     Ok(CommandResult { text, json: result })
 }
 
+/// Prints the CLI version, then the hub version when the hub answers. An
+/// unreachable or older hub is not an error: the CLI version still prints.
+fn cmd_version(json_output: bool) -> CommandResult {
+    let cli_version = env!("CARGO_PKG_VERSION");
+    let hub_version = api::ApiClient::from_settings()
+        .and_then(|client| client.trpc_query_no_input("services.health"))
+        .ok()
+        .and_then(|health| {
+            health
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
+    let text = match &hub_version {
+        Some(hub) => format!("CLI: {cli_version}\nHub: {hub}\n"),
+        None => format!("CLI: {cli_version}\nHub: unreachable\n"),
+    };
+    CommandResult {
+        text: if json_output { String::new() } else { text },
+        json: serde_json::json!({ "cli": cli_version, "hub": hub_version }),
+    }
+}
+
 // --- Tunnel commands ---
 
 fn cmd_tunnel_status() -> Result<CommandResult, String> {
@@ -4923,32 +5108,43 @@ fn cmd_open(file_path: &str, worktree: Option<&str>, focus: bool) -> Result<Comm
 
 // --- Notify command ---
 
-fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
+/// Longest `band notify` takes in total, whatever the hub or stdin does.
+const NOTIFY_DEADLINE: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// `band notify` runs from agent hooks and must never disturb the agent: it
+/// prints nothing, exits 0 whatever happens (no `band` setup, hub down, bad or
+/// empty stdin, a hub that hangs, even a panic) and returns within
+/// `NOTIFY_DEADLINE`. The work runs on a thread so a stdin that never closes
+/// or a stuck connection cannot hold the process.
+fn run_notify_silently(agent: Option<String>) -> ! {
+    std::panic::set_hook(Box::new(|_| {}));
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let _ = std::panic::catch_unwind(|| notify_forward(agent.as_deref()));
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(NOTIFY_DEADLINE);
+    process::exit(0);
+}
+
+/// Forwards the hook payload on stdin to the hub. Every failure is dropped.
+fn notify_forward(agent: Option<&str>) {
     use std::io::Read;
 
     // The CLI is intentionally agent-agnostic: it forwards the raw hook
     // payload to the server and lets the server dispatch to the relevant
     // coding-agent adapter to decide the worktree status. Adding hook
     // support for a new agent therefore never requires changing this command.
-
-    let ok = || {
-        Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        })
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&input) else {
+        return;
     };
 
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|e| format!("Failed to read stdin: {e}"))?;
-
-    let payload: serde_json::Value = serde_json::from_str(&input)
-        .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
-
-    // `cwd` tells the server which worktree this notification is for — that's
-    // about routing, not about interpreting the agent's behavior. Prefer the
-    // payload's cwd (agents include it), falling back to the process cwd.
+    // `cwd` tells the server which worktree this notification is for. Prefer
+    // the payload's cwd (agents include it), falling back to the process cwd.
     let cwd = payload
         .get("cwd")
         .and_then(|v| v.as_str())
@@ -4960,10 +5156,8 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
         })
         .unwrap_or_default();
 
-    // All API calls for notify are fire-and-forget — fail silently
-    // because this runs from agent hooks and must not break the agent.
-    let Ok(client) = api::ApiClient::from_settings() else {
-        return ok();
+    let Ok(client) = api::ApiClient::from_settings_with_timeout(NOTIFY_DEADLINE) else {
+        return;
     };
 
     let mut body = serde_json::json!({
@@ -4973,13 +5167,15 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     // Who sent the hook, so the server reads it with that agent's rules and
     // keeps one status per agent session. `BAND_DISPATCH` is `chat` inside a
     // chat pane's agent and `terminal` inside a Band terminal, which also
-    // sets `BAND_TERMINAL_ID`.
+    // sets `BAND_TERMINAL_ID`. `BAND_HOST_ID` names the host when it is set;
+    // a worker's relay writes it in either way.
     if let Some(agent) = agent {
         body["agent"] = serde_json::json!(agent);
     }
     for (env_var, field) in [
         ("BAND_DISPATCH", "dispatch"),
         ("BAND_TERMINAL_ID", "terminalId"),
+        ("BAND_HOST_ID", "hostId"),
     ] {
         if let Ok(value) = std::env::var(env_var) {
             if !value.is_empty() {
@@ -4989,8 +5185,6 @@ fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     }
 
     let _ = client.trpc_mutate("statuses.notify", &body);
-
-    ok()
 }
 
 // --- Table formatting ---
@@ -5070,6 +5264,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--hosts", "type": "string", "required": false, "description": "Hosts the repo may run on (ids or names, comma separated), or `all`"},
                 {"name": "--primary", "type": "string", "required": false, "description": "Host that lists the repo's default-branch worktree (id or name), or `auto`"},
                 {"name": "--checkpoints", "type": "string", "required": false, "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default"},
+                {"name": "--auto-continue", "type": "string", "required": false, "description": "Whether a worktree on an offline host continues on another host without asking: on or off"},
             ],
             "notes": "A meta repo is one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults; it changes no behaviour. `band repos list` shows it in the META column. `--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
         }),
@@ -5138,6 +5333,27 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Works when the old host is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`."
         }),
         serde_json::json!({
+            "name": "worktrees continue",
+            "description": "Continue a worktree on another host when its host is offline",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "--to", "type": "string", "required": false, "description": "Target host (id or name). Default: the host the hub recommends"},
+            ],
+            "notes": "Restores the worktree from the hub's latest checkpoint on an online host the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its host comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the host is online (use `worktrees move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is not available on another host."
+        }),
+        serde_json::json!({
+            "name": "worktrees set-origin",
+            "description": "Set or remove a worktree's parent (the worktree it was started from)",
+            "parameters": [
+                {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name"},
+                {"name": "--host", "type": "string", "required": false, "description": "Host the worktree is on (default: local)"},
+                {"name": "--origin", "type": "string", "required": false, "description": "Parent worktree ID. Required unless --none"},
+                {"name": "--none", "type": "boolean", "required": false, "description": "Remove the parent"},
+            ],
+            "notes": "Rejects the worktree itself and any of its descendants as the parent. A manual parent records no chat or terminal."
+        }),
+        serde_json::json!({
             "name": "worktrees checkpoints",
             "description": "List the hub's checkpoints of a worktree",
             "parameters": [
@@ -5161,6 +5377,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Show current settings",
             "parameters": [],
             "notes": "Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON."
+        }),
+        serde_json::json!({
+            "name": "version",
+            "description": "Print the CLI version and the hub version",
+            "parameters": [],
+            "notes": "Prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. `band --version` prints only the CLI version and needs no hub. With `--output json`, prints `{\"cli\": ..., \"hub\": ... | null}`."
         }),
         serde_json::json!({
             "name": "tunnel status",
@@ -5621,7 +5843,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree."},
             ],
-            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard (`band notify --agent claude-code`). Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
+            "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
         }),
         serde_json::json!({
             "name": "schema",

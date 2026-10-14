@@ -165,6 +165,49 @@ export class AddRepoPage {
   pickerSelectButton(): Locator {
     return this.form.getByTestId("add-repo__picker-select");
   }
+
+  /** The message shown when the folder's repo was already in Band. */
+  existingMessage(): Locator {
+    return this.form.getByTestId("add-repo__existing-message");
+  }
+
+  /** Makes the host of the clone just added the repo's primary host. */
+  async makePrimary(): Promise<void> {
+    await test.step("Make the new clone's host the primary", async () => {
+      await this.form.getByTestId("add-repo__make-primary").click();
+    });
+  }
+
+  async doneExisting(): Promise<void> {
+    await this.form.getByTestId("add-repo__existing-done").click();
+  }
+
+  /** Folder rows fully inside the folder list's box, and whether the list scrolls. */
+  async folderList(): Promise<{ visibleRows: number; scrolls: boolean; height: number }> {
+    return await this.form.getByTestId("add-repo__folders").evaluate((list) => {
+      const box = list.getBoundingClientRect();
+      let visibleRows = 0;
+      for (const row of list.querySelectorAll<HTMLElement>(
+        '[data-testid="add-repo__picker-entry"]',
+      )) {
+        const r = row.getBoundingClientRect();
+        if (r.top >= box.top - 1 && r.bottom <= box.bottom + 1) visibleRows++;
+      }
+      return {
+        visibleRows,
+        scrolls: list.scrollHeight > list.clientHeight,
+        height: box.height,
+      };
+    });
+  }
+
+  /** Pixels between the sticky action row's bottom edge and the dialog's bottom edge. */
+  async gapBelowFooter(): Promise<number> {
+    const dialog = await this.dialog.boundingBox();
+    const footer = await this.form.getByTestId("add-repo__picker-select").boundingBox();
+    if (!dialog || !footer) throw new Error("dialog or footer button not visible");
+    return dialog.y + dialog.height - (footer.y + footer.height);
+  }
 }
 
 export interface DialogOverflow {

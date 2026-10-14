@@ -96,7 +96,9 @@ export async function launchDesktop(opts: {
     executablePath: packaged ?? electronBinary(),
     // A packaged app has its own entry point; the dev tree needs the directory.
     args: packaged ? [] : [DESKTOP_DIR],
-    env: { ...env, HOME: opts.home, ...extraEnv },
+    // The Keychain needs an unlocked login session, which a test run does not have, so the
+    // app stores its secrets with a fixed-key stand-in for `safeStorage` (`secret-store.ts`).
+    env: { ...env, HOME: opts.home, BAND_DESKTOP_SECRET_STORE: "test", ...extraEnv },
     timeout: 60_000,
   });
 

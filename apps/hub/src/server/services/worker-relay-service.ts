@@ -21,10 +21,12 @@ import { CHAT_ID_HEADER, TERMINAL_ID_HEADER, WORKTREE_ID_HEADER } from "../api/c
 import { hostRegistry } from "../infra/host/registry";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
+import { crossHostRefusal, repoHostRefusal } from "./cross-host-policy";
 import {
   checkRelayRequest,
   filterReposReply,
   pinWorktreeHost,
+  redactHostsReply,
   type ScopeLookups,
   trpcRefusalBody,
 } from "./relay-scope";
@@ -54,11 +56,13 @@ const defaultLookups: ScopeLookups = {
     const chat = chatService.get(id);
     return chat?.worktreeId ?? null;
   },
-  worktreeOfCwd: (cwd) => resolveWorktreeIdByCwd(cwd),
+  worktreeOfCwd: (cwd, hostId) => resolveWorktreeIdByCwd(cwd, hostId),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
   worktreeOfBrowser: (id) => browserService.get(id)?.worktreeId ?? null,
   worktreeOfSubscription: (id) =>
     subscriptionService.list().find((s) => s.id === id)?.worktreeId ?? null,
+  crossHostRefusal,
+  repoHostRefusal,
 };
 
 export class WorkerRelayService {
@@ -131,11 +135,27 @@ export class WorkerRelayService {
       const value = upstream.headers.get(name);
       if (value !== null) replyHeaders[name] = value;
     }
+    // The scope check decodes the path, so the rewrite must too: `hosts%2Elist` is the same procedure.
+    let decodedPath = request.path.split("?")[0] ?? "";
+    try {
+      decodedPath = decodeURIComponent(decodedPath);
+    } catch {
+      // Keep the raw path; the scope check has refused a path it cannot decode.
+    }
     // The repo list covers every host, so a worker gets only its own worktrees.
-    if (request.path.split("?")[0] === "/trpc/repos.list" && upstream.ok) {
+    if (decodedPath === "/trpc/repos.list" && upstream.ok) {
       try {
         const filtered = filterReposReply(await upstream.json(), session.workerId);
         return this.answer(session, upstream.status, filtered);
+      } catch (err) {
+        log.warn(`relay call failed: ${err instanceof Error ? err.message : err}`);
+        return this.answer(session, 502, { error: "The hub could not answer" });
+      }
+    }
+    // The host list holds roots, tokens' hosts and runner details an agent has no use for.
+    if (decodedPath === "/trpc/hosts.list" && upstream.ok) {
+      try {
+        return this.answer(session, upstream.status, redactHostsReply(await upstream.json()));
       } catch (err) {
         log.warn(`relay call failed: ${err instanceof Error ? err.message : err}`);
         return this.answer(session, 502, { error: "The hub could not answer" });

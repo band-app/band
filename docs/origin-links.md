@@ -30,6 +30,10 @@ The tool `worktrees_create` takes `repo`, `branch`, and optionally `base`, `host
 
 A chat on a worker creates worktrees on that worker only. A chat on the hub's machine may name any host. The name `band` is reserved, so `mcp.add` refuses it.
 
+## Setting the parent by hand
+
+`worktrees.setOrigin { repo, name, hostId?, origin }` sets a worktree's parent, or clears it when `origin` is null. A manual parent has no chat or terminal, and clearing removes all three ids. The hub refuses the worktree itself and any of its descendants (a cycle) and an unknown id, then emits a `worktree-origin-changed` status event so other clients refetch the repo list. In the sidebar, the card's context menu has "Set parent…" (a searchable list of every other worktree, on any repo and host, minus the worktree and its descendants) and "Remove parent" (shown only when there is a parent).
+
 ## Reading links
 
 `repos.list` returns, for every worktree:
@@ -43,6 +47,7 @@ Each repo also has `meta`.
 
 ```sh
 band worktrees create <repo> <branch> [--origin <worktree id> | --no-origin]
+band worktrees set-origin <repo> <name> [--host <h>] (--origin <worktree id> | --none)
 band worktrees list            # ORIGIN column
 band repos set <repo> --meta true|false
 band repos list                # META column
@@ -59,6 +64,6 @@ The sidebar has a Group by switch: Repo, Origin or Host. The choice is kept per 
 - Repo is the list by repo. A meta repo shows a "meta" badge.
 - Origin has each repo's main worktree at the top level. A worktree nests under the one that started it, across repos. A worktree with no origin nests under its repo's main on the same host, and so does one whose parent was removed, which also shows a "parent removed" hint. A worktree on a host with no main of its repo stays at the top level. Every row shows the repo avatar, the repo name and a gray host tag. A chevron collapses a subtree, and the choice is kept per device. Repo view shows the host tag only for a repo with worktrees on more than one host.
 - Host groups by worker (the hub's own machine first) with its online state, then by repo. Pinned worktrees stay in place in Origin and Host.
-- A worktree started from another one has a "Started from <repo · branch>" bar above its tabs. The link opens the origin worktree on the chat (or terminal) that started it, when that tab is open there.
+- The worktree view has no "Started from" bar. The relationship shows only in the Origin tree.
 
 Test: `apps/web/e2e/sidebar-grouping.spec.ts`.

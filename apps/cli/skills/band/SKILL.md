@@ -86,6 +86,8 @@ band repos remove <name>
 
 Removes the repo from Band's registry (does not delete the repository).
 
+An agent running on a worker may use `repos add`, `repos set` and `repos remove` like a person. The only refusal is a repo limited to hosts that do not include the agent's own host (`band repos set <name> --hosts ...`), and adding a repo limited to hosts that exclude the host its folder is on.
+
 ### List worktrees, optionally filtered by repo
 
 ```sh
@@ -98,7 +100,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--origin <worktree id> | --no-origin]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--host <host>] [--origin <worktree id> | --no-origin]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -131,6 +133,8 @@ When to omit `--prompt` (rare — user explicitly wants no task):
 band worktrees create my-app feat/experiment
 ```
 
+**Another host (`--host`).** `--host <id or name>` creates the worktree on that host (ids and names are in `band hosts list`). An agent on a worker may do this when the hub setting "Agents may start worktrees on other hosts" is on, the host is an online static worker and the repo allows it; the new worktree records the caller's worktree and chat as its origin. A refusal names the reason. It cannot be combined with `--labels`, `--requires`, `--any-host` or `--isolation`, and without it the worktree is created where the caller runs.
+
 **Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-repo-path` says where the repository is on the chosen host the first time the repo is used there.
 
 **Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
@@ -144,6 +148,23 @@ band worktrees restore <id> --to <host> [--checkpoint <checkpointId>] [--add-hos
 ```
 
 The hub keeps recent checkpoints of worktrees on workers: uncommitted and untracked changes plus the agent session. Ignored files and running processes are not included. `checkpoints` lists them (`--take` makes one now). `move` works while the worktree's host is online: it takes a fresh checkpoint, restores it on the target and removes the source only after the target has the same files. `restore` works when the host is offline and leaves the old copy on disk, listed as superseded in `band worktrees list`; remove it with `band worktrees remove`. A target the repo is not allowed on is refused unless `--add-host` is given (admin token). `<id>` is the worktree id from `band worktrees list`; `--to` takes a host id or name.
+
+### Continue on another host when a host is offline
+
+```sh
+band worktrees continue <id> [--to <host>]
+band repos set <repo> --auto-continue on|off
+```
+
+When the host of a worktree is offline, the hub can continue the work on another host the repo may run on, from its latest checkpoint: the branch, uncommitted and untracked files, the agent sessions and the chats. The repo's setup runs on the new copy. `continue` does it on request (the hub picks the target unless `--to` names one). A chat message, a new terminal or an agent launch for such a worktree is refused with the same offer, unless the repo has `--auto-continue on` and the checkpoint is younger than 30 minutes (`BAND_AUTO_CONTINUE_MAX_AGE_MS`), in which case it continues by itself. Reading the worktree (changes, files, chat history) never triggers it. The command fails with a reason when the host is online (use `move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is missing on every other host. The old copy is never deleted: it is listed as superseded, and when its host returns the UI flags it diverged if it holds changes the checkpoint lacks. Ignored files and running processes are not carried over.
+
+### Set or remove a worktree's parent
+
+```sh
+band worktrees set-origin <repo> <name> [--host <host>] (--origin <worktree id> | --none)
+```
+
+The parent is the worktree this one was started from. The sidebar shows it in Group by: Origin. `--origin` sets a parent by hand (no chat or terminal is recorded), `--none` removes it. The hub refuses the worktree itself and any of its descendants as the parent, and an unknown worktree id.
 
 ### Remove a worktree (git worktree + state cleanup)
 
@@ -197,6 +218,15 @@ band settings
 
 Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON.
 
+### Show versions
+
+```sh
+band --version
+band version
+```
+
+`band --version` prints the CLI version and needs no hub. `band version` prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. With `--output json` it prints `{"cli": "...", "hub": "..." | null}`.
+
 ### Show tunnel status
 
 ```sh
@@ -227,7 +257,7 @@ Stops the remote tunnel.
 band hosts list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`.
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
 
 ### Move every worktree off a host
 

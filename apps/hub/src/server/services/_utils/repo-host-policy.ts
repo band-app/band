@@ -60,15 +60,49 @@ export function primaryHostOf(repo: {
   );
 }
 
-/** The worktrees a repo lists: all of them except the default-branch checkouts of non-primary hosts. */
+/**
+ * The host whose default-branch checkout the repo lists. The primary host while it holds one.
+ * When the primary's clone is on another branch (or the primary has no clone), another allowed
+ * host that does hold the default branch, so a repo never lists no main while one exists.
+ */
+export function listedMainHostOf(repo: {
+  defaultBranch: string;
+  allowedHostIds?: string[] | null;
+  primaryHostId?: string | null;
+  worktrees: ListedRow[];
+}): string | null {
+  const withMain = repo.worktrees
+    .filter((wt) => isDefaultCheckout(repo, wt))
+    .map((wt) => wt.hostId || "local");
+  const primary = primaryHostOf(repo);
+  if (primary && withMain.includes(primary)) return primary;
+  return effectivePrimaryHost(null, repo.allowedHostIds, withMain);
+}
+
+/**
+ * The primary host when no host lists a default-branch checkout, so the UI can show a "main is
+ * not checked out on <host>" row instead of nothing. Null when a main row is listed.
+ */
+export function mainMissingOf(repo: {
+  defaultBranch: string;
+  allowedHostIds?: string[] | null;
+  primaryHostId?: string | null;
+  worktrees: ListedRow[];
+}): { hostId: string } | null {
+  if (listedMainHostOf(repo)) return null;
+  const primary = primaryHostOf(repo);
+  return primary ? { hostId: primary } : null;
+}
+
+/** The worktrees a repo lists: all of them except the default-branch checkouts of non-listed hosts. */
 export function listedWorktrees<T extends ListedRow>(repo: {
   defaultBranch: string;
   allowedHostIds?: string[] | null;
   primaryHostId?: string | null;
   worktrees: T[];
 }): T[] {
-  const primary = primaryHostOf(repo);
+  const main = listedMainHostOf(repo);
   return repo.worktrees.filter(
-    (wt) => !isDefaultCheckout(repo, wt) || (wt.hostId || "local") === primary,
+    (wt) => !isDefaultCheckout(repo, wt) || (wt.hostId || "local") === main,
   );
 }

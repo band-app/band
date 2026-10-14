@@ -33,6 +33,7 @@ import { registerIpc } from "./ipc/register.js";
 import { isTrustedSender } from "./ipc/sender-guard.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
+import { electronSecretStore } from "./services/electron-secret-store.js";
 import {
   checkRemoteHub,
   type HubChoice,
@@ -42,6 +43,7 @@ import {
 } from "./services/hub-choice.js";
 import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
+import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
 import { resolveWorkerLocation, ThisComputerWorker } from "./services/this-computer-worker.js";
 import { resolveUiDir } from "./services/ui-paths.js";
@@ -86,6 +88,12 @@ interface AppState {
 /** powerMonitor listeners survive window close; wire them at most once. */
 let powerEventsWired = false;
 
+// Before `loadHubChoice()` below reads the saved token. `BAND_DESKTOP_SECRET_STORE=test` swaps
+// the Keychain for a fixed-key store, because the e2e harness has no Keychain to unlock.
+setSecretStore(
+  process.env.BAND_DESKTOP_SECRET_STORE === "test" ? createTestSecretStore() : electronSecretStore,
+);
+
 const state: AppState = {
   mainWindow: null,
   managed: new ManagedProcess(),
@@ -97,6 +105,8 @@ const state: AppState = {
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
+  // Runs before `ready`. On macOS `safeStorage` works then; on Linux it reports unavailable until
+  // `ready`, so a saved choice stays in the plain file there (the only supported secure path is macOS).
   hubChoice: loadHubChoice(),
   uiDir: null,
   appHost: LOCAL_APP_HOST,

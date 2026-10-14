@@ -140,6 +140,8 @@ interface ChatViewProps {
    * cache only; it must NOT remount this component.
    */
   onSessionDiscovered?: (sessionId: string) => void;
+  /** The agent renamed its session (`session_info_update`): the parent refreshes the tab title. */
+  onSessionTitle?: () => void;
   /**
    * User-initiated path: "Select past session" and "New session". The
    * parent persists the choice and remounts this component so its
@@ -162,6 +164,7 @@ export function ChatView({
   onStreamingChange,
   onNewSessionRef,
   onSessionDiscovered,
+  onSessionTitle,
   onSwitchSession,
   agentType,
   codingAgentId,
@@ -308,6 +311,11 @@ export function ChatView({
       onSessionDiscovered?.(sessionId);
     }
   }, [sessionId, onSessionDiscovered]);
+
+  const sessionTitle = session?.title;
+  useEffect(() => {
+    if (sessionTitle) onSessionTitle?.();
+  }, [sessionTitle, onSessionTitle]);
 
   // Queue view with drag-reorder. `optimisticQueue` holds the local order
   // until the server's next `queue-updated` confirms it.

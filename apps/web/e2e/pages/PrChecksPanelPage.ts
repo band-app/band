@@ -19,6 +19,12 @@
  *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
  *     fails and `pr-checks__unavailable` when no plugin serves the repo.
  *
+ * Sections: reviewers and comments have a header `pr-<id>__header`
+ * (`aria-expanded`) with `pr-<id>__summary`; checks uses its `pr-checks__summary` row. Reviewers: `pr-reviewers__reviewer`
+ * (`data-reviewer-state`, `pr-reviewers__state`). Comments: `pr-comments__item`,
+ * `pr-comments__thread` (`pr-comments__thread-location`, `-label`, `-toggle`,
+ * `-messages`), `pr-comments__body` and `pr-comments__link`.
+ *
  * Revealing the sidepanel and selecting its tab is delegated to
  * `WorktreePage`.
  */
@@ -64,6 +70,12 @@ export class PrChecksPanelPage {
   /** The name cell of every check row, in list order. */
   readonly checkNames: Locator;
 
+  readonly reviewers: Locator;
+  readonly reviewersSummary: Locator;
+  readonly commentsSummary: Locator;
+  readonly commentItems: Locator;
+  readonly threads: Locator;
+
   private readonly worktree: WorktreePage;
 
   constructor(
@@ -102,6 +114,67 @@ export class PrChecksPanelPage {
     this.summaryPending = page.getByTestId("pr-checks__summary-pending");
     this.checks = page.getByTestId("pr-checks__check");
     this.checkNames = page.getByTestId("pr-checks__check-name");
+    this.reviewers = page.getByTestId("pr-reviewers__reviewer");
+    this.reviewersSummary = page.getByTestId("pr-reviewers__summary");
+    this.commentsSummary = page.getByTestId("pr-comments__summary");
+    this.commentItems = page.getByTestId("pr-comments__item");
+    this.threads = page.getByTestId("pr-comments__thread");
+  }
+
+  /** The header button of a section: `reviewers`, `checks` (the summary row) or `comments`. */
+  sectionHeader(id: "reviewers" | "checks" | "comments"): Locator {
+    return id === "checks" ? this.summary : this.page.getByTestId(`pr-${id}__header`);
+  }
+
+  async toggleSection(id: "reviewers" | "checks" | "comments"): Promise<void> {
+    await test.step(`Toggle the ${id} section`, async () => {
+      await this.sectionHeader(id).click();
+    });
+  }
+
+  reviewer(login: string): Locator {
+    return this.reviewers.filter({ hasText: login });
+  }
+
+  /** Script elements inside comment bodies; untrusted HTML must never produce one. */
+  commentBodyScripts(): Locator {
+    return this.page.getByTestId("pr-comments__body").locator("script");
+  }
+
+  /** The GitHub links inside the thread on `location`. */
+  threadLinks(location: string): Locator {
+    return this.thread(location).getByTestId("pr-comments__link");
+  }
+
+  /** The "Resolved" or "Outdated" label of the thread on `location`. */
+  threadLabel(location: string): Locator {
+    return this.thread(location).getByTestId("pr-comments__thread-label");
+  }
+
+  /** The messages of the thread on `location`, hidden while it is collapsed. */
+  threadMessages(location: string): Locator {
+    return this.thread(location).getByTestId("pr-comments__thread-messages");
+  }
+
+  /** The inline thread on `location` (`path:line`). */
+  thread(location: string): Locator {
+    return this.threads.filter({
+      has: this.page.getByTestId("pr-comments__thread-location").getByText(location, {
+        exact: true,
+      }),
+    });
+  }
+
+  async openThreadLocation(location: string): Promise<void> {
+    await test.step(`Open ${location} from its thread`, async () => {
+      await this.thread(location).getByTestId("pr-comments__thread-location").click();
+    });
+  }
+
+  async toggleThread(location: string): Promise<void> {
+    await test.step(`Toggle the thread on ${location}`, async () => {
+      await this.thread(location).getByTestId("pr-comments__thread-toggle").click();
+    });
   }
 
   /** Open the worktree and its Checks tab, and wait until the lookup settles. */

@@ -4,6 +4,7 @@ import { readAgentMode } from "@/dashboard/lib/agent-mode";
 import { queryClient } from "@/dashboard/query-client";
 import { openExternalUrl } from "../lib/open-external-url";
 import { trpc } from "../lib/trpc-client";
+import { PluginMarkdown } from "./PluginMarkdown";
 
 const reviewQueryKey = (worktreeId: string) => ["worktreeReview", worktreeId] as const;
 
@@ -56,4 +57,14 @@ export const clientPluginHost: ClientPluginHost = {
     }
     if (protocol === "https:" || protocol === "http:") openExternalUrl(url);
   },
+
+  openFile(worktreeId, path, line) {
+    // The center dock listens for this, filters on the worktree id and
+    // opens the file at the line.
+    window.dispatchEvent(
+      new CustomEvent("band:lsp-navigate", { detail: { filePath: path, worktreeId, line } }),
+    );
+  },
+
+  Markdown: PluginMarkdown,
 };

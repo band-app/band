@@ -35,3 +35,13 @@ export function useIsFullscreen(): boolean {
 
   return isFullscreen;
 }
+
+/**
+ * Single source for the macOS traffic-light gutter. Left padding class for a
+ * top-row surface that must clear the window buttons: wide on desktop, the
+ * normal padding in fullscreen (no traffic lights) and in the browser.
+ */
+export function useTitleBarOffset(): string {
+  const isFullscreen = useIsFullscreen();
+  return isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
+}

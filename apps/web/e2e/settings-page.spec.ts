@@ -78,6 +78,7 @@ test("settings opens full screen with one page per sidebar entry", async ({ page
     ["browser", () => settingsPage.webBrowserCdpSwitch()],
     ["hosts", () => settingsPage.hostRow("local")],
     ["credentials", () => settingsPage.credentialsAddButton()],
+    ["agent-hooks", () => settingsPage.hooksHostRow("local")],
     ["labels", () => settingsPage.addLabelButton().first()],
     ["notifications", () => settingsPage.soundOnNeedsAttentionSwitch()],
     ["web-server", () => settingsPage.webServerPortInput()],
@@ -305,4 +306,24 @@ test("changing theme via the dropdown persists the new theme", async ({ page }) 
       throw new Error(`expected theme=light, got ${JSON.stringify(settings.theme)}`);
     }
   }).toPass({ timeout: 5_000 });
+});
+
+test("the cross-host worktrees setting is on by default and saves when turned off", async ({
+  page,
+}) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog("agents");
+  const toggle = settingsPage.crossHostWorktreesSwitch();
+  await expect(toggle).toHaveAttribute("data-state", "checked");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("data-state", "unchecked");
+  await settingsPage.saveButton.click();
+  await expect
+    .poll(
+      () =>
+        (readSettings().agents as { crossHostWorktrees?: boolean } | undefined)?.crossHostWorktrees,
+    )
+    .toBe(false);
 });

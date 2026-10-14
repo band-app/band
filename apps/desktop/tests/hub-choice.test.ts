@@ -6,7 +6,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -21,6 +21,7 @@ import {
   saveHubChoice,
   viewHubChoice,
 } from "../src/main/services/hub-choice.ts";
+import { createTestSecretStore, setSecretStore } from "../src/main/services/secret-store.ts";
 
 describe("hub choice", () => {
   let sandboxHome: string;
@@ -55,6 +56,53 @@ describe("hub choice", () => {
     assert.equal(mode, 0o600);
     saveHubChoice({ mode: "local" });
     assert.deepEqual(loadHubChoice(), { mode: "local" });
+  });
+
+  describe("with an OS key store", () => {
+    const TOKEN = "bdt_admin-token.1";
+    const bandFiles = () => readdirSync(join(sandboxHome, ".band")).sort();
+
+    beforeEach(() => setSecretStore(createTestSecretStore()));
+    afterEach(() => setSecretStore(null));
+
+    test("saves the choice encrypted, with the token in no plain-text file", () => {
+      saveHubChoice({ mode: "remote", url: "https://hub.example.com", token: TOKEN });
+      assert.deepEqual(bandFiles(), ["desktop-hub.enc"]);
+      const stored = readFileSync(join(sandboxHome, ".band", "desktop-hub.enc"), "utf8");
+      assert.ok(!stored.includes(TOKEN));
+      assert.ok(!Buffer.from(stored, "base64").toString("latin1").includes(TOKEN));
+      assert.deepEqual(loadHubChoice(), {
+        mode: "remote",
+        url: "https://hub.example.com",
+        token: TOKEN,
+      });
+    });
+
+    test("moves a plain-text file from an older version into the key store and deletes it", () => {
+      mkdirSync(join(sandboxHome, ".band"), { recursive: true });
+      const legacy = join(sandboxHome, ".band", "desktop-hub.json");
+      const body = JSON.stringify({ mode: "remote", url: "https://hub.example.com", token: TOKEN });
+      writeFileSync(legacy, body);
+      writeFileSync(`${legacy}.tmp`, body);
+      writeFileSync(`${legacy}.bak`, body);
+
+      assert.deepEqual(loadHubChoice(), {
+        mode: "remote",
+        url: "https://hub.example.com",
+        token: TOKEN,
+      });
+      assert.deepEqual(bandFiles(), ["desktop-hub.enc"]);
+      // The next launch reads it back from the key store alone.
+      assert.equal(loadHubChoice().mode, "remote");
+    });
+
+    test("saving a new choice removes a plain-text file that came back", () => {
+      saveHubChoice({ mode: "remote", url: "https://hub.example.com", token: TOKEN });
+      writeFileSync(join(sandboxHome, ".band", "desktop-hub.json"), "{}");
+      saveHubChoice({ mode: "local" });
+      assert.ok(!existsSync(join(sandboxHome, ".band", "desktop-hub.json")));
+      assert.deepEqual(loadHubChoice(), { mode: "local" });
+    });
   });
 
   test("the renderer's view never carries the token", () => {

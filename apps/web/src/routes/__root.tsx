@@ -20,6 +20,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { ContinuePromptHost } from "@/dashboard/components/ContinueOnHostDialog";
 import { ToastHost } from "@/dashboard/components/ToastHost";
 import { queryClient, queryKeys } from "@/dashboard/query-client";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
@@ -36,7 +37,7 @@ import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { useIsFullscreen } from "../hooks/useIsFullscreen";
+import { useTitleBarOffset } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { activateBrowserGuestWorktree } from "../lib/browser-guest-retention";
@@ -801,8 +802,7 @@ function AppShell() {
   // to the stationary nav-cluster overlay below so the sidebar-toggle /
   // back-forward buttons clear the traffic lights; the top-row drag surfaces
   // themselves take no offset prop.
-  const isFullscreen = useIsFullscreen();
-  const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
+  const titleBarOffset = useTitleBarOffset();
 
   // The center tab strip reserves the overlay's width at its left edge while
   // the sidebar is collapsed (`SidebarGutter`), so it tracks the rendered
@@ -1025,6 +1025,7 @@ function RootLayout() {
           <AppShell />
         </ClientStateGate>
         <ToastHost />
+        <ContinuePromptHost />
       </TooltipProvider>
     </DashboardProvider>
   );

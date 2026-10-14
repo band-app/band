@@ -1,7 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
-import { checkHooks, installHooks } from "./hooks-service";
+import { AGENT_CHECKS } from "./coding-agent-seed";
 import { modelRefreshService } from "./model-refresh-service";
 import { repoService } from "./repo-service";
 import { agentModeFromVia } from "./settings-service";
@@ -11,14 +11,6 @@ import { systemService } from "./system-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("setup");
-
-// Coding agents to detect, in priority order. The first detected agent
-// becomes the default if no default has been chosen yet.
-const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[] = [
-  { id: "claude-code", type: "claude-code", label: "Claude Code", binary: "claude" },
-  { id: "codex", type: "codex", label: "Codex", binary: "codex" },
-  { id: "opencode", type: "opencode", label: "OpenCode", binary: "opencode" },
-];
 
 /**
  * Run startup setup. Called every server boot. Each step is idempotent —
@@ -30,17 +22,16 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  *   ensureRepoStateInSync ─────────────────────────────────┐
  *                                                             │
  *   ensureCliInstalled ──┬─► ensureSettingsDefaults  ──────── ─┤
- *                        ├─► ensureClaudeHooks      ──────── ─┤
  *                        └─► ensureSkillsInstalled  ──────── ─┘
  *                                                             │
  *                                                            await
  *
  * Two parallelism dimensions:
  *
- *   1. The CLI install gates `ensureClaudeHooks` and `ensureSkillsInstalled`
- *      because both need `band` resolvable on PATH (the hooks register a
- *      `band notify …` command; the skills install spawns
- *      `band skills install`). `ensureSettingsDefaults` doesn't strictly
+ *   1. The CLI install gates `ensureSkillsInstalled` because it needs `band`
+ *      resolvable on PATH (the skills install spawns `band skills install`).
+ *      Claude Code hooks are not installed here: a person installs them
+ *      from the banner or Settings. `ensureSettingsDefaults` doesn't strictly
  *      need the CLI, but it's grouped here for code clarity and the cost
  *      is negligible on warm boots.
  *   2. `ensureRepoStateInSync` (DB + `git worktree list`) doesn't touch
@@ -77,7 +68,6 @@ export async function runFirstTimeSetup(): Promise<void> {
   const results = await Promise.allSettled([
     repoSync,
     ensureSettingsDefaults(),
-    ensureClaudeHooks(),
     ensureSkillsInstalled(),
   ]);
 
@@ -313,26 +303,6 @@ function migrateAgentDefaultMode(): void {
   if (!mode) return;
   saveSettings({ ...settings, agents: { ...settings.agents, defaultMode: mode } });
   log.info("Migrated cli.defaultVia to agents.defaultMode = %s", mode);
-}
-
-/**
- * Install Claude Code hooks if they're not already present. Relies on
- * the band CLI being on PATH, so this must run after `ensureCliInstalled`.
- */
-async function ensureClaudeHooks(): Promise<void> {
-  try {
-    const status = await checkHooks();
-    if (status.installed) {
-      return;
-    }
-    await installHooks();
-    log.info("Installed Claude Code hooks");
-  } catch (err) {
-    log.warn(
-      "Failed to install Claude Code hooks: %s",
-      err instanceof Error ? err.message : String(err),
-    );
-  }
 }
 
 /**

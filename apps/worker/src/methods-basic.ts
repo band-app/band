@@ -312,6 +312,7 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   r.json("agentEnv.installSkills", () => host.agentEnv.installSkills());
   r.json("agentEnv.hooksStatus", () => host.agentEnv.hooksStatus());
   r.json("agentEnv.installHooks", () => host.agentEnv.installHooks());
+  r.json("agentEnv.removeHooks", () => host.agentEnv.removeHooks());
 
   return () => {
     for (const plan of plans.values()) plan.dispose();

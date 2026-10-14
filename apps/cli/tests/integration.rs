@@ -591,6 +591,73 @@ fn repos_set_checkpoints_round_trips_in_the_list() {
     );
 }
 
+#[test]
+fn repos_set_auto_continue_round_trips_in_the_list() {
+    let env = TestEnv::new();
+    let auto_continue = |env: &TestEnv| {
+        let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
+        listed["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "my-repo")
+            .expect("my-repo in list")["autoContinue"]
+            .clone()
+    };
+    // Off until a person turns it on.
+    assert_eq!(auto_continue(&env), false);
+
+    let on = env.band(&["repos", "set", "my-repo", "--auto-continue", "on"]);
+    assert!(on.status.success(), "stderr: {}", stderr(&on));
+    assert_eq!(auto_continue(&env), true);
+
+    let off = env.band(&["repos", "set", "my-repo", "--auto-continue", "off"]);
+    assert!(off.status.success(), "stderr: {}", stderr(&off));
+    assert_eq!(auto_continue(&env), false);
+
+    let bad = env.band(&["repos", "set", "my-repo", "--auto-continue", "maybe"]);
+    assert!(!bad.status.success());
+    assert!(stderr(&bad).contains("on or off"), "{}", stderr(&bad));
+}
+
+#[test]
+fn worktrees_continue_explains_why_it_cannot() {
+    let env = TestEnv::new();
+    let created = env.band(&["worktrees", "create", "my-repo", "feat/cont"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let listed = json_of(&env.band(&["worktrees", "list", "my-repo", "--output", "json"]));
+    let id = listed["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "feat/cont")
+        .expect("worktree")["worktreeId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The hub's own machine is up, so there is nothing to continue.
+    let up = env.band(&["worktrees", "continue", &id]);
+    assert!(!up.status.success());
+    assert!(stderr(&up).contains("is online"), "{}", stderr(&up));
+
+    let unknown = env.band(&["worktrees", "continue", "no-such-worktree"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("Unknown worktree"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    let nowhere = env.band(&["worktrees", "continue", &id, "--to", "nowhere"]);
+    assert!(!nowhere.status.success());
+    assert!(
+        stderr(&nowhere).contains("Unknown host"),
+        "{}",
+        stderr(&nowhere)
+    );
+}
+
 /// Registers a worker host the way the UI does and returns its id.
 fn issue_worker_host(env: &TestEnv, name: &str) -> String {
     let settings: serde_json::Value = serde_json::from_str(
@@ -759,6 +826,105 @@ fn worktrees_create_refuses_a_host_the_repo_is_not_allowed_on() {
     assert!(reset.status.success(), "stderr: {}", stderr(&reset));
     let created = env.band(&["worktrees", "create", "my-repo", "feat/refused"]);
     assert!(created.status.success(), "stderr: {}", stderr(&created));
+}
+
+#[test]
+fn worktrees_create_host_flag_conflicts_and_unknown_host() {
+    let env = TestEnv::new();
+
+    let out = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/h",
+        "--host",
+        "h-1",
+        "--labels",
+        "a=b",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("cannot be used with"),
+        "stderr: {}",
+        stderr(&out)
+    );
+
+    let out = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/h",
+        "--host",
+        "no-such-host",
+    ]);
+    assert!(!out.status.success());
+    assert!(!stderr(&out).is_empty());
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    assert!(!listed.to_string().contains("feat-h"), "listed: {listed}");
+}
+
+#[test]
+fn worktrees_set_origin_sets_clears_and_refuses_bad_input() {
+    let env = TestEnv::new();
+    for branch in ["feat/a", "feat/b"] {
+        let output = env.band(&["worktrees", "create", "my-repo", branch]);
+        assert!(output.status.success(), "stderr: {}", stderr(&output));
+    }
+    let origin_of = |id: &str| {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap_or_else(|| panic!("{id} in {listed}"))["origin"]
+            .clone()
+    };
+
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/b",
+        "--origin",
+        "my-repo-feat-a",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(origin_of("my-repo-feat-b")["worktreeId"], "my-repo-feat-a");
+
+    // A descendant cannot become its ancestor's parent.
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/a",
+        "--origin",
+        "my-repo-feat-b",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("descendant"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    let output = env.band(&[
+        "worktrees",
+        "set-origin",
+        "my-repo",
+        "feat/a",
+        "--origin",
+        "no-such-worktree",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown origin worktree"),
+        "stderr: {}",
+        stderr(&output)
+    );
+
+    let output = env.band(&["worktrees", "set-origin", "my-repo", "feat/b", "--none"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(origin_of("my-repo-feat-b").is_null());
 }
 
 #[test]
@@ -1567,6 +1733,7 @@ fn band_notify_with_env(
         .env_remove("BAND_SERVER_URL")
         .env_remove("BAND_DISPATCH")
         .env_remove("BAND_TERMINAL_ID")
+        .env_remove("BAND_HOST_ID")
         .envs(extra_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1626,7 +1793,7 @@ fn query_agent_status(band_dir: &Path, worktree_id: &str) -> Option<String> {
 fn notify_forwards_payload_to_server() {
     let env = TestEnv::new();
 
-    // A "Stop" hook → the agent finished its turn → needs_attention.
+    // A "Stop" hook → the agent finished its turn → done.
     let output = band_notify(
         &env,
         &serde_json::json!({
@@ -1637,8 +1804,8 @@ fn notify_forwards_payload_to_server() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
-        Some("needs_attention"),
-        "Stop hook should be forwarded and mapped to needs_attention by the server"
+        Some("done"),
+        "Stop hook should be forwarded and mapped to done by the server"
     );
 
     // A regular tool-use hook → the agent is making progress → working. Proves
@@ -1713,7 +1880,7 @@ fn notify_forwards_agent_and_terminal_id() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
-        Some("needs_attention"),
+        Some("done"),
     );
     assert_eq!(
         query_source_terminal(&env.band_dir, "hook:cli-session").as_deref(),
@@ -1737,7 +1904,7 @@ fn notify_forwards_chat_dispatch() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
-        Some("needs_attention"),
+        Some("done"),
     );
 
     // Would map to `working` if the server applied it.
@@ -1754,9 +1921,126 @@ fn notify_forwards_chat_dispatch() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
-        Some("needs_attention"),
+        Some("done"),
         "a chat agent's hook should not change the worktree status"
     );
+}
+
+// --- Notify must stay silent ---
+
+/// Runs `band notify` with `stdin` against `server_url` and returns the output
+/// and how long it took. HOME and BAND_HOME are temporary.
+fn run_notify_silently(
+    server_url: &str,
+    stdin: &[u8],
+) -> (std::process::Output, std::time::Duration) {
+    use std::io::Write;
+    let home = tempfile::tempdir().expect("tempdir");
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["notify", "--agent", "claude-code"])
+        .env("HOME", home.path())
+        .env("BAND_HOME", home.path().join(".band"))
+        .env("BAND_SERVER_URL", server_url)
+        .env_remove("BAND_TOKEN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn band notify");
+    if let Some(mut input) = child.stdin.take() {
+        let _ = input.write_all(stdin);
+    }
+    let output = child.wait_with_output().expect("band notify failed");
+    (output, started.elapsed())
+}
+
+fn assert_silent_success(output: &std::process::Output, took: std::time::Duration) {
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(output));
+    assert!(output.stdout.is_empty(), "stdout: {}", stdout(output));
+    assert!(output.stderr.is_empty(), "stderr: {}", stderr(output));
+    assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+}
+
+/// A hook never disturbs the agent: whatever the hub or stdin does, `band
+/// notify` exits 0, prints nothing and returns within two seconds.
+#[test]
+fn notify_is_silent_when_the_hub_is_down() {
+    // A port nobody listens on: bind, note the port, drop the listener.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let (output, took) = run_notify_silently(
+        &format!("http://127.0.0.1:{port}"),
+        br#"{"hook_event_name":"Stop","cwd":"/tmp"}"#,
+    );
+    assert_silent_success(&output, took);
+}
+
+#[test]
+fn notify_is_silent_for_garbage_and_empty_stdin() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port}");
+    for input in [
+        &b"this is not json"[..],
+        &b""[..],
+        &b"{\"hook_event_name\":"[..],
+    ] {
+        let (output, took) = run_notify_silently(&url, input);
+        assert_silent_success(&output, took);
+    }
+}
+
+#[test]
+fn notify_is_silent_when_the_hub_hangs() {
+    // A hub that accepts the connection and never answers.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let held = std::thread::spawn(move || {
+        let mut sockets = Vec::new();
+        listener.set_nonblocking(false).unwrap();
+        while let Ok((socket, _)) = listener.accept() {
+            sockets.push(socket);
+            if sockets.len() >= 2 {
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(4));
+    });
+    let (output, took) = run_notify_silently(
+        &format!("http://127.0.0.1:{port}"),
+        br#"{"hook_event_name":"Stop","cwd":"/tmp"}"#,
+    );
+    assert_silent_success(&output, took);
+    // Unblock the accept loop if the CLI connected only once.
+    let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+    let _ = held.join();
+}
+
+#[test]
+fn notify_is_silent_when_stdin_never_closes() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["notify", "--agent", "claude-code"])
+        .env("HOME", home.path())
+        .env("BAND_HOME", home.path().join(".band"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn band notify");
+    // Keep stdin open: the process must still return on its own.
+    let stdin = child.stdin.take();
+    let output = child.wait_with_output().expect("band notify failed");
+    drop(stdin);
+    assert_silent_success(&output, started.elapsed());
 }
 
 // --- Settings tests ---
@@ -1772,6 +2056,52 @@ fn settings_shows_config() {
     assert!(
         json.get("worktreesDir").is_some(),
         "expected worktreesDir in settings: {json}"
+    );
+}
+
+// --- Version tests ---
+
+#[test]
+fn dash_dash_version_prints_the_cli_version() {
+    let out = band_offline(&["--version"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out).trim(),
+        format!("band {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_prints_cli_and_hub_versions() {
+    let body = r#"{"result":{"data":{"webserver":true,"version":"9.8.7","tunnel":false}}}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["version"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        format!("CLI: {}\nHub: 9.8.7", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_labels_an_unreachable_hub() {
+    // Port 1 refuses connections.
+    let tmp = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["version"])
+        .env("BAND_HOME", tmp.path())
+        .env("BAND_SERVER_URL", "http://127.0.0.1:1")
+        .output()
+        .expect("failed to execute band");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        format!("CLI: {}\nHub: unreachable", env!("CARGO_PKG_VERSION"))
     );
 }
 
