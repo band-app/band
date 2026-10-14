@@ -151,7 +151,9 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       args: strArray(a, "args"),
       env,
     };
-    const stdio = await host.acp.spawn(launch, await path(a, "cwd"));
+    const cwd = await path(a, "cwd");
+    ctx.lease.assertMayRun(cwd);
+    const stdio = await host.acp.spawn(launch, cwd);
     const agentId = `a-${stdio.pid ?? "x"}-${agents.size}-${Date.now().toString(36)}`;
     agents.set(agentId, { stdio });
 
@@ -306,6 +308,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
 
   r.json("pty.spawn", async (a) => {
     const worktreeRoot = await path(a, "worktreeRoot");
+    ctx.lease.assertMayRun(worktreeRoot);
     const o = optObj(a, "options");
     let options: SpawnOptions | undefined = o && {
       command: optStr(o, "command"),
@@ -410,6 +413,15 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       channel.end();
     }
     session.notify("pty.exit", event);
+  });
+
+  // The lease ran out: nothing this worker runs for the hub may go on.
+  ctx.lease.onFence(async () => {
+    for (const { stdio } of agents.values()) stdio.kill();
+    for (const proc of mcpProcesses) proc.kill();
+    await Promise.all([...openBrowsers].map((id) => host.browser.close(id)));
+    for (const t of await pty.listAll().catch(() => [])) await pty.kill(t.terminalId);
+    await host.lsp.killAll();
   });
 
   return async () => {

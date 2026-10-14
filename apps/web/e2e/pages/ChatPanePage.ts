@@ -723,6 +723,18 @@ export class ChatPanePage {
     return () => [...urls];
   }
 
+  /** Start recording the older-page requests the page makes
+   *  (`/api/chats/<id>/history`). The getter returns their URLs. Call
+   *  BEFORE `goto`. */
+  trackHistoryRequests(): () => string[] {
+    const urls: string[] = [];
+    this.page.on("request", (req) => {
+      const url = new URL(req.url());
+      if (/^\/api\/chats\/[^/]+\/history$/.test(url.pathname)) urls.push(req.url());
+    });
+    return () => [...urls];
+  }
+
   /** Locator for a user-role message bubble carrying the given text.
    *  Scoped to the `chat-pane__user-message` data-testid container so a
    *  future change that renders user text inside an assistant bubble
@@ -770,6 +782,57 @@ export class ChatPanePage {
   /** The visible chat transcript's `scrollTop`, in CSS px. */
   async readScrollTop(): Promise<number> {
     return await this.scroller.filter({ visible: true }).evaluate((el) => el.scrollTop);
+  }
+
+  /** Before the page loads, start recording one sample per animation frame of
+   *  what the transcript shows: whether the list is revealed, how far the
+   *  scroller is from its bottom, and whether the row holding `newestText` is
+   *  inside the scroller's box. Read back with `readOpenSamples`. */
+  async installOpenSampler(newestText: string): Promise<void> {
+    await this.page.addInitScript((needle) => {
+      const w = window as unknown as { __openSamples: unknown[] };
+      w.__openSamples = [];
+      const tick = () => {
+        const list = document.querySelector('[data-testid="chat-pane__virtual-list"]');
+        const scroller = document.querySelector('[data-testid="chat-pane__scroller"]');
+        if (list && scroller) {
+          const box = scroller.getBoundingClientRect();
+          const rows = [...list.querySelectorAll('[data-testid="chat-pane__message-row"]')];
+          const newest = rows.find((r) => r.textContent?.includes(needle));
+          const r = newest?.getBoundingClientRect();
+          w.__openSamples.push({
+            revealed: getComputedStyle(list).visibility !== "hidden",
+            fromBottom: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop,
+            scrollTop: scroller.scrollTop,
+            newestInView: !!r && r.bottom > box.top && r.top < box.bottom,
+            rows: rows.length,
+          });
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, newestText);
+  }
+
+  async readOpenSamples(): Promise<
+    {
+      revealed: boolean;
+      fromBottom: number;
+      scrollTop: number;
+      newestInView: boolean;
+      rows: number;
+    }[]
+  > {
+    return await this.page.evaluate(
+      () => (window as unknown as { __openSamples: never[] }).__openSamples,
+    );
+  }
+
+  /** How far the visible chat transcript is from its bottom, in CSS px. */
+  async distanceFromBottom(): Promise<number> {
+    return await this.scroller
+      .filter({ visible: true })
+      .evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
   }
 
   /** Scroll the chat container to the bottom — used to verify stick-to-bottom

@@ -28,6 +28,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Host } from "@band-app/host-api";
+import {
+  buildSnapshot,
+  checkoutSnapshot,
+  gitIn,
+  resetCheckoutToSnapshot,
+  type Snapshot,
+  WIP_DIR,
+} from "@band-app/host-api/snapshot-git";
 import { RemoteRpc } from "@band-app/host-remote";
 import {
   METHOD_LIFECYCLE_EXPORT_SESSIONS,
@@ -37,6 +45,7 @@ import {
   type SessionFile,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import { formatAge } from "@band-app/shared/continuation";
 import {
   checkpointsEnabledFor,
   isHostAllowed,
@@ -46,15 +55,19 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { CheckpointError, RepoHostNotAllowedError } from "../errors";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { CheckpointQueries, type CheckpointRow } from "../infra/db/queries/worktree-checkpoints";
-import { rekeyWorktreeRows } from "../infra/db/queries/worktree-rekey";
+import { clearWorktreeKeyedRows, rekeyWorktreeRows } from "../infra/db/queries/worktree-rekey";
 import { hostRegistry } from "../infra/host/registry";
 import { checkpointDir, forgetCheckpoints, worktreeCheckpointDir } from "./_utils/checkpoint-store";
+import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, checkoutSnapshot, gitIn, WIP_DIR } from "./_utils/snapshot-git";
 import { onTurnEnded } from "./_utils/turn-events";
+import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { repoService } from "./repo-service";
 import { loadState, saveState } from "./state";
+import { hasRunningTask } from "./task-service";
+import { terminalService } from "./terminal-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("checkpoints");
@@ -116,6 +129,11 @@ export interface RestoreResult {
   hostId: string;
   /** The worktree it replaced, marked superseded. Absent when a move removed it. */
   supersededId?: string;
+  /**
+   * Refs on the target host (`refs/band/backup/<worktree id>/<time>`) that keep what it held under
+   * this name before the checkpoint replaced it. Absent when it held nothing.
+   */
+  backupRefs?: string[];
   /** For a move: whether the source worktree was removed. */
   sourceRemoved?: boolean;
   /** For a move whose source could not be removed. */
@@ -359,6 +377,7 @@ export class CheckpointService {
         `Host ${hostId} is offline, so it cannot be checkpointed.`,
       );
     }
+    this.assertOwner(worktreeId, hostId, session);
     const host = hostRegistry.hostById(hostId);
     const rpc = new RemoteRpc(hostId, () => session);
     const [root] = (await host.info()).roots;
@@ -450,6 +469,13 @@ export class CheckpointService {
         trigger,
         createdAt: Date.now(),
       };
+      // A continuation may have superseded the worktree while the snapshot was being read.
+      try {
+        this.assertOwner(worktreeId, hostId, session);
+      } catch (err) {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        throw err;
+      }
       this.rows.insert(row);
       this.warnings.delete(worktreeId);
       await this.markCurrent(worktreeId, host, cwd);
@@ -459,6 +485,32 @@ export class CheckpointService {
     } finally {
       await git(["update-ref", "-d", ref]).catch(() => undefined);
       await host.fs.rm(remoteBundle, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * A checkpoint is stored only for the worktree's current owner: the row is not superseded, it
+   * still lives on the sending worker, and that worker's link is the one the snapshot came over.
+   * This holds on the store path as well as at the start, so a late shutdown checkpoint that
+   * races a continuation is rejected.
+   */
+  private assertOwner(worktreeId: string, hostId: string, session: ServerSession): void {
+    const found = worktreeService.resolve(worktreeId);
+    if (!found) throw new CheckpointError("conflict", `${worktreeId} no longer exists.`);
+    if (found.worktree.supersededBy) {
+      throw new CheckpointError(
+        "conflict",
+        `${worktreeId} was continued as ${found.worktree.supersededBy}, so ${hostId} no longer owns it.`,
+      );
+    }
+    if (
+      (found.worktree.hostId ?? LOCAL_HOST_ID) !== hostId ||
+      this.sessions.get(hostId) !== session
+    ) {
+      throw new CheckpointError(
+        "conflict",
+        `${hostId} does not own ${worktreeId}, so its checkpoint is not stored.`,
+      );
     }
   }
 
@@ -813,6 +865,15 @@ export class CheckpointService {
       throw new CheckpointError("conflict", `${worktreeId} is being restored or moved.`);
     }
     const row = this.pick(worktreeId, input.checkpointId);
+    // An offline source may still be running under its lease. Wait until it has stopped.
+    const sourceUp = this.sessions.get(fromHostId)?.attached === true;
+    const leaseLeft = sourceUp ? 0 : workerLeaseService.remainingMs(fromHostId);
+    if (leaseLeft > 0) {
+      throw new CheckpointError(
+        "conflict",
+        `${fromHostId} may still be running ${worktreeId}: its lease ends in ${formatAge(leaseLeft)}. Try again then.`,
+      );
+    }
     const target = this.sessions.get(toHostId);
     if (!target?.attached) {
       throw new CheckpointError(
@@ -830,11 +891,33 @@ export class CheckpointService {
         );
       }
     }
-    if (
-      repo.worktrees.some(
-        (w) => w.name === worktree.name && (w.hostId ?? LOCAL_HOST_ID) === toHostId,
-      )
-    ) {
+    // The default branch is the repo's own checkout on the target, so it is always "already there".
+    const isRoot = worktree.name === repo.defaultBranch;
+    // A live worktree of this branch on the target is the one the branch belongs to. A superseded
+    // older copy is replaced: the checkpoint wins, and what the target holds is backed up first.
+    const onTarget = repo.worktrees.find(
+      (w) => w.name === worktree.name && (w.hostId ?? LOCAL_HOST_ID) === toHostId,
+    );
+    if (onTarget && !onTarget.supersededBy && isRoot) {
+      // The target's own checkout is reset under whoever is using it, so it must be idle.
+      const targetId = toWorktreeId(repo.name, worktree.name, toHostId);
+      const busy =
+        chatService
+          .list(targetId)
+          .some(
+            (chat) =>
+              hasRunningTask(chat.id) ||
+              agentSessionService.isActive(chat.id) ||
+              hasQueuedMessages(chat.id),
+          ) || (await terminalService.list(targetId).catch(() => [])).length > 0;
+      if (busy) {
+        throw new CheckpointError(
+          "conflict",
+          `${targetId} has a running agent, queued message or terminal on ${toHostId}. Stop it first: opening ${worktreeId} there replaces its files.`,
+        );
+      }
+    }
+    if (onTarget && !onTarget.supersededBy && !isRoot) {
       throw new CheckpointError(
         "conflict",
         `Host ${toHostId} already has a worktree ${worktree.name} of ${repo.name}. Remove it first.`,
@@ -867,14 +950,45 @@ export class CheckpointService {
       );
       const git = gitIn(host, repoPath);
       const newId = toWorktreeId(repo.name, worktree.name, toHostId);
-      const worktreePath = posix.join(root, ".band-worktrees", repo.name, worktree.name);
-      if (
-        await host.fs.stat(worktreePath).then(
+      const worktreePath = isRoot
+        ? repoPath
+        : posix.join(root, ".band-worktrees", repo.name, worktree.name);
+      // What the target holds under this name is saved before the checkpoint replaces it.
+      const backups: string[] = [];
+      const backupStamp = Date.now();
+      const backupRef = (suffix = "") => `refs/band/backup/${newId}/${backupStamp}${suffix}`;
+      let oldSnap: Snapshot | undefined;
+      if (!isRoot) {
+        const exists = await host.fs.stat(worktreePath).then(
           () => true,
           () => false,
-        )
-      ) {
-        throw new CheckpointError("conflict", `${worktreePath} already exists on ${toHostId}.`);
+        );
+        if (exists) {
+          const listed = await git(["worktree", "list", "--porcelain"]).catch(() => "");
+          const registered = listed.split("\n").includes(`worktree ${worktreePath}`);
+          if (!registered) {
+            throw new CheckpointError(
+              "conflict",
+              `${worktreePath} already exists on ${toHostId} and is not a worktree of ${repo.name}.`,
+            );
+          }
+          oldSnap = await buildSnapshot(
+            host,
+            worktreePath,
+            wipDir,
+            `${newId}.backup`,
+            `band: backup of ${worktreePath} before ${newId}`,
+            true,
+          );
+          await git(["update-ref", backupRef(), oldSnap.snapshotSha]);
+          backups.push(backupRef());
+          // The folder is moved aside, not deleted: the backup ref holds no ignored files
+          // (.env, node_modules), and the old state must not vanish silently.
+          const aside = `${worktreePath}.band-backup-${backupStamp}`;
+          await host.fs.rename(worktreePath, aside);
+          await git(["worktree", "prune"]);
+          log.info({ worktreeId, aside }, "kept the target's older copy beside the restored one");
+        }
       }
 
       // Objects first: what origin has, then the checkpoint's bundle for what it lacks.
@@ -899,11 +1013,32 @@ export class CheckpointService {
         );
       });
 
+      let rootBefore: Snapshot | undefined;
       try {
-        await checkoutSnapshot(host, repoPath, worktreePath, row);
-        await host.scripts.copyFiles(repoPath, worktreePath).catch((err) => {
-          log.warn({ worktreeId, err: errorText(err) }, "could not copy worktree files");
-        });
+        if (isRoot) {
+          // The target's own checkout of the default branch: what it holds is kept, then replaced.
+          rootBefore = await buildSnapshot(
+            host,
+            repoPath,
+            wipDir,
+            `${newId}.backup`,
+            `band: backup of ${repoPath} before ${newId}`,
+            true,
+          );
+          await git(["update-ref", backupRef(), rootBefore.snapshotSha]);
+          backups.push(backupRef());
+          await resetCheckoutToSnapshot(host, repoPath, row);
+        } else {
+          await checkoutSnapshot(host, repoPath, worktreePath, row, {
+            onDivergentTip: async (tip) => {
+              await git(["update-ref", backupRef("-branch"), tip]);
+              backups.push(backupRef("-branch"));
+            },
+          });
+          await host.scripts.copyFiles(repoPath, worktreePath).catch((err) => {
+            log.warn({ worktreeId, err: errorText(err) }, "could not copy worktree files");
+          });
+        }
         // Confirm: the same files are there before anything on the hub points at the new copy.
         const check = await buildSnapshot(
           host,
@@ -921,9 +1056,16 @@ export class CheckpointService {
         }
         await this.restoreSessions(host, rpc, row, wipDir);
       } catch (err) {
-        // Only what this call created on the target is undone.
-        await git(["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
-        await git(["worktree", "prune"]).catch(() => undefined);
+        // Only what this call changed on the target is undone, from the backup it just made.
+        if (isRoot) {
+          if (rootBefore)
+            await resetCheckoutToSnapshot(host, repoPath, rootBefore).catch(() => undefined);
+        } else {
+          await git(["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
+          await git(["worktree", "prune"]).catch(() => undefined);
+          if (oldSnap)
+            await checkoutSnapshot(host, repoPath, worktreePath, oldSnap).catch(() => undefined);
+        }
         throw err;
       } finally {
         await git(["update-ref", "-d", local]).catch(() => undefined);
@@ -933,20 +1075,31 @@ export class CheckpointService {
       const state = loadState();
       const stateRepo = state.repos.find((r) => r.name === repo.name);
       if (!stateRepo) throw new CheckpointError("invalid", `Repo ${repo.name} is gone.`);
+      // An older copy the target held under this name is replaced by the restored one.
+      stateRepo.worktrees = stateRepo.worktrees.filter(
+        (w) => !(w.name === worktree.name && (w.hostId ?? LOCAL_HOST_ID) === toHostId),
+      );
       stateRepo.worktrees.push({
         name: worktree.name,
         branch: row.branch || worktree.branch,
         path: worktreePath,
-        pinned: worktree.pinned,
+        pinned: onTarget?.pinned ?? worktree.pinned,
         hostId: toHostId,
       });
       saveState(state);
+      if (onTarget) {
+        // `saveAll` keeps what the database holds for a key, and the older copy's marks are stale.
+        this.repos.setSupersededBy(repo.name, worktree.name, toHostId, null);
+        this.repos.setDivergence(repo.name, worktree.name, toHostId, null);
+        this.repos.setContinuedFrom(repo.name, worktree.name, toHostId, null);
+        clearWorktreeKeyedRows(newId);
+      }
       if (worktree.origin) this.repos.setOrigin(repo.name, worktree.name, worktree.origin);
       this.repos.setSupersededBy(repo.name, worktree.name, fromHostId, newId);
       rekeyWorktreeRows(worktreeId, newId);
       const chatIds = chatService.reassignWorktree(worktreeId, newId);
       log.info(
-        { worktreeId, newId, checkpoint: row.id, isMove },
+        { worktreeId, newId, checkpoint: row.id, isMove, backups },
         "worktree restored on another host",
       );
       restored = true;
@@ -956,6 +1109,7 @@ export class CheckpointService {
         supersededId: worktreeId,
         checkpointId: row.id,
         chatIds,
+        ...(backups.length > 0 ? { backupRefs: backups } : {}),
       };
     } finally {
       if (widened && !restored) {
@@ -1024,6 +1178,12 @@ export class CheckpointService {
       throw new CheckpointError(
         "offline",
         `Host ${fromHostId} is offline. Restore ${worktreeId} from its last checkpoint instead.`,
+      );
+    }
+    if (found.worktree.name === found.repo.defaultBranch) {
+      throw new CheckpointError(
+        "invalid",
+        `${worktreeId} is the repo's own checkout of ${found.repo.defaultBranch} on ${fromHostId}, so it is not moved while ${fromHostId} is up. It can be opened on another host once ${fromHostId} is offline.`,
       );
     }
     const enabled = checkpointsEnabledFor(found.repo.checkpointsEnabled, found.repo.allowedHostIds);

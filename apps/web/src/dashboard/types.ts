@@ -260,7 +260,6 @@ export interface Settings {
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
-  tokenSecret?: string;
   autoStartTunnel?: boolean;
   enableLSP?: boolean;
   /**

@@ -42,9 +42,7 @@ import {
   GitCompare,
   Globe,
   Loader2,
-  Maximize2,
   MessageSquare,
-  Minimize2,
   MoreVertical,
   Plus,
   RotateCcw,
@@ -67,9 +65,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
-  AGENT_STATE_INFO,
   AgentIcon,
-  AgentStateDot,
   buildLspWsUrl,
   type ChangeEntry,
   type ChangeSection,
@@ -90,13 +86,11 @@ import {
   SearchBar,
   serializeViewPosition,
   storeViewMode,
-  type TabAgentStatus,
   type TerminalInsertDetail,
   toFileUri,
   toLspServerLang,
   useAdapter,
   useCapabilities,
-  useDashboardStore,
   useSearch,
   useSettingsQuery,
   useWorktreePath,
@@ -198,6 +192,13 @@ import { setPerWorktreeState } from "./per-worktree-state-store";
 import { crossPanelHandlers } from "./SharedDockviewLayout";
 import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
+import {
+  readCachedTabMeta,
+  TabStatusIndicator,
+  useChatTabStatus,
+  useTerminalTabStatus,
+  writeCachedTabMeta,
+} from "./tab-status";
 
 // ---------------------------------------------------------------------------
 // Leaf kinds
@@ -283,53 +284,6 @@ function TabEndSlot({
   );
 }
 
-type TabAgentStatusKind = TabAgentStatus["status"];
-
-/** Which of several panes' statuses a terminal tab shows: the higher rank. */
-const TAB_STATUS_RANK: Record<TabAgentStatusKind, number> = {
-  question: 5,
-  failed: 4,
-  working: 3,
-  monitoring: 2,
-  done: 1,
-};
-
-/** Spinner while the agent works; the dashboard's dot for every other state. */
-function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
-  if (status === "working") {
-    return (
-      <Loader2
-        role="img"
-        aria-label={AGENT_STATE_INFO.working.label}
-        data-testid={testId}
-        data-status={status}
-        className="size-3 animate-spin text-muted-foreground"
-      />
-    );
-  }
-  return <AgentStateDot status={status} testId={testId} withTitle />;
-}
-
-/** The agent status of a chat, from the worktree's status snapshot. */
-function useChatTabStatus(worktreeId: string, chatId: string): TabAgentStatusKind | undefined {
-  return useDashboardStore(
-    (s) => s.statuses.get(worktreeId)?.tabStatuses?.find((t) => t.chatId === chatId)?.status,
-  );
-}
-
-/** The agent status of a terminal tab: the most urgent one reported from any
- *  of its split panes. */
-function useTerminalTabStatus(worktreeId: string, leafId: string): TabAgentStatusKind | undefined {
-  return useDashboardStore((s) => {
-    let found: TabAgentStatusKind | undefined;
-    for (const t of s.statuses.get(worktreeId)?.tabStatuses ?? []) {
-      if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
-      if (!found || TAB_STATUS_RANK[t.status] > TAB_STATUS_RANK[found]) found = t.status;
-    }
-    return found;
-  });
-}
-
 /** Track a tab's active state via its dockview panel api. */
 function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
   const [isActive, setIsActive] = useState(api.isActive);
@@ -356,6 +310,19 @@ function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: b
     return () => d.dispose();
   }, [api]);
   return preview === true;
+}
+
+/** Pin a preview tab (clears its italic `preview` param). `params` are the
+ *  tab's props, because `api.getParameters()` can be empty on a freshly-added
+ *  panel's tab. A pinned tab is never picked as the preview to replace, because
+ *  the open paths re-read this param from the live panel instead of trusting
+ *  their id refs. */
+function pinTab<P extends { preview?: boolean }>(
+  api: IDockviewPanelHeaderProps["api"],
+  params: P,
+): void {
+  const cur = { ...params, ...api.getParameters<P>() };
+  if (cur.preview !== false) api.updateParameters({ ...cur, preview: false });
 }
 
 const bandTheme: DockviewTheme = {
@@ -415,7 +382,7 @@ export function getWorktreeLeafActions(worktreeId: string | null): LeafActions |
 // ---------------------------------------------------------------------------
 //
 // Each leaf can publish a node of action buttons (save, view toggle, revert…)
-// that the group header (`RightHeaderActions`) renders next to the Maximize
+// that the group header (`RightHeaderActions`) renders next to the toolbar
 // action for whichever tab is active — so the tab content holds no toolbar of
 // its own. Leaves publish via `usePublishHeaderActions`; the header subscribes
 // to a change event and re-reads the active panel's entry each render.
@@ -1480,9 +1447,52 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     (view: any) => {
       editorViewRef.current = view;
       setViews(view ? [view] : []);
+      // Track the position as the user scrolls: by the time a tab switch
+      // unmounts the leaf, the detached scroller already reads 0.
+      stopTrackingScrollRef.current?.();
+      stopTrackingScrollRef.current = null;
+      if (view) {
+        const scroller: HTMLElement = view.scrollDOM;
+        // One store write per frame: a scroll fires many events.
+        let scrollFrame = 0;
+        const onScroll = () => {
+          if (scrollFrame) return;
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            persistEditorStateRef.current();
+          });
+        };
+        scroller.addEventListener("scroll", onScroll, { passive: true });
+        // Switching tabs detaches the editor and puts it back at offset 0
+        // without a scroll event. When it has a size again, restore the stored
+        // offset; the browser clamps it until layout settles, so retry briefly.
+        let frame = 0;
+        const restore = (tries: number) => {
+          const saved = getFileTabState(worktreeIdRaw, filePathRaw)?.scrollTop;
+          if (!saved || scroller.clientHeight === 0) return;
+          scroller.scrollTop = saved;
+          if (Math.abs(scroller.scrollTop - saved) > 1 && tries < 30) {
+            frame = requestAnimationFrame(() => restore(tries + 1));
+          }
+        };
+        const observer = new ResizeObserver(() => {
+          if (scroller.clientHeight > 0 && scroller.scrollTop === 0) {
+            cancelAnimationFrame(frame);
+            restore(0);
+          }
+        });
+        observer.observe(scroller);
+        stopTrackingScrollRef.current = () => {
+          scroller.removeEventListener("scroll", onScroll);
+          cancelAnimationFrame(scrollFrame);
+          observer.disconnect();
+          cancelAnimationFrame(frame);
+        };
+      }
     },
-    [setViews],
+    [setViews, worktreeIdRaw, filePathRaw],
   );
+  const stopTrackingScrollRef = useRef<(() => void) | null>(null);
 
   // Capture the editor's cursor selection + scroll offset into the per-tab
   // store so reopening the file (or reloading) lands the user back where they
@@ -1492,7 +1502,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   // replay a stale copy of the file over newer content.
   const persistEditorState = useCallback(() => {
     const view = editorViewRef.current;
-    if (!view) return;
+    // A hidden or detached scroller reads scrollTop 0 — keep the last real one.
+    if (!view || view.scrollDOM.clientHeight === 0) return;
     try {
       const { selection, scrollTop } = serializeViewPosition(view);
       updateFileTabState(worktreeIdRaw, filePathRaw, { selection, scrollTop });
@@ -2338,24 +2349,6 @@ function IconTab(props: IDockviewPanelHeaderProps) {
 /** Coding-agent types whose CLI can resume a session in a terminal. */
 const RESUME_CAPABLE_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
 
-function readCachedTabMeta(chatId: string): { title?: string; agentType?: string } {
-  if (!chatId) return {};
-  try {
-    const raw = sessionStorage.getItem(`band:chat-tab-meta:${chatId}`);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeCachedTabMeta(chatId: string, patch: { title?: string; agentType?: string }) {
-  if (!chatId) return;
-  try {
-    const prev = readCachedTabMeta(chatId);
-    sessionStorage.setItem(`band:chat-tab-meta:${chatId}`, JSON.stringify({ ...prev, ...patch }));
-  } catch {}
-}
-
 function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
   const chatId = props.params.chatId;
   const worktreeId = props.params.worktreeId;
@@ -2678,11 +2671,18 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   // per-file store when that fires. Seeded synchronously so a restored dirty
   // file shows the dot immediately on mount.
   const [dirty, setDirty] = useState(() => isFileDirty(worktreeId, filePath));
+  const tabApi = props.api;
+  const tabParams = props.params;
   useEffect(() => {
-    const recheck = () => setDirty(isFileDirty(worktreeId, filePath));
+    const recheck = () => {
+      const nowDirty = isFileDirty(worktreeId, filePath);
+      setDirty(nowDirty);
+      // Editing a preview tab pins it, like VS Code.
+      if (nowDirty) pinTab(tabApi, tabParams);
+    };
     window.addEventListener("band:dirty-change", recheck);
     return () => window.removeEventListener("band:dirty-change", recheck);
-  }, [worktreeId, filePath]);
+  }, [worktreeId, filePath, tabApi, tabParams]);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
@@ -2698,7 +2698,11 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
       filePath={filePath}
       testidPrefix={`center-file-tab--${filePath}`}
     >
-      <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
+      <div
+        className={TAB_ROOT_CLASS}
+        data-testid={`center-file-tab--${filePath}`}
+        onDoubleClick={() => pinTab(tabApi, tabParams)}
+      >
         <div className={TAB_CONTENT_WRAP}>
           <FileTypeIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
@@ -2771,6 +2775,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
         className={TAB_ROOT_CLASS}
         data-testid={`center-diff-tab--${filePath}`}
         data-commit={commit}
+        onDoubleClick={() => pinTab(props.api, props.params)}
       >
         <div className={TAB_CONTENT_WRAP}>
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
@@ -2903,14 +2908,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const chrome = useWorktreeChrome();
   const edges = useGroupEdges(props, !!chrome && isGridGroup);
 
-  const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
-  useEffect(() => {
-    const refresh = () => setIsMaximized(props.api.isMaximized());
-    refresh();
-    const d = props.containerApi.onDidMaximizedGroupChange(refresh);
-    return () => d.dispose();
-  }, [props.api, props.containerApi]);
-
   // Re-render when the active tab changes (in any group) or a leaf republishes
   // its header actions, so this group's active-tab actions stay current.
   const [, bumpActions] = useReducer((n: number) => n + 1, 0);
@@ -2934,7 +2931,7 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const activeId = props.group.activePanel?.id;
   const renderLeafActions = activeId ? leafHeaderActionsByPanelId.get(activeId) : undefined;
 
-  // Mobile / tabs-only: no Maximize (single full-screen group). The active
+  // Mobile / tabs-only: single full-screen group. The active
   // tab's actions fold behind a ⋮ menu so the narrow tab strip stays uncluttered.
   if (mobileByApiId.has(props.containerApi.id)) {
     if (!renderLeafActions) return null;
@@ -2959,8 +2956,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     );
   }
 
-  const MaxIcon = isMaximized ? Minimize2 : Maximize2;
-  const maxLabel = isMaximized ? "Restore" : "Maximize";
   const activeWorktreeId = (props.group.activePanel?.params as { worktreeId?: string } | undefined)
     ?.worktreeId;
 
@@ -2968,30 +2963,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
       {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={maxLabel}
-            onClick={() => {
-              if (props.api.isMaximized()) {
-                props.api.exitMaximized();
-              } else {
-                props.api.maximize();
-              }
-            }}
-            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <MaxIcon className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {maxLabel}
-          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-            ⇧⌘M
-          </kbd>
-        </TooltipContent>
-      </Tooltip>
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
         <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
       )}
@@ -3690,7 +3661,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
@@ -3750,7 +3723,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
@@ -4567,6 +4542,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           id,
           title: byId.get(id)?.title ?? id,
           kind: byId.get(id)?.api.component ?? "",
+          params: byId.get(id)?.params as SwitcherItem["params"],
         }));
         updateSwitcher({ items, index: initialIndex(items.length, e.shiftKey) });
         return;

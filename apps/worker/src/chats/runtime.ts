@@ -69,6 +69,11 @@ export interface RuntimeEnv {
   log: Logger;
   /** The launch for the chat's agent (or `agentId`'s): from the hub, or the last one it gave. */
   launch(chatId: string, agentId?: string): Promise<ChatLaunchReply>;
+  /**
+   * Throws when no process may start in `cwd`: the worker lost the hub's lease, or the folder was
+   * continued on another host. The same check the hub's `acp.spawn` gets.
+   */
+  assertMayRun(cwd: string): void;
   /** The environment every agent the worker starts gets: the `band` CLI on PATH, a GitHub token. */
   spawnEnv(env: Record<string, string>): Promise<Record<string, string>>;
   /** An event for the chat's subscribers. Logged events carry their row id. */
@@ -307,6 +312,7 @@ export class ChatRuntime {
     const generation = ++this.generation;
     this.starting = (async () => {
       const launch = await this.env.launch(this.chatId, agentId);
+      this.env.assertMayRun(launch.cwd);
       const resolved = await this.env.host.acp.resolveLaunch({
         type: launch.agent.type,
         label: launch.agent.label,

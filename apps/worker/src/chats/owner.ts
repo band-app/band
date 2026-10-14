@@ -341,6 +341,7 @@ export class ChatOwner {
         store: this.store,
         log: this.ctx.log,
         launch: (id, agentId) => this.launch(id, agentId),
+        assertMayRun: (cwd) => this.ctx.lease.assertMayRun(cwd),
         spawnEnv: (env) => agentSpawnEnv(this.ctx, env),
         emit: (id, event) => this.emit(id, event),
         logged: () => this.kickReplication(),

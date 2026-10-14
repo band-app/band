@@ -29,6 +29,9 @@ import {
 } from "./server";
 import { waitFor } from "./wait-for";
 
+/** The lease the test hub grants workers: short, so waiting it out costs a couple of seconds. */
+export const LEASE_MS = 1500;
+
 export const WORKER_BIN = join(import.meta.dirname, "../../../worker/bin/band-worker.mjs");
 
 export function git(cwd: string, ...args: string[]): string {
@@ -85,7 +88,12 @@ export interface World {
   addWorker(name: string, repos: string[], opts?: AddWorkerOptions): Promise<Worker>;
   /** Starts the worker process again with the state it saved, as a restart of the same machine. */
   restartWorker(w: Worker): Promise<Worker>;
-  killWorker(w: Worker, signal?: NodeJS.Signals): Promise<void>;
+  /**
+   * Stops the worker and waits until the hub sees it offline. By default it also waits out the
+   * worker's lease (`LEASE_MS`), after which the hub lets its worktrees continue elsewhere. Pass
+   * `{ waitForLease: false }` to look at the time in between.
+   */
+  killWorker(w: Worker, signal?: NodeJS.Signals, opts?: { waitForLease?: boolean }): Promise<void>;
   createWorktree(w: Worker, repo: string, branch: string): Promise<string>;
   worktreePath(w: Worker, repo: string, branch: string): string;
   turn(worktreeId: string, chatId: string, text: string): Promise<ChatEvent[]>;
@@ -172,6 +180,7 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       BAND_TEST_ACP_STATE: join(hubHome, "acp-state"),
       BAND_CHECKPOINT_POLL_MS: "500",
       BAND_CHECKPOINT_QUIET_MS: "1500",
+      BAND_WORKER_LEASE_MS: String(LEASE_MS),
       ...opts.env,
     },
   });
@@ -299,13 +308,17 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       });
       return next;
     },
-    async killWorker(w, signal = "SIGKILL") {
+    async killWorker(w, signal = "SIGKILL", killOpts = {}) {
       w.child.kill(signal);
       await w.exited;
       await waitFor(async () => ((await hostStatus(w.hostId)) !== "online" ? true : undefined), {
         label: `${w.name} offline`,
         timeoutMs: 30_000,
       });
+      // The lease the worker held ends one lease time after the hub last heard from it.
+      if (killOpts.waitForLease !== false) {
+        await new Promise((r) => setTimeout(r, LEASE_MS + 700));
+      }
     },
     async createWorktree(w, repo, branch) {
       await m("worktrees.create", {

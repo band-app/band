@@ -9,7 +9,15 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   type ChangeEntry,
   type ChangeSection,
@@ -28,7 +36,11 @@ import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { DiffTargetHeader } from "./DiffTargetHeader";
-import { CheckpointSidepanel, useOfflineCheckpoint } from "./OfflineCheckpoint";
+import {
+  CheckpointSidepanel,
+  OfflineSidepanelPlaceholder,
+  useOfflineCheckpoint,
+} from "./OfflineCheckpoint";
 import { usePerWorktreeState } from "./per-worktree-state-store";
 import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
 
@@ -67,6 +79,12 @@ function saveActiveTab(tab: RightTab): void {
 // Tab button (label + optional count badge)
 // ---------------------------------------------------------------------------
 
+/** True when the tab strip is too narrow for the titles, so tabs show icons only. */
+const IconsOnlyContext = createContext(false);
+
+/** Extra room the strip needs before titles come back, so it doesn't flicker at the boundary. */
+const TITLES_RETURN_MARGIN_PX = 8;
+
 function TabButton({
   label,
   icon: Icon,
@@ -85,6 +103,7 @@ function TabButton({
   badge?: number;
   testid: string;
 }) {
+  const iconsOnly = useContext(IconsOnlyContext);
   return (
     <button
       type="button"
@@ -104,7 +123,7 @@ function TabButton({
       }`}
     >
       <Icon className="size-3.5 shrink-0" />
-      <span className="whitespace-nowrap">{label}</span>
+      {!iconsOnly && <span className="whitespace-nowrap">{label}</span>}
       {badge != null && badge > 0 && (
         <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-medium text-blue-600 dark:text-blue-400">
           {badge}
@@ -199,6 +218,43 @@ function SidepanelHeader({
   children?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const [iconsOnly, setIconsOnly] = useState(false);
+  const iconsOnlyRef = useRef(false);
+  // Width the strip needs with titles, recorded when it overflows.
+  const fullWidthRef = useRef(0);
+
+  // Switch all tabs together: icons only once the titles overflow, titles
+  // again once the strip is wider than they needed.
+  const updateRef = useRef<() => void>(() => {});
+  updateRef.current = () => {
+    const el = tabListRef.current;
+    if (!el) return;
+    if (!iconsOnlyRef.current) {
+      if (el.scrollWidth > el.clientWidth) {
+        fullWidthRef.current = el.scrollWidth;
+        iconsOnlyRef.current = true;
+        setIconsOnly(true);
+      }
+    } else if (el.clientWidth >= fullWidthRef.current + TITLES_RETURN_MARGIN_PX) {
+      iconsOnlyRef.current = false;
+      setIconsOnly(false);
+    }
+  };
+  const hasTabs = Boolean(children);
+
+  // Re-measure after every render, since the set of tabs can change.
+  useLayoutEffect(() => {
+    updateRef.current();
+  });
+
+  useLayoutEffect(() => {
+    const el = tabListRef.current;
+    if (!hasTabs || !el) return;
+    const observer = new ResizeObserver(() => updateRef.current());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasTabs]);
   return (
     <div
       className="flex h-[38px] shrink-0 items-stretch gap-1 border-b border-border pr-2"
@@ -206,12 +262,13 @@ function SidepanelHeader({
       data-testid="right-sidepanel__header"
     >
       {children ? (
-        // Tabs keep their labels; when they don't all fit, the strip scrolls sideways.
+        // Tabs show their titles; when those don't fit, every tab shows its icon only.
         <div
+          ref={tabListRef}
           role="tablist"
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto pl-1.5 [scrollbar-width:none]"
         >
-          {children}
+          <IconsOnlyContext.Provider value={iconsOnly}>{children}</IconsOnlyContext.Provider>
         </div>
       ) : (
         <div className="flex-1" />
@@ -324,8 +381,8 @@ function RightSidepanelInner({
   // subtree mounted when collapsed, and each poll shells out to `git`.
   const offlineCheckpoint = useOfflineCheckpoint(worktreeId);
   const changesQuery = useWorktreeChanges(worktreeId, {
-    enabled: visible && !offlineCheckpoint.active,
-    refetchInterval: visible && !offlineCheckpoint.active ? 15_000 : false,
+    enabled: visible && !offlineCheckpoint.offline,
+    refetchInterval: visible && !offlineCheckpoint.offline ? 15_000 : false,
   });
 
   // The header's branch names outlive the result for one target: a new pick
@@ -379,13 +436,18 @@ function RightSidepanelInner({
     [worktreeId],
   );
 
-  if (offlineCheckpoint.active) {
-    // The host is offline: read the newest checkpoint instead, read-only.
+  if (offlineCheckpoint.offline) {
+    // The host is offline: the files are not reachable. The notice above the worktree offers to
+    // open it elsewhere, and the checkpoint can be read, read-only, once the person asks for it.
     return (
       <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
         <SidepanelHeader actions={headerActions} />
         <div className="min-h-0 flex-1">
-          <CheckpointSidepanel worktreeId={worktreeId} />
+          {offlineCheckpoint.active ? (
+            <CheckpointSidepanel worktreeId={worktreeId} />
+          ) : (
+            <OfflineSidepanelPlaceholder worktreeId={worktreeId} />
+          )}
         </div>
       </div>
     );

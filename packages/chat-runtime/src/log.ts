@@ -14,7 +14,7 @@
  * until the chat is removed.
  */
 
-import type { LoggedChatEvent } from "@band-app/shared/chat-events";
+import { HISTORY_PAGE_MAX_ROWS, type LoggedChatEvent } from "@band-app/shared/chat-events";
 import { and, asc, desc, eq, gt, inArray, lt, max, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { chatEvents } from "./log-schema";
@@ -228,8 +228,9 @@ export class ChatEventQueries {
 
   /**
    * The last `turns` turns before `beforeId` (the whole revision when
-   * `beforeId` is undefined), oldest first. `hasOlder` says whether rows
-   * exist before the returned window.
+   * `beforeId` is undefined), oldest first, shortened to the newest whole
+   * turns that fit `HISTORY_PAGE_MAX_ROWS` (the newest turn is always kept).
+   * `hasOlder` says whether rows exist before the returned window.
    */
   readTurns(
     sessionId: string,
@@ -250,10 +251,32 @@ export class ChatEventQueries {
       .orderBy(desc(chatEvents.id))
       .limit(turns)
       .all();
-    // Fewer turn starts than asked for means the window reaches the start
-    // of the log, including any rows before the first turn (a session
-    // attach, a commands update).
-    const from = starts.length < turns ? undefined : starts[starts.length - 1].id;
+    // Keep adding older turns while the page stays within the row bound.
+    // One query lists the newest ids of the window; a turn is kept when the
+    // rows from its start to the end fit the bound.
+    let kept = starts.length;
+    if (starts.length > 1) {
+      const ids = db
+        .select({ id: chatEvents.id })
+        .from(chatEvents)
+        .where(and(scope, sql`${chatEvents.id} >= ${starts[starts.length - 1].id}`))
+        .orderBy(desc(chatEvents.id))
+        .limit(HISTORY_PAGE_MAX_ROWS + 1)
+        .all()
+        .map((r) => r.id);
+      for (let i = 1; i < starts.length; i++) {
+        // Rows from starts[i] to the end = ids at or above it.
+        const count = ids.findIndex((id) => id < starts[i].id);
+        if ((count === -1 ? ids.length : count) > HISTORY_PAGE_MAX_ROWS) {
+          kept = i;
+          break;
+        }
+      }
+    }
+    // Fewer turn starts than asked for, all kept, means the window reaches
+    // the start of the log, including any rows before the first turn (a
+    // session attach, a commands update).
+    const from = kept === starts.length && starts.length < turns ? undefined : starts[kept - 1]?.id;
     const rows = db
       .select()
       .from(chatEvents)
