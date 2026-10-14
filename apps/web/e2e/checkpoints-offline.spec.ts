@@ -170,12 +170,24 @@ test("a checkpoint is taken once, and the worktree is readable from it when the 
   await app.goto(worktreeId);
   await app.waitForReady();
 
-  await expect(checkpoints.offlineBadge(worktreeId)).toContainText("last checkpoint", {
-    timeout: 30_000,
-  });
-  await expect(checkpoints.banner).toContainText("Showing the checkpoint from");
-  await expect(checkpoints.banner).toContainText("read-only");
+  // The card shows an icon, faded, with the details in its tooltip.
+  await expect(checkpoints.offlineIcon(worktreeId)).toBeVisible({ timeout: 30_000 });
+  await expect(checkpoints.offlineIcon(worktreeId)).not.toContainText("checkpoint");
+  await expect(checkpoints.card(worktreeId)).toHaveCSS("opacity", "0.6");
+  await checkpoints.showOfflineDetails(worktreeId);
+  await expect(checkpoints.offlineDetails).toContainText("Last seen");
+  await expect(checkpoints.offlineDetails).toContainText("Last checkpoint");
 
+  // Opening it shows the notice. With no other host online the offer is blocked: the reason, no button.
+  await expect(checkpoints.noticeHost).toContainText("box-a is offline");
+  await expect(checkpoints.noticeHost).toContainText("Last checkpoint");
+  await expect(checkpoints.noticeBlocked).toBeVisible();
+  await expect(checkpoints.openElsewhereButton).toHaveCount(0);
+  await expect(checkpoints.panel).toHaveCount(0);
+  await expect(checkpoints.sidepanelPlaceholder).toBeVisible();
+
+  // The read-only checkpoint view stays one click away.
+  await checkpoints.viewCheckpoint();
   await checkpoints.openChanges();
   await expect(checkpoints.change("hello.txt")).toBeVisible();
   await expect(checkpoints.change("notes.md")).toBeVisible();

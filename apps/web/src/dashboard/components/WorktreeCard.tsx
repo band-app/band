@@ -15,6 +15,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clipboard,
+  CloudOff,
   CornerUpLeft,
   Folder,
   FolderOpen,
@@ -32,7 +33,7 @@ import {
 import { memo, useEffect, useRef, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
-import { timeAgo, useHostOffline } from "../hooks/use-host-status";
+import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
 import { queryKeys } from "../query-client";
@@ -50,6 +51,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { ContinuedFromLine } from "./ContinuedFromLine";
+import { ContinueOnHostDialog } from "./ContinueOnHostDialog";
 import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
@@ -127,6 +129,8 @@ interface Props {
   repoAvatar?: RepoAvatarInfo | null;
   /** Host name shown as a small gray tag beside the repo name (or the branch name). */
   hostTag?: string;
+  /** Hosts the repo may run on, or null/undefined for all. A repo limited to one host has nothing to move to. */
+  allowedHostIds?: string[] | null;
   /**
    * Toggle the pinned state for this card's worktree. Passed as a prop
    * (rather than reading from `usePinnedWorktrees()` inside the card) so
@@ -149,6 +153,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   showRepoName,
   repoAvatar,
   hostTag,
+  allowedHostIds,
   onTogglePinned,
 }: Props) {
   const isPlain = repoKind === "plain";
@@ -162,7 +167,8 @@ export const WorktreeCard = memo(function WorktreeCard({
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorktreeMutation = useRemoveWorktree();
   const isPinned = worktree.pinned;
-  const hostOffline = useHostOffline(worktree.hostId);
+  const hostSeen = useHostSeen(worktree.hostId);
+  const hostOffline = hostSeen.offline;
   const superseded = worktree.supersededBy;
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
@@ -171,15 +177,37 @@ export const WorktreeCard = memo(function WorktreeCard({
   const setError = useDashboardStore((s) => s.setError);
   const [divergenceOpen, setDivergenceOpen] = useState(false);
   const diverged = worktree.divergence?.state === "diverged";
-  // Move needs the host online. Restore needs a checkpoint to restore from.
-  const moveMode: "move" | "restore" | null =
-    !worktree.hostId || worktree.hostId === "local" || superseded
+  // One action, "Open on another host": a move while the host is online, a continuation from the
+  // last checkpoint when it is offline. Nothing to move to, or no checkpoint, shows it disabled
+  // with the reason. A worktree on the hub's own machine or a superseded copy has no such action.
+  const onRemoteHost = !!worktree.hostId && worktree.hostId !== "local" && !superseded;
+  const hostLabelText = hostSeen.name || worktree.hostId || "this host";
+  const moveMode: "move" | "offline" | null = !onRemoteHost
+    ? null
+    : hostOffline
+      ? "offline"
+      : "move";
+  const moveDisabledReason: string | null =
+    moveMode === null
       ? null
-      : hostOffline
-        ? lastCheckpointAt !== null
-          ? "restore"
-          : null
-        : "move";
+      : allowedHostIds?.every((id) => id === worktree.hostId)
+        ? `Only available on ${hostLabelText}`
+        : moveMode === "offline" && lastCheckpointAt === null
+          ? "The hub has no checkpoint of this worktree"
+          : null;
+  const [offer, setOffer] = useState<Awaited<ReturnType<typeof trpc.follow.offer.query>> | null>(
+    null,
+  );
+  const openElsewhere = () => {
+    if (moveMode === "move") {
+      setMoveOpen(true);
+      return;
+    }
+    trpc.follow.offer
+      .query({ worktreeId: toWorktreeId(repoName, worktree.name, worktree.hostId) })
+      .then(setOffer)
+      .catch((err) => setError(err));
+  };
   // The default-branch worktree is a git repo's main checkout — its path is
   // the repository root (git's "main worktree"). A home icon marks it apart
   // from the added feature worktrees below it. Plain repos have no root
@@ -229,7 +257,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
   // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
   // drops the 300ms double-tap delay so taps register immediately.
-  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden select-none touch-manipulation transition-colors ${isDeleting ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-accent/50"} [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden select-none touch-manipulation transition-colors ${isDeleting ? "cursor-not-allowed opacity-50" : `cursor-pointer hover:bg-accent/50 ${hostOffline && !superseded ? "opacity-60" : ""}`} [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,
@@ -408,17 +436,34 @@ export const WorktreeCard = memo(function WorktreeCard({
               {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
             </span>
           )}
-          {/* The host is offline: the hub may hold a checkpoint of the worktree. */}
+          {/* The host is offline: an icon only, the details are in its tooltip. */}
           {hostOffline && !superseded && !isDeleting && (
-            <span
-              data-testid="worktree-card__offline"
-              data-checkpoint={lastCheckpointAt !== null ? "true" : "false"}
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
-            >
-              {lastCheckpointAt !== null
-                ? `Offline, last checkpoint ${timeAgo(lastCheckpointAt)}`
-                : "Host offline"}
-            </span>
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <span
+                  data-testid="worktree-card__offline"
+                  data-checkpoint={lastCheckpointAt !== null ? "true" : "false"}
+                  role="img"
+                  aria-label={`${hostLabelText} is offline`}
+                  className="flex shrink-0 items-center ml-auto pl-2 text-muted-foreground"
+                >
+                  <CloudOff className="size-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right" data-testid="worktree-card__offline-details">
+                <div>{hostLabelText} is offline</div>
+                <div>
+                  {hostSeen.lastSeenAt !== null
+                    ? `Last seen ${timeAgo(hostSeen.lastSeenAt)}`
+                    : "Never seen"}
+                </div>
+                <div>
+                  {lastCheckpointAt !== null
+                    ? `Last checkpoint ${timeAgo(lastCheckpointAt)}`
+                    : "No checkpoint"}
+                </div>
+              </TooltipContent>
+            </Tooltip>
           )}
           {/* The work of this worktree continued here from another host's checkpoint. */}
           {worktree.continuedFrom && !isDeleting && (
@@ -592,9 +637,20 @@ export const WorktreeCard = memo(function WorktreeCard({
             would orphan the repo, so the user is steered toward
             removing the repo itself instead. */}
         {moveMode && !isPlain && worktree.name !== defaultBranch && (
-          <ContextMenuItem data-testid="worktree-card__move" onClick={() => setMoveOpen(true)}>
+          <ContextMenuItem
+            data-testid="worktree-card__move"
+            disabled={moveDisabledReason !== null}
+            onClick={openElsewhere}
+          >
             <MoveRight />
-            {moveMode === "move" ? "Move to host…" : "Restore on another host…"}
+            <span className="flex flex-col">
+              Open on another host…
+              {moveDisabledReason ? (
+                <span data-testid="worktree-card__move-reason" className="text-xs">
+                  {moveDisabledReason}
+                </span>
+              ) : null}
+            </span>
           </ContextMenuItem>
         )}
         {!isPlain && worktree.name !== defaultBranch && (
@@ -619,13 +675,20 @@ export const WorktreeCard = memo(function WorktreeCard({
           worktree={worktree}
         />
       )}
-      {moveMode && moveOpen && (
+      {offer && (
+        <ContinueOnHostDialog
+          offer={offer}
+          onClose={() => {
+            setOffer(null);
+          }}
+        />
+      )}
+      {moveMode === "move" && moveOpen && (
         <MoveWorktreeDialog
           open={moveOpen}
           onOpenChange={setMoveOpen}
           repoName={repoName}
           worktree={worktree}
-          mode={moveMode}
         />
       )}
     </ContextMenu>

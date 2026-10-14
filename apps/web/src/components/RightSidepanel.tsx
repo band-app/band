@@ -36,7 +36,11 @@ import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { DiffTargetHeader } from "./DiffTargetHeader";
-import { CheckpointSidepanel, useOfflineCheckpoint } from "./OfflineCheckpoint";
+import {
+  CheckpointSidepanel,
+  OfflineSidepanelPlaceholder,
+  useOfflineCheckpoint,
+} from "./OfflineCheckpoint";
 import { usePerWorktreeState } from "./per-worktree-state-store";
 import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
 
@@ -377,8 +381,8 @@ function RightSidepanelInner({
   // subtree mounted when collapsed, and each poll shells out to `git`.
   const offlineCheckpoint = useOfflineCheckpoint(worktreeId);
   const changesQuery = useWorktreeChanges(worktreeId, {
-    enabled: visible && !offlineCheckpoint.active,
-    refetchInterval: visible && !offlineCheckpoint.active ? 15_000 : false,
+    enabled: visible && !offlineCheckpoint.offline,
+    refetchInterval: visible && !offlineCheckpoint.offline ? 15_000 : false,
   });
 
   // The header's branch names outlive the result for one target: a new pick
@@ -432,13 +436,18 @@ function RightSidepanelInner({
     [worktreeId],
   );
 
-  if (offlineCheckpoint.active) {
-    // The host is offline: read the newest checkpoint instead, read-only.
+  if (offlineCheckpoint.offline) {
+    // The host is offline: the files are not reachable. The notice above the worktree offers to
+    // open it elsewhere, and the checkpoint can be read, read-only, once the person asks for it.
     return (
       <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
         <SidepanelHeader actions={headerActions} />
         <div className="min-h-0 flex-1">
-          <CheckpointSidepanel worktreeId={worktreeId} />
+          {offlineCheckpoint.active ? (
+            <CheckpointSidepanel worktreeId={worktreeId} />
+          ) : (
+            <OfflineSidepanelPlaceholder worktreeId={worktreeId} />
+          )}
         </div>
       </div>
     );

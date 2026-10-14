@@ -39,6 +39,7 @@ import {
 import { trpcMutateData, trpcQuery } from "./helpers/trpc";
 import { startWorker, type WorkerHandle } from "./helpers/worker";
 import { ChatPanePage } from "./pages/ChatPanePage";
+import { CheckpointsPage } from "./pages/CheckpointsPage";
 import { FollowPage } from "./pages/FollowPage";
 import { SidebarGroupingPage } from "./pages/SidebarGroupingPage";
 import { WorktreePage } from "./pages/WorktreePage";
@@ -200,6 +201,8 @@ const stubMethods = (w: Worker): string[] => {
 
 let openId = "";
 let lockedId = "";
+let buttonId = "";
+let noCheckpointId = "";
 let continuedId = "";
 
 test.beforeAll(async () => {
@@ -217,6 +220,8 @@ test.beforeAll(async () => {
   await createWorktree(b, "app", "seed-b");
 
   openId = await createWorktree(a, "app", "feat-one");
+  buttonId = await createWorktree(a, "app", "feat-button");
+  noCheckpointId = await createWorktree(a, "app", "feat-bare");
   lockedId = await createWorktree(a, "locked", "feat-lock");
   await trpcMutateData(server.url, TOKEN, "repos.update", {
     name: "locked",
@@ -260,6 +265,9 @@ test("a finished turn and an uncommitted file give feat-one a checkpoint with th
     })
     .toBeGreaterThan(0);
 
+  const buttonPath = (await worktreeRow("app", "feat-button", a.hostId))?.path ?? "";
+  writeFileSync(join(buttonPath, "hello.txt"), "edited for the button flow\n");
+  await trpcMutateData(server.url, TOKEN, "checkpoints.take", { worktreeId: buttonId });
   // The limited repo needs a checkpoint too, so only the restriction can stop it.
   await trpcMutateData(server.url, TOKEN, "checkpoints.take", { worktreeId: lockedId }).catch(
     () => undefined,
@@ -283,6 +291,67 @@ test("a repo limited to the offline host says so, with no host to choose (S3)", 
   await expect(follow.question).toContainText("box-a");
   await expect(follow.targets).toHaveCount(0);
   await follow.dismiss();
+});
+
+test("offline worktrees are faded with an icon, and their menu offers Open on another host or says why not", async ({
+  page,
+}) => {
+  const checkpoints = new CheckpointsPage(page);
+  const app = new WorktreePage(page, server.url, TOKEN);
+  await app.goto(openId);
+  await app.waitForReady();
+
+  await expect(checkpoints.offlineIcon(openId)).toBeVisible();
+  await expect(checkpoints.card(openId)).toHaveCSS("opacity", "0.6");
+  await checkpoints.showOfflineDetails(openId);
+  await expect(checkpoints.offlineDetails).toContainText("box-a is offline");
+  await expect(checkpoints.offlineDetails).toContainText("Last checkpoint");
+
+  await checkpoints.openCardMenu(openId);
+  await expect(checkpoints.moveItem()).toBeEnabled();
+  await checkpoints.closeCardMenu();
+
+  // No checkpoint: shown, disabled, with the reason.
+  await page.mouse.move(0, 0);
+  await expect(checkpoints.offlineDetails).toHaveCount(0);
+  await checkpoints.showOfflineDetails(noCheckpointId);
+  await expect(checkpoints.offlineDetails).toContainText("No checkpoint");
+  await checkpoints.openCardMenu(noCheckpointId);
+  await expect(checkpoints.moveItem()).toBeDisabled();
+  await expect(checkpoints.moveReason()).toBeVisible();
+  await checkpoints.closeCardMenu();
+
+  // A repo limited to one host is never offered for transfer.
+  await checkpoints.openCardMenu(lockedId);
+  await expect(checkpoints.moveItem()).toBeDisabled();
+  await expect(checkpoints.moveReason()).toContainText("box-a");
+});
+
+test("the notice of an offline worktree has an Open on another host button that continues it on B", async ({
+  page,
+}) => {
+  const follow = new FollowPage(page);
+  const checkpoints = new CheckpointsPage(page);
+  const app = new WorktreePage(page, server.url, TOKEN);
+  await app.goto(buttonId);
+  await app.waitForReady();
+
+  await expect(checkpoints.noticeHost).toContainText("box-a is offline");
+  await expect(checkpoints.noticeBlocked).toHaveCount(0);
+  await expect(checkpoints.panel).toHaveCount(0);
+  await checkpoints.openElsewhereButton.click();
+
+  await expect(follow.dialog).toBeVisible();
+  await expect(follow.target(b.hostId)).toBeChecked();
+  await expect(follow.notes).toContainText("Ignored files");
+  await follow.accept();
+  await expect(follow.dialog).toBeHidden({ timeout: 90_000 });
+
+  const moved = await worktreeRow("app", "feat-button", b.hostId);
+  expect(moved?.continuedFrom?.reason).toBe("manual");
+  expect((await worktreeRow("app", "feat-button", a.hostId))?.supersededBy).toBe(
+    `app-feat-button@${b.hostId}`,
+  );
 });
 
 test("messaging a worktree on an offline host offers B, continues there and delivers the message (S1)", async ({

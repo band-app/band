@@ -1,48 +1,180 @@
+import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { CloudOff, File as FileIcon, FolderOpen, GitCompare } from "lucide-react";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { toWorktreeId, useRepos } from "@/dashboard";
-import { timeAgo, useHostOffline } from "../dashboard/hooks/use-host-status";
+import { ContinueOnHostDialog } from "../dashboard/components/ContinueOnHostDialog";
+import { timeAgo, useHostSeen } from "../dashboard/hooks/use-host-status";
 import { trpc } from "../lib/trpc-client";
 
 /**
- * Whether a worktree's host is offline and the hub holds a checkpoint of it. Then the worktree is
- * read from the checkpoint, read-only, until the host is back.
+ * Whether a worktree's host is offline, when the hub last saw it, and when the hub last took a
+ * checkpoint of the worktree.
+ */
+export function useOfflineWorktree(worktreeId: string): {
+  offline: boolean;
+  hostId: string | null;
+  hostName: string;
+  lastSeenAt: number | null;
+  checkpointAt: number | null;
+} {
+  const { repos } = useRepos();
+  const wt = repos
+    .flatMap((r) => r.worktrees.map((w) => ({ repo: r, wt: w })))
+    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId)?.wt;
+  const seen = useHostSeen(wt?.hostId);
+  return {
+    offline: seen.offline && !wt?.supersededBy,
+    hostId: wt?.hostId ?? null,
+    hostName: seen.name,
+    lastSeenAt: seen.lastSeenAt,
+    checkpointAt: wt?.lastCheckpointAt ?? null,
+  };
+}
+
+// Which offline worktrees show the read-only checkpoint instead of the notice. Kept in memory: a
+// reload starts from the notice again.
+const viewing = new Set<string>();
+const viewingListeners = new Set<() => void>();
+
+function setViewingCheckpoint(worktreeId: string, on: boolean): void {
+  if (viewing.has(worktreeId) === on) return;
+  if (on) viewing.add(worktreeId);
+  else viewing.delete(worktreeId);
+  for (const listener of viewingListeners) listener();
+}
+
+function useViewingCheckpoint(worktreeId: string): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      viewingListeners.add(listener);
+      return () => viewingListeners.delete(listener);
+    },
+    () => viewing.has(worktreeId),
+  );
+}
+
+/**
+ * Whether the worktree is read from its checkpoint: its host is offline, a checkpoint exists and
+ * the person chose to look at it from the notice.
  */
 export function useOfflineCheckpoint(worktreeId: string): {
   active: boolean;
   offline: boolean;
   at: number | null;
 } {
-  const { repos } = useRepos();
-  const wt = repos
-    .flatMap((r) => r.worktrees.map((w) => ({ repo: r, wt: w })))
-    .find(({ repo, wt }) => toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId)?.wt;
-  const offline = useHostOffline(wt?.hostId);
-  const at = wt?.lastCheckpointAt ?? null;
-  return { active: offline && at !== null, offline, at };
+  const { offline, checkpointAt } = useOfflineWorktree(worktreeId);
+  const chosen = useViewingCheckpoint(worktreeId);
+  return { active: offline && checkpointAt !== null && chosen, offline, at: checkpointAt };
 }
 
-/** The banner above a worktree whose host is offline. */
-export function OfflineCheckpointBar({ worktreeId }: { worktreeId: string }) {
-  const { offline, at } = useOfflineCheckpoint(worktreeId);
+/** The age text of a timestamp, with the exact time on hover. */
+function Ago({ at }: { at: number }) {
+  return <span title={new Date(at).toLocaleString()}>{timeAgo(at)}</span>;
+}
+
+/**
+ * The notice above a worktree whose host is offline: where it is, when it was last seen and
+ * checkpointed, and a button to open it on another host. When the offer is blocked it says why and
+ * shows no button. The read-only view of the checkpoint stays behind a link.
+ */
+export function OfflineWorktreeNotice({
+  worktreeId,
+  active = true,
+}: {
+  worktreeId: string;
+  /** Whether the worktree is on screen. Hidden worktrees do not poll the hub. */
+  active?: boolean;
+}) {
+  const { offline, hostName, lastSeenAt, checkpointAt } = useOfflineWorktree(worktreeId);
+  const chosen = useViewingCheckpoint(worktreeId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const offerQuery = useQuery({
+    queryKey: ["follow.offer", worktreeId],
+    queryFn: () => trpc.follow.offer.query({ worktreeId }),
+    enabled: offline && active,
+    refetchInterval: active ? 15_000 : false,
+    staleTime: 10_000,
+  });
   if (!offline) return null;
+  const offer = offerQuery.data;
+  const blocked = offer?.blocked;
   return (
     <div
-      data-testid="offline-checkpoint"
-      data-has-checkpoint={at !== null ? "true" : "false"}
-      className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[12px] text-muted-foreground"
+      data-testid="offline-notice"
+      data-has-checkpoint={checkpointAt !== null ? "true" : "false"}
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-muted/40 px-3 py-2 text-[12px]"
     >
-      <CloudOff className="size-3.5" />
-      {at !== null ? (
-        <span>
-          Host offline. Showing the checkpoint from{" "}
-          <span title={new Date(at).toLocaleString()}>{timeAgo(at)}</span>, read-only. Terminals,
-          dev servers and the desktop need the host.
-        </span>
-      ) : (
-        <span>Host offline. The hub has no checkpoint of this worktree.</span>
-      )}
+      <CloudOff className="size-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1 basis-60 space-y-0.5">
+        <p data-testid="offline-notice__host" className="text-foreground">
+          {hostName} is offline
+          {lastSeenAt !== null ? (
+            <>
+              {" "}
+              (last seen <Ago at={lastSeenAt} />)
+            </>
+          ) : null}
+          .{" "}
+          {checkpointAt !== null ? (
+            <>
+              Last checkpoint <Ago at={checkpointAt} />.
+            </>
+          ) : (
+            "The hub has no checkpoint of this worktree."
+          )}
+        </p>
+        {blocked ? (
+          <p data-testid="offline-notice__blocked" className="text-muted-foreground">
+            {blocked.message}
+          </p>
+        ) : null}
+      </div>
+      {checkpointAt !== null ? (
+        <button
+          type="button"
+          data-testid="offline-notice__view-checkpoint"
+          className="text-muted-foreground underline hover:text-foreground"
+          onClick={() => setViewingCheckpoint(worktreeId, !chosen)}
+        >
+          {chosen ? "Hide checkpoint" : "View checkpoint (read-only)"}
+        </button>
+      ) : null}
+      {offer && !blocked ? (
+        <Button
+          size="sm"
+          data-testid="offline-notice__open-elsewhere"
+          onClick={() => setDialogOpen(true)}
+        >
+          Open on another host
+        </Button>
+      ) : null}
+      {dialogOpen && offer ? (
+        <ContinueOnHostDialog offer={offer} onClose={() => setDialogOpen(false)} />
+      ) : null}
+    </div>
+  );
+}
+
+/** The right panel of an offline worktree that is not read from its checkpoint. */
+export function OfflineSidepanelPlaceholder({ worktreeId }: { worktreeId: string }) {
+  const { checkpointAt } = useOfflineWorktree(worktreeId);
+  return (
+    <div
+      data-testid="offline-sidepanel"
+      className="flex h-full flex-col items-start gap-2 p-3 text-xs text-muted-foreground"
+    >
+      <p>The host is offline, so its files and changes are not available.</p>
+      {checkpointAt !== null ? (
+        <button
+          type="button"
+          data-testid="offline-sidepanel__view-checkpoint"
+          className="underline hover:text-foreground"
+          onClick={() => setViewingCheckpoint(worktreeId, true)}
+        >
+          View the checkpoint (read-only)
+        </button>
+      ) : null}
     </div>
   );
 }
