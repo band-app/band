@@ -1,15 +1,10 @@
 /**
  * Page object for the worktree dockview route (`/worktree/:id`).
  *
- * Owns the locators for the shared dockview's header buttons (Maximize /
- * Restore) and provides high-level actions (`maximizePanel`,
- * `restorePanel`) plus helpers for reading client-side persisted state
- * out of `localStorage`.
- *
- * The aria-label values "Maximize" / "Restore" are set in
- * `SharedDockviewLayout.tsx` (`MainGroupRightActions`) — system-
- * controlled, not localised user copy — so `getByRole({ name })` is the
- * preferred locator.
+ * Owns the locators for the shared dockview's header and provides high-level
+ * actions (`maximizePanel`, `restorePanel`, which press the ⇧⌘M shortcut: the
+ * header has no Maximize button) plus helpers for reading client-side
+ * persisted state out of `localStorage`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -43,13 +38,13 @@ interface Rect {
 /** What the desktop window's drag region is built from, read by
  *  `WorktreePage.readTopRowDragGeometry`. */
 interface TopRowDragGeometry {
-  ops: (Rect & { drag: boolean; visible: boolean })[];
-  /** `ownOps`: indexes into `ops` of the control's own box and its ancestors'. */
-  controls: (Rect & { label: string; inTopRowStrip: boolean; ownOps: number[] })[];
+  ops: (Rect & { drag: boolean; visible: boolean; gutter: boolean })[];
+  controls: (Rect & { label: string })[];
   sidebarTitleBar: Rect | null;
+  rightPanelHeader: Rect | null;
   stripVoids: Rect[];
-  /** The shown top-row strips' tab viewports (`.dv-scrollable`). */
-  tabViewports: Rect[];
+  /** The shown worktree's center column and the empty-state drag bar. */
+  centerColumns: Rect[];
 }
 
 /** Whether (x, y) is in the drag region Chromium builds from `ops`: walking
@@ -63,12 +58,6 @@ function inDragRegion(ops: TopRowDragGeometry["ops"], x: number, y: number): boo
 }
 
 export class WorktreePage {
-  /** All "Maximize" buttons in the dockview. Multiple groups expose
-   *  their own button; tests use `.first()` / `.nth()` when they need a
-   *  specific group. */
-  readonly maximizeButtons: Locator;
-  /** "Restore" button — only present when SOME group is maximized. */
-  readonly restoreButton: Locator;
   /** Terminal panel's input textbox — visible only when the terminal
    *  tab is the active view in its group AND that group isn't hidden
    *  behind a maximize. Used as a DOM-level proof that the terminal
@@ -91,8 +80,6 @@ export class WorktreePage {
     private readonly baseUrl: string,
     private readonly token: string,
   ) {
-    this.maximizeButtons = page.getByRole("button", { name: "Maximize" });
-    this.restoreButton = page.getByRole("button", { name: "Restore" });
     this.terminalInput = page.getByRole("textbox", { name: "Terminal input" });
     this.changesHeading = page.getByRole("heading", { name: "Files changed" });
     this.deleteWorktreeMenuItem = page.getByRole("menuitem", { name: "Delete worktree" });
@@ -920,7 +907,6 @@ export class WorktreePage {
     return await this.page.evaluate(() => {
       const box = (r: DOMRect) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
       const ops: TopRowDragGeometry["ops"] = [];
-      const opElements: Element[] = [];
       for (const el of document.querySelectorAll("*")) {
         const style = getComputedStyle(el);
         const region =
@@ -928,9 +914,9 @@ export class WorktreePage {
         if (region !== "drag" && region !== "no-drag") continue;
         const rect = el.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
-        opElements.push(el);
         ops.push({
           drag: region === "drag",
+          gutter: el.getAttribute("data-testid") === "worktree-center__sidebar-gutter",
           visible: style.visibility === "visible",
           ...box(rect),
         });
@@ -949,8 +935,11 @@ export class WorktreePage {
           !el.closest("[inert]")
         );
       });
-      if (!elements.some((el) => el.classList.contains("dv-tab"))) {
-        throw new Error("no visible .dv-tab on the page");
+      const dragBarShown = Array.from(
+        document.querySelectorAll('[data-testid="worktree-center__drag-bar"]'),
+      ).some((el) => el.checkVisibility({ visibilityProperty: true }) && !el.closest("[inert]"));
+      if (!dragBarShown && !elements.some((el) => el.classList.contains("dv-tab"))) {
+        throw new Error("no visible .dv-tab or center drag bar on the page");
       }
       const shownRect = (el: Element) => {
         let { left, top, right, bottom } = el.getBoundingClientRect();
@@ -973,9 +962,6 @@ export class WorktreePage {
             el.getAttribute("aria-label") ??
             el.getAttribute("title") ??
             (el.textContent ?? "").trim(),
-          inTopRowStrip:
-            el.closest("[data-band-top-row] > .dv-tabs-and-actions-container") !== null,
-          ownOps: opElements.flatMap((op, i) => (op.contains(el) ? [i] : [])),
           ...shownRect(el),
         };
       });
@@ -990,15 +976,20 @@ export class WorktreePage {
         .map((el) => el.getBoundingClientRect())
         .filter((rect) => rect.width > 4 && rect.height > 0)
         .map(box);
-      const tabViewports = Array.from(
+      const headerRect = document
+        .querySelector('[data-testid="right-sidepanel__header"]')
+        ?.getBoundingClientRect();
+      const rightPanelHeader = headerRect && headerRect.width > 50 ? box(headerRect) : null;
+      const centerColumns = Array.from(
         document.querySelectorAll(
-          ".band-worktree-entry:not([inert]) [data-band-top-row] > .dv-tabs-and-actions-container > .dv-scrollable",
+          '.band-worktree-entry:not([inert]) .dockview-center-desktop, [data-testid="worktree-center__drag-bar"]',
         ),
       )
+        .filter((el) => el.checkVisibility({ visibilityProperty: true }) && !el.closest("[inert]"))
         .map((el) => el.getBoundingClientRect())
         .filter((rect) => rect.width > 4 && rect.height > 0)
         .map(box);
-      return { ops, controls, sidebarTitleBar, stripVoids, tabViewports };
+      return { ops, controls, sidebarTitleBar, rightPanelHeader, stripVoids, centerColumns };
     });
   }
 
@@ -1029,75 +1020,43 @@ export class WorktreePage {
     return covered;
   }
 
-  /** How many visible `drag` boxes overlap the shown top-row strips' tab
-   *  viewports, whatever `no-drag` boxes later cut out of them. A drag box
-   *  under the tabs made scrolling them depend on the `no-drag` cut being
-   *  current when Electron hit-tests a wheel event, so this must be 0. Throws
-   *  when no strip has a viewport, so it can't pass vacuously. */
-  async dragBoxesOverTabViewports(): Promise<number> {
-    const { ops, tabViewports } = await this.readTopRowDragGeometry();
-    if (tabViewports.length === 0) throw new Error("no top-row tab strip has a tab viewport");
+  /** How many visible `drag` boxes overlap the center column (the shown
+   *  worktree's dockview, which holds the tab strip, its empty space and the
+   *  empty state, and the empty-state drag bar used with no worktree). Only
+   *  the sidebars drag the window, so this must be 0. The sidebar gutter the
+   *  strip reserves under the nav cluster while the sidebar is collapsed is
+   *  the one exception: it belongs to the sidebar. Throws when no center
+   *  column is on screen, so it can't pass vacuously. */
+  async dragBoxesOverCenterColumn(): Promise<number> {
+    const { ops, centerColumns } = await this.readTopRowDragGeometry();
+    if (centerColumns.length === 0) throw new Error("no center column is on screen");
     return ops.filter(
       (op) =>
         op.drag &&
         op.visible &&
-        tabViewports.some(
-          (v) =>
-            op.left < v.right - 0.5 &&
-            op.right > v.left + 0.5 &&
-            op.top < v.bottom - 0.5 &&
-            op.bottom > v.top + 0.5,
+        !op.gutter &&
+        centerColumns.some(
+          (c) =>
+            op.left < c.right - 0.5 &&
+            op.right > c.left + 0.5 &&
+            op.top < c.bottom - 0.5 &&
+            op.bottom > c.top + 0.5,
         ),
     ).length;
   }
 
-  /** The center strip's tabs and buttons that don't cut themselves out of
-   *  the drag region, as a label each. A control passes when a `no-drag` box
-   *  (its own or an ancestor's) contains its shown part and no `drag` box
-   *  after that one in document order overlaps it. Such a control stays
-   *  clickable even when a drag box before it (the sidebar's title bar and
-   *  gutter, its own strip) reaches past its drawn place, so this checks the
-   *  defensive rule itself, not only the result at the current layout.
-   *  Throws when no top-row strip has a visible control, so it can't pass
-   *  vacuously. */
-  async topRowControlsWithoutOwnNoDrag(): Promise<string[]> {
-    const { ops, controls } = await this.readTopRowDragGeometry();
-    const EPS = 0.5;
-    const contains = (o: Rect, c: Rect) =>
-      o.left <= c.left + EPS &&
-      o.top <= c.top + EPS &&
-      o.right >= c.right - EPS &&
-      o.bottom >= c.bottom - EPS;
-    const overlaps = (o: Rect, c: Rect) =>
-      o.left < c.right - EPS &&
-      o.right > c.left + EPS &&
-      o.top < c.bottom - EPS &&
-      o.bottom > c.top + EPS;
-    const stripControls = controls.filter(
-      (c) => c.inTopRowStrip && c.right - c.left > 1 && c.bottom - c.top > 1,
-    );
-    if (stripControls.length === 0) throw new Error("no visible control in a top-row tab strip");
-    return stripControls
-      .filter((c) => {
-        let cut = -1;
-        for (const i of c.ownOps) {
-          if (!ops[i].drag && contains(ops[i], c)) cut = i;
-        }
-        return cut === -1 || ops.slice(cut + 1).some((op) => op.drag && overlaps(op, c));
-      })
-      .map((c) => c.label);
-  }
-
-  /** Whether the empty top-row spots that should move the desktop window
-   *  are inside its drag region: the middle of the sidebar title bar's right
-   *  half (clear of the nav cluster), `null` while the sidebar is collapsed,
-   *  and the middle of the empty space in each top-row tab strip of the shown
-   *  worktree. Same walk as {@link controlsUnderWindowDragRegion}, except that
-   *  a `drag` box counts only when its `visibility` is `visible`, as in
-   *  Chromium, so a hidden box can't make a spot pass. Throws when no strip
-   *  has empty space, so it can't pass vacuously. */
+  /** Whether the spots that should move the desktop window are inside its
+   *  drag region: the middle of the sidebar title bar's right half (clear of
+   *  the nav cluster, `null` while the sidebar is collapsed), any point of
+   *  the right sidepanel's header (`null` while it is collapsed), and, which
+   *  must be false, the middle of the empty space in each top-row tab strip of
+   *  the shown worktree. Same walk as {@link controlsUnderWindowDragRegion},
+   *  except that a `drag` box counts only when its `visibility` is `visible`,
+   *  as in Chromium, so a hidden box can't make a spot pass. Throws when no
+   *  strip has empty space, so it can't pass vacuously. */
   async emptyTopRowSpotsInDragRegion(): Promise<{
     sidebarTitleBar: boolean | null;
+    rightPanelHeader: boolean | null;
     strips: boolean[];
   }> {
     const geometry = await this.readTopRowDragGeometry();
@@ -1108,9 +1067,18 @@ export class WorktreePage {
         rect.left + (from + (1 - from) / 2) * (rect.right - rect.left),
         (rect.top + rect.bottom) / 2,
       );
+    const anyPointOf = (rect: Rect) => {
+      for (let x = rect.left + 1; x < rect.right - 1; x += 3) {
+        for (let y = rect.top + 1; y < rect.bottom - 1; y += 3) {
+          if (inDragRegion(ops, x, y)) return true;
+        }
+      }
+      return false;
+    };
     if (geometry.stripVoids.length === 0) throw new Error("no top-row tab strip has empty space");
     return {
       sidebarTitleBar: geometry.sidebarTitleBar ? middleOf(geometry.sidebarTitleBar, 0.5) : null,
+      rightPanelHeader: geometry.rightPanelHeader ? anyPointOf(geometry.rightPanelHeader) : null,
       strips: geometry.stripVoids.map((rect) => middleOf(rect)),
     };
   }
@@ -1433,6 +1401,39 @@ export class WorktreePage {
    *  (`center-file-tab--<path>`, set in `WorktreeCenterDockview.tsx`). */
   fileTab(path: string): Locator {
     return this.page.getByTestId(`center-file-tab--${path}`);
+  }
+
+  /** Double-click the `file` leaf tab for `path` (pins a preview tab). */
+  async doubleClickFileTab(path: string): Promise<void> {
+    await test.step(`Double-click the tab of ${path}`, async () => {
+      await this.fileTab(path).dblclick();
+    });
+  }
+
+  /** Double-click the `diff` leaf tab for `path` (pins a preview tab). */
+  async doubleClickDiffTab(path: string): Promise<void> {
+    await test.step(`Double-click the diff tab of ${path}`, async () => {
+      await this.diffTab(path).dblclick();
+    });
+  }
+
+  /** The italic title span of a file tab; italic means "preview". */
+  private tabTitle(tab: Locator): Locator {
+    return tab.locator("span").first();
+  }
+
+  /** Assert the `file` tab for `path` is (or is not) a preview tab. */
+  async expectFileTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.fileTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
+  }
+
+  /** Assert the `diff` tab for `path` is (or is not) a preview tab. */
+  async expectDiffTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.diffTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
   }
 
   /** The close button on the `file` leaf tab for `path`. */
@@ -2253,6 +2254,51 @@ export class WorktreePage {
     });
   }
 
+  /** Open the "+" menu's "New agent" submenu and return the submenu, without picking an agent. */
+  async openNewAgentMenu(worktreeId: string): Promise<Locator> {
+    await test.step("Open the New agent menu", async () => {
+      await this.newTabButton(worktreeId).first().focus();
+      await this.page.keyboard.press("Enter");
+      await this.page
+        .getByTestId("worktree-center__new-tab--agent")
+        .filter({ visible: true })
+        .first()
+        .click();
+    });
+    return this.page.getByTestId("worktree-center__new-agent-menu").filter({ visible: true });
+  }
+
+  /** One agent's item in the open "New agent" submenu. */
+  newAgentItem(agentId: string): Locator {
+    return this.page
+      .getByTestId("worktree-center__new-agent-menu")
+      .filter({ visible: true })
+      .getByTestId(`worktree-center__new-agent--${agentId}`);
+  }
+
+  /** The icon (an image named after the agent) inside a "New agent" item. */
+  newAgentItemIcon(agentId: string, iconName: string): Locator {
+    return this.newAgentItem(agentId).getByRole("img", { name: iconName, exact: true });
+  }
+
+  /** The generic "no agents configured" entry of the "New agent" submenu. */
+  newAgentFallbackItem(): Locator {
+    return this.page
+      .getByTestId("worktree-center__new-agent-menu")
+      .filter({ visible: true })
+      .getByTestId("worktree-center__new-agent");
+  }
+
+  /** The agent icon (an image named after the agent) in the first visible chat tab. */
+  chatTabAgentIcon(agentName: string): Locator {
+    return this.tab("chat").getByRole("img", { name: agentName, exact: true });
+  }
+
+  /** The title text of the first visible chat tab. */
+  chatTabTitle(): Locator {
+    return this.tab("chat").locator("[title]").first();
+  }
+
   /** Save this browser's agent mode, as the Settings page does. */
   async setDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
     await this.page.evaluate(([key, value]) => localStorage.setItem(key, value), [
@@ -2556,6 +2602,45 @@ export class WorktreePage {
     return this.page.getByTestId("right-sidepanel__header");
   }
 
+  /** The sidepanel's tab strip (`role="tablist"` in its header). */
+  get rightPanelTabList(): Locator {
+    return this.rightPanelHeader.getByRole("tablist");
+  }
+
+  /** Every tab button in the sidepanel's strip. */
+  get rightPanelTabs(): Locator {
+    return this.rightPanelTabList.getByRole("tab");
+  }
+
+  /** Drag the separator left of the sidepanel until the panel is `width` px wide. */
+  async resizeRightPanelTo(width: number): Promise<void> {
+    await test.step(`Resize the right sidepanel to ${width}px`, async () => {
+      const separator = this.page.getByRole("separator").last();
+      const handle = await this.boxOf(separator);
+      const panel = await this.boxOf(this.rightSidepanel);
+      const y = handle.y + handle.height / 2;
+      const x = handle.x + handle.width / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + (panel.width - width), y, { steps: 10 });
+      await this.page.mouse.up();
+      await expect
+        .poll(async () => Math.round((await this.boxOf(this.rightSidepanel)).width))
+        .toBeGreaterThan(width - 20);
+    });
+  }
+
+  /** True when no tab sticks out of the strip's box. */
+  async rightPanelTabsFitStrip(): Promise<boolean> {
+    return this.rightPanelTabList.evaluate((strip) => {
+      const bounds = strip.getBoundingClientRect();
+      return Array.from(strip.querySelectorAll('[role="tab"]')).every((tab) => {
+        const box = tab.getBoundingClientRect();
+        return box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5;
+      });
+    });
+  }
+
   /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
   get rightPanelToggleInHeader(): Locator {
     return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
@@ -2630,9 +2715,7 @@ export class WorktreePage {
   /** Wait for the shared dockview to render its header. The app boot is
    *  multi-stage (settings query → worktrees fetch → dockview mount) and any
    *  test that interacts with the header must wait for it to be in the DOM.
-   *  Anchors on the header toolbar container rather than the Maximize button
-   *  specifically — a worktree restored in a maximized state shows only a
-   *  "Restore" button, so keying off "Maximize" would hang. */
+   *  Anchors on the header toolbar container. */
   async waitForReady(): Promise<void> {
     await this.page
       .getByTestId("worktree-center__toolbar")
@@ -3915,31 +3998,47 @@ export class WorktreePage {
   }
 
   /** Maximize the center group that hosts the named tab (rather than the Nth
-   *  group, which depends on the default layout's ordering). Each grid group
-   *  renders exactly one Maximize/Restore toggle in its right header actions
-   *  (`RightHeaderActions` in `WorktreeCenterDockview.tsx`). */
+   *  group, which depends on the default layout's ordering): activate it by
+   *  clicking its tab, then press the ⇧⌘M shortcut. */
   async maximizeGroupContaining(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
     await test.step(`Maximize the group hosting the ${panelComponent} tab`, async () => {
-      await this.groupContaining(panelComponent)
-        .first()
-        .getByRole("button", { name: "Maximize" })
-        .click();
+      await this.tab(panelComponent).click();
+      await this.page.keyboard.press("ControlOrMeta+Shift+M");
     });
   }
 
-  /** Click the Nth Maximize button (0-indexed). Useful when the layout
-   *  has multiple groups and the test wants to target a specific one. */
+  /** Maximize the Nth center group (0-indexed): activate it by clicking its
+   *  active tab, then press the ⇧⌘M shortcut, which acts on the active group. */
   async maximizePanel(index = 0): Promise<void> {
     await test.step(`Maximize panel at index ${index}`, async () => {
-      await this.maximizeButtons.nth(index).click();
+      await this.page
+        .locator(".dv-groupview")
+        .filter({ has: this.page.getByTestId("worktree-center__toolbar") })
+        .filter({ visible: true })
+        .nth(index)
+        .locator(".dv-tab")
+        .first()
+        .click();
+      await this.page.keyboard.press("ControlOrMeta+Shift+M");
     });
   }
 
-  /** Exit the currently-maximized panel. */
+  /** Exit the currently-maximized panel with ⇧⌘M (it acts on the active group,
+   *  which is the maximized one). */
   async restorePanel(): Promise<void> {
     await test.step("Restore (un-maximize) the active panel", async () => {
-      await this.restoreButton.click();
+      await this.page.keyboard.press("ControlOrMeta+Shift+M");
     });
+  }
+
+  /** Wait until the worktree's persisted layout records a maximized group. */
+  async expectMaximized(worktreeId: string): Promise<void> {
+    await expect.poll(() => this.readMaximizedGroup(worktreeId)).toBeDefined();
+  }
+
+  /** Wait until the worktree's persisted layout records no maximized group. */
+  async expectNotMaximized(worktreeId: string): Promise<void> {
+    await expect.poll(() => this.readMaximizedGroup(worktreeId)).toBeUndefined();
   }
 
   /** Read the persisted active-state blob for a worktree out of

@@ -20,6 +20,7 @@
  */
 
 import { posix } from "node:path";
+import { buildSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { createLogger } from "@band-app/logger";
 import {
   CONTINUE_LIMITS,
@@ -44,13 +45,13 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, gitIn, WIP_DIR } from "./_utils/snapshot-git";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { type ChangedFile, checkpointService } from "./checkpoint-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { modelRefreshService } from "./model-refresh-service";
 import { tokenService } from "./token-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeScriptService } from "./worktree-script-service";
 import { worktreeService } from "./worktree-service";
 
@@ -223,6 +224,22 @@ export class FollowService {
         "no-checkpoint",
         `The hub has no checkpoint of ${worktreeId} yet, so it cannot continue on another host. Bring ${hostName} back online.`,
       );
+    }
+
+    // The old host may still be running this worktree until its lease is over.
+    const leaseLeft = workerLeaseService.remainingMs(hostId);
+    if (leaseLeft > 0 && !checkpointService.isHostOnline(hostId)) {
+      return {
+        ...blocked(
+          "lease-active",
+          `${hostName} may still be running ${worktreeId}. It stops all work when its lease ends, in ${formatAge(leaseLeft)}, and then this worktree can be opened on another host.`,
+        ),
+        leaseExpiresAt: Date.now() + leaseLeft,
+        leaseRemainingMs: leaseLeft,
+        checkpointId: checkpoint.id,
+        checkpointAt: checkpoint.createdAt,
+        checkpointAgeMs: Date.now() - checkpoint.createdAt,
+      };
     }
 
     const needed = this.neededAgents(worktreeId, opts);
@@ -721,6 +738,41 @@ export class FollowService {
   }
 
   /**
+   * "Discard" for a superseded default-branch copy: the folder stays, and the branch goes back to
+   * the latest of its remote, with local changes and untracked files dropped. The superseded mark
+   * is cleared, because the folder is the repo's checkout again.
+   */
+  private async resetDefaultBranch(old: Located): Promise<void> {
+    const host = hostRegistry.hostById(old.hostId);
+    const git = gitIn(host, old.worktree.path);
+    const branch = old.repo.defaultBranch;
+    // What the folder holds is kept under a backup ref before it is reset.
+    const [root] = (await host.info()).roots;
+    if (root) {
+      const oldId = idOf(old);
+      const snap = await buildSnapshot(
+        host,
+        old.worktree.path,
+        posix.join(root, WIP_DIR),
+        `${oldId}.discard`,
+        `band: backup of ${old.worktree.path} before it is reset`,
+        true,
+      );
+      await git(["update-ref", `refs/band/backup/${oldId}/${Date.now()}`, snap.snapshotSha]);
+    }
+    await git(["fetch", "origin", branch]).catch(() => undefined);
+    const target =
+      (await git(["rev-parse", "--verify", "--quiet", `origin/${branch}`]).catch(() => "")) ||
+      undefined;
+    await git(["checkout", "-q", "-f", "-B", branch, ...(target ? [target] : [])]);
+    await git(["reset", "-q", "--hard", ...(target ? [target] : [])]);
+    await git(["clean", "-q", "-fd"]);
+    this.repos.setSupersededBy(old.repo.name, old.worktree.name, old.hostId, null);
+    this.repos.setDivergence(old.repo.name, old.worktree.name, old.hostId, null);
+    this.repos.setContinuedFrom(old.repo.name, old.worktree.name, old.hostId, null);
+  }
+
+  /**
    * Removes the old copy. Only after `confirm` is true: this deletes files on its host. A host
    * that is offline removes the checkout the next time it connects.
    */
@@ -748,6 +800,11 @@ export class FollowService {
           `${oldId} has changes${count ? ` in ${count} file${count === 1 ? "" : "s"}` : ""} that the continued worktree lacks, and removing it loses them. Bring them over first, or pass discardChanges: true to delete them.`,
         );
       }
+    }
+    if (old.worktree.name === old.repo.defaultBranch) {
+      // The default branch is the repo's own folder, and other worktrees depend on it: reset it.
+      await this.resetDefaultBranch(old);
+      return { ok: true };
     }
     await worktreeService.remove({
       repo: old.repo.name,

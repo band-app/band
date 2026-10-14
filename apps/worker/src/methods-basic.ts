@@ -238,21 +238,29 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     host.scripts.command({ ...(await worktreePaths(a)), label: label(a) }),
   );
   r.json("scripts.environment", async (a) => host.scripts.environment(await worktreePaths(a)));
-  r.json("scripts.runHidden", async (a) =>
-    host.scripts.runHidden(str(a, "script"), await path(a, "cwd"), optNum(a, "timeoutMs")),
-  );
+  r.json("scripts.runHidden", async (a) => {
+    const cwd = await path(a, "cwd");
+    ctx.lease.assertMayRun(cwd);
+    return host.scripts.runHidden(str(a, "script"), cwd, optNum(a, "timeoutMs"));
+  });
   r.json("scripts.copyFiles", async (a) => {
     const { repoPath, worktreePath } = await worktreePaths(a);
     return host.scripts.copyFiles(repoPath, worktreePath);
   });
   // A plan lives on the worker until `scripts.dispose`. Its exit comes back as a `scripts.exited` notification.
   r.json("scripts.prepare", async (a) => {
-    const plan = await host.scripts.prepare({ ...(await worktreePaths(a)), label: label(a) });
+    const paths = await worktreePaths(a);
+    ctx.lease.assertMayRun(paths.worktreePath);
+    const plan = await host.scripts.prepare({ ...paths, label: label(a) });
     if (!plan) return null;
     const planId = randomUUID();
     plans.set(planId, plan);
     void plan.exited.then((code) => session.notify("scripts.exited", { planId, code }));
     return { planId, command: plan.command };
+  });
+  ctx.lease.onFence(() => {
+    for (const plan of plans.values()) plan.dispose();
+    plans.clear();
   });
   r.json("scripts.dispose", (a) => {
     const planId = str(a, "planId");

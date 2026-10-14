@@ -26,6 +26,7 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { checkpointService } from "./checkpoint-service";
+import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
@@ -33,6 +34,7 @@ import { placementService } from "./placement-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { workerRelayService } from "./worker-relay-service";
 import { worktreeService } from "./worktree-service";
 
@@ -83,6 +85,7 @@ export class WorkerLinkService {
       this.setStatus(session.workerId, "lost", this.now()),
     );
     this.server.on("expired", (session: ServerSession) => {
+      workerLeaseService.detach(session);
       // A newer session for the same worker owns the host now.
       if (this.server.getSession(session.workerId) === undefined) {
         this.setStatus(session.workerId, "offline");
@@ -187,6 +190,7 @@ export class WorkerLinkService {
     gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);
+    workerLeaseService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {
@@ -218,6 +222,12 @@ export class WorkerLinkService {
     };
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
+    workerLeaseService.onConnected(session);
+    try {
+      seedCodingAgentsFromTypes(hello.agents);
+    } catch (err) {
+      log.warn(`could not seed coding agents: ${err instanceof Error ? err.message : err}`);
+    }
     this.publish(workerId, "online");
     void ephemeralLifecycleService.onConnected(session);
     // A copy this host kept while its work continued elsewhere is compared with that checkpoint.

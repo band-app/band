@@ -168,3 +168,29 @@ export interface GhTokenParams {
 }
 
 export type GhTokenReply = { found: false; reason?: string } | { found: true; token: string };
+
+/**
+ * Hub to worker: renews the worker's lease (issue #901). While the link is up the hub sends it
+ * every fifth of the lease time. A worker whose lease runs out, because it lost the hub or the hub
+ * stopped, stops its agents, terminals and run scripts and refuses to start new ones until a renewal
+ * arrives. The hub offers "Open on another host" for the worker's worktrees only after the lease it
+ * could have granted last has expired, so two copies never run at once.
+ */
+export const METHOD_LEASE_RENEW = "lease.renew";
+
+export interface LeaseRenewParams {
+  /** How long the lease lasts from the moment the worker receives this call. */
+  ttlMs: number;
+  /**
+   * Folders on this worker that another host owns now (a continued worktree's old copy). Nothing
+   * is started in them while they are listed, so a superseded copy stays stopped after a fence.
+   */
+  blockedPaths: string[];
+}
+
+export interface LeaseRenewReply {
+  /** The lease had run out since the last renewal: the worker stopped its processes. */
+  fenced: boolean;
+  /** How many worktrees got a local snapshot when it did. */
+  snapshots: number;
+}

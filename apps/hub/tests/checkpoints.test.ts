@@ -217,6 +217,14 @@ describe("offline view, restore and supersede (S2, S3)", () => {
     expect((await findWorktree("proj", "feat-x", b.hostId))?.supersededBy).toBeUndefined();
   }, 90_000);
 
+  it("rejects a checkpoint sent for the superseded copy, however it is asked for (#901)", async () => {
+    const before = (await w.checkpoints(wt())).checkpoints.length;
+    const refused = await w.mFail("checkpoints.take", { worktreeId: wt() });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.body).toContain(`continued as ${restored}`);
+    expect((await w.checkpoints(wt())).checkpoints).toHaveLength(before);
+  }, 30_000);
+
   it("takes a checkpoint when a worker shuts down cleanly", async () => {
     const wtB = `proj-seed-b@${b.hostId}`;
     appendFileSync(
