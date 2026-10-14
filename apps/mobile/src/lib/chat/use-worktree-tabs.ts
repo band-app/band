@@ -222,16 +222,12 @@ export function useWorktreeTabs(worktreeId: string) {
       const agentId = chat?.agent ?? defaultId;
       const hubStatus = statuses.get(id);
       const pendingText = getPending(id);
-      const shown: ShownState =
-        hubStatus === "needs_attention" || hubStatus === "working"
-          ? shownState({
-              status: hubStatus,
-              pending: pendingText !== undefined || chat?.status === "running",
-              failed: chat?.status === "error",
-            })
-          : unread.has(id)
-            ? "done"
-            : "idle";
+      const hubShown = shownState({
+        status: hubStatus,
+        pending: pendingText !== undefined || chat?.status === "running",
+        failed: chat?.status === "error",
+      });
+      const shown: ShownState = hubShown === "idle" && unread.has(id) ? "done" : hubShown;
       return {
         id,
         label: chatTabLabel({

@@ -107,57 +107,71 @@ export function applyStatusEvent(state: StatusState, event: StatusEvent): Status
 /** `running`: an agent is working. `attention`: one waits for the user. `idle`: neither. */
 export type AgentState = "running" | "attention" | "idle";
 
+/** Hub statuses that wait for the user: a question, a finished turn or a failed one. */
+function isAttention(status: string | undefined): boolean {
+  return (
+    status === "question" || status === "done" || status === "failed" || status === "needs_attention"
+  );
+}
+
+/** Hub statuses that mean an agent is busy, or watching background work. */
+function isRunning(status: string | undefined): boolean {
+  return status === "working" || status === "monitoring";
+}
+
 export function agentStateOf(status: WorktreeStatusLike | undefined): AgentState {
   if (!status) return "idle";
-  const tabs = status.tabStatuses ?? [];
-  if (
-    status.agent?.status === "needs_attention" ||
-    tabs.some((t) => t.status === "needs_attention")
-  ) {
-    return "attention";
-  }
-  if (status.agent?.status === "working" || tabs.some((t) => t.status === "working")) {
-    return "running";
-  }
+  const all = [status.agent?.status, ...(status.tabStatuses ?? []).map((t) => t.status)];
+  if (all.some(isAttention)) return "attention";
+  if (all.some(isRunning)) return "running";
   return "idle";
 }
 
 /**
- * What an agent's icon shows. The names are the design's (`.am/refs/design-demo.html`); the hub
- * reports `working`, `needs_attention` and `waiting` today. This function is the one place that
- * maps one to the other, so the hub's new states (monitoring, question, done, failed, idle) are
- * added here and nowhere else.
+ * What an agent's icon shows. The names are the design's (`.am/refs/design-demo.html`) and the
+ * hub's own (`AgentHookStatus`). This function is the one place that maps a hub status to an
+ * icon. An older hub reports `needs_attention` and `waiting`, which map to question or done and
+ * to idle.
  */
 export type ShownState = "working" | "monitoring" | "question" | "done" | "failed" | "idle";
 
 export interface ShownStateInput {
-  /** The hub's status for the agent: `working`, `needs_attention` or `waiting`. */
+  /** The hub's status for the agent. */
   status: string | undefined;
   /**
-   * Whether the agent waits on a permission or a question. `undefined` when the caller can't
-   * tell (a worktree row, which sees no chat), which counts as a question because that is the
-   * case that needs the user.
+   * Only for an older hub's `needs_attention`: whether the agent waits on a permission or a
+   * question. `undefined` counts as a question because that is the case that needs the user.
    */
   pending?: boolean;
-  /** The chat's last turn failed. */
+  /** Only for an older hub's `needs_attention`: the chat's last turn failed. */
   failed?: boolean;
 }
 
 export function shownState({ status, pending, failed }: ShownStateInput): ShownState {
-  if (status === "working") return "working";
-  if (status === "needs_attention") {
-    if (failed) return "failed";
-    return pending === false ? "done" : "question";
+  switch (status) {
+    case "working":
+    case "monitoring":
+    case "question":
+    case "done":
+    case "failed":
+      return status;
+    case "needs_attention":
+      if (failed) return "failed";
+      return pending === false ? "done" : "question";
+    default:
+      return "idle";
   }
-  return "idle";
 }
 
-/** A worktree's icon: its most urgent agent. */
+/** The most urgent of an agent's and its tabs' states, the one a worktree's icon shows. */
+const URGENCY: ShownState[] = ["question", "failed", "done", "working", "monitoring", "idle"];
+
 export function shownStateOf(status: WorktreeStatusLike | undefined): ShownState {
-  const state = agentStateOf(status);
-  if (state === "attention") return shownState({ status: "needs_attention" });
-  if (state === "running") return shownState({ status: "working" });
-  return shownState({ status: status?.agent?.status });
+  if (!status) return "idle";
+  const states = [status.agent?.status, ...(status.tabStatuses ?? []).map((t) => t.status)].map(
+    (s) => shownState({ status: s }),
+  );
+  return URGENCY.find((u) => states.includes(u)) ?? "idle";
 }
 
 /** "now", "3 m", "2 h" or "5 d" since `iso`; null when there is no usable timestamp. */

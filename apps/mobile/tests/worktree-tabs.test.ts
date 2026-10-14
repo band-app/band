@@ -88,7 +88,7 @@ describe("phone tabs", () => {
 describe("tab state", () => {
   const statuses = chatStatuses([
     { chatId: "a", status: "working" },
-    { chatId: "b", status: "needs_attention" },
+    { chatId: "b", status: "question" },
     { status: "working" },
   ]);
 
@@ -97,7 +97,7 @@ describe("tab state", () => {
       [...statuses],
       [
         ["a", "working"],
-        ["b", "needs_attention"],
+        ["b", "question"],
       ],
     );
     assert.equal(tabState("a", statuses, new Set()), "running");

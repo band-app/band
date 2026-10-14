@@ -106,8 +106,15 @@ export function tabState(
   unread: ReadonlySet<string>,
 ): TabState {
   const status = statuses.get(chatId);
-  if (status === "needs_attention") return "attention";
-  if (status === "working") return "running";
+  if (
+    status === "question" ||
+    status === "done" ||
+    status === "failed" ||
+    status === "needs_attention"
+  ) {
+    return "attention";
+  }
+  if (status === "working" || status === "monitoring") return "running";
   return unread.has(chatId) ? "unread" : "idle";
 }
 

@@ -11,7 +11,7 @@ import {
 } from "../src/lib/status-state.ts";
 
 const working = { worktreeId: "a-main", agent: { status: "working" } };
-const waiting = { worktreeId: "b-main", agent: { status: "needs_attention" } };
+const waiting = { worktreeId: "b-main", agent: { status: "question" } };
 
 function run(events: StatusEvent[]) {
   return events.reduce(applyStatusEvent, emptyStatusState());
@@ -52,7 +52,17 @@ describe("applyStatusEvent", () => {
 });
 
 describe("agentStateOf", () => {
-  it("maps working to running and needs_attention to attention", () => {
+  it("maps working and monitoring to running, question, done and failed to attention", () => {
+    for (const status of ["working", "monitoring"]) {
+      assert.equal(agentStateOf({ worktreeId: "x", agent: { status } }), "running");
+    }
+    for (const status of ["question", "done", "failed"]) {
+      assert.equal(agentStateOf({ worktreeId: "x", agent: { status } }), "attention");
+    }
+    assert.equal(agentStateOf({ worktreeId: "x", agent: { status: "idle" } }), "idle");
+  });
+
+  it("still maps an older hub's working and needs_attention", () => {
     assert.equal(agentStateOf(working), "running");
     assert.equal(agentStateOf(waiting), "attention");
   });
@@ -73,7 +83,13 @@ describe("agentStateOf", () => {
 });
 
 describe("shownState", () => {
-  it("maps the hub's statuses to the design's icons", () => {
+  it("shows each of the hub's states as itself", () => {
+    for (const status of ["working", "monitoring", "question", "done", "failed", "idle"] as const) {
+      assert.equal(shownState({ status }), status);
+    }
+  });
+
+  it("maps an older hub's statuses to the design's icons", () => {
     assert.equal(shownState({ status: "working" }), "working");
     assert.equal(shownState({ status: "waiting" }), "idle");
     assert.equal(shownState({ status: undefined }), "idle");
@@ -90,9 +106,17 @@ describe("shownState", () => {
       shownStateOf({
         worktreeId: "w",
         agent: { status: "working" },
-        tabStatuses: [{ chatId: "c", status: "needs_attention" }],
+        tabStatuses: [{ chatId: "c", status: "question" }],
       }),
       "question",
+    );
+    assert.equal(
+      shownStateOf({
+        worktreeId: "w",
+        agent: { status: "done" },
+        tabStatuses: [{ chatId: "c", status: "monitoring" }],
+      }),
+      "done",
     );
   });
 });

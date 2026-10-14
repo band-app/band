@@ -106,7 +106,7 @@ describe("buildSections", () => {
       {
         kind: "snapshot",
         statuses: [
-          { worktreeId: "beta-main", agent: { status: "needs_attention" } },
+          { worktreeId: "beta-main", agent: { status: "question" } },
           {
             worktreeId: "alpha-main",
             agent: {
