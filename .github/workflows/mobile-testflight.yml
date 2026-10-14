@@ -1,0 +1,77 @@
+name: Mobile TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/client/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/mobile-testflight.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-testflight
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: Build and submit to TestFlight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+    steps:
+      - name: Skip until the App Store Connect app exists
+        if: env.ASC_APP_ID == ''
+        run: echo "::notice::Skipped. Set the repository variable ASC_APP_ID to the App Store Connect app id to turn on TestFlight builds (see apps/mobile/README.md)."
+
+      - name: Checkout
+        if: env.ASC_APP_ID != ''
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: env.ASC_APP_ID != ''
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        if: env.ASC_APP_ID != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        if: env.ASC_APP_ID != ''
+        run: pnpm install --frozen-lockfile --filter @band-app/mobile...
+
+      - name: Setup EAS
+        if: env.ASC_APP_ID != ''
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Set the App Store Connect app id
+        if: env.ASC_APP_ID != ''
+        working-directory: apps/mobile
+        run: |
+          jq --arg id "$ASC_APP_ID" '.submit.production.ios.ascAppId = $id' eas.json > eas.json.tmp
+          mv eas.json.tmp eas.json
+
+      - name: Start the EAS build
+        if: env.ASC_APP_ID != ''
+        working-directory: apps/mobile
+        run: |
+          eas build -p ios --profile production --non-interactive --no-wait --auto-submit --json > build.json
+          url=$(jq -r '.[0].buildDetailsPageUrl // empty' build.json)
+          echo "### EAS iOS build" >> "$GITHUB_STEP_SUMMARY"
+          echo "${url:-Build started. See https://expo.dev/accounts/band-app/projects/band/builds}" >> "$GITHUB_STEP_SUMMARY"
+          rm build.json
