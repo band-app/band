@@ -37,8 +37,13 @@ describe("host.fs.watch ignore", () => {
     // Let the watcher start, write into an ignored and a normal path, then give the events time to arrive.
     await new Promise((r) => setTimeout(r, 200));
     writeFileSync(join(dir, "node_modules", "pkg", "index.js"), `${Math.random()}\n`);
-    writeFileSync(join(dir, "src", "app.ts"), `${Math.random()}\n`);
-    await new Promise((r) => setTimeout(r, 600));
+    // The sentinel is written last; once its event arrives, the earlier write had its chance to be reported.
+    const deadline = Date.now() + 5_000;
+    while (!seen.some((p) => p.endsWith("sentinel.ts")) && Date.now() < deadline) {
+      writeFileSync(join(dir, "src", "sentinel.ts"), `${Math.random()}\n`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await new Promise((r) => setTimeout(r, 200));
     controller.abort();
     await reading;
     return seen;

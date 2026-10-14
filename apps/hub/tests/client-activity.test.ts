@@ -130,6 +130,30 @@ describe("client activity drives the poller cadence", () => {
     await expectLevel("idle", TTL_MS + 5_000);
   });
 
+  it("refuses a caller without a token", async () => {
+    for (const [procedure, input] of [
+      ["services.setActivity", { activity: "active", clientId: "anon" }],
+      ["services.releaseActivity", { clientId: "anon" }],
+    ] as const) {
+      const res = await fetch(`${server.url}/trpc/${procedure}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      expect(res.status, procedure).toBe(401);
+    }
+    const query = await fetch(`${server.url}/trpc/services.getActivity`);
+    expect(query.status).toBe(401);
+  });
+
+  it("keeps an active client when other clients flood the cap with background ids", async () => {
+    await report("watcher", "active");
+    for (let i = 0; i < 70; i++) await report(`flood-${i}`, "background");
+    await expectLevel("active");
+    await release("watcher");
+    for (let i = 0; i < 70; i++) await release(`flood-${i}`);
+  });
+
   it("refuses an unknown level and an oversized client id", async () => {
     const bad = await trpcMutate(
       server.url,

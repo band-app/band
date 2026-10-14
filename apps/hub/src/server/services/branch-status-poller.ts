@@ -582,25 +582,42 @@ async function pollTick() {
 
   if (allWorktrees.length === 0) return;
 
-  // A host on battery is polled at the slowest cadence whatever the clients do, and never
-  // fetched. The tick runs at the clients' cadence, so such a worktree skips ticks until due.
+  // A host on battery is polled at the slowest cadence whatever the clients do, never fetched, and
+  // asked about CI every 10 minutes. The tick runs at the clients' cadence, so such a worktree
+  // skips ticks until it is due.
   const now = Date.now();
   await refreshHostPower(allWorktrees, now);
   const background = INTERVALS.background;
-  const batteryDueMs = background.pollMs - INTERVALS[pollerState.activity].pollMs / 2;
+  const tickMs = INTERVALS[pollerState.activity].pollMs;
+  const batteryDueMs = background.pollMs - tickMs / 2;
+  const batteryCIDueMs = background.pollMs * background.ciTicks - tickMs / 2;
+  const liveIds = new Set(allWorktrees.map((ws) => ws.worktreeId));
+  for (const id of [...lastPolledAt.keys()]) if (!liveIds.has(id)) lastPolledAt.delete(id);
+  const liveHosts = new Set(allWorktrees.map(hostKey));
+  for (const key of [...lastCIQueryAt.keys()]) if (!liveHosts.has(key)) lastCIQueryAt.delete(key);
   const worktrees = allWorktrees.filter((ws) => {
     if (!isOnBatteryHost(ws)) return true;
     const last = lastPolledAt.get(ws.worktreeId);
     return last === undefined || now - last >= batteryDueMs;
   });
-  for (const ws of worktrees) lastPolledAt.set(ws.worktreeId, now);
-  const batteryCIDueMs =
-    background.pollMs * background.ciTicks - INTERVALS[pollerState.activity].pollMs / 2;
+  for (const ws of worktrees) {
+    if (isOnBatteryHost(ws)) lastPolledAt.set(ws.worktreeId, now);
+  }
+  /** Whether a worktree's CI status is queried in this tick. A battery host follows its own clock, not the tick count. */
   const ciDue = (ws: WorktreeInfo): boolean => {
-    if (!isOnBatteryHost(ws)) return true;
+    if (!isOnBatteryHost(ws)) return queryCI;
     const last = lastCIQueryAt.get(hostKey(ws));
     return last === undefined || now - last >= batteryCIDueMs;
   };
+
+  // Subscriptions of repos with no webhook are polled on the same cadence.
+  // The call is not awaited: a slow `gh` must not hold up the status pass.
+  if (queryCI) {
+    void githubPollService
+      .poll()
+      .catch((err) => log.warn({ err }, "github subscription poll failed"));
+  }
+  // Every worktree on a battery host is waiting for its turn.
   if (worktrees.length === 0) return;
 
   // On CI ticks, git fetch each unique repo path. A fetch waits on the
@@ -630,7 +647,7 @@ async function pollTick() {
   // the poller never runs `gh`: a CI tick then stores no CI state and no
   // PR, and the rows show neither the PR badge nor the CI icon.
   let ciStatuses = new Map<string, CIStatus>();
-  if (queryCI && pluginHost.isEnabled("github")) {
+  if (pluginHost.isEnabled("github")) {
     const ciWorktrees = worktrees.filter((w) => w.hasOrigin && ciDue(w));
     if (ciWorktrees.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorktrees);
@@ -638,21 +655,15 @@ async function pollTick() {
     }
   }
 
-  // Subscriptions of repos with no webhook are polled on the same cadence.
-  // The call is not awaited: a slow `gh` must not hold up the status pass.
-  if (queryCI) {
-    void githubPollService
-      .poll()
-      .catch((err) => log.warn({ err }, "github subscription poll failed"));
-  }
-
-  // A battery host's worktree whose CI query is not due keeps its stored CI status.
+  // A worktree whose CI status was not asked for this tick keeps its stored one.
   await forEachLimited(worktrees, (ws) =>
     pollWorktree(
       ws,
-      queryCI && !(ws.hasOrigin && !ciDue(ws))
-        ? (ciStatuses.get(ws.worktreeId) ?? { state: "none" })
-        : null,
+      isOnBatteryHost(ws)
+        ? (ciStatuses.get(ws.worktreeId) ?? null)
+        : queryCI
+          ? (ciStatuses.get(ws.worktreeId) ?? { state: "none" })
+          : null,
     ),
   );
 

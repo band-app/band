@@ -75,7 +75,8 @@ test.beforeAll(async () => {
   });
   // DOM renderer so the rendered rows are readable.
   seedSettings(tmpHome, { tokenSecret: TOKEN, useWebGLTerminalRenderer: false });
-  server = await startServer({ tmpHome });
+  // A short expiry, so a page an earlier test left behind drops out of the hub's view quickly.
+  server = await startServer({ tmpHome, env: { BAND_ACTIVITY_TTL_MS: "8000" } });
 });
 
 test.beforeEach(() => resetClientState(tmpHome));
@@ -122,6 +123,28 @@ test("infinite animations run plugged in and focused, and stop on battery or whe
   await expect.poll(() => power.runningInfiniteAnimations()).toEqual([]);
   await power.focus();
   await expect.poll(() => power.runningInfiniteAnimations()).toContain("status-pulse");
+});
+
+test("the UI tells the hub when it is blurred or on battery", async ({ page }) => {
+  const power = new PowerSaverPage(page);
+  await power.installBattery(false);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await worktree.goto(WORKTREE_A);
+  await worktree.waitForReady();
+  const level = async () =>
+    (await trpcQuery<{ activity: string }>(server.url, TOKEN, "services.getActivity")).activity;
+  const slow = { timeout: 20_000, intervals: [250] };
+
+  // Focused and plugged in: active. A page an earlier test left behind may still count for a few seconds.
+  await expect.poll(level, slow).toBe("active");
+  await power.setOnBattery(true);
+  await expect.poll(level, slow).toBe("idle");
+  await power.blur();
+  await expect.poll(level, slow).toBe("background");
+  await power.setOnBattery(false);
+  await expect.poll(level, slow).toBe("idle");
+  await power.focus();
+  await expect.poll(level, slow).toBe("active");
 });
 
 test("a focused terminal's cursor blinks plugged in and stops on battery", async ({ page }) => {

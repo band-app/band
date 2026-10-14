@@ -52,10 +52,13 @@ describe("readLinuxPower", () => {
 
 describe("isOnBattery", () => {
   it("honours BAND_POWER_STATE", async () => {
-    process.env.BAND_POWER_STATE = "battery";
-    assert.equal(await isOnBattery(), true);
-    process.env.BAND_POWER_STATE = "ac";
-    assert.equal(await isOnBattery(), false);
-    delete process.env.BAND_POWER_STATE;
+    try {
+      process.env.BAND_POWER_STATE = "battery";
+      assert.equal(await isOnBattery(), true);
+      process.env.BAND_POWER_STATE = "ac";
+      assert.equal(await isOnBattery(), false);
+    } finally {
+      delete process.env.BAND_POWER_STATE;
+    }
   });
 });

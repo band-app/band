@@ -51,10 +51,20 @@ export class ClientActivityService {
   report(clientId: string, activity: ClientActivity, now = Date.now()): void {
     this.clients.delete(clientId);
     this.clients.set(clientId, { activity, reportedAt: now });
+    // Over the cap, drop the least active client first (the stalest of those), so a flood of
+    // `background` ids cannot push out an `active` one.
     while (this.clients.size > MAX_CLIENTS) {
-      const oldest = this.clients.keys().next().value;
-      if (oldest === undefined) break;
-      this.clients.delete(oldest);
+      let victim: string | undefined;
+      let victimRank = Number.POSITIVE_INFINITY;
+      for (const [id, entry] of this.clients) {
+        if (id === clientId) continue;
+        if (RANK[entry.activity] < victimRank) {
+          victim = id;
+          victimRank = RANK[entry.activity];
+        }
+      }
+      if (victim === undefined) break;
+      this.clients.delete(victim);
     }
     this.refresh(now);
   }
@@ -84,7 +94,9 @@ export class ClientActivityService {
    */
   titlePollEvery(now = Date.now()): number {
     const level = this.effective(now);
-    if (this.clients.size === 0 || level === "background") return 0;
+    if (level === "background") return 0;
+    // With no live client the fallback level decides (idle unless `BAND_ACTIVITY_DEFAULT` says otherwise).
+    if (this.clients.size === 0 && level === "idle") return 0;
     return level === "active" ? 1 : 5;
   }
 

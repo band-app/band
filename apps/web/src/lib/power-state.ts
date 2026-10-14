@@ -71,7 +71,12 @@ export function usePowerState(): PowerState {
 function watchFocus(): void {
   const update = () => setState({ focused: !document.hidden && document.hasFocus() });
   window.addEventListener("focus", () => setState({ focused: !document.hidden }));
-  window.addEventListener("blur", () => setState({ focused: false }));
+  window.addEventListener("blur", () => {
+    // Focus moving into a browser pane's <webview> or an iframe blurs the window, but the user is still in Band.
+    const active = document.activeElement?.tagName;
+    if (active === "WEBVIEW" || active === "IFRAME") return;
+    setState({ focused: false });
+  });
   document.addEventListener("visibilitychange", update);
   update();
 }

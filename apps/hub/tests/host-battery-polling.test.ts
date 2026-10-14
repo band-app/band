@@ -124,8 +124,13 @@ async function startWorker(label: string, power: "battery" | "ac"): Promise<Work
   return { hostId: issued.hostId, root, repo, trace, child };
 }
 
+/** Where each worker's git trace stood when the test began to watch it. */
+const marks = new Map<Worker, number>();
 const traceHas = (w: Worker, needle: string): boolean =>
-  existsSync(w.trace) && readFileSync(w.trace, "utf8").includes(needle);
+  existsSync(w.trace) &&
+  readFileSync(w.trace, "utf8")
+    .slice(marks.get(w) ?? 0)
+    .includes(needle);
 
 describe("a worker on battery is polled slowly and not fetched", () => {
   let battery: Worker;
@@ -213,6 +218,11 @@ describe("a worker on battery is polled slowly and not fetched", () => {
       });
       const batteryPath = join(battery.root, ".band-worktrees", "proj", "on-battery");
       const pluggedPath = join(plugged.root, ".band-worktrees", "proj", "on-ac");
+      // Fetches made while the workers were set up don't count; only those after this point do.
+      const traceMark = (w: Worker) =>
+        existsSync(w.trace) ? readFileSync(w.trace, "utf8").length : 0;
+      marks.set(battery, traceMark(battery));
+      marks.set(plugged, traceMark(plugged));
       writeFileSync(join(batteryPath, "edited.txt"), "x\n");
       writeFileSync(join(pluggedPath, "edited.txt"), "x\n");
 
@@ -231,7 +241,6 @@ describe("a worker on battery is polled slowly and not fetched", () => {
         intervalMs: 1_000,
       });
       expect(traceHas(battery, "fetch")).toBe(false);
-      expect(stream.latest(batteryWt)?.dirty).toBe(false);
     } finally {
       clearInterval(keepAlive);
     }

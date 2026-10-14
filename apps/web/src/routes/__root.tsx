@@ -222,8 +222,13 @@ function TranslucentSidebarSync() {
 /** Starts the power and focus watcher (battery, blurred or hidden) and reports it to the hub. */
 function PowerSync() {
   useEffect(() => {
-    startPowerState();
-    startActivityReporter();
+    // Saving power must never stop the app from rendering.
+    try {
+      startPowerState();
+      startActivityReporter();
+    } catch (err) {
+      console.error("power saver failed to start", err);
+    }
   }, []);
   return null;
 }

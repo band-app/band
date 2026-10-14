@@ -10,6 +10,7 @@
  * and drops one that stops reporting, so the report repeats every minute while the page is open.
  */
 
+import { hubFetch, hubUrl } from "./hub-config";
 import { getPowerState, type PowerState, subscribePowerState } from "./power-state";
 import { trpc } from "./trpc-client";
 
@@ -29,7 +30,11 @@ let started = false;
 export function startActivityReporter(): void {
   if (started || typeof window === "undefined") return;
   started = true;
-  const clientId = crypto.randomUUID();
+  // `crypto.randomUUID` is missing on a plain-http page that is not localhost (a phone on a LAN URL).
+  const clientId =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
   let debounce: ReturnType<typeof setTimeout> | null = null;
 
   const send = () => {
@@ -46,8 +51,15 @@ export function startActivityReporter(): void {
 
   subscribePowerState(schedule);
   setInterval(send, KEEP_ALIVE_MS);
+  // A normal request is often cancelled while the page unloads; `keepalive` lets this one finish.
+  // The hub drops the client after its expiry if this never arrives.
   window.addEventListener("pagehide", () => {
-    trpc.services.releaseActivity.mutate({ clientId }).catch(() => {});
+    hubFetch(hubUrl("/trpc/services.releaseActivity"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId }),
+      keepalive: true,
+    }).catch(() => {});
   });
   send();
 }
