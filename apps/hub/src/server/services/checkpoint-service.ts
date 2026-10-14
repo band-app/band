@@ -28,6 +28,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Host } from "@band-app/host-api";
+import { buildSnapshot, checkoutSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { RemoteRpc } from "@band-app/host-remote";
 import {
   METHOD_LIFECYCLE_EXPORT_SESSIONS,
@@ -37,6 +38,7 @@ import {
   type SessionFile,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import { formatAge } from "@band-app/shared/continuation";
 import {
   checkpointsEnabledFor,
   isHostAllowed,
@@ -50,11 +52,11 @@ import { rekeyWorktreeRows } from "../infra/db/queries/worktree-rekey";
 import { hostRegistry } from "../infra/host/registry";
 import { checkpointDir, forgetCheckpoints, worktreeCheckpointDir } from "./_utils/checkpoint-store";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, checkoutSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { onTurnEnded } from "./_utils/turn-events";
 import { chatService } from "./chat-service";
 import { repoService } from "./repo-service";
 import { loadState, saveState } from "./state";
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("checkpoints");
@@ -485,7 +487,10 @@ export class CheckpointService {
         `${worktreeId} was continued as ${found.worktree.supersededBy}, so ${hostId} no longer owns it.`,
       );
     }
-    if ((found.worktree.hostId ?? LOCAL_HOST_ID) !== hostId || this.sessions.get(hostId) !== session) {
+    if (
+      (found.worktree.hostId ?? LOCAL_HOST_ID) !== hostId ||
+      this.sessions.get(hostId) !== session
+    ) {
       throw new CheckpointError(
         "conflict",
         `${hostId} does not own ${worktreeId}, so its checkpoint is not stored.`,
@@ -844,6 +849,15 @@ export class CheckpointService {
       throw new CheckpointError("conflict", `${worktreeId} is being restored or moved.`);
     }
     const row = this.pick(worktreeId, input.checkpointId);
+    // An offline source may still be running under its lease. Wait until it has stopped.
+    const sourceUp = this.sessions.get(fromHostId)?.attached === true;
+    const leaseLeft = sourceUp ? 0 : workerLeaseService.remainingMs(fromHostId);
+    if (leaseLeft > 0) {
+      throw new CheckpointError(
+        "conflict",
+        `${fromHostId} may still be running ${worktreeId}: its lease ends in ${formatAge(leaseLeft)}. Try again then.`,
+      );
+    }
     const target = this.sessions.get(toHostId);
     if (!target?.attached) {
       throw new CheckpointError(

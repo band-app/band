@@ -20,6 +20,7 @@
  */
 
 import { posix } from "node:path";
+import { buildSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { createLogger } from "@band-app/logger";
 import {
   CONTINUE_LIMITS,
@@ -44,13 +45,13 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { type ChangedFile, checkpointService } from "./checkpoint-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { modelRefreshService } from "./model-refresh-service";
 import { tokenService } from "./token-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeScriptService } from "./worktree-script-service";
 import { worktreeService } from "./worktree-service";
 
@@ -223,6 +224,21 @@ export class FollowService {
         "no-checkpoint",
         `The hub has no checkpoint of ${worktreeId} yet, so it cannot continue on another host. Bring ${hostName} back online.`,
       );
+    }
+
+    // The old host may still be running this worktree until its lease is over.
+    const leaseLeft = workerLeaseService.remainingMs(hostId);
+    if (leaseLeft > 0 && !checkpointService.isHostOnline(hostId)) {
+      return {
+        ...blocked(
+          "lease-active",
+          `${hostName} may still be running ${worktreeId}. It stops all work when its lease ends, in ${formatAge(leaseLeft)}, and then this worktree can be opened on another host.`,
+        ),
+        leaseExpiresAt: Date.now() + leaseLeft,
+        checkpointId: checkpoint.id,
+        checkpointAt: checkpoint.createdAt,
+        checkpointAgeMs: Date.now() - checkpoint.createdAt,
+      };
     }
 
     const needed = this.neededAgents(worktreeId, opts);

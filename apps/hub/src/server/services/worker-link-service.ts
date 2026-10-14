@@ -34,6 +34,7 @@ import { placementService } from "./placement-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { workerRelayService } from "./worker-relay-service";
 import { worktreeService } from "./worktree-service";
 
@@ -84,6 +85,7 @@ export class WorkerLinkService {
       this.setStatus(session.workerId, "lost", this.now()),
     );
     this.server.on("expired", (session: ServerSession) => {
+      workerLeaseService.detach(session);
       // A newer session for the same worker owns the host now.
       if (this.server.getSession(session.workerId) === undefined) {
         this.setStatus(session.workerId, "offline");
@@ -188,6 +190,7 @@ export class WorkerLinkService {
     gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);
+    workerLeaseService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {
@@ -219,6 +222,7 @@ export class WorkerLinkService {
     };
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
+    workerLeaseService.onConnected(session);
     try {
       seedCodingAgentsFromTypes(hello.agents);
     } catch (err) {

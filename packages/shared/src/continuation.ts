@@ -91,6 +91,7 @@ export type ContinueBlock =
   | "no-checkpoint"
   | "no-online-host"
   | "agent-unavailable"
+  | "lease-active"
   | "already-continued"
   | "not-offline";
 
@@ -101,6 +102,11 @@ export interface ContinueOffer {
   fromHostName: string;
   /** Set when the work cannot continue, with a message that says why and what to do. */
   blocked?: { reason: ContinueBlock; message: string };
+  /**
+   * Epoch ms when the old host's lease ends. Until then the old copy may still be running, so the
+   * work cannot continue elsewhere (`blocked.reason` is `lease-active`). The UI counts down to it.
+   */
+  leaseExpiresAt?: number;
   checkpointId?: string;
   checkpointAt?: number;
   /** Age of the checkpoint in ms, at the time of the offer. */

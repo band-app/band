@@ -144,6 +144,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   // Stdio is one channel (hub writes stdin, worker writes stdout) and stderr is another.
   // The hub ending its side closes stdin. Resetting the stdio channel kills the agent.
   r.raw("acp.spawn", async (a) => {
+    ctx.lease.assertMayRun(str(a, "cwd"));
     const env = strRecord(a, "env");
     // The hub's `band` CLI goes first, so an agent's shell tool finds it.
     const cliDir = await ctx.cli?.dir();
@@ -308,6 +309,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   const pty = host.pty;
 
   r.json("pty.spawn", async (a) => {
+    ctx.lease.assertMayRun(str(a, "worktreeRoot"));
     const worktreeRoot = await path(a, "worktreeRoot");
     const o = optObj(a, "options");
     let options: SpawnOptions | undefined = o && {
@@ -413,6 +415,15 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       channel.end();
     }
     session.notify("pty.exit", event);
+  });
+
+  // The lease ran out: nothing this worker runs for the hub may go on.
+  ctx.lease.onFence(async () => {
+    for (const { stdio } of agents.values()) stdio.kill();
+    for (const proc of mcpProcesses) proc.kill();
+    await Promise.all([...openBrowsers].map((id) => host.browser.close(id)));
+    for (const t of await pty.listAll().catch(() => [])) await pty.kill(t.terminalId);
+    await host.lsp.killAll();
   });
 
   return async () => {
