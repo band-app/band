@@ -148,6 +148,12 @@ export interface PromptEvent {
   taskId: string;
   text: string;
   files?: ChatEventFile[];
+  /** Per-turn choices a sender made, logged by a worker that owns the chat so
+   *  the hub can keep the chat's saved agent, model and mode in step
+   *  (docs/architecture/chat-ownership.md). */
+  codingAgentId?: string;
+  model?: string;
+  mode?: string;
 }
 
 /** A prompt turn started (`session/prompt` sent). */

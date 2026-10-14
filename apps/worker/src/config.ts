@@ -23,6 +23,12 @@ export interface WorkerConfig {
   reposDir?: string;
   ephemeral: boolean;
   idleExitMs: number;
+  /**
+   * Run the chats of this worker's worktrees here and replicate them to the hub
+   * (docs/architecture/chat-ownership.md). The desktop app's worker turns it on.
+   * An ephemeral worker never owns chats.
+   */
+  ownChats: boolean;
 }
 
 export class ConfigError extends Error {
@@ -44,6 +50,7 @@ const USAGE = `Usage: band-worker --hub <url> --token <token> [options]
   --state-dir <dir>    Where the worker id and session token live (env BAND_WORKER_STATE_DIR).
   --ephemeral          Exit when idle (env BAND_WORKER_EPHEMERAL=1).
   --idle-exit <dur>    Idle time before an ephemeral worker exits, like 90s, 10m or 1h (env BAND_WORKER_IDLE_EXIT).
+  --own-chats          Run the chats of this worker's worktrees here and copy them to the hub (env BAND_WORKER_OWN_CHATS=1).
 
 Run as a service (systemd user unit on Linux, launchd agent on macOS):
 
@@ -147,6 +154,10 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
   if (idleText !== undefined && !ephemeral) {
     throw new ConfigError("--idle-exit only applies with --ephemeral");
   }
+  const ownChats = values["own-chats"] ?? isTruthy(env.BAND_WORKER_OWN_CHATS);
+  if (ownChats && ephemeral) {
+    throw new ConfigError("--own-chats does not apply with --ephemeral");
+  }
 
   return {
     hubUrl: parseHubUrl(hub),
@@ -165,6 +176,7 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
     ),
     ephemeral,
     idleExitMs: idleText === undefined ? DEFAULT_IDLE_EXIT_MS : parseDuration(idleText),
+    ownChats,
   };
 }
 
@@ -186,6 +198,7 @@ function parse(argv: string[]) {
       "state-dir": { type: "string" },
       ephemeral: { type: "boolean" },
       "idle-exit": { type: "string" },
+      "own-chats": { type: "boolean" },
     },
     strict: true,
   });

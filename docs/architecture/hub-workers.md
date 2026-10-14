@@ -42,6 +42,7 @@ Negative:
 - Chatty operations (diffs, search, file trees) cross a network link and need batching, streaming and caching.
 - Hub and worker versions can drift, so the handshake carries a protocol version and the hub rejects a mismatch.
 - Every worker is a code-execution endpoint, so the tokens and the worker-side relay must be scoped tightly.
+- A worker that owns its chats ([chat-ownership.md](chat-ownership.md)) holds the live copy of their logs. The hub's copy follows by replication, so while that worker is offline the hub shows the chat only up to the last replicated event.
 - A large refactor: the server code moves out of `apps/web`, and all git and file access goes through `Host`.
 
 ## Alternatives considered

@@ -56,6 +56,10 @@ export interface Worker {
   token: string;
   child: ChildProcess;
   exited: Promise<number | null>;
+  /** The options it was started with, kept for a restart. */
+  options: AddWorkerOptions;
+  /** The last of what the process printed. */
+  output(): string;
 }
 
 export interface CheckpointRow {
@@ -98,6 +102,12 @@ export interface World {
 export interface AddWorkerOptions {
   /** Leave the scripted ACP agent out of the worker's environment, so it resolves agents as a real machine does. */
   noStubAgent?: boolean;
+  /** Start the worker with `--own-chats`, so it runs its worktrees' chats (docs/architecture/chat-ownership.md). */
+  ownChats?: boolean;
+  /** The hub URL the worker dials instead of the hub's own, such as a proxy a test can cut. */
+  hubUrl?: string;
+  /** Extra environment for the worker, such as a scenario for the scripted agent. */
+  env?: Record<string, string>;
 }
 
 export interface WorldOptions {
@@ -180,7 +190,7 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
     });
 
   const spawnWorker = (
-    w: Omit<Worker, "child" | "exited">,
+    w: Omit<Worker, "child" | "exited" | "options" | "output">,
     spawnOpts: AddWorkerOptions = {},
   ): Worker => {
     const child = spawn(
@@ -188,13 +198,14 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       [
         WORKER_BIN,
         "--hub",
-        server.url,
+        spawnOpts.hubUrl ?? server.url,
         "--token",
         w.token,
         "--root",
         w.root,
         "--state-dir",
         w.state,
+        ...(spawnOpts.ownChats ? ["--own-chats"] : []),
       ],
       {
         env: {
@@ -212,14 +223,19 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
                 BAND_AGENT_BIN_DIRS: agentBin,
                 ANTHROPIC_API_KEY: "test-key",
               }),
+          ...spawnOpts.env,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    child.stdout?.on("data", () => undefined);
-    child.stderr?.on("data", () => undefined);
+    let output = "";
+    const keep = (chunk: Buffer) => {
+      output = (output + chunk.toString()).slice(-20_000);
+    };
+    child.stdout?.on("data", keep);
+    child.stderr?.on("data", keep);
     const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
-    return { ...w, child, exited };
+    return { ...w, child, exited, options: spawnOpts, output: () => output };
   };
 
   const hostStatus = async (hostId: string) =>
@@ -269,11 +285,13 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       await waitFor(async () => ((await hostStatus(w.hostId)) === "online" ? true : undefined), {
         label: `${name} online`,
         timeoutMs: 30_000,
+      }).catch((err: Error) => {
+        throw new Error(`${err.message}\n${w.output()}`);
       });
       return w;
     },
     async restartWorker(w) {
-      const next = spawnWorker({ ...w });
+      const next = spawnWorker({ ...w }, w.options);
       workers.push(next);
       await waitFor(async () => ((await hostStatus(w.hostId)) === "online" ? true : undefined), {
         label: `${w.name} back online`,

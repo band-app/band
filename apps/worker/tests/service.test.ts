@@ -91,6 +91,26 @@ describe("install-service", () => {
 
   const supported = platform() === "linux" || platform() === "darwin";
 
+  it("keeps --own-chats in the service's environment", { skip: !supported }, () => {
+    const home = tmpDir("band-service-own-");
+    dirs.push(home);
+    const { bin } = stubBin(home);
+    const install = run(home, bin, [
+      "install-service",
+      "--hub",
+      "https://hub.example.com",
+      "--token",
+      TOKEN,
+      "--own-chats",
+    ]);
+    assert.equal(install.status, 0, install.stderr);
+    const secretFile =
+      platform() === "linux"
+        ? join(home, ".band", "worker-service", "worker.env")
+        : join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+    assert.match(readFileSync(secretFile, "utf8"), /BAND_WORKER_OWN_CHATS/);
+  });
+
   it("installs, reports status and uninstalls", { skip: !supported }, () => {
     const home = tmpDir("band-service-");
     dirs.push(home);

@@ -29,6 +29,8 @@ import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
 import { agentSessionService } from "./agent-session-service";
+// FRAGILE: ESM cycle leg, used only inside method bodies like the import above.
+import { chatOwnershipService } from "./chat-ownership-service";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 
@@ -347,6 +349,7 @@ export class ChatService {
       activeSessionLastModified: undefined,
       status: "idle",
       labels,
+      ownerHostId: undefined,
     };
 
     this.queries.insert({ ...session, createdAt: now, updatedAt: now });
@@ -375,6 +378,12 @@ export class ChatService {
   get(chatId: string): ChatSession | undefined {
     this.ensureInitialized();
     return this.chatSessions.get(chatId);
+  }
+
+  /** Every chat, of every worktree. */
+  all(): ChatSession[] {
+    this.ensureInitialized();
+    return [...this.chatSessions.values()];
   }
 
   /** List all chat sessions for a worktree. */
@@ -454,6 +463,23 @@ export class ChatService {
     // a phantom "field change".
     const updatedFields = Object.keys(updates).filter((k) => k !== "allowReservedLabels");
     log.info({ chatId, updatedFields }, "chat pane updated");
+    return merged;
+  }
+
+  /**
+   * Records which worker runs the chat, or `null` for the hub
+   * (docs/architecture/chat-ownership.md). Only `chat-ownership-service` calls it.
+   */
+  setOwner(chatId: string, hostId: string | null): ChatSession | undefined {
+    this.ensureInitialized();
+    const session = this.chatSessions.get(chatId);
+    if (!session) return undefined;
+    const merged = this.queries.update(chatId, session, {
+      ownerHostId: hostId,
+      updatedAt: Date.now(),
+    });
+    this.chatSessions.set(chatId, merged);
+    log.info({ chatId, owner: hostId ?? "hub" }, "chat owner changed");
     return merged;
   }
 
@@ -546,9 +572,10 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
-    // Stop the agent process and drop the chat's event log
+    // Stop the agent process and drop the chat's event log, here and on the worker that owns it
     agentSessionService.stop(chatId);
     agentSessionService.deleteLog(chatId);
+    if (session.ownerHostId) chatOwnershipService.release(chatId, session.ownerHostId, true);
 
     // Remove from DB
     this.queries.remove(chatId);
@@ -605,6 +632,8 @@ export class ChatService {
       for (const chatId of [...ids]) {
         agentSessionService.stop(chatId);
         agentSessionService.deleteLog(chatId);
+        const owner = this.chatSessions.get(chatId)?.ownerHostId;
+        if (owner) chatOwnershipService.release(chatId, owner, true);
         this.removeFromIndex(chatId);
       }
 
@@ -630,8 +659,13 @@ export class ChatService {
     const ids = [...(this.worktreeChats.get(oldId) ?? [])];
     for (const chatId of ids) {
       agentSessionService.stop(chatId);
-      const session = this.chatSessions.get(chatId);
-      if (!session) continue;
+      const current = this.chatSessions.get(chatId);
+      if (!current) continue;
+      // The chat leaves the worker that ran it. Who runs it on the new host is decided afresh.
+      const session = current.ownerHostId
+        ? this.queries.update(chatId, current, { ownerHostId: null, updatedAt: Date.now() })
+        : current;
+      if (current.ownerHostId) chatOwnershipService.release(chatId, current.ownerHostId, false);
       this.removeFromIndex(chatId);
       this.addToIndex({ ...session, worktreeId: newId });
     }

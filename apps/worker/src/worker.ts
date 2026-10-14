@@ -5,6 +5,7 @@ import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import {
+  CAPABILITY_CHAT_OWNERSHIP,
   type Channel,
   type LifecycleIdleReply,
   type LifecyclePolicy,
@@ -22,6 +23,8 @@ import { createLogger } from "@band-app/logger";
 import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
+import { ChatOwner } from "./chats/owner.ts";
+import { ChatStore } from "./chats/store.ts";
 import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
@@ -103,6 +106,8 @@ export class Worker {
   private exitCode = 0;
   /** The save of the latest session token. Writes queue behind it, and shutdown waits for it. */
   private tokenSaved: Promise<void> = Promise.resolve();
+  /** The chats this worker owns, with `--own-chats`. */
+  chats: ChatOwner | null = null;
   /** The daemon backend, when terminals persist. It reports the exits that happened while the worker was down. */
   private terminalDaemon: { recoverExits(): Promise<number> } | null = null;
 
@@ -176,9 +181,12 @@ export class Worker {
         workerId,
         buildId: `band-worker@${WORKER_VERSION}`,
         mode: config.ephemeral ? "ephemeral" : "attached",
-        capabilities: Object.entries(info.capabilities)
-          .filter(([, on]) => on)
-          .map(([name]) => name),
+        capabilities: [
+          ...Object.entries(info.capabilities)
+            .filter(([, on]) => on)
+            .map(([name]) => name),
+          ...(config.ownChats ? [CAPABILITY_CHAT_OWNERSHIP] : []),
+        ],
         labels: config.labels,
         roots: policy.rootPaths,
         agents: await findAgents(host),
@@ -198,12 +206,22 @@ export class Worker {
       stateDir: config.stateDir,
       reposDir: config.reposDir,
       cli: new CliCache(client.session, config.stateDir, log),
+      ownsChats: config.ownChats,
     };
     const registrar = new Registrar(ctx);
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
-    if (config.ephemeral) registerLifecycleMethods(registrar, ctx);
+    // Every worker hands out its agents' session files: an ephemeral one when it sleeps, a static
+    // one for the hub's checkpoints, so a restored chat resumes its session on another host.
+    registerLifecycleMethods(registrar, ctx);
+    if (config.ownChats) {
+      const chats = new ChatOwner(ctx, await ChatStore.open(join(config.stateDir, "chats.db")));
+      chats.register(registrar);
+      chats.start();
+      worker.chats = chats;
+      worker.disposers.push(() => chats.close());
+    }
     if (options.gitCredentialHelper) {
       const broker = new GitCredentialBroker(ctx);
       const socketPath = await broker.start();
@@ -273,6 +291,7 @@ export class Worker {
       disconnectedSince = null;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
       void ctx.cli?.sync();
+      this.chats?.onConnected();
       // Shells that ended while the worker was down: the hub hears of them now.
       void this.terminalDaemon
         ?.recoverExits()

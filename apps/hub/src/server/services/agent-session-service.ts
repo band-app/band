@@ -26,12 +26,29 @@
 import { randomUUID } from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+  type AcpAgentHandlers,
+  AcpAgentProcess,
+  type AttachedSession,
+  type PermissionOutcome,
+} from "@band-app/chat-runtime/acp-agent-process";
+import {
+  type ConfigChoice,
+  configCategory,
+  findOption,
+  optionChoices,
+  selectValues,
+} from "@band-app/chat-runtime/config-options";
+import { PendingWork } from "@band-app/chat-runtime/pending-work";
+import { rowsToEvents } from "@band-app/chat-runtime/replay";
+import { loggedSessionCost, sessionStateFromLog } from "@band-app/chat-runtime/session-state";
+import {
   type AcpAgentDefinition,
   type ClaudeCliArgs,
   type ClaudeDefaults,
   type Host,
   HostOfflineError,
 } from "@band-app/host-api";
+import type { ChatLaunchReply, OwnedChatInfo } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import type {
   ChatEvent,
@@ -41,13 +58,7 @@ import type {
   ResolvedDefaults,
   SessionState,
 } from "@band-app/shared/chat-events";
-import {
-  type AcpAgentHandlers,
-  AcpAgentProcess,
-  type AttachedSession,
-  type PermissionOutcome,
-} from "../infra/agents/acp-agent-process";
-import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
+import { ChatEventQueries } from "../infra/db/queries/chat-events";
 import {
   bandHome,
   type CodingAgentDefinition,
@@ -55,9 +66,9 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
-import { PendingWork } from "./_utils/agent-pending-work";
-import { rowsToEvents } from "./_utils/chat-log-replay";
-import { agentExtraDirs } from "./_utils/shared-dir";
+import { agentExtraDirs, openSharedDir } from "./_utils/shared-dir";
+// FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in method bodies.
+import { chatOwnershipService } from "./chat-ownership-service";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { BUILTIN_BAND_SERVER, MAX_TOKEN_TTL_MS, mcpProxyService } from "./mcp-proxy-service";
@@ -205,11 +216,26 @@ function emptyLive(): LiveState {
 // Helpers
 // ---------------------------------------------------------------------------
 
+export { type ConfigChoice, findOption, optionChoices };
+
 export class ChatNotFoundError extends Error {
   constructor(chatId: string) {
     super(`Chat not found: ${chatId}`);
     this.name = "ChatNotFoundError";
   }
+}
+
+/** What a worker that owns the chat keeps of it. */
+export function ownedChatInfo(chat: ChatSession): OwnedChatInfo {
+  return {
+    chatId: chat.id,
+    worktreeId: chat.worktreeId,
+    agentId: definitionFor(chat).id,
+    model: chat.model,
+    mode: chat.mode,
+    activeSessionId: chat.activeSessionId,
+    hasSummary: Boolean(chat.activeSessionSummary),
+  };
 }
 
 function definitionFor(chat: Pick<ChatSession, "agent">): CodingAgentDefinition {
@@ -218,34 +244,6 @@ function definitionFor(chat: Pick<ChatSession, "agent">): CodingAgentDefinition 
 
 function launchDefinition(def: CodingAgentDefinition): AcpAgentDefinition {
   return { type: def.type, label: def.label, command: def.command };
-}
-
-/** A choice of a select-type session config option, groups flattened. */
-export interface ConfigChoice {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-/** The select option for a category (`model`, `mode`), by ACP category or
- *  by the id agents conventionally give it. */
-export function findOption(
-  options: acp.SessionConfigOption[],
-  category: "model" | "mode",
-): acp.SessionConfigOption | undefined {
-  return options.find((o) => o.type === "select" && (o.category === category || o.id === category));
-}
-
-/** A select option's choices, flat or grouped, as one list. */
-export function optionChoices(option: acp.SessionConfigOption): ConfigChoice[] {
-  if (option.type !== "select") return [];
-  return option.options
-    .flatMap((o) => ("group" in o ? o.options : [o]))
-    .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
-}
-
-function selectValues(option: acp.SessionConfigOption): string[] {
-  return optionChoices(option).map((c) => c.id);
 }
 
 function emit(chatId: string, event: ChatEvent): void {
@@ -818,49 +816,58 @@ function localHubUrl(): string {
  * relay token as well. A failure here never stops the chat.
  */
 function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] {
+  if (!proc.supportsHttpMcp) {
+    log.info(
+      { chatId: rt.chatId, agent: proc.agentName },
+      "agent does not support HTTP MCP servers, so none are passed",
+    );
+    return [];
+  }
+  return mcpServerEntries(rt.chatId, rt.worktreeId, rt.relayEnv);
+}
+
+/** The `mcpServers` entries for a chat's session, each attach with a new token. */
+function mcpServerEntries(
+  chatId: string,
+  worktreeId: string,
+  relayEnv: Record<string, string> | null,
+): acp.McpServer[] {
   try {
-    const worktree = worktreeService.resolve(rt.worktreeId);
+    const worktree = worktreeService.resolve(worktreeId);
     if (!worktree) return [];
     // Every chat gets the built-in `band` server, so any chat can start linked work.
     const names = [
       BUILTIN_BAND_SERVER,
       ...mcpProxyService.serversForSession(worktree.repo.name, worktree.host.id).map((s) => s.name),
     ];
-    if (!proc.supportsHttpMcp) {
-      log.info(
-        { chatId: rt.chatId, agent: proc.agentName, servers: names },
-        "agent does not support HTTP MCP servers, so none are passed",
-      );
-      return [];
-    }
-    if (!rt.relayEnv && hostRegistry.hostFor(rt.worktreeId).id !== hostRegistry.local.id) {
+    if (!relayEnv && hostRegistry.hostFor(worktreeId).id !== hostRegistry.local.id) {
       // The hub's loopback address means nothing on a worker, so no relay grant means no tools.
       log.warn(
-        { chatId: rt.chatId, scope: rt.worktreeId },
+        { chatId, scope: worktreeId },
         "the agent runs on a worker but has no relay grant, so no MCP servers are passed",
       );
       return [];
     }
     // A resume or reload gets a new token, and the old one stops working.
-    mcpProxyService.revokeSession(rt.chatId);
+    mcpProxyService.revokeSession(chatId);
     const { token } = mcpProxyService.issueSessionToken(
-      rt.chatId,
+      chatId,
       names,
       // The process can outlive the default hour. Exit and chat removal revoke it.
       MAX_TOKEN_TTL_MS,
     );
-    const base = (rt.relayEnv?.BAND_SERVER_URL ?? localHubUrl()).replace(/\/+$/, "");
+    const base = (relayEnv?.BAND_SERVER_URL ?? localHubUrl()).replace(/\/+$/, "");
     const headers = [{ name: "Authorization", value: `Bearer ${token}` }];
-    if (rt.relayEnv?.BAND_TOKEN) {
-      headers.push({ name: "X-Band-Relay-Token", value: rt.relayEnv.BAND_TOKEN });
+    if (relayEnv?.BAND_TOKEN) {
+      headers.push({ name: "X-Band-Relay-Token", value: relayEnv.BAND_TOKEN });
     }
     log.info(
       {
-        chatId: rt.chatId,
-        scope: rt.worktreeId,
+        chatId,
+        scope: worktreeId,
         servers: names,
         baseUrl: base,
-        viaRelay: Boolean(rt.relayEnv?.BAND_TOKEN),
+        viaRelay: Boolean(relayEnv?.BAND_TOKEN),
       },
       "MCP servers for the session",
     );
@@ -871,7 +878,7 @@ function sessionMcpServers(rt: Runtime, proc: AcpAgentProcess): acp.McpServer[] 
       headers,
     }));
   } catch (err) {
-    log.warn({ chatId: rt.chatId, err }, "could not prepare MCP servers for the session");
+    log.warn({ chatId, err }, "could not prepare MCP servers for the session");
     return [];
   }
 }
@@ -1026,6 +1033,9 @@ export interface SessionListing {
   supported: boolean;
 }
 
+/** Relay grants of the agents worker-owned chats run, by chat id. A new launch revokes the old one. */
+const ownerGrants = new Map<string, { revoke(): Promise<void> }>();
+
 export class AgentSessionService {
   /** Subscribes to a chat's events: logged ones with their row id, and
    *  transient ones with negative ids. */
@@ -1040,6 +1050,64 @@ export class AgentSessionService {
       subs.delete(listener);
       if (subs.size === 0) listeners.delete(chatId);
     };
+  }
+
+  // ---- chats a worker owns (docs/architecture/chat-ownership.md) ---------
+
+  /**
+   * What a worker that owns the chat needs to start its agent: the agent
+   * definition, a relay grant and the chat ids in the environment, MCP
+   * servers with a fresh token, and the directories. Each call revokes the
+   * grant and the MCP token of the previous one.
+   */
+  async launchForOwner(chatId: string, agentId?: string): Promise<ChatLaunchReply> {
+    const chat = chatService.get(chatId);
+    if (!chat) throw new ChatNotFoundError(chatId);
+    const worktree = worktreeService.resolve(chat.worktreeId);
+    if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
+    const def = resolveAgentDefinition(settings.load(), agentId ?? chat.agent);
+    await ownerGrants.get(chatId)?.revoke();
+    ownerGrants.delete(chatId);
+    const grant = await worktree.host.relay?.issue({ worktreeId: chat.worktreeId, chatId });
+    if (grant) ownerGrants.set(chatId, grant);
+    const shared = await openSharedDir(chat.worktreeId).catch(() => null);
+    return {
+      chat: ownedChatInfo(chat),
+      agent: {
+        id: def.id,
+        type: def.type,
+        label: def.label,
+        command: def.command,
+        model: def.model,
+      },
+      cwd: worktree.worktree.path,
+      env: { ...grant?.env, BAND_CHAT_ID: chatId, BAND_WORKTREE_ID: chat.worktreeId },
+      mcpServers: mcpServerEntries(chatId, chat.worktreeId, grant?.env ?? null),
+      additionalDirectories: await agentExtraDirs(chat.worktreeId),
+      sharedDir: shared?.path ?? null,
+    };
+  }
+
+  /** Ends what `launchForOwner` handed out for the chat: its relay grant and MCP token. */
+  async revokeOwnerLaunch(chatId: string): Promise<void> {
+    await ownerGrants.get(chatId)?.revoke();
+    ownerGrants.delete(chatId);
+    mcpProxyService.revokeSession(chatId);
+  }
+
+  /** Hands an event of a worker-owned chat to the hub's subscribers. */
+  deliver(chatId: string, event: ChatEvent): void {
+    emit(chatId, event);
+  }
+
+  /** A worker-owned chat's open requests changed. */
+  notifyPending(chatId: string, worktreeId: string): void {
+    pendingObserver?.(chatId, worktreeId);
+  }
+
+  /** A worker-owned chat's agent acted outside a turn. */
+  notifyActivity(chatId: string, worktreeId: string, kind: AgentActivityKind): void {
+    activityObserver?.(chatId, worktreeId, kind);
   }
 
   /** Called whenever a permission or elicitation request opens or closes,
@@ -1058,6 +1126,7 @@ export class AgentSessionService {
 
   /** The soonest time one of the chat's pending-work holds lapses, or null with none. */
   nextWorkDeadline(chatId: string): number | null {
+    if (chatOwnershipService.isOwned(chatId)) return chatOwnershipService.workDeadline(chatId);
     const holds = runtimes.get(chatId)?.work.outstanding() ?? [];
     return holds.length > 0 ? Math.min(...holds.map((h) => h.until)) : null;
   }
@@ -1071,6 +1140,8 @@ export class AgentSessionService {
   async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
+    // A chat its worker owns runs there only, never in a second process here.
+    if (chat.ownerHostId) return null;
     // A message to a sleeping worktree brings its worker back first.
     if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
     const worktree = worktreeService.resolve(chat.worktreeId);
@@ -1122,7 +1193,7 @@ export class AgentSessionService {
     const reported = this.reportedCost(chatId);
     if (reported !== undefined) return reported;
     const sessionId = chatService.get(chatId)?.activeSessionId;
-    return sessionId ? sessionCost(sessionId) : null;
+    return sessionId ? loggedSessionCost(events, sessionId) : null;
   }
 
   /** Runs one prompt turn on the attached session. */
@@ -1211,6 +1282,9 @@ export class AgentSessionService {
   }
 
   answerPermission(chatId: string, requestId: string, optionId: string | null): boolean {
+    if (chatOwnershipService.isOwned(chatId)) {
+      return chatOwnershipService.answerPermission(chatId, requestId, optionId);
+    }
     const pending = runtimes.get(chatId)?.pending.get(requestId);
     if (!pending?.permission) return false;
     if (optionId !== null && !pending.optionIds?.includes(optionId)) return false;
@@ -1223,6 +1297,9 @@ export class AgentSessionService {
     requestId: string,
     response: acp.CreateElicitationResponse,
   ): boolean {
+    if (chatOwnershipService.isOwned(chatId)) {
+      return chatOwnershipService.answerElicitation(chatId, requestId, response);
+    }
     const pending = runtimes.get(chatId)?.pending.get(requestId);
     if (!pending?.elicitation) return false;
     pending.elicitation(response);
@@ -1231,12 +1308,14 @@ export class AgentSessionService {
 
   /** True while the chat's agent waits on the user. */
   hasPendingRequest(chatId: string): boolean {
+    if (chatOwnershipService.isOwned(chatId))
+      return chatOwnershipService.pending(chatId).length > 0;
     return (runtimes.get(chatId)?.pending.size ?? 0) > 0;
   }
 
   /** Chats of the worktree whose agent waits on the user. */
   chatsWithPendingRequest(worktreeId: string): string[] {
-    const chatIds: string[] = [];
+    const chatIds: string[] = chatOwnershipService.chatsWithPending(worktreeId);
     for (const rt of runtimes.values()) {
       for (const p of rt.pending.values()) {
         if (p.worktreeId === worktreeId) {
@@ -1258,6 +1337,13 @@ export class AgentSessionService {
    * a request waiting on the user, or work the agent started on its own.
    */
   isActive(chatId: string): boolean {
+    if (chatOwnershipService.isOwned(chatId)) {
+      return (
+        chatOwnershipService.task(chatId) !== null ||
+        chatOwnershipService.pending(chatId).length > 0 ||
+        chatOwnershipService.workDeadline(chatId) !== null
+      );
+    }
     const rt = runtimes.get(chatId);
     if (!rt) return false;
     return rt.inTurn || rt.pending.size > 0 || rt.work.outstanding().length > 0;
@@ -1284,21 +1370,14 @@ export class AgentSessionService {
       chatService.get(chatId) ??
       (worktreeId ? chatService.create(worktreeId, { id: chatId, name: "Chat" }) : undefined);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
-    const category =
-      option?.category === "model" || configId === "model"
-        ? "model"
-        : option?.category === "mode" || configId === "mode"
-          ? "mode"
-          : configId === "__legacy_model"
-            ? "model"
-            : configId === "__legacy_mode"
-              ? "mode"
-              : undefined;
+    const options = this.getSessionState(chatId).configOptions;
+    const option = options.find((o) => o.id === configId);
+    const category = configCategory(options, configId);
     if (category === "model") chatService.update(chatId, { model: value });
     if (category === "mode") chatService.update(chatId, { mode: value });
     const isEffort = option?.category === "thought_level" || configId === "effort";
     if (category === "model" || isEffort) defaultsChangedAt.set(chatId, Date.now());
+    if (chat.ownerHostId) return chatOwnershipService.setConfigOption(chatId, configId, value);
 
     const live = runtimes.get(chatId);
     const attached =
@@ -1385,47 +1464,7 @@ export class AgentSessionService {
 
     const revision = sessionId ? events.currentRevision(sessionId) : 0;
     if (sessionId && revision > 0) {
-      const latest = (match: Parameters<ChatEventQueries["latest"]>[2]) =>
-        events.latest(sessionId, revision, match);
-      const attached = latest({ kind: "session-attached" });
-      const after = (row: ChatEventRow | undefined) =>
-        row && (!attached || row.id > attached.id) ? row.event : undefined;
-      const base = attached?.event.type === "session-attached" ? attached.event : undefined;
-      const configUpdate = after(latest({ updateKind: "config_option_update" }));
-      const modeUpdate = after(latest({ updateKind: "current_mode_update" }));
-      const commands = latest({ updateKind: "available_commands_update" })?.event;
-      const usage = latest({ updateKind: "usage_update" })?.event;
-      const info = latest({ updateKind: "session_info_update" })?.event;
-      const modes = base?.modes ?? null;
-      const usageUpdate =
-        usage?.type === "update" && usage.update.sessionUpdate === "usage_update"
-          ? usage.update
-          : null;
-      return {
-        source: "log",
-        configOptions:
-          configUpdate?.type === "update" &&
-          configUpdate.update.sessionUpdate === "config_option_update"
-            ? configUpdate.update.configOptions
-            : (base?.configOptions ?? []),
-        modes:
-          modes &&
-          modeUpdate?.type === "update" &&
-          modeUpdate.update.sessionUpdate === "current_mode_update"
-            ? { ...modes, currentModeId: modeUpdate.update.currentModeId }
-            : modes,
-        models: base?.models ?? null,
-        commands:
-          commands?.type === "update" &&
-          commands.update.sessionUpdate === "available_commands_update"
-            ? commands.update.availableCommands
-            : (catalog.get(def.id)?.commands ?? []),
-        usage: usageUpdate,
-        title:
-          info?.type === "update" && info.update.sessionUpdate === "session_info_update"
-            ? (info.update.title ?? null)
-            : null,
-      };
+      return sessionStateFromLog(events, sessionId, revision, catalog.get(def.id)?.commands ?? []);
     }
 
     const cached = catalog.get(def.id);
@@ -1473,6 +1512,7 @@ export class AgentSessionService {
     const location = chatLocation(chat);
     if (!location) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const def = definitionFor(chat);
+    if (chat.ownerHostId) return this.listOwnedSessions(chat, def);
     const sameAgent = chatService
       .list(chat.worktreeId)
       .filter((c) => definitionFor(c).id === def.id)
@@ -1496,6 +1536,38 @@ export class AgentSessionService {
       return {
         supported: true,
         sessions: agentSessions.map((s) => ({
+          sessionId: s.sessionId,
+          summary: s.title || titles.get(s.sessionId) || s.sessionId,
+          lastModified: s.updatedAt ? Date.parse(s.updatedAt) : 0,
+        })),
+      };
+    }
+    return {
+      supported: true,
+      sessions: logged.map((s) => ({
+        sessionId: s.sessionId,
+        summary: s.title ?? s.sessionId,
+        lastModified: s.updatedAt,
+      })),
+    };
+  }
+
+  /** `listSessions` for a chat its worker owns: the agent's list from the worker, else the log. */
+  private async listOwnedSessions(
+    chat: ChatSession,
+    def: CodingAgentDefinition,
+  ): Promise<SessionListing> {
+    const sameAgent = chatService
+      .list(chat.worktreeId)
+      .filter((c) => definitionFor(c).id === def.id)
+      .map((c) => c.id);
+    const logged = events.listSessions(sameAgent);
+    const titles = new Map(logged.map((s) => [s.sessionId, s.title]));
+    const listed = await chatOwnershipService.listSessions(chat.id);
+    if (listed) {
+      return {
+        supported: true,
+        sessions: listed.map((s) => ({
           sessionId: s.sessionId,
           summary: s.title || titles.get(s.sessionId) || s.sessionId,
           lastModified: s.updatedAt ? Date.parse(s.updatedAt) : 0,
@@ -1680,11 +1752,3 @@ export class AgentSessionService {
 }
 
 export const agentSessionService = new AgentSessionService();
-
-/** Band's running cost estimate for a session, from its last finished turn. */
-function sessionCost(sessionId: string): number | null {
-  const revision = events.currentRevision(sessionId);
-  if (revision === 0) return null;
-  const row = events.latest(sessionId, revision, { kind: "turn-ended" });
-  return row?.event.type === "turn-ended" ? (row.event.usage?.costUsd ?? null) : null;
-}

@@ -159,6 +159,8 @@ test.describe("Desktop app: this computer as a worker", () => {
     // S6: the service runs the worker bundled in the app, through the app's own executable.
     const { program, env } = readPlist(home);
     expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
+    // This Mac's worker runs its worktrees' chats (docs/chat-ownership.md).
+    expect(env.BAND_WORKER_OWN_CHATS).toBe("1");
     if (isPackagedRun()) {
       expect(program[0]).toContain(".app/Contents/MacOS/");
       expect(program[1]).toContain(".app/Contents/Resources/worker/band-worker.mjs");
@@ -262,6 +264,7 @@ ${env}
     expect(program[1]).not.toContain("/usr/local/lib");
     expect(after.BAND_WORKER_ID).toBe(issued.hostId);
     expect(after.BAND_WORKER_ROOTS).toBe(root);
+    expect(after.BAND_WORKER_OWN_CHATS).toBe("1");
     expect(
       (await hosts()).filter((h) => h.id === issued.hostId && h.status === "online"),
     ).toHaveLength(1);

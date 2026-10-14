@@ -25,6 +25,7 @@ import { selectWsProtocol } from "../../../auth";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
+import { chatOwnershipService } from "./chat-ownership-service";
 import { checkpointService } from "./checkpoint-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { followService } from "./follow-service";
@@ -187,6 +188,7 @@ export class WorkerLinkService {
     gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);
+    chatOwnershipService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {
@@ -219,6 +221,8 @@ export class WorkerLinkService {
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
     this.publish(workerId, "online");
+    // Chats the worker owns or can own, and what other clients asked of them while it was away.
+    chatOwnershipService.onConnected(session);
     void ephemeralLifecycleService.onConnected(session);
     // A copy this host kept while its work continued elsewhere is compared with that checkpoint.
     void followService.onHostReturned(workerId).catch((err) => {
