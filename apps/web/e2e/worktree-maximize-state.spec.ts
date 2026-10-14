@@ -46,7 +46,7 @@ const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared
 // dockview renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
-// The dockview layout — and therefore the maximize button — only exists
+// The dockview layout — and therefore the maximize shortcut — only exists
 // in the desktop layout.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -126,9 +126,8 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.waitForReady();
     await worktreePage.maximizePanel(0);
 
-    // Positive anchor: the alternate state actually rendered (Restore
-    // button visible) before we assert on the persisted bytes.
-    await expect(worktreePage.restoreButton).toBeVisible();
+    // Positive anchor: the maximize was recorded before we assert on the persisted bytes.
+    await worktreePage.expectMaximized(WORKTREE_A);
 
     // Capture the group id A chose (whichever was at index 0 in the
     // default layout). It must match the persisted `maximizedGroup`.
@@ -142,8 +141,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     // B must NOT inherit A's maximize. The reviewer flagged this
     // contamination path explicitly during review of the first
     // implementation — see thread on `apps/web/src/components/SharedDockviewLayout.tsx:1500`.
-    await expect(worktreePage.maximizeButtons.first()).toBeVisible();
-    await expect(worktreePage.restoreButton).not.toBeVisible();
+    await worktreePage.expectNotMaximized(WORKTREE_B);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_B)).toBeUndefined();
 
     // A's persisted state is untouched by the B visit.
@@ -152,8 +150,24 @@ test.describe("Worktree maximize state (issue #490)", () => {
     // Switch back to A — the maximize must be re-applied to the UI.
     await worktreePage.goto(WORKTREE_A);
     await worktreePage.waitForReady();
-    await expect(worktreePage.restoreButton).toBeVisible();
+    await worktreePage.expectMaximized(WORKTREE_A);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_A)).toBe(aMaxGroup);
+  });
+
+  test("the group header has no Maximize or Restore button; the shortcut maximizes and restores", async ({
+    page,
+  }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE_A);
+    await worktreePage.waitForReady();
+    await expect(page.getByRole("button", { name: "Maximize" })).toHaveCount(0);
+
+    await worktreePage.maximizePanel(0);
+    await worktreePage.expectMaximized(WORKTREE_A);
+    await expect(page.getByRole("button", { name: "Restore" })).toHaveCount(0);
+
+    await worktreePage.restorePanel();
+    await worktreePage.expectNotMaximized(WORKTREE_A);
   });
 
   test("AC2 — a maximized panel survives a full page reload", async ({ page }) => {
@@ -162,7 +176,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.goto(WORKTREE_A);
     await worktreePage.waitForReady();
     await worktreePage.maximizePanel(0);
-    await expect(worktreePage.restoreButton).toBeVisible();
+    await worktreePage.expectMaximized(WORKTREE_A);
     const before = await worktreePage.readMaximizedGroup(WORKTREE_A);
     expect(before).toBeDefined();
 
@@ -170,7 +184,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.waitForReady();
 
     // Same button visible, same persisted value.
-    await expect(worktreePage.restoreButton).toBeVisible();
+    await worktreePage.expectMaximized(WORKTREE_A);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_A)).toBe(before);
   });
 
@@ -183,12 +197,11 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.goto(WORKTREE_A);
     await worktreePage.waitForReady();
     await worktreePage.maximizePanel(0);
-    await expect(worktreePage.restoreButton).toBeVisible();
+    await worktreePage.expectMaximized(WORKTREE_A);
 
     // Click Restore — the maximize must be cleared from localStorage too.
     await worktreePage.restorePanel();
-    await expect(worktreePage.maximizeButtons.first()).toBeVisible();
-    await expect(worktreePage.restoreButton).not.toBeVisible();
+    await worktreePage.expectNotMaximized(WORKTREE_A);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_A)).toBeUndefined();
 
     // Round-trip through B and back; A must still NOT show maximize.
@@ -196,8 +209,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.waitForReady();
     await worktreePage.goto(WORKTREE_A);
     await worktreePage.waitForReady();
-    await expect(worktreePage.maximizeButtons.first()).toBeVisible();
-    await expect(worktreePage.restoreButton).not.toBeVisible();
+    await worktreePage.expectNotMaximized(WORKTREE_A);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_A)).toBeUndefined();
   });
 
@@ -219,7 +231,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     // maximized in A, so maximizing index 1 here gives B a different group.
     await worktreePage.openChat(WORKTREE_B);
     await worktreePage.clickChatSplitRight(WORKTREE_B);
-    await expect(worktreePage.maximizeButtons).toHaveCount(2);
+    await expect(worktreePage.centerToolbars).toHaveCount(2);
     await worktreePage.maximizePanel(1);
     const bMaxGroup = await worktreePage.readMaximizedGroup(WORKTREE_B);
     expect(bMaxGroup).toBeDefined();
@@ -305,7 +317,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     await worktreePage.waitForReady();
     await worktreePage.tab("terminal").click();
     await worktreePage.maximizePanel(0);
-    await expect(worktreePage.restoreButton).toBeVisible();
+    await worktreePage.expectMaximized(WORKTREE_A);
 
     // Wait for the saveLayout that fires after maximize to settle on
     // the expected shape: groups populated, terminal as g2's active
@@ -349,13 +361,13 @@ test.describe("Worktree maximize state (issue #490)", () => {
     // it yet (it's behind the maximize).
     await worktreePage.goto(WORKTREE_A);
     await worktreePage.waitForReady();
-    await expect(worktreePage.restoreButton).toBeVisible(); // maxed
+    await worktreePage.expectMaximized(WORKTREE_A); // maxed
 
     // Exit max — the hidden group becomes visible. The active view
     // should be "terminal" (A's saved value), not "changes" (B's last
     // active that the live dockview was previously showing).
     await worktreePage.restorePanel();
-    await expect(worktreePage.maximizeButtons.first()).toBeVisible();
+    await worktreePage.expectNotMaximized(WORKTREE_A);
 
     // Two-phase assertion. Phase 1 is the fast negative regression
     // check — if the wrong tab (Changes) leaked across the worktree

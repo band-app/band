@@ -42,9 +42,7 @@ import {
   GitCompare,
   Globe,
   Loader2,
-  Maximize2,
   MessageSquare,
-  Minimize2,
   MoreVertical,
   Plus,
   RotateCcw,
@@ -384,7 +382,7 @@ export function getWorktreeLeafActions(worktreeId: string | null): LeafActions |
 // ---------------------------------------------------------------------------
 //
 // Each leaf can publish a node of action buttons (save, view toggle, revert…)
-// that the group header (`RightHeaderActions`) renders next to the Maximize
+// that the group header (`RightHeaderActions`) renders next to the toolbar
 // action for whichever tab is active — so the tab content holds no toolbar of
 // its own. Leaves publish via `usePublishHeaderActions`; the header subscribes
 // to a change event and re-reads the active panel's entry each render.
@@ -2910,14 +2908,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const chrome = useWorktreeChrome();
   const edges = useGroupEdges(props, !!chrome && isGridGroup);
 
-  const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
-  useEffect(() => {
-    const refresh = () => setIsMaximized(props.api.isMaximized());
-    refresh();
-    const d = props.containerApi.onDidMaximizedGroupChange(refresh);
-    return () => d.dispose();
-  }, [props.api, props.containerApi]);
-
   // Re-render when the active tab changes (in any group) or a leaf republishes
   // its header actions, so this group's active-tab actions stay current.
   const [, bumpActions] = useReducer((n: number) => n + 1, 0);
@@ -2941,7 +2931,7 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const activeId = props.group.activePanel?.id;
   const renderLeafActions = activeId ? leafHeaderActionsByPanelId.get(activeId) : undefined;
 
-  // Mobile / tabs-only: no Maximize (single full-screen group). The active
+  // Mobile / tabs-only: single full-screen group. The active
   // tab's actions fold behind a ⋮ menu so the narrow tab strip stays uncluttered.
   if (mobileByApiId.has(props.containerApi.id)) {
     if (!renderLeafActions) return null;
@@ -2966,8 +2956,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     );
   }
 
-  const MaxIcon = isMaximized ? Minimize2 : Maximize2;
-  const maxLabel = isMaximized ? "Restore" : "Maximize";
   const activeWorktreeId = (props.group.activePanel?.params as { worktreeId?: string } | undefined)
     ?.worktreeId;
 
@@ -2975,30 +2963,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
       {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={maxLabel}
-            onClick={() => {
-              if (props.api.isMaximized()) {
-                props.api.exitMaximized();
-              } else {
-                props.api.maximize();
-              }
-            }}
-            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <MaxIcon className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {maxLabel}
-          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-            ⇧⌘M
-          </kbd>
-        </TooltipContent>
-      </Tooltip>
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
         <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
       )}

@@ -1,6 +1,6 @@
 /**
  * The unified center dockview renders each active leaf's actions in the group
- * header (next to Maximize), not inside the tab content (#643). This guards the
+ * header, not inside the tab content (#643). This guards the
  * file leaf's side of that: opening a markdown file publishes its preview/source
  * toggle to the header, and doing so must NOT trigger an infinite render loop
  * (a regression where FileViewer.onActionsChange re-fired every render because it
