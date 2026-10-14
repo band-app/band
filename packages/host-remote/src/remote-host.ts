@@ -312,6 +312,7 @@ export class RemoteHost implements Host {
     usageReader: (agent) => this.usageReader(agent),
     // The worker takes no `home` override. It is for tests of the local install.
     installSkills: (): Promise<InstallSkillsResult> => this.rpc.call("agentEnv.installSkills"),
+    accountUsage: (options) => this.rpc.call("agentEnv.accountUsage", options ?? {}),
     hooksStatus: () => this.rpc.call("agentEnv.hooksStatus"),
     installHooks: () => this.rpc.call("agentEnv.installHooks"),
     removeHooks: () => this.rpc.call("agentEnv.removeHooks"),
