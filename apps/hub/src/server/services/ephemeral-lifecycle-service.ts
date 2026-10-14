@@ -58,7 +58,7 @@ import { WorktreeSleepQueries, type WorktreeSleepRow } from "../infra/db/queries
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { hostRegistry } from "../infra/host/registry";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
-import { buildSnapshot, WIP_DIR } from "./_utils/snapshot-git";
+import { buildSnapshot, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { placementService } from "./placement-service";

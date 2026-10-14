@@ -44,7 +44,7 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, gitIn, WIP_DIR } from "./_utils/snapshot-git";
+import { buildSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { type ChangedFile, checkpointService } from "./checkpoint-service";

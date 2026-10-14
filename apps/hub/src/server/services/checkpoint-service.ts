@@ -50,7 +50,7 @@ import { rekeyWorktreeRows } from "../infra/db/queries/worktree-rekey";
 import { hostRegistry } from "../infra/host/registry";
 import { checkpointDir, forgetCheckpoints, worktreeCheckpointDir } from "./_utils/checkpoint-store";
 import { hostNamesOf } from "./_utils/repo-host-policy";
-import { buildSnapshot, checkoutSnapshot, gitIn, WIP_DIR } from "./_utils/snapshot-git";
+import { buildSnapshot, checkoutSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { onTurnEnded } from "./_utils/turn-events";
 import { chatService } from "./chat-service";
 import { repoService } from "./repo-service";
@@ -359,6 +359,7 @@ export class CheckpointService {
         `Host ${hostId} is offline, so it cannot be checkpointed.`,
       );
     }
+    this.assertOwner(worktreeId, hostId, session);
     const host = hostRegistry.hostById(hostId);
     const rpc = new RemoteRpc(hostId, () => session);
     const [root] = (await host.info()).roots;
@@ -450,6 +451,13 @@ export class CheckpointService {
         trigger,
         createdAt: Date.now(),
       };
+      // A continuation may have superseded the worktree while the snapshot was being read.
+      try {
+        this.assertOwner(worktreeId, hostId, session);
+      } catch (err) {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        throw err;
+      }
       this.rows.insert(row);
       this.warnings.delete(worktreeId);
       await this.markCurrent(worktreeId, host, cwd);
@@ -459,6 +467,29 @@ export class CheckpointService {
     } finally {
       await git(["update-ref", "-d", ref]).catch(() => undefined);
       await host.fs.rm(remoteBundle, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * A checkpoint is stored only for the worktree's current owner: the row is not superseded, it
+   * still lives on the sending worker, and that worker's link is the one the snapshot came over.
+   * This holds on the store path as well as at the start, so a late shutdown checkpoint that
+   * races a continuation is rejected.
+   */
+  private assertOwner(worktreeId: string, hostId: string, session: ServerSession): void {
+    const found = worktreeService.resolve(worktreeId);
+    if (!found) throw new CheckpointError("conflict", `${worktreeId} no longer exists.`);
+    if (found.worktree.supersededBy) {
+      throw new CheckpointError(
+        "conflict",
+        `${worktreeId} was continued as ${found.worktree.supersededBy}, so ${hostId} no longer owns it.`,
+      );
+    }
+    if ((found.worktree.hostId ?? LOCAL_HOST_ID) !== hostId || this.sessions.get(hostId) !== session) {
+      throw new CheckpointError(
+        "conflict",
+        `${hostId} does not own ${worktreeId}, so its checkpoint is not stored.`,
+      );
     }
   }
 
