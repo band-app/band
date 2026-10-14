@@ -1435,6 +1435,39 @@ export class WorktreePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** Double-click the `file` leaf tab for `path` (pins a preview tab). */
+  async doubleClickFileTab(path: string): Promise<void> {
+    await test.step(`Double-click the tab of ${path}`, async () => {
+      await this.fileTab(path).dblclick();
+    });
+  }
+
+  /** Double-click the `diff` leaf tab for `path` (pins a preview tab). */
+  async doubleClickDiffTab(path: string): Promise<void> {
+    await test.step(`Double-click the diff tab of ${path}`, async () => {
+      await this.diffTab(path).dblclick();
+    });
+  }
+
+  /** The italic title span of a file tab; italic means "preview". */
+  private tabTitle(tab: Locator): Locator {
+    return tab.locator("span").first();
+  }
+
+  /** Assert the `file` tab for `path` is (or is not) a preview tab. */
+  async expectFileTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.fileTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
+  }
+
+  /** Assert the `diff` tab for `path` is (or is not) a preview tab. */
+  async expectDiffTabPreview(path: string, preview: boolean): Promise<void> {
+    const title = this.tabTitle(this.diffTab(path));
+    if (preview) await expect(title).toHaveClass(/italic/);
+    else await expect(title).not.toHaveClass(/italic/);
+  }
+
   /** The close button on the `file` leaf tab for `path`. */
   fileTabCloseButton(path: string): Locator {
     return this.page.getByTestId(`center-file-tab__close--${path}`);
@@ -1572,6 +1605,16 @@ export class WorktreePage {
     });
   }
 
+  /** Switch to the `file` leaf tab for `path` without touching its editor. */
+  async activateFileTab(path: string): Promise<void> {
+    await test.step(`Switch to the tab for ${path}`, async () => {
+      await this.fileTab(path).click();
+      await this.fileLeafVisibilityMarker(true)
+        .first()
+        .waitFor({ state: "visible", timeout: 20_000 });
+    });
+  }
+
   /** Type `text` at the end of the visible file leaf's editor. The caller
    *  activates the tab first (a click on desktop, a tap on a touch screen). */
   async appendToActiveFileEditor(text: string): Promise<void> {
@@ -1635,6 +1678,36 @@ export class WorktreePage {
     await test.step("Navigate away from the app (about:blank)", async () => {
       await this.page.goto("about:blank");
     });
+  }
+
+  /** Press Cmd+S (Ctrl+S off macOS) in the focused editor. */
+  async pressSaveShortcut(): Promise<void> {
+    await test.step("Press Cmd/Ctrl+S", async () => {
+      await this.page.keyboard.press(`${this.modifier}+s`);
+    });
+  }
+
+  /** Press Cmd+Z (Ctrl+Z off macOS) in the focused editor. */
+  async pressUndoShortcut(): Promise<void> {
+    await test.step("Press Cmd/Ctrl+Z", async () => {
+      await this.page.keyboard.press(`${this.modifier}+z`);
+    });
+  }
+
+  /** Text of the line holding the editor's cursor, read from the browser's
+   *  selection anchor (CodeMirror keeps it in sync with its own selection). */
+  async activeEditorLineText(): Promise<string> {
+    return await this.page.evaluate(() => {
+      const node = window.getSelection()?.anchorNode ?? null;
+      const el = node instanceof Element ? node : (node?.parentElement ?? null);
+      return el?.closest(".cm-line")?.textContent ?? "";
+    });
+  }
+
+  /** The selected text of the page, which is the editor's selection while the
+   *  editor has focus. */
+  async selectedText(): Promise<string> {
+    return await this.page.evaluate(() => window.getSelection()?.toString() ?? "");
   }
 
   /** The scroll offset of the visible file leaf's CodeMirror scroller. 0 means
@@ -2559,6 +2632,45 @@ export class WorktreePage {
    *  with the center tab strip. */
   get rightPanelHeader(): Locator {
     return this.page.getByTestId("right-sidepanel__header");
+  }
+
+  /** The sidepanel's tab strip (`role="tablist"` in its header). */
+  get rightPanelTabList(): Locator {
+    return this.rightPanelHeader.getByRole("tablist");
+  }
+
+  /** Every tab button in the sidepanel's strip. */
+  get rightPanelTabs(): Locator {
+    return this.rightPanelTabList.getByRole("tab");
+  }
+
+  /** Drag the separator left of the sidepanel until the panel is `width` px wide. */
+  async resizeRightPanelTo(width: number): Promise<void> {
+    await test.step(`Resize the right sidepanel to ${width}px`, async () => {
+      const separator = this.page.getByRole("separator").last();
+      const handle = await this.boxOf(separator);
+      const panel = await this.boxOf(this.rightSidepanel);
+      const y = handle.y + handle.height / 2;
+      const x = handle.x + handle.width / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + (panel.width - width), y, { steps: 10 });
+      await this.page.mouse.up();
+      await expect
+        .poll(async () => Math.round((await this.boxOf(this.rightSidepanel)).width))
+        .toBeGreaterThan(width - 20);
+    });
+  }
+
+  /** True when no tab sticks out of the strip's box. */
+  async rightPanelTabsFitStrip(): Promise<boolean> {
+    return this.rightPanelTabList.evaluate((strip) => {
+      const bounds = strip.getBoundingClientRect();
+      return Array.from(strip.querySelectorAll('[role="tab"]')).every((tab) => {
+        const box = tab.getBoundingClientRect();
+        return box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5;
+      });
+    });
   }
 
   /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */

@@ -42,6 +42,44 @@ export class FileTreesPage {
     return this.page.getByTestId(`file-tree__row--${path}`);
   }
 
+  /** The leading file icon (an `<svg>`) of a Files-tree row. */
+  fileTreeRowIcon(path: string): Locator {
+    return this.fileTreeRow(path).locator("svg").first();
+  }
+
+  /** RGBA of the icon's top-left corner pixel and of a pixel at the far right
+   *  of the same row (the row's own background), read from two screenshots. */
+  async iconCornerAndRowBackground(
+    path: string,
+  ): Promise<{ corner: number[]; background: number[] }> {
+    const row = this.fileTreeRow(path);
+    const [iconPng, rowPng] = await Promise.all([
+      this.fileTreeRowIcon(path).screenshot(),
+      row.screenshot(),
+    ]);
+    return this.page.evaluate(
+      async ([iconB64, rowB64]) => {
+        const pixel = async (b64: string, at: (w: number, h: number) => [number, number]) => {
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("no 2d context");
+          ctx.drawImage(bitmap, 0, 0);
+          const [x, y] = at(bitmap.width, bitmap.height);
+          return Array.from(ctx.getImageData(x, y, 1, 1).data);
+        };
+        return {
+          corner: await pixel(iconB64 as string, () => [0, 0]),
+          background: await pixel(rowB64 as string, (w, h) => [w - 2, Math.floor(h / 2)]),
+        };
+      },
+      [iconPng.toString("base64"), rowPng.toString("base64")],
+    );
+  }
+
   /** A row in the Changes tree (`ChangesFileTree`), keyed by its
    *  worktree-relative path. */
   changesTreeRow(path: string): Locator {
@@ -119,6 +157,38 @@ export class FileTreesPage {
       await this.page
         .getByTestId(FILE_VIEWER_ROOT_TESTID)
         .waitFor({ state: "visible", timeout: 15_000 });
+    });
+  }
+
+  /** Single-click a Files-tree row (opens a preview tab) and wait for its tab. */
+  async clickFile(path: string): Promise<void> {
+    await test.step(`Single-click Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).click();
+      await this.worktree.fileTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Double-click a Files-tree row (opens or pins its tab) and wait for the tab. */
+  async doubleClickFile(path: string): Promise<void> {
+    await test.step(`Double-click Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).dblclick();
+      await this.worktree.fileTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Single-click a Changes-tree row (opens a preview diff tab). */
+  async clickChange(path: string): Promise<void> {
+    await test.step(`Single-click Changes-tree row ${path}`, async () => {
+      await this.changesTreeRow(path).click();
+      await this.worktree.diffTab(path).waitFor({ state: "attached", timeout: 15_000 });
+    });
+  }
+
+  /** Double-click a Changes-tree row (opens or pins its diff tab). */
+  async doubleClickChange(path: string): Promise<void> {
+    await test.step(`Double-click Changes-tree row ${path}`, async () => {
+      await this.changesTreeRow(path).dblclick();
+      await this.worktree.diffTab(path).waitFor({ state: "attached", timeout: 15_000 });
     });
   }
 

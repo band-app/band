@@ -314,6 +314,19 @@ function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: b
   return preview === true;
 }
 
+/** Pin a preview tab (clears its italic `preview` param). `params` are the
+ *  tab's props, because `api.getParameters()` can be empty on a freshly-added
+ *  panel's tab. A pinned tab is never picked as the preview to replace, because
+ *  the open paths re-read this param from the live panel instead of trusting
+ *  their id refs. */
+function pinTab<P extends { preview?: boolean }>(
+  api: IDockviewPanelHeaderProps["api"],
+  params: P,
+): void {
+  const cur = { ...params, ...api.getParameters<P>() };
+  if (cur.preview !== false) api.updateParameters({ ...cur, preview: false });
+}
+
 const bandTheme: DockviewTheme = {
   name: "band",
   // `dockview-center-tabs` scopes the unified-center tab CSS (title-sized
@@ -1436,9 +1449,52 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     (view: any) => {
       editorViewRef.current = view;
       setViews(view ? [view] : []);
+      // Track the position as the user scrolls: by the time a tab switch
+      // unmounts the leaf, the detached scroller already reads 0.
+      stopTrackingScrollRef.current?.();
+      stopTrackingScrollRef.current = null;
+      if (view) {
+        const scroller: HTMLElement = view.scrollDOM;
+        // One store write per frame: a scroll fires many events.
+        let scrollFrame = 0;
+        const onScroll = () => {
+          if (scrollFrame) return;
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            persistEditorStateRef.current();
+          });
+        };
+        scroller.addEventListener("scroll", onScroll, { passive: true });
+        // Switching tabs detaches the editor and puts it back at offset 0
+        // without a scroll event. When it has a size again, restore the stored
+        // offset; the browser clamps it until layout settles, so retry briefly.
+        let frame = 0;
+        const restore = (tries: number) => {
+          const saved = getFileTabState(worktreeIdRaw, filePathRaw)?.scrollTop;
+          if (!saved || scroller.clientHeight === 0) return;
+          scroller.scrollTop = saved;
+          if (Math.abs(scroller.scrollTop - saved) > 1 && tries < 30) {
+            frame = requestAnimationFrame(() => restore(tries + 1));
+          }
+        };
+        const observer = new ResizeObserver(() => {
+          if (scroller.clientHeight > 0 && scroller.scrollTop === 0) {
+            cancelAnimationFrame(frame);
+            restore(0);
+          }
+        });
+        observer.observe(scroller);
+        stopTrackingScrollRef.current = () => {
+          scroller.removeEventListener("scroll", onScroll);
+          cancelAnimationFrame(scrollFrame);
+          observer.disconnect();
+          cancelAnimationFrame(frame);
+        };
+      }
     },
-    [setViews],
+    [setViews, worktreeIdRaw, filePathRaw],
   );
+  const stopTrackingScrollRef = useRef<(() => void) | null>(null);
 
   // Capture the editor's cursor selection + scroll offset into the per-tab
   // store so reopening the file (or reloading) lands the user back where they
@@ -1448,7 +1504,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   // replay a stale copy of the file over newer content.
   const persistEditorState = useCallback(() => {
     const view = editorViewRef.current;
-    if (!view) return;
+    // A hidden or detached scroller reads scrollTop 0 — keep the last real one.
+    if (!view || view.scrollDOM.clientHeight === 0) return;
     try {
       const { selection, scrollTop } = serializeViewPosition(view);
       updateFileTabState(worktreeIdRaw, filePathRaw, { selection, scrollTop });
@@ -2616,11 +2673,18 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   // per-file store when that fires. Seeded synchronously so a restored dirty
   // file shows the dot immediately on mount.
   const [dirty, setDirty] = useState(() => isFileDirty(worktreeId, filePath));
+  const tabApi = props.api;
+  const tabParams = props.params;
   useEffect(() => {
-    const recheck = () => setDirty(isFileDirty(worktreeId, filePath));
+    const recheck = () => {
+      const nowDirty = isFileDirty(worktreeId, filePath);
+      setDirty(nowDirty);
+      // Editing a preview tab pins it, like VS Code.
+      if (nowDirty) pinTab(tabApi, tabParams);
+    };
     window.addEventListener("band:dirty-change", recheck);
     return () => window.removeEventListener("band:dirty-change", recheck);
-  }, [worktreeId, filePath]);
+  }, [worktreeId, filePath, tabApi, tabParams]);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
@@ -2636,7 +2700,11 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
       filePath={filePath}
       testidPrefix={`center-file-tab--${filePath}`}
     >
-      <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
+      <div
+        className={TAB_ROOT_CLASS}
+        data-testid={`center-file-tab--${filePath}`}
+        onDoubleClick={() => pinTab(tabApi, tabParams)}
+      >
         <div className={TAB_CONTENT_WRAP}>
           <FileTypeIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
@@ -2709,6 +2777,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
         className={TAB_ROOT_CLASS}
         data-testid={`center-diff-tab--${filePath}`}
         data-commit={commit}
+        onDoubleClick={() => pinTab(props.api, props.params)}
       >
         <div className={TAB_CONTENT_WRAP}>
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
@@ -3628,7 +3697,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
@@ -3688,7 +3759,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
-        if (prev) {
+        // A tab pinned from its own strip (double-click, edit) only flips its
+        // param, so only an explicit `false` there overrides the id ref.
+        if (prev && prev.api.getParameters<{ preview?: boolean }>().preview !== false) {
           position = { referenceGroup: prev.group.id };
           previewToRemove = prev;
         }
