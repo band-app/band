@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stripTerminalQueries } from "@band-app/worktree-ops/strip-queries";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ContinueGateError } from "../../errors";
@@ -6,7 +7,6 @@ import { followService } from "../../services/follow-service";
 import { terminalService } from "../../services/terminal-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
-import { stripTerminalQueries } from "./strip-queries";
 
 /**
  * Terminal sub-router — migrated into the 3-tier architecture as part of

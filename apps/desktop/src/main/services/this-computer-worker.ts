@@ -204,6 +204,17 @@ export class ThisComputerWorker {
     return Boolean(dir && installed.program[1]?.startsWith(`${dir}/`));
   }
 
+  /**
+   * The host id of the worker service on this Mac when it serves `hub`, or null. Read from the
+   * installed service with no call to the hub, so the UI can ask on every start.
+   */
+  localHostId(hub: HubAccess | null): string | null {
+    if (!hub) return null;
+    const installed = this.readInstalled();
+    if (!installed || installed.env.BAND_HUB_URL !== hub.url) return null;
+    return installed.env.BAND_WORKER_ID ?? null;
+  }
+
   async status(hub: HubAccess | null): Promise<ThisComputerStatus> {
     const supported = this.platform === "darwin" && this.deps.location !== null;
     const installed = this.readInstalled();

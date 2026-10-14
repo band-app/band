@@ -16,7 +16,7 @@
  * It also checks that a parked terminal acknowledges its output on receipt
  * (`terminal-cache.ts`): the flood must never pause long enough to hit the
  * server's 5 s stall timeout, which is what a parked terminal that withheld
- * its acks would cost (`api/terminals/output-flow.ts`). The check is the
+ * its acks would cost (`packages/worktree-ops/src/output-flow.ts`). The check is the
  * longest gap between two polls that saw the flood's `seq` number climb.
  *
  * DOM renderer so the rendered rows are readable. Real server, real PTYs.

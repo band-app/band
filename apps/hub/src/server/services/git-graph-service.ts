@@ -13,8 +13,8 @@
 
 import { createHash } from "node:crypto";
 import { type CommandRun, gitRunner } from "@band-app/host-api";
+import { assertWorktreeRelative } from "@band-app/worktree-ops/diff";
 import { WorktreeNotFoundError } from "../errors";
-import { assertWorktreeRelative } from "./diff-service";
 import {
   worktreeService as defaultWorktreeService,
   type WorktreeService,

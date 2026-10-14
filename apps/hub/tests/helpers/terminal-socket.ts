@@ -65,14 +65,59 @@ export class TerminalSocket {
       `ws://${url.host}/terminal?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${terminalId}`,
       { headers: { Cookie: `band_token=${token}` } },
     );
-    const socket = new TerminalSocket(ws, maxOutputChars);
+    return TerminalSocket.attach(ws, { maxOutputChars, flow });
+  }
+
+  /**
+   * The same protocol on a worker's direct listener, with the
+   * token as a subprotocol the way the desktop app sends it. Rejects when the worker refuses
+   * the upgrade.
+   */
+  static openDirect(
+    access: { port: number; token: string },
+    {
+      worktreeId,
+      terminalId,
+      cols = 100,
+      rows = 30,
+    }: { worktreeId: string; terminalId: string; cols?: number; rows?: number },
+  ): Promise<TerminalSocket> {
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${access.port}/terminal?worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${terminalId}`,
+      ["band", `band-token.${access.token}`],
+    );
+    return TerminalSocket.attach(ws, {
+      maxOutputChars: Number.POSITIVE_INFINITY,
+      flow: false,
+      cols,
+      rows,
+    });
+  }
+
+  private static async attach(
+    ws: WebSocket,
+    opts: { maxOutputChars: number; flow: boolean; cols?: number; rows?: number },
+  ): Promise<TerminalSocket> {
+    const socket = new TerminalSocket(ws, opts.maxOutputChars);
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
     });
-    ws.send(JSON.stringify({ type: "attach", cols: 100, rows: 30, flow }));
+    ws.send(
+      JSON.stringify({
+        type: "attach",
+        cols: opts.cols ?? 100,
+        rows: opts.rows ?? 30,
+        flow: opts.flow,
+      }),
+    );
     await waitFor(async () => (socket.attached ? true : undefined), { label: "attach ack" });
     return socket;
+  }
+
+  /** Send a `resize` control message, as the browser does when the pane changes size. */
+  resize(cols: number, rows: number): void {
+    this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
   }
 
   /** Call `listener` with each output frame as it arrives. Returns an unsubscribe function. */

@@ -45,12 +45,9 @@ import type { HostOfflineAnswer } from "@band-app/shared/continuation";
  * forcing it keeps log lines diagnostic instead of degrading to the bare
  * `"Worktree not found"` string under future refactors.
  */
-export class WorktreeNotFoundError extends Error {
-  constructor(identifier: string) {
-    super(`Worktree not found: ${identifier}`);
-    this.name = "WorktreeNotFoundError";
-  }
-}
+// The class lives in `@band-app/worktree-ops`, whose files, diff and search
+// services throw it on the hub and on a worker's direct listener alike.
+export { WorktreeNotFoundError } from "@band-app/worktree-ops/resolver";
 
 /**
  * Thrown by `BrowserProfileService` for an unknown browser profile id.

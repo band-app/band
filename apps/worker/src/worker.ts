@@ -5,6 +5,7 @@ import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import {
+  CAPABILITY_DIRECT,
   type Channel,
   type LifecycleIdleReply,
   type LifecyclePolicy,
@@ -25,6 +26,7 @@ import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
+import { registerDirectMethods } from "./direct.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
@@ -176,9 +178,13 @@ export class Worker {
         workerId,
         buildId: `band-worker@${WORKER_VERSION}`,
         mode: config.ephemeral ? "ephemeral" : "attached",
-        capabilities: Object.entries(info.capabilities)
-          .filter(([, on]) => on)
-          .map(([name]) => name),
+        capabilities: [
+          ...Object.entries(info.capabilities)
+            .filter(([, on]) => on)
+            .map(([name]) => name),
+          // The loopback listener for the desktop app on this machine (`direct.ts`).
+          CAPABILITY_DIRECT,
+        ],
         labels: config.labels,
         roots: policy.rootPaths,
         agents: await findAgents(host),
@@ -203,6 +209,7 @@ export class Worker {
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
+    worker.disposers.push(registerDirectMethods(registrar, ctx));
     if (config.ephemeral) registerLifecycleMethods(registrar, ctx);
     if (options.gitCredentialHelper) {
       const broker = new GitCredentialBroker(ctx);
