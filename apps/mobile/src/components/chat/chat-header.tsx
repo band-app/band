@@ -6,15 +6,25 @@ import { SessionSheet } from "./session-sheet";
 
 type Pickers = ReturnType<typeof sessionPickers>;
 
-/** The chat's model and mode, under the worktree's name. Tapping either opens the session sheet. */
+/** The chat's model and mode as pills in the expanded composer. Tapping either opens the session sheet. */
 export function ChatHeader({
   pickers,
   setConfigOption,
+  onOpenChange,
 }: {
   pickers: Pickers;
   setConfigOption: (configId: string, value: string) => Promise<void>;
+  /** Tells the composer a sheet is open, so it stays expanded while the input loses focus. */
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   // Changes in flight. A chat without a live session starts one before the change applies.
   const [pending, setPending] = useState(0);
 
@@ -84,24 +94,17 @@ function Chip({
 }
 
 const styles = StyleSheet.create({
-  root: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
+  root: { alignItems: "center", flexDirection: "row", flexShrink: 1, gap: 6 },
   chip: {
     alignItems: "center",
     backgroundColor: colors.muted,
-    borderRadius: 14,
+    borderRadius: 18,
     flexDirection: "row",
     flexShrink: 1,
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    gap: 5,
+    height: 36,
+    paddingHorizontal: 12,
   },
-  label: { color: colors.foreground, flexShrink: 1, fontSize: 13 },
+  label: { color: colors.foreground, flexShrink: 1, fontSize: 14 },
   caret: { color: colors.mutedForeground, fontSize: 11 },
 });

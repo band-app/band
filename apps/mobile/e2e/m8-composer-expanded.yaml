@@ -1,0 +1,42 @@
+# S5: focused, the composer expands into a card with the attachment button and the model and mode
+# pills; unfocused it is the floating bar again. Sending still works from the expanded card. Runs
+# after m1, which already started this worktree's session, so the agent has reported its model.
+appId: app.getband.mobile
+name: S5 the composer expands when focused
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- extendedWaitUntil:
+    visible:
+      id: composer__input
+    timeout: 15000
+- takeScreenshot: m8-collapsed
+- tapOn:
+    id: composer__input
+- tapOn:
+    text: "Continue"
+    optional: true
+- assertVisible:
+    id: composer__attach
+- extendedWaitUntil:
+    visible:
+      id: chat__model
+    timeout: 10000
+- assertVisible:
+    id: chat__mode
+- takeScreenshot: m8-expanded
+- inputText: "expanded hello"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      text: "Done."
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: "expanded hello"

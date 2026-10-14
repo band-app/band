@@ -1,4 +1,5 @@
-# S1: the home screen lists the hub's repos with their worktrees, branch and host.
+# S1: the home screen lists the hub's repos with their worktrees, branch and host, a Pinned
+# section first, and groups them by repo, origin or host.
 appId: app.getband.mobile
 name: S1 repos and worktrees on the home screen
 ---
@@ -9,6 +10,9 @@ name: S1 repos and worktrees on the home screen
     timeout: 20000
 - assertVisible:
     id: home__repo-beta
+# alpha-feat-mobile is pinned, so it sits in the Pinned section.
+- assertVisible:
+    text: Pinned
 - assertVisible:
     id: home__worktree-alpha-main
     text: ".*main.*main.*This hub.*"
@@ -40,7 +44,34 @@ name: S1 repos and worktrees on the home screen
     id: home__repo-beta
 - assertVisible:
     id: home__worktree-beta-main
+# Group by: Host lists the worktrees under "This hub"; Origin and Repo list them again.
+- tapOn:
+    id: home__group-by
+- tapOn:
+    text: Host
+- extendedWaitUntil:
+    visible:
+      id: "home__repo-host:local"
+    timeout: 10000
+- assertVisible:
+    id: home__worktree-beta-main
+- takeScreenshot: s1-group-by-host
+- tapOn:
+    id: home__group-by
+- tapOn:
+    text: Origin
+- assertVisible:
+    id: home__repo-alpha
+- takeScreenshot: s1-group-by-origin
+- tapOn:
+    id: home__group-by
+- tapOn:
+    text: Repo
+- assertVisible:
+    id: home__repo-alpha
 # Search by branch narrows the list.
+- tapOn:
+    id: home__search-toggle
 - tapOn:
     id: home__search
 - inputText: feat/mobile

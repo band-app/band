@@ -33,3 +33,9 @@ export function permissionInput(entry: Extract<RequestEntry, { kind: "permission
     return [`${key}: ${text.length > 400 ? `${text.slice(0, 400)}…` : text}`];
   });
 }
+
+/** One line naming what the request asks: the tool for a permission, the question for a form. */
+export function requestText(entry: RequestEntry): string {
+  if (entry.kind === "permission") return entry.request.toolCall.title ?? "a tool";
+  return entry.request.message || "a question";
+}

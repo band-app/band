@@ -1,10 +1,11 @@
 import { Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { restoreAppearance } from "../lib/appearance";
 import { HubSessionProvider } from "../lib/hub-session";
 import { HubsProvider, useHubs } from "../lib/hubs-context";
-import { colors, navigationTheme } from "../theme";
+import { colors, navigationDark, navigationLight, useScheme } from "../theme";
 
 /** Gives the signed-in screens the active hub's session; the pairing screens ignore it. */
 function ActiveHubSession({ children }: { children: ReactNode }) {
@@ -13,12 +14,16 @@ function ActiveHubSession({ children }: { children: ReactNode }) {
 }
 
 export default function RootLayout() {
+  const scheme = useScheme();
+  useEffect(() => {
+    void restoreAppearance();
+  }, []);
   return (
     <SafeAreaProvider>
-      <ThemeProvider value={navigationTheme}>
+      <ThemeProvider value={scheme === "light" ? navigationLight : navigationDark}>
         <HubsProvider>
           <ActiveHubSession>
-            <StatusBar style="light" />
+            <StatusBar style={scheme === "light" ? "dark" : "light"} />
             <Stack
               screenOptions={{
                 headerStyle: { backgroundColor: colors.background },
@@ -31,8 +36,8 @@ export default function RootLayout() {
               <Stack.Screen name="scan" options={{ title: "Scan QR code" }} />
               <Stack.Screen name="manual" options={{ title: "Enter URL and token" }} />
               <Stack.Screen name="pair" options={{ title: "Pairing" }} />
-              <Stack.Screen name="home" options={{ title: "Band" }} />
-              <Stack.Screen name="worktree/[id]" options={{ title: "Worktree" }} />
+              <Stack.Screen name="home" options={{ headerShown: false }} />
+              <Stack.Screen name="worktree/[id]" options={{ headerShown: false }} />
               <Stack.Screen name="hubs" options={{ title: "Hubs" }} />
               <Stack.Screen
                 name="unreachable"

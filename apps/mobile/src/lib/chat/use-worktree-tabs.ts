@@ -13,6 +13,8 @@ import { chatTabLabel } from "@band-app/client/chat-tab-label";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useHubSession } from "../hub-session";
+import { ageLabel, type ShownState, shownState } from "../status-state";
+import { getPending, pendingVersion, subscribePending } from "./pending-store";
 import {
   chatStatuses,
   keepAlive,
@@ -41,6 +43,34 @@ export interface ChatTab {
   id: string;
   label: string;
   state: TabState;
+  /** The icon: the hub's status mapped by `shownState`. */
+  shown: ShownState;
+  /** One line under the name: the question while one waits, else the last activity. */
+  summary: string;
+}
+
+/** What the sheet says under a tab's name. */
+function summaryOf(
+  shown: ShownState,
+  pendingText: string | undefined,
+  chat: { activeSessionSummary?: string; activeSessionLastModified?: number } | undefined,
+  now: number,
+): string {
+  const age = ageLabel(chat?.activeSessionLastModified, now);
+  switch (shown) {
+    case "question":
+      return pendingText ? `Asks: ${pendingText}` : "Waiting for you";
+    case "working":
+      return age ? `Working · ${age}` : "Working";
+    case "done":
+      return age ? `Finished · ${age}` : "Finished";
+    case "failed":
+      return age ? `Failed · ${age}` : "Failed";
+    case "monitoring":
+      return "Monitoring";
+    default:
+      return chat?.activeSessionSummary || (age ? `Last activity ${age} ago` : "No messages yet");
+  }
 }
 
 function readTabs(raw: string | null): CenterTabs | null {
@@ -156,6 +186,18 @@ export function useWorktreeTabs(worktreeId: string) {
     feed.getSnapshot().state.agents.get(worktreeId),
   );
   const statuses = useMemo(() => chatStatuses(worktreeStatus?.tabStatuses), [worktreeStatus]);
+  // The hub's chat status says whether a turn is still open, which tells a question from a
+  // finished turn; it changes with the worktree's status, so read it again then.
+  const refetchChats = chats.refetch;
+  const statusKey = useMemo(
+    () => JSON.stringify(worktreeStatus?.tabStatuses ?? []),
+    [worktreeStatus],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new status is the trigger
+  useEffect(() => {
+    void refetchChats();
+  }, [statusKey, refetchChats]);
+  const pendingTick = useSyncExternalStore(subscribePending, pendingVersion);
   const [unread, setUnread] = useState<ReadonlySet<string>>(new Set());
   const lastStatuses = useRef(statuses);
   useEffect(() => {
@@ -171,12 +213,25 @@ export function useWorktreeTabs(worktreeId: string) {
       .map((a) => ({ id: a.id, label: a.label, isDefault: a.id === defaultId }));
   }, [settings.data]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingTick re-reads the pending store
   const tabs = useMemo((): ChatTab[] => {
     const byId = new Map((chats.data ?? []).map((c) => [c.id, c]));
     const defaultId = settings.data?.defaultCodingAgent ?? settings.data?.codingAgents?.[0]?.id;
     return view.chats.map((id) => {
       const chat = byId.get(id);
       const agentId = chat?.agent ?? defaultId;
+      const hubStatus = statuses.get(id);
+      const pendingText = getPending(id);
+      const shown: ShownState =
+        hubStatus === "needs_attention" || hubStatus === "working"
+          ? shownState({
+              status: hubStatus,
+              pending: pendingText !== undefined || chat?.status === "running",
+              failed: chat?.status === "error",
+            })
+          : unread.has(id)
+            ? "done"
+            : "idle";
       return {
         id,
         label: chatTabLabel({
@@ -186,9 +241,11 @@ export function useWorktreeTabs(worktreeId: string) {
           agentId,
         }),
         state: tabState(id, statuses, unread),
+        shown,
+        summary: summaryOf(shown, pendingText, chat, Date.now()),
       };
     });
-  }, [view.chats, chats.data, settings.data, statuses, unread]);
+  }, [view.chats, chats.data, settings.data, statuses, unread, pendingTick]);
 
   const viewRef = useRef(view);
   viewRef.current = view;

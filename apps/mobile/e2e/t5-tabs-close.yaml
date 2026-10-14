@@ -30,29 +30,28 @@ name: t5 rename and close a tab
     timeout: 10000
 - tapOn:
     id: tabs__sheet-tab-chat_tabs_1
+# The shown tab is Parser v2, so the title pill carries its new name.
 - extendedWaitUntil:
     visible:
-      id: tabs__tab-chat_tabs_1
-      text: "Parser v2"
+      id: tabs__switcher
+      text: "Parser v2, .*"
     timeout: 10000
 - runScript:
     file: scripts/hub-control.js
     env:
       ACTION: check-tabs?wt=gamma-tabs
       VALUE: "chat_tabs_1:Parser v2"
-# Close from the strip: show Tests so the strip scrolls it into view, then long-press it.
-- runFlow:
-    file: subflows/select-tab.yaml
-    env:
-      CHAT: chat_tabs_3
+# Close from the sheet: a long press on a row offers the same menu.
+- tapOn:
+    id: tabs__switcher
 - longPressOn:
-    id: tabs__tab-chat_tabs_3
+    id: tabs__sheet-tab-chat_tabs_3
 - takeScreenshot: t5-tab-menu
 - tapOn:
     text: Close tab
 - extendedWaitUntil:
     notVisible:
-      id: tabs__tab-chat_tabs_3
+      id: tabs__sheet-tab-chat_tabs_3
     timeout: 10000
 - assertVisible:
     id: tabs__hidden

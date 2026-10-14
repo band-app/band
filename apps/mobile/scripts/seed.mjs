@@ -27,10 +27,10 @@ export const SHOWCASE_MARKDOWN = [
   "2. Patch the _parser_",
   "3. Run the tests",
   "",
-  "| File | Change |",
-  "| --- | --- |",
-  "| `src/parser.ts` | parse as base 10 |",
-  "| `README.md` | document it |",
+  "| File | Change | Why it matters for every caller that reads a leading zero as octal |",
+  "| --- | --- | --- |",
+  "| `src/parser.ts` | parse as base 10 | Callers get the same number on every runtime |",
+  "| `README.md` | document it | Readers learn the radix is always ten |",
   "",
   "```ts",
   "export function parse(input: string): number {",
@@ -350,6 +350,8 @@ export async function seedHub(state) {
     await trpc(state, "repos.add", { path: join(root, name) });
   }
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
+  // The home screen's Pinned section (w1).
+  await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
   for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }

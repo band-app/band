@@ -10,8 +10,14 @@ name: t2 a new chat from the phone becomes a tab everywhere
       WT: gamma-tabs
 - extendedWaitUntil:
     visible:
-      id: tabs__new
+      id: tabs__switcher
     timeout: 15000
+- tapOn:
+    id: tabs__switcher
+- extendedWaitUntil:
+    visible:
+      id: tabs__new
+    timeout: 5000
 - tapOn:
     id: tabs__new
 - extendedWaitUntil:
@@ -31,13 +37,10 @@ name: t2 a new chat from the phone becomes a tab everywhere
     visible:
       id: chat__empty
     timeout: 10000
-# The selected tab is the new chat, not one of the seeded ones.
+# The shown tab is the new chat, fourth of four, not one of the seeded ones.
 - assertVisible:
-    id: "tabs__tab-(?!chat_tabs_).*"
-    selected: true
-- assertNotVisible:
-    id: tabs__tab-chat_tabs_2
-    selected: true
+    id: tabs__switcher
+    text: ".*4 of 4.*"
 - takeScreenshot: t2-new-tab
 - runScript:
     file: scripts/hub-control.js

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ageLabel,
   agentStateOf,
   applyStatusEvent,
   emptyStatusState,
   type StatusEvent,
+  shownState,
+  shownStateOf,
 } from "../src/lib/status-state.ts";
 
 const working = { worktreeId: "a-main", agent: { status: "working" } };
@@ -66,5 +69,50 @@ describe("agentStateOf", () => {
       tabStatuses: [{ status: "needs_attention" }],
     };
     assert.equal(agentStateOf(status), "attention");
+  });
+});
+
+describe("shownState", () => {
+  it("maps the hub's statuses to the design's icons", () => {
+    assert.equal(shownState({ status: "working" }), "working");
+    assert.equal(shownState({ status: "waiting" }), "idle");
+    assert.equal(shownState({ status: undefined }), "idle");
+    assert.equal(shownState({ status: "needs_attention", pending: true }), "question");
+    assert.equal(shownState({ status: "needs_attention", pending: false }), "done");
+    assert.equal(shownState({ status: "needs_attention", pending: false, failed: true }), "failed");
+    // A worktree row can't tell, and a question is the case that needs the user.
+    assert.equal(shownState({ status: "needs_attention" }), "question");
+  });
+
+  it("shows a worktree's most urgent agent", () => {
+    assert.equal(shownStateOf(undefined), "idle");
+    assert.equal(
+      shownStateOf({
+        worktreeId: "w",
+        agent: { status: "working" },
+        tabStatuses: [{ chatId: "c", status: "needs_attention" }],
+      }),
+      "question",
+    );
+  });
+});
+
+describe("ageLabel edge cases", () => {
+  const now = Date.parse("2026-01-01T12:00:00Z");
+  it("returns null with no time and clamps a future time to now", () => {
+    assert.equal(ageLabel(null, now), null);
+    assert.equal(ageLabel("2026-01-01T12:01:00Z", now), "now");
+  });
+});
+
+describe("ageLabel", () => {
+  const now = Date.parse("2026-01-01T12:00:00Z");
+  it("rounds down to minutes, hours and days", () => {
+    assert.equal(ageLabel("2026-01-01T11:59:50Z", now), "now");
+    assert.equal(ageLabel("2026-01-01T11:57:00Z", now), "3 m");
+    assert.equal(ageLabel(now - 5 * 3_600_000, now), "5 h");
+    assert.equal(ageLabel("2025-12-29T12:00:00Z", now), "3 d");
+    assert.equal(ageLabel(undefined, now), null);
+    assert.equal(ageLabel("nonsense", now), null);
   });
 });

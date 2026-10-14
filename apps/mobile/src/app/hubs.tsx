@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Body, Button, Screen, styles } from "../components/ui";
+import { APPEARANCE_OPTIONS, useAppearance } from "../lib/appearance";
 import type { SavedHub } from "../lib/hub-store";
 import { useHubs } from "../lib/hubs-context";
 import { resetTo } from "../lib/navigation";
@@ -10,6 +11,7 @@ import { colors } from "../theme";
 export default function Hubs() {
   const { list, setActive, remove } = useHubs();
   const hubs = list?.hubs ?? [];
+  const [appearance, setAppearance] = useAppearance();
 
   const failed = (err: unknown) =>
     Alert.alert(
@@ -79,6 +81,26 @@ export default function Hubs() {
         onPress={() => router.push("/connect")}
         testID="hubs__add"
       />
+      <Text style={hubStyles.section}>Appearance</Text>
+      <View style={hubStyles.segments} testID="hubs__appearance">
+        {APPEARANCE_OPTIONS.map((o) => (
+          <Pressable
+            key={o.value}
+            onPress={() => setAppearance(o.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: appearance === o.value }}
+            accessibilityLabel={`Appearance ${o.label}`}
+            testID={`hubs__appearance-${o.value}`}
+            style={[hubStyles.segment, appearance === o.value && hubStyles.segmentOn]}
+          >
+            <Text
+              style={[hubStyles.segmentText, appearance === o.value && hubStyles.segmentTextOn]}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
     </Screen>
   );
 }
@@ -86,4 +108,21 @@ export default function Hubs() {
 const hubStyles = StyleSheet.create({
   active: { borderColor: colors.foreground },
   name: { color: colors.foreground, fontSize: 17, fontWeight: "600" },
+  section: { color: colors.mutedForeground, fontSize: 14, marginTop: 12 },
+  segments: {
+    backgroundColor: colors.muted,
+    borderRadius: 22,
+    flexDirection: "row",
+    padding: 3,
+  },
+  segment: {
+    alignItems: "center",
+    borderRadius: 19,
+    flex: 1,
+    height: 38,
+    justifyContent: "center",
+  },
+  segmentOn: { backgroundColor: colors.primary },
+  segmentText: { color: colors.foreground, fontSize: 15 },
+  segmentTextOn: { color: colors.primaryForeground, fontWeight: "600" },
 });

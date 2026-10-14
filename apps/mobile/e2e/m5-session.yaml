@@ -29,6 +29,9 @@ name: S5 stop and change the model
       id: composer__stop
     timeout: 15000
 - takeScreenshot: m5-stopped
+# The model and mode pills sit in the composer once it is focused.
+- tapOn:
+    id: composer__input
 - assertVisible:
     id: chat__model
 - tapOn:

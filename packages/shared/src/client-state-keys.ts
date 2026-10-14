@@ -174,6 +174,8 @@ const RULES: KeyRule[] = [
   perWorktree("band:dockview-layout-v9:", [jsonPart("device")]),
   // The repo names the mobile app's worktree list has collapsed.
   exact("band.mobile.collapsed-repos", [jsonPart("device")]),
+  // How the mobile worktree list is grouped: repo, origin or host.
+  exact("band.mobile.group-by", [rawPart("device")]),
 ];
 
 export interface MatchedKey {

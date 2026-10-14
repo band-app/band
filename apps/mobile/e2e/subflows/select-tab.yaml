@@ -1,5 +1,4 @@
-# Shows the chat tab CHAT through the tab switcher sheet. The strip keeps the shown tab in view,
-# so with several tabs another one can be scrolled off the screen.
+# Shows the chat tab CHAT through the tab switcher sheet (the title pill opens it).
 appId: app.getband.mobile
 ---
 - tapOn:

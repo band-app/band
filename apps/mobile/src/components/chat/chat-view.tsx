@@ -1,6 +1,6 @@
 import { sessionPickers } from "@band-app/client/session-pickers";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -12,7 +12,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { pendingRequest } from "../../lib/chat/pending-request";
+import { pendingRequest, requestText } from "../../lib/chat/pending-request";
+import { setPending } from "../../lib/chat/pending-store";
 import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useChatActions } from "../../lib/chat/use-chat-actions";
@@ -20,7 +21,6 @@ import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
 import { ChatProvider } from "./chat-context";
-import { ChatHeader } from "./chat-header";
 import { ChatRowView } from "./chat-row";
 import { Composer } from "./composer";
 import { FrameLog } from "./frame-log";
@@ -44,9 +44,12 @@ export const ChatView = memo(function ChatView({
   chatId,
   worktreeId,
   active = true,
+  chips = null,
 }: {
   chatId: string;
   worktreeId: string;
+  /** Chips shown above the composer, such as a link to the tab that needs the user. */
+  chips?: ReactNode;
   /**
    * False for a chat kept mounted behind the shown one. It keeps its stream and its place, but
    * has no composer, because the worktree's draft belongs to the shown chat's composer.
@@ -74,6 +77,12 @@ export const ChatView = memo(function ChatView({
   );
 
   const request = useMemo(() => pendingRequest(state.messages), [state.messages]);
+  // The tab sheet shows the question as this chat's summary.
+  const requestLine = request ? requestText(request) : null;
+  useEffect(() => {
+    setPending(chatId, requestLine);
+  }, [chatId, requestLine]);
+  useEffect(() => () => setPending(chatId, null), [chatId]);
 
   const listRef = useRef<FlashListRef<ChatRow>>(null);
   const pinned = useRef(true);
@@ -145,7 +154,6 @@ export const ChatView = memo(function ChatView({
       rowFor={rowFor}
     >
       <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
-        <ChatHeader pickers={pickers} setConfigOption={actions.setConfigOption} />
         <View style={styles.root} testID="chat__view">
           {!loaded ? (
             <View style={styles.center} testID="chat__loading">
@@ -221,6 +229,7 @@ export const ChatView = memo(function ChatView({
           />
         ) : null}
         <PlanCard plan={state.plan} />
+        {active ? chips : null}
         <QueuedMessages
           messages={state.queue}
           onRemove={actions.removeQueued}
@@ -232,6 +241,8 @@ export const ChatView = memo(function ChatView({
             worktreeId={worktreeId}
             running={state.taskRunning}
             skills={skills}
+            pickers={pickers}
+            setConfigOption={actions.setConfigOption}
             onSend={actions.send}
             onStop={() => void actions.stop()}
           />

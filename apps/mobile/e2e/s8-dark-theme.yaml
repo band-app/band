@@ -1,0 +1,36 @@
+# S8: the app follows the system appearance and has the same five screens in light and dark
+# (home, a worktree chat, the tab sheet, a question card, the expanded composer). Switching the
+# override in Hubs to Light while the system is dark changes the app at once. The screenshots
+# `s8-light-*` and `s8-dark-*` go side by side into the PR.
+appId: app.getband.mobile
+name: S8 light and dark themes
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/s8-screens.yaml
+    env:
+      MODE: light
+- runFlow:
+    file: subflows/s8-screens.yaml
+    env:
+      MODE: dark
+# The override: System is dark here, Light forces the light palette, System follows again.
+- tapOn:
+    id: home__hubs
+- extendedWaitUntil:
+    visible:
+      id: hubs__appearance
+    timeout: 10000
+- takeScreenshot: s8-override-system-dark
+- tapOn:
+    id: hubs__appearance-light
+- takeScreenshot: s8-override-light
+- tapOn:
+    id: hubs__appearance-dark
+- takeScreenshot: s8-override-dark
+- tapOn:
+    id: hubs__appearance-system
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: appearance?mode=light

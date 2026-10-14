@@ -6,6 +6,9 @@
 
 export interface AgentStatusLike {
   status: string;
+  /** When the agent last did something (an ISO timestamp), as the web card shows its age. */
+  lastActivity?: string;
+  summary?: string;
 }
 
 export interface TabStatusLike {
@@ -117,4 +120,55 @@ export function agentStateOf(status: WorktreeStatusLike | undefined): AgentState
     return "running";
   }
   return "idle";
+}
+
+/**
+ * What an agent's icon shows. The names are the design's (`.am/refs/design-demo.html`); the hub
+ * reports `working`, `needs_attention` and `waiting` today. This function is the one place that
+ * maps one to the other, so the hub's new states (monitoring, question, done, failed, idle) are
+ * added here and nowhere else.
+ */
+export type ShownState = "working" | "monitoring" | "question" | "done" | "failed" | "idle";
+
+export interface ShownStateInput {
+  /** The hub's status for the agent: `working`, `needs_attention` or `waiting`. */
+  status: string | undefined;
+  /**
+   * Whether the agent waits on a permission or a question. `undefined` when the caller can't
+   * tell (a worktree row, which sees no chat), which counts as a question because that is the
+   * case that needs the user.
+   */
+  pending?: boolean;
+  /** The chat's last turn failed. */
+  failed?: boolean;
+}
+
+export function shownState({ status, pending, failed }: ShownStateInput): ShownState {
+  if (status === "working") return "working";
+  if (status === "needs_attention") {
+    if (failed) return "failed";
+    return pending === false ? "done" : "question";
+  }
+  return "idle";
+}
+
+/** A worktree's icon: its most urgent agent. */
+export function shownStateOf(status: WorktreeStatusLike | undefined): ShownState {
+  const state = agentStateOf(status);
+  if (state === "attention") return shownState({ status: "needs_attention" });
+  if (state === "running") return shownState({ status: "working" });
+  return shownState({ status: status?.agent?.status });
+}
+
+/** "now", "3 m", "2 h" or "5 d" since `iso`; null when there is no usable timestamp. */
+export function ageLabel(when: string | number | undefined | null, now: number): string | null {
+  if (when === undefined || when === null || when === "") return null;
+  const then = typeof when === "number" ? when : Date.parse(when);
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes} m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} d`;
 }

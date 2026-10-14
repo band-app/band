@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors } from "../theme";
+import { colors, useScheme } from "../theme";
 
 /** A screen's body: safe-area padded, scrollable so the keyboard never hides a field. */
 export function Screen({ children, testID }: { children: ReactNode; testID?: string }) {
@@ -99,10 +99,12 @@ export function Button({
 }
 
 export function Field({ label, ...props }: TextInputProps & { label: string }) {
+  const scheme = useScheme();
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
+        keyboardAppearance={scheme}
         placeholderTextColor={colors.mutedForeground}
         autoCapitalize="none"
         autoCorrect={false}
@@ -138,7 +140,7 @@ export const styles = StyleSheet.create({
   error: { color: colors.destructive, fontSize: 15, lineHeight: 21 },
   button: {
     minHeight: 46,
-    borderRadius: 10,
+    borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,

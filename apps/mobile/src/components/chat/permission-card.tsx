@@ -5,7 +5,7 @@ import {
   permissionTexts,
   type RequestEntry,
 } from "../../lib/chat/pending-request";
-import { colors, tones } from "../../theme";
+import { colors, floating, tones } from "../../theme";
 import { Button } from "../ui";
 import { Markdown } from "./markdown";
 
@@ -86,9 +86,11 @@ export function PermissionCard({
 
 export const requestCardStyles = StyleSheet.create({
   card: {
+    ...floating,
+    shadowOpacity: 0.1,
     backgroundColor: colors.card,
     borderColor: tones.attention,
-    borderRadius: 12,
+    borderRadius: 24,
     borderWidth: 1,
     gap: 10,
     marginHorizontal: 12,
@@ -101,7 +103,7 @@ const styles = StyleSheet.create({
   card: requestCardStyles.card,
   title: { color: colors.foreground, fontSize: 16, fontWeight: "600" },
   muted: { color: colors.mutedForeground, fontWeight: "400" },
-  input: { backgroundColor: colors.muted, borderRadius: 8, gap: 2, padding: 10 },
+  input: { backgroundColor: colors.muted, borderRadius: 14, gap: 2, padding: 10 },
   inputLine: { color: colors.foreground, fontFamily: "Menlo", fontSize: 13 },
   options: { gap: 8 },
   option: { alignSelf: "stretch" },

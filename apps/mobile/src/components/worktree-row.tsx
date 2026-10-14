@@ -1,30 +1,18 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { AgentState } from "../lib/status-state";
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
-import { colors, tones } from "../theme";
+import { colors, tints, tones } from "../theme";
+import { SHOWN_LABEL, StateIcon } from "./state-icon";
 
-export const STATE_LABEL: Record<AgentState, string> = {
-  running: "Running",
-  attention: "Needs attention",
-  idle: "Idle",
+const PR_COLOR: Record<PullRequestTone, { fg: typeof tones.failure; bg: typeof tints.failure }> = {
+  failure: { fg: tones.failure, bg: tints.failure },
+  pending: { fg: tones.pending, bg: tints.pending },
+  success: { fg: tones.success, bg: tints.success },
+  neutral: { fg: colors.mutedForeground, bg: tints.neutral },
+  merged: { fg: tones.merged, bg: tints.merged },
+  closed: { fg: colors.mutedForeground, bg: tints.neutral },
 };
 
-const STATE_COLOR: Record<AgentState, string> = {
-  running: tones.running,
-  attention: tones.attention,
-  idle: tones.neutral,
-};
-
-const PR_COLOR: Record<PullRequestTone, string> = {
-  failure: tones.failure,
-  pending: tones.pending,
-  success: tones.success,
-  neutral: tones.neutral,
-  merged: tones.merged,
-  closed: tones.neutral,
-};
-
-const CI_COLOR: Record<CiTone, string> = {
+const CI_COLOR: Record<CiTone, typeof tones.failure> = {
   failure: tones.failure,
   pending: tones.pending,
   success: tones.success,
@@ -40,18 +28,19 @@ const CI_LABEL: Record<CiTone, string> = {
 
 /** The spoken form of a row, also what Maestro matches on. */
 export function rowLabel(row: WorktreeRow): string {
-  const parts = [row.name, row.branch, row.hostTag, STATE_LABEL[row.agent]];
+  const parts = [row.name, row.branch, row.hostTag, SHOWN_LABEL[row.shown]];
   if (row.pr) parts.push(`PR ${row.pr.number}`);
   return parts.join(", ");
 }
 
+/** The PR number on a tinted chip, colored by CI state as the web's badge is. */
 export function PullRequestTag({ row }: { row: WorktreeRow }) {
   if (!row.pr || !row.prTone) return null;
-  const color = PR_COLOR[row.prTone];
+  const { fg, bg } = PR_COLOR[row.prTone];
   return (
-    <View style={[styles.prTag, { borderColor: color }]}>
+    <View style={[styles.pr, { backgroundColor: bg }]}>
       <Text
-        style={[styles.prText, { color }, row.prTone === "closed" && styles.struck]}
+        style={[styles.prText, { color: fg }, row.prTone === "closed" && styles.struck]}
         testID={`worktree__pr-${row.id}`}
       >
         #{row.pr.number}
@@ -71,30 +60,42 @@ export function CiDot({ row }: { row: WorktreeRow }) {
   );
 }
 
-export function StatePill({ row }: { row: WorktreeRow }) {
-  const color = STATE_COLOR[row.agent];
+/** Ahead count, dirty marker, PR chip (or CI dot) and the host tag of a worktree not on the hub. */
+export function RowMeta({ row, showHost = true }: { row: WorktreeRow; showHost?: boolean }) {
   return (
-    <View
-      style={[
-        styles.pill,
-        { borderColor: color },
-        row.agent === "attention" && { backgroundColor: color },
-      ]}
-    >
-      <Text
-        style={[
-          styles.pillText,
-          { color: row.agent === "attention" ? colors.primaryForeground : color },
-        ]}
-      >
-        {STATE_LABEL[row.agent]}
-      </Text>
+    <View style={styles.meta}>
+      {row.ahead > 0 ? (
+        <Text style={styles.metaText} testID={`worktree__ahead-${row.id}`}>
+          ↑{row.ahead}
+        </Text>
+      ) : null}
+      {row.dirty ? <View style={styles.dirty} accessibilityLabel="Uncommitted changes" /> : null}
+      <PullRequestTag row={row} />
+      <CiDot row={row} />
+      {showHost && row.remote ? (
+        <View style={styles.tag}>
+          <Text style={styles.tagText} numberOfLines={1} testID={`worktree__host-${row.id}`}>
+            {row.hostTag}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-export function WorktreeRowView({ row, onPress }: { row: WorktreeRow; onPress: () => void }) {
-  const attention = row.agent === "attention";
+export function WorktreeRowView({
+  row,
+  onPress,
+  first,
+  last,
+}: {
+  row: WorktreeRow;
+  onPress: () => void;
+  /** First row of a card with no header of its own (Pinned): round the top. */
+  first?: boolean;
+  last?: boolean;
+}) {
+  const attention = row.shown === "question";
   return (
     <Pressable
       onPress={onPress}
@@ -103,59 +104,81 @@ export function WorktreeRowView({ row, onPress }: { row: WorktreeRow; onPress: (
       testID={`home__worktree-${row.id}`}
       style={({ pressed }) => [
         styles.row,
-        attention && styles.rowAttention,
-        pressed && styles.rowPressed,
+        first && styles.first,
+        last && styles.last,
+        !first && styles.divided,
+        pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.stripe, { backgroundColor: STATE_COLOR[row.agent] }]} />
+      <View style={{ width: row.depth * 16 }} />
+      <StateIcon state={row.shown} />
       <View style={styles.body}>
-        <View style={styles.titleLine}>
-          {row.pinned ? <Text style={styles.pin}>★</Text> : null}
-          <Text style={[styles.name, attention && styles.nameAttention]} numberOfLines={1}>
-            {row.name}
-          </Text>
-          <PullRequestTag row={row} />
-          <CiDot row={row} />
-        </View>
-        <Text style={styles.meta} numberOfLines={1}>
-          {row.branch} · {row.hostTag}
-          {row.missing ? " · folder missing" : ""}
-          {row.lifecycle ? ` · ${row.lifecycle}` : ""}
+        <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>
+          {row.name}
         </Text>
+        {row.subtitle ? (
+          <Text style={styles.sub} numberOfLines={1} testID={`home__subtitle-${row.id}`}>
+            {row.subtitle}
+          </Text>
+        ) : null}
       </View>
-      <StatePill row={row} />
+      <RowMeta row={row} />
     </Pressable>
   );
 }
 
+const CARD_RADIUS = 18;
+
+export const rowCard = {
+  backgroundColor: colors.card,
+  borderColor: colors.border,
+  borderLeftWidth: StyleSheet.hairlineWidth,
+  borderRightWidth: StyleSheet.hairlineWidth,
+} as const;
+
 const styles = StyleSheet.create({
   row: {
-    flexDirection: "row",
+    ...rowCard,
     alignItems: "center",
+    flexDirection: "row",
     gap: 10,
-    minHeight: 60,
-    paddingRight: 14,
-    marginHorizontal: 12,
-    marginBottom: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    overflow: "hidden",
+    marginHorizontal: 16,
+    minHeight: 54,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  rowAttention: { borderColor: tones.attention, backgroundColor: "#2a1f16" },
-  rowPressed: { opacity: 0.7 },
-  stripe: { alignSelf: "stretch", width: 5 },
-  body: { flex: 1, paddingVertical: 10, gap: 3 },
-  titleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
-  pin: { color: colors.mutedForeground, fontSize: 12 },
-  name: { flexShrink: 1, color: colors.foreground, fontSize: 16, fontWeight: "500" },
-  nameAttention: { fontWeight: "700" },
-  meta: { color: colors.mutedForeground, fontSize: 13 },
-  pill: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 3 },
-  pillText: { fontSize: 12, fontWeight: "600" },
-  prTag: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-  prText: { fontSize: 11, fontWeight: "600" },
+  divided: { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth },
+  first: {
+    borderTopLeftRadius: CARD_RADIUS,
+    borderTopRightRadius: CARD_RADIUS,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  last: {
+    borderBottomLeftRadius: CARD_RADIUS,
+    borderBottomRightRadius: CARD_RADIUS,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    marginBottom: 4,
+  },
+  pressed: { opacity: 0.6 },
+  body: { flex: 1, gap: 1, minWidth: 0 },
+  name: { color: colors.foreground, fontSize: 16 },
+  nameStrong: { fontWeight: "600" },
+  sub: { color: colors.mutedForeground, fontSize: 12.5 },
+  meta: { alignItems: "center", flexDirection: "row", gap: 6 },
+  metaText: { color: colors.mutedForeground, fontSize: 12.5 },
+  dirty: { width: 6, height: 6, borderRadius: 3, backgroundColor: tones.pending },
+  pr: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  prText: { fontSize: 12.5, fontWeight: "600" },
   struck: { textDecorationLine: "line-through" },
   ciDot: { width: 9, height: 9, borderRadius: 5 },
+  tag: {
+    backgroundColor: tints.neutral,
+    borderRadius: 6,
+    maxWidth: 90,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  tagText: { color: colors.mutedForeground, fontSize: 11 },
 });
