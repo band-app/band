@@ -65,6 +65,8 @@ jobs:
         run: |
           jq --arg id "$ASC_APP_ID" '.submit.production.ios.ascAppId = $id' eas.json > eas.json.tmp
           mv eas.json.tmp eas.json
+          # EAS refuses to build a dirty tree non-interactively. This commit stays on the runner.
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit --quiet -m "ci: set ascAppId" eas.json
 
       - name: Start the EAS build
         if: env.ASC_APP_ID != ''
