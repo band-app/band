@@ -48,7 +48,9 @@ When it is off the hub stores nothing for the repo, and `checkpoints.take` refus
 
 ## Offline worktrees
 
-When a worktree's host is offline and it has a checkpoint, the card says "Offline, last checkpoint <time>" and the worktree opens read-only from the checkpoint:
+When a worktree's host is offline its card shows an offline icon and fades. The tooltip (hover; the icon also carries an `aria-label`) has the host's last seen time and the checkpoint age, or "No checkpoint". The card's menu has one item, **Open on another host…**, for a worktree on a worker. It is disabled with its reason when the hub has no checkpoint, and when the repo is limited to that one host ("Only available on <host>"). While the host is online the same item moves the worktree (see Move to host below); while it is offline it opens the [continue dialog](follow-the-work.md), which says that ignored files (`.env`, `node_modules`) are not carried over.
+
+Opening the worktree shows a notice above it: "<host> is offline (last seen …). Last checkpoint …", with an **Open on another host** button (`follow.offer` and `follow.continue`). When the offer is blocked the notice shows the reason and no button. The right panel then says the host is offline, with a link to **View checkpoint (read-only)**; the same link is in the notice. The checkpoint view shows:
 
 - Changes shows the diff of the checkpoint against its branch head.
 - Files lists and opens the files as the checkpoint holds them.
@@ -58,7 +60,7 @@ Terminals, the desktop, dev servers and the browser need the host and show "host
 
 ## Restore on another host
 
-`band worktrees restore <id> --to <host>` (Restore on another host in the worktree menu) uses the newest checkpoint, or `--checkpoint <id>`:
+`band worktrees restore <id> --to <host>` uses the newest checkpoint, or `--checkpoint <id>`:
 
 1. The target host must be online and allowed for the repo. If it is not allowed, the call is refused with `<repo> is only available on ...`. An admin can add the host in the same call (`--add-host`, the checkbox in the dialog).
 2. The hub makes sure the target has the repo, fetches what origin has, sends the bundle, and runs `git worktree add -B <branch>` with the working tree of the checkpoint. The edits are uncommitted again.

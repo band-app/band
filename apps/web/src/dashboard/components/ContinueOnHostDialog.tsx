@@ -1,4 +1,4 @@
-import { CONTINUE_LIMITS, formatAge } from "@band-app/shared/continuation";
+import { CONTINUE_LIMITS, type ContinueOffer, formatAge } from "@band-app/shared/continuation";
 import {
   Button,
   Dialog,
@@ -36,27 +36,52 @@ export function ContinuePromptHost() {
     if (href && capabilities.navigate) capabilities.navigate(href);
   }, [announcedId, announcedWorktree, queryClient, capabilities]);
   if (!request) return null;
-  return <ContinueOnHostDialog key={request.id} request={request} />;
+  const { answer, chatId } = request;
+  return (
+    <ContinueOnHostDialog
+      key={request.id}
+      offer={answer.offer}
+      chatId={chatId}
+      blockedMessage={answer.code === "CONTINUE_NOT_POSSIBLE" ? answer.error : undefined}
+      title="Host is offline"
+      onClose={request.resolve}
+    />
+  );
 }
 
-function ContinueOnHostDialog({
-  request,
-}: {
-  request: NonNullable<ReturnType<typeof useContinueRequest>>;
-}) {
-  const { answer, chatId } = request;
-  const { offer } = answer;
+interface ContinueOnHostDialogProps {
+  offer: ContinueOffer;
+  chatId?: string;
+  /** Set when the work cannot continue and the offer itself carries no reason. */
+  blockedMessage?: string;
+  title?: string;
+  /** Called with the new worktree after a continuation, or null when the dialog is dismissed. */
+  onClose: (result: { worktreeId: string } | null) => void;
+}
+
+/**
+ * The offer to continue an offline worktree on another host: the candidate hosts, what does not
+ * carry over, or why the work cannot continue. Used by the prompt an action opens, and by the
+ * "Open on another host" item and button.
+ */
+export function ContinueOnHostDialog({
+  offer,
+  chatId,
+  blockedMessage,
+  title = "Open on another host",
+  onClose,
+}: ContinueOnHostDialogProps) {
   const queryClient = useQueryClient();
   const capabilities = useCapabilities();
   const recommended = offer.targets.find((t) => t.recommended)?.hostId ?? "";
   const [chosen, setChosen] = useState(recommended);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const blocked = answer.code === "CONTINUE_NOT_POSSIBLE" || offer.blocked;
+  const blocked = blockedMessage !== undefined || offer.blocked !== undefined;
 
   const cancel = () => {
     if (busy) return;
-    request.resolve(null);
+    onClose(null);
   };
 
   const run = async () => {
@@ -71,7 +96,7 @@ function ContinueOnHostDialog({
       await queryClient.invalidateQueries({ queryKey: ["repos"] });
       const href = capabilities.getWorktreeHref?.(res.worktreeId);
       if (href && capabilities.navigate) capabilities.navigate(href);
-      request.resolve({ worktreeId: res.worktreeId });
+      onClose({ worktreeId: res.worktreeId });
     } catch (err) {
       setError(errorText(err));
       setBusy(false);
@@ -82,9 +107,9 @@ function ContinueOnHostDialog({
     <Dialog open onOpenChange={(open) => (open ? undefined : cancel())}>
       <DialogContent className="sm:max-w-[520px]" data-testid="continue-dialog">
         <DialogHeader>
-          <DialogTitle>{blocked ? "Cannot continue elsewhere" : "Host is offline"}</DialogTitle>
+          <DialogTitle>{blocked ? "Cannot continue elsewhere" : title}</DialogTitle>
           <DialogDescription data-testid="continue-dialog__question">
-            {blocked ? (offer.blocked?.message ?? answer.error) : offer.question}
+            {blocked ? (offer.blocked?.message ?? blockedMessage) : offer.question}
           </DialogDescription>
         </DialogHeader>
         {blocked ? (
