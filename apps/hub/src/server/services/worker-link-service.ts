@@ -26,6 +26,7 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { checkpointService } from "./checkpoint-service";
+import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
@@ -218,6 +219,11 @@ export class WorkerLinkService {
     };
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
+    try {
+      seedCodingAgentsFromTypes(hello.agents);
+    } catch (err) {
+      log.warn(`could not seed coding agents: ${err instanceof Error ? err.message : err}`);
+    }
     this.publish(workerId, "online");
     void ephemeralLifecycleService.onConnected(session);
     // A copy this host kept while its work continued elsewhere is compared with that checkpoint.

@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
+import { AGENT_CHECKS } from "./coding-agent-seed";
 import { modelRefreshService } from "./model-refresh-service";
 import { repoService } from "./repo-service";
 import { agentModeFromVia } from "./settings-service";
@@ -10,14 +11,6 @@ import { systemService } from "./system-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("setup");
-
-// Coding agents to detect, in priority order. The first detected agent
-// becomes the default if no default has been chosen yet.
-const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[] = [
-  { id: "claude-code", type: "claude-code", label: "Claude Code", binary: "claude" },
-  { id: "codex", type: "codex", label: "Codex", binary: "codex" },
-  { id: "opencode", type: "opencode", label: "OpenCode", binary: "opencode" },
-];
 
 /**
  * Run startup setup. Called every server boot. Each step is idempotent —

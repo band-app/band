@@ -57,6 +57,7 @@ function AgentItems({
       // path (e.g. a chat pane still opens if its launch fails).
       onClick={() => onPick(agent.id === defaultAgentId ? undefined : agent.id)}
       data-testid={`worktree-center__new-agent--${agent.id}`}
+      data-default={agent.id === defaultAgentId ? "true" : undefined}
     >
       <AgentIcon type={agent.type} className="size-4" />
       {agent.label}

@@ -67,9 +67,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
-  AGENT_STATE_INFO,
   AgentIcon,
-  AgentStateDot,
   buildLspWsUrl,
   type ChangeEntry,
   type ChangeSection,
@@ -90,13 +88,11 @@ import {
   SearchBar,
   serializeViewPosition,
   storeViewMode,
-  type TabAgentStatus,
   type TerminalInsertDetail,
   toFileUri,
   toLspServerLang,
   useAdapter,
   useCapabilities,
-  useDashboardStore,
   useSearch,
   useSettingsQuery,
   useWorktreePath,
@@ -198,6 +194,13 @@ import { setPerWorktreeState } from "./per-worktree-state-store";
 import { crossPanelHandlers } from "./SharedDockviewLayout";
 import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
+import {
+  readCachedTabMeta,
+  TabStatusIndicator,
+  useChatTabStatus,
+  useTerminalTabStatus,
+  writeCachedTabMeta,
+} from "./tab-status";
 
 // ---------------------------------------------------------------------------
 // Leaf kinds
@@ -281,53 +284,6 @@ function TabEndSlot({
       </button>
     </span>
   );
-}
-
-type TabAgentStatusKind = TabAgentStatus["status"];
-
-/** Which of several panes' statuses a terminal tab shows: the higher rank. */
-const TAB_STATUS_RANK: Record<TabAgentStatusKind, number> = {
-  question: 5,
-  failed: 4,
-  working: 3,
-  monitoring: 2,
-  done: 1,
-};
-
-/** Spinner while the agent works; the dashboard's dot for every other state. */
-function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
-  if (status === "working") {
-    return (
-      <Loader2
-        role="img"
-        aria-label={AGENT_STATE_INFO.working.label}
-        data-testid={testId}
-        data-status={status}
-        className="size-3 animate-spin text-muted-foreground"
-      />
-    );
-  }
-  return <AgentStateDot status={status} testId={testId} withTitle />;
-}
-
-/** The agent status of a chat, from the worktree's status snapshot. */
-function useChatTabStatus(worktreeId: string, chatId: string): TabAgentStatusKind | undefined {
-  return useDashboardStore(
-    (s) => s.statuses.get(worktreeId)?.tabStatuses?.find((t) => t.chatId === chatId)?.status,
-  );
-}
-
-/** The agent status of a terminal tab: the most urgent one reported from any
- *  of its split panes. */
-function useTerminalTabStatus(worktreeId: string, leafId: string): TabAgentStatusKind | undefined {
-  return useDashboardStore((s) => {
-    let found: TabAgentStatusKind | undefined;
-    for (const t of s.statuses.get(worktreeId)?.tabStatuses ?? []) {
-      if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
-      if (!found || TAB_STATUS_RANK[t.status] > TAB_STATUS_RANK[found]) found = t.status;
-    }
-    return found;
-  });
 }
 
 /** Track a tab's active state via its dockview panel api. */
@@ -2394,24 +2350,6 @@ function IconTab(props: IDockviewPanelHeaderProps) {
 
 /** Coding-agent types whose CLI can resume a session in a terminal. */
 const RESUME_CAPABLE_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
-
-function readCachedTabMeta(chatId: string): { title?: string; agentType?: string } {
-  if (!chatId) return {};
-  try {
-    const raw = sessionStorage.getItem(`band:chat-tab-meta:${chatId}`);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeCachedTabMeta(chatId: string, patch: { title?: string; agentType?: string }) {
-  if (!chatId) return;
-  try {
-    const prev = readCachedTabMeta(chatId);
-    sessionStorage.setItem(`band:chat-tab-meta:${chatId}`, JSON.stringify({ ...prev, ...patch }));
-  } catch {}
-}
 
 function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
   const chatId = props.params.chatId;
@@ -4640,6 +4578,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           id,
           title: byId.get(id)?.title ?? id,
           kind: byId.get(id)?.api.component ?? "",
+          params: byId.get(id)?.params as SwitcherItem["params"],
         }));
         updateSwitcher({ items, index: initialIndex(items.length, e.shiftKey) });
         return;
