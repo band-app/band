@@ -10,6 +10,15 @@ import { call, cleanup, startHub, startWorker, type TestHub, type TestWorker } f
 
 const chromium = findChromium();
 
+// RemoteHost gives browser.open 60 s (packages/host-remote/src/remote-host.ts), because a Chromium that hangs
+// on its first start is killed after 20 s and started again, which can take 44 s in all. The link's default
+// 30 s would end the call mid-retry and hide the browser's own error.
+const OPEN_TIMEOUT_MS = 60_000;
+
+function openBrowser(session: ServerSession, worktreeId: string) {
+  return call<BrowserInfo>(session, "browser.open", { worktreeId }, { timeoutMs: OPEN_TIMEOUT_MS });
+}
+
 interface BrowserInfo {
   pid: number;
   profileDir: string;
@@ -130,14 +139,14 @@ describe("browser over the link", {
   });
 
   it("reads the title of a page on the worker's localhost", async () => {
-    const info = await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-a" });
+    const info = await openBrowser(w.session, "wt-a");
     assert.ok(info.pid > 0);
     assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
     assert.equal(await pageTitle(w.session, "wt-a", origin), "served on the worker");
   });
 
   it("keeps the DevTools port on loopback", async () => {
-    const info = await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-a" });
+    const info = await openBrowser(w.session, "wt-a");
     const [port, path] = readFileSync(join(info.profileDir, "DevToolsActivePort"), "utf8").split(
       "\n",
     );
@@ -154,10 +163,10 @@ describe("browser over the link", {
   });
 
   it("keeps cookies across a close and reopen of the same worktree", async () => {
-    await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-b" });
+    await openBrowser(w.session, "wt-b");
     assert.equal(await pageTitle(w.session, "wt-b", `${origin}/cookie`), "cookie set");
     await call(w.session, "browser.close", { worktreeId: "wt-b" });
-    const again = await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-b" });
+    const again = await openBrowser(w.session, "wt-b");
     assert.ok(cookieHits >= 1);
     assert.equal(
       await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`),
@@ -167,13 +176,13 @@ describe("browser over the link", {
   });
 
   it("gives another worktree its own profile", async () => {
-    const other = await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-a" });
+    const other = await openBrowser(w.session, "wt-a");
     assert.equal(await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`), "cookie:none");
     assert.ok(other.profileDir.endsWith("wt-a"));
   });
 
   it("kills Chromium when the worktree's browser is closed", async () => {
-    const info = await call<BrowserInfo>(w.session, "browser.open", { worktreeId: "wt-a" });
+    const info = await openBrowser(w.session, "wt-a");
     assert.ok(alive(info.pid));
     await call(w.session, "browser.close", { worktreeId: "wt-a" });
     assert.equal(alive(info.pid), false);

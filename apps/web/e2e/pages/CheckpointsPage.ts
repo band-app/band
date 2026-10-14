@@ -1,7 +1,7 @@
 /**
  * Page object for the checkpoint surfaces: the "Checkpoints on the hub" switch in Settings >
- * Repos, the offline badge and superseded badge on a worktree card, the offline banner, and the
- * read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
+ * Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…"
+ * menu item, the offline notice, and the read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
  * `ReposSettings.tsx`, `WorktreeCard.tsx` and `OfflineCheckpoint.tsx`.
  */
 
@@ -36,16 +36,82 @@ export class CheckpointsPage {
     return this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
   }
 
-  offlineBadge(worktreeId: string): Locator {
+  /** The icon an offline worktree's card shows in place of text. */
+  offlineIcon(worktreeId: string): Locator {
     return this.card(worktreeId).getByTestId("worktree-card__offline");
+  }
+
+  /** The tooltip with the host's last seen time and the checkpoint age. */
+  get offlineDetails(): Locator {
+    return this.page.getByTestId("worktree-card__offline-details");
+  }
+
+  async showOfflineDetails(worktreeId: string): Promise<void> {
+    await this.offlineIcon(worktreeId).hover();
   }
 
   supersededBadge(worktreeId: string): Locator {
     return this.card(worktreeId).getByTestId("worktree-card__superseded");
   }
 
-  get banner(): Locator {
-    return this.page.getByTestId("offline-checkpoint");
+  /** The "Open on another host…" item of a card's context menu. */
+  moveItem(): Locator {
+    return this.page.getByTestId("worktree-card__move");
+  }
+
+  async openCardMenu(worktreeId: string): Promise<void> {
+    await test.step(`Open the context menu of ${worktreeId}`, async () => {
+      await this.card(worktreeId).click({ button: "right" });
+    });
+  }
+
+  /** The reason a disabled "Open on another host…" item gives. */
+  moveReason(): Locator {
+    return this.page.getByTestId("worktree-card__move-reason");
+  }
+
+  /** The open context menu. */
+  get cardMenu(): Locator {
+    return this.page.getByRole("menu");
+  }
+
+  async closeCardMenu(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.moveItem()).toHaveCount(0);
+  }
+
+  // ---- the notice above an offline worktree ----------------------------------------
+
+  get notice(): Locator {
+    return this.page.getByTestId("offline-notice");
+  }
+
+  get noticeHost(): Locator {
+    return this.notice.getByTestId("offline-notice__host");
+  }
+
+  get noticeBlocked(): Locator {
+    return this.notice.getByTestId("offline-notice__blocked");
+  }
+
+  /** The right panel of an offline worktree, before the checkpoint is chosen. */
+  get sidepanelPlaceholder(): Locator {
+    return this.page.getByTestId("offline-sidepanel");
+  }
+
+  /** The time left before the old host's lease ends and the button turns on. */
+  get leaseCountdown(): Locator {
+    return this.notice.getByTestId("offline-notice__countdown");
+  }
+
+  get openElsewhereButton(): Locator {
+    return this.notice.getByTestId("offline-notice__open-elsewhere");
+  }
+
+  async viewCheckpoint(): Promise<void> {
+    await test.step("Open the read-only checkpoint view", async () => {
+      await this.notice.getByTestId("offline-notice__view-checkpoint").click();
+    });
   }
 
   // ---- read-only panel ----------------------------------------------------------

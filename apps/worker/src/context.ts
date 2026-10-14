@@ -4,6 +4,7 @@ import { type LinkSession, RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
 import type { CliCache } from "./cli.ts";
+import type { LeaseGuard } from "./lease.ts";
 import type { PathPolicy } from "./path-policy.ts";
 import { asParams, encodeBytes, encodeJson, mapError, type Params } from "./rpc-util.ts";
 
@@ -16,6 +17,8 @@ export interface WorkerContext {
   labels: Record<string, string>;
   /** The hub's `band` CLI, cached on this machine. Absent in a worker that does not fetch it. */
   cli?: CliCache;
+  /** The hub's lease: what fences the worker when it runs out. */
+  lease: LeaseGuard;
   /** The worker's private directory. */
   stateDir: string;
   /** Where this worker clones repos. A clone made there is covered by adding this directory as a root. */

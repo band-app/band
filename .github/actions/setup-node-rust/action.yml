@@ -1,0 +1,58 @@
+name: Set up Node, Rust and dependencies
+description: >
+  Installs the Rust toolchain, pnpm and Node, restores the cargo and pnpm
+  caches, builds the release CLI and runs pnpm install. Restore only: the
+  `check` job in ci.yml owns the cache saves. Run actions/checkout first.
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+
+    - name: Restore Cargo registry cache
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: cargo-registry-${{ runner.os }}-
+
+    - name: Restore CLI target cache
+      uses: actions/cache/restore@v5
+      with:
+        path: apps/cli/target
+        key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+        restore-keys: cargo-cli-${{ runner.os }}-
+
+    - uses: pnpm/action-setup@v6
+      with:
+        version: 10
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version-file: .nvmrc
+
+    - name: Resolve pnpm store path
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pnpm store cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-
+
+    - name: Build CLI
+      shell: bash
+      run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+    # node-pty ships no linux-x64 prebuild, so pnpm install runs node-gyp.
+    - name: Install node-gyp
+      shell: bash
+      run: npm install -g node-gyp
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

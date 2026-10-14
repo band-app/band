@@ -150,6 +150,7 @@ export function GroupedWorktrees({
                   showRepoName={mode === "origin"}
                   repoAvatar={entry.repo.avatar}
                   hostTag={hostLabel(hostIdOf(entry.worktree), hosts)}
+                  allowedHostIds={entry.repo.allowedHostIds}
                   onTogglePinned={onTogglePinned}
                 />
               </div>

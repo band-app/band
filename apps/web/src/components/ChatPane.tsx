@@ -37,6 +37,8 @@ export interface ChatPaneState {
    * no client mutation is needed and no remount is triggered.
    */
   onSessionDiscovered: (sessionId: string) => void;
+  /** The agent renamed its session: refetch the chat so the tab title follows. */
+  onSessionTitle: () => void;
   /**
    * User-initiated path: called from "Select past session" / "New session"
    * affordances. Persists the change to the server, invalidates the
@@ -204,6 +206,10 @@ export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneSt
     [chatId, queryClient],
   );
 
+  const onSessionTitle = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
+  }, [chatId, queryClient]);
+
   // User-initiated path. Persists to server, then bumps `paneKey` to
   // remount ChatView with the new session loaded from scratch.
   //
@@ -248,6 +254,7 @@ export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneSt
     agents,
     newSessionRef,
     onSessionDiscovered,
+    onSessionTitle,
     onSwitchSession,
     activeSessionSummary,
     paneKey,
@@ -280,6 +287,7 @@ export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatP
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}
         onSessionDiscovered={state.onSessionDiscovered}
+        onSessionTitle={state.onSessionTitle}
         onSwitchSession={state.onSwitchSession}
         agentType={state.agentType}
         codingAgentId={state.codingAgentId}

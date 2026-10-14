@@ -1,19 +1,34 @@
 import { cn } from "@band-app/ui";
 import { GitCompare, Globe, MessageSquare, TerminalSquare } from "lucide-react";
-import { getFileIcon } from "@/dashboard";
+import { AgentIcon, getFileIcon } from "@/dashboard";
+import {
+  readCachedTabMeta,
+  TabStatusIndicator,
+  useChatTabStatus,
+  useTerminalTabStatus,
+} from "./tab-status";
 
 export interface SwitcherItem {
   id: string;
   title: string;
   /** Dockview component name: chat, term, browser, file or diff. */
   kind: string;
+  /** The panel's params: the owning worktree and the chat or terminal id. */
+  params?: { worktreeId?: string; chatId?: string; terminalId?: string };
 }
 
 function ItemIcon({ item }: { item: SwitcherItem }) {
   const className = "size-4 shrink-0 text-muted-foreground";
   switch (item.kind) {
-    case "chat":
-      return <MessageSquare className={className} />;
+    case "chat": {
+      // The agent type ChatTab resolved and cached for this chat.
+      const agentType = readCachedTabMeta(item.params?.chatId ?? "").agentType;
+      return agentType ? (
+        <AgentIcon type={agentType} className="size-4 shrink-0" />
+      ) : (
+        <MessageSquare className={className} />
+      );
+    }
     case "term":
       return <TerminalSquare className={className} />;
     case "browser":
@@ -25,6 +40,16 @@ function ItemIcon({ item }: { item: SwitcherItem }) {
       return <FileIcon className={className} />;
     }
   }
+}
+
+/** The agent status mark a tab shows, from the same store hooks. */
+function ItemStatus({ item }: { item: SwitcherItem }) {
+  const worktreeId = item.params?.worktreeId ?? "";
+  const chatStatus = useChatTabStatus(worktreeId, item.params?.chatId ?? "");
+  const termStatus = useTerminalTabStatus(worktreeId, item.params?.terminalId ?? "");
+  const status = item.kind === "chat" ? chatStatus : item.kind === "term" ? termStatus : undefined;
+  if (!status) return null;
+  return <TabStatusIndicator status={status} testId={`tab-switcher__status--${item.id}`} />;
 }
 
 /** The Ctrl+Tab list: a centered popover of the group's tabs, newest first. */
@@ -46,7 +71,8 @@ export function TabSwitcher(props: { items: SwitcherItem[]; index: number }) {
             )}
           >
             <ItemIcon item={item} />
-            <span className="truncate">{item.title}</span>
+            <span className="min-w-0 flex-1 truncate">{item.title}</span>
+            <ItemStatus item={item} />
           </div>
         ))}
       </div>

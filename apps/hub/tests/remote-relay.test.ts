@@ -428,6 +428,14 @@ describe("uploads (S1)", () => {
     });
     expect(served.status).toBe(200);
     expect(await served.text()).toBe("uploaded to a worker\n");
+
+    // An <img> against a hub on another origin sends the token in the query.
+    const viaQuery = await fetch(`${server.url}${url}?token=${TEST_TOKEN}`);
+    expect(viaQuery.status).toBe(200);
+    expect(await viaQuery.text()).toBe("uploaded to a worker\n");
+    const wrongToken = await fetch(`${server.url}${url}?token=wrong`);
+    expect(wrongToken.status).toBe(401);
+    expect((await fetch(`${server.url}${url}`)).status).toBe(401);
   });
 
   it("keeps a local worktree's uploads on the hub", async () => {
@@ -445,6 +453,11 @@ describe("uploads (S1)", () => {
       headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
     expect(await served.text()).toBe("stays here\n");
+
+    const viaQuery = await fetch(`${server.url}${url}?token=${TEST_TOKEN}`);
+    expect(viaQuery.status).toBe(200);
+    expect(await viaQuery.text()).toBe("stays here\n");
+    expect((await fetch(`${server.url}${url}?token=wrong`)).status).toBe(401);
   });
 
   it("shows a file the agent shares on the worker as a download in the chat", async () => {
@@ -462,6 +475,9 @@ describe("uploads (S1)", () => {
     });
     expect(served.status).toBe(200);
     expect(await served.text()).toBe("shared from the worker\n");
+    const viaQuery = await fetch(`${server.url}${file?.url}?token=${TEST_TOKEN}`);
+    expect(viaQuery.status).toBe(200);
+    expect(await viaQuery.text()).toBe("shared from the worker\n");
   });
 });
 

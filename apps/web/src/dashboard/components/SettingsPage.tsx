@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
@@ -259,7 +260,13 @@ function formatLastRefreshed(epochMs: number): string {
   }
 }
 
+// Inline app-region styles: importing them from `components/DesktopTitleBar` would pull
+// its asset imports into every module that loads this page (the e2e page objects do).
+const DRAG_STYLE = { WebkitAppRegion: "drag" } as React.CSSProperties;
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
+
 export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
+  const titleBarOffset = useTitleBarOffset();
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
   const restartTerminalDaemonMutation = useRestartTerminalDaemon();
@@ -631,7 +638,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
-      tokenSecret: settings.tokenSecret,
       // Always send explicit booleans rather than `value || undefined`.
       // `saveSettings` does a shallow merge with the on-disk file, so
       // sending `undefined` (or omitting the key) keeps whatever value
@@ -668,17 +674,27 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
             data-testid="settings-page__nav"
             className="flex shrink-0 flex-col gap-2 border-border border-b bg-muted/20 p-3 max-lg:flex-row max-lg:items-center max-lg:overflow-x-auto lg:w-60 lg:overflow-y-auto lg:border-r lg:border-b-0"
           >
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="shrink-0 justify-start gap-2"
-              data-testid="settings-page__back"
-              onClick={() => onOpenChange(false)}
+            <div
+              data-testid="settings-page__top-row"
+              className={cn(
+                "flex shrink-0 items-center",
+                isDesktop && `-mx-3 -mt-3 h-[38px] lg:max-w-none ${titleBarOffset}`,
+              )}
+              style={isDesktop ? DRAG_STYLE : undefined}
             >
-              <ArrowLeft className="size-4" />
-              Back to app
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0 justify-start gap-2"
+                style={isDesktop ? NO_DRAG_STYLE : undefined}
+                data-testid="settings-page__back"
+                onClick={() => onOpenChange(false)}
+              >
+                <ArrowLeft className="size-4" />
+                Back to app
+              </Button>
+            </div>
             <Input
               aria-label="Search settings"
               placeholder="Search settings"

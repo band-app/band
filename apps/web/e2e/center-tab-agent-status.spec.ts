@@ -27,13 +27,14 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { CenterTabFocus } from "./pages/CenterTabFocus";
 import { ChatPanePage } from "./pages/ChatPanePage";
 import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-tab-agent-status-token";
 // One repo per test, so one test's agent status doesn't reach the other.
-const REPOS = ["tabstatuschat", "tabstatusterm"];
-const [CHAT_WS, TERM_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
+const REPOS = ["tabstatuschat", "tabstatusterm", "tabstatusswitch"];
+const [CHAT_WS, TERM_WS, SWITCH_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -141,4 +142,55 @@ test("a hidden terminal tab shows its Claude Code session's status", async ({ pa
   await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "done");
   await worktree.hoverTab("terminal");
   await expect(worktree.tabCloseButton("terminal")).toHaveCSS("opacity", "1");
+});
+
+test("the Ctrl+Tab list shows a terminal's agent status and follows changes", async ({ page }) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const focus = new CenterTabFocus(page);
+  const cwd = join(tmpHome, "tabstatusterm");
+  await chatPane.goto(TERM_WS);
+  await chatPane.waitForReady();
+  const terminalId = await worktree.firstTerminalTabId();
+  await worktree.reportTerminalHook({
+    cwd,
+    terminalId,
+    sessionId: "switcher-status-session",
+    hook: { hook_event_name: "PreToolUse", tool_name: "Bash" },
+  });
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "working");
+
+  await focus.openSwitcher();
+  await expect(focus.switcherStatus(terminalId)).toHaveAttribute("data-status", "working");
+
+  // The row follows a change while the list is open.
+  await worktree.reportTerminalHook({
+    cwd,
+    terminalId,
+    sessionId: "switcher-status-session",
+    hook: { hook_event_name: "Stop" },
+  });
+  await expect(focus.switcherStatus(terminalId)).toHaveAttribute("data-status", "done");
+  await focus.pressEscapeWhileHeld();
+  await focus.releaseControl();
+});
+
+test("the Ctrl+Tab list shows a chat's session title and working spinner", async ({ page }) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const focus = new CenterTabFocus(page);
+  await chatPane.goto(SWITCH_WS);
+  await chatPane.waitForReady();
+  await chatPane.typeMessage("start fixing the login redirect");
+  await chatPane.submit();
+  await expect(chatPane.assistantMessage("working")).toBeVisible();
+  await worktree.activateTab("terminal");
+  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+
+  await focus.openSwitcher();
+  const row = focus.switcherRow("start fixing the login redirect");
+  await expect(row).toBeVisible();
+  await expect(focus.rowStatus(row)).toHaveAttribute("data-status", "working");
+  await focus.pressEscapeWhileHeld();
+  await focus.releaseControl();
 });

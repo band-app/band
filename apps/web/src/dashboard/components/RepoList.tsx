@@ -574,6 +574,7 @@ function SortableRepo({
                   onShowDeleteDialog={onShowDeleteDialog}
                   onTogglePinned={onTogglePinned}
                   hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
+                  allowedHostIds={repo.allowedHostIds}
                 />
               );
             })
@@ -1160,6 +1161,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
                       isFocused={!pinnedSectionCollapsed && i === focusedIndex}
                       onShowDeleteDialog={setDeleteDialog}
                       showRepoName
+                      allowedHostIds={repo.allowedHostIds}
                       onTogglePinned={togglePinned}
                     />
                   ))}

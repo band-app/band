@@ -1,9 +1,10 @@
 /**
  * The desktop window's drag region must never cover a control in the top row.
  *
- * On desktop the center tab strip is the window's top row, and the empty part
- * of each top-row group's strip is `app-region: drag` (the strip is `drag`,
- * its tab viewport and buttons are `no-drag`).
+ * On desktop the center tab strip is the window's top row, but only the
+ * sidebars drag the window: the left sidebar's title bar (and its gutter in the
+ * strip while it is collapsed) and the right sidepanel's header. Nothing in the
+ * center column is `app-region: drag`.
  * Chromium builds the window's drag region from every element in document
  * order whose `visibility` is `visible`, whether or not it shows (z-index,
  * `inert` and `pointer-events` don't count), so any drag rect that lands on a
@@ -11,7 +12,7 @@
  * dockview never sees the click or the tab's HTML5 drag. That happened with
  * several worktrees open: hidden worktrees stay mounted at the same place
  * as the visible one, and their strips' empty space covered the visible
- * worktree's tabs.
+ * worktree's tabs. With no drag box in the center, that can't recur.
  *
  * Electron is the only place that hit-tests the drag region, and the e2e
  * harness boots the web build in plain Chromium, so these tests assert the
@@ -132,7 +133,7 @@ test("a hidden worktree's tab strip doesn't cover the visible worktree's tabs", 
   expect(await wp.appRegionsInHiddenWorktrees()).toEqual([]);
 });
 
-test("no window drag box sits under the tab viewport, but the strip's empty space drags", async ({
+test("no drag box covers the center column, while the sidebar title bar and right header drag", async ({
   page,
 }) => {
   const wp = new WorktreePage(page, server.url, TOKEN);
@@ -141,11 +142,35 @@ test("no window drag box sits under the tab viewport, but the strip's empty spac
   await wp.clickTerminalAddTab(WORKTREE_A);
   await expect(wp.terminalTabs()).toHaveCount(2);
 
-  expect(await wp.dragBoxesOverTabViewports()).toBe(0);
-  expect((await wp.emptyTopRowSpotsInDragRegion()).strips).toEqual([true]);
+  expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
+  await wp.revealRightPanel();
+  await expect(wp.rightPanelHeader).toBeVisible();
+  expect(await wp.emptyTopRowSpotsInDragRegion()).toEqual({
+    sidebarTitleBar: true,
+    rightPanelHeader: true,
+    strips: [false],
+  });
   // Back to the single default tab, which later tests start from.
   await wp.closeTerminalTab(WORKTREE_A);
   await expect(wp.terminalTabs()).toHaveCount(1);
+});
+
+test("the empty center and the no-worktree center don't drag, and the expand button stays reachable", async ({
+  page,
+}) => {
+  const wp = new WorktreePage(page, server.url, TOKEN);
+  await wp.goto(WORKTREE_A);
+  await wp.waitForReady();
+  await wp.revealRightPanel();
+  await wp.collapseRightPanelViaHeader();
+  await wp.closeTerminalTab(WORKTREE_A);
+  await expect(wp.centerDragBar).toBeVisible();
+
+  expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+  await expect(wp.rightPanelToggleInDragBar).toBeVisible();
+  await wp.rightPanelToggleInDragBar.click();
+  await expect(wp.rightPanelHeader).toBeVisible();
 });
 
 test("a hidden worktree with every tab closed sets no app-region", async ({ page }) => {
@@ -164,7 +189,7 @@ test("a hidden worktree with every tab closed sets no app-region", async ({ page
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 });
 
-test("split and maximized top-row groups keep their tabs and buttons out of the drag region", async ({
+test("split and maximized top-row groups drag nothing and keep their tabs and buttons clickable", async ({
   page,
 }) => {
   const wp = new WorktreePage(page, server.url, TOKEN);
@@ -176,23 +201,21 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
   await wp.clickChatSplitRight(WORKTREE_B);
   await expect(wp.centerToolbars).toHaveCount(2);
 
-  expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
+  expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 
   await wp.maximizePanel(0);
-  await expect(wp.restoreButton).toBeVisible();
+  await wp.expectMaximized(WORKTREE_B);
 
-  expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
+  expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
   expect(await wp.appRegionsInHiddenWorktrees()).toEqual([]);
 });
 
 // The app zoom is CSS `zoom` on <html>. A report from the desktop app (v0.44.0,
 // 110%) had clicks on center-strip tabs start a window drag while no drag box
-// covered them in the DOM. The tab viewport and strip buttons now carry their
-// own `no-drag`, after every drag box that could cover them in document order;
-// this checks that rule and the DOM-level region at the zoom levels people
-// use, with the sidebar open and collapsed. 125% comes from a persisted
+// covered them in the DOM. The center column now has no drag box at all; this
+// checks the DOM-level region at the zoom levels people use, with the sidebar open and collapsed. 125% comes from a persisted
 // setting on a reload, 100% and 110% from the real shortcuts, and 110% again
 // from the app's own persistence after a reload.
 test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% zoom", async ({
@@ -208,23 +231,23 @@ test("tabs and strip buttons stay out of the drag region at 100%, 110% and 125% 
   const expectTopRowAtZoom = async (zoom: number) => {
     await test.step(`Top row at ${Math.round(zoom * 100)}% zoom`, async () => {
       await expect.poll(() => wp.readAppZoom()).toBeCloseTo(zoom, 5);
-      // Sidebar open: its title bar and the strip's empty space drag.
+      // Sidebar open: its title bar drags, the strip's empty space doesn't.
       await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(100);
-      expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
+      expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
       expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
-      expect(await wp.emptyTopRowSpotsInDragRegion()).toEqual({
+      expect(await wp.emptyTopRowSpotsInDragRegion()).toMatchObject({
         sidebarTitleBar: true,
-        strips: [true],
+        strips: [false],
       });
       // Sidebar collapsed: the strip carries the sidebar gutter.
       await wp.toggleSidebarViaButton();
       await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
       await expect(wp.sidebarGutter).toHaveCount(1);
-      expect(await wp.topRowControlsWithoutOwnNoDrag()).toEqual([]);
+      expect(await wp.dragBoxesOverCenterColumn()).toBe(0);
       expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
-      expect(await wp.emptyTopRowSpotsInDragRegion()).toEqual({
+      expect(await wp.emptyTopRowSpotsInDragRegion()).toMatchObject({
         sidebarTitleBar: null,
-        strips: [true],
+        strips: [false],
       });
       await wp.toggleSidebarViaButton();
       await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(100);

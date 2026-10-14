@@ -218,6 +218,20 @@ describe("registering a worker", () => {
     expect((await exchange(fresh.token)).status).toBe(401);
   });
 
+  it("fills the hub's empty agent list from the agents the worker offers", async () => {
+    // A hub on a server has no agent CLIs of its own, so boot detection leaves the list empty
+    // and the UI would list no agents. The worker runs the scripted ACP agent, so it offers them all.
+    const settings = await trpcQ<{
+      codingAgents?: { id: string; type: string; label: string }[];
+      defaultCodingAgent?: string;
+    }>("settings.get");
+    expect(settings.codingAgents?.find((a) => a.id === "claude-code")).toMatchObject({
+      type: "claude-code",
+      label: "Claude Code",
+    });
+    expect(settings.defaultCodingAgent).toBeTruthy();
+  });
+
   it("binds a bootstrap token to the host it was issued for", async () => {
     const a = await issueBootstrap("A");
     const b = await issueBootstrap("B");
