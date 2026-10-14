@@ -75,6 +75,7 @@ import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
 import { copyWorktreeFiles } from "./setup/worktree-files";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
+import { readAccountUsage } from "./usage/account-usage";
 
 /** How long `info()` keeps the tool versions it probed. */
 const TOOLS_TTL_MS = 60_000;
@@ -175,6 +176,7 @@ export class LocalHost implements Host {
     usageReader: async (agent: AgentDescriptor) =>
       getUsageReader(agent.agentType, { command: agent.command }),
     installSkills: (options) => installSkills(options),
+    accountUsage: (options) => readAccountUsage(options),
     hooksStatus: () => checkHooks(),
     installHooks: () => installHooks(),
     removeHooks: () => removeHooks(),
