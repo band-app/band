@@ -27,7 +27,7 @@ import {
   WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
-import { isRemoteLoopback, testWorktreeId } from "./helpers/test-host";
+import { isRemoteLoopback, LOOPBACK_HOST_ID, testWorktreeId } from "./helpers/test-host";
 
 let servers: ServerHandle[] = [];
 /** Homes a test seeded itself; removed even when the test fails. */
@@ -532,7 +532,7 @@ describe("chat over ACP", () => {
       cause: "killed",
       signal: "SIGKILL",
       exitCode: null,
-      host: "local",
+      host: isRemoteLoopback ? LOOPBACK_HOST_ID : "local",
       agent: expect.any(String),
     });
     expect(ended?.type === "turn-ended" && ended.failure?.stderrTail).toContain("[session/query]");
