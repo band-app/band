@@ -21,6 +21,17 @@ import {
   worktrees,
 } from "../schema";
 
+/**
+ * Deletes what a worktree id holds under a unique key, so that rekeying another worktree onto the
+ * id cannot collide. Used when a continuation replaces an older superseded copy that had the id.
+ */
+export function clearWorktreeKeyedRows(worktreeId: string): void {
+  getDb().transaction((tx) => {
+    tx.delete(panelStates).where(eq(panelStates.worktreeId, worktreeId)).run();
+    tx.delete(clientState).where(eq(clientState.worktreeId, worktreeId)).run();
+  });
+}
+
 export function rekeyWorktreeRows(oldId: string, newId: string): void {
   if (oldId === newId) return;
   getDb().transaction((tx) => {

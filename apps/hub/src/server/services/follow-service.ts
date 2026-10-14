@@ -740,6 +740,27 @@ export class FollowService {
    * Removes the old copy. Only after `confirm` is true: this deletes files on its host. A host
    * that is offline removes the checkout the next time it connects.
    */
+  /**
+   * "Discard" for a superseded default-branch copy: the folder stays, and the branch goes back to
+   * the latest of its remote, with local changes and untracked files dropped. The superseded mark
+   * is cleared, because the folder is the repo's checkout again.
+   */
+  private async resetDefaultBranch(old: Located): Promise<void> {
+    const host = hostRegistry.hostById(old.hostId);
+    const git = gitIn(host, old.worktree.path);
+    const branch = old.repo.defaultBranch;
+    await git(["fetch", "origin", branch]).catch(() => undefined);
+    const target =
+      (await git(["rev-parse", "--verify", "--quiet", `origin/${branch}`]).catch(() => "")) ||
+      undefined;
+    await git(["checkout", "-q", "-f", "-B", branch, ...(target ? [target] : [])]);
+    await git(["reset", "-q", "--hard", ...(target ? [target] : [])]);
+    await git(["clean", "-q", "-fd"]);
+    this.repos.setSupersededBy(old.repo.name, old.worktree.name, old.hostId, null);
+    this.repos.setDivergence(old.repo.name, old.worktree.name, old.hostId, null);
+    this.repos.setContinuedFrom(old.repo.name, old.worktree.name, old.hostId, null);
+  }
+
   async discardOld(oldId: string, confirm: boolean, discardChanges = false): Promise<{ ok: true }> {
     if (!confirm) {
       throw new CheckpointError(
@@ -764,6 +785,11 @@ export class FollowService {
           `${oldId} has changes${count ? ` in ${count} file${count === 1 ? "" : "s"}` : ""} that the continued worktree lacks, and removing it loses them. Bring them over first, or pass discardChanges: true to delete them.`,
         );
       }
+    }
+    if (old.worktree.name === old.repo.defaultBranch) {
+      // The default branch is the repo's own folder, and other worktrees depend on it: reset it.
+      await this.resetDefaultBranch(old);
+      return { ok: true };
     }
     await worktreeService.remove({
       repo: old.repo.name,

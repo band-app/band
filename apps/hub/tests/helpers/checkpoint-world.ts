@@ -89,11 +89,7 @@ export interface World {
    * worker's lease (`LEASE_MS`), after which the hub lets its worktrees continue elsewhere. Pass
    * `{ waitForLease: false }` to look at the time in between.
    */
-  killWorker(
-    w: Worker,
-    signal?: NodeJS.Signals,
-    opts?: { waitForLease?: boolean },
-  ): Promise<void>;
+  killWorker(w: Worker, signal?: NodeJS.Signals, opts?: { waitForLease?: boolean }): Promise<void>;
   createWorktree(w: Worker, repo: string, branch: string): Promise<string>;
   worktreePath(w: Worker, repo: string, branch: string): string;
   turn(worktreeId: string, chatId: string, text: string): Promise<ChatEvent[]>;
