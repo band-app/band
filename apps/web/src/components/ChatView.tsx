@@ -55,6 +55,7 @@ import {
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
+import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { withResolvedDefaults } from "./chat/claude-default-labels";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
@@ -531,8 +532,8 @@ export function ChatView({
   // end, and the last row's thinking indicator must see that flip.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  const actionsRef = useRef({ answerPermission, answerElicitation });
-  actionsRef.current = { answerPermission, answerElicitation };
+  const actionsRef = useRef({ answerPermission, answerElicitation, send });
+  actionsRef.current = { answerPermission, answerElicitation, send };
 
   // Entrance animation only for messages appended at the end after the
   // first render; loaded history and prepended pages render instantly.
@@ -597,6 +598,23 @@ export function ChatView({
         );
       case "file":
         return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
+      case "failure": {
+        // Only the newest turn's card retries; an older card would resend a later prompt.
+        const all = messagesRef.current;
+        const last = all[all.length - 1];
+        const isNewest =
+          last?.role === "assistant" &&
+          last.entries.some((e) => e.kind === "failure" && e.id === entry.id);
+        const lastPrompt = [...all].reverse().find((m) => m.role === "user");
+        const retryText = isNewest && lastPrompt?.role === "user" ? lastPrompt.text : "";
+        return (
+          <AgentFailureCard
+            key={entry.id}
+            failure={entry.failure}
+            onRetry={retryText ? () => void actionsRef.current.send(retryText) : undefined}
+          />
+        );
+      }
       case "notice":
         return (
           <div

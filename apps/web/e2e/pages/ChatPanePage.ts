@@ -179,6 +179,8 @@ export class ChatPanePage {
   /** The "Listening" pill in the chat's top right corner. Absent while the
    *  chat has no subscriptions. */
   readonly listeningPill: Locator;
+  /** The card shown when the agent fails. */
+  readonly failureCards: Locator;
   /** The number of subscriptions the pill shows. */
   readonly listeningCount: Locator;
   /** The open subscription list. */
@@ -213,6 +215,7 @@ export class ChatPanePage {
     this.emptyConversation = page.getByTestId("chat-pane__empty-state");
     this.taskListWidget = page.getByTestId("task-list-widget__container");
     this.notices = page.getByTestId("chat-pane__notice");
+    this.failureCards = page.getByTestId("agent-failure");
     this.permissionCards = page.getByTestId("chat-pane__permission");
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
     this.composer = page.getByTestId("chat__composer").filter({ visible: true });
@@ -747,6 +750,40 @@ export class ChatPanePage {
    *  text. Same role-scoping rationale as `userMessage`. */
   assistantMessage(text: string): Locator {
     return this.page.getByTestId("chat-pane__assistant-message").filter({ hasText: text });
+  }
+
+  /** One failure card's parts. */
+  failureCard(index = 0) {
+    const card = this.failureCards.nth(index);
+    return {
+      card,
+      headline: card.getByTestId("agent-failure__headline"),
+      line: card.getByTestId("agent-failure__line"),
+      retry: card.getByTestId("agent-failure__retry"),
+      copy: card.getByTestId("agent-failure__copy"),
+      toggle: card.getByTestId("agent-failure__toggle"),
+      details: card.getByTestId("agent-failure__details"),
+      relevant: card.getByTestId("agent-failure__relevant"),
+      all: card.getByTestId("agent-failure__all"),
+      output: card.getByTestId("agent-failure__output"),
+      hidden: card.getByTestId("agent-failure__hidden"),
+      errorLines: card.getByTestId("agent-failure__error-line"),
+    };
+  }
+
+  /** Switch the app theme the way the theme toggle does: the `dark` class on the root. */
+  async setDarkTheme(dark: boolean): Promise<void> {
+    await this.page.evaluate((d) => document.documentElement.classList.toggle("dark", d), dark);
+  }
+
+  /** The text on the clipboard. */
+  async readClipboard(): Promise<string> {
+    return this.page.evaluate(() => navigator.clipboard.readText());
+  }
+
+  /** Save a screenshot of the page to `path`. */
+  async screenshot(path: string): Promise<void> {
+    await this.page.screenshot({ path });
   }
 
   /** Count of currently-mounted message rows in the virtualized list.

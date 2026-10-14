@@ -33,6 +33,7 @@ import {
   HostOfflineError,
 } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+import { type AgentFailure, classifyFailure } from "@band-app/shared/agent-failure";
 import type {
   ChatEvent,
   ChatEventPayload,
@@ -44,6 +45,7 @@ import type {
 import {
   type AcpAgentHandlers,
   AcpAgentProcess,
+  AgentProcessError,
   type AttachedSession,
   type PermissionOutcome,
 } from "../infra/agents/acp-agent-process";
@@ -1026,6 +1028,16 @@ export interface SessionListing {
   supported: boolean;
 }
 
+/** The host a worktree runs on. Never throws, because it runs while a failure is reported. */
+function hostIdFor(worktreeId: string | undefined): string {
+  if (!worktreeId) return "local";
+  try {
+    return hostRegistry.hostFor(worktreeId).id;
+  } catch {
+    return "local";
+  }
+}
+
 export class AgentSessionService {
   /** Subscribes to a chat's events: logged ones with their row id, and
    *  transient ones with negative ids. */
@@ -1203,6 +1215,35 @@ export class AgentSessionService {
       return;
     }
     record(rt, event, turnStart);
+  }
+
+  /** Describes why a chat's agent failed: the exit, the cause and what the
+   *  agent printed, for the error card. `turnStartedAt` is epoch ms. */
+  failureFor(chatId: string, err: unknown, turnStartedAt?: number): AgentFailure {
+    const message = err instanceof Error ? err.message : String(err);
+    const chat = chatService.get(chatId);
+    const rt = runtimes.get(chatId);
+    const details = err instanceof AgentProcessError ? err.details : null;
+    const input = {
+      exitCode: details?.exitCode ?? null,
+      signal: details?.signal ?? null,
+      stderr: details?.stderr ?? "",
+      message,
+      timedOut: details?.timedOut ?? false,
+    };
+    const at = Date.now();
+    return {
+      ...classifyFailure(input),
+      exitCode: input.exitCode,
+      signal: input.signal,
+      host: hostIdFor(rt?.worktreeId ?? chat?.worktreeId),
+      sessionId: rt?.sessionId ?? chat?.activeSessionId ?? null,
+      agent: chat ? definitionFor(chat).label : "The agent",
+      at,
+      stderrTail: input.stderr,
+      message,
+      ...(turnStartedAt !== undefined && { turnMs: at - turnStartedAt }),
+    };
   }
 
   /** Broadcasts an event that isn't logged (a failure before any session). */
