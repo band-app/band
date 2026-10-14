@@ -218,8 +218,11 @@ export class Worker {
     const registrar = new Registrar(ctx);
     registrar.json(METHOD_LEASE_RENEW, (a) => {
       const p = a as unknown as LeaseRenewParams;
+      if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {
+        throw new Error("lease.renew needs a positive ttlMs");
+      }
       return ctx.lease.renew(
-        typeof p.ttlMs === "number" && p.ttlMs > 0 ? p.ttlMs : 0,
+        p.ttlMs,
         Array.isArray(p.blockedPaths) ? p.blockedPaths.filter((x) => typeof x === "string") : [],
       );
     });

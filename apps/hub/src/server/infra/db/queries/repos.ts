@@ -596,10 +596,6 @@ export class RepoQueries {
     return row ? (row.checkpointsEnabled ?? null) : undefined;
   }
 
-  /**
-   * Marks the worktree on `hostId` as replaced by `newId`, or clears the mark with `null`.
-   * Focused UPDATE, because `saveAll` keeps the stored mark.
-   */
   /** The folders on `hostId` that a continuation superseded: nothing may start in them. */
   supersededPaths(hostId: string): string[] {
     return getDb()
@@ -610,6 +606,10 @@ export class RepoQueries {
       .map((r) => r.path);
   }
 
+  /**
+   * Marks the worktree on `hostId` as replaced by `newId`, or clears the mark with `null`.
+   * Focused UPDATE, because `saveAll` keeps the stored mark.
+   */
   setSupersededBy(repoName: string, name: string, hostId: string, newId: string | null): void {
     getDb()
       .update(worktreesTable)

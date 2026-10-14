@@ -58,11 +58,15 @@ import { CheckpointQueries, type CheckpointRow } from "../infra/db/queries/workt
 import { clearWorktreeKeyedRows, rekeyWorktreeRows } from "../infra/db/queries/worktree-rekey";
 import { hostRegistry } from "../infra/host/registry";
 import { checkpointDir, forgetCheckpoints, worktreeCheckpointDir } from "./_utils/checkpoint-store";
+import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { hostNamesOf } from "./_utils/repo-host-policy";
 import { onTurnEnded } from "./_utils/turn-events";
+import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { repoService } from "./repo-service";
 import { loadState, saveState } from "./state";
+import { hasRunningTask } from "./task-service";
+import { terminalService } from "./terminal-service";
 import { workerLeaseService } from "./worker-lease-service";
 import { worktreeService } from "./worktree-service";
 
@@ -894,6 +898,25 @@ export class CheckpointService {
     const onTarget = repo.worktrees.find(
       (w) => w.name === worktree.name && (w.hostId ?? LOCAL_HOST_ID) === toHostId,
     );
+    if (onTarget && !onTarget.supersededBy && isRoot) {
+      // The target's own checkout is reset under whoever is using it, so it must be idle.
+      const targetId = toWorktreeId(repo.name, worktree.name, toHostId);
+      const busy =
+        chatService
+          .list(targetId)
+          .some(
+            (chat) =>
+              hasRunningTask(chat.id) ||
+              agentSessionService.isActive(chat.id) ||
+              hasQueuedMessages(chat.id),
+          ) || (await terminalService.list(targetId).catch(() => [])).length > 0;
+      if (busy) {
+        throw new CheckpointError(
+          "conflict",
+          `${targetId} has a running agent, queued message or terminal on ${toHostId}. Stop it first: opening ${worktreeId} there replaces its files.`,
+        );
+      }
+    }
     if (onTarget && !onTarget.supersededBy && !isRoot) {
       throw new CheckpointError(
         "conflict",
@@ -959,8 +982,12 @@ export class CheckpointService {
           );
           await git(["update-ref", backupRef(), oldSnap.snapshotSha]);
           backups.push(backupRef());
-          await git(["worktree", "remove", "--force", worktreePath]);
+          // The folder is moved aside, not deleted: the backup ref holds no ignored files
+          // (.env, node_modules), and the old state must not vanish silently.
+          const aside = `${worktreePath}.band-backup-${backupStamp}`;
+          await host.fs.rename(worktreePath, aside);
           await git(["worktree", "prune"]);
+          log.info({ worktreeId, aside }, "kept the target's older copy beside the restored one");
         }
       }
 

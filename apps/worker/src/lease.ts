@@ -29,8 +29,8 @@ const safeName = (path: string) => path.replace(/[^A-Za-z0-9._-]/g, "_").replace
 /**
  * The worker's side of the hub's lease (issue #901). The hub renews the lease while the link is
  * up (`lease.renew`). When it runs out, whatever the reason (the hub is gone, the network is
- * down, the hub itself stopped) the worker snapshots every worktree locally, then stops its
- * agents, terminals and run scripts, and refuses to start new ones until a renewal arrives. It
+ * down, the hub itself stopped) the worker stops its agents, terminals and run scripts, then
+ * snapshots every worktree locally, and refuses to start new ones until a renewal arrives. It
  * cannot tell "the hub is down" from "my network is down", so both fence. A worker that never gets
  * a renewal (an older hub) never fences.
  *
@@ -40,7 +40,10 @@ const safeName = (path: string) => path.replace(/[^A-Za-z0-9._-]/g, "_").replace
  */
 export class LeaseGuard {
   private expiresAt: number | null = null;
-  /** The same expiry on the wall clock, which keeps counting while the machine sleeps. */
+  /**
+   * The same expiry on the wall clock, which keeps counting while the machine sleeps. A clock
+   * that jumps forward fences too: it cannot be told from a sleep, and fencing is the safe side.
+   */
   private expiresAtWall: number | null = null;
   private fenced = false;
   private fencing: Promise<void> | null = null;
@@ -112,16 +115,19 @@ export class LeaseGuard {
     this.fenced = true;
     this.fencing ??= (async () => {
       const { log } = this.options;
-      log.warn("the hub's lease ran out, snapshotting and stopping all work");
-      this.lastSnapshots = await this.snapshotAll().catch((err) => {
-        log.warn({ message: err instanceof Error ? err.message : String(err) }, "fence snapshot");
-        return 0;
-      });
+      log.warn("the hub's lease ran out, stopping all work and snapshotting");
+      // Stop first: the hub offers the worktree elsewhere once the lease is over, so nothing may
+      // keep running while the snapshots are built. Stopping touches no files, and the snapshots
+      // then see a tree that no process is writing to.
       for (const stop of this.stoppers) {
         await Promise.resolve(stop()).catch((err) =>
           log.warn({ message: err instanceof Error ? err.message : String(err) }, "fence stop"),
         );
       }
+      this.lastSnapshots = await this.snapshotAll().catch((err) => {
+        log.warn({ message: err instanceof Error ? err.message : String(err) }, "fence snapshot");
+        return 0;
+      });
       log.warn({ snapshots: this.lastSnapshots }, "fenced");
     })().finally(() => {
       this.fencing = null;

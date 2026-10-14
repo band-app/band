@@ -45,7 +45,7 @@ describe("lease and fencing", () => {
     cleanup(w.root, w.stateDir);
   });
 
-  it("stops terminals when the lease runs out, after keeping the work in a local snapshot", async () => {
+  it("stops terminals when the lease runs out, then keeps the work in a local snapshot", async () => {
     assert.deepEqual(await renew(1000), { fenced: false, snapshots: 0 });
     await spawn("t1");
     assert.equal((await terminals()).length, 1);
@@ -53,6 +53,8 @@ describe("lease and fencing", () => {
     // No more renewals: the lease runs out.
     await waitFor(async () => (await terminals()).length === 0, 8000, "the fence stops terminals");
 
+    // The snapshot is built after the stop, so it is written a moment later.
+    await waitFor(async () => existsSync(join(w.stateDir, "fenced.json")), 8000, "the snapshot");
     await assert.rejects(spawn("t2"), /lost the hub's lease/);
 
     // The files stay, and a snapshot commit holds them under a local ref.
