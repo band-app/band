@@ -21,7 +21,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { colors, tones } from "../../theme";
+import { colors, tones, useScheme } from "../../theme";
 import { Button } from "../ui";
 import { requestCardStyles } from "./permission-card";
 
@@ -265,6 +265,7 @@ function StepBody({
   onPick: (field: Field, choice: Choice) => void;
   onSet: (key: string, value: ElicitationValue | undefined) => void;
 }) {
+  const scheme = useScheme();
   const { field, note } = step;
   const current = values[field.key];
   const inputField = note ?? (field.kind === "text" || field.kind === "number" ? field : undefined);
@@ -317,11 +318,12 @@ function StepBody({
       ) : null}
       {inputField ? (
         <TextInput
+          keyboardAppearance={scheme}
           value={text}
           editable={!disabled}
           onChangeText={(t) => onSet(inputField.key, t)}
           placeholder={note ? "Something else" : "Type your answer…"}
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.faint}
           keyboardType={inputField.kind === "number" ? "numbers-and-punctuation" : "default"}
           autoCorrect={false}
           autoCapitalize={inputField.kind === "number" ? "none" : "sentences"}
@@ -352,14 +354,16 @@ const styles = StyleSheet.create({
   stepBody: { gap: 6 },
   choice: {
     alignItems: "center",
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 12,
-    minHeight: 48,
-    paddingHorizontal: 8,
+    minHeight: 52,
+    paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  choiceSelected: { backgroundColor: colors.muted },
+  choiceSelected: { borderColor: colors.foreground },
   number: {
     alignItems: "center",
     backgroundColor: colors.card,
@@ -380,7 +384,7 @@ const styles = StyleSheet.create({
   textInput: {
     backgroundColor: colors.background,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     color: colors.foreground,
     fontSize: 16,

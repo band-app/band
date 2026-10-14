@@ -189,7 +189,7 @@ function checkTabs({ tabs, chats }, params) {
  * make the scripted agent work, ask for permission or stop (in the chat `chat=<id>` names, else
  * the worktree's first), /check-tabs?wt=<id> checks the shared tab list (`checkTabs`, retried
  * for up to 10 s), /web-tabs?wt=<id> changes it as the web would (`webEditTabs`),
- * /stream?wt=<id> streams numbered
+ * /appearance?mode=light|dark sets the simulator's system appearance, /stream?wt=<id> streams numbered
  * lines for 45 s, /fill adds worktrees, and /sleep?ms=<n> answers after n milliseconds (a
  * flow's way to wait while the app is away). /clipboard?value=<text> fails unless the
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
@@ -226,6 +226,11 @@ function startControlServer(hub, chats, udid, notes) {
         }
         notes.push(`${wt}: ${result.note}`);
         if (!result.ok) throw new Error(result.note);
+      }
+      else if (url.pathname === "/appearance") {
+        // The simulator's system appearance: light or dark.
+        const mode = url.searchParams.get("mode") === "dark" ? "dark" : "light";
+        execFileSync("xcrun", ["simctl", "ui", udid, "appearance", mode]);
       }
       else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
       else if (url.pathname === "/subscribe") await addSubscription(hub, chats, wt);

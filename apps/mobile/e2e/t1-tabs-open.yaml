@@ -1,6 +1,7 @@
 # t1 (S1): the worktree's three chats, open as tabs on the "web" (the seeded shared tab list), show
-# on the phone in the same order with the same active tab. The terminal and browser tabs between
-# them are not shown; the strip says they are on the desktop.
+# on the phone in the same order with the same active tab. The title pill names the shown tab and
+# its place ("2 of 3"), the sheet lists the three with their state, and the terminal and browser
+# tabs between them are not listed; the sheet says they are on the desktop.
 appId: app.getband.mobile
 name: t1 the web's chat tabs open on the phone
 ---
@@ -9,30 +10,14 @@ name: t1 the web's chat tabs open on the phone
     file: subflows/open-gamma.yaml
     env:
       WT: gamma-tabs
+# Docs is the web's active tab: the pill names it, and its (empty) chat is the one shown.
 - extendedWaitUntil:
     visible:
-      id: tabs__tab-chat_tabs_1
-      text: "Parser"
+      id: tabs__switcher
+      text: "Docs, .*2 of 3.*"
     timeout: 15000
 - assertVisible:
-    id: tabs__tab-chat_tabs_2
-    text: "Docs"
-    rightOf:
-      id: tabs__tab-chat_tabs_1
-- assertVisible:
-    id: tabs__tab-chat_tabs_3
-    text: "Tests"
-    rightOf:
-      id: tabs__tab-chat_tabs_2
-# Docs is the web's active tab: it is selected, and its (empty) chat is the one shown.
-- assertVisible:
-    id: tabs__tab-chat_tabs_2
-    selected: true
-- assertVisible:
     id: chat__empty
-- assertVisible:
-    id: tabs__hidden
-    text: "2 more on desktop"
 - takeScreenshot: t1-tabs
 - tapOn:
     id: tabs__switcher
@@ -40,9 +25,29 @@ name: t1 the web's chat tabs open on the phone
     visible:
       id: tabs__sheet
     timeout: 5000
+- assertVisible:
+    id: tabs__label-chat_tabs_1
+    text: "Parser"
+- assertVisible:
+    id: tabs__label-chat_tabs_2
+    text: "Docs"
+    below:
+      id: tabs__label-chat_tabs_1
+- assertVisible:
+    id: tabs__label-chat_tabs_3
+    text: "Tests"
+    below:
+      id: tabs__label-chat_tabs_2
+- assertVisible:
+    id: tabs__hidden
+    text: "2 more on desktop"
 - takeScreenshot: t1-switcher
 - tapOn:
     id: tabs__sheet-done
+- extendedWaitUntil:
+    notVisible:
+      id: tabs__sheet
+    timeout: 5000
 - runScript:
     file: scripts/hub-control.js
     env:

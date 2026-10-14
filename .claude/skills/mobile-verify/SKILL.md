@@ -91,8 +91,8 @@ Check each tool first and install only what is missing. All of it is user space 
 | `pair-manual.yaml` | Manual pairing with URL and token. |
 | `wrong-token.yaml` | A wrong token shows "Invalid token. The hub rejected it." and nothing is saved. |
 | `hub-down.yaml` | A stopped hub shows the unreachable screen at start; Retry reconnects after the hub restarts. |
-| `w1-list.yaml` | The home screen lists both seeded repos with their worktrees, branch and host; a collapsed repo stays collapsed after a restart; search narrows the list. |
-| `w2-status-live.yaml` | A row shows Running within 2 s of the agent starting a turn and Needs attention when it asks for permission; the "needs me" filter keeps only waiting worktrees. |
+| `w1-list.yaml` | The home screen lists both seeded repos with their worktrees, branch and host, with the pinned worktree in a Pinned section; Group by switches Host, Origin and Repo; a collapsed repo stays collapsed after a restart; search narrows the list. |
+| `w2-status-live.yaml` | A row shows "working" within 2 s of the agent starting a turn and "needs you" when it asks for permission. |
 | `w3-foreground.yaml` | After a minute in the background the list shows what changed meanwhile. |
 | `w4-open.yaml` | Tapping a worktree opens its screen with the right name and branch; Back returns to the same place in a long list. |
 | `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link shows the "file viewer comes later" notice. |
@@ -104,15 +104,18 @@ Check each tool first and install only what is missing. All of it is user space 
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
 | `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
-| `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet shows in the header and in `chats.sessionState`. |
+| `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
 | `m6-keyboard.yaml` | With the keyboard open, the last message and the composer are both on screen. Run it on other simulators with `BAND_SIM_UDID`. |
 | `m7-draft.yaml` | An unsent draft survives leaving the screen and the app going to the background. |
-| `t1-tabs-open.yaml` | The three chats open as tabs on the "web" (the seeded shared tab list) show in the same order with the same active tab, and the strip says 2 more tabs are on the desktop. |
-| `t2-tabs-new-chat.yaml` | "+" lists the agents; the picked one starts a chat that becomes the active tab, and the shared list (what the web reads) gains it with the terminal and browser tabs kept. |
-| `t3-tabs-attention.yaml` | A chat in a background tab asks for permission: its tab shows the needs-attention dot, and switching to it shows the request. |
+| `m8-composer-expanded.yaml` | Focused, the composer expands with the attach button and the model and mode pills, and sending still works. |
+| `s8-dark-theme.yaml` | Screenshots of home, a worktree chat, the tab sheet, a question card and the expanded composer in light and dark (`xcrun simctl ui <udid> appearance`, through the control server's `/appearance?mode=`), and the Hubs screen's System / Light / Dark override. The `s8-light-*` and `s8-dark-*` pairs go into the PR. |
+| `t1-tabs-open.yaml` | The three chats open as tabs on the "web" (the seeded shared tab list) show in the same order in the title pill's sheet with the same active tab ("2 of 3"), and the sheet says 2 more tabs are on the desktop. |
+| `t2-tabs-new-chat.yaml` | "+ Chat" in the sheet lists the agents; the picked one starts a chat that becomes the active tab ("4 of 4"), and the shared list (what the web reads) gains it with the terminal and browser tabs kept. |
+| `t3-tabs-attention.yaml` | A chat in a background tab asks for permission: its dot shows needs-attention, a chip above the composer says "Tests: question", and tapping it shows that tab with the request. |
 | `t4-tabs-switch.yaml` | Switching back to a tab shown a moment ago shows it at once, with no spinner, still scrolled to its first turn. |
-| `t5-tabs-close.yaml` | Rename names the chat on the hub; Close tab removes the chat and its tab and keeps the web's terminal and browser tabs in the shared list. |
+| `t5-tabs-close.yaml` | Rename names the chat on the hub; Close tab (long press a row in the sheet) removes the chat and its tab and keeps the web's terminal and browser tabs in the shared list. |
 | `t6-tabs-live.yaml` | While the worktree is open, the web starts a chat and reorders the shared list (`/web-tabs`); the phone's tabs follow without reopening the screen. |
+| `t7-tabs-swipe.yaml` | A swipe left or right on the transcript moves to the next or previous tab and "N of M" follows; a drag from the left edge leaves the tab alone, for the system back swipe. |
 | `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees

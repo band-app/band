@@ -29,15 +29,13 @@ name: S4 open a worktree and come back
     visible:
       id: worktree__screen
     timeout: 10000
+# The title pill's second line names the repo and branch.
 - assertVisible:
-    id: worktree__name
-    text: bulk-9
-- assertVisible:
-    id: worktree__branch
-    text: bulk-9
+    id: tabs__switcher
+    text: ".*alpha · bulk-9.*"
 - takeScreenshot: s4-worktree-screen
 - tapOn:
-    text: Band
+    id: worktree__back
 - extendedWaitUntil:
     visible:
       id: home__worktree-alpha-bulk-9

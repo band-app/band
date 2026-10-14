@@ -6,7 +6,7 @@ name: S3 statuses are current after the app returns
 - extendedWaitUntil:
     visible:
       id: home__worktree-alpha-feat-mobile
-      text: ".*Idle.*"
+      text: ".*idle.*"
     timeout: 20000
 - pressKey: home
 # The control server answers after 9 s; the call is repeated because Maestro's HTTP client
@@ -27,7 +27,7 @@ name: S3 statuses are current after the app returns
 - extendedWaitUntil:
     visible:
       id: home__worktree-alpha-feat-mobile
-      text: ".*Running.*"
+      text: ".*working.*"
     timeout: 10000
 - takeScreenshot: s3-current-after-return
 - runScript:

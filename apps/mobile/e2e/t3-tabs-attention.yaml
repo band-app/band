@@ -1,5 +1,5 @@
-# t3 (S3): a chat in a background tab asks for permission; its tab shows the needs-attention dot,
-# and switching to it shows the request.
+# t3 (S4): a chat in a background tab asks for permission; its dot shows needs-attention and a chip
+# above the composer names it; tapping the chip shows the tab with the pinned request.
 appId: app.getband.mobile
 name: t3 a background tab that needs attention
 ---
@@ -27,10 +27,18 @@ name: t3 a background tab that needs attention
 - assertNotVisible:
     id: tabs__dot-chat_tabs_1-attention
 - takeScreenshot: t3-attention-dot
-- runFlow:
-    file: subflows/select-tab.yaml
-    env:
-      CHAT: chat_tabs_3
+# A chip above the composer names the tab that needs the user; tapping it opens that tab.
+- extendedWaitUntil:
+    visible:
+      id: worktree__chip-question
+      text: "Tests: question"
+    timeout: 10000
+- takeScreenshot: t3-question-chip
+- tapOn:
+    id: worktree__chip-question
+- assertVisible:
+    id: tabs__switcher
+    text: "Tests, .*3 of 4.*"
 - extendedWaitUntil:
     visible:
       text: "Waiting for permission"

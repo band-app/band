@@ -1,6 +1,6 @@
 # Band mobile
 
-The Expo iOS app for Band. It pairs with a hub, lists repos and worktrees with live agent status, and opens chats (transcript, composer, queue, permission requests, chat tabs shared with the web). iOS only.
+The Expo iOS app for Band. It pairs with a hub, lists repos and worktrees like the web sidebar (Pinned, then repos grouped by repo, origin or host, with agent state, PR and CI), starts an agent from a floating composer, and opens chats (transcript, composer, queue, permission requests). A worktree's chat tabs, shared with the web, sit behind the title pill: tap it for the tab sheet, or swipe the transcript sideways. The look follows the system appearance, light or dark. iOS only.
 
 ## Requirements
 

@@ -10,7 +10,8 @@ name: M7 draft per chat
 - tapOn:
     id: composer__input
 - inputText: "unsent thought"
-- tapOn: "Band"
+- tapOn:
+    id: worktree__back
 - extendedWaitUntil:
     visible:
       id: home__screen

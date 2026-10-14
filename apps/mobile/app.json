@@ -6,8 +6,8 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "band",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#1e1e1e",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#f5f5f4",
     "ios": {
       "bundleIdentifier": "app.getband.mobile",
       "supportsTablet": true,

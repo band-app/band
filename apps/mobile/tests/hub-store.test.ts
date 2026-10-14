@@ -127,13 +127,13 @@ describe("S4: tokens live only in the secure store", () => {
       );
       assert.doesNotMatch(text, /console\.(log|info|warn|error|debug)/, `${file} must not log`);
     }
-    // AsyncStorage backs the client-state store (collapsed repos) and nothing else.
+    // AsyncStorage backs the client-state store (collapsed repos) and the appearance choice, and nothing else.
     const asyncUsers = sources(join(appRoot, "src")).filter((f) =>
       /(from|require\(|import\()\s*["'][^"']*async-storage/.test(readFileSync(f, "utf8")),
     );
     assert.deepEqual(
       asyncUsers.map((f) => f.slice(appRoot.length + 1)),
-      ["src/lib/hub-session.tsx"],
+      ["src/lib/appearance.ts", "src/lib/hub-session.tsx"],
     );
     const storeUsers = sources(join(appRoot, "src")).filter((f) =>
       /(from|require\(|import\()\s*["']expo-secure-store["']/.test(readFileSync(f, "utf8")),

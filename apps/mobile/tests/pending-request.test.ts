@@ -6,6 +6,7 @@ import {
   pendingRequest,
   permissionInput,
   permissionTexts,
+  requestText,
 } from "../src/lib/chat/pending-request.ts";
 
 let id = 0;
@@ -64,5 +65,18 @@ describe("permission details", () => {
     assert.ok(entry?.kind === "permission");
     assert.deepEqual(permissionInput(entry), ["command: pnpm test", "description: Run the tests"]);
     assert.deepEqual(permissionTexts(entry), ["Plan: run them"]);
+  });
+});
+
+describe("requestText", () => {
+  it("names the tool for a permission request", () => {
+    const state = foldEvents(INITIAL_TRANSCRIPT, [
+      ev({ type: "prompt", text: "go" }),
+      ev({ type: "turn-started" }),
+      permission("p9"),
+    ]);
+    const entry = pendingRequest(state.messages);
+    assert.ok(entry);
+    assert.equal(requestText(entry), "Run tests");
   });
 });

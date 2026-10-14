@@ -2,7 +2,7 @@ import type { QueuedChatMessage } from "@band-app/shared/chat-events";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { moveItem } from "../../lib/composer/queue";
-import { chatColors, colors } from "../../theme";
+import { chatColors, colors, useScheme } from "../../theme";
 
 /**
  * Messages sent while the agent runs, listed above the composer as unsent bubbles. They go out
@@ -66,6 +66,7 @@ function QueuedMessage({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.text);
 
+  const scheme = useScheme();
   const save = () => {
     const next = draft.trim();
     if (!next) return;
@@ -79,6 +80,7 @@ function QueuedMessage({
         <TextInput
           accessibilityLabel="Edit queued message"
           autoFocus
+          keyboardAppearance={scheme}
           multiline
           value={draft}
           onChangeText={setDraft}
