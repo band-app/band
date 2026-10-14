@@ -4,8 +4,9 @@
  * A git credential helper on the worker asks for the credential of one remote
  * with `git.credential`. The hub answers only for a remote of a repository
  * placed on that worker: a repo with a checkout or a worktree on the
- * worker (its remotes, read from the hub's checkout, never from the
- * worker's own, which its agents can edit), or a clone the hub is about to make there (`expectRemote`). Anything
+ * worker (its remotes: the URL the hub stored for the repo and those of
+ * the hub's checkout, never the worker's own, which its agents can edit), or a
+ * clone the hub is about to make there (`expectRemote`). Anything
  * else is refused, so a worker cannot fish for the token of a repository it
  * does not serve.
  *
@@ -136,8 +137,18 @@ export class GitCredentialService {
     return null;
   }
 
-  /** The remotes of a repo's repository, read from the hub's checkout. */
+  /**
+   * The remotes of a repo: the URL the hub stored when it registered the repo (the only source on
+   * a hub with no checkout), plus the remotes of the hub's own checkout when it has one.
+   */
   private async remotesOf(repo: string): Promise<RemoteKey[]> {
+    const stored = this.repos.findLocation(repo)?.remoteUrl;
+    const storedKey = stored ? parseRemoteUrl(stored) : null;
+    const fromCheckout = await this.checkoutRemotes(repo);
+    return storedKey ? [storedKey, ...fromCheckout] : fromCheckout;
+  }
+
+  private async checkoutRemotes(repo: string): Promise<RemoteKey[]> {
     const local = loadState().repos.find((p) => p.name === repo)?.path;
     if (!local) return [];
     try {
