@@ -186,6 +186,11 @@ export class ChatPanePage {
   /** The rows of the open subscription list, one per subscription. */
   readonly listeningItems: Locator;
 
+  /** Everything a person can read on the page right now. */
+  async screenText(): Promise<string> {
+    return this.page.locator("body").innerText();
+  }
+
   constructor(
     private readonly page: Page,
     private readonly baseUrl: string,
