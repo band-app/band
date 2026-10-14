@@ -10,10 +10,10 @@
  *   - the merge control: `pr-checks__merge` (with `data-merge-state`),
  *     `pr-checks__merge-menu`, `pr-checks__merge-method--<method>`,
  *     `pr-checks__merge-confirm-button`;
- *   - the failing banner `pr-checks__failing-banner` with `pr-checks__fix`;
+ *   - the failing banner `pr-checks__failing-banner` with `pr-checks__fix` and `pr-checks__rerun-failed`;
  *   - the summary `pr-checks__summary-<passing|failing|pending>`;
  *   - one `pr-checks__check` row per check (`data-check-state`), with
- *     `pr-checks__check-name`, `-state`, `-link`, `-toggle` and `-details`
+ *     `pr-checks__check-name`, `-state`, `-link`, `-toggle`, `-rerun` (with `-rerun-error`) and `-details`
  *     (with `pr-checks__check-duration`);
  *   - the overflow menu `pr-checks__menu` (`pr-checks__menu-open`, `-copy`);
  *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
@@ -240,6 +240,28 @@ export class PrChecksPanelPage {
     await test.step(`Expand the ${name} check`, async () => {
       await this.check(name).getByTestId("pr-checks__check-toggle").click();
       await expect(this.checkDetails(name)).toBeVisible();
+    });
+  }
+
+  /** The Re-run button on the check called `name`. */
+  rerunButton(name: string): Locator {
+    return this.check(name).getByTestId("pr-checks__check-rerun");
+  }
+
+  /** The message shown under a check whose re-run was refused. */
+  rerunError(name: string): Locator {
+    return this.check(name).getByTestId("pr-checks__check-rerun-error");
+  }
+
+  async rerunCheck(name: string): Promise<void> {
+    await test.step(`Re-run the ${name} check`, async () => {
+      await this.rerunButton(name).click();
+    });
+  }
+
+  async rerunFailed(): Promise<void> {
+    await test.step("Re-run every failed job", async () => {
+      await this.page.getByTestId("pr-checks__rerun-failed").click();
     });
   }
 

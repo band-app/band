@@ -73,6 +73,14 @@ export default definePlugin({
           ctx,
         );
       },
+      async rerunChecks(repo, target, ctx) {
+        const args = ["run", "rerun", target.runId];
+        if (target.failedOnly) args.push("--failed");
+        else if (target.jobId) args.push("--job", target.jobId);
+        else throw new Error("Name a job to run again, or ask for the failed jobs.");
+        args.push("--repo", repoArg(normalize(repo)));
+        await runGh(api, args, ctx);
+      },
     });
 
     api.providers.registerChecksProvider({

@@ -40,6 +40,14 @@ export const clientPluginHost: ClientPluginHost = {
     }
   },
 
+  async rerunChecks(worktreeId, targets) {
+    try {
+      await trpc.reviews.rerunChecks.mutate({ worktreeId, targets });
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
+    }
+  },
+
   async startAgent(worktreeId, prompt) {
     // The server announces the new chat or terminal, and the worktree's
     // center dock adds its pane from that event.

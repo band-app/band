@@ -6,6 +6,7 @@ import type {
   MergeMethod,
   ProviderContext,
   RepoInfo,
+  RerunTarget,
   ReviewInfo,
   ReviewProvider,
   WorktreeReview,
@@ -98,6 +99,22 @@ export class ReviewService {
       await provider.merge(repo, review.number, method, ctx);
     } catch (err) {
       throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async rerunChecks(worktreeId: string, targets: RerunTarget[]): Promise<void> {
+    const target = await this.resolve(worktreeId);
+    if (!target.ok) throw new NoOpenReviewError(worktreeId);
+    const { repo, ctx, provider } = target;
+    if (!provider.rerunChecks) {
+      throw new ReviewProviderError(`${provider.name} cannot run checks again.`);
+    }
+    for (const item of targets) {
+      try {
+        await provider.rerunChecks(repo, item, ctx);
+      } catch (err) {
+        throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

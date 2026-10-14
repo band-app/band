@@ -58,4 +58,39 @@ export const reviewsRouter = t.router({
         throw err;
       }
     }),
+
+  /** Run CI jobs of the worktree's branch again. */
+  rerunChecks: publicProcedure
+    .input(
+      z.object({
+        worktreeId: z.string(),
+        targets: z
+          .array(
+            z.object({
+              runId: z.string().regex(/^\d+$/),
+              jobId: z.string().regex(/^\d+$/).optional(),
+              failedOnly: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(50),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await reviewService.rerunChecks(input.worktreeId, input.targets);
+        return { ok: true as const };
+      } catch (err) {
+        if (err instanceof WorktreeNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        if (err instanceof NoOpenReviewError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
+        }
+        if (err instanceof ReviewProviderError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
 });
