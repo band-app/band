@@ -188,8 +188,8 @@ function hunkSeparatorExtension(boundaryLines: number[], onLoadMore: () => void)
 }
 
 const diffTheme = EditorView.theme({
-  ".cm-insertedLine": { backgroundColor: "rgba(34, 197, 94, 0.1)" },
-  ".cm-deletedLine": { backgroundColor: "rgba(239, 68, 68, 0.1)" },
+  ".cm-insertedLine": { backgroundColor: "var(--diff-added-bg)" },
+  ".cm-deletedLine": { backgroundColor: "var(--diff-removed-bg)" },
   ".cm-hunk-separator": {
     display: "flex",
     alignItems: "stretch",

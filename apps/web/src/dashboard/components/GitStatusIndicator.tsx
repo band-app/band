@@ -17,14 +17,14 @@ export function GitStatusIndicator({ git }: Props) {
     parts.push({
       kind: "conflict",
       text: "!",
-      color: "text-red-600 dark:text-red-400",
+      color: "text-git-conflict",
       tooltip: "Merge conflict",
     });
   } else if (git.dirty) {
     parts.push({
       kind: "dirty",
       text: "M",
-      color: "text-yellow-600 dark:text-yellow-400",
+      color: "text-git-untracked",
       tooltip: "Uncommitted changes",
     });
   }
@@ -33,21 +33,21 @@ export function GitStatusIndicator({ git }: Props) {
     parts.push({
       kind: "ahead",
       text: `\u2191${git.ahead}`,
-      color: "text-blue-600 dark:text-blue-400",
+      color: "text-git-ahead",
       tooltip: `${git.ahead} commit${git.ahead > 1 ? "s" : ""} ahead`,
     });
   } else if (git.sync_state === "behind") {
     parts.push({
       kind: "behind",
       text: `\u2193${git.behind}`,
-      color: "text-yellow-600 dark:text-yellow-400",
+      color: "text-git-behind",
       tooltip: `${git.behind} commit${git.behind > 1 ? "s" : ""} behind`,
     });
   } else if (git.sync_state === "diverged") {
     parts.push({
       kind: "diverged",
       text: `\u2191${git.ahead}\u2193${git.behind}`,
-      color: "text-orange-600 dark:text-orange-400",
+      color: "text-git-diverged",
       tooltip: `Diverged: ${git.ahead} ahead, ${git.behind} behind`,
     });
   }

@@ -33,10 +33,11 @@ import { useSettingsQuery } from "../hooks/use-settings-query";
 import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
 import { useAgentMode } from "../lib/agent-mode";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
+import type { CodingAgentDefinition, CodingAgentType, LabelDefinition } from "../types";
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { AgentHooksSettings } from "./settings/AgentHooksSettings";
+import { AppearanceSettings } from "./settings/AppearanceSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
@@ -317,7 +318,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const [enableFilePreviewTabs, setEnableFilePreviewTabs] = useState(
     settings.enableFilePreviewTabs ?? true,
   );
-  const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   // Default true — see Settings.translucentSidebar JSDoc.
   const [translucentSidebar, setTranslucentSidebar] = useState(settings.translucentSidebar ?? true);
   // Default true — see Settings.useWebGLTerminalRenderer JSDoc.
@@ -540,7 +540,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
-    if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (translucentSidebar !== (settings.translucentSidebar ?? true)) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
     if (webBrowserCdpEnabled !== (settings.webBrowserCdpEnabled ?? false)) return true;
@@ -560,7 +559,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     autoStartTunnel,
     enableLSP,
     enableFilePreviewTabs,
-    selectedTheme,
     translucentSidebar,
     useWebGLTerminalRenderer,
     webBrowserCdpEnabled,
@@ -582,7 +580,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
     setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
-    setSelectedTheme(settings.theme ?? "system");
     setTranslucentSidebar(settings.translucentSidebar ?? true);
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
     setWebBrowserCdpEnabled(settings.webBrowserCdpEnabled ?? false);
@@ -599,7 +596,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     settings.autoStartTunnel,
     settings.enableLSP,
     settings.enableFilePreviewTabs,
-    settings.theme,
     settings.translucentSidebar,
     settings.useWebGLTerminalRenderer,
     settings.webBrowserCdpEnabled,
@@ -648,7 +644,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       autoStartTunnel,
       enableLSP,
       enableFilePreviewTabs,
-      theme: selectedTheme,
       translucentSidebar,
       useWebGLTerminalRenderer,
       webBrowserCdpEnabled,
@@ -739,40 +734,11 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                 <SettingsPageContext.Provider value={true}>
                   {/* ── Appearance ─────────────────────────────────── */}
                   {active === "appearance" ? (
-                    <SettingsSection title="Appearance">
-                      <SettingsRow
-                        variant="responsive"
-                        label="Theme"
-                        description="Choose between system default, light, and dark mode."
-                      >
-                        <Select
-                          value={selectedTheme}
-                          onValueChange={(v: string) => setSelectedTheme(v as Theme)}
-                        >
-                          <SelectTrigger className="h-8 w-full text-sm sm:w-32" aria-label="Theme">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="system">System</SelectItem>
-                            <SelectItem value="light">Light</SelectItem>
-                            <SelectItem value="dark">Dark</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </SettingsRow>
-                      {capabilities.translucentSidebar && (
-                        <SettingsRow
-                          htmlFor="translucent-sidebar"
-                          label="Translucent sidebar"
-                          description="Show the desktop through the repo list, blurred and tinted."
-                        >
-                          <Switch
-                            id="translucent-sidebar"
-                            checked={translucentSidebar}
-                            onCheckedChange={setTranslucentSidebar}
-                          />
-                        </SettingsRow>
-                      )}
-                    </SettingsSection>
+                    <AppearanceSettings
+                      translucentSidebarAvailable={capabilities.translucentSidebar === true}
+                      translucentSidebar={translucentSidebar}
+                      onTranslucentSidebarChange={setTranslucentSidebar}
+                    />
                   ) : null}
 
                   {/* ── General ────────────────────────────────────── */}
@@ -934,6 +900,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                               const id = `lbl_${Date.now()}`;
                               setLabels((prev) => [
                                 ...prev,
+                                // theme-lint-ignore-line: default value of a user-chosen label color
                                 { id, name: "New label", color: "#3b82f6" },
                               ]);
                             }}
@@ -992,6 +959,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                                 const id = `lbl_${Date.now()}`;
                                 setLabels((prev) => [
                                   ...prev,
+                                  // theme-lint-ignore-line: default value of a user-chosen label color
                                   { id, name: "New label", color: "#3b82f6" },
                                 ]);
                               }}
@@ -1136,7 +1104,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                                 <span
                                   className={cn(
                                     "size-2 shrink-0 rounded-full",
-                                    enabled ? "bg-green-500" : "bg-muted-foreground/30",
+                                    enabled ? "bg-success" : "bg-muted-foreground/30",
                                   )}
                                 />
                                 <AgentIcon type={known.type} className="size-4 shrink-0" />

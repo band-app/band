@@ -11,10 +11,16 @@
  */
 
 /** Lane colour of the branch HEAD is on. */
-export const GRAPH_REF_COLOR = "#3b82f6";
+export const GRAPH_REF_COLOR = "var(--info)";
 
 /** Colours handed out, in rotation, to other lanes. */
-const GRAPH_LANE_COLORS = ["#22c55e", "#a855f7", "#f97316", "#ec4899", "#14b8a6"] as const;
+const GRAPH_LANE_COLORS = [
+  "var(--git-added)",
+  "var(--merged)",
+  "var(--git-diverged)",
+  "var(--git-renamed)",
+  "var(--git-ahead)",
+] as const;
 
 export interface GraphCommit {
   sha: string;

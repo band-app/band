@@ -550,7 +550,7 @@ export function ChatView({
             className={cn(
               "text-sm",
               entry.level === "error" && "text-destructive",
-              entry.level === "warning" && "text-amber-600 dark:text-amber-400",
+              entry.level === "warning" && "text-warning",
               entry.level === "info" && "text-muted-foreground",
             )}
           >

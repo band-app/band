@@ -1,3 +1,4 @@
+// theme-lint-ignore-file: user-chosen color swatches
 import type * as React from "react";
 
 import { cn } from "../utils";

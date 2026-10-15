@@ -25,7 +25,7 @@ export function CIStatusIndicator({ ci }: Props) {
           <GitMerge
             data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
-            className={`size-3.5 shrink-0 text-violet-600 dark:text-violet-400 ${cursorClass}`}
+            className={`size-3.5 shrink-0 text-merged ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
           />
         </TooltipTrigger>
@@ -41,7 +41,7 @@ export function CIStatusIndicator({ ci }: Props) {
           <CircleCheck
             data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
-            className={`size-3.5 shrink-0 text-green-600 dark:text-green-400 ${cursorClass}`}
+            className={`size-3.5 shrink-0 text-success ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
           />
         </TooltipTrigger>
@@ -57,7 +57,7 @@ export function CIStatusIndicator({ ci }: Props) {
           <CircleAlert
             data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
-            className={`size-3.5 shrink-0 text-red-600 dark:text-red-400 ${cursorClass}`}
+            className={`size-3.5 shrink-0 text-danger ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
           />
         </TooltipTrigger>
@@ -73,7 +73,7 @@ export function CIStatusIndicator({ ci }: Props) {
           <Loader
             data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
-            className={`size-3.5 shrink-0 text-yellow-600 dark:text-yellow-400 animate-spin ${cursorClass}`}
+            className={`size-3.5 shrink-0 text-warning animate-spin ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
           />
         </TooltipTrigger>
@@ -89,7 +89,7 @@ export function CIStatusIndicator({ ci }: Props) {
           <Ban
             data-testid="worktree-card__ci-icon"
             data-ci-state={ci.state}
-            className={`size-3.5 shrink-0 text-gray-600 dark:text-gray-400 ${cursorClass}`}
+            className={`size-3.5 shrink-0 text-muted-foreground ${cursorClass}`}
             onClick={(e) => handleOpenUrl(ci.url, e)}
           />
         </TooltipTrigger>

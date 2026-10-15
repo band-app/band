@@ -766,8 +766,8 @@ export function BrowserPaneComponent({
           <Wrench className="size-4" />
         </button>
         {loading && (
-          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
-            <div className="band-browser-loading-bar h-full w-2/5 rounded-full bg-blue-500" />
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-info-bg">
+            <div className="band-browser-loading-bar h-full w-2/5 rounded-full bg-info" />
           </div>
         )}
         {/* History autocomplete — absolutely positioned under the

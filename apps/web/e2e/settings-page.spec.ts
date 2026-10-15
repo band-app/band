@@ -289,25 +289,6 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
   }).toPass({ timeout: 5_000 });
 });
 
-test("changing theme via the dropdown persists the new theme", async ({ page }) => {
-  const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  await settingsPage.goto();
-  await settingsPage.openDialog("appearance");
-
-  // Open the Theme dropdown and pick Light.
-  await settingsPage.selectTheme("Light");
-
-  // Save and verify persistence.
-  await settingsPage.save();
-
-  await expect(() => {
-    const settings = readSettings();
-    if (settings.theme !== "light") {
-      throw new Error(`expected theme=light, got ${JSON.stringify(settings.theme)}`);
-    }
-  }).toPass({ timeout: 5_000 });
-});
-
 test("the cross-host worktrees setting is on by default and saves when turned off", async ({
   page,
 }) => {

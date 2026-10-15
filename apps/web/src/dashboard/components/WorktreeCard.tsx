@@ -257,7 +257,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
   // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
   // drops the 300ms double-tap delay so taps register immediately.
-  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden select-none touch-manipulation transition-colors ${isDeleting ? "cursor-not-allowed opacity-50" : `cursor-pointer hover:bg-accent/50 ${hostOffline && !superseded ? "opacity-60" : ""}`} [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden select-none touch-manipulation transition-colors ${isDeleting ? "cursor-not-allowed opacity-50" : `cursor-pointer hover:bg-accent/50 ${hostOffline && !superseded ? "opacity-60" : ""}`} [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-selection text-selection-foreground outline outline-1 -outline-offset-1 outline-selection-border hover:bg-selection" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,

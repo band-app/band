@@ -178,9 +178,9 @@ export function ToolbarActionBar() {
             <Globe
               className={
                 ctx.tunnelStatus === "error"
-                  ? "size-4 text-red-500"
+                  ? "size-4 text-danger"
                   : ctx.tunnelStatus === "running"
-                    ? "size-4 text-green-500"
+                    ? "size-4 text-success"
                     : "size-4"
               }
             />

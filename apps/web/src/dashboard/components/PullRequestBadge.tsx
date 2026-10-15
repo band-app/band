@@ -30,14 +30,11 @@ export function pullRequestTone(pr: PullRequestSummary, ciState: CIState): PullR
 
 // Text, border and a faint fill in one hue, so the number reads as a tag.
 const TONE_CLASS: Record<PullRequestTone, string> = {
-  failure: "text-red-600 border-red-600/40 bg-red-500/10 dark:text-red-400 dark:border-red-400/40",
-  pending:
-    "text-yellow-700 border-yellow-600/50 bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-400/40",
-  success:
-    "text-green-700 border-green-600/40 bg-green-500/10 dark:text-green-400 dark:border-green-400/40",
+  failure: "text-danger border-danger/40 bg-danger-bg",
+  pending: "text-warning border-warning/40 bg-warning-bg",
+  success: "text-success border-success/40 bg-success-bg",
   neutral: "text-muted-foreground border-border bg-muted/50",
-  merged:
-    "text-violet-600 border-violet-600/40 bg-violet-500/10 dark:text-violet-400 dark:border-violet-400/40",
+  merged: "text-merged border-merged/40 bg-merged-bg",
   closed: "text-muted-foreground border-border bg-muted/50 line-through",
 };
 

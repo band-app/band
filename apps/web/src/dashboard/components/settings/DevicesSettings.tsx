@@ -274,6 +274,7 @@ export function DevicesSettings() {
                   hub's public address to get a link that works.
                 </p>
               ) : null}
+              {/* theme-lint-ignore-line: a QR code needs a white quiet zone to scan */}
               <div className="flex justify-center rounded-lg bg-white p-3">
                 <QRCodeSVG
                   value={issued.signInUrl}

@@ -1027,7 +1027,7 @@ export function FileViewer({
                 formatStatus.kind === "error"
                   ? "text-destructive"
                   : formatStatus.kind === "ok"
-                    ? "text-emerald-600 dark:text-emerald-400"
+                    ? "text-success"
                     : "text-muted-foreground"
               }`}
               title={formatStatus.message}

@@ -71,10 +71,10 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
   };
 
   const tone = merged
-    ? "bg-violet-600 text-white"
+    ? "bg-merged text-merged-foreground"
     : status.canMerge
-      ? "bg-green-700 text-white hover:bg-green-600"
-      : "bg-green-700/50 text-white/80";
+      ? "bg-success text-success-foreground hover:bg-success/90"
+      : "bg-success/50 text-success-foreground/80";
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -100,8 +100,10 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
               aria-label="Merge options"
               data-testid="pr-checks__merge-menu"
               className={cn(
-                "flex w-8 items-center justify-center border-l border-black/20",
-                merged ? "bg-violet-600 text-white" : "bg-green-700 text-white hover:bg-green-600",
+                "flex w-8 items-center justify-center border-l border-scrim",
+                merged
+                  ? "bg-merged text-merged-foreground"
+                  : "bg-success text-success-foreground hover:bg-success/90",
               )}
             >
               <ChevronDown className="size-3.5" />
@@ -148,7 +150,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
           </button>
           <button
             type="button"
-            className="rounded bg-green-700 px-2 py-0.5 font-medium text-white hover:bg-green-600"
+            className="rounded bg-success px-2 py-0.5 font-medium text-success-foreground hover:bg-success/90"
             onClick={() => void merge(confirming)}
             disabled={merging}
             data-testid="pr-checks__merge-confirm-button"
@@ -158,7 +160,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
         </div>
       )}
       {error && (
-        <p className="text-[11px] text-red-500" data-testid="pr-checks__merge-error">
+        <p className="text-[11px] text-danger" data-testid="pr-checks__merge-error">
           {error}
         </p>
       )}

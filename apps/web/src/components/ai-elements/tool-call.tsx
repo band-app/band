@@ -43,7 +43,7 @@ function Diff({
     >
       <div className="border-b border-border/30 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
         {shortPath(path, cwd)}
-        {!oldText && <span className="ml-2 text-green-600 dark:text-green-400">new file</span>}
+        {!oldText && <span className="ml-2 text-success">new file</span>}
       </div>
       <pre className="max-h-80 overflow-auto text-xs leading-5">
         {lines.map((line, i) =>
@@ -58,8 +58,8 @@ function Diff({
               key={i}
               className={cn(
                 "whitespace-pre px-2",
-                line.kind === "add" && "bg-green-500/15",
-                line.kind === "del" && "bg-red-500/15",
+                line.kind === "add" && "bg-diff-added-bg",
+                line.kind === "del" && "bg-diff-removed-bg",
               )}
             >
               <span className="select-none text-muted-foreground/60">
@@ -129,7 +129,7 @@ function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) 
   if (!run) return null;
   const exitCode = shownExitCode(run, failed);
   return (
-    <div className={cn("space-y-2 font-mono text-xs", failed && "text-red-400")}>
+    <div className={cn("space-y-2 font-mono text-xs", failed && "text-danger")}>
       <pre
         data-testid="tool-call__command"
         className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border/40 bg-muted/30 px-3 py-2 text-foreground"
@@ -201,8 +201,8 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
         <CollapsibleTrigger
           className={cn(
             "flex min-w-0 items-center gap-1.5 text-left",
-            failed ? "text-red-400" : "text-muted-foreground",
-            hasBody && (failed ? "hover:text-red-300" : "hover:text-foreground"),
+            failed ? "text-danger" : "text-muted-foreground",
+            hasBody && (failed ? "hover:text-danger/80" : "hover:text-foreground"),
           )}
           disabled={!hasBody}
         >

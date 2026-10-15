@@ -2217,12 +2217,8 @@ function SectionDiffFile({
           <span className="truncate font-medium" title={entry.path}>
             {entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
           </span>
-          {!!entry.additions && (
-            <span className="shrink-0 text-green-600 dark:text-green-400">+{entry.additions}</span>
-          )}
-          {!!entry.deletions && (
-            <span className="shrink-0 text-red-600 dark:text-red-400">-{entry.deletions}</span>
-          )}
+          {!!entry.additions && <span className="shrink-0 text-success">+{entry.additions}</span>}
+          {!!entry.deletions && <span className="shrink-0 text-danger">-{entry.deletions}</span>}
         </button>
         <button
           type="button"
@@ -2345,7 +2341,7 @@ function IconTab(props: IDockviewPanelHeaderProps) {
       )}
       <span className={TAB_TITLE_CLASS}>{title}</span>
       {hasBadge && (
-        <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+        <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-info-bg px-1.5 text-xs font-medium text-info">
           {badge}
         </span>
       )}

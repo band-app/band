@@ -188,8 +188,8 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__section-card");
   }
 
-  /** Theme dropdown trigger — `aria-label="Theme"` is set in
-   *  `SettingsPage.tsx` so the combobox role+name locator is exact. */
+  /** Theme preset dropdown trigger — `aria-label="Theme"` is set in
+   *  `AppearanceSettings.tsx` so the combobox role+name locator is exact. */
   themeSelect(): Locator {
     return this.dialog.getByRole("combobox", { name: "Theme" });
   }
@@ -457,8 +457,7 @@ export class SettingsPage {
 
   /**
    * Scroll the "Refresh" button for the named agent into view and click
-   * it. Mirrors the shape of the other action methods (`toggleLsp`,
-   * `selectTheme`) so the test body stays free of raw locator actions.
+   * it. Mirrors the shape of the other action methods (`toggleLsp`) so the test body stays free of raw locator actions.
    */
   async clickRefreshModels(agentLabel: string): Promise<void> {
     await test.step(`Click Refresh models for ${agentLabel}`, async () => {
@@ -1079,23 +1078,6 @@ export class SettingsPage {
   async expectRowVisible(locator: Locator): Promise<void> {
     await locator.scrollIntoViewIfNeeded();
     await expect(locator).toBeVisible();
-  }
-
-  /**
-   * Open the Theme dropdown and click an option by its visible name.
-   * Theme option names ("System", "Light", "Dark") are user-visible copy,
-   * but they are system-controlled enum values rather than translatable
-   * strings — they appear in the source as `<SelectItem value="...">`
-   * — so `getByRole("option", { name })` is the doctrine-correct locator.
-   */
-  async selectTheme(theme: "System" | "Light" | "Dark"): Promise<void> {
-    await test.step(`Select theme "${theme}"`, async () => {
-      const trigger = this.themeSelect();
-      await expect(trigger).toBeVisible();
-      await trigger.click();
-      await this.page.getByRole("option", { name: theme }).click();
-      await expect(trigger).toContainText(theme);
-    });
   }
 
   /** Pick this browser's agent mode ("Open agents on this device as"). It

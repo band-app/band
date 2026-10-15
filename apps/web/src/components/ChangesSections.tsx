@@ -274,8 +274,8 @@ export function ChangesSections({
               {pendingDiscard && discardQuestion(pendingDiscard)}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-yellow-500" />
+          <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
             <span>{pendingDiscard && discardWarning(pendingDiscard.section)}</span>
           </div>
           <DialogFooter>

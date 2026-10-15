@@ -63,6 +63,9 @@ import {
   saveSidebarCollapsed,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
+import { startThemeRuntime } from "../lib/theme/apply";
+import { THEME_INIT_SCRIPT } from "../lib/theme/init-script";
+import { MODE_KEY } from "../lib/theme/model";
 import {
   applyTranslucentSidebar,
   TRANSLUCENT_SIDEBAR_INIT_SCRIPT,
@@ -101,6 +104,7 @@ export const Route = createRootRoute({
       // `black` gives an opaque status bar and a window that reaches the bottom
       // edge. iOS reads this tag at install time: re-add the app to pick it up.
       { name: "apple-mobile-web-app-status-bar-style", content: "black" },
+      // theme-lint-ignore-line: static <head> tag, read by the OS before any script runs
       { name: "theme-color", content: "#1e1e1e" },
     ],
     links: [
@@ -127,10 +131,6 @@ function NotFound() {
   );
 }
 
-/** Blocking script injected into <head> to apply the theme before first paint.
- *  Reads a cached theme value from localStorage (written by ThemeSync). */
-const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
-
 /** Blocking script injected into <head> to apply the zoom level before first paint.
  *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts).
  *  Also seeds the `--app-zoom` CSS custom property the TerminalPanel relies on
@@ -147,56 +147,22 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-them
  *  zoom"; read the persisted value via `loadZoomLevel()` instead. */
 const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");var n=1;if(z){var p=parseFloat(z);if(!isNaN(p)&&p>=0.5&&p<=2)n=p;}var d=document.documentElement;d.style.zoom=String(n);d.style.setProperty("--app-zoom",String(n));}catch(e){}})()`;
 
-/** Applies a theme value ("dark", "light", or "system") to the document root. */
-function applyTheme(theme: string) {
-  const root = document.documentElement;
-  if (theme === "system") {
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  } else if (theme === "dark") {
-    root.classList.add("dark");
-  } else {
-    root.classList.remove("dark");
-  }
-}
-
-/** Syncs the "dark" class on <html> with the persisted theme setting.
- *  Runs for ALL pages (including standalone desktop windows like tasks/cronjobs).
- *  Also caches the theme in localStorage so the blocking script can use it. */
+/** Applies the device's mode and the synced appearance (preset, colors, fonts)
+ *  to <html>, and follows the OS, other windows and the hub's copy.
+ *  Runs for ALL pages (including standalone desktop windows like tasks/cronjobs). */
 function ThemeSync() {
   const { settings } = useSettingsQuery();
-  const theme = settings.theme ?? "dark";
 
+  // First run on this device: keep the mode the old per-hub setting had.
+  const legacyMode = settings.theme;
   useEffect(() => {
     try {
-      localStorage.setItem("band-theme", theme);
+      if (legacyMode && localStorage.getItem(MODE_KEY) === null) {
+        localStorage.setItem(MODE_KEY, legacyMode);
+      }
     } catch {}
-
-    applyTheme(theme);
-
-    if (theme === "system") {
-      const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      const handler = () => applyTheme("system");
-      mq.addEventListener("change", handler);
-      return () => mq.removeEventListener("change", handler);
-    }
-  }, [theme]);
-
-  // Cross-window theme sync via the storage event.
-  // When another window updates "band-theme" in localStorage,
-  // apply the change immediately to this window's DOM.
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key !== "band-theme" || !e.newValue) return;
-      applyTheme(e.newValue);
-    };
-
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
+    return startThemeRuntime();
+  }, [legacyMode]);
 
   return null;
 }

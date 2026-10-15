@@ -206,7 +206,7 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
         onClick={handleClick}
         className={cn(
           rest.className,
-          "cursor-pointer no-underline hover:underline hover:decoration-blue-500/50 dark:hover:decoration-blue-400/50",
+          "cursor-pointer no-underline hover:underline hover:decoration-link/50",
         )}
         title={`Open ${href?.slice("band-file:".length)}`}
       >

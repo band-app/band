@@ -307,8 +307,8 @@ export function ReportsPageContent() {
                       <Tooltip
                         cursor={{ stroke: "currentColor", strokeOpacity: 0.2 }}
                         contentStyle={{
-                          background: "var(--popover, #1e1e1e)",
-                          border: "1px solid var(--border, #333)",
+                          background: "var(--popover)",
+                          border: "1px solid var(--border)",
                           borderRadius: 6,
                           fontSize: 12,
                           padding: "6px 8px",

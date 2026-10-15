@@ -92,9 +92,9 @@ export function TaskListWidget({ plan, worktreeId }: { plan: PlanEntry[]; worktr
 function TaskStatusIcon({ status }: { status: string }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="size-3 shrink-0 text-green-500" />;
+      return <CheckCircle2 className="size-3 shrink-0 text-success" />;
     case "in_progress":
-      return <Loader2 className="size-3 shrink-0 animate-spin text-orange-500" />;
+      return <Loader2 className="size-3 shrink-0 animate-spin text-warning" />;
     default:
       return <Circle className="size-3 shrink-0 text-muted-foreground" />;
   }

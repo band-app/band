@@ -38,6 +38,7 @@ import {
   noteTypingLatencyOutput,
   registerTypingLatencyTerminal,
 } from "./terminal-typing-latency";
+import { cssColorToHex, cssVar, THEME_CHANGED_EVENT } from "./theme/apply";
 import { isWorktreeColdParked, subscribeWorktreeColdPark } from "./worktree-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 
@@ -78,14 +79,20 @@ const LONG_PRESS_MS = 500;
  *  gesture as a scroll instead of a long-press. */
 const LONG_PRESS_SLOP_PX = 10;
 
-/** xterm.js search addon decoration colors — VS Code's terminal-find palette.
- *  Decorations must be set for `onDidChangeResults` to fire (drives the counter). */
-const SEARCH_DECORATIONS = {
-  matchBackground: "#515c6a",
-  activeMatchBackground: "#a9913680",
-  matchOverviewRuler: "#a9913680",
-  activeMatchColorOverviewRuler: "#a99136",
-} as const;
+/** xterm.js search addon decoration colors, from the find tokens. They must be
+ *  `#rrggbb` hex, so the translucent tokens are blended over the terminal
+ *  background. Decorations must be set for `onDidChangeResults` to fire (drives the counter). */
+function searchDecorations() {
+  const background = cssVar("--terminal-background");
+  const match = cssColorToHex(cssVar("--search-match"), background);
+  const current = cssColorToHex(cssVar("--search-match-current"), background);
+  return {
+    matchBackground: match,
+    activeMatchBackground: current,
+    matchOverviewRuler: match,
+    activeMatchColorOverviewRuler: current,
+  };
+}
 
 const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   caseSensitive: false,
@@ -98,65 +105,49 @@ function toXtermSearchOptions(opts: SearchOptions): ISearchOptions {
     caseSensitive: opts.caseSensitive,
     wholeWord: opts.wholeWord,
     regex: opts.regex,
-    decorations: SEARCH_DECORATIONS,
+    decorations: searchDecorations(),
   };
 }
 
-// The `background` values are mirrored as `--terminal-background` in
-// styles/globals.css (dark and light); change both together.
-const DARK_TERMINAL_THEME: ITheme = {
-  background: "#1e1e1e",
-  foreground: "#e8e8e8",
-  cursor: "#e8e8e8",
-  selectionBackground: "rgba(255, 255, 255, 0.2)",
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0dbc79",
-  yellow: "#e5e510",
-  blue: "#2472c8",
-  magenta: "#bc3fbc",
-  cyan: "#11a8cd",
-  white: "#e5e5e5",
-  brightBlack: "#666666",
-  brightRed: "#f14c4c",
-  brightGreen: "#23d18b",
-  brightYellow: "#f5f543",
-  brightBlue: "#3b8eea",
-  brightMagenta: "#d670d6",
-  brightCyan: "#29b8db",
-  brightWhite: "#e5e5e5",
-};
-
-const LIGHT_TERMINAL_THEME: ITheme = {
-  background: "#ffffff",
-  foreground: "#1e1e1e",
-  cursor: "#1e1e1e",
-  cursorAccent: "#ffffff",
-  selectionBackground: "rgba(0, 0, 0, 0.15)",
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0a8043",
-  yellow: "#946800",
-  blue: "#0451a5",
-  magenta: "#bc05bc",
-  cyan: "#0598bc",
-  white: "#555555",
-  brightBlack: "#666666",
-  brightRed: "#cd3131",
-  brightGreen: "#0a8043",
-  brightYellow: "#946800",
-  brightBlue: "#0451a5",
-  brightMagenta: "#bc05bc",
-  brightCyan: "#0598bc",
-  brightWhite: "#1e1e1e",
-};
-
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains("dark");
+/** xterm's theme, read from the terminal tokens in styles/globals.css so the
+ *  Appearance settings and the active preset apply to it. */
+function getTerminalTheme(): ITheme {
+  const v = (name: string) => cssVar(name);
+  const background = v("--terminal-background");
+  return {
+    background,
+    foreground: v("--terminal-foreground"),
+    cursor: v("--terminal-foreground"),
+    cursorAccent: background,
+    selectionBackground: v("--terminal-selection"),
+    black: v("--ansi-0"),
+    red: v("--ansi-1"),
+    green: v("--ansi-2"),
+    yellow: v("--ansi-3"),
+    blue: v("--ansi-4"),
+    magenta: v("--ansi-5"),
+    cyan: v("--ansi-6"),
+    white: v("--ansi-7"),
+    brightBlack: v("--ansi-8"),
+    brightRed: v("--ansi-9"),
+    brightGreen: v("--ansi-10"),
+    brightYellow: v("--ansi-11"),
+    brightBlue: v("--ansi-12"),
+    brightMagenta: v("--ansi-13"),
+    brightCyan: v("--ansi-14"),
+    brightWhite: v("--ansi-15"),
+  };
 }
 
-function getTerminalTheme(): ITheme {
-  return isDarkMode() ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
+/** The code font stack from Appearance settings. */
+function getTerminalFontFamily(): string {
+  return cssVar("--font-code") || "'SF Mono', Menlo, Monaco, 'Courier New', monospace";
+}
+
+/** Base xterm font size at zoom 1.0: the code font size setting, else the default. */
+function getBaseFontSize(): number {
+  const px = Number.parseFloat(cssVar("--code-font-size"));
+  return Number.isFinite(px) && px > 0 ? px : BASE_FONT_SIZE;
 }
 
 // WebSocket heartbeat / reconnect tuning (identical to the old TerminalPanel).
@@ -425,8 +416,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       allowProposedApi: true,
       // A blinking cursor repaints the terminal twice a second. Off on battery and while blurred.
       cursorBlink: !isSaver(getPowerState()),
-      fontSize: BASE_FONT_SIZE * getCurrentZoomLevel(),
-      fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+      fontSize: getBaseFontSize() * getCurrentZoomLevel(),
+      fontFamily: getTerminalFontFamily(),
       // 1.2 row spacing is only safe under WebGL (redraws continuous glyphs at
       // full cell rect); the DOM renderer needs 1.0 to keep box art continuous.
       lineHeight: useWebGL ? 1.2 : 1.0,
@@ -443,14 +434,6 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     const unsubscribePower = subscribePowerState(() => {
       term.options.cursorBlink = !isSaver(getPowerState());
-    });
-
-    const themeObserver = new MutationObserver(() => {
-      term.options.theme = getTerminalTheme();
-    });
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
     });
 
     // Unicode 11 width tables, so emoji like U+1F7E0 take two cells as they
@@ -1211,7 +1194,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // frame later picks up the settled metrics.
     let zoomRefitRafId: number | null = null;
     const handleZoomChange = (zoom: number) => {
-      const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
+      const target = Math.round(getBaseFontSize() * zoom * 100) / 100;
       if (term.options.fontSize === target) return;
       remeasureAndReattach({ newFontSize: target });
       // Don't push a resize mid-replay: the pending snapshot is bound to the
@@ -1226,6 +1209,20 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       });
     };
     const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
+
+    // Appearance changes (mode, preset, colors, code font and size) reconfigure
+    // the live terminal in place; nothing reloads.
+    const handleThemeChange = () => {
+      term.options.theme = getTerminalTheme();
+      const family = getTerminalFontFamily();
+      if (term.options.fontFamily !== family) {
+        term.options.fontFamily = family;
+        remeasureAndReattach();
+        if (attached && hostIsVisible() && !awaitingReplay) sendPtyResize();
+      }
+      handleZoomChange(getCurrentZoomLevel());
+    };
+    window.addEventListener(THEME_CHANGED_EVENT, handleThemeChange);
 
     let dprMql: MediaQueryList | undefined;
     const onDprMediaChange = () => {
@@ -1291,7 +1288,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       window.removeEventListener("focus", handleForeground);
       document.removeEventListener("visibilitychange", handleVisibility);
       unlistenSystemResumed?.();
-      themeObserver.disconnect();
+      window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChange);
       unsubscribePower();
       resizeObserver.disconnect();
       searchResultsDisposable.dispose();

@@ -189,7 +189,7 @@ export function ChecksSection({
           className="flex items-center gap-2 border-b border-border px-3 py-2.5"
           data-testid="pr-checks__failing-banner"
         >
-          <CircleX className="size-4 shrink-0 text-red-500" aria-hidden />
+          <CircleX className="size-4 shrink-0 text-danger" aria-hidden />
           <div className="min-w-0 flex-1">
             <p
               className="text-xs font-semibold"
@@ -405,7 +405,7 @@ const CheckRow = memo(function CheckRow({
         </div>
         {rerunError && (
           <p
-            className="px-3 pb-2 pl-[42px] text-[11px] text-red-500"
+            className="px-3 pb-2 pl-[42px] text-[11px] text-danger"
             role="alert"
             data-testid="pr-checks__check-rerun-error"
           >

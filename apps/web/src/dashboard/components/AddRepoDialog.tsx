@@ -431,7 +431,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
             {hostsFields}
             {needsRoot ? (
               <div
-                className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+                className="space-y-1 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm"
                 data-testid="add-repo__confirm-root"
               >
                 <p>

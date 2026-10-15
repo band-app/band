@@ -1,3 +1,4 @@
+// theme-lint-ignore-file: the remote desktop canvas is always dark, whatever the app theme
 import { Button, SegmentedControl, Spinner } from "@band-app/ui";
 import type RFB from "@novnc/novnc";
 import { Eye, Maximize2, Minimize2, Monitor, MousePointer2, Unplug, X } from "lucide-react";
@@ -372,7 +373,7 @@ function ModeBadge({ phase, control, label }: { phase: Phase; control: boolean; 
       : phase === "connecting"
         ? "border-border bg-muted text-muted-foreground"
         : control
-          ? "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+          ? "border-warning/40 bg-warning-bg text-warning"
           : "border-border bg-muted text-muted-foreground";
   return (
     <span

@@ -67,12 +67,12 @@ export function GroupedWorktrees({
               <span
                 data-testid={`repo-list__host-state--${row.hostId}`}
                 className={`ml-auto flex shrink-0 items-center gap-1 text-[11px] ${
-                  row.status === "online" ? "text-muted-foreground" : "text-amber-500"
+                  row.status === "online" ? "text-muted-foreground" : "text-warning"
                 }`}
               >
                 <span
                   className={`size-1.5 rounded-full ${
-                    row.status === "online" ? "bg-emerald-500" : "bg-amber-500"
+                    row.status === "online" ? "bg-success" : "bg-warning"
                   }`}
                 />
                 {row.status}
