@@ -585,8 +585,10 @@ function SortableRepo({
               const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
               const currentIndex = worktreeIndex++;
               return (
+                // Keyed by name, not id: a move changes the id, and a remount would drop the
+                // open "Open on another host" dialog before it shows the result.
                 <DragRow
-                  key={wsId}
+                  key={wt.name}
                   dndId={`wt:${wsId}`}
                   data={{
                     kind: "wt",
