@@ -119,6 +119,46 @@ export function PlusGlyph({
   );
 }
 
+/** A microphone drawn from views: a capsule, a cradle and a stand. */
+export function MicGlyph({ size = 18 }: { size?: number }) {
+  const line = colors.foreground;
+  return (
+    <View style={{ width: size, height: size, alignItems: "center" }}>
+      <View
+        style={{
+          width: size * 0.38,
+          height: size * 0.62,
+          borderRadius: size * 0.19,
+          backgroundColor: line,
+        }}
+      />
+      <View
+        style={{
+          position: "absolute",
+          top: size * 0.3,
+          width: size * 0.66,
+          height: size * 0.4,
+          borderColor: line,
+          borderBottomWidth: 1.6,
+          borderLeftWidth: 1.6,
+          borderRightWidth: 1.6,
+          borderBottomLeftRadius: size * 0.33,
+          borderBottomRightRadius: size * 0.33,
+        }}
+      />
+      <View
+        style={{
+          position: "absolute",
+          bottom: size * 0.04,
+          width: 1.6,
+          height: size * 0.2,
+          backgroundColor: line,
+        }}
+      />
+    </View>
+  );
+}
+
 export function DotsGlyph() {
   return (
     <View style={{ flexDirection: "row", gap: 3.5 }}>

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { openSseStream, type SseWriter } from "@band-app/chat-runtime/sse-writer";
 import { createLogger } from "@band-app/logger";
 import { type ChatEvent, HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
 import {
@@ -6,8 +7,8 @@ import {
   subscribeQueue,
   toWireQueuedMessages,
 } from "../server/services/_utils/queued-message-store";
-import { openSseStream, type SseWriter } from "../server/services/_utils/sse-writer";
 import { agentSessionService } from "../server/services/agent-session-service";
+import { chatOwnershipService } from "../server/services/chat-ownership-service";
 import { chatService } from "../server/services/chat-service";
 import { taskService } from "../server/services/task-service";
 
@@ -70,9 +71,14 @@ export async function handleChatEvents(
     reset,
     eventId: syntheticId--,
   });
+  // A chat its worker owns keeps its queue there; the hub knows it from the worker.
+  const queuedNow = () =>
+    chatOwnershipService.isOwned(chatId)
+      ? chatOwnershipService.queue(chatId)
+      : toWireQueuedMessages(getQueuedMessages(chatId));
   writer.write({
     type: "queue-updated",
-    messages: toWireQueuedMessages(getQueuedMessages(chatId)),
+    messages: queuedNow(),
     eventId: syntheticId--,
   });
 
@@ -186,7 +192,7 @@ export async function handleChatEvents(
         if (
           event.type === "turn-ended" &&
           taskService.getTask(chatId)?.status !== "running" &&
-          getQueuedMessages(chatId).length === 0
+          queuedNow().length === 0
         ) {
           return;
         }

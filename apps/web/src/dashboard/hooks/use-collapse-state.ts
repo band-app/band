@@ -58,6 +58,8 @@ export interface CollapseState {
   expand: (id: string) => void;
   /** Replace the entire collapsed set in one shot (used for collapse-all). */
   setAll: (ids: Iterable<string>) => void;
+  /** Add ids to the collapsed set and keep the ones already in it. */
+  addAll: (ids: Iterable<string>) => void;
 }
 
 export function useCollapseState(storageKey: string): CollapseState {
@@ -125,10 +127,21 @@ export function useCollapseState(storageKey: string): CollapseState {
     [storageKey],
   );
 
+  const addAll = useCallback(
+    (ids: Iterable<string>) => {
+      setCollapsed((prev) => {
+        const next = new Set([...prev, ...ids]);
+        write(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
   // Memoised so consumers can use the returned object as a useMemo/useEffect
   // dependency without triggering work on every render.
   return useMemo(
-    () => ({ isCollapsed, toggle, expand, setAll }),
-    [isCollapsed, toggle, expand, setAll],
+    () => ({ isCollapsed, toggle, expand, setAll, addAll }),
+    [isCollapsed, toggle, expand, setAll, addAll],
   );
 }

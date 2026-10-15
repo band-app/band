@@ -23,6 +23,8 @@ export interface WorkerContext {
   stateDir: string;
   /** Where this worker clones repos. A clone made there is covered by adding this directory as a root. */
   reposDir?: string;
+  /** This worker runs the chats of its worktrees (`--own-chats`). */
+  ownsChats?: boolean;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */
@@ -30,6 +32,7 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
   const info = await ctx.host.info();
   return {
     ...info,
+    capabilities: { ...info.capabilities, ...(ctx.ownsChats ? { chatOwnership: true } : {}) },
     labels: Object.entries(ctx.labels).map(([k, v]) => `${k}=${v}`),
     roots: ctx.policy.rootPaths,
     dirs: hostDirs(ctx.policy.rootPaths),

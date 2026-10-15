@@ -20,8 +20,10 @@ import {
   saveWorktreeUploads,
   uploadPathFromUrl,
 } from "../../services/_utils/upload-utils";
+import { chatOwnershipService } from "../../services/chat-ownership-service";
 import { chatService } from "../../services/chat-service";
 import { bandHome } from "../../services/state";
+import { taskService } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("trpc.queue");
@@ -255,6 +257,21 @@ export const queueRouter = t.router({
         );
         files = undefined;
       }
+      // A chat its worker owns keeps its queue there: the message goes to the worker.
+      if (chatOwnershipService.isOwned(chatId)) {
+        const result = taskService.submitOrQueueTask({
+          worktreeId: input.worktreeId,
+          chatId,
+          prompt: input.text,
+          attachments: files,
+        });
+        const id = result.queued ? result.queuedMessageId : result.task.id;
+        return {
+          ok: true,
+          message: { id, text: input.text },
+          messages: chatOwnershipService.queue(chatId),
+        };
+      }
       const message = pushQueuedMessage(chatId, { text: input.text, files });
       return {
         ok: true,
@@ -306,6 +323,13 @@ export const queueRouter = t.router({
           }
         }),
       );
+      if (chatOwnershipService.isOwned(chatId)) {
+        chatOwnershipService.reorderQueue(
+          chatId,
+          messages.flatMap((m) => (m.id ? [m.id] : [])),
+        );
+        return { ok: true, messages: chatOwnershipService.queue(chatId) };
+      }
       setQueuedMessages(chatId, messages);
       return { ok: true, messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
@@ -314,6 +338,9 @@ export const queueRouter = t.router({
     .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
+      if (chatOwnershipService.isOwned(chatId)) {
+        return { messages: chatOwnershipService.queue(chatId) };
+      }
       return { messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
 
@@ -321,6 +348,10 @@ export const queueRouter = t.router({
     .input(z.object({ worktreeId: z.string(), chatId: z.string().optional(), id: z.string() }))
     .mutation(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
+      if (chatOwnershipService.isOwned(chatId)) {
+        const removed = chatOwnershipService.removeQueued(chatId, input.id);
+        return { ok: true, removed, messages: chatOwnershipService.queue(chatId) };
+      }
       const removed = removeQueuedMessage(chatId, input.id);
       return {
         ok: true,
@@ -340,6 +371,10 @@ export const queueRouter = t.router({
     )
     .mutation(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
+      if (chatOwnershipService.isOwned(chatId)) {
+        const updated = chatOwnershipService.updateQueued(chatId, input.id, input.text);
+        return { ok: true, updated, messages: chatOwnershipService.queue(chatId) };
+      }
       const updated = updateQueuedMessage(chatId, input.id, input.text);
       return {
         ok: true,
@@ -360,6 +395,10 @@ export const queueRouter = t.router({
     .input(z.object({ worktreeId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.worktreeId).id;
+      if (chatOwnershipService.isOwned(chatId)) {
+        chatOwnershipService.clearQueue(chatId);
+        return { ok: true };
+      }
       clearQueuedMessages(chatId);
       return { ok: true };
     }),

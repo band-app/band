@@ -55,6 +55,14 @@ export interface ChatFindHighlights {
 }
 
 export class ChatPanePage {
+  /** The dictation mic in the composer. Absent until the hub has voice set up. */
+  readonly mic: Locator;
+  /** The "Listening" state with the elapsed timer, shown while recording. */
+  readonly micListening: Locator;
+  readonly micTimer: Locator;
+  readonly micCancel: Locator;
+  /** The dictation error line (a denied microphone, a failed transcription). */
+  readonly micError: Locator;
   /** The prompt textarea — placeholder is stable, hard-coded in
    *  `ChatView.tsx` and not user-localised. */
   readonly promptInput: Locator;
@@ -201,6 +209,11 @@ export class ChatPanePage {
     private readonly hubUrl?: string,
   ) {
     this.promptInput = page.getByPlaceholder("Type a message...");
+    this.mic = page.getByTestId("prompt-input__mic").filter({ visible: true });
+    this.micListening = page.getByTestId("prompt-input__mic-listening").filter({ visible: true });
+    this.micTimer = page.getByTestId("prompt-input__mic-timer").filter({ visible: true });
+    this.micCancel = page.getByTestId("prompt-input__mic-cancel").filter({ visible: true });
+    this.micError = page.getByTestId("prompt-input__mic-error").filter({ visible: true });
     this.promptForm = page.getByTestId("prompt-input__form").filter({ visible: true });
     this.root = page.getByTestId("chat-pane").filter({ visible: true });
     this.find = new FindWidget(this.root);
@@ -621,6 +634,28 @@ export class ChatPanePage {
   async typeMessage(text: string): Promise<void> {
     await test.step(`Type "${text}" into the prompt`, async () => {
       await this.promptInput.fill(text);
+    });
+  }
+
+  /** Puts the caret at the end of the draft, as a user clicking after the last word does. */
+  async placeCaretAtEnd(): Promise<void> {
+    await test.step("Put the caret at the end of the prompt", async () => {
+      await this.promptInput.focus();
+      await this.promptInput.press("End");
+    });
+  }
+
+  /** Taps the mic: starts recording, or stops and sends the clip when already recording. */
+  async tapMic(): Promise<void> {
+    await test.step("Tap the mic", async () => {
+      await this.mic.click();
+    });
+  }
+
+  /** Cancels the recording in progress. */
+  async cancelDictation(): Promise<void> {
+    await test.step("Cancel the dictation", async () => {
+      await this.micCancel.click();
     });
   }
 

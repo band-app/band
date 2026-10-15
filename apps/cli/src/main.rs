@@ -5125,7 +5125,7 @@ fn cmd_open(file_path: &str, worktree: Option<&str>, focus: bool) -> Result<Comm
 // --- Notify command ---
 
 /// Longest `band notify` takes in total, whatever the hub or stdin does.
-const NOTIFY_DEADLINE: std::time::Duration = std::time::Duration::from_millis(1000);
+const NOTIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// `band notify` runs from agent hooks and must never disturb the agent: it
 /// prints nothing, exits 0 whatever happens (no `band` setup, hub down, bad or

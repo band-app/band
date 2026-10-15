@@ -12,6 +12,7 @@ import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { createTerminalBackend } from "@band-app/host-local/terminals/create-backend";
+import { VOICE_TRANSCRIBE_PATH } from "@band-app/shared/speech-transcription";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -33,6 +34,7 @@ import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
+import { handleVoiceTranscribe } from "./src/server/api/voice/handler";
 import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
@@ -950,6 +952,12 @@ async function main() {
 
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
+
+    // Dictation: the audio clip goes to the hub, which calls the configured speech-to-text endpoint.
+    if (req.url?.split("?")[0] === VOICE_TRANSCRIBE_PATH) {
+      await handleVoiceTranscribe(req, res);
+      return;
+    }
 
     // Serve uploaded files (images, attachments)
     // A local upload is `/api/uploads/<name>`. One on a remote worktree's

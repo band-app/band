@@ -328,6 +328,11 @@ beforeAll(async () => {
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
           probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
+          // Dictation spends the hub's speech-to-text key, so an agent gets neither the audio
+          // route nor the voice procedures.
+          post("voice-transcribe", "/api/voice/transcribe", {}),
+          probe("voice-status", "/trpc/voice.status"),
+          post("voice-test", "/trpc/voice.test", {}),
           { say: "probed" },
         ],
       },
@@ -524,6 +529,9 @@ describe("the worker relay (S2)", () => {
     expect(by("other-route")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
+    expect(by("voice-transcribe")?.status).toBe(403);
+    expect(by("voice-status")?.status).toBe(403);
+    expect(by("voice-test")?.status).toBe(403);
     // A foreign target next to the agent's own worktreeId does not borrow its scope.
     expect(by("decoy-terminal")?.status).toBe(403);
     expect(by("decoy-repo")?.status).toBe(403);

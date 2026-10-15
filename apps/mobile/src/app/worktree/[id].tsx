@@ -1,7 +1,6 @@
-import { Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -18,6 +17,7 @@ import { WorktreeHeader } from "../../components/chat/worktree-header";
 import { StateIcon } from "../../components/state-icon";
 import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
+import { ViewsSheet, type ViewsSheetItem } from "../../components/views-sheet";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
@@ -26,15 +26,15 @@ import { colors, tints, tones } from "../../theme";
 
 /** A worktree's screen: title pill with the shown chat, the chat, and a sheet of the other tabs. */
 export default function WorktreeRoute() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, openChat } = useLocalSearchParams<{ id: string; openChat?: string }>();
   return (
     <SessionGate>
-      <WorktreeScreen id={id} />
+      <WorktreeScreen id={id} openChat={openChat} />
     </SessionGate>
   );
 }
 
-function WorktreeScreen({ id }: { id: string }) {
+function WorktreeScreen({ id, openChat }: { id: string; openChat?: string }) {
   const { client } = useHubSession();
   const repos = useRepos();
   const hosts = useHosts();
@@ -59,7 +59,13 @@ function WorktreeScreen({ id }: { id: string }) {
 
   return (
     <View style={local.screen} testID="worktree__screen">
-      <WorktreeChats worktreeId={id} repo={row.repoTitle} branch={row.branch} pr={row.pr} />
+      <WorktreeChats
+        worktreeId={id}
+        repo={row.repoTitle}
+        branch={row.branch}
+        pr={row.pr}
+        openChat={openChat}
+      />
     </View>
   );
 }
@@ -75,11 +81,14 @@ const WorktreeChats = memo(function WorktreeChats({
   repo,
   branch,
   pr,
+  openChat,
 }: {
   worktreeId: string;
   repo: string;
   branch: string;
   pr: WorktreeRow["pr"];
+  /** A chat another screen started (the Fix agent); it becomes the shown tab once listed. */
+  openChat?: string;
 }) {
   const tabs = useWorktreeTabs(worktreeId);
   const { select, close, move, rename, create, createTerminal } = tabs;
@@ -90,6 +99,18 @@ const WorktreeChats = memo(function WorktreeChats({
   const [sheet, setSheet] = useState(false);
   const [picker, setPicker] = useState(false);
   const pickerAfterSheet = useRef(false);
+  const [views, setViews] = useState(false);
+  // What the Views sheet chose; it runs once the sheet has closed, so a modal never opens over it.
+  const afterViews = useRef<(() => void) | null>(null);
+
+  // A chat started elsewhere (the Fix agent) is shown as soon as the tab list has it.
+  const shownOpenChat = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!openChat || shownOpenChat.current === openChat) return;
+    if (!tabs.tabs.some((t) => t.id === openChat)) return;
+    shownOpenChat.current = openChat;
+    select(openChat);
+  }, [openChat, tabs.tabs, select]);
 
   // The tab pager: a horizontal paging scroll view holds the previous tab's name, the chats and
   // the next tab's name, so UIKit does the sideways drag. That keeps the vertical transcript, the
@@ -121,22 +142,36 @@ const WorktreeChats = memo(function WorktreeChats({
   }
 
   const current = tabs.tabs.find((t) => t.id === tabs.active);
-  const showMore = () => {
-    const options = ["New chat", "Rename chat", "Close tab", "Cancel"];
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options,
-        destructiveButtonIndex: 2,
-        cancelButtonIndex: 3,
-        disabledButtonIndices: !current ? [1, 2] : current.kind === "term" ? [1] : [],
-      },
-      (choice) => {
-        if (choice === 0) setPicker(true);
-        else if (choice === 1 && current) renameTab(current, actions);
-        else if (choice === 2 && current) closeTab(actions, current.id);
-      },
-    );
+  const afterSheet = (run: () => void) => () => {
+    afterViews.current = run;
+    setViews(false);
   };
+  const viewItems: ViewsSheetItem[] = [
+    {
+      key: "checks",
+      title: "Checks",
+      subtitle: pr ? `PR #${pr.number}` : undefined,
+      onPress: afterSheet(() =>
+        router.push({ pathname: "/worktree/[id]/checks", params: { id: worktreeId, branch } }),
+      ),
+    },
+  ];
+  const actionItems: ViewsSheetItem[] = [
+    { key: "new-chat", title: "New chat", onPress: afterSheet(() => setPicker(true)) },
+    {
+      key: "rename-chat",
+      title: "Rename chat",
+      disabled: !current || current.kind === "term",
+      onPress: afterSheet(() => current && renameTab(current, actions)),
+    },
+    {
+      key: "close-tab",
+      title: "Close tab",
+      destructive: true,
+      disabled: !current,
+      onPress: afterSheet(() => current && closeTab(actions, current.id)),
+    },
+  ];
 
   const needsYou = tabs.tabs.find((t) => t.id !== tabs.active && t.shown === "question");
   const chips =
@@ -182,7 +217,7 @@ const WorktreeChats = memo(function WorktreeChats({
         tabs={tabs.tabs}
         active={tabs.active}
         onOpenTabs={() => setSheet(true)}
-        onMore={showMore}
+        onMore={() => setViews(true)}
       />
       {tabs.active ? (
         <View style={local.chats}>
@@ -267,6 +302,18 @@ const WorktreeChats = memo(function WorktreeChats({
           if (!pickerAfterSheet.current) return;
           pickerAfterSheet.current = false;
           setPicker(true);
+        }}
+      />
+      <ViewsSheet
+        visible={views}
+        onClose={() => setViews(false)}
+        title={`${repo} · ${branch}`}
+        views={viewItems}
+        actions={actionItems}
+        onDismiss={() => {
+          const run = afterViews.current;
+          afterViews.current = null;
+          run?.();
         }}
       />
       <AgentPicker

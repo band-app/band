@@ -70,9 +70,10 @@ async function filesOf(sessionId: string): Promise<SessionFile[]> {
 }
 
 /**
- * Methods an ephemeral worker adds for the hub's sleep and wake handshake
- * (plan step 3.5). The hub reads a session's files before the worker exits and
- * writes them back on a new worker, which is how a chat resumes there.
+ * The agent session files of a chat, for the hub's sleep and wake handshake
+ * (plan step 3.5) and its checkpoints. The hub reads a
+ * session's files before the worker exits, or with each checkpoint, and writes
+ * them back on another worker, which is how a chat resumes there.
  */
 export function registerLifecycleMethods(r: Registrar, ctx: WorkerContext): void {
   r.json("lifecycle.exportSessions", async (a) => {

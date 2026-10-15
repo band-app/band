@@ -116,6 +116,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.worktrees.setPinned.mutate({ repo, name, pinned, hostId });
   }
 
+  async reorderWorktrees(
+    input: Parameters<DashboardAdapter["reorderWorktrees"]>[0],
+  ): Promise<void> {
+    await this.trpc.worktrees.reorder.mutate(input);
+  }
+
   async clearNeedsAttention(worktreeId: string): Promise<void> {
     await this.trpc.statuses.clearNeedsAttention.mutate({ worktreeId });
   }

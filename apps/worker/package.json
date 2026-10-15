@@ -38,6 +38,7 @@
     "@xterm/addon-serialize": "0.15.0-beta.300",
     "@xterm/addon-unicode11": "0.10.0-beta.300",
     "@xterm/headless": "6.1.0-beta.302",
+    "drizzle-orm": "1.0.0-rc.1",
     "fzf": "0.5.2",
     "node-pty": "^1.1.0",
     "pino": "^9.6.0",
@@ -47,6 +48,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@band-app/chat-runtime": "workspace:^",
     "@band-app/host-api": "workspace:^",
     "@band-app/host-local": "workspace:^",
     "@band-app/host-remote": "workspace:^",

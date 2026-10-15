@@ -17,6 +17,25 @@
           "NSAllowsLocalNetworking": true
         },
         "NSLocalNetworkUsageDescription": "Band connects to the hub on your local network."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          }
+        ]
       }
     },
     "android": {
@@ -37,12 +56,24 @@
         {
           "photosPermission": "Band reads the photos you pick to attach them to a message.",
           "cameraPermission": "Band uses the camera to take a photo to attach to a message.",
-          "microphonePermission": false
+          "microphonePermission": "Band records your voice when you dictate into a message. The audio goes to your hub, which sends it to the speech-to-text service set up in Settings > Voice."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Band records your voice when you dictate into a message. The audio goes to your hub, which sends it to the speech-to-text service set up in Settings > Voice."
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "owner": "band-app",
+    "extra": {
+      "eas": {
+        "projectId": "5a636dca-d612-4e88-aa13-31b3d47e7c62"
+      }
     }
   }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "@band-app/chat-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@band-app/coding-agent": "workspace:^",
+    "@band-app/host-api": "workspace:^",
+    "@band-app/logger": "workspace:^",
+    "@band-app/shared": "workspace:^",
+    "drizzle-orm": "1.0.0-rc.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  }
+}
