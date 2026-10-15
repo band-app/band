@@ -17,6 +17,9 @@
           "NSAllowsLocalNetworking": true
         },
         "NSLocalNetworkUsageDescription": "Band connects to the hub on your local network."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -43,6 +46,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "owner": "band-app",
+    "extra": {
+      "eas": {
+        "projectId": "5a636dca-d612-4e88-aa13-31b3d47e7c62"
+      }
     }
   }
 }
