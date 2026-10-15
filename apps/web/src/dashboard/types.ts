@@ -118,6 +118,10 @@ export interface WorktreeInfo {
    *  The DB column is `NOT NULL DEFAULT false`, so the value is always
    *  defined when the worktree comes through `repos.list`. */
   pinned: boolean;
+  /** Position among its siblings, shared by every sidebar view. Absent keeps the older order. */
+  sortIndex?: number;
+  /** Position inside the Pinned section. */
+  pinSortIndex?: number;
   /** Set while the worktree's ephemeral worker has exited (`sleeping`) or is being started again (`waking`). */
   lifecycle?: "sleeping" | "waking";
   /** The host the worktree lives on. Absent or `local` for this machine. */

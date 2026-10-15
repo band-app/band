@@ -168,6 +168,10 @@ export const worktrees = sqliteTable("worktrees", {
   path: text("path").notNull(),
   head: text("head"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  // Position among its siblings, shared by every sidebar view and device. Null keeps the older
+  // order. `pinSortIndex` is the position inside the Pinned section.
+  sortIndex: integer("sort_index"),
+  pinSortIndex: integer("pin_sort_index"),
   hostId: hostId(),
   // Where the worktree was started from: the worktree (id as `toWorktreeId` makes it) and the
   // chat or terminal in it. Plain ids with no foreign key, because the origin may live on any
