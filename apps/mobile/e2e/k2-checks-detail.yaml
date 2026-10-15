@@ -1,0 +1,31 @@
+# k2 (S2): a check opens to its result text, and a link opens the job in Safari.
+appId: app.getband.mobile
+name: k2 a failed check's details and its job in Safari
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-checks
+- extendedWaitUntil:
+    visible:
+      id: checks__check-Unit
+    timeout: 20000
+- tapOn:
+    id: checks__check-Unit
+- assertVisible:
+    id: checks__result
+    text: "3 tests failed in parser.test.ts"
+- assertVisible:
+    id: checks__workflow
+    text: "CI"
+- takeScreenshot: k2-check-details
+- tapOn:
+    id: checks__open
+# The job's page opens in Safari, so the app's screen is no longer on top.
+- extendedWaitUntil:
+    notVisible:
+      id: checks__screen
+    timeout: 20000
+# Safari's address bar is not in the accessibility tree Maestro reads, so the screenshot shows the page.
+- takeScreenshot: k2-safari

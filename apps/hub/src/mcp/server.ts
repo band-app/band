@@ -46,6 +46,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
       path.startsWith("accountUsage.") ||
+      path.startsWith("voice.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")
     )
@@ -64,6 +65,7 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "repos.inspectFolder" || path === "repos.resolveRemote") continue;
     // Re-parenting a worktree is a person's decision, and an MCP call is not scoped to a worker.
     if (path === "worktrees.setOrigin") continue;
+    if (path === "worktrees.reorder") continue;
     // `environment.build` runs commands from the repository on the builder host.
     if (path === "environment.build") continue;
 

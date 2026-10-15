@@ -8,7 +8,7 @@ A checkpoint is the sleep snapshot of [ephemeral workers](ephemeral-workers.md) 
 
 - The working tree on top of the branch head: tracked edits and untracked files that `.gitignore` does not hide.
 - A git bundle of the commits and objects the worker's remotes lack, so a checkpoint of a pushed branch is small. A worktree with no unpushed work and no edits has no bundle.
-- The files of each chat's agent session, so the chat can resume on another machine.
+- The files of each chat's agent session, so the chat can resume on another machine. Every worker hands them out (`lifecycle.exportSessions`), static and ephemeral alike.
 
 The files are under `<BAND_HOME>/checkpoints/<worktree id>/<checkpoint id>/`, with a row in the `worktree_checkpoints` table.
 
@@ -54,7 +54,7 @@ Opening the worktree shows a notice above it: "<host> is offline (last seen …)
 
 - Changes shows the diff of the checkpoint against its branch head.
 - Files lists and opens the files as the checkpoint holds them.
-- Chat history is on the hub already and works as before.
+- Chat history is on the hub already and works as before. A chat the worker ran itself ([chat ownership](chat-ownership.md)) is on the hub up to the last event the worker replicated before it went offline.
 
 Terminals, the desktop, dev servers and the browser need the host and show "host offline". The hub reads the checkpoint with git on a bare repo it builds from the bundles under `view.git` in the worktree's checkpoint directory. It fetches the repo's history from the hub's checkout or remote URL first, because a bundle only has what the remotes lack. If the hub can reach neither, the view fails with a message that says so.
 
@@ -70,7 +70,7 @@ A checkpoint is stored only for a worktree's current owner: its row is not super
 2. The hub makes sure the target has the repo, fetches what origin has, sends the bundle, and runs `git worktree add -B <branch>` with the working tree of the checkpoint. The edits are uncommitted again.
 3. The hub compares the restored files with the checkpoint. If they differ, it removes only what it just created and fails.
 4. The agent session files are written on the target. The next message in each chat resumes the session (`session/resume`, or `session/load` when the agent cannot resume).
-5. The worktree on the new host gets the id `<repo>-<branch>@<new host>`. Chats, terminal records, tasks, cron jobs, subscriptions and browser history move to it.
+5. The worktree on the new host gets the id `<repo>-<branch>@<new host>`. Chats, terminal records, tasks, cron jobs, subscriptions and browser history move to it. A chat the old worker owned leaves it: the new host runs it if it owns chats, else the hub does, and the old worker gets a release for when it reconnects ([chat ownership](chat-ownership.md)).
 
 If the target already holds a copy under that name, the checkpoint replaces it and the old state is kept under `refs/band/backup/<worktree id>/<time>` (see [Follow the work](follow-the-work.md#when-the-target-already-has-a-copy)). Restoring from an offline host waits until its lease is over. The old copy is marked superseded and nothing is deleted on the old host. When that host comes back, Band does not run both: it takes no checkpoints of the superseded copy, lists it as "Superseded by <id>" and leaves the files untouched. Remove it from its card when you no longer need it. That is the only step that deletes files.
 

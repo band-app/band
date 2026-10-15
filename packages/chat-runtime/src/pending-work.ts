@@ -23,7 +23,7 @@
  */
 
 import type * as acp from "@agentclientprotocol/sdk";
-import type { AsyncTaskUpdate } from "../../infra/agents/acp-agent-process";
+import type { AsyncTaskUpdate } from "./acp-agent-process";
 
 /** The longest any one piece of work keeps an idle agent process alive. */
 export const MAX_HOLD_MS = 8 * 60 * 60_000;

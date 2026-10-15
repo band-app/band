@@ -25,7 +25,7 @@ import type { ChatEventFile, SessionState } from "@band-app/shared/chat-events";
 import type { HostOfflineAnswer } from "@band-app/shared/continuation";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { announceContinued, requestContinue } from "../../lib/continue-prompt";
-import { hubFetch } from "../../lib/hub-config";
+import { chatFetch, directChatCall } from "../../lib/direct-chat";
 import { trpc } from "../../lib/trpc-client";
 
 export interface UseChatSubscriptionOptions {
@@ -89,6 +89,25 @@ async function fileToWirePart(file: File): Promise<ChatEventFile> {
 
 let localId = 0;
 
+/**
+ * A stop or an answer on the chat's direct path. True when the worker took it;
+ * false sends it to the hub instead (the worker does not run the chat, or is away).
+ */
+async function directPost(
+  worktreeId: string,
+  chatId: string,
+  route: "stop" | "permission" | "elicitation",
+  body: unknown,
+): Promise<boolean> {
+  const res = await directChatCall(
+    worktreeId,
+    chatId,
+    `/api/chats/${encodeURIComponent(chatId)}/${route}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+  return res?.ok === true;
+}
+
 export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSubscriptionResult {
   const { worktreeId, chatId, codingAgentId, enabled = true } = opts;
 
@@ -143,7 +162,8 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     void resumeKey;
 
     const stream = openChatStream({
-      fetch: hubFetch,
+      // This computer's worker when it runs the chat, else the hub (`lib/direct-chat.ts`).
+      fetch: chatFetch(() => agentRef.current.worktreeId, chatId),
       chatId,
       getCursor: () => cursorRef.current,
       onEvent: dispatch,
@@ -184,7 +204,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         });
       }
       const post = (worktreeId: string) =>
-        hubFetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+        chatFetch(() => worktreeId, chatId)(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -233,6 +253,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
 
   const cancel = useCallback(async (): Promise<void> => {
     try {
+      if (await directPost(worktreeId, chatId, "stop", {})) return;
       await trpc.tasks.abort.mutate({ worktreeId, chatId });
     } catch {
       // Nothing running; the stream already says so.
@@ -242,9 +263,10 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
   const answerPermission = useCallback(
     async (requestId: string, optionId: string | null) => {
       dispatch({ type: "local-answer", requestId, answer: optionId ?? "cancelled" });
+      if (await directPost(worktreeId, chatId, "permission", { requestId, optionId })) return;
       await trpc.chat.answer.mutate({ chatId, requestId, optionId });
     },
-    [chatId],
+    [chatId, worktreeId],
   );
 
   const answerElicitation = useCallback(
@@ -258,9 +280,12 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         requestId,
         answer: action === "cancel" ? "cancelled" : action,
       });
+      // The same response the hub builds from these fields.
+      const response = action === "accept" ? { action, content: content ?? {} } : { action };
+      if (await directPost(worktreeId, chatId, "elicitation", { requestId, response })) return;
       await trpc.chat.answerElicitation.mutate({ chatId, requestId, action, content });
     },
-    [chatId],
+    [chatId, worktreeId],
   );
 
   const setConfigOption = useCallback(
@@ -297,7 +322,12 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const page = await fetchChatHistory(hubFetch, chatId, oldestEventId, revision);
+      const page = await fetchChatHistory(
+        chatFetch(() => agentRef.current.worktreeId, chatId),
+        chatId,
+        oldestEventId,
+        revision,
+      );
       const folded = foldEvents(INITIAL_TRANSCRIPT, page.events);
       const messages: ChatMessage[] = folded.messages;
       dispatch({

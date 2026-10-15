@@ -81,6 +81,7 @@ import { tokensRouter } from "./tokens/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
 import { vaultRouter } from "./vault/router";
+import { voiceRouter } from "./voice/router";
 import { worktreeRouter } from "./worktree/router";
 import { worktreesRouter } from "./worktrees/router";
 
@@ -113,6 +114,7 @@ export const appRouter = t.router({
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,
+  voice: voiceRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

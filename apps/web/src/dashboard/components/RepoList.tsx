@@ -22,12 +22,15 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import {
+  type CollisionDetection,
   closestCenter,
   DndContext,
   type DragEndEvent,
+  type DragMoveEvent,
   DragOverlay,
   type DragStartEvent,
   MouseSensor,
+  pointerWithin,
   TouchSensor,
   useDndContext,
   useDroppable,
@@ -82,13 +85,28 @@ import {
   useRemoveRepo,
   useRemoveWorktree,
   useReorderRepos,
+  useReorderWorktrees,
   useUpdateRepoLabel,
 } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
+  type DropPlan,
+  type DropZone,
+  moveRefusal,
+  planHostViewDrop,
+  planOriginDrop,
+  planPinDrop,
+  planRepoViewDrop,
+  zoneAt,
+} from "../lib/sidebar-drop";
+import {
   buildHostRows,
   buildOriginRows,
+  buildOriginTree,
+  buildPinnedRows,
+  buildPinnedTree,
+  entriesOf,
   HOST_COLLAPSE_KEY,
   type HostInfoLite,
   hostIdOf,
@@ -96,7 +114,10 @@ import {
   navigableIds,
   ORIGIN_COLLAPSE_KEY,
   repoSpansHosts,
+  sortRepoWorktrees,
   useGroupBy,
+  type WorktreeEntry,
+  withoutPinned,
 } from "../lib/sidebar-grouping";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
@@ -110,12 +131,15 @@ import type {
 } from "../types";
 import { AgentStatusIndicator, isActiveAgentStatus } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
-import { GroupedWorktrees, MetaBadge } from "./GroupedWorktrees";
+import { GroupedWorktrees, MetaBadge, WorktreeRowView } from "./GroupedWorktrees";
 import { MainMissingRow } from "./MainMissingRow";
+import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
 import { RepoAvatar } from "./RepoAvatar";
+import { DragRow, DropIndicatorContext } from "./SidebarDnd";
+import { useIsAdmin } from "./settings/DevicesSettings";
 import { markRecentActivation, WorktreeCard } from "./WorktreeCard";
 
 /**
@@ -561,21 +585,33 @@ function SortableRepo({
               const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
               const currentIndex = worktreeIndex++;
               return (
-                <WorktreeCard
+                // Keyed by name, not id: a move changes the id, and a remount would drop the
+                // open "Open on another host" dialog before it shows the result.
+                <DragRow
                   key={wt.name}
-                  worktree={wt}
-                  repoName={repo.name}
-                  defaultBranch={repo.defaultBranch}
-                  repoKind={repo.kind}
-                  status={statuses.get(wsId)}
-                  branchStatus={branchStatuses.get(wsId)}
-                  setupStatus={setupStatuses.get(wsId)}
-                  isFocused={!collapsed && currentIndex === focusedIndex}
-                  onShowDeleteDialog={onShowDeleteDialog}
-                  onTogglePinned={onTogglePinned}
-                  hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
-                  allowedHostIds={repo.allowedHostIds}
-                />
+                  dndId={`wt:${wsId}`}
+                  data={{
+                    kind: "wt",
+                    worktreeId: wsId,
+                    repoName: repo.name,
+                    hostId: hostIdOf(wt),
+                  }}
+                >
+                  <WorktreeCard
+                    worktree={wt}
+                    repoName={repo.name}
+                    defaultBranch={repo.defaultBranch}
+                    repoKind={repo.kind}
+                    status={statuses.get(wsId)}
+                    branchStatus={branchStatuses.get(wsId)}
+                    setupStatus={setupStatuses.get(wsId)}
+                    isFocused={!collapsed && currentIndex === focusedIndex}
+                    onShowDeleteDialog={onShowDeleteDialog}
+                    onTogglePinned={onTogglePinned}
+                    hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
+                    allowedHostIds={repo.allowedHostIds}
+                  />
+                </DragRow>
               );
             })
           )}
@@ -673,6 +709,8 @@ export function RepoList({ labelFilter }: RepoListProps) {
 
   const removeRepoMutation = useRemoveRepo();
   const reorderReposMutation = useReorderRepos();
+  const reorderWorktreesMutation = useReorderWorktrees();
+  const isAdmin = useIsAdmin();
   const updateRepoLabelMutation = useUpdateRepoLabel();
   const promoteRepoToGitMutation = usePromoteRepoToGit();
   const removeWorktreeMutation = useRemoveWorktree();
@@ -684,6 +722,15 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const rawStore = useRawDashboardStore();
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [activeWorktreeDrag, setActiveWorktreeDrag] = useState<WorktreeEntry | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{
+    overId: string | null;
+    zone: DropZone | null;
+  }>({ overId: null, zone: null });
+  const [dropNotice, setDropNotice] = useState<string | null>(null);
+  const [moveDialog, setMoveDialog] = useState<{ entry: WorktreeEntry; toHostId: string } | null>(
+    null,
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const keyboardNavRef = useRef(false);
 
@@ -698,14 +745,20 @@ export function RepoList({ labelFilter }: RepoListProps) {
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
   });
-  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorktrees();
-  // Plain (non-git) repos have no separate worktree card to pull up
-  // to a Pinned section — they're already flat at the repo level. Drop
-  // them from the pinned list so a stale `pinned=true` row doesn't show
-  // a confusing duplicate entry at the top of the tree.
-  const pinnedEntries = useMemo(
-    () => pinnedEntriesRaw.filter((e) => e.repo.kind !== "plain"),
-    [pinnedEntriesRaw],
+  const { toggle: togglePinned } = usePinnedWorktrees();
+
+  // Worktrees in the order the user dragged them to, and the pins with their subtrees. The label
+  // filter applies to pins too: a pin shows only when its repo has the selected label, and its
+  // children follow the same rule.
+  const sortedRepos = useMemo(() => sortRepoWorktrees(repos), [repos]);
+  const visibleRepos = useMemo(
+    () => (labelFilter ? sortedRepos.filter((r) => r.label === labelFilter) : sortedRepos),
+    [sortedRepos, labelFilter],
+  );
+  const pinnedTree = useMemo(() => buildPinnedTree(visibleRepos), [visibleRepos]);
+  const pinnedRows = useMemo(
+    () => buildPinnedRows(pinnedTree, originCollapse.isCollapsed),
+    [pinnedTree, originCollapse],
   );
 
   // Two sensors so reorder works without an explicit "edit" toggle:
@@ -718,32 +771,22 @@ export function RepoList({ labelFilter }: RepoListProps) {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 
-  // Each pinned worktree is rendered exclusively in the Pinned section, so
-  // we strip pinned worktrees out of the regular tree. Track which repos
-  // had any pinned worktrees so SortableRepo can hide the misleading
-  // "No worktrees yet" copy when the only reason a repo looks empty is
-  // that everything got pinned.
-  //
-  // Plain (non-git) repos are flat — the repo header IS the implicit
-  // worktree, with no nested card to pull up to a separate "Pinned"
-  // section. Skip the filter for them so a stray `pinned=true` row (e.g.
-  // pinned before the feature was disabled for plain repos) doesn't
-  // strand SortableRepo with an empty `worktrees: []` and crash on
-  // `worktrees[0].branch`.
+  // The Pinned section shows each pin and everything started from it, so the regular tree leaves
+  // them out. `reposWithPinned` lets SortableRepo hide "No worktrees yet" for a repo that only
+  // looks empty because its worktrees are pinned. Plain repos are flat and have no pins.
   const { displayRepos, reposWithPinned } = useMemo(() => {
-    const withPinned = new Set<string>();
-    const display = repos.map((p) => {
-      if (p.kind === "plain") return p;
-      const filtered = p.worktrees.filter((w) => !w.pinned);
-      if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
-      return { ...p, worktrees: filtered };
-    });
-    return { displayRepos: display, reposWithPinned: withPinned };
-  }, [repos]);
+    const result = withoutPinned(sortedRepos, pinnedTree);
+    return { displayRepos: result.repos, reposWithPinned: result.reposWithPinned };
+  }, [sortedRepos, pinnedTree]);
 
   const pinnedSectionCollapsed = pinnedCollapse.isCollapsed(PINNED_SECTION_ID);
-  const showPinnedSection = pinnedEntries.length > 0;
-  const pinnedNavCount = showPinnedSection && !pinnedSectionCollapsed ? pinnedEntries.length : 0;
+  const showPinnedSection = pinnedTree.pins.length > 0;
+  const pinnedNavIds = useMemo(
+    () =>
+      showPinnedSection && !pinnedSectionCollapsed ? pinnedRows.map((r) => r.entry.worktreeId) : [],
+    [showPinnedSection, pinnedSectionCollapsed, pinnedRows],
+  );
+  const pinnedNavCount = pinnedNavIds.length;
 
   const groups = useMemo(() => {
     if (labels.length === 0)
@@ -786,10 +829,10 @@ export function RepoList({ labelFilter }: RepoListProps) {
   }, [groups, labelFilter]);
 
   // The Origin and Host views list every worktree of the repos the label filter lets through,
-  // pinned ones included, in one flat list of rows.
+  // except the ones the Pinned section shows, in one flat list of rows.
   const groupedRepos = useMemo(
-    () => (labelFilter ? repos.filter((r) => r.label === labelFilter) : repos),
-    [repos, labelFilter],
+    () => withoutPinned(visibleRepos, pinnedTree).repos,
+    [visibleRepos, pinnedTree],
   );
   const groupedRows = useMemo(() => {
     if (groupBy === "origin") return buildOriginRows(groupedRepos, originCollapse.isCollapsed);
@@ -797,6 +840,8 @@ export function RepoList({ labelFilter }: RepoListProps) {
       return buildHostRows(groupedRepos, hostsQuery.data ?? [], hostCollapse.isCollapsed);
     return [];
   }, [groupBy, groupedRepos, hostsQuery.data, originCollapse, hostCollapse]);
+  const groupedEntries = useMemo(() => entriesOf(groupedRepos), [groupedRepos]);
+  const originTree = useMemo(() => buildOriginTree(groupedEntries), [groupedEntries]);
 
   // Only count worktrees that are actually rendered — collapsed
   // repos/labels hide their worktrees entirely, and keyboard arrow
@@ -804,9 +849,9 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // user can't see. Pinned worktrees are always at the top of the list
   // (independent of label filter), then the regular tree follows.
   const allWorktreeIds = useMemo(() => {
-    if (grouped) return navigableIds(groupedRows);
+    if (grouped) return [...pinnedNavIds, ...navigableIds(groupedRows)];
     const headerVisible = labels.length > 0 && !labelFilter;
-    const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.worktreeId) : [];
+    const pinnedPart = pinnedNavIds;
     const rest = visibleGroups.flatMap((g) => {
       const groupKey = g.labelId ?? UNLABELED_KEY;
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
@@ -824,8 +869,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     labelFilter,
     labelCollapse,
     repoCollapse,
-    pinnedEntries,
-    pinnedNavCount,
+    pinnedNavIds,
   ]);
 
   const worktreeIndexMap = useMemo(() => {
@@ -869,7 +913,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // The naive implementation would include only `activeWorktreeId` in the
   // deps, but we also reference `labelCollapse`/`repoCollapse` inside
   // (their references change on every state update), `groups` (which we
-  // walk), and `pinnedEntries` (for the pinned-worktree early-exit).
+  // walk), and `pinnedTree` (for the pinned-worktree early-exit).
   // Including all of those in the deps makes the effect re-fire on every
   // collapse-state change and undo the user's collapse. To preserve the
   // "once per activeWorktreeId" semantics while keeping the deps list
@@ -903,7 +947,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
       revealedAsPinnedRef.current = false;
       return;
     }
-    const isActivePinned = pinnedEntries.some((e) => e.worktreeId === activeWorktreeId);
+    const isActivePinned = pinnedTree.ids.has(activeWorktreeId);
     if (
       revealedWorktreeRef.current === activeWorktreeId &&
       revealedAsPinnedRef.current === isActivePinned &&
@@ -914,6 +958,20 @@ export function RepoList({ labelFilter }: RepoListProps) {
     revealedGroupByRef.current = groupBy;
     revealedWorktreeRef.current = activeWorktreeId;
     revealedAsPinnedRef.current = isActivePinned;
+    if (isActivePinned) {
+      // The Pinned section shows it in every view: open the section and the pins above it.
+      pinnedCollapse.expand(PINNED_SECTION_ID);
+      let id: string | undefined = activeWorktreeId;
+      const seen = new Set<string>();
+      while (id && !seen.has(id)) {
+        seen.add(id);
+        const parent: string | undefined = findWorktree(repos, id)?.wt.origin?.worktreeId;
+        if (parent && pinnedTree.ids.has(parent)) originCollapse.expand(parent);
+        id = parent && pinnedTree.ids.has(parent) ? parent : undefined;
+      }
+      keyboardNavRef.current = false;
+      return;
+    }
     if (grouped) {
       // Open what hides the active worktree: its origin ancestors, or its host and repo group.
       let id: string | undefined = activeWorktreeId;
@@ -930,11 +988,6 @@ export function RepoList({ labelFilter }: RepoListProps) {
         hostCollapse.expand(`${hostKey}/${entry.repo.name}`);
         id = parent && !parent.removed ? parent.worktreeId : undefined;
       }
-      keyboardNavRef.current = false;
-      return;
-    }
-    if (isActivePinned) {
-      pinnedCollapse.expand(PINNED_SECTION_ID);
       keyboardNavRef.current = false;
       return;
     }
@@ -967,7 +1020,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     labelCollapse,
     repoCollapse,
     pinnedCollapse,
-    pinnedEntries,
+    pinnedTree,
   ]);
 
   // Focus the container so keyboard navigation works immediately.
@@ -1054,14 +1107,149 @@ export function RepoList({ labelFilter }: RepoListProps) {
     [visibleGroups],
   );
 
+  // Rows are only candidates for the kind of drag that makes sense: pins among pins, worktrees
+  // within their repo in the Repo view, onto rows and pins in the Origin view, onto rows and host
+  // headers in the Host view. Repo drags keep their own droppables.
+  const collisionDetection = useCallback<CollisionDetection>(
+    (args) => {
+      const activeData = args.active.data.current as
+        | { kind?: string; repoName?: string }
+        | undefined;
+      const kindOf = (c: { data: { current?: unknown } }) =>
+        (c.data.current as { kind?: string } | undefined)?.kind;
+      if (!activeData?.kind) {
+        return closestCenter({
+          ...args,
+          droppableContainers: args.droppableContainers.filter((c) => !kindOf(c)),
+        });
+      }
+      const droppableContainers = args.droppableContainers.filter((c) => {
+        const kind = kindOf(c);
+        if (activeData.kind === "pin") return kind === "pin";
+        if (groupBy === "repo") {
+          return (
+            kind === "wt" &&
+            (c.data.current as { repoName?: string } | undefined)?.repoName === activeData.repoName
+          );
+        }
+        if (groupBy === "origin") return kind === "wt" || kind === "pin";
+        return kind === "wt" || kind === "host";
+      });
+      const hits = pointerWithin({ ...args, droppableContainers });
+      return hits.length > 0 ? hits : closestCenter({ ...args, droppableContainers });
+    },
+    [groupBy],
+  );
+
   function handleDragStart(event: DragStartEvent) {
+    const data = event.active.data.current as { kind?: string; worktreeId?: string } | undefined;
+    if (data?.kind) {
+      const entry = [...groupedEntries, ...entriesOf(sortedRepos)].find(
+        (e) => e.worktreeId === data.worktreeId,
+      );
+      setActiveWorktreeDrag(entry ?? null);
+      return;
+    }
     setActiveDragId(event.active.id as string);
+  }
+
+  /** Where the pointer is inside the row it is over, from the drag's start point and delta. */
+  function zoneOf(event: DragMoveEvent | DragEndEvent): DropZone | null {
+    const { active, over, activatorEvent, delta } = event;
+    if (!over) return null;
+    const overKind = (over.data.current as { kind?: string } | undefined)?.kind;
+    const activeKind = (active.data.current as { kind?: string } | undefined)?.kind;
+    if (overKind === "host") return "into";
+    if (overKind === "pin" && activeKind === "wt") return "into";
+    const start = activatorEvent as Partial<MouseEvent & TouchEvent>;
+    const startY =
+      start.clientY ?? start.touches?.[0]?.clientY ?? start.changedTouches?.[0]?.clientY;
+    if (startY === undefined) return null;
+    const allowInto = groupBy === "origin" && activeKind === "wt" && overKind === "wt";
+    return zoneAt(over.rect, startY + delta.y, allowInto);
+  }
+
+  function handleDragMove(event: DragMoveEvent) {
+    const overId = event.over ? String(event.over.id) : null;
+    const zone = zoneOf(event);
+    setDropIndicator((prev) =>
+      prev.overId === overId && prev.zone === zone ? prev : { overId, zone },
+    );
+  }
+
+  function applyPlan(plan: DropPlan, entry: WorktreeEntry | null) {
+    if (plan.type === "reorder") {
+      reorderWorktreesMutation.mutate({
+        order: plan.order,
+        scope: plan.scope,
+        reparent: plan.reparent,
+      });
+    } else if (plan.type === "refuse") {
+      setDropNotice(plan.reason);
+    } else if (plan.type === "move" && entry) {
+      const reason = moveRefusal(entry, plan.toHostId, {
+        hosts: hostsQuery.data ?? [],
+        isAdmin,
+      });
+      if (reason) setDropNotice(reason);
+      else setMoveDialog({ entry, toHostId: plan.toHostId });
+    }
+  }
+
+  function handleWorktreeDrop(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over) return;
+    const activeData = active.data.current as {
+      kind: string;
+      worktreeId: string;
+      repoName: string;
+    };
+    const overData = over.data.current as {
+      kind: string;
+      worktreeId?: string;
+      repoName?: string;
+      hostId?: string;
+    };
+    const zone = zoneOf(event);
+    if (!zone) return;
+    const activeId = activeData.worktreeId;
+    if (activeData.kind === "pin") {
+      if (overData.worktreeId)
+        applyPlan(planPinDrop(pinnedTree, activeId, overData.worktreeId, zone), null);
+      return;
+    }
+    if (groupBy === "repo") {
+      const siblings = entriesOf(displayRepos.filter((r) => r.name === activeData.repoName));
+      if (overData.worktreeId) {
+        applyPlan(planRepoViewDrop(siblings, activeId, overData.worktreeId, zone), null);
+      }
+      return;
+    }
+    if (groupBy === "host") {
+      const plan = planHostViewDrop(
+        groupedEntries,
+        activeId,
+        { worktreeId: overData.worktreeId, hostId: overData.hostId ?? "local" },
+        zone,
+      );
+      applyPlan(plan, groupedEntries.find((e) => e.worktreeId === activeId) ?? null);
+      return;
+    }
+    if (overData.worktreeId) {
+      applyPlan(planOriginDrop(originTree, pinnedTree, activeId, overData.worktreeId, zone), null);
+    }
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveDragId(null);
+    setActiveWorktreeDrag(null);
+    setDropIndicator({ overId: null, zone: null });
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    if ((active.data.current as { kind?: string } | undefined)?.kind) {
+      handleWorktreeDrop(event);
+      return;
+    }
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -1087,6 +1275,19 @@ export function RepoList({ labelFilter }: RepoListProps) {
     }
   }
 
+  function handleDragCancel() {
+    setActiveDragId(null);
+    setActiveWorktreeDrag(null);
+    setDropIndicator({ overId: null, zone: null });
+  }
+
+  // A refused drop explains itself for a few seconds.
+  useEffect(() => {
+    if (!dropNotice) return;
+    const timer = setTimeout(() => setDropNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [dropNotice]);
+
   if (repos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -1108,30 +1309,40 @@ export function RepoList({ labelFilter }: RepoListProps) {
         }}
         className="flex flex-col gap-0.5 outline-none min-w-0"
       >
-        {grouped ? (
-          <GroupedWorktrees
-            mode={groupBy as "origin" | "host"}
-            rows={groupedRows}
-            originCollapse={originCollapse}
-            hostCollapse={hostCollapse}
-            hosts={hostsQuery.data ?? []}
-            statuses={statuses}
-            branchStatuses={branchStatuses}
-            setupStatuses={setupStatuses}
-            focusedIndex={focusedIndex}
-            onShowDeleteDialog={setDeleteDialog}
-            onTogglePinned={togglePinned}
-          />
-        ) : (
-          <>
-            {/* Pinned section — rendered outside DndContext/SortableContext so
-            pinned worktrees cannot be touched by repo drag-and-drop. It
-            also ignores the label filter (pinned ws should always be
-            visible) and is the *only* place pinned worktrees render. */}
+        {dropNotice && (
+          <div
+            role="status"
+            data-testid="repo-list__drop-refused"
+            className="mx-2 mb-1 flex items-start gap-2 rounded-md border border-warning/40 bg-warning-bg px-2 py-1.5 text-[12px] text-foreground"
+          >
+            <span className="flex-1">{dropNotice}</span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setDropNotice(null)}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        <DropIndicatorContext.Provider value={dropIndicator}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={collisionDetection}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
+            {/* The Pinned section is the same in every view: each pin with the worktrees
+                started from it. Pins reorder among themselves, and pinning or unpinning
+                is not something a drag does. */}
             {showPinnedSection && (
-              <div key="__pinned">
+              <div key="__pinned" data-testid="repo-list__pinned">
                 <button
                   type="button"
+                  data-testid="repo-list__pinned-header"
                   onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
                   aria-expanded={!pinnedSectionCollapsed}
                   className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
@@ -1144,37 +1355,49 @@ export function RepoList({ labelFilter }: RepoListProps) {
                     }`}
                   />
                 </button>
+                {/* Collapsed rows are not mounted: a hidden row would still be a drop target. */}
                 <CollapsibleSection
                   collapsed={pinnedSectionCollapsed}
                   className="flex flex-col gap-0.5 px-2"
                 >
-                  {pinnedEntries.map(({ repo, worktree, worktreeId }, i) => (
-                    <WorktreeCard
-                      key={worktreeId}
-                      worktree={worktree}
-                      repoName={repo.name}
-                      defaultBranch={repo.defaultBranch}
-                      repoKind={repo.kind}
-                      status={statuses.get(worktreeId)}
-                      branchStatus={branchStatuses.get(worktreeId)}
-                      setupStatus={setupStatuses.get(worktreeId)}
-                      isFocused={!pinnedSectionCollapsed && i === focusedIndex}
-                      onShowDeleteDialog={setDeleteDialog}
-                      showRepoName
-                      allowedHostIds={repo.allowedHostIds}
-                      onTogglePinned={togglePinned}
-                    />
-                  ))}
+                  {!pinnedSectionCollapsed &&
+                    pinnedRows.map((row, i) => (
+                      <WorktreeRowView
+                        key={row.key}
+                        row={row}
+                        index={i}
+                        mode={groupBy}
+                        draggable={groupBy === "origin" || row.depth === 0}
+                        originCollapse={originCollapse}
+                        hosts={hostsQuery.data ?? []}
+                        statuses={statuses}
+                        branchStatuses={branchStatuses}
+                        setupStatuses={setupStatuses}
+                        focusedIndex={focusedIndex}
+                        onShowDeleteDialog={setDeleteDialog}
+                        onTogglePinned={togglePinned}
+                      />
+                    ))}
                 </CollapsibleSection>
               </div>
             )}
 
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-            >
+            {grouped ? (
+              <GroupedWorktrees
+                mode={groupBy as "origin" | "host"}
+                rows={groupedRows}
+                navStart={pinnedNavCount}
+                originCollapse={originCollapse}
+                hostCollapse={hostCollapse}
+                hosts={hostsQuery.data ?? []}
+                statuses={statuses}
+                branchStatuses={branchStatuses}
+                setupStatuses={setupStatuses}
+                focusedIndex={focusedIndex}
+                onShowDeleteDialog={setDeleteDialog}
+                onTogglePinned={togglePinned}
+              />
+            ) : (
               <SortableContext items={allRepoNames} strategy={verticalListSortingStrategy}>
                 {visibleGroups.map((group) => {
                   const groupKey = group.labelId ?? UNLABELED_KEY;
@@ -1234,29 +1457,41 @@ export function RepoList({ labelFilter }: RepoListProps) {
                   );
                 })}
               </SortableContext>
-              {/* dropAnimation={null} disables dnd-kit's default snap-back. The
-              reorder mutation runs an optimistic update in onMutate, so when
-              the user releases we want the overlay to disappear instantly
-              and the list to look like the new order — not animate back to
-              the original drop position before re-rendering. */}
-              <DragOverlay dropAnimation={null}>
-                {activeDragId ? (
-                  <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
-                    <RepoAvatar
-                      avatar={repos.find((p) => p.name === activeDragId)?.avatar}
-                      className="size-3.5"
-                      fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
-                    />
-                    <span className="text-[13px] font-semibold text-foreground">
-                      {activeDragId}
-                    </span>
-                  </div>
-                ) : null}
-              </DragOverlay>
-            </DndContext>
-          </>
-        )}
+            )}
+            {/* dropAnimation={null} disables dnd-kit's default snap-back. The reorder
+            mutations run an optimistic update in onMutate, so when the user releases we want
+            the overlay to disappear instantly and the list to look like the new order. */}
+            <DragOverlay dropAnimation={null}>
+              {activeWorktreeDrag ? (
+                <div className="rounded border bg-background px-2 py-1 text-[13px] font-medium shadow-lg">
+                  {activeWorktreeDrag.worktree.name}
+                </div>
+              ) : activeDragId ? (
+                <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
+                  <RepoAvatar
+                    avatar={repos.find((p) => p.name === activeDragId)?.avatar}
+                    className="size-3.5"
+                    fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
+                  />
+                  <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        </DropIndicatorContext.Provider>
       </div>
+
+      {moveDialog && (
+        <MoveWorktreeDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setMoveDialog(null);
+          }}
+          repoName={moveDialog.entry.repo.name}
+          worktree={moveDialog.entry.worktree}
+          initialTarget={moveDialog.toHostId}
+        />
+      )}
 
       <NewWorktreeDialog
         repoName={worktreeDialog ?? ""}

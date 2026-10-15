@@ -59,6 +59,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
+import { PromptInputMic } from "./ai-elements/prompt-input-mic";
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
@@ -791,6 +792,7 @@ export function ChatView({
                   instead of pushing the settings out of the composer. */}
               <div className="flex min-w-0 items-center gap-0.5">
                 <PromptInputAttach />
+                <PromptInputMic />
                 <SessionHistoryMenu
                   worktreeId={worktreeId}
                   chatId={chatId}

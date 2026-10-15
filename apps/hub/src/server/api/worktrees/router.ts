@@ -6,6 +6,7 @@ import {
   worktreeCreateInput,
   worktreeGitInput,
   worktreeRemoveInput,
+  worktreeReorderInput,
   worktreeRunScriptInput,
   worktreeService,
   worktreeSetOriginInput,
@@ -53,6 +54,14 @@ export const worktreesRouter = t.router({
   setPinned: publicProcedure.input(worktreeSetPinnedInput).mutation(({ input }) => {
     try {
       return worktreeService.setPinned(input);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  reorder: publicProcedure.input(worktreeReorderInput).mutation(({ input }) => {
+    try {
+      return worktreeService.reorder(input);
     } catch (err) {
       throwAsTrpcError(err);
     }

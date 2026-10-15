@@ -39,6 +39,7 @@ import type {
   HostMcp,
   HostScripts,
   HostSearch,
+  HostSpeech,
   HostWorktree,
   ScriptLabel,
   ScriptPlan,
@@ -75,6 +76,7 @@ import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
 import { copyWorktreeFiles } from "./setup/worktree-files";
+import { transcribeLocally } from "./speech/transcribe";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 import { readAccountUsage } from "./usage/account-usage";
 
@@ -151,6 +153,7 @@ export class LocalHost implements Host {
     close: (worktreeId) => this.chromium.close(worktreeId),
   };
   readonly desktop: HostDesktop = { open: () => openDesktop() };
+  readonly speech: HostSpeech = { transcribe: (req) => transcribeLocally(req) };
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),

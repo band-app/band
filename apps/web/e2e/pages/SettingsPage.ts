@@ -45,6 +45,7 @@ export type SettingsNavId =
   | "hosts"
   | "devices"
   | "credentials"
+  | "voice"
   | "mcp"
   | "agent-hooks"
   | "context"
@@ -626,6 +627,53 @@ export class SettingsPage {
   /** The error shown under the Credentials section. */
   credentialError(): Locator {
     return this.dialog.getByTestId("settings__credential-error");
+  }
+
+  /** Fills the Voice page. `apiKey` is the name of a stored credential. */
+  async fillVoice(opts: {
+    baseUrl: string;
+    model: string;
+    apiKey?: string;
+    language?: string;
+    enabled?: boolean;
+  }): Promise<void> {
+    await test.step("Fill the Voice settings", async () => {
+      const dialog = this.dialog;
+      await dialog.getByTestId("settings__voice-base-url").fill(opts.baseUrl);
+      await dialog.getByTestId("settings__voice-model").fill(opts.model);
+      if (opts.language !== undefined) {
+        await dialog.getByTestId("settings__voice-language").fill(opts.language);
+      }
+      if (opts.apiKey !== undefined) {
+        await dialog.getByTestId("settings__voice-key").selectOption({ label: opts.apiKey });
+      }
+      if (opts.enabled !== undefined) {
+        const toggle = dialog.getByTestId("settings__voice-enabled");
+        if ((await toggle.getAttribute("aria-checked")) !== String(opts.enabled)) {
+          await toggle.click();
+        }
+      }
+    });
+  }
+
+  async testVoice(): Promise<void> {
+    await test.step("Press Test connection", async () => {
+      await this.dialog.getByTestId("settings__voice-test").click();
+    });
+  }
+
+  async saveVoice(): Promise<void> {
+    await test.step("Save the Voice settings", async () => {
+      await this.dialog.getByTestId("settings__voice-save").click();
+    });
+  }
+
+  get voiceOk(): Locator {
+    return this.dialog.getByTestId("settings__voice-ok");
+  }
+
+  get voiceError(): Locator {
+    return this.dialog.getByTestId("settings__voice-error");
   }
 
   /** Fills the "Add a key" form and submits it. */
