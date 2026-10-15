@@ -111,7 +111,7 @@ describe("install-service", () => {
     assert.match(
       readFileSync(secretFile, "utf8"),
       platform() === "linux"
-        ? /BAND_WORKER_OWN_CHATS=1/
+        ? /BAND_WORKER_OWN_CHATS="1"/
         : /<key>BAND_WORKER_OWN_CHATS<\/key>\s*<string>1<\/string>/,
     );
   });
