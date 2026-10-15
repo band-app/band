@@ -84,6 +84,7 @@ export function ChecksSection({
   const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
+  const [fixPaneId, setFixPaneId] = useState<string | null>(null);
   const [fixError, setFixError] = useState<string | null>(null);
   // Check ids with a re-run request in flight, and ones GitHub accepted that the list does not show yet.
   const [rerunning, setRerunning] = useState<ReadonlySet<string>>(new Set());
@@ -172,7 +173,8 @@ export function ChecksSection({
     setFixState("starting");
     setFixError(null);
     try {
-      await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      const started = await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      setFixPaneId(started.chatId ?? started.terminalId ?? null);
       setFixState("started");
     } catch (err) {
       setFixState("idle");
@@ -200,8 +202,21 @@ export function ChecksSection({
               {rerunFailedError ??
                 fixError ??
                 (fixState === "started"
-                  ? "An agent is working on the failures."
+                  ? "An agent is fixing these checks"
                   : "Inspect details or start an AI fix pass.")}
+              {!fixError && fixState === "started" && fixPaneId && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => host.openPane(worktreeId, fixPaneId)}
+                    data-testid="pr-checks__open-agent"
+                    className="underline hover:text-foreground"
+                  >
+                    Open
+                  </button>
+                </>
+              )}
             </p>
           </div>
           {failedRuns.length > 0 && (

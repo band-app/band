@@ -643,7 +643,56 @@ export interface HooksStatus {
   version: number;
 }
 
+/** One usage window of a provider account, such as the 5 hour or the weekly limit. */
+export interface UsageWindow {
+  /** Short label for the bar: `5h`, `wk`, `Fable`. */
+  label: string;
+  /** Share of the window used, 0 to 100. */
+  percent: number;
+  /** Epoch ms when the window resets, or null when the provider does not say. */
+  resetsAt: number | null;
+}
+
+export type AccountUsageProvider = "claude" | "codex";
+
+/**
+ * Why a provider has no numbers on a host. `not-logged-in` means no login was
+ * found, `expired` that the provider refused the token, `rate-limited` that the
+ * usage endpoint refused the request, `error` anything else.
+ */
+export type AccountUsageFailure = "not-logged-in" | "expired" | "rate-limited" | "error";
+
+/**
+ * What a host knows of one provider account. Never carries a token: only
+ * percentages, reset times, the plan and a display identity.
+ */
+export type AccountUsage =
+  | {
+      provider: AccountUsageProvider;
+      status: "ok";
+      /** Email, or the account id when there is no email. Null when the login names neither. */
+      account: string | null;
+      plan: string | null;
+      windows: UsageWindow[];
+      /** Epoch ms when the host read the numbers. */
+      updatedAt: number;
+    }
+  | {
+      provider: AccountUsageProvider;
+      status: AccountUsageFailure;
+      account: string | null;
+      plan: null;
+      windows: [];
+      updatedAt: number;
+    };
+
 export interface HostAgentEnv {
+  /**
+   * Usage of the Claude and Codex accounts logged in on this host, one entry
+   * per provider. Results are cached for a few minutes on the host; `refresh`
+   * reads past the cache. A failure is an entry with a status, never a rejection.
+   */
+  accountUsage(options?: { refresh?: boolean }): Promise<AccountUsage[]>;
   /**
    * The model and effort Claude Code would use in `cwd` according to its
    * config files and environment. Without `cwd`, repo files are skipped.
