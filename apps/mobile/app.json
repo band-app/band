@@ -56,7 +56,13 @@
         {
           "photosPermission": "Band reads the photos you pick to attach them to a message.",
           "cameraPermission": "Band uses the camera to take a photo to attach to a message.",
-          "microphonePermission": false
+          "microphonePermission": "Band records your voice when you dictate into a message. The audio goes to your hub, which sends it to the speech-to-text service set up in Settings > Voice."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Band records your voice when you dictate into a message. The audio goes to your hub, which sends it to the speech-to-text service set up in Settings > Voice."
         }
       ]
     ],

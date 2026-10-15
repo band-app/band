@@ -191,6 +191,20 @@ export interface Settings {
     [key: string]: unknown;
   };
   /**
+   * Speech-to-text for the chat composer's mic. One hub-wide OpenAI-compatible endpoint. The key
+   * is a vault item (`apiKeyItemId`), never stored here. With `hostId` set, that worker makes the
+   * request (for a server on its loopback); otherwise the hub does.
+   */
+  voice?: {
+    enabled?: boolean;
+    baseUrl?: string;
+    model?: string;
+    language?: string;
+    hostId?: string;
+    apiKeyItemId?: string;
+    [key: string]: unknown;
+  };
+  /**
    * Where and how environment images are built (plan step 3.2). `hostId` is
    * the host that runs docker (default `local`, the hub's machine), `registry`
    * a registry prefix to push to, and `workerImage` the worker base image the

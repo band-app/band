@@ -1,6 +1,7 @@
 import type { SlashCommandSkill } from "@band-app/client/composer";
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
+import { insertAtSelection } from "@band-app/shared/dictation-text";
 import { useCallback, useRef, useState } from "react";
 import {
   ActionSheetIOS,
@@ -15,9 +16,10 @@ import {
 } from "react-native";
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
 import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
+import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { colors, useScheme } from "../../theme";
-import { Glass, PlusGlyph } from "../glass";
+import { Glass, MicGlyph, PlusGlyph } from "../glass";
 import { ChatHeader } from "./chat-header";
 import { ComposerSuggestions } from "./composer-suggestions";
 
@@ -56,8 +58,31 @@ export function Composer({
   const picker = useAttachmentPicker();
   const textRef = useRef(text);
   textRef.current = text;
+  const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+
+  // Dictated text lands over the selection and the caret moves after it. It is never sent.
+  const insertDictated = useCallback(
+    (dictated: string) => {
+      const at = selectionRef.current;
+      const length = textRef.current.length;
+      const next = insertAtSelection(
+        textRef.current,
+        Math.min(at.start, length),
+        Math.min(at.end, length),
+        dictated,
+      );
+      setText(next.value);
+      setSelection({ start: next.caret, end: next.caret });
+    },
+    [setText],
+  );
+  const dictation = useDictation(insertDictated);
+  const dictating = dictation.state.phase === "recording";
+  const transcribing = dictation.state.phase === "transcribing";
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
   const expanded = focused || sheetOpen || attachments.length > 0;
@@ -113,6 +138,20 @@ export function Composer({
       <PlusGlyph size={expanded ? 16 : 18} />
     </Pressable>
   );
+  const mic = dictation.available ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={dictating ? "Stop dictation" : "Dictate"}
+      accessibilityState={{ busy: transcribing, selected: dictating }}
+      disabled={transcribing || dictation.state.phase === "starting"}
+      onPress={dictation.toggle}
+      hitSlop={8}
+      style={[styles.plus, expanded && styles.plusSmall, dictating && styles.micActive]}
+      testID="composer__mic"
+    >
+      {dictating ? <View style={styles.micStop} /> : <MicGlyph size={expanded ? 16 : 18} />}
+    </Pressable>
+  ) : null;
   const action =
     canSend || !running ? (
       <Pressable
@@ -177,6 +216,35 @@ export function Composer({
             ) : null}
           </>
         ) : null}
+        {dictating || transcribing || dictation.state.error ? (
+          <View style={styles.listening} testID="composer__listening">
+            {dictating ? (
+              <>
+                <View style={styles.recDot} />
+                <Text style={styles.listeningText}>Listening</Text>
+                <Text style={styles.listeningText} testID="composer__listening-timer">
+                  {formatElapsed(dictation.elapsed)}
+                </Text>
+                <View style={styles.spacer} />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel dictation"
+                  onPress={dictation.cancel}
+                  hitSlop={8}
+                  testID="composer__listening-cancel"
+                >
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : transcribing ? (
+              <Text style={styles.listeningText}>Transcribing…</Text>
+            ) : (
+              <Text style={styles.errorText} testID="composer__dictation-error">
+                {dictation.state.error}
+              </Text>
+            )}
+          </View>
+        ) : null}
         <View style={expanded ? styles.fieldExpanded : styles.fieldRow}>
           {expanded ? null : plus}
           <TextInput
@@ -186,6 +254,8 @@ export function Composer({
             submitBehavior="newline"
             value={text}
             onChangeText={setText}
+            selection={selection}
+            onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={running ? "Queue a message…" : "Follow up…"}
@@ -194,6 +264,7 @@ export function Composer({
             autoCapitalize="sentences"
             testID="composer__input"
           />
+          {expanded ? null : mic}
           {expanded ? null : action}
         </View>
         {expanded ? (
@@ -205,6 +276,7 @@ export function Composer({
               onOpenChange={setSheetOpen}
             />
             <View style={styles.spacer} />
+            {mic}
             {action}
           </View>
         ) : null}
@@ -241,7 +313,25 @@ function AttachmentChip({
   );
 }
 
+function formatElapsed(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 const styles = StyleSheet.create({
+  listening: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    paddingBottom: 4,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+  },
+  recDot: { backgroundColor: colors.destructive, borderRadius: 5, height: 10, width: 10 },
+  listeningText: { color: colors.mutedForeground, fontSize: 13 },
+  cancelText: { color: colors.foreground, fontSize: 13, fontWeight: "600" },
+  errorText: { color: colors.destructive, flex: 1, fontSize: 12.5 },
+  micActive: { backgroundColor: colors.destructive },
+  micStop: { backgroundColor: colors.primaryForeground, borderRadius: 2, height: 12, width: 12 },
   root: { paddingBottom: 6, paddingHorizontal: 12, paddingTop: 6 },
   card: { alignItems: "stretch", minHeight: 56, padding: 6 },
   cardExpanded: { paddingBottom: 8, paddingHorizontal: 8, paddingTop: 8 },

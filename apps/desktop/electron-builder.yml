@@ -123,6 +123,10 @@ mac:
   # (Renderer, GPU, Plugin) so V8/JIT works in every Electron sub-process.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # The text of the macOS microphone prompt. The first tap on the composer's mic shows it;
+  # without this key macOS refuses the microphone and shows no prompt.
+  extendInfo:
+    NSMicrophoneUsageDescription: Band records your voice when you dictate into the chat composer. The audio goes to the speech-to-text service you set up in Settings > Voice.
   # Notarization is wired via the afterSign hook (scripts/notarize.mjs) so
   # the build falls through cleanly when the App Store Connect API key is
   # absent (local dev builds). Setting `notarize: false` disables

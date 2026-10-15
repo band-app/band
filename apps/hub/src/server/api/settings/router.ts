@@ -17,10 +17,11 @@ import { publicProcedure, t } from "../trpc";
  */
 
 export const settingsRouter = t.router({
-  get: publicProcedure.query(() => {
+  get: publicProcedure.query(({ ctx }) => {
     // The shared token secret is an admin credential, so no caller gets it back.
-    const { tokenSecret: _tokenSecret, ...settings } = settingsService.get();
-    return settings;
+    // The voice endpoint (URL, host, key item) is for admins; other devices use voice.status.
+    const { tokenSecret: _tokenSecret, voice, ...settings } = settingsService.get();
+    return ctx.admin ? { ...settings, voice } : settings;
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
@@ -31,6 +32,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing environmentBuilder needs an admin token.",
+      });
+    }
+    if (input.voice !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing voice needs an admin token.",
       });
     }
     if (input.runners !== undefined && !ctx.admin) {
