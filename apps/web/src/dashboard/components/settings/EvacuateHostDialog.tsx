@@ -11,6 +11,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useWorktreeDisplay } from "../../hooks/use-worktree-display";
 
 type Hosts = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
 type Summary = Awaited<ReturnType<typeof trpc.checkpoints.evacuate.mutate>>;
@@ -34,6 +35,7 @@ export function EvacuateHostDialog({
   hosts: Hosts;
 }) {
   const queryClient = useQueryClient();
+  const displayWorktree = useWorktreeDisplay();
   const targets = hosts.filter(
     (h) => h.id !== from.id && h.id !== "local" && h.status === "online",
   );
@@ -91,9 +93,9 @@ export function EvacuateHostDialog({
                 data-worktree={r.worktreeId}
                 data-ok={r.ok ? "true" : "false"}
               >
-                <span className="font-mono">{r.worktreeId}</span>:{" "}
+                <span className="font-mono">{displayWorktree(r.worktreeId).label}</span>:{" "}
                 {r.ok
-                  ? `${r.mode === "move" ? "moved" : "restored"} as ${r.newWorktreeId}`
+                  ? `${r.mode === "move" ? "moved" : "restored"} as ${displayWorktree(r.newWorktreeId ?? "").label}`
                   : `failed. ${r.error}`}
               </li>
             ))}
@@ -108,7 +110,7 @@ export function EvacuateHostDialog({
             <ul className="max-h-32 overflow-auto text-xs text-muted-foreground">
               {(worktrees.data ?? []).map((w) => (
                 <li key={w.worktreeId} data-testid="evacuate__worktree">
-                  {w.worktreeId}
+                  {displayWorktree(w.worktreeId).label}
                 </li>
               ))}
             </ul>
