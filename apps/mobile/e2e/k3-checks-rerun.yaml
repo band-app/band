@@ -1,0 +1,51 @@
+# k3 (S3): re-run one job, then every failed job; the hub calls `gh run rerun` and the checks
+# go back to queued or in progress.
+appId: app.getband.mobile
+name: k3 re-run a check and the failed checks
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-rerun
+- extendedWaitUntil:
+    visible:
+      id: checks__failing-count
+      text: "3 failing checks"
+    timeout: 20000
+- takeScreenshot: k3-three-failed
+- tapOn:
+    id: checks__check-Unit
+- tapOn:
+    id: checks__rerun
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-rerun?run=700&job=71
+- assertVisible:
+    id: checks__check-Unit
+    text: ".*(Queued|In progress).*"
+- takeScreenshot: k3-unit-rerun
+- extendedWaitUntil:
+    visible:
+      id: checks__failing-count
+      text: "2 failing checks"
+    timeout: 10000
+- tapOn:
+    id: checks__rerun-failed
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-rerun?run=700&failed=1
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-rerun?run=701&failed=1
+- extendedWaitUntil:
+    notVisible:
+      id: checks__failing-banner
+    timeout: 20000
+- assertVisible:
+    id: checks__count-pending
+    text: "3 pending"
+- takeScreenshot: k3-all-rerun

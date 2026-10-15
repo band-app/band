@@ -38,6 +38,7 @@ export default function RootLayout() {
               <Stack.Screen name="pair" options={{ title: "Pairing" }} />
               <Stack.Screen name="home" options={{ headerShown: false }} />
               <Stack.Screen name="worktree/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="worktree/[id]/checks" options={{ headerShown: false }} />
               <Stack.Screen name="hubs" options={{ title: "Hubs" }} />
               <Stack.Screen
                 name="unreachable"

@@ -1,0 +1,20 @@
+# Opens a worktree's Checks view from the home screen: the header's more button, then Views >
+# Checks. WT is the worktree id.
+appId: app.getband.mobile
+---
+- runFlow:
+    file: open-gamma.yaml
+    env:
+      WT: ${WT}
+- tapOn:
+    id: worktree__more
+- extendedWaitUntil:
+    visible:
+      id: views__checks
+    timeout: 5000
+- tapOn:
+    id: views__checks
+- extendedWaitUntil:
+    visible:
+      id: checks__screen
+    timeout: 10000
