@@ -68,6 +68,7 @@ import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp
 import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
+import { isOnBattery } from "./process/power";
 import { probeTools } from "./process/tools";
 import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
@@ -296,6 +297,7 @@ export class LocalHost implements Host {
       roots: [],
       versions,
       tools: await this.toolVersions(),
+      onBattery: await isOnBattery(),
       report: this.reportValue,
       repoMappings: await this.repos.list(),
       capabilities: {
@@ -417,6 +419,7 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
   return {
     [Symbol.asyncIterator](): AsyncIterator<FileChange> {
       const queue: FileChange[] = [];
+      const ignored = options.ignore?.length ? new Set(options.ignore) : null;
       let wake: (() => void) | null = null;
       let done = false;
       const finish = () => {
@@ -430,7 +433,9 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
         { recursive: options.recursive ?? true, persistent: false },
         (kind, filename) => {
           if (done || filename === null) return;
-          queue.push({ path: filename.toString().split("\\").join("/"), kind });
+          const path = filename.toString().split("\\").join("/");
+          if (ignored && path.split("/").some((segment) => ignored.has(segment))) return;
+          queue.push({ path, kind });
           wake?.();
         },
       );

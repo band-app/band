@@ -7,7 +7,7 @@
  * `invoke()` always returns a Promise.
  */
 
-import { type BrowserWindow, ipcMain } from "electron";
+import { type BrowserWindow, ipcMain, powerMonitor } from "electron";
 import {
   chromeRunningStatus,
   clearProfileData,
@@ -117,6 +117,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Per-process Electron/Chromium resource metrics for the Resources page.
   // Pass the dashboard window's webContents id so the mapper can label its
   // renderer "Dashboard" and not confuse it with other top-level windows.
+  handle(Channels.getPowerState, () => ({ onBattery: powerMonitor.isOnBatteryPower() }));
   handle(Channels.getAppMetrics, () => getAppMetrics(opts.mainWindow.webContents.id));
 
   // ---- macOS shell ----

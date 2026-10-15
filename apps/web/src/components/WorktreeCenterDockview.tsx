@@ -154,6 +154,7 @@ import {
   newTerminalId,
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
+import { usePollInterval } from "../lib/poll-interval";
 import {
   initialIndex,
   orderByRecency,
@@ -1917,7 +1918,7 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
       }),
     enabled:
       !!worktreeId && !!filePath && !!section && (section !== "branch" || !!mergeBase) && !commit,
-    refetchInterval: visible ? 10_000 : false,
+    refetchInterval: usePollInterval(visible ? 10_000 : false),
   });
 
   // A commit's diff never changes, so it is fetched once and never polled.

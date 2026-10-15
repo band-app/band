@@ -290,6 +290,19 @@ html[data-translucent-sidebar] {
 }
 
 /*
+ * On battery the desktop window drops its vibrancy layer (apps/desktop/src/main/window.ts), so
+ * WindowServer stops blending the blurred desktop behind the page. The page paints solid.
+ */
+html[data-on-battery][data-translucent-sidebar],
+html[data-on-battery][data-translucent-sidebar] body {
+  background: var(--background);
+}
+
+html[data-on-battery][data-translucent-sidebar] {
+  --sidebar-tint: 100%;
+}
+
+/*
  * CSS `zoom` on <html> (set by the zoom-apply helper on startup and on every
  * user zoom change, mirrored onto --app-zoom) scales fixed-position
  * descendants — including Radix's popper wrapper — by the zoom factor.
@@ -348,6 +361,10 @@ html[data-translucent-sidebar] {
 }
 
 /* Indeterminate loading bar under a browser pane's address bar. */
+.band-browser-loading-bar {
+  animation: browser-bar-slide 1.4s ease-in-out infinite;
+}
+
 @keyframes browser-bar-slide {
   0% {
     transform: translateX(-100%);
@@ -417,5 +434,35 @@ html[data-translucent-sidebar] {
   .animate-collapsible-down,
   .animate-collapsible-up {
     animation: none;
+  }
+}
+
+/*
+ * Power saver (lib/power-state.ts sets `data-power="saver"` on <html> on battery or while the
+ * window is blurred or hidden) and prefers-reduced-motion: infinite animations stop. A running
+ * infinite animation keeps the compositor producing frames at display rate. One-shot enter and
+ * exit animations are untouched, so they still finish.
+ */
+html[data-power="saver"] .animate-spin,
+html[data-power="saver"] .animate-pulse,
+html[data-power="saver"] .animate-ping,
+html[data-power="saver"] .animate-bounce,
+html[data-power="saver"] .animate-status-pulse,
+html[data-power="saver"] .animate-status-pulse-slow,
+html[data-power="saver"] .tool-shimmer,
+html[data-power="saver"] .band-browser-loading-bar {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse,
+  .animate-ping,
+  .animate-bounce,
+  .animate-status-pulse,
+  .animate-status-pulse-slow,
+  .tool-shimmer,
+  .band-browser-loading-bar {
+    animation-play-state: paused;
   }
 }
