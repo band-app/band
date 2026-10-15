@@ -10,11 +10,10 @@ import {
   Switch,
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Plus } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
-import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
+import { PairingDialog } from "./PairingDialog";
 import { SettingsRow } from "./SettingsRow";
 
 type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
@@ -23,32 +22,10 @@ type DeviceView = TokenList[number];
 const TOKENS_KEY = ["tokens.list"] as const;
 const CURRENT_KEY = ["tokens.current"] as const;
 
-interface IssuedDevice {
-  token: string;
-  signInUrl: string;
-}
-
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 function formatTime(at: number | null): string {
   return at == null ? "Never" : new Date(at).toLocaleString();
-}
-
-/**
- * The URL a new device opens: the configured remote hub in the desktop app,
- * else the origin this page is served from.
- */
-export function hubPublicUrl(): string {
-  return crossOriginHub()?.origin ?? window.location.origin;
-}
-
-function isLoopback(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host);
-  } catch {
-    return false;
-  }
 }
 
 /** Whether the signed-in token is an admin one. Settings hides Devices when it is not. */
@@ -62,9 +39,10 @@ export function useIsAdmin(): boolean {
 }
 
 /**
- * Settings > Devices: the device tokens that reach this hub, "Add device"
- * (a sign-in link and QR code shown once) and Revoke. Admin only. The hub
- * keeps only a hash of a token, so closing the Add device dialog discards it.
+ * Settings > Devices: the devices that reach this hub, "Add device", "Connect details" (a link
+ * and QR code with a one-time pairing code, `PairingDialog`) and Revoke, which signs a device
+ * out and removes it. Admin only. The hub keeps only a hash of each device token, so a token
+ * is never shown. A pairing code replaces the device's token when it is opened.
  */
 export function DevicesSettings() {
   const queryClient = useQueryClient();
@@ -84,7 +62,7 @@ export function DevicesSettings() {
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("Phone");
   const [admin, setAdmin] = useState(false);
-  const [issued, setIssued] = useState<IssuedDevice | null>(null);
+  const [pairing, setPairing] = useState<{ id: string; label: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
@@ -94,9 +72,7 @@ export function DevicesSettings() {
   };
 
   const closeAdd = () => {
-    if (issued) void refresh();
     setAdding(false);
-    setIssued(null);
     setLabel("Phone");
     setAdmin(false);
     setError(null);
@@ -106,12 +82,12 @@ export function DevicesSettings() {
     setBusy(true);
     setError(null);
     try {
-      const result = await trpc.tokens.createDevice.mutate({ label: label.trim(), admin });
-      const base = hubPublicUrl().replace(/\/+$/, "");
-      setIssued({
-        token: result.token,
-        signInUrl: `${base}/?token=${encodeURIComponent(result.token)}`,
+      const { view } = await trpc.tokens.createUnpairedDevice.mutate({
+        label: label.trim(),
+        admin,
       });
+      closeAdd();
+      setPairing({ id: view.id, label: view.label });
       await refresh();
     } catch (err) {
       setError(errorText(err));
@@ -131,10 +107,6 @@ export function DevicesSettings() {
     await refresh();
   };
 
-  const copy = (text: string) => {
-    void navigator.clipboard?.writeText(text).catch(() => undefined);
-  };
-
   if (current.data && !current.data.admin) {
     return (
       <p
@@ -147,14 +119,12 @@ export function DevicesSettings() {
     );
   }
 
-  const baseUrl = hubPublicUrl();
-
   return (
     <>
       <SettingsRow
         variant="stacked"
         label="Add device"
-        description="Connect a phone, tablet or another browser. You get a sign-in link and a QR code once."
+        description="Connect a phone, tablet or another browser with a one-time link and QR code."
       >
         <Button
           type="button"
@@ -171,7 +141,7 @@ export function DevicesSettings() {
       <SettingsRow
         variant="stacked"
         label="Devices"
-        description="Revoking a device signs it out. The shared token in settings.json cannot be revoked here."
+        description="Revoking a device signs it out and removes it. The shared token in settings.json cannot be revoked here."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {devices.map((device) => {
@@ -184,6 +154,7 @@ export function DevicesSettings() {
                 data-token-id={device.id}
                 data-state={device.state}
                 data-current={isThis ? "true" : undefined}
+                data-confirming={confirming ? (isThis ? "self" : "other") : undefined}
                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
               >
                 <div className="min-w-0">
@@ -204,7 +175,9 @@ export function DevicesSettings() {
                   </div>
                   {confirming ? (
                     <p role="alert" className="mt-1 text-xs text-destructive">
-                      This is the token you are signed in with. Revoking it signs you out here.
+                      {isThis
+                        ? "This is the token you are signed in with. Revoking it signs you out here."
+                        : "Revoking signs this device out and removes it from the list."}
                     </p>
                   ) : null}
                 </div>
@@ -230,16 +203,29 @@ export function DevicesSettings() {
                       </Button>
                     </>
                   ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Revoke device ${device.label || device.id}`}
-                      disabled={device.state !== "active" || device.id === "shared"}
-                      onClick={() => (isThis ? setConfirmingId(device.id) : void revoke(device))}
-                    >
-                      Revoke
-                    </Button>
+                    <>
+                      {device.id === "shared" ? null : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Connect details ${device.label || device.id}`}
+                          onClick={() => setPairing({ id: device.id, label: device.label })}
+                        >
+                          Connect details
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Revoke device ${device.label || device.id}`}
+                        disabled={device.state !== "active" || device.id === "shared"}
+                        onClick={() => setConfirmingId(device.id)}
+                      >
+                        Revoke
+                      </Button>
+                    </>
                   )}
                 </div>
               </li>
@@ -258,112 +244,60 @@ export function DevicesSettings() {
           <DialogHeader>
             <DialogTitle>Add device</DialogTitle>
             <DialogDescription>
-              {issued
-                ? "Open the link or scan the code on the new device. Closing this dialog discards it."
-                : "Name the device. You can revoke it from this list later."}
+              Name the device. You get a link and QR code to connect it next. You can revoke it from
+              this list later.
             </DialogDescription>
           </DialogHeader>
-          {issued ? (
-            <div className="space-y-3" data-testid="settings__device-result">
-              <p className="text-xs text-muted-foreground">
-                Copy this now. The hub keeps only a hash of the token and cannot show it again.
+          <div className="space-y-3">
+            <Input
+              aria-label="Device label"
+              placeholder="Label"
+              value={label}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLabel(e.target.value)}
+              className="h-8 text-sm"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="device-admin" className="text-sm">
+                Admin device
+              </label>
+              <Switch id="device-admin" checked={admin} onCheckedChange={setAdmin} />
+            </div>
+            {admin ? (
+              <p role="alert" className="text-xs text-destructive">
+                An admin device can create and revoke devices, workers and credentials. Give it to
+                devices you trust as much as this one.
               </p>
-              {isLoopback(baseUrl) ? (
-                <p role="alert" className="text-xs text-destructive">
-                  This hub is at {baseUrl}, which another device cannot reach. Open Band from the
-                  hub's public address to get a link that works.
-                </p>
-              ) : null}
-              {/* theme-lint-ignore-line: a QR code needs a white quiet zone to scan */}
-              <div className="flex justify-center rounded-lg bg-white p-3">
-                <QRCodeSVG
-                  value={issued.signInUrl}
-                  size={200}
-                  data-testid="settings__device-qr"
-                  data-value={issued.signInUrl}
-                />
-              </div>
-              <label className="block text-xs font-medium" htmlFor="device-sign-in-url">
-                Sign-in link
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  id="device-sign-in-url"
-                  readOnly
-                  value={issued.signInUrl}
-                  data-testid="settings__device-url"
-                  className="h-8 font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid="settings__copy-device-url"
-                  onClick={() => copy(issued.signInUrl)}
-                >
-                  <Copy className="size-3" />
-                  Copy
-                </Button>
-              </div>
-              <label className="block text-xs font-medium" htmlFor="device-token">
-                Token
-              </label>
-              <Input
-                id="device-token"
-                readOnly
-                value={issued.token}
-                data-testid="settings__device-token"
-                className="h-8 font-mono text-xs"
-              />
-              <DialogFooter>
-                <Button type="button" size="sm" onClick={closeAdd}>
-                  Done
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <Input
-                aria-label="Device label"
-                placeholder="Label"
-                value={label}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLabel(e.target.value)}
-                className="h-8 text-sm"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <label htmlFor="device-admin" className="text-sm">
-                  Admin device
-                </label>
-                <Switch id="device-admin" checked={admin} onCheckedChange={setAdmin} />
-              </div>
-              {admin ? (
-                <p role="alert" className="text-xs text-destructive">
-                  An admin device can create and revoke devices, workers and credentials. Give it to
-                  devices you trust as much as this one.
-                </p>
-              ) : null}
-              {error ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {error}
-                </p>
-              ) : null}
-              <DialogFooter>
-                <Button type="button" variant="ghost" size="sm" onClick={closeAdd}>
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy || label.trim() === ""}
-                  onClick={() => void create()}
-                >
-                  Create device
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
+            ) : null}
+            {error ? (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="ghost" size="sm" onClick={closeAdd}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy || label.trim() === ""}
+                onClick={() => void create()}
+              >
+                Create device
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
+      {pairing ? (
+        <PairingDialog
+          device={pairing}
+          onClose={() => {
+            setPairing(null);
+            void refresh();
+          }}
+        />
+      ) : null}
     </>
   );
 }

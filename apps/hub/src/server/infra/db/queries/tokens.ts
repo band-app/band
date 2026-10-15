@@ -4,7 +4,7 @@
  * NULL`), so two callers racing for one row can't both win.
  */
 
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 import { getDb } from "../connection";
 import { hosts, tokens, worktrees } from "../schema";
 
@@ -25,8 +25,94 @@ export class TokenQueries {
     return this.db().select().from(tokens).where(eq(tokens.id, id)).get();
   }
 
+  /** The newest `limit` tokens. Pairing codes are internal and never listed. */
   list(limit: number): TokenRow[] {
-    return this.db().select().from(tokens).orderBy(desc(tokens.createdAt)).limit(limit).all();
+    return this.db()
+      .select()
+      .from(tokens)
+      .where(ne(tokens.kind, "device_pairing"))
+      .orderBy(desc(tokens.createdAt))
+      .limit(limit)
+      .all();
+  }
+
+  /** The newest live pairing code of a device, or undefined. */
+  findPendingPairing(deviceId: string, at: number): TokenRow | undefined {
+    return this.db()
+      .select()
+      .from(tokens)
+      .where(
+        and(
+          eq(tokens.kind, "device_pairing"),
+          eq(tokens.deviceId, deviceId),
+          isNull(tokens.revokedAt),
+        ),
+      )
+      .orderBy(desc(tokens.createdAt))
+      .all()
+      .find((r) => r.expiresAt != null && r.expiresAt > at);
+  }
+
+  /** Marks a live pairing code as spent and drops its sealed copy. Returns whether this call spent it. */
+  spendPairing(id: string, at: number): boolean {
+    const result = this.db()
+      .update(tokens)
+      .set({ revokedAt: at, lastUsedAt: at, sealed: null })
+      .where(and(eq(tokens.id, id), isNull(tokens.revokedAt)))
+      .run();
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /** Gives a live device a new secret. Returns false when the device is gone or revoked. */
+  replaceDeviceHash(id: string, hash: string): boolean {
+    const result = this.db()
+      .update(tokens)
+      .set({ hash })
+      .where(and(eq(tokens.id, id), eq(tokens.kind, "device"), isNull(tokens.revokedAt)))
+      .run();
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /** Deletes a token row. */
+  delete(id: string): void {
+    this.db().delete(tokens).where(eq(tokens.id, id)).run();
+  }
+
+  /** Deletes every pairing code of a device. */
+  deletePairings(deviceId: string): void {
+    this.db()
+      .delete(tokens)
+      .where(and(eq(tokens.kind, "device_pairing"), eq(tokens.deviceId, deviceId)))
+      .run();
+  }
+
+  /** Deletes pairing codes that were spent, revoked or have expired. Returns how many. */
+  deleteDeadPairings(at: number): number {
+    const result = this.db()
+      .delete(tokens)
+      .where(
+        and(
+          eq(tokens.kind, "device_pairing"),
+          or(isNotNull(tokens.revokedAt), lte(tokens.expiresAt, at)),
+        ),
+      )
+      .run();
+    return Number(result.changes ?? 0);
+  }
+
+  /** Deletes revoked or expired device tokens, except the shared one. Returns how many. */
+  deleteDeadDevices(at: number, keepId: string): number {
+    const result = this.db()
+      .delete(tokens)
+      .where(
+        and(
+          eq(tokens.kind, "device"),
+          ne(tokens.id, keepId),
+          or(isNotNull(tokens.revokedAt), lte(tokens.expiresAt, at)),
+        ),
+      )
+      .run();
+    return Number(result.changes ?? 0);
   }
 
   insert(row: TokenRow): void {
