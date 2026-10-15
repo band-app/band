@@ -22,6 +22,21 @@ export const TERMINAL_TAB_COLD_PARK_DELAY_MS = 30_000;
 export const TERMINAL_TAB_HOT_RETAIN_MS = 5 * 60_000;
 export const TERMINAL_TAB_HOT_RETAIN_LIMIT = 6;
 
+/**
+ * On battery a hidden terminal stays warm for less time: its xterm, WebGL context and socket cost
+ * power while idle, and the server snapshot replays it when it is shown again.
+ */
+export const BATTERY_COLD_PARK_DELAY_MS = 10_000;
+export const BATTERY_HOT_RETAIN_MS = 60_000;
+
+export function coldParkDelayMs(baseMs: number, onBattery: boolean): number {
+  return onBattery ? Math.min(baseMs, BATTERY_COLD_PARK_DELAY_MS) : baseMs;
+}
+
+export function hotRetainMs(baseMs: number, onBattery: boolean): number {
+  return onBattery ? Math.min(baseMs, BATTERY_HOT_RETAIN_MS) : baseMs;
+}
+
 export interface ColdParkRetainCandidate {
   id: string;
   hiddenSinceMs: number;

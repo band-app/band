@@ -40,6 +40,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "get_app_title",
   "get_window_fullscreen",
   "get_app_metrics",
+  "get_power_state",
   // Hub picker
   "hub_get_choice",
   "hub_set_choice",
@@ -101,6 +102,8 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   // Wake from system sleep / screen unlock (powerMonitor resume/unlock-screen);
   // WebGL surfaces subscribe to repair their glyph atlases.
   "system-resumed",
+  // Mac moved between AC and battery power; payload `{ onBattery }`.
+  "power-state-changed",
 ]);
 
 type Unlisten = () => void;

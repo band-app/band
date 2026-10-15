@@ -767,12 +767,7 @@ export function BrowserPaneComponent({
         </button>
         {loading && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
-            <div
-              className="h-full w-2/5 rounded-full bg-blue-500"
-              style={{
-                animation: "browser-bar-slide 1.4s ease-in-out infinite",
-              }}
-            />
+            <div className="band-browser-loading-bar h-full w-2/5 rounded-full bg-blue-500" />
           </div>
         )}
         {/* History autocomplete — absolutely positioned under the
