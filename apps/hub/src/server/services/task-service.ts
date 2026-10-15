@@ -1,7 +1,12 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import { computeCost } from "@band-app/coding-agent";
+import {
+  FAILED_STOP_REASONS,
+  fileUri,
+  sharedDirNote,
+  turnUsage,
+} from "@band-app/chat-runtime/turns";
 import { createLogger } from "@band-app/logger";
-import type { ChatEvent, TurnUsage } from "@band-app/shared/chat-events";
+import type { ChatEvent } from "@band-app/shared/chat-events";
 import { WorktreeNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { hostRegistry } from "../infra/host/registry";
@@ -15,6 +20,8 @@ import {
 import { openSharedDir } from "./_utils/shared-dir";
 import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, findOption } from "./agent-session-service";
+// FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in function bodies.
+import { chatOwnershipService } from "./chat-ownership-service";
 import { chatService } from "./chat-service";
 import {
   beginBandTurn,
@@ -156,10 +163,6 @@ export { WorktreeNotFoundError };
 // Prompt blocks
 // ---------------------------------------------------------------------------
 
-function fileUri(path: string): string {
-  return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
-}
-
 async function promptBlocks(
   task: InternalTask,
   firstTurn: boolean,
@@ -184,61 +187,10 @@ async function promptBlocks(
   if (firstTurn) {
     blocks.push({
       type: "text",
-      text: `[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a downloadable file card in the chat.]`,
+      text: sharedDirNote(sharedDir),
     });
   }
   return blocks;
-}
-
-/**
- * Token usage for the finished turn. `PromptResponse.usage` is the ACP
- * field (Claude Code: the whole turn; Codex: the turn's last model call);
- * Gemini CLI reports the turn's tokens only in `_meta.quota.token_count`.
- * The cost is the agent's own cumulative figure when it sends one
- * (`usage_update.cost`, Claude Code), else the previous estimate plus this
- * turn priced from `MODEL_PRICING`.
- */
-function turnUsage(
-  chatId: string,
-  res: acp.PromptResponse,
-  previousCost: number | null,
-): TurnUsage | undefined {
-  const model = agentSessionService.currentModel(chatId);
-  const reported = agentSessionService.reportedCost(chatId);
-  let usage: TurnUsage | undefined;
-  if (res.usage) {
-    usage = {
-      inputTokens: res.usage.inputTokens,
-      outputTokens: res.usage.outputTokens,
-      cachedReadTokens: res.usage.cachedReadTokens ?? undefined,
-      cachedWriteTokens: res.usage.cachedWriteTokens ?? undefined,
-      thoughtTokens: res.usage.thoughtTokens ?? undefined,
-      totalTokens: res.usage.totalTokens,
-    };
-  } else {
-    const quota = (res._meta as { quota?: { token_count?: Record<string, number> } } | null)?.quota;
-    const tokens = quota?.token_count;
-    if (tokens && (tokens.input_tokens !== undefined || tokens.output_tokens !== undefined)) {
-      usage = { inputTokens: tokens.input_tokens ?? 0, outputTokens: tokens.output_tokens ?? 0 };
-    }
-  }
-  if (reported !== undefined) {
-    return { ...(usage ?? { inputTokens: 0, outputTokens: 0 }), model, costUsd: reported };
-  }
-  if (!usage) {
-    return previousCost === null
-      ? undefined
-      : { inputTokens: 0, outputTokens: 0, model, costUsd: previousCost };
-  }
-  // OpenAI-style input counts include the cached part; price it once.
-  const cost = computeCost(model, {
-    inputTokens: Math.max(0, usage.inputTokens - (usage.cachedReadTokens ?? 0)),
-    outputTokens: usage.outputTokens,
-    reasoningOutputTokens: usage.thoughtTokens,
-    cacheReadTokens: usage.cachedReadTokens,
-    cacheCreationTokens: usage.cachedWriteTokens,
-  });
-  return { ...usage, model, costUsd: (previousCost ?? 0) + cost };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +203,9 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
   if (worktreeService.resolve(worktreeId) === null) {
     throw new WorktreeNotFoundError(worktreeId);
   }
+  // A chat its worker owns runs there; the hub only forwards the message.
+  const owned = chatOwnershipService.submitAsTask(options);
+  if (owned) return owned;
 
   const existing = tasks.get(chatId);
   if (existing?.status === "running") {
@@ -299,6 +254,8 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
   if (worktreeService.resolve(worktreeId) === null) {
     throw new WorktreeNotFoundError(worktreeId);
   }
+  const owned = chatOwnershipService.submit(options);
+  if (owned) return owned;
 
   const running = tasks.get(chatId)?.status === "running";
   if (!running && !hasQueuedMessages(chatId)) {
@@ -436,7 +393,11 @@ async function runTask(task: InternalTask): Promise<void> {
       taskId: task.id,
       stopReason: res.stopReason,
       durationMs: Date.now() - task.startedAt,
-      usage: turnUsage(chatId, res, previousCost),
+      usage: turnUsage(res, {
+        model: agentSessionService.currentModel(chatId),
+        reportedCost: agentSessionService.reportedCost(chatId),
+        previousCost,
+      }),
     });
     finishTask(task, res.stopReason === "cancelled" ? "cancelled" : "completed", res.stopReason);
   } catch (err) {
@@ -465,9 +426,6 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
     log.warn({ chatId, category, value, err }, "could not apply the task's setting");
   }
 }
-
-/** Stop reasons that end a turn without an answer: the chat shows `failed`. */
-const FAILED_STOP_REASONS = new Set<string>(["refusal", "max_tokens", "max_turn_requests"]);
 
 /**
  * Settles a task: records its status, then either starts the next queued
@@ -533,6 +491,7 @@ function drainQueue(worktreeId: string, chatId: string): boolean {
  * `turn-ended` event and the task status follow from that.
  */
 export function abortTask(chatId: string): boolean {
+  if (chatOwnershipService.isOwned(chatId)) return chatOwnershipService.stop(chatId);
   const task = tasks.get(chatId);
   if (!task || task.status !== "running") return false;
   task.cancelRequested = true;
@@ -550,6 +509,9 @@ export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: s
       return { cancelled: true, worktreeId: task.worktreeId };
     }
   }
+
+  const owned = chatOwnershipService.cancelTask(taskId);
+  if (owned) return owned;
 
   // Not running in this process: mark the persisted record as failed
   // (orphaned by a server restart).
@@ -570,10 +532,12 @@ export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: s
  * agent process is still starting, so it covers the span before `agentSessionService.isActive`.
  */
 export function hasRunningTask(chatId: string): boolean {
+  if (chatOwnershipService.isOwned(chatId)) return chatOwnershipService.task(chatId) !== null;
   return tasks.get(chatId)?.status === "running";
 }
 
 export function getTask(chatId: string): TaskInfo | null {
+  if (chatOwnershipService.isOwned(chatId)) return chatOwnershipService.task(chatId);
   const task = tasks.get(chatId);
   return task ? toTaskInfo(task) : null;
 }

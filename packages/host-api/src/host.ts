@@ -68,6 +68,11 @@ export interface HostCapabilities {
   acp: boolean;
   /** A display (`DISPLAY`) and a VNC server (`x11vnc`) are available, so `desktop.open` works. */
   desktop: boolean;
+  /**
+   * A worker that runs the chats of its worktrees itself and replicates them to the hub.
+   * Absent from the hub's own host and older workers.
+   */
+  chatOwnership?: boolean;
 }
 
 /** One coding agent as a host sees it: is its CLI installed, and is it logged in. */

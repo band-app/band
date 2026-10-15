@@ -3,9 +3,9 @@
  * assert exact bytes written. Pure utility, no real I/O.
  */
 
+import { openSseStream } from "@band-app/chat-runtime/sse-writer";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { describe, expect, it } from "vitest";
-import { openSseStream } from "../src/server/services/_utils/sse-writer";
 
 interface RecordedResponse {
   chunks: string[];

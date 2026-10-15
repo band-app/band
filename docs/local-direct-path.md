@@ -20,7 +20,7 @@ All of these must hold:
 | HTTP `POST /direct/<procedure>` | `worktree.listFiles`, `getFile`, `saveFile`, `getDiff`, `getChanges`, `getFileDiff`, `searchFiles`, `searchContent` |
 | WebSocket `/terminal?worktreeId=…&terminalId=…` | The hub's terminal protocol: replay on `attach`, `ack`, input, `resize`, `ping`, title and exit frames |
 
-Everything else goes to the hub: chat and agent events, LSP, file watching, the formatter, git staging, commits, pull and push, worktree lifecycle, the browser pane and the desktop viewer. The list of direct procedures is `DIRECT_PROCEDURES` in `packages/shared/src/direct-access.ts`.
+A chat this worker owns ([chat ownership](chat-ownership.md)) goes there too: its event stream, messages, stop and answers, on the same token. Everything else goes to the hub: the events of chats the hub runs, LSP, file watching, the formatter, git staging, commits, pull and push, worktree lifecycle, the browser pane and the desktop viewer. The list of direct procedures is `DIRECT_PROCEDURES` in `packages/shared/src/direct-access.ts`.
 
 A new terminal is still created through the hub (`terminal.create`), which spawns the PTY on the worker. The app opens the tab's socket at the same time, so the worker holds an upgrade for up to 5 seconds until the PTY appears. A terminal that never appears there closes with code `4100`, and the app reconnects through the hub, which spawns it. A pane whose first connect carries spawn options (`init`) goes to the hub from the start. Closing a terminal also goes through the hub (`terminal.kill`), so a `close` frame on a direct socket leaves the PTY running.
 

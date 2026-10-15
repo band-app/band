@@ -239,6 +239,8 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
       "/Users/me/code",
       "--root",
       "/Users/me/more",
+      // This Mac's worker runs its worktrees' chats.
+      "--own-chats",
     ]);
     assert.equal(call.token, "bwb_old");
     assert.equal(call.electronAsNode, "1");
@@ -265,6 +267,7 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
       "My Mac",
       "--root",
       "/Users/me/code",
+      "--own-chats",
     ]);
     assert.equal(install?.token, "bwb_secret");
     assert.deepEqual(uninstall?.args, ["uninstall-service"]);

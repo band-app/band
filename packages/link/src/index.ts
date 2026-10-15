@@ -1,7 +1,9 @@
 export { Channel } from "./channel.ts";
+export * from "./chats.ts";
 export { LinkClient, type LinkClientOptions } from "./client.ts";
 export * from "./direct.ts";
 export { decodeFrames, encodeFrame, MAX_FRAME_BYTES } from "./frames.ts";
+export * from "./payload.ts";
 export * from "./protocol.ts";
 export * from "./relay.ts";
 export { type AuthResult, LinkServer, type LinkServerOptions, ServerSession } from "./server.ts";
