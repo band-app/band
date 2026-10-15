@@ -59,12 +59,14 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
 
 ### Connect a phone
 
-1. Open Band on a machine that already has an admin token, from the hub's public address (`https://band.example.com/`, not `localhost`).
+1. Open Band on a machine that already has an admin token. Set `BAND_PUBLIC_URL=https://band.example.com` in `.env` so the hub offers its public address as the default link address.
 2. Go to Settings > Devices and choose Add device. Keep the label `Phone` or change it. Leave Admin device off unless the phone should manage tokens too.
-3. Scan the QR code with the phone, or copy the sign-in link. The link is `<hub URL>/?token=<token>` and signs the phone in on first open.
-4. Choose Done. The dialog shows the link, QR code and token once, because the hub keeps only a hash of the token.
+3. The Connect dialog shows a link and QR code. Pick the address the phone reaches the hub on: the public URL, this page's address, one of the hub machine's network addresses, or a custom address that Add custom address saves in `settings.json`. The link is `<address>/?pair=<code>`. Scan the QR code with the phone, or open the link.
+4. The code works once and expires after 15 minutes. Opening it signs the phone in as that device and replaces the device's previous token. Reopening it a second time shows "already used or has expired".
 
-Settings > Devices lists each device with when it was added and last used. Revoke signs a device out at once. Revoking the token you are signed in with asks for confirmation first.
+The network addresses come from the hub's own interfaces, ordered Tailscale (100.64.0.0/10), IPv4, global IPv6, then virtual networks such as `docker0`. A hub in a container sees only container addresses, so set `BAND_PUBLIC_URL` there. The picker never preselects a virtual network. The hub does not test whether another device can reach a custom address.
+
+Settings > Devices lists each device with when it was added and last used. Connect details on a device shows its pending code again, or Regenerate replaces it. The hub keeps a pending code sealed with the vault key (`BAND_VAULT_KEY` or `<BAND_HOME>/vault.key`) until it is used or expires. Revoke signs a device out at once and removes it from the list, after a confirmation. Revoking the token you are signed in with signs you out. Links of the older form `<hub URL>/?token=<token>` still sign in.
 
 If you lost the admin token and cannot reach Settings, set `BAND_ADMIN_TOKEN` in `.env` to a new value and run `docker compose up -d`. The hub replaces the stored token with that value. Then sign in with it and add the device.
 

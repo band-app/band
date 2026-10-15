@@ -10,7 +10,7 @@ import {
 } from "react";
 import { checkHub, type HubCheck } from "./hub-api";
 import type { HubList, SavedHub } from "./hub-store";
-import type { Pairing } from "./pairing";
+import { exchangePairingCode, type PairingInput } from "./pairing";
 import { hubStore } from "./secure-kv";
 
 export type Connection =
@@ -26,7 +26,7 @@ interface HubsValue {
   active: SavedHub | null;
   connection: Connection;
   /** Checks the URL and token with the hub, and saves the hub only when both work. */
-  pair: (pairing: Pairing) => Promise<HubCheck>;
+  pair: (pairing: PairingInput) => Promise<HubCheck>;
   /** Checks the active hub again. */
   recheck: () => Promise<Connection>;
   setActive: (id: string) => Promise<void>;
@@ -96,14 +96,21 @@ export function HubsProvider({ children }: { children: ReactNode }) {
   }, [active]);
 
   const pair = useCallback(
-    async (pairing: Pairing): Promise<HubCheck> => {
+    async (input: PairingInput): Promise<HubCheck> => {
+      // A code is spent by the exchange, so nothing is saved before it succeeds.
+      const exchanged = await exchangePairingCode(input);
+      if (!exchanged.ok) return { ok: false, reason: "error", error: exchanged.error };
+      const pairing = exchanged.value;
       const check = await checkHub(pairing.url, pairing.token);
-      if (!check.ok) return check;
+      // The code is spent once the exchange answers, so a failure from here on needs a new link.
+      const spent =
+        "code" in input ? " The link was used. Create a new one in Settings > Devices." : "";
+      if (!check.ok) return { ...check, error: `${check.error}${spent}` };
       try {
         await hubStore.save({ url: pairing.url, token: pairing.token, label: check.label });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, reason: "error", error: `Could not save the hub: ${message}` };
+        return { ok: false, reason: "error", error: `Could not save the hub: ${message}${spent}` };
       }
       checkSeq.current++;
       setConnection({ state: "connected" });

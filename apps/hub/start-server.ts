@@ -31,6 +31,12 @@ import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
+import {
+  handlePairExchange,
+  handlePairLink,
+  isPairLinkRequest,
+  PAIR_EXCHANGE_PATH,
+} from "./src/server/api/pairing/handler.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
@@ -904,6 +910,17 @@ async function main() {
     // the device-token check, because the bootstrap token is the credential.
     if (req.url?.split("?")[0] === WORKER_EXCHANGE_PATH) {
       await workerLinkService.handleExchange(req, res);
+      return;
+    }
+
+    // A pairing link and its exchange. Before the device-token check: the one-time
+    // pairing code is the credential.
+    if (req.url?.split("?")[0] === PAIR_EXCHANGE_PATH) {
+      await handlePairExchange(req, res);
+      return;
+    }
+    if (isPairLinkRequest(req)) {
+      handlePairLink(req, res);
       return;
     }
 
