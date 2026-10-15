@@ -243,17 +243,20 @@ export class Worker {
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
-    worker.disposers.push(registerDirectMethods(registrar, ctx));
-    // Every worker hands out its agents' session files: an ephemeral one when it sleeps, a static
-    // one for the hub's checkpoints, so a restored chat resumes its session on another host.
-    registerLifecycleMethods(registrar, ctx);
     if (config.ownChats) {
       const chats = new ChatOwner(ctx, await ChatStore.open(join(config.stateDir, "chats.db")));
       chats.register(registrar);
       chats.start();
       worker.chats = chats;
-      worker.disposers.push(() => chats.close());
     }
+    // The desktop app on this machine reaches files, terminals and owned chats on loopback.
+    worker.disposers.push(registerDirectMethods(registrar, ctx, worker.chats));
+    // After the listener, so no open chat stream reads a closed store.
+    const chats = worker.chats;
+    if (chats) worker.disposers.push(() => chats.close());
+    // Every worker hands out its agents' session files: an ephemeral one when it sleeps, a static
+    // one for the hub's checkpoints, so a restored chat resumes its session on another host.
+    registerLifecycleMethods(registrar, ctx);
     if (options.gitCredentialHelper) {
       const broker = new GitCredentialBroker(ctx);
       const socketPath = await broker.start();

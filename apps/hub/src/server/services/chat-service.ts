@@ -371,7 +371,10 @@ export class ChatService {
     emit({ kind: "chat-created", worktreeId, chatId: session.id });
 
     log.info({ chatId: session.id, worktreeId, agent: session.agent }, "chat pane created");
-    return session;
+    // A new chat on a worker that owns its chats runs there from the start, so the desktop app
+    // on that machine can send its first message directly (docs/chat-ownership.md).
+    chatOwnershipService.ownerFor(session.id);
+    return this.chatSessions.get(session.id) ?? session;
   }
 
   /** Get a chat session by ID. */
