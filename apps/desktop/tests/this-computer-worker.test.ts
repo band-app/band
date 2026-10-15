@@ -239,7 +239,7 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
       "/Users/me/code",
       "--root",
       "/Users/me/more",
-      // This Mac's worker runs its worktrees' chats (docs/chat-ownership.md).
+      // This Mac's worker runs its worktrees' chats.
       "--own-chats",
     ]);
     assert.equal(call.token, "bwb_old");

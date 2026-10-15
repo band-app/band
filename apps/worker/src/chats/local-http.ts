@@ -1,5 +1,5 @@
 /**
- * Chat routes on the worker's local listener (docs/chat-ownership.md), for
+ * Chat routes on the worker's local listener, for
  * the desktop app on this machine. They speak the hub's wire format, so the
  * UI points the same code at `127.0.0.1:<port>` instead of the hub:
  *
@@ -21,7 +21,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import { openSseStream, type SseWriter } from "@band-app/chat-runtime/sse-writer";
-import { type ChatEvent, HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
+import {
+  type ChatEvent,
+  HISTORY_PAGE_SIZE,
+  SESSION_ID_PATTERN,
+} from "@band-app/shared/chat-events";
 import type { ChatMessage, ChatOwner } from "./owner.ts";
 
 /** Largest request body: a message with its attached files. */
@@ -84,7 +88,12 @@ export async function handleChatRoute(
     res.end(JSON.stringify(body));
   };
   if (!match) return json(404, { error: "Not found" });
-  const chatId = decodeURIComponent(match[1]);
+  let chatId: string;
+  try {
+    chatId = decodeURIComponent(match[1]);
+  } catch {
+    return json(400, { error: "Bad chat id" });
+  }
   const route = match[2];
   const { owner } = ctx;
   if (!owner.isOwned(chatId)) return json(404, { error: "This worker does not run the chat" });
@@ -107,6 +116,9 @@ export async function handleChatRoute(
       case "messages": {
         const text = typeof body.text === "string" ? body.text : "";
         if (!text.trim()) return json(400, { error: "text is required" });
+        if (body.sessionId !== undefined && !SESSION_ID_PATTERN.test(String(body.sessionId))) {
+          return json(400, { error: "invalid session id" });
+        }
         const message: ChatMessage = {
           text,
           files: await saveUploads(ctx, body.files),

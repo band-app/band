@@ -1,6 +1,6 @@
 /**
  * Prompt turns of an owned chat on the worker: the worker's counterpart of
- * the hub's `task-service.ts` (docs/architecture/chat-ownership.md).
+ * the hub's `task-service.ts`.
  *
  * One turn per chat at a time. A message that arrives while a turn runs, or
  * while earlier messages wait, joins the queue (kept in the worker's store,
@@ -145,7 +145,9 @@ export class Turns {
 
   private start(chatId: string, message: StoredQueuedMessage): void {
     const turn: RunningTurn = {
-      id: `task-${randomUUID()}`,
+      // The message's id: for a message the hub forwarded, the task id the hub handed its caller,
+      // so cancelling by that id reaches this turn.
+      id: message.id,
       prompt: message.text,
       startedAt: Date.now(),
       cancelRequested: false,

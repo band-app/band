@@ -69,8 +69,8 @@ export interface HostCapabilities {
   /** A display (`DISPLAY`) and a VNC server (`x11vnc`) are available, so `desktop.open` works. */
   desktop: boolean;
   /**
-   * A worker that runs the chats of its worktrees itself and replicates them to the hub
-   * (docs/architecture/chat-ownership.md). Absent from the hub's own host and older workers.
+   * A worker that runs the chats of its worktrees itself and replicates them to the hub.
+   * Absent from the hub's own host and older workers.
    */
   chatOwnership?: boolean;
 }

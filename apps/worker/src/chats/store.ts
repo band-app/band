@@ -1,5 +1,5 @@
 /**
- * The owning worker's chat store (docs/architecture/chat-ownership.md):
+ * The owning worker's chat store:
  * `<state dir>/chats.db`, one SQLite file with
  *
  * - `chat_events`: the same table, ids and rows as the hub's log;
@@ -14,7 +14,7 @@
  * without it still starts.
  */
 
-import { mkdirSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { ChatEventQueries, type ChatLogDb } from "@band-app/chat-runtime/log";
@@ -103,6 +103,11 @@ export class ChatStore {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     const { DatabaseSync } = await import("node:sqlite");
     const { drizzle } = await import("drizzle-orm/node-sqlite");
+    // The cached launch holds the agent's relay and MCP tokens: owner-only from the first byte.
+    closeSync(openSync(file, "a", 0o600));
+    for (const path of [file, `${file}-wal`, `${file}-shm`]) {
+      if (existsSync(path)) chmodSync(path, 0o600);
+    }
     const db = new DatabaseSync(file);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
@@ -221,22 +226,15 @@ export class ChatStore {
   // ---- owned chats ---------------------------------------------------------
 
   ownedChats(): OwnedChatRecord[] {
-    const rows = this.db.prepare("SELECT * FROM owned_chats").all() as {
-      info: string;
-      launch: string | null;
-      seeded_through: number;
-      seeded: number;
-    }[];
-    return rows.map((r) => ({
-      info: JSON.parse(r.info) as OwnedChatInfo,
-      launch: r.launch ? (JSON.parse(r.launch) as ChatLaunchReply) : null,
-      seededThrough: r.seeded_through,
-      seeded: r.seeded === 1,
-    }));
+    const rows = this.db.prepare("SELECT * FROM owned_chats").all() as unknown as OwnedChatRow[];
+    return rows.map(toRecord);
   }
 
   ownedChat(chatId: string): OwnedChatRecord | undefined {
-    return this.ownedChats().find((c) => c.info.chatId === chatId);
+    const row = this.db.prepare("SELECT * FROM owned_chats WHERE chat_id = ?").get(chatId) as
+      | OwnedChatRow
+      | undefined;
+    return row ? toRecord(row) : undefined;
   }
 
   saveChat(info: OwnedChatInfo): void {
@@ -335,4 +333,20 @@ export class ChatStore {
       .prepare("INSERT OR IGNORE INTO forwards (forward_id, reply, at) VALUES (?, ?, ?)")
       .run(forwardId, JSON.stringify(reply), Date.now());
   }
+}
+
+interface OwnedChatRow {
+  info: string;
+  launch: string | null;
+  seeded_through: number;
+  seeded: number;
+}
+
+function toRecord(r: OwnedChatRow): OwnedChatRecord {
+  return {
+    info: JSON.parse(r.info) as OwnedChatInfo,
+    launch: r.launch ? (JSON.parse(r.launch) as ChatLaunchReply) : null,
+    seededThrough: r.seeded_through,
+    seeded: r.seeded === 1,
+  };
 }

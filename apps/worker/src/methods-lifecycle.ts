@@ -71,7 +71,7 @@ async function filesOf(sessionId: string): Promise<SessionFile[]> {
 
 /**
  * The agent session files of a chat, for the hub's sleep and wake handshake
- * (plan step 3.5) and its checkpoints (docs/checkpoints.md). The hub reads a
+ * (plan step 3.5) and its checkpoints. The hub reads a
  * session's files before the worker exits, or with each checkpoint, and writes
  * them back on another worker, which is how a chat resumes there.
  */

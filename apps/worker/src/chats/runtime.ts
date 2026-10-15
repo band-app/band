@@ -1,5 +1,5 @@
 /**
- * One owned chat's agent session on the worker (docs/architecture/chat-ownership.md).
+ * One owned chat's agent session on the worker.
  *
  * The worker's counterpart of the hub's `agent-session-service.ts`: it starts
  * the chat's agent, attaches its session (`session/new`, `resume` or `load`),
@@ -310,7 +310,7 @@ export class ChatRuntime {
     if (this.process && this.agentId !== agentId) this.stopProcess();
     if (this.starting) return this.starting;
     const generation = ++this.generation;
-    this.starting = (async () => {
+    const starting = (async () => {
       const launch = await this.env.launch(this.chatId, agentId);
       this.env.assertMayRun(launch.cwd);
       const resolved = await this.env.host.acp.resolveLaunch({
@@ -327,17 +327,23 @@ export class ChatRuntime {
         launch.agent.label,
         this.handlers(generation),
       );
+      // Stopped while it started (the chat was released or switched agent): it never runs.
+      if (this.generation !== generation) {
+        proc.close();
+        throw new Error("The agent was stopped while it started");
+      }
       this.launch = launch;
       this.agentId = agentId;
       return proc;
     })();
+    this.starting = starting;
     try {
-      const proc = await this.starting;
+      const proc = await starting;
       this.process = proc;
       this.sessionId = null;
       return proc;
     } finally {
-      this.starting = null;
+      if (this.starting === starting) this.starting = null;
     }
   }
 
@@ -679,6 +685,7 @@ export class ChatRuntime {
   /** Stops the agent. Used when the chat switches agent or the worker gives the chat up. */
   stop(): void {
     this.generation++;
+    this.starting = null;
     this.stopProcess();
   }
 }

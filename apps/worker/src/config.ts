@@ -24,8 +24,8 @@ export interface WorkerConfig {
   ephemeral: boolean;
   idleExitMs: number;
   /**
-   * Run the chats of this worker's worktrees here and replicate them to the hub
-   * (docs/architecture/chat-ownership.md). The desktop app's worker turns it on.
+   * Run the chats of this worker's worktrees here and replicate them to the hub.
+   * The desktop app's worker turns it on.
    * An ephemeral worker never owns chats.
    */
   ownChats: boolean;

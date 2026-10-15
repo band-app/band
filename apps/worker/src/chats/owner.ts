@@ -1,5 +1,5 @@
 /**
- * The chats this worker owns (docs/architecture/chat-ownership.md).
+ * The chats this worker owns.
  *
  * - `chat.own` hands the worker a chat. The worker copies the hub's log for
  *   it (`chat.history`) and from then on runs its turns.
@@ -135,8 +135,42 @@ export class ChatOwner {
   /** Runs what was queued before the worker last stopped, for chats whose log is copied in. */
   start(): void {
     for (const record of this.store.ownedChats()) {
-      if (record.seeded) this.turns.drain(record.info.chatId);
+      // A chat still copying in may hold a hub turn whose end is on a page not copied yet.
+      if (!record.seeded) continue;
+      this.closeInterruptedTurn(record.info.chatId);
+      this.turns.drain(record.info.chatId);
     }
+  }
+
+  /**
+   * Logs the end of a turn the worker was running when it stopped. Without it the hub, which
+   * learns a turn's end only from the log, would show the chat working until the next turn.
+   */
+  private closeInterruptedTurn(chatId: string): void {
+    const sessionId = this.activeSessionId(chatId);
+    if (!sessionId) return;
+    const revision = this.store.events.currentRevision(sessionId);
+    if (revision === 0) return;
+    const started = this.store.events.latest(sessionId, revision, { kind: "turn-started" });
+    if (!started || started.event.type !== "turn-started") return;
+    const ended = this.store.events.latest(sessionId, revision, { kind: "turn-ended" });
+    if (ended && ended.id > started.id) return;
+    const id = this.store.takeId();
+    if (id === null) return;
+    this.store.events.append({
+      id,
+      chatId,
+      sessionId,
+      revision,
+      event: {
+        type: "turn-ended",
+        taskId: started.event.taskId,
+        error: "The worker stopped during the turn",
+        durationMs: Date.now() - started.createdAt,
+      },
+      createdAt: Date.now(),
+    });
+    this.ctx.log.info({ chatId, taskId: started.event.taskId }, "closed a turn the worker stopped");
   }
 
   /** The link is up: lease ids, finish copying logs, resend what the hub lacks, report each chat. */
@@ -289,6 +323,9 @@ export class ChatOwner {
     this.replicating = true;
     void this.replicate().finally(() => {
       this.replicating = false;
+      // Rows logged after the last pass looked, while it leased ids or settled, go out now.
+      // After a failure the retry timer sends them.
+      if (this.replicateAgain && !this.retryTimer) this.kickReplication();
     });
   }
 

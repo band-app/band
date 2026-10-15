@@ -1,5 +1,5 @@
 /**
- * Chat ownership on a worker (docs/architecture/chat-ownership.md).
+ * Chat ownership on a worker.
  *
  * A worker whose hello lists `chatOwnership` runs the ACP client and the
  * event log for the chats the hub hands it with `chat.own`. It replicates

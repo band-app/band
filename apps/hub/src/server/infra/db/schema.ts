@@ -397,10 +397,10 @@ export const tasks = sqliteTable("tasks", {
 });
 
 // Chat event log (issue #648). Defined in `@band-app/chat-runtime`, because a
-// worker that owns its chats keeps the same table (docs/architecture/chat-ownership.md).
+// worker that owns its chats keeps the same table.
 export { chatEvents } from "@band-app/chat-runtime/log-schema";
 
-// What the hub forwards to a worker that owns a chat (docs/architecture/chat-ownership.md):
+// What the hub forwards to a worker that owns a chat:
 // messages, stops, answers, queue edits and releases, oldest first. A row stays until the
 // worker has answered it, so a message for an offline worker runs once it reconnects. The
 // worker remembers each `id`, so a resend after a lost answer runs nothing twice.

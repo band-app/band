@@ -1,5 +1,5 @@
 /**
- * Chats on the direct path (docs/chat-ownership.md). In the desktop app, a
+ * Chats on the direct path. In the desktop app, a
  * chat that this computer's worker owns is read and sent on that worker's
  * direct listener (`127.0.0.1`), with the worktree's direct token
  * (`direct-worker.ts`), so the hub is not on the way. The worker speaks the

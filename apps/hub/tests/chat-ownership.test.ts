@@ -1,10 +1,10 @@
-// Integration tests for chats a worker owns (docs/architecture/chat-ownership.md): a real hub
+// Integration tests for chats a worker owns: a real hub
 // and real `band-worker` processes (helpers/checkpoint-world.ts), one started with
 // `--own-chats` and one without. The coding agent is the scripted ACP stub on the workers. The
 // hub's and the worker's event logs are read from their SQLite files, the rest through the hub's
 // HTTP and tRPC API.
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ChatEvent } from "@band-app/shared/chat-events";
@@ -66,6 +66,8 @@ const SCENARIO = {
         },
       ],
     },
+    { match: "^boom", steps: [{ fail: "boom" }] },
+    { match: "^hang", steps: [{ waitForCancel: true }] },
     {
       match: "^usage",
       steps: [
@@ -91,6 +93,35 @@ function workerPrompts(worker: Worker): string[] {
 async function worktreeStatus(worktreeId: string): Promise<string | undefined> {
   const data = await w.q<{ agent?: { status: string } } | null>("statuses.get", { worktreeId });
   return data?.agent?.status;
+}
+
+/** Waits until the chat has no turn running and nothing queued, on the hub's view. */
+async function waitQuiet(worktreeId: string, chatId: string): Promise<void> {
+  await waitFor(
+    async () => {
+      const queue = await w.q<{ messages: unknown[] }>("queue.get", { worktreeId, chatId });
+      const running = await w.q<{ task: unknown }>("tasks.get", { worktreeId, chatId });
+      return queue.messages.length === 0 && !running.task ? true : undefined;
+    },
+    { label: "the chat to go quiet", timeoutMs: 30_000 },
+  );
+}
+
+/**
+ * Sends `text` through the hub and collects the chat's stream until that message's turn ends.
+ * Keyed on the prompt text, so turns that ran before (through any path) don't end it early.
+ */
+async function turnViaHub(worktreeId: string, chatId: string, text: string): Promise<ChatEvent[]> {
+  let sawPrompt = false;
+  const stream = await openStream(w.server.url, chatId, {
+    until: (e: ChatEvent) => {
+      if (e.type === "prompt" && e.text === text) sawPrompt = true;
+      return sawPrompt && turnEnded(e);
+    },
+    timeoutMs: 60_000,
+  });
+  await sendViaHub(worktreeId, chatId, text);
+  return stream.events;
 }
 
 async function sendViaHub(worktreeId: string, chatId: string, text: string) {
@@ -131,6 +162,8 @@ describe("a chat on a worker that owns its chats (S2)", () => {
     expect(chat?.activeSessionId).toBeTruthy();
     // The worker started the agent itself: its own log has the turn.
     expect(workerLog(owner, chatId).some((r) => r.kind === "turn-ended")).toBe(true);
+    // The store keeps the agent's relay and MCP tokens, so only the worker's user reads it.
+    expect(statSync(join(owner.state, "chats.db")).mode & 0o777).toBe(0o600);
   }, 90_000);
 
   it("leaves the hub's log equal to the worker's, same ids and order", async () => {
@@ -239,14 +272,7 @@ describe("requests from the hub side (S4)", () => {
 
   it("delivers a message sent while the worker is offline once, after it reconnects", async () => {
     // Let the wake-up's turn finish first, so the count below is only this message.
-    await waitFor(
-      async () => {
-        const queue = await w.q<{ messages: unknown[] }>("queue.get", { worktreeId: wt, chatId });
-        const running = await w.q<{ task: unknown }>("tasks.get", { worktreeId: wt, chatId });
-        return queue.messages.length === 0 && !running.task ? true : undefined;
-      },
-      { label: "the chat to go quiet", timeoutMs: 30_000 },
-    );
+    await waitQuiet(wt, chatId);
     await w.killWorker(owner);
     const sent = await sendViaHub(wt, chatId, "sent while offline");
     expect(sent).toMatchObject({ ok: true, queued: true });
@@ -261,8 +287,13 @@ describe("requests from the hub side (S4)", () => {
       label: "the offline message on the worker",
       timeoutMs: 30_000,
     });
-    // Give a duplicate time to show up, then count.
-    await new Promise((r) => setTimeout(r, 2000));
+    // The outbox delivers in order, so once a later message ran, a duplicate would have too.
+    await waitQuiet(wt, chatId);
+    await sendViaHub(wt, chatId, "sent after the reconnect");
+    await waitFor(
+      () => (workerPrompts(owner).includes("sent after the reconnect") ? true : undefined),
+      { label: "the later message on the worker", timeoutMs: 30_000 },
+    );
     expect(workerPrompts(owner).filter((p) => p === "sent while offline")).toHaveLength(1);
     await waitFor(
       () => {
@@ -341,6 +372,72 @@ describe("hub state follows the owner's events (S5)", () => {
       timeoutMs: 20_000,
     });
   }, 120_000);
+
+  it("shows failed after a turn the agent fails", async () => {
+    await w.m("statuses.clearNeedsAttention", { worktreeId: wt });
+    const events = await turnViaHub(wt, chatId, "boom now");
+    expect(events.filter(turnEnded).at(-1)).toMatchObject({
+      error: expect.stringContaining("boom"),
+    });
+    await waitFor(async () => ((await worktreeStatus(wt)) === "failed" ? true : undefined), {
+      label: "status failed",
+      timeoutMs: 20_000,
+    });
+    const tasks = await w.q<{ tasks: Array<{ prompt: string; status: string }> }>("tasks.list", {
+      worktreeId: wt,
+    });
+    expect(tasks.tasks.find((t) => t.prompt === "boom now")?.status).toBe("failed");
+  }, 90_000);
+
+  it("stops the owner's turn when the hub cancels the task id it handed out", async () => {
+    await waitQuiet(wt, chatId);
+    const submitted = await w.m<{ queued: boolean; id: string | null }>("tasks.submit", {
+      worktreeId: wt,
+      chatId,
+      prompt: "hang until cancelled",
+    });
+    expect(submitted).toMatchObject({ queued: false });
+    await waitFor(
+      async () => {
+        const { task } = await w.q<{ task: { id: string } | null }>("tasks.get", {
+          worktreeId: wt,
+          chatId,
+        });
+        return task?.id === submitted.id ? true : undefined;
+      },
+      { label: "the owner's turn under the handed-out id", timeoutMs: 20_000 },
+    );
+    await w.m("tasks.cancel", { taskId: submitted.id });
+    const ended = await waitFor(
+      () =>
+        hubLog(chatId)
+          .filter((r) => r.kind === "turn-ended")
+          .map((r) => JSON.parse(r.payload) as { taskId: string; stopReason?: string })
+          .find((e) => e.taskId === submitted.id),
+      { label: "the cancelled turn in the hub's log", timeoutMs: 20_000 },
+    );
+    expect(ended.stopReason).toBe("cancelled");
+  }, 90_000);
+
+  it("ends a turn the worker was running when it stopped", async () => {
+    await waitQuiet(wt, chatId);
+    await sendViaHub(wt, chatId, "hang through a restart");
+    await waitFor(async () => ((await worktreeStatus(wt)) === "working" ? true : undefined), {
+      label: "status working",
+      timeoutMs: 20_000,
+    });
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    owner = await w.restartWorker(owner);
+    await waitFor(async () => ((await worktreeStatus(wt)) === "failed" ? true : undefined), {
+      label: "status failed after the restart",
+      timeoutMs: 30_000,
+    });
+    await waitQuiet(wt, chatId);
+    const tasks = await w.q<{ tasks: Array<{ prompt: string; status: string }> }>("tasks.list", {
+      worktreeId: wt,
+    });
+    expect(tasks.tasks.find((t) => t.prompt === "hang through a restart")?.status).toBe("failed");
+  }, 120_000);
 });
 
 describe("restore while the owner is offline (S6)", () => {
@@ -354,6 +451,8 @@ describe("restore while the owner is offline (S6)", () => {
     );
     const sessionId = (await getChat(chatId))?.activeSessionId;
     await w.killWorker(owner);
+    const waiting = await sendViaHub(wt, chatId, "sent before the restore");
+    expect(waiting).toMatchObject({ ok: true, queued: true });
 
     const result = await w.m<{ worktreeId: string }>("checkpoints.restore", {
       worktreeId: wt,
@@ -363,8 +462,14 @@ describe("restore while the owner is offline (S6)", () => {
     const chat = await getChat(chatId);
     expect(chat?.ownerHostId).toBeUndefined();
     expect(chat?.activeSessionId).toBe(sessionId);
+    // The message that waited for the old owner follows the chat to the new host.
+    await waitFor(
+      () => (workerPrompts(plain).includes("sent before the restore") ? true : undefined),
+      { label: "the waiting message on the new host", timeoutMs: 30_000 },
+    );
+    await waitQuiet(restored, chatId);
 
-    const events = await w.turn(restored, chatId, "what was it?");
+    const events = await turnViaHub(restored, chatId, "what was it?");
     expect(agentText(events)).toContain("what was it?");
     // Resumed, not replaced: the checkpoint carried the agent's session files.
     expect(events.some((e) => e.type === "notice")).toBe(false);
@@ -377,7 +482,9 @@ describe("restore while the owner is offline (S6)", () => {
     const prompts = (await replay.events)
       .filter((e) => e.type === "prompt")
       .map((e) => (e.type === "prompt" ? e.text : ""));
-    expect(prompts).toEqual(expect.arrayContaining(["remember: mango", "what was it?"]));
+    expect(prompts).toEqual(
+      expect.arrayContaining(["remember: mango", "sent before the restore", "what was it?"]),
+    );
     const resumed = [
       ...w.stubRequests(plain, "session/resume"),
       ...w.stubRequests(plain, "session/load"),
@@ -385,5 +492,39 @@ describe("restore while the owner is offline (S6)", () => {
     expect(resumed.length).toBeGreaterThan(0);
 
     owner = await w.restartWorker(owner);
+  }, 150_000);
+});
+
+describe("a worker that stops owning chats (S9)", () => {
+  it("hands its chats back to the hub, with the messages that waited for it", async () => {
+    const wt = await w.createWorktree(owner, "proj", "feat-take-back");
+    const chatId = "take-back-chat";
+    await w.turn(wt, chatId, "owned first");
+    expect((await getChat(chatId))?.ownerHostId).toBe(owner.hostId);
+    await w.killWorker(owner);
+    expect(await sendViaHub(wt, chatId, "waited for the worker")).toMatchObject({ queued: true });
+
+    // The same machine comes back with a build that does not own chats.
+    owner = await w.restartWorker(owner, { ownChats: false });
+    await waitFor(async () => ((await getChat(chatId))?.ownerHostId ? undefined : true), {
+      label: "the hub to run the chat again",
+      timeoutMs: 20_000,
+    });
+    // The hub runs the waiting message itself, through the worker's ACP spawn.
+    await waitFor(
+      () =>
+        hubLog(chatId).some(
+          (r) =>
+            r.kind === "prompt" &&
+            (JSON.parse(r.payload) as { text: string }).text === "waited for the worker",
+        )
+          ? true
+          : undefined,
+      { label: "the waiting message, run by the hub", timeoutMs: 30_000 },
+    );
+    await waitQuiet(wt, chatId);
+    const events = await turnViaHub(wt, chatId, "hub-run again");
+    expect(agentText(events)).toContain("hub-run again");
+    expect((await getChat(chatId))?.ownerHostId).toBeUndefined();
   }, 150_000);
 });

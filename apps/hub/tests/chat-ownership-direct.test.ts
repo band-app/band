@@ -1,4 +1,4 @@
-// Integration tests for an owned chat on the worker's direct listener (docs/chat-ownership.md):
+// Integration tests for an owned chat on the worker's direct listener:
 // the desktop app's path, where the send and the event stream go to `127.0.0.1:<worker port>`
 // and the hub only gets the replicated copy. A real hub and a real `band-worker` started with
 // `--own-chats`, dialing the hub through a proxy the test can cut. The lease is two minutes, so a
@@ -140,6 +140,22 @@ describe("send and stream on the direct path (S1)", () => {
     });
     expect(wrongScope.status).toBe(403);
   }, 60_000);
+
+  it("refuses a session id that a CLI would read as a flag, and a chat id it cannot decode", async () => {
+    const before = workerLog().length;
+    const badSession = await fetch(`${direct()}/api/chats/${chatId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...bearer() },
+      body: JSON.stringify({ text: "never runs", sessionId: "--dangerous" }),
+    });
+    expect(badSession.status).toBe(400);
+    expect(await badSession.json()).toEqual({ error: "invalid session id" });
+    const badId = await fetch(`${direct()}/api/chats/%E0%A4%A/events`, { headers: bearer() });
+    expect(badId.status).toBe(400);
+    expect(await badId.json()).toEqual({ error: "Bad chat id" });
+    // Nothing ran: the worker logged no new row.
+    expect(workerLog().length).toBe(before);
+  });
 
   it("answers 404 for a chat the worker does not own, so the app uses the hub", async () => {
     const res = await fetch(`${direct()}/api/chats/not-owned-chat/events`, { headers: bearer() });

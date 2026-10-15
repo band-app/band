@@ -249,34 +249,6 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   await worktreePage.selectRightPanelTab("explorer");
   expect(directCalls().every((u) => portOf(u) === portOf(directSockets()[0] as string))).toBe(true);
 
-  // Chat ownership S1: this Mac's worker runs the chat, and the message and its event stream go
-  // to the worker's port. The hub only gets the worker's copy. A packaged run has no stub agent.
-  if (!isPackagedRun()) {
-    const chatId = "direct-e2e-chat";
-    await hubCall("chats.create", { worktreeId, id: chatId, name: "Chat" });
-    const chat = new ChatPanePage(desktop.window, "app://placeholder", "");
-    await expect(async () => {
-      await worktreePage.activateTabInNarrowWindow("chat");
-      await chat.chatTab(chatId).click();
-      await expect(chat.promptInput).toBeVisible({ timeout: 2_000 });
-    }).toPass({ timeout: 30_000 });
-    await chat.promptInput.fill("hello on this Mac");
-    await chat.submit();
-    await expect(chat.assistantMessage("hello on this Mac")).toBeVisible({ timeout: 60_000 });
-    const chatCalls = (route: string) =>
-      requests.filter((u) => new URL(u).pathname === `/api/chats/${chatId}/${route}`);
-    for (const route of ["messages", "events"]) {
-      expect(
-        chatCalls(route).some((u) => /^http:\/\/127\.0\.0\.1:\d+\//.test(u)),
-        route,
-      ).toBe(true);
-      expect(
-        chatCalls(route).filter((u) => portOf(u) === hubPort),
-        route,
-      ).toEqual([]);
-    }
-  }
-
   // Back to the terminal for the restart. The file tab is closed first: the shared tab list may
   // make an open file tab the active one again while the worker is away.
   await worktreePage.closeFileTab("README.md");
@@ -311,4 +283,34 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
       .poll(() => directSockets().length, { timeout: 5_000 })
       .toBeGreaterThan(directBefore);
   }).toPass({ timeout: 60_000, intervals: [5_000] });
+
+  // Chat ownership S1: this Mac's worker runs the chat, and the message and its event stream go
+  // to the worker's port. The hub only gets the worker's copy. A packaged run has no stub agent.
+  // Last, because the chat tab stays the shown tab, and once the direct path is back from the
+  // restart above.
+  if (!isPackagedRun()) {
+    const chatId = "direct-e2e-chat";
+    await hubCall("chats.create", { worktreeId, id: chatId, name: "Chat" });
+    const chat = new ChatPanePage(desktop.window, "app://placeholder", "");
+    await expect(async () => {
+      await worktreePage.activateTabInNarrowWindow("chat");
+      await chat.chatTab(chatId).click();
+      await expect(chat.promptInput).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    await chat.promptInput.fill("hello on this Mac");
+    await chat.submit();
+    await expect(chat.assistantMessage("hello on this Mac")).toBeVisible({ timeout: 60_000 });
+    const chatCalls = (route: string) =>
+      requests.filter((u) => new URL(u).pathname === `/api/chats/${chatId}/${route}`);
+    for (const route of ["messages", "events"]) {
+      expect(
+        chatCalls(route).some((u) => /^http:\/\/127\.0\.0\.1:\d+\//.test(u)),
+        route,
+      ).toBe(true);
+      expect(
+        chatCalls(route).filter((u) => portOf(u) === hubPort),
+        route,
+      ).toEqual([]);
+    }
+  }
 });

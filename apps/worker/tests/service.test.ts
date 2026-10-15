@@ -108,7 +108,12 @@ describe("install-service", () => {
       platform() === "linux"
         ? join(home, ".band", "worker-service", "worker.env")
         : join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
-    assert.match(readFileSync(secretFile, "utf8"), /BAND_WORKER_OWN_CHATS/);
+    assert.match(
+      readFileSync(secretFile, "utf8"),
+      platform() === "linux"
+        ? /BAND_WORKER_OWN_CHATS=1/
+        : /<key>BAND_WORKER_OWN_CHATS<\/key>\s*<string>1<\/string>/,
+    );
   });
 
   it("installs, reports status and uninstalls", { skip: !supported }, () => {

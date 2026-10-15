@@ -1,9 +1,9 @@
 /**
  * The outbox of requests for chats a worker owns, and the rows a worker sent
- * for a chat it no longer owns (docs/architecture/chat-ownership.md).
+ * for a chat it no longer owns.
  */
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "../connection";
 import { chatEventHolds, chatForwards } from "../schema";
 
@@ -35,24 +35,28 @@ export class ChatForwardQueries {
       .run();
   }
 
-  /** Requests for a host it has not answered yet, oldest first. */
-  pending(hostId: string): ChatForwardRow[] {
-    return getDb()
+  /**
+   * The oldest request a host has not answered yet. Ordered by rowid, because two rows of one
+   * millisecond have random ids.
+   */
+  nextPending(hostId: string): ChatForwardRow | undefined {
+    const row = getDb()
       .select()
       .from(chatForwards)
       .where(and(eq(chatForwards.hostId, hostId), isNull(chatForwards.deliveredAt)))
-      .orderBy(asc(chatForwards.createdAt), asc(chatForwards.id))
-      .all()
-      .map(toRow);
+      .orderBy(sql`rowid`)
+      .limit(1)
+      .get();
+    return row ? toRow(row) : undefined;
   }
 
-  /** Requests of a chat no host has answered yet, oldest first. */
+  /** Requests of a chat no host has answered yet, in the order they were added. */
   pendingForChat(chatId: string): ChatForwardRow[] {
     return getDb()
       .select()
       .from(chatForwards)
       .where(and(eq(chatForwards.chatId, chatId), isNull(chatForwards.deliveredAt)))
-      .orderBy(asc(chatForwards.createdAt), asc(chatForwards.id))
+      .orderBy(sql`rowid`)
       .all()
       .map(toRow);
   }
@@ -66,15 +70,10 @@ export class ChatForwardQueries {
       .run();
   }
 
-  delivered(id: string, reply: unknown, at: number): void {
-    getDb()
-      .update(chatForwards)
-      .set({ deliveredAt: at, reply: JSON.stringify(reply ?? null) })
-      .where(eq(chatForwards.id, id))
-      .run();
-  }
-
-  /** Drops a request nobody will run (its chat was removed, or it went elsewhere). */
+  /**
+   * Drops a request: the worker answered it (its own forward ids keep a resend from running
+   * twice), or nobody will run it (its chat was removed, or it went elsewhere).
+   */
   remove(id: string): void {
     getDb().delete(chatForwards).where(eq(chatForwards.id, id)).run();
   }
@@ -86,6 +85,11 @@ export class ChatForwardQueries {
       .values({ hostId, chatId, id, row: JSON.stringify(row), receivedAt: at })
       .onConflictDoNothing()
       .run();
+  }
+
+  /** Drops the rows held for a removed chat. */
+  dropHolds(chatId: string): void {
+    getDb().delete(chatEventHolds).where(eq(chatEventHolds.chatId, chatId)).run();
   }
 
   /** How many rows are held for a chat. */

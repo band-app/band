@@ -59,7 +59,7 @@ export interface ChatRow {
   labels: Record<string, string>;
   /**
    * The worker that runs this chat and replicates it to the hub, or
-   * undefined when the hub runs it (docs/architecture/chat-ownership.md).
+   * undefined when the hub runs it.
    */
   ownerHostId: string | undefined;
 }

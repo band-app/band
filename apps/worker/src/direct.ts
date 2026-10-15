@@ -93,7 +93,7 @@ export class DirectListener {
   constructor(
     private readonly ctx: WorkerContext,
     registrar: Registrar,
-    /** The chats this worker owns, served on the same token (docs/chat-ownership.md). */
+    /** The chats this worker owns, served on the same token. */
     private readonly chats: ChatOwner | null = null,
   ) {
     this.host = checkedHost(ctx, registrar);
@@ -235,6 +235,11 @@ export class DirectListener {
           uploadsDir: hostDirs(this.ctx.policy.rootPaths)?.uploads,
           headers: cors,
         });
+      } catch (err) {
+        // Never let one request reject out of the server's handler and take the worker down.
+        this.ctx.log.warn({ err: err instanceof Error ? err.message : String(err) }, "chat route");
+        if (!res.headersSent) fail(500, "INTERNAL", "Internal error");
+        else res.destroy();
       } finally {
         release();
       }

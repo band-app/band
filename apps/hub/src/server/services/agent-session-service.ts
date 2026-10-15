@@ -1064,7 +1064,7 @@ export class AgentSessionService {
     };
   }
 
-  // ---- chats a worker owns (docs/architecture/chat-ownership.md) ---------
+  // ---- chats a worker owns ---------
 
   /**
    * What a worker that owns the chat needs to start its agent: the agent
@@ -1371,6 +1371,12 @@ export class AgentSessionService {
   /** True while the chat's agent runs a turn. */
   isInTurn(chatId: string): boolean {
     return runtimes.get(chatId)?.inTurn === true;
+  }
+
+  /** True while the hub starts the chat's agent or attaches its session. */
+  isStarting(chatId: string): boolean {
+    const rt = runtimes.get(chatId);
+    return Boolean(rt?.starting || rt?.attaching);
   }
 
   /**

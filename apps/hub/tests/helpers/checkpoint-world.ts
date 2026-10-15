@@ -86,8 +86,11 @@ export interface World {
   mFail(procedure: string, input: unknown): Promise<{ status: number; body: string }>;
   tmp(prefix: string): string;
   addWorker(name: string, repos: string[], opts?: AddWorkerOptions): Promise<Worker>;
-  /** Starts the worker process again with the state it saved, as a restart of the same machine. */
-  restartWorker(w: Worker): Promise<Worker>;
+  /**
+   * Starts the worker process again with the state it saved, as a restart of the same machine.
+   * `opts` replaces options it was started with, such as a build without `--own-chats`.
+   */
+  restartWorker(w: Worker, opts?: Partial<AddWorkerOptions>): Promise<Worker>;
   /**
    * Stops the worker and waits until the hub sees it offline. By default it also waits out the
    * worker's lease (`LEASE_MS`), after which the hub lets its worktrees continue elsewhere. Pass
@@ -110,7 +113,7 @@ export interface World {
 export interface AddWorkerOptions {
   /** Leave the scripted ACP agent out of the worker's environment, so it resolves agents as a real machine does. */
   noStubAgent?: boolean;
-  /** Start the worker with `--own-chats`, so it runs its worktrees' chats (docs/architecture/chat-ownership.md). */
+  /** Start the worker with `--own-chats`, so it runs its worktrees' chats. */
   ownChats?: boolean;
   /** The hub URL the worker dials instead of the hub's own, such as a proxy a test can cut. */
   hubUrl?: string;
@@ -299,8 +302,8 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
       });
       return w;
     },
-    async restartWorker(w) {
-      const next = spawnWorker({ ...w }, w.options);
+    async restartWorker(w, opts = {}) {
+      const next = spawnWorker({ ...w }, { ...w.options, ...opts });
       workers.push(next);
       await waitFor(async () => ((await hostStatus(w.hostId)) === "online" ? true : undefined), {
         label: `${w.name} back online`,

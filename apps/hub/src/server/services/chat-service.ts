@@ -372,7 +372,7 @@ export class ChatService {
 
     log.info({ chatId: session.id, worktreeId, agent: session.agent }, "chat pane created");
     // A new chat on a worker that owns its chats runs there from the start, so the desktop app
-    // on that machine can send its first message directly (docs/chat-ownership.md).
+    // on that machine can send its first message directly.
     chatOwnershipService.ownerFor(session.id);
     return this.chatSessions.get(session.id) ?? session;
   }
@@ -470,8 +470,7 @@ export class ChatService {
   }
 
   /**
-   * Records which worker runs the chat, or `null` for the hub
-   * (docs/architecture/chat-ownership.md). Only `chat-ownership-service` calls it.
+   * Records which worker runs the chat, or `null` for the hub. Only `chat-ownership-service` calls it.
    */
   setOwner(chatId: string, hostId: string | null): ChatSession | undefined {
     this.ensureInitialized();
@@ -668,9 +667,10 @@ export class ChatService {
       const session = current.ownerHostId
         ? this.queries.update(chatId, current, { ownerHostId: null, updatedAt: Date.now() })
         : current;
-      if (current.ownerHostId) chatOwnershipService.release(chatId, current.ownerHostId, false);
       this.removeFromIndex(chatId);
       this.addToIndex({ ...session, worktreeId: newId });
+      // After the index has the new worktree and no owner, so waiting messages follow the chat.
+      if (current.ownerHostId) chatOwnershipService.release(chatId, current.ownerHostId, false);
     }
     return ids;
   }

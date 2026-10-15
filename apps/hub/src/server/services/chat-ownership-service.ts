@@ -1,5 +1,5 @@
 /**
- * Chats a worker owns (docs/architecture/chat-ownership.md).
+ * Chats a worker owns.
  *
  * A worker whose hello lists `chatOwnership` runs the chats of its worktrees.
  * The hub then:
@@ -80,6 +80,8 @@ const log = createLogger("chat-ownership");
 
 /** How long the hub waits for a worker to answer one forwarded request. */
 const FORWARD_TIMEOUT_MS = 60_000;
+/** How long the outbox waits before it tries a host again after a request timed out. */
+const RETRY_MS = 5_000;
 /** Rows per `chat.history` page the hub serves. */
 const HISTORY_MAX_ROWS = 1000;
 
@@ -96,8 +98,10 @@ export class ChatOwnershipService {
   /** Per host, the delivery of its outbox that runs now, and whether another pass is due. */
   private readonly delivering = new Map<string, Promise<void>>();
   private readonly deliverAgain = new Set<string>();
-  /** Callers waiting for a forwarded request's answer, by forward id. */
-  private readonly waiters = new Map<string, (reply: ChatForwardReply | undefined) => void>();
+  /** Per host, the retry that waits after a request timed out. */
+  private readonly retryTimers = new Map<string, NodeJS.Timeout>();
+  /** Outbox rows sent and not answered yet. A reroute leaves them to their answer. */
+  private readonly inFlight = new Set<string>();
   /** The prompt of each turn the hub has seen start, by task id, for the task record. */
   private readonly prompts = new Map<string, string>();
 
@@ -143,14 +147,75 @@ export class ChatOwnershipService {
   /** A worker said hello: hand it the chats it can own, then send what waited for it. */
   onConnected(session: ServerSession): void {
     const hostId = session.workerId;
-    if (this.canOwn(hostId)) {
+    // Decided on this hello, not on the session map, which a reconnect may have replaced.
+    const owns = session.hello.capabilities.includes(CAPABILITY_CHAT_OWNERSHIP);
+    if (owns && this.canOwn(hostId)) {
       for (const chat of chatService.all()) {
         if (!chat.ownerHostId && worktreeService.resolve(chat.worktreeId)?.host.id === hostId) {
           this.ownerFor(chat.id);
         }
       }
+    } else if (!owns && this.sessions.get(hostId) === session && session.attached) {
+      // A build that no longer owns chats (a downgrade, an install without --own-chats): the
+      // hub runs its chats again, or nothing would run them.
+      for (const chat of chatService.all()) {
+        if (chat.ownerHostId === hostId) this.takeBack(chat.id, hostId);
+      }
     }
     this.deliver(hostId);
+  }
+
+  /** The hub runs a chat its worker can no longer own. Messages waiting for the worker follow. */
+  private takeBack(chatId: string, hostId: string): void {
+    this.closeOpenTurn(chatId);
+    chatService.setOwner(chatId, null);
+    this.live.delete(chatId);
+    void agentSessionService.revokeOwnerLaunch(chatId);
+    log.info({ chatId, hostId }, "the worker no longer owns chats; the hub runs the chat again");
+    this.rerouteAll(chatId);
+  }
+
+  /**
+   * Ends a turn the replicated log started and never ended (the worker stopped mid-turn and came
+   * back unable to log the end): the hub logs the failed `turn-ended` itself, which settles the
+   * task, the statuses and open streams like a replicated one.
+   */
+  private closeOpenTurn(chatId: string): void {
+    const chat = chatService.get(chatId);
+    const sessionId = chat?.activeSessionId;
+    if (!chat || !sessionId) return;
+    const revision = this.events.currentRevision(sessionId);
+    if (revision === 0) return;
+    const started = this.events.latest(sessionId, revision, { kind: "turn-started" });
+    if (!started || started.event.type !== "turn-started") return;
+    const ended = this.events.latest(sessionId, revision, { kind: "turn-ended" });
+    if (ended && ended.id > started.id) return;
+    const now = Date.now();
+    const row: ChatEventRow = {
+      id: this.events.reserveIdBlock(1),
+      chatId,
+      sessionId,
+      revision,
+      event: {
+        type: "turn-ended",
+        taskId: started.event.taskId,
+        error: "The worker stopped during the turn",
+        durationMs: now - started.createdAt,
+      },
+      turnStart: false,
+      createdAt: now,
+    };
+    for (const inserted of this.events.insertRows([row])) this.ingest(inserted);
+  }
+
+  /** Sends every request still waiting for a chat's former owner to wherever the chat runs now. */
+  private rerouteAll(chatId: string): void {
+    for (const row of this.forwards.pendingForChat(chatId)) {
+      // The old owner may be running it right now; its answer decides (`deliverOne`).
+      if (this.inFlight.has(row.id)) continue;
+      if (row.method === METHOD_CHAT_FORWARD) this.reroute(row);
+      else this.forwards.remove(row.id);
+    }
   }
 
   // ---- who owns a chat -----------------------------------------------------
@@ -194,6 +259,8 @@ export class ChatOwnershipService {
     if (
       taskService.getTask(chatId)?.status === "running" ||
       agentSessionService.isActive(chatId) ||
+      // A process still starting would come up after the stop below, next to the worker's.
+      agentSessionService.isStarting(chatId) ||
       hasQueuedMessages(chatId)
     ) {
       return undefined;
@@ -213,10 +280,13 @@ export class ChatOwnershipService {
   release(chatId: string, hostId: string, deleteLog: boolean): void {
     this.live.delete(chatId);
     void agentSessionService.revokeOwnerLaunch(chatId);
-    for (const row of this.forwards.pendingForChat(chatId)) {
-      if (row.method === METHOD_CHAT_FORWARD && !deleteLog) continue;
-      this.forwards.remove(row.id);
-      this.waiters.get(row.id)?.(undefined);
+    if (deleteLog) {
+      for (const row of this.forwards.pendingForChat(chatId)) this.forwards.remove(row.id);
+      this.forwards.dropHolds(chatId);
+    } else {
+      // Messages that waited for the old owner (often offline after a restore) follow the chat
+      // now, instead of when that host comes back. The caller has already moved the chat.
+      this.rerouteAll(chatId);
     }
     this.enqueue(chatId, hostId, METHOD_CHAT_RELEASE, { chatId, deleteLog });
     log.info({ chatId, hostId, deleteLog }, "the chat left its worker");
@@ -240,17 +310,39 @@ export class ChatOwnershipService {
     const run = (async () => {
       do {
         this.deliverAgain.delete(hostId);
-        for (const row of this.forwards.pending(hostId)) {
+        // One row at a time, read afresh: a message removed or edited while an earlier one was
+        // in flight goes out as it is now, or not at all.
+        for (;;) {
+          const row = this.forwards.nextPending(hostId);
+          if (!row) break;
           const session = this.sessions.get(hostId);
           if (!session?.attached) return;
-          if (!(await this.deliverOne(session, row))) return;
+          if (!(await this.deliverOne(session, row))) {
+            // Timed out on a live link: try again soon rather than at the next connect.
+            if (!this.retryTimers.has(hostId)) {
+              const timer = setTimeout(() => {
+                this.retryTimers.delete(hostId);
+                this.deliver(hostId);
+              }, RETRY_MS);
+              timer.unref();
+              this.retryTimers.set(hostId, timer);
+            }
+            return;
+          }
         }
       } while (this.deliverAgain.has(hostId));
     })();
     this.delivering.set(hostId, run);
     void run
       .catch((err) => log.warn({ hostId, err }, "chat outbox delivery failed"))
-      .finally(() => this.delivering.delete(hostId));
+      .finally(() => {
+        this.delivering.delete(hostId);
+        // A request added after the last pass ended but before this ran is not left waiting.
+        // A pending retry sends it anyway.
+        if (this.deliverAgain.delete(hostId) && !this.retryTimers.has(hostId)) {
+          this.deliver(hostId);
+        }
+      });
   }
 
   /** Sends one request. False when the link failed, so the rest waits for the next connect. */
@@ -268,20 +360,37 @@ export class ChatOwnershipService {
       return true;
     }
     let reply: unknown;
+    this.inFlight.add(row.id);
     try {
       const enc = await session.request<JsonPayload>(row.method, params, {
         timeoutMs: FORWARD_TIMEOUT_MS,
       });
       reply = await readPayload(session, enc);
     } catch (err) {
-      if (!(err instanceof RpcError)) return false;
+      if (!(err instanceof RpcError)) {
+        log.warn({ chatId: row.chatId, method: row.method, err }, "chat outbox request failed");
+        return false;
+      }
       // The worker answered with an error: it will not run, so it is done.
       log.warn({ chatId: row.chatId, method: row.method, err: err.message }, "worker refused");
       reply = { ok: false, error: err.message };
+    } finally {
+      this.inFlight.delete(row.id);
     }
-    this.forwards.delivered(row.id, reply, Date.now());
-    this.waiters.get(row.id)?.(reply as ChatForwardReply);
-    this.waiters.delete(row.id);
+    const refused = (reply as ChatForwardReply | undefined)?.ok === false;
+    if (refused) {
+      log.info({ chatId: row.chatId, method: row.method, reply }, "the worker did not run it");
+    }
+    // The chat moved while this was on its way, and the old owner did not take it: it follows.
+    if (refused && row.method === METHOD_CHAT_FORWARD && this.ownerOf(row.chatId) !== row.hostId) {
+      this.reroute(row);
+      return true;
+    }
+    this.forwards.remove(row.id);
+    // The message left the hub's part of the queue.
+    if ((params as ChatForwardParams | undefined)?.action?.kind === "send") {
+      this.publishQueue(row.chatId);
+    }
     return true;
   }
 
@@ -290,24 +399,24 @@ export class ChatOwnershipService {
     this.forwards.remove(row.id);
     const params = row.params as ChatForwardParams;
     const action = params.action;
-    if (action.kind !== "send") {
-      this.waiters.get(row.id)?.(undefined);
-      return;
-    }
+    if (action.kind !== "send") return;
     const chat = chatService.get(row.chatId);
     if (!chat) return;
     const { kind: _kind, files, ...rest } = action;
-    taskService.submitOrQueueTask({
-      worktreeId: chat.worktreeId,
-      chatId: chat.id,
-      prompt: rest.text,
-      sessionId: rest.sessionId,
-      mode: rest.mode,
-      model: rest.model,
-      codingAgentId: rest.codingAgentId,
-      attachments: files ?? [],
-    });
-    this.waiters.get(row.id)?.({ ok: true, queued: true });
+    try {
+      taskService.submitOrQueueTask({
+        worktreeId: chat.worktreeId,
+        chatId: chat.id,
+        prompt: rest.text,
+        sessionId: rest.sessionId,
+        mode: rest.mode,
+        model: rest.model,
+        codingAgentId: rest.codingAgentId,
+        attachments: files ?? [],
+      });
+    } catch (err) {
+      log.warn({ chatId: chat.id, forwardId: row.id, err }, "could not reroute a waiting message");
+    }
   }
 
   /** Forwards an action to the chat's owner, now or once it reconnects. */
@@ -555,7 +664,9 @@ export class ChatOwnershipService {
     if (chat?.ownerHostId !== hostId) return;
     const before = this.live.get(state.chatId);
     this.live.set(state.chatId, { ...state, hostId });
-    this.publishQueue(state.chatId);
+    if (JSON.stringify(before?.queue ?? []) !== JSON.stringify(state.queue)) {
+      this.publishQueue(state.chatId);
+    }
     if ((before?.pending ?? []).join() !== state.pending.join()) {
       agentSessionService.notifyPending(state.chatId, chat.worktreeId);
     }

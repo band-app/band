@@ -159,8 +159,7 @@ export interface PromptEvent {
   text: string;
   files?: ChatEventFile[];
   /** Per-turn choices a sender made, logged by a worker that owns the chat so
-   *  the hub can keep the chat's saved agent, model and mode in step
-   *  (docs/architecture/chat-ownership.md). */
+   *  the hub can keep the chat's saved agent, model and mode in step. */
   codingAgentId?: string;
   model?: string;
   mode?: string;
@@ -327,3 +326,12 @@ export const CHAT_EVENT_TYPES: ReadonlyArray<ChatEventType> = [
   "session-state",
   "history-meta",
 ] as const;
+
+/**
+ * Shape of an agent session id a client may hand Band (a session to resume
+ * or switch to). The id ends up as a vendor CLI argument
+ * (`claude --resume <id>`, `codex resume <id>`), so it must not start with
+ * `-`, where the CLI would read it as a flag. Real ids are UUIDs or
+ * `ses_…`-style tokens.
+ */
+export const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;

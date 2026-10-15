@@ -159,7 +159,7 @@ test.describe("Desktop app: this computer as a worker", () => {
     // S6: the service runs the worker bundled in the app, through the app's own executable.
     const { program, env } = readPlist(home);
     expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
-    // This Mac's worker runs its worktrees' chats (docs/chat-ownership.md).
+    // This Mac's worker runs its worktrees' chats.
     expect(env.BAND_WORKER_OWN_CHATS).toBe("1");
     if (isPackagedRun()) {
       expect(program[0]).toContain(".app/Contents/MacOS/");

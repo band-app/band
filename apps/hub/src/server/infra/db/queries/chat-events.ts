@@ -1,7 +1,7 @@
 /**
  * The hub's chat event log: `@band-app/chat-runtime`'s queries on the hub's
  * database. A worker that owns its chats runs the same queries on its own
- * database (docs/architecture/chat-ownership.md).
+ * database.
  */
 
 import { type ChatLogDb, ChatEventQueries as LogQueries } from "@band-app/chat-runtime/log";
