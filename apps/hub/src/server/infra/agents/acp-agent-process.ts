@@ -179,13 +179,40 @@ function stderrTail() {
   };
 }
 
+/** A failed agent request, with what the hub knows about the process. */
+export class AgentProcessError extends Error {
+  constructor(
+    message: string,
+    readonly details: {
+      exitCode: number | null;
+      signal: string | null;
+      stderr: string;
+      timedOut: boolean;
+    },
+  ) {
+    super(message);
+    this.name = "AgentProcessError";
+  }
+}
+
+class RequestTimeoutError extends Error {}
+
+/** How long a failed request waits for the process's exit to be reported. */
+const EXIT_GRACE_MS = 1000;
+
+/** Errors the SDK raises when the stream under a request closes. */
+const CLOSED_CONNECTION = /clos|EPIPE|disconnect|not connected|stream/i;
+
 function withTimeout<T>(work: Promise<T>, what: string, ms = STARTUP_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     work,
     new Promise<T>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`${what} did not answer within ${Math.round(ms / 1000)}s`)),
+        () =>
+          reject(
+            new RequestTimeoutError(`${what} did not answer within ${Math.round(ms / 1000)}s`),
+          ),
         ms,
       );
     }),
@@ -208,10 +235,15 @@ function toAttached(
   };
 }
 
+interface Lifecycle {
+  exited: boolean;
+  exit: { code: number | null; signal: string | null } | null;
+}
+
 export class AcpAgentProcess {
   private closed = false;
   private constructor(
-    private readonly lifecycle: { exited: boolean },
+    private readonly lifecycle: Lifecycle,
     private readonly child: AgentStdio,
     private readonly connection: acp.ClientConnection,
     private readonly label: string,
@@ -231,7 +263,7 @@ export class AcpAgentProcess {
     handlers: AcpAgentHandlers,
   ): Promise<AcpAgentProcess> {
     const stderr = stderrTail();
-    const lifecycle = { exited: false };
+    const lifecycle: Lifecycle = { exited: false, exit: null };
     let child: AgentStdio;
     try {
       child = await host.spawn(launch, cwd);
@@ -270,9 +302,10 @@ export class AcpAgentProcess {
       )
       .connect(stream);
 
-    void child.exit.then(({ code }) => {
+    void child.exit.then(({ code, signal }) => {
       // Before the handler, so a caller it wakes already sees `alive` false.
       lifecycle.exited = true;
+      lifecycle.exit = { code, signal: signal ?? null };
       connection.close();
       handlers.onExit(code, stderr.text());
     });
@@ -293,7 +326,7 @@ export class AcpAgentProcess {
       return new AcpAgentProcess(lifecycle, child, connection, label, init, stderr);
     } catch (err) {
       child.kill("SIGTERM");
-      throw withStderr(label, err, stderr.text());
+      throw withStderr(label, err, stderr.text(), lifecycle.exit);
     }
   }
 
@@ -498,15 +531,42 @@ export class AcpAgentProcess {
     try {
       return await work;
     } catch (err) {
-      throw withStderr(this.label, err, this.alive ? "" : this.stderr.text());
+      // A closed connection can reject before the exit event lands. Give the
+      // exit a moment, so the error carries its code and signal.
+      if (
+        err instanceof Error &&
+        !(err instanceof RequestTimeoutError) &&
+        !this.lifecycle.exited &&
+        CLOSED_CONNECTION.test(err.message)
+      ) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          this.child.exit,
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, EXIT_GRACE_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+      }
+      throw withStderr(this.label, err, this.alive ? "" : this.stderr.text(), this.lifecycle.exit);
     }
   }
 }
 
-function withStderr(label: string, err: unknown, stderr: string): Error {
+function withStderr(
+  label: string,
+  err: unknown,
+  stderr: string,
+  exit: Lifecycle["exit"] = null,
+): AgentProcessError {
   const message = err instanceof Error ? err.message : describe(err);
   const detail = stderr.trim();
-  return new Error(`${label}: ${message}${detail ? `\n\n${detail}` : ""}`);
+  return new AgentProcessError(`${label}: ${message}${detail ? `\n\n${detail}` : ""}`, {
+    exitCode: exit?.code ?? null,
+    signal: exit?.signal ?? null,
+    stderr,
+    timedOut: err instanceof RequestTimeoutError,
+  });
 }
 
 /** JSON-RPC errors arrive as plain `{ code, message, data }` objects. */

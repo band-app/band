@@ -22,3 +22,11 @@ export function toWorktreeId(
   const base = `${repo}-${branch.replaceAll("/", "-")}`;
   return (hostId && hostId !== LOCAL_HOST_ID ? `${base}@${hostId}` : base) as WorktreeId;
 }
+
+/**
+ * Whether `worktreeId` names a worktree on the remote host `hostId`, read from the id alone.
+ * The hub's own host has no suffix, so this is false for `local`.
+ */
+export function worktreeIdIsOnHost(worktreeId: string, hostId: string): boolean {
+  return hostId !== LOCAL_HOST_ID && worktreeId.endsWith(`@${hostId}`);
+}

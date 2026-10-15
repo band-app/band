@@ -3,7 +3,7 @@
  *
  * A visible terminal writes through a paced drain and acknowledges each
  * chunk once xterm has parsed it; the server pauses the PTY while more than
- * 256 KB is unacknowledged (`api/terminals/output-flow.ts`). These cover ways
+ * 256 KB is unacknowledged (`packages/worktree-ops/src/output-flow.ts`). These cover ways
  * visible output could stall or arrive in batches:
  *
  *  - a flood far past the hold threshold must run to the end at full speed

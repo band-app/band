@@ -9,7 +9,7 @@ import { TerminalSocket } from "./helpers/terminal-socket";
 import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
-// Parse-acknowledged backpressure (`api/terminals/output-flow.ts`). A browser
+// Parse-acknowledged backpressure (`packages/worktree-ops/src/output-flow.ts`). A browser
 // that attaches with `flow: true` acknowledges output once xterm has parsed
 // it, and the server pauses the PTY while more than 256 KB is
 // unacknowledged, so a flooding shell blocks instead of burying the user's

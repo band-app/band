@@ -62,6 +62,8 @@ export class PrChecksPanelPage {
   readonly failingBanner: Locator;
   readonly failingCount: Locator;
   readonly fixButton: Locator;
+  /** The "Open" link in the banner once the fix agent has started. */
+  readonly openAgentLink: Locator;
   readonly summaryPassing: Locator;
   readonly summaryFailing: Locator;
   readonly summaryPending: Locator;
@@ -109,6 +111,7 @@ export class PrChecksPanelPage {
     this.failingBanner = page.getByTestId("pr-checks__failing-banner");
     this.failingCount = page.getByTestId("pr-checks__failing-count");
     this.fixButton = page.getByTestId("pr-checks__fix");
+    this.openAgentLink = page.getByTestId("pr-checks__open-agent");
     this.summaryPassing = page.getByTestId("pr-checks__summary-passing");
     this.summaryFailing = page.getByTestId("pr-checks__summary-failing");
     this.summaryPending = page.getByTestId("pr-checks__summary-pending");
@@ -246,6 +249,12 @@ export class PrChecksPanelPage {
   async startFix(): Promise<void> {
     await test.step("Start an AI fix pass for the failing checks", async () => {
       await this.fixButton.click();
+    });
+  }
+
+  async openFixAgent(): Promise<void> {
+    await test.step("Open the fix agent's tab from the banner", async () => {
+      await this.openAgentLink.click();
     });
   }
 

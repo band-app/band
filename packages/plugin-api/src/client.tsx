@@ -22,8 +22,14 @@ export interface WorktreeReviewQueryOptions {
 export interface ClientPluginHost {
   useWorktreeReview(worktreeId: string, options: WorktreeReviewQueryOptions): WorktreeReviewQuery;
   mergeReview(worktreeId: string, method: MergeMethod): Promise<void>;
-  /** Start a coding agent in the worktree with a first prompt, in this device's agent mode. */
-  startAgent(worktreeId: string, prompt: string): Promise<void>;
+  /**
+   * Start a coding agent in the worktree with a first prompt, in this device's
+   * agent mode. The agent's tab opens and becomes the active one in the center
+   * dock. Resolves with the id of its chat or terminal.
+   */
+  startAgent(worktreeId: string, prompt: string): Promise<{ chatId?: string; terminalId?: string }>;
+  /** Make the center dock tab with this chat or terminal id the active one. */
+  openPane(worktreeId: string, paneId: string): void;
   /** Open a URL in the system browser (the desktop app) or a new tab (the web app). */
   openUrl(url: string): void;
   /** Open a file of the worktree in the center dock, scrolled to `line` when given. */

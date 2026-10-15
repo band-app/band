@@ -279,6 +279,11 @@ beforeAll(async () => {
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
+          // A direct-path token would let the agent call the worker's loopback listener.
+          post("direct-access", "/trpc/worktree.directAccess", {
+            worktreeId: WT_A,
+            hostId: "h-000000000000",
+          }),
           post("vault-oauth", "/trpc/vault.startOAuth", {
             name: "x",
             serverUrl: "http://127.0.0.1:1/mcp",
@@ -515,6 +520,7 @@ describe("the worker relay (S2)", () => {
     expect(by("vault-list")?.status).toBe(403);
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
+    expect(by("direct-access")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);

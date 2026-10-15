@@ -41,6 +41,7 @@
  * `./trpc.ts`) for `mergeRouters` to accept them.
  */
 
+import { accountUsageRouter } from "./account-usage/router";
 import { agentSessionsRouter } from "./agent-sessions/router";
 import { browserHostRouter, hostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
@@ -101,6 +102,7 @@ export const appRouter = t.router({
   sessions: sessionsRouter,
   ...terminalsRouters,
   cli: cliRouter,
+  accountUsage: accountUsageRouter,
   hooks: hooksRouter,
   host: hostRouter,
   hosts: hostsRouter,

@@ -3,6 +3,7 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import type { SearchOptions } from "@/dashboard";
 import { listen as desktopListen } from "./desktop-ipc";
+import { type DirectSocketTarget, directSocketClosed, directTerminalTarget } from "./direct-worker";
 import { HubWebSocket, hubWsUrl } from "./hub-config";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
@@ -739,17 +740,41 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       }, delay);
     };
 
+    // Each connect first asks whether this worktree's worker is on this computer
+    // (`direct-worker.ts`). Only the latest connect opens a socket.
+    let connectSeq = 0;
     function connect() {
       if (intentionalClose || terminated || destroyed) return;
       clearReconnectTimer();
+      // The socket being replaced is ignored from here on: its late frames and its close.
+      ws = null;
+      const seq = ++connectSeq;
+      // A pane whose first connect carries spawn options (`init`) is spawned by the hub.
+      const spawnsWithInit =
+        !didConnectOnce &&
+        Boolean(paneMetadata && (paneMetadata.command || paneMetadata.cwd || paneMetadata.env));
+      (spawnsWithInit ? Promise.resolve(null) : directTerminalTarget(worktreeId, terminalId)).then(
+        (direct) => {
+          if (seq === connectSeq) openSocket(direct);
+        },
+        () => {
+          if (seq === connectSeq) openSocket(null);
+        },
+      );
+    }
+
+    /** Opens the socket: to this computer's worker when `direct` is set, else to the hub. */
+    function openSocket(direct: DirectSocketTarget | null) {
+      if (intentionalClose || terminated || destroyed) return;
       const isReconnect = didConnectOnce;
-      const sock = new HubWebSocket(wsUrl);
+      const sock = direct ? new WebSocket(direct.url, direct.protocols) : new HubWebSocket(wsUrl);
       ws = sock;
+      let opened = false;
       sock.binaryType = "arraybuffer";
 
       // Parse acknowledgements for this connection's output (`flow: true` in
       // the attach), batched per task. The server pauses the PTY while too
-      // many bytes are unacknowledged (`api/terminals/output-flow.ts`).
+      // many bytes are unacknowledged (`packages/worktree-ops/src/output-flow.ts`).
       let unacked = 0;
       const sendAck = () => {
         const bytes = unacked;
@@ -765,6 +790,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       };
 
       sock.onopen = () => {
+        opened = true;
         reconnectAttempts = 0;
         lastPongAt = Date.now();
         // Replay state is per-connection: a reconnect must ask again.
@@ -881,6 +907,14 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         if (ws !== sock) return;
         stopHeartbeat();
         if (intentionalClose) return;
+        // The direct path failed (no listener, no such PTY there yet, a dropped
+        // connection): reconnect through the hub at once, which replays the screen.
+        if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
+          ws = null;
+          output.clear();
+          openSocket(null);
+          return;
+        }
         // Explicit, deliberate close-code handling (band-app/band#617):
         //  - 1000  → PTY exited or closed by client. Terminate: keep the pane
         //            and scrollback, print a marker, and do NOT reconnect (no
