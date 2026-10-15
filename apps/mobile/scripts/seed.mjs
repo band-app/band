@@ -284,6 +284,11 @@ export const WORKTREES = {
   GAMMA_HISTORY: "gamma-history",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
   GAMMA_TABS: "gamma-tabs",
+  /** Terminal flows: open and type (S2, S4), new and close (S3), background (S5), scroll and copy (S6). */
+  GAMMA_TERM: "gamma-term",
+  GAMMA_TERM_NEW: "gamma-term-new",
+  GAMMA_TERM_BG: "gamma-term-bg",
+  GAMMA_TERM_SCROLL: "gamma-term-scroll",
 };
 
 /** The chats of `gamma-tabs`, in the shared tab order; the second is the active tab. */
@@ -352,7 +357,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -566,4 +571,38 @@ export async function fillWorktrees(state, count) {
   for (let i = 1; i <= count; i++) {
     await trpc(state, "worktrees.create", { repo: "alpha", branch: `bulk-${i}` });
   }
+}
+
+/** The id of the terminal a flow starts on the hub, per number, so the flow can name it. */
+export const termId = (n) => `7e57a1e1-0000-4000-8000-00000000000${n}`;
+
+/** Starts terminal `n` in a worktree, as the web's "New terminal" does. */
+export async function termOpen(state, worktreeId, n) {
+  await trpc(state, "terminal.create", { worktreeId, id: termId(n) });
+  // A shell prints its prompt shortly after it starts.
+  await waitFor(async () => (await termOutput(state, n)).length > 0, "the shell to print a prompt");
+}
+
+export async function termSend(state, n, data) {
+  await trpc(state, "terminal.send", { terminalId: termId(n), data });
+}
+
+/** Everything terminal `n` has printed (the hub's scrollback). */
+export async function termOutput(state, n) {
+  return (await trpcQuery(state, "terminal.output", { terminalId: termId(n) })).output;
+}
+
+/** The terminals the hub holds for a worktree. */
+export async function termList(state, worktreeId) {
+  return (await trpcQuery(state, "terminal.list", { worktreeId })).terminals;
+}
+
+/** Waits up to `timeoutMs` for `check` to be true. */
+export async function waitFor(check, what, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }

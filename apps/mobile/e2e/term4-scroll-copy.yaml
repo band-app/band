@@ -1,0 +1,57 @@
+# Terminals S6: a long output scrolls back, and a long press selects text that the edit menu copies.
+appId: app.getband.mobile
+name: term4 scrollback and copy
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-open?wt=gamma-term-scroll&n=4
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-send?n=4
+      VALUE: "seq 1 3000 | sed 's/^/line /'\r"
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-term-scroll
+- runFlow:
+    file: subflows/select-tab.yaml
+    env:
+      CHAT: 7e57a1e1-0000-4000-8000-000000000004
+- extendedWaitUntil:
+    visible:
+      text: ".*line 3000.*"
+    timeout: 20000
+- takeScreenshot: term4-bottom
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 300
+- takeScreenshot: term4-scrolled-back
+# Scrolling back moved the view up: an earlier line shows and the last one does not.
+- assertVisible:
+    text: ".*line 2[0-9][0-9][0-9].*"
+- assertNotVisible:
+    text: ".*line 3000.*"
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          direction: UP
+          duration: 300
+# A long press opens the edit menu, Select picks the word under the finger and Copy puts it on the
+# clipboard: a word of the "line <number>" output.
+- longPressOn:
+    point: 6%,40%
+- takeScreenshot: term4-menu
+- tapOn: Select
+- takeScreenshot: term4-selection
+- tapOn: Copy
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: clipboard-matches?re=%5E(line%7C%5Cd%2B)%24

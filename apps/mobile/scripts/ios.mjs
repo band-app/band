@@ -70,8 +70,9 @@ export function pickSimulator() {
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   const phones = runtimes.flatMap((r) => devices[r].filter((d) => d.name.startsWith("iPhone")));
   const wanted = process.env.BAND_SIM_UDID;
+  // A simulator picked by UDID may have been renamed, so its name need not start with "iPhone".
   const device = wanted
-    ? phones.find((d) => d.udid === wanted)
+    ? runtimes.flatMap((r) => devices[r]).find((d) => d.udid === wanted)
     : (phones.find((d) => d.state === "Booted") ?? phones[0]);
   if (!device) throw new Error("No iPhone simulator found. Install an iOS runtime in Xcode.");
   if (device.state !== "Booted") {

@@ -26,6 +26,11 @@ import {
   startTurn,
   STREAM_LINES,
   stopTurn,
+  termList,
+  termOpen,
+  termOutput,
+  termSend,
+  waitFor,
   webEditTabs,
 } from "./seed.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
@@ -199,6 +204,8 @@ function checkTabs({ tabs, chats }, params) {
  * /expect-subscriptions?wt=<id>&n=<count> fails unless the hub holds that many for the chat.
  */
 function startControlServer(hub, chats, udid, notes) {
+  // Terminal sizes `/term-size` recorded, by tag.
+  const termSizes = {};
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://control");
@@ -227,7 +234,57 @@ function startControlServer(hub, chats, udid, notes) {
         notes.push(`${wt}: ${result.note}`);
         if (!result.ok) throw new Error(result.note);
       }
-      else if (url.pathname === "/appearance") {
+      else if (url.pathname === "/term-open") await termOpen(hub, wt, Number(url.searchParams.get("n")));
+      else if (url.pathname === "/term-send") {
+        await termSend(hub, Number(url.searchParams.get("n")), url.searchParams.get("value") ?? "");
+      } else if (url.pathname === "/term-expect") {
+        // The shell printed `value` at least `count` times (default 1). The echo of a typed line
+        // and its output count separately, so a typed `echo x` shows `x` twice.
+        const n = Number(url.searchParams.get("n"));
+        const want = url.searchParams.get("value") ?? "";
+        const count = Number(url.searchParams.get("count") ?? 1);
+        const seen = async () => (await termOutput(hub, n)).split(want).length - 1;
+        await waitFor(async () => (await seen()) >= count, `${JSON.stringify(want)} x${count} in terminal ${n}`);
+        notes.push(`terminal ${n}: ${JSON.stringify(want)} printed ${await seen()} times`);
+      } else if (url.pathname === "/term-size") {
+        // Runs `stty size` and reads "<rows> <cols>" from the output; `smaller=<tag>` needs fewer rows than that tag.
+        const n = Number(url.searchParams.get("n"));
+        const tag = url.searchParams.get("tag") ?? "a";
+        const marker = `size-${tag}-`;
+        await termSend(hub, n, `echo ${marker}$(stty size)\r`);
+        let rows = 0;
+        let cols = 0;
+        await waitFor(async () => {
+          const m = new RegExp(`${marker}(\\d+) (\\d+)`, "g");
+          const all = [...(await termOutput(hub, n)).matchAll(m)];
+          const last = all.at(-1);
+          if (!last) return false;
+          rows = Number(last[1]);
+          cols = Number(last[2]);
+          return true;
+        }, `stty size ${tag}`);
+        termSizes[tag] = { rows, cols };
+        notes.push(`terminal ${n}: stty size ${tag} = ${rows} rows x ${cols} columns`);
+        const than = url.searchParams.get("smaller");
+        if (than && !(rows < termSizes[than].rows)) {
+          throw new Error(`the shell sees ${rows} rows, not fewer than the ${termSizes[than].rows} of ${than}`);
+        }
+      } else if (url.pathname === "/term-count") {
+        // The hub holds `n` terminals for the worktree, and the shared tab list lists the same ids.
+        const want = Number(url.searchParams.get("n") ?? 0);
+        const deadline = Date.now() + 10_000;
+        let live = await termList(hub, wt);
+        let listed = ((await sharedTabs(hub, wt)).tabs?.tabs ?? []).filter((t) => t.kind === "term");
+        while ((live.length !== want || listed.length !== want) && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 200));
+          live = await termList(hub, wt);
+          listed = ((await sharedTabs(hub, wt)).tabs?.tabs ?? []).filter((t) => t.kind === "term");
+        }
+        notes.push(`${wt}: ${live.length} live terminals, ${listed.length} terminal tabs in the shared list`);
+        if (live.length !== want || listed.length !== want) {
+          throw new Error(`${live.length} live terminals and ${listed.length} terminal tabs, expected ${want}`);
+        }
+      } else if (url.pathname === "/appearance") {
         // The simulator's system appearance: light or dark.
         const mode = url.searchParams.get("mode") === "dark" ? "dark" : "light";
         execFileSync("xcrun", ["simctl", "ui", udid, "appearance", mode]);
@@ -245,6 +302,12 @@ function startControlServer(hub, chats, udid, notes) {
         const want = url.searchParams.get("value") ?? "";
         const got = clipboard(udid);
         if (got !== want) throw new Error(`clipboard holds ${JSON.stringify(got.slice(0, 200))}`);
+        notes.push(`clipboard: ${JSON.stringify(got)}`);
+      } else if (url.pathname === "/clipboard-matches") {
+        // The simulator's clipboard matches a regular expression (`re`).
+        const re = new RegExp(url.searchParams.get("re") ?? "");
+        const got = clipboard(udid);
+        if (!re.test(got)) throw new Error(`clipboard holds ${JSON.stringify(got.slice(0, 200))}, not ${re}`);
         notes.push(`clipboard: ${JSON.stringify(got)}`);
       } else if (url.pathname === "/check-transcript") {
         const result = await checkTranscript(hub, chats, wt, udid);

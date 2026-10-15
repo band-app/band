@@ -3,6 +3,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -15,6 +16,7 @@ import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
 import { StateIcon } from "../../components/state-icon";
+import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
@@ -80,10 +82,10 @@ const WorktreeChats = memo(function WorktreeChats({
   pr: WorktreeRow["pr"];
 }) {
   const tabs = useWorktreeTabs(worktreeId);
-  const { select, close, move, rename, create } = tabs;
+  const { select, close, move, rename, create, createTerminal } = tabs;
   const actions = useMemo(
-    () => ({ select, close, move, rename, create }),
-    [select, close, move, rename, create],
+    () => ({ select, close, move, rename, create, createTerminal }),
+    [select, close, move, rename, create, createTerminal],
   );
   const [sheet, setSheet] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -120,13 +122,13 @@ const WorktreeChats = memo(function WorktreeChats({
 
   const current = tabs.tabs.find((t) => t.id === tabs.active);
   const showMore = () => {
-    const options = ["New chat", "Rename chat", "Close chat", "Cancel"];
+    const options = ["New chat", "Rename chat", "Close tab", "Cancel"];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options,
         destructiveButtonIndex: 2,
         cancelButtonIndex: 3,
-        disabledButtonIndices: current ? [] : [1, 2],
+        disabledButtonIndices: !current ? [1, 2] : current.kind === "term" ? [1] : [],
       },
       (choice) => {
         if (choice === 0) setPicker(true);
@@ -206,7 +208,7 @@ const WorktreeChats = memo(function WorktreeChats({
               <NeighbourPage tab={prevTab} direction="prev" width={width} height={pageHeight} />
             ) : null}
             <View style={{ width, height: pageHeight }}>
-              {mounted.map(({ id }) => {
+              {mounted.map(({ id, kind }) => {
                 const shown = id === tabs.active;
                 return (
                   <View
@@ -216,12 +218,16 @@ const WorktreeChats = memo(function WorktreeChats({
                     accessibilityElementsHidden={!shown}
                     importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
                   >
-                    <ChatView
-                      chatId={id}
-                      worktreeId={worktreeId}
-                      active={shown}
-                      chips={shown ? chips : null}
-                    />
+                    {kind === "term" ? (
+                      <TerminalPane terminalId={id} worktreeId={worktreeId} active={shown} />
+                    ) : (
+                      <ChatView
+                        chatId={id}
+                        worktreeId={worktreeId}
+                        active={shown}
+                        chips={shown ? chips : null}
+                      />
+                    )}
                   </View>
                 );
               })}
@@ -237,7 +243,7 @@ const WorktreeChats = memo(function WorktreeChats({
       ) : (
         <Centered>
           <Body testID="worktree__no-chat">
-            This worktree has no chat yet. Open the tab sheet to start one.
+            This worktree has no tab yet. Open the tab sheet to start a chat or a terminal.
           </Body>
         </Centered>
       )}
@@ -252,6 +258,10 @@ const WorktreeChats = memo(function WorktreeChats({
         onNew={() => {
           pickerAfterSheet.current = true;
           setSheet(false);
+        }}
+        onNewTerminal={() => {
+          setSheet(false);
+          actions.createTerminal().catch(() => Alert.alert("Couldn't open a terminal"));
         }}
         onDismiss={() => {
           if (!pickerAfterSheet.current) return;

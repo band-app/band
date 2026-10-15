@@ -265,6 +265,9 @@ importers:
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.14
+      '@xterm/headless':
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

@@ -1,6 +1,6 @@
 # Band mobile
 
-The Expo iOS app for Band. It pairs with a hub, lists repos and worktrees like the web sidebar (Pinned, then repos grouped by repo, origin or host, with agent state, PR and CI), starts an agent from a floating composer, and opens chats (transcript, composer, queue, permission requests). A worktree's chat tabs, shared with the web, sit behind the title pill: tap it for the tab sheet, or swipe the transcript sideways. The look follows the system appearance, light or dark. iOS only.
+The Expo iOS app for Band. It pairs with a hub, lists repos and worktrees like the web sidebar (Pinned, then repos grouped by repo, origin or host, with agent state, PR and CI), starts an agent from a floating composer, and opens chats (transcript, composer, queue, permission requests) and terminals. A worktree's chat and terminal tabs, shared with the web, sit behind the title pill: tap it for the tab sheet, or swipe the transcript sideways. The look follows the system appearance, light or dark. iOS only.
 
 ## Requirements
 
@@ -64,3 +64,11 @@ npx -y pnpm@10 --filter @band-app/mobile typecheck
 ```
 
 The end-to-end Maestro flows in `e2e/` run against a throwaway hub on one booted simulator. Follow `.claude/skills/mobile-verify/SKILL.md`, or run `node apps/mobile/scripts/verify.mjs`. Set `BAND_SIM_UDID` to pick the simulator. Reports and screenshots go to `apps/mobile/e2e/artifacts/` (gitignored).
+
+## Terminals
+
+A terminal tab draws with SwiftTerm in a local Expo module (`modules/band-terminal`). The module only shows a screen: JavaScript feeds it the hub's bytes and reads back keystrokes and the grid size. The protocol (attach with the fitted size, parse acknowledgements, resize, ping, reconnect with a replay) is `packages/client/src/terminal-client.ts`, and the key bar's bytes are `src/lib/terminal/key-bar.ts`. The scrollback is 10,000 lines.
+
+SwiftTerm v1.20.0 is vendored under `modules/band-terminal/ios/SwiftTerm` (see `VENDORED.md` there) because it is not on CocoaPods trunk and the Swift package route needs package plugin validation and Xcode's Metal Toolchain in every build.
+
+`tests/terminal-replay.test.ts` replays the sessions in `tests/fixtures/terminal` (recorded from real PTYs with `scripts/record-terminal.mjs`: `ls --color`, `less`, `vim` with resizes, a shell with resizes, a fast build log in a scroll region, and Claude Code's first-run screens) through SwiftTerm's headless terminal (`modules/band-terminal/replay`, a Swift package) and through xterm.js, and compares the final screens cell by cell. It needs macOS with the Swift toolchain and skips elsewhere.

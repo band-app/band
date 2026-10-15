@@ -91,6 +91,9 @@ function boot({ home, port, adminToken }) {
     env: {
       ...cleanEnv(),
       HOME: home,
+      // Terminals start $SHELL; bash in a bare home gives a plain prompt, zsh runs its first-run wizard.
+      SHELL: "/bin/bash",
+      BASH_SILENCE_DEPRECATION_WARNING: "1",
       BAND_HOME: join(home, ".band"),
       PORT: String(port),
       NODE_ENV: "production",

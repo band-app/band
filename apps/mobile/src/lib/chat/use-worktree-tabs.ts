@@ -1,5 +1,5 @@
 /**
- * The worktree screen's chat tabs: the shared center tabs (`worktree-tabs.ts`), the hub's chats,
+ * The worktree screen's chat and terminal tabs: the shared center tabs (`worktree-tabs.ts`), the hub's chats,
  * each chat's agent state, and the actions the tab strip offers.
  *
  * Other devices' changes arrive through the client-state store, which follows the status stream.
@@ -8,7 +8,12 @@
  * active tab.
  */
 
-import { type CenterTabs, centerTabsKey, parseCenterTabs } from "@band-app/client/center-tabs";
+import {
+  type CenterTab,
+  type CenterTabs,
+  centerTabsKey,
+  parseCenterTabs,
+} from "@band-app/client/center-tabs";
 import { chatTabLabel } from "@band-app/client/chat-tab-label";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -41,6 +46,8 @@ export interface AgentChoice {
 
 export interface ChatTab {
   id: string;
+  /** A chat, or a terminal (whose state is always idle). */
+  kind: "chat" | "term";
   label: string;
   state: TabState;
   /** The icon: the hub's status mapped by `shownState`. */
@@ -97,6 +104,11 @@ export function useWorktreeTabs(worktreeId: string) {
     queryKey: chatsKey,
     queryFn: async () => (await client.chats.list.query({ worktreeId })).chats,
   });
+  const terminalsKey = useMemo(() => ["terminal.list", worktreeId], [worktreeId]);
+  const terminals = useQuery({
+    queryKey: terminalsKey,
+    queryFn: async () => (await client.terminal.list.query({ worktreeId })).terminals,
+  });
   const settings = useQuery({
     queryKey: ["settings.get"],
     queryFn: async () => (await client.settings.get.query()) as SettingsLike | null,
@@ -111,8 +123,11 @@ export function useWorktreeTabs(worktreeId: string) {
         if (event.kind === "chat-created" || event.kind === "chat-removed") {
           void queryClient.invalidateQueries({ queryKey: chatsKey });
         }
+        if (event.kind === "terminal-created" || event.kind === "terminal-killed") {
+          void queryClient.invalidateQueries({ queryKey: terminalsKey });
+        }
       }),
-    [feed, queryClient, chatsKey, worktreeId],
+    [feed, queryClient, chatsKey, terminalsKey, worktreeId],
   );
 
   // undefined until hydrated (or the timeout passed), then the shared list or null.
@@ -147,8 +162,23 @@ export function useWorktreeTabs(worktreeId: string) {
     return [...ids, ...created.filter((id) => !ids.includes(id))];
   }, [chats.data, created]);
 
-  const ready = chats.data !== undefined && shared !== undefined;
-  const view: PhoneTabs = useMemo(() => phoneTabs(shared ?? null, known), [shared, known]);
+  // Terminals this phone opened whose `terminal-created` hasn't refreshed the list yet.
+  const [createdTerms, setCreatedTerms] = useState<string[]>([]);
+  useEffect(() => {
+    const ids = new Set((terminals.data ?? []).map((t) => t.terminalId));
+    setCreatedTerms((c) => (c.some((id) => ids.has(id)) ? c.filter((id) => !ids.has(id)) : c));
+  }, [terminals.data]);
+  const knownTerms = useMemo(() => {
+    const ids = (terminals.data ?? []).map((t) => t.terminalId);
+    return [...ids, ...createdTerms.filter((id) => !ids.includes(id))];
+  }, [terminals.data, createdTerms]);
+
+  // A failed terminal list shows the chats alone rather than hiding the worktree.
+  const ready = chats.data !== undefined && shared !== undefined && !terminals.isPending;
+  const view: PhoneTabs = useMemo(
+    () => phoneTabs(shared ?? null, known, knownTerms),
+    [shared, known, knownTerms],
+  );
 
   // The shown tab: the shared active one on open, then the user's choice.
   const [active, setActive] = useState<string | null>(null);
@@ -157,17 +187,17 @@ export function useWorktreeTabs(worktreeId: string) {
   useEffect(() => {
     if (!ready) return;
     const before = prevChats.current;
-    prevChats.current = view.chats;
+    prevChats.current = view.ids;
     if (!chosen.current) {
       chosen.current = true;
-      setActive(view.active ?? view.chats[0] ?? null);
+      setActive(view.active ?? view.ids[0] ?? null);
       return;
     }
     // The shown tab was closed elsewhere: show its neighbour, as a close here does.
     setActive((current) => {
-      if (current && view.chats.includes(current)) return current;
+      if (current && view.ids.includes(current)) return current;
       const neighbour = current ? neighbourOf(before, current) : null;
-      return neighbour && view.chats.includes(neighbour) ? neighbour : (view.chats[0] ?? null);
+      return neighbour && view.ids.includes(neighbour) ? neighbour : (view.ids[0] ?? null);
     });
   }, [ready, view]);
 
@@ -176,8 +206,8 @@ export function useWorktreeTabs(worktreeId: string) {
     if (active) setRecent((r) => [active, ...r.filter((id) => id !== active)].slice(0, 8));
   }, [active]);
   const mounted = useMemo(
-    () => keepAlive(recent, active, (id) => view.chats.includes(id), KEEP_ALIVE),
-    [recent, active, view.chats],
+    () => keepAlive(recent, active, (id) => view.ids.includes(id), KEEP_ALIVE),
+    [recent, active, view.ids],
   );
 
   // Only this worktree's entry: an event for another worktree keeps its identity, so it doesn't
@@ -217,7 +247,21 @@ export function useWorktreeTabs(worktreeId: string) {
   const tabs = useMemo((): ChatTab[] => {
     const byId = new Map((chats.data ?? []).map((c) => [c.id, c]));
     const defaultId = settings.data?.defaultCodingAgent ?? settings.data?.codingAgents?.[0]?.id;
-    return view.chats.map((id) => {
+    const termById = new Map((terminals.data ?? []).map((t) => [t.terminalId, t]));
+    let termNumber = 0;
+    return view.tabs.map(({ id, kind }): ChatTab => {
+      if (kind === "term") {
+        termNumber += 1;
+        const title = termById.get(id)?.title;
+        return {
+          id,
+          kind,
+          label: `Terminal ${termNumber}`,
+          state: "idle",
+          shown: "idle",
+          summary: title ? `Running ${title}` : "Shell",
+        };
+      }
       const chat = byId.get(id);
       const agentId = chat?.agent ?? defaultId;
       const hubStatus = statuses.get(id);
@@ -230,6 +274,7 @@ export function useWorktreeTabs(worktreeId: string) {
       const shown: ShownState = hubShown === "idle" && unread.has(id) ? "done" : hubShown;
       return {
         id,
+        kind: "chat",
         label: chatTabLabel({
           name: chat?.name,
           summary: chat?.activeSessionSummary,
@@ -241,14 +286,14 @@ export function useWorktreeTabs(worktreeId: string) {
         summary: summaryOf(shown, pendingText, chat, Date.now()),
       };
     });
-  }, [view.chats, chats.data, settings.data, statuses, unread, pendingTick]);
+  }, [view.tabs, chats.data, terminals.data, settings.data, statuses, unread, pendingTick]);
 
   const viewRef = useRef(view);
   viewRef.current = view;
   const write = useCallback(
-    (nextChats: readonly string[], nextActive: string | null) => {
+    (nextTabs: readonly CenterTab[], nextActive: string | null) => {
       const current = readTabs(clientState.getItem(key));
-      const next = writePhoneTabs(current, viewRef.current.chats, nextChats, nextActive);
+      const next = writePhoneTabs(current, viewRef.current.ids, nextTabs, nextActive);
       clientState.setItem(key, JSON.stringify(next));
       setShared(next);
     },
@@ -259,17 +304,37 @@ export function useWorktreeTabs(worktreeId: string) {
     (id: string) => {
       chosen.current = true;
       setActive(id);
-      write(viewRef.current.chats, id);
+      write(viewRef.current.tabs, id);
     },
     [write],
   );
 
   const close = useCallback(
     (id: string) => {
-      const chatsNow = viewRef.current.chats;
-      const rest = chatsNow.filter((c) => c !== id);
-      const nextActive = active === id ? neighbourOf(chatsNow, id) : active;
+      const tabsNow = viewRef.current.tabs;
+      const kind = tabsNow.find((t) => t.id === id)?.kind ?? "chat";
+      const rest = tabsNow.filter((t) => t.id !== id);
+      const nextActive =
+        active === id
+          ? neighbourOf(
+              tabsNow.map((t) => t.id),
+              id,
+            )
+          : active;
       setActive(nextActive);
+      write(rest, nextActive);
+      if (kind === "term") {
+        setCreatedTerms((c) => c.filter((x) => x !== id));
+        void queryClient.cancelQueries({ queryKey: terminalsKey });
+        queryClient.setQueryData(terminalsKey, (list: { terminalId: string }[] | undefined) =>
+          list?.filter((t) => t.terminalId !== id),
+        );
+        // Closing a terminal tab kills its shell, as the web's close does.
+        return client.terminal.kill
+          .mutate({ terminalId: id })
+          .then(() => {})
+          .finally(() => queryClient.invalidateQueries({ queryKey: terminalsKey }));
+      }
       setCreated((c) => c.filter((x) => x !== id));
       // Drop it from the cached list now; until the remove lands it would come back as a chat
       // the shared list lacks. A failed remove refetches it below.
@@ -277,7 +342,6 @@ export function useWorktreeTabs(worktreeId: string) {
       queryClient.setQueryData(chatsKey, (list: { id: string }[] | undefined) =>
         list?.filter((c) => c.id !== id),
       );
-      write(rest, nextActive);
       // Closing a chat tab removes the chat, as the web's close does. A failed remove rejects, so
       // the strip can say so; the refetch shows the chat again.
       return client.chats.remove
@@ -285,12 +349,22 @@ export function useWorktreeTabs(worktreeId: string) {
         .then(() => {})
         .finally(() => queryClient.invalidateQueries({ queryKey: chatsKey }));
     },
-    [active, write, client, queryClient, chatsKey],
+    [active, write, client, queryClient, chatsKey, terminalsKey],
   );
 
   const move = useCallback(
     (id: string, delta: number) => {
-      write(moveChat(viewRef.current.chats, id, delta), active);
+      const tabsNow = viewRef.current.tabs;
+      const order = moveChat(
+        tabsNow.map((t) => t.id),
+        id,
+        delta,
+      );
+      const byId = new Map(tabsNow.map((t) => [t.id, t]));
+      write(
+        order.flatMap((x) => byId.get(x) ?? []),
+        active,
+      );
     },
     [write, active],
   );
@@ -312,12 +386,33 @@ export function useWorktreeTabs(worktreeId: string) {
       setCreated((c) => (c.includes(chatId) ? c : [...c, chatId]));
       chosen.current = true;
       setActive(chatId);
-      const chatsNow = viewRef.current.chats;
-      write(chatsNow.includes(chatId) ? chatsNow : [...chatsNow, chatId], chatId);
+      const tabsNow = viewRef.current.tabs;
+      write(
+        tabsNow.some((t) => t.id === chatId)
+          ? tabsNow
+          : [...tabsNow, { id: chatId, kind: "chat" as const }],
+        chatId,
+      );
       void queryClient.invalidateQueries({ queryKey: chatsKey });
     },
     [client, worktreeId, write, queryClient, chatsKey],
   );
+
+  /** Opens a shell in this worktree and shows it. */
+  const createTerminal = useCallback(async () => {
+    const { terminalId } = await client.terminal.create.mutate({ worktreeId });
+    setCreatedTerms((c) => (c.includes(terminalId) ? c : [...c, terminalId]));
+    chosen.current = true;
+    setActive(terminalId);
+    const tabsNow = viewRef.current.tabs;
+    write(
+      tabsNow.some((t) => t.id === terminalId)
+        ? tabsNow
+        : [...tabsNow, { id: terminalId, kind: "term" as const }],
+      terminalId,
+    );
+    void queryClient.invalidateQueries({ queryKey: terminalsKey });
+  }, [client, worktreeId, write, queryClient, terminalsKey]);
 
   return {
     ready,
@@ -333,5 +428,6 @@ export function useWorktreeTabs(worktreeId: string) {
     move,
     rename,
     create,
+    createTerminal,
   };
 }
