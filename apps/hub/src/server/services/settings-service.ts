@@ -224,6 +224,15 @@ export class SettingsService {
         }),
       };
     }
+    // `pairingAddresses` is written only by `tokens.addPairingAddress` and
+    // `removePairingAddress`, which validate each URL. The schema is
+    // `.passthrough()`, so drop it here.
+    if ("pairingAddresses" in patch) {
+      const { pairingAddresses: _ignored, ...rest } = patch as SettingsUpdate & {
+        pairingAddresses?: unknown;
+      };
+      patch = rest;
+    }
     this.queries.save(patch);
   }
 
