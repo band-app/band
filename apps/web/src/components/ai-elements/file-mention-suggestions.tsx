@@ -1,3 +1,4 @@
+import { getMentionContext } from "@band-app/client/composer";
 import { cn } from "@band-app/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getFileIcon } from "@/dashboard";
@@ -6,32 +7,6 @@ import { usePromptInputContext } from "./prompt-input";
 
 interface FileMentionSuggestionsProps {
   worktreeId: string;
-}
-
-/**
- * Find the @mention token being typed. The mention can appear anywhere
- * in the text — at the beginning or after a space.
- *
- * Returns `{ prefix, query }` where:
- *   - `prefix` is everything before the `@`
- *   - `query` is the partial file path (without the `@`)
- *
- * Returns `null` when no mention is being typed (e.g. cursor past a space
- * after the path, or no `@` present).
- */
-function getMentionContext(inputValue: string): { prefix: string; query: string } | null {
-  // Find the last `@` that is at position 0 or preceded by whitespace
-  for (let i = inputValue.length - 1; i >= 0; i--) {
-    if (inputValue[i] === "@") {
-      if (i === 0 || /\s/.test(inputValue[i - 1])) {
-        const afterAt = inputValue.slice(i + 1);
-        // Still typing the path — no spaces after the @
-        if (/\s/.test(afterAt)) return null;
-        return { prefix: inputValue.slice(0, i), query: afterAt };
-      }
-    }
-  }
-  return null;
 }
 
 export function FileMentionSuggestions({ worktreeId }: FileMentionSuggestionsProps) {

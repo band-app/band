@@ -1,0 +1,40 @@
+# S2: a row follows the agent without a refresh: working when a turn starts, needs you when the
+# agent asks for permission.
+appId: app.getband.mobile
+name: S2 live agent status
+---
+- runFlow: subflows/pair-link.yaml
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*idle.*"
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: work?wt=alpha-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*working.*"
+    timeout: 2000
+- takeScreenshot: s2-running
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: ask?wt=beta-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-beta-main
+      text: ".*needs you.*"
+    timeout: 2000
+- takeScreenshot: s2-needs-attention
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: halt?wt=alpha-main
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-main
+      text: ".*idle.*"
+    timeout: 2000

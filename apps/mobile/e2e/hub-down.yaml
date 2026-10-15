@@ -1,0 +1,60 @@
+# S3: a stopped hub shows the unreachable screen at start; Retry reconnects once it is back.
+appId: app.getband.mobile
+name: S3 hub down
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- openLink: ${PAIR_LINK}
+# iOS asks "Open in “Band”?" for a custom scheme opened from outside the app.
+- tapOn:
+    text: Open
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: pair__host
+    timeout: 20000
+- tapOn:
+    id: pair__connect
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: stop
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: unreachable__title
+    timeout: 20000
+- assertVisible:
+    id: unreachable__retry
+- assertVisible:
+    id: unreachable__switch
+- assertVisible:
+    id: unreachable__edit
+- takeScreenshot: s3-unreachable
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: start
+- tapOn:
+    id: unreachable__retry
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- takeScreenshot: s3-reconnected-after-retry

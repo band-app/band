@@ -1,0 +1,89 @@
+# Screenshots of the five screens in one appearance. MODE is light or dark; the simulator is set to
+# it first, and the app (appearance: System) follows at once.
+appId: app.getband.mobile
+---
+- runScript:
+    file: ../scripts/hub-control.js
+    env:
+      ACTION: appearance?mode=${MODE}
+- extendedWaitUntil:
+    visible:
+      id: home__screen
+    timeout: 10000
+# Opening a worktree by search leaves its query on the home screen: clear it for the screenshot.
+- runFlow:
+    when:
+      visible:
+        id: home__search
+    commands:
+      - tapOn:
+          id: home__search-toggle
+# iOS cross-fades an appearance change; wait it out before taking the screenshot.
+- runScript:
+    file: ../scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=2000
+- takeScreenshot: s8-${MODE}-1-home
+# A worktree chat, and the tab sheet over it.
+- runFlow:
+    file: open-gamma.yaml
+    env:
+      WT: gamma-tabs
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+    timeout: 15000
+- takeScreenshot: s8-${MODE}-2-chat
+- tapOn:
+    id: tabs__switcher
+- extendedWaitUntil:
+    visible:
+      id: tabs__sheet
+    timeout: 5000
+- takeScreenshot: s8-${MODE}-3-tab-sheet
+- tapOn:
+    id: tabs__sheet-done
+- extendedWaitUntil:
+    notVisible:
+      id: tabs__sheet
+    timeout: 5000
+- tapOn:
+    id: worktree__back
+- extendedWaitUntil:
+    visible:
+      id: home__screen
+    timeout: 10000
+# A question card, then the expanded composer.
+- runFlow:
+    file: open-gamma.yaml
+    env:
+      WT: gamma-permit-allow
+- runScript:
+    file: ../scripts/hub-control.js
+    env:
+      ACTION: ask?wt=gamma-permit-allow
+- extendedWaitUntil:
+    visible:
+      id: request__permission
+    timeout: 15000
+- takeScreenshot: s8-${MODE}-4-question
+- runScript:
+    file: ../scripts/hub-control.js
+    env:
+      ACTION: halt?wt=gamma-permit-allow
+- extendedWaitUntil:
+    notVisible:
+      id: request__permission
+    timeout: 15000
+- tapOn:
+    id: composer__input
+- tapOn:
+    text: "Continue"
+    optional: true
+- takeScreenshot: s8-${MODE}-5-composer
+- tapOn:
+    id: worktree__back
+- extendedWaitUntil:
+    visible:
+      id: home__screen
+    timeout: 10000

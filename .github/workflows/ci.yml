@@ -261,6 +261,12 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
+      # Biome above already lints apps/mobile; the iOS build is the `mobile-ios` job.
+      - name: Typecheck (mobile)
+        run: pnpm --filter @band-app/mobile typecheck
+
+      - name: Test (mobile)
+        run: pnpm --filter @band-app/mobile test
   # The test jobs run beside `check` and rebuild what they need (the CLI comes
   # from the restored cargo cache, the web and hub bundles from the pretest
   # hook or an explicit build), which costs less than waiting on an artifact
@@ -330,6 +336,7 @@ jobs:
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/client test
           pnpm --filter @band-app/shared test
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
@@ -543,6 +550,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       docker: ${{ steps.filter.outputs.docker }}
       desktop: ${{ steps.filter.outputs.desktop }}
+      mobile: ${{ steps.filter.outputs.mobile }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -578,6 +586,7 @@ jobs:
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "docker=true" >> "$GITHUB_OUTPUT"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
             exit 0
           }
 
@@ -628,6 +637,15 @@ jobs:
             echo "desktop=true" >> "$GITHUB_OUTPUT"
           else
             echo "desktop=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Mobile: the Expo app, the packages it imports, its dependencies and
+          # this workflow file. Path-filtered on pushes too: the simulator build
+          # takes minutes and nothing outside these paths reaches the app.
+          if grep -qE '^(apps/mobile/|packages/client/|packages/shared/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
           fi
 
           # Docker: the image builds the Rust CLI, the hub and the UI, so it
@@ -1207,6 +1225,7 @@ jobs:
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
+          pnpm --filter @band-app/client test
           pnpm --filter @band-app/shared test
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
@@ -1237,6 +1256,37 @@ jobs:
         with:
           path: apps/cli/target
           key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
+  # Builds apps/mobile for the iOS simulator (expo prebuild, pod install,
+  # xcodebuild Release with the JS bundle embedded). The Maestro flows in
+  # apps/mobile/e2e are not run here yet; agents and people run them locally
+  # with the mobile-verify skill.
+  mobile-ios:
+    name: Mobile iOS simulator build
+    runs-on: macos-latest
+    timeout-minutes: 45
+    needs: macos-changes
+    if: needs.macos-changes.outputs.mobile == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build for the iOS simulator
+        run: node apps/mobile/scripts/build-ios-sim.mjs Release
 
   # Drives the real Electron app with Playwright's `_electron`: the bundled UI
   # over app://, the local hub it spawns, a remote hub on another port, the hub

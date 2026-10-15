@@ -1,0 +1,52 @@
+# t3 (S4): a chat in a background tab asks for permission; its dot shows needs-attention and a chip
+# above the composer names it; tapping the chip shows the tab with the pinned request.
+appId: app.getband.mobile
+name: t3 a background tab that needs attention
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-tabs
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+    timeout: 15000
+- runFlow:
+    file: subflows/select-tab.yaml
+    env:
+      CHAT: chat_tabs_1
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: ask?wt=gamma-tabs&chat=chat_tabs_3
+- extendedWaitUntil:
+    visible:
+      id: tabs__dot-chat_tabs_3-attention
+    timeout: 10000
+- assertNotVisible:
+    id: tabs__dot-chat_tabs_1-attention
+- takeScreenshot: t3-attention-dot
+# A chip above the composer names the tab that needs the user; tapping it opens that tab.
+- extendedWaitUntil:
+    visible:
+      id: worktree__chip-question
+      text: "Tests: question"
+    timeout: 10000
+- takeScreenshot: t3-question-chip
+- tapOn:
+    id: worktree__chip-question
+- assertVisible:
+    id: tabs__switcher
+    text: "Tests, .*3 of 4.*"
+- extendedWaitUntil:
+    visible:
+      text: "Waiting for permission"
+    timeout: 10000
+- assertVisible:
+    text: "Run the test suite"
+- takeScreenshot: t3-permission-request
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: halt?wt=gamma-tabs&chat=chat_tabs_3

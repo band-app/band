@@ -1,0 +1,15 @@
+# Shows the chat tab CHAT through the tab switcher sheet (the title pill opens it).
+appId: app.getband.mobile
+---
+- tapOn:
+    id: tabs__switcher
+- extendedWaitUntil:
+    visible:
+      id: tabs__sheet-tab-${CHAT}
+    timeout: 5000
+- tapOn:
+    id: tabs__sheet-tab-${CHAT}
+- extendedWaitUntil:
+    notVisible:
+      id: tabs__sheet
+    timeout: 5000

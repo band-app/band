@@ -1,3 +1,13 @@
+import {
+  type Choice,
+  type ElicitationEntry,
+  type ElicitationValue,
+  type Field,
+  fieldsOf,
+  type Step,
+  stepsOf,
+  toContent,
+} from "@band-app/client/elicitation";
 import { Button, cn } from "@band-app/ui";
 import { CheckIcon, ChevronLeft, ChevronRight, Loader2, PencilIcon, XIcon } from "lucide-react";
 import {
@@ -11,108 +21,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Entry } from "../chat/transcript";
 
-type ElicitationEntry = Extract<Entry, { kind: "elicitation" }>;
-type Value = string | number | boolean | string[];
-
-interface Choice {
-  value: string;
-  title: string;
-  description?: string;
-}
-
-interface Field {
-  key: string;
-  title?: string;
-  description?: string;
-  kind: "single" | "multi" | "text" | "number" | "boolean";
-  choices: Choice[];
-  /** Set on a free-text field that is another field's "Other" box: the key
-   *  of the question it belongs to. */
-  customFor?: string;
-}
-
-/** One screen of the card: a question, plus its free-text box if it has one. */
-interface Step {
-  field: Field;
-  note?: Field;
-}
-
-/** `_meta` marker the Claude Code and Codex ACP adapters put on the per-question
- *  free-text field of an AskUserQuestion form. */
-const CUSTOM_ANSWER_META_KEY = "_askUserQuestionCustomAnswer";
-
-/** The choices of an enum schema: titled `oneOf` / `anyOf`, or bare `enum`. */
-function choicesOf(schema: Record<string, unknown> | undefined): Choice[] {
-  if (!schema) return [];
-  const titled = (schema.oneOf ?? schema.anyOf) as
-    | { const: string; title?: string; description?: string | null }[]
-    | undefined;
-  if (Array.isArray(titled)) {
-    return titled.map((o) => ({
-      value: o.const,
-      title: o.title ?? o.const,
-      description: o.description ?? undefined,
-    }));
-  }
-  const plain = schema.enum as string[] | undefined;
-  return Array.isArray(plain) ? plain.map((v) => ({ value: v, title: v })) : [];
-}
-
-function customFor(prop: Record<string, unknown>): string | undefined {
-  const meta = prop._meta as Record<string, { questionId?: unknown }> | undefined;
-  const questionId = meta?.[CUSTOM_ANSWER_META_KEY]?.questionId;
-  return typeof questionId === "string" ? questionId : undefined;
-}
-
-function fieldsOf(entry: ElicitationEntry): Field[] {
-  if (entry.request.mode !== "form") return [];
-  const schema = (
-    entry.request as { requestedSchema?: { properties?: Record<string, Record<string, unknown>> } }
-  ).requestedSchema;
-  return Object.entries(schema?.properties ?? {}).map(([key, prop]) => {
-    const base = {
-      key,
-      title: (prop.title as string | undefined) ?? undefined,
-      description: (prop.description as string | undefined) ?? undefined,
-    };
-    if (prop.type === "array") {
-      return { ...base, kind: "multi", choices: choicesOf(prop.items as Record<string, unknown>) };
-    }
-    if (prop.type === "boolean") return { ...base, kind: "boolean", choices: [] };
-    if (prop.type === "number" || prop.type === "integer")
-      return { ...base, kind: "number", choices: [] };
-    const choices = choicesOf(prop);
-    if (choices.length > 0) return { ...base, kind: "single", choices };
-    return { ...base, kind: "text", choices: [], customFor: customFor(prop) };
-  });
-}
-
-/** Every field is a step, except a free-text box that belongs to a question
- *  in the form: that one renders under its question. */
-function stepsOf(fields: Field[]): Step[] {
-  const keys = new Set(fields.map((f) => f.key));
-  const steps: Step[] = [];
-  for (const field of fields) {
-    if (field.customFor && keys.has(field.customFor)) continue;
-    const note = fields.find((f) => f.customFor === field.key);
-    steps.push({ field, note });
-  }
-  return steps;
-}
-
-/** The answer content: number fields parsed, unparseable ones dropped. */
-function toContent(fields: Field[], values: Record<string, Value>): Record<string, Value> {
-  const content: Record<string, Value> = { ...values };
-  for (const field of fields) {
-    if (field.kind !== "number" || typeof content[field.key] !== "string") continue;
-    const n = Number(content[field.key]);
-    if (Number.isFinite(n)) content[field.key] = n;
-    else delete content[field.key];
-  }
-  return content;
-}
+type Value = ElicitationValue;
 
 /**
  * An ACP form elicitation: the agent needs structured input from the user,

@@ -1,0 +1,21 @@
+# Opens a worktree from the home screen. WT is the worktree id. The floating composer and the
+# header cover the ends of the list, so the flow searches for the id instead of scrolling to it.
+appId: app.getband.mobile
+---
+- runFlow:
+    when:
+      notVisible:
+        id: home__search
+    commands:
+      - tapOn:
+          id: home__search-toggle
+- tapOn:
+    id: home__search
+- eraseText: 60
+- inputText: ${WT}
+- tapOn:
+    id: home__worktree-${WT}
+- extendedWaitUntil:
+    visible:
+      id: worktree__screen
+    timeout: 10000

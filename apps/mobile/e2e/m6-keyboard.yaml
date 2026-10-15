@@ -1,0 +1,21 @@
+# S6: with the keyboard open, the composer and the last message are both on screen.
+appId: app.getband.mobile
+name: S6 keyboard keeps the composer and the last message visible
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-main
+- extendedWaitUntil:
+    visible:
+      text: "Done. The tests pass; the README is next."
+    timeout: 15000
+- takeScreenshot: m6-before-keyboard
+- tapOn:
+    id: composer__input
+- inputText: "draft that stays"
+- assertVisible:
+    id: composer__input
+- assertVisible: "Done. The tests pass; the README is next."
+- takeScreenshot: m6-keyboard-open

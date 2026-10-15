@@ -1,0 +1,108 @@
+# S1: a chat with history renders every item natively: the prompt with its image, thinking,
+# markdown (heading, list, table, file links, code with highlighting, a mermaid fence), a folded
+# run of tool calls with a file edit as a diff and a command, the plan, and the turn's end.
+appId: app.getband.mobile
+name: S1 chat transcript renders the seeded history
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-main
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- assertVisible:
+    text: "Done. The tests pass; the README is next."
+- assertVisible:
+    id: chat__plan
+- assertVisible:
+    text: "Update the README"
+- takeScreenshot: s1-bottom
+# The folded tool calls: open the group, then the edit (a diff) and the command.
+- tapOn:
+    id: tool-group__summary
+# Opening a call at the bottom grows the list downward without scrolling, so scroll to it.
+- tapOn:
+    text: "Edit src/parser.ts.*"
+- scrollUntilVisible:
+    element:
+      id: tool-call__diff
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Run the tests.*"
+    timeout: 10000
+# The list ends above the plan card and the composer, but Maestro counts a row below that edge as
+# visible. Scroll once more so the row is inside the list before tapping it.
+- scroll
+- waitForAnimationToEnd
+- tapOn:
+    text: "Run the tests.*"
+- scrollUntilVisible:
+    element:
+      id: tool-call__command
+    timeout: 10000
+- takeScreenshot: s1-tools-open
+- scrollUntilVisible:
+    element:
+      text: "graph TD.*"
+    direction: UP
+    speed: 15
+    timeout: 30000
+- assertVisible:
+    text: "diagram"
+- scrollUntilVisible:
+    element:
+      # The block's language label: its wide code line is clipped by the sideways scroll, so
+      # Maestro never counts the line itself as fully visible.
+      id: chat__code-lang
+      text: "ts"
+    direction: UP
+    speed: 15
+    timeout: 30000
+- takeScreenshot: s1-code
+- scrollUntilVisible:
+    element:
+      text: "Plan for the parser fix"
+    direction: UP
+    speed: 15
+    timeout: 30000
+- assertVisible:
+    text: "parse as base 10"
+- takeScreenshot: s1-markdown
+# The wide table scrolls sideways: a drag on it shows the last column, and does not change tabs.
+- swipe:
+    from:
+      id: chat__table
+    direction: LEFT
+    duration: 600
+- assertVisible:
+    text: "Readers learn the radix is always ten"
+- takeScreenshot: s1-table-scrolled
+# A file path opens the placeholder for the file viewer.
+# A link inside a paragraph is its own element on iOS, named by its text. Maestro counts text
+# clipped under the headers above the list as visible, so the scroll above can stop with the
+# heading and this link hidden there; a short swipe brings them into the middle of the list.
+- swipe:
+    start: 50%, 45%
+    end: 50%, 70%
+    duration: 600
+- tapOn:
+    text: "src/parser\\.ts:12"
+- assertVisible:
+    text: ".*file viewer comes in a later version.*"
+- takeScreenshot: s1-file-link
+- tapOn:
+    text: OK
+- scrollUntilVisible:
+    element:
+      id: chat__image
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: chat__thought
+- assertVisible:
+    text: ".*Read it, patch it, run the tests.*"
+- takeScreenshot: s1-top

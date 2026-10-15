@@ -8,8 +8,8 @@
  * Pure, like `transcript.ts`: the renderer calls these on every render.
  */
 
-import type { ToolKind } from "@agentclientprotocol/sdk";
-import type { Entry, ToolEntry } from "./transcript";
+import type { ToolCallContent, ToolKind } from "@agentclientprotocol/sdk";
+import type { Entry, ToolEntry } from "./transcript.ts";
 
 /** One item in an assistant message: an entry on its own, or a run of
  *  tool calls (with any thinking between them) shown as one group. */
@@ -269,4 +269,42 @@ export function shellRun(entry: ToolEntry): ShellRun | null {
     output = output.slice(exitLine[0].length);
   }
   return { command, exitCode, output: output.trimEnd() };
+}
+
+/** The exit code a shell row shows: any code when the call failed, else only a non-zero one. */
+export function shownExitCode(run: ShellRun, failed: boolean): number | undefined {
+  return run.exitCode !== undefined && (failed || run.exitCode !== 0) ? run.exitCode : undefined;
+}
+
+export type DiffContent = Extract<ToolCallContent, { type: "diff" }>;
+
+export interface ToolDetails {
+  /** File edits, as old and new text. */
+  diffs: DiffContent[];
+  texts: string[];
+  /** Plans and thinking come back as prose to render as markdown; other text is raw output. */
+  prose: boolean;
+}
+
+/** What a call that isn't a shell command reported: file edits and text. */
+export function toolDetails(entry: ToolEntry): ToolDetails {
+  return {
+    diffs: entry.content.filter((c): c is DiffContent => c.type === "diff"),
+    texts: entry.content.flatMap((c) =>
+      c.type === "content" && c.content.type === "text" ? [c.content.text] : [],
+    ),
+    prose: entry.toolKind === "switch_mode" || entry.toolKind === "think",
+  };
+}
+
+/** Whether expanding the call shows anything. */
+export function hasToolDetails(entry: ToolEntry): boolean {
+  return (
+    entry.toolKind === "execute" ||
+    entry.content.some(
+      (c) => c.type === "diff" || (c.type === "content" && c.content.type === "text"),
+    ) ||
+    entry.rawInput !== undefined ||
+    entry.rawOutput !== undefined
+  );
 }

@@ -1,0 +1,36 @@
+# S3: after a minute in the background, the list shows what happened meanwhile.
+appId: app.getband.mobile
+name: S3 statuses are current after the app returns
+---
+- runFlow: subflows/pair-link.yaml
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-feat-mobile
+      text: ".*idle.*"
+    timeout: 20000
+- pressKey: home
+# The control server answers after 9 s; the call is repeated because Maestro's HTTP client
+# gives up on a slower answer.
+- repeat:
+    times: 7
+    commands:
+      - runScript:
+          file: scripts/hub-control.js
+          env:
+            ACTION: sleep?ms=9000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: work?wt=alpha-feat-mobile
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-feat-mobile
+      text: ".*working.*"
+    timeout: 10000
+- takeScreenshot: s3-current-after-return
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: halt?wt=alpha-feat-mobile

@@ -10,6 +10,7 @@
  * modified. The `::highlight(chat-find)` styles live in `globals.css`.
  */
 
+import type { ChatMessage } from "@band-app/client/transcript";
 import {
   type KeyboardEvent,
   type RefObject,
@@ -21,7 +22,6 @@ import {
   useState,
 } from "react";
 import { isMacPlatform, type SearchBarHandle, type SearchOptions } from "@/dashboard";
-import type { ChatMessage } from "./transcript";
 import type { VirtualizedMessageListHandle } from "./VirtualizedMessageList";
 
 /** Marks the rendered text a find searches: a user message's text and each

@@ -1028,7 +1028,7 @@ export class RunnerService {
     repos: string[] = [],
     handle: string | null = null,
   ): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = {};
+    const env = {} as NodeJS.ProcessEnv;
     for (const name of PASSTHROUGH_ENV) {
       const v = process.env[name];
       if (v !== undefined) env[name] = v;

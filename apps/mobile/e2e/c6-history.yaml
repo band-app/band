@@ -1,0 +1,41 @@
+# Scroll-back: the hub sends the last 20 turns when a chat opens. Reaching the top loads the
+# older ones, and the list keeps its place while they arrive instead of jumping.
+appId: app.getband.mobile
+name: Older turns load on scroll-back and the list keeps its place
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-history
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+# Inside the list: the chat's tab is labelled with its first prompt, "turn 01: say done".
+- assertNotVisible:
+    text: "turn 01: say done"
+    childOf:
+      id: chat__list
+# Turn 05 is the oldest the hub sent; scrolling to it reaches the top of the first page.
+- scrollUntilVisible:
+    element:
+      text: "turn 05: say done"
+    direction: UP
+    timeout: 30000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=2000
+# The older page arrived above it without moving it off screen.
+- assertVisible:
+    text: "turn 05: say done"
+- takeScreenshot: c6-older-loaded
+- scrollUntilVisible:
+    element:
+      text: "turn 01: say done"
+      childOf:
+        id: chat__list
+    direction: UP
+    timeout: 20000
+- takeScreenshot: c6-first-turn

@@ -47,6 +47,10 @@ The non-negotiables for any new frontend test:
 
 Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/WorktreePage.ts` as the model — they follow the doctrine end-to-end. Run frontend tests with `pnpm --filter @band-app/web test:e2e`; backend integration tests with `pnpm --filter @band-app/server test`.
 
+### Mobile app (apps/mobile)
+
+`apps/mobile` (`@band-app/mobile`) is the Expo iOS app. Its unit tests are `node:test` over the pure modules (`pnpm --filter @band-app/mobile test`), and `pnpm --filter @band-app/mobile typecheck` runs tsc. To verify a mobile change end to end, follow the `mobile-verify` skill (`.claude/skills/mobile-verify/SKILL.md`): it starts a throwaway hub, builds and installs the app on an iOS simulator, runs the Maestro flows in `apps/mobile/e2e/` and saves screenshots for `/am-verify`.
+
 ### Running the hub suite locally
 
 `pnpm install`, then `pnpm --filter @band-app/server test`. The `pretest` script builds the web app and the hub bundle first. Use Node 24 (`.nvmrc`); the default Node on some machines is newer and breaks other suites.

@@ -1,4 +1,14 @@
 import {
+  type CenterTab,
+  type CenterTabs,
+  centerTabsKey,
+  diffCenterTabs,
+  keepHiddenTabs,
+  parseCenterTabs,
+  withLocalMembership,
+} from "@band-app/client/center-tabs";
+import { chatTabLabel } from "@band-app/client/chat-tab-label";
+import {
   Button,
   ContextMenu,
   ContextMenuContent,
@@ -121,18 +131,7 @@ import {
   type OpenPaneDetail,
   PaneActivations,
 } from "../lib/agent-pane-events";
-import {
-  type CenterTab,
-  type CenterTabs,
-  centerTabsFromApi,
-  centerTabsKey,
-  diffCenterTabs,
-  keepHiddenTabs,
-  parseCenterTabs,
-  readCenterTabs,
-  withLocalMembership,
-  writeCenterTabs,
-} from "../lib/center-tabs";
+import { centerTabsFromApi, readCenterTabs, writeCenterTabs } from "../lib/center-tabs";
 import { clientStorage, hydrateWorktree, subscribeClientState } from "../lib/client-state";
 import { writeClipboardText } from "../lib/clipboard";
 import { announceIfMoved, promptOnHostOffline } from "../lib/continue-prompt";
@@ -848,9 +847,20 @@ function ChatLeafContent({
   setTitleRef.current = setTitle;
   useEffect(() => {
     if (!state.sessionQueryDone) return;
-    const title = state.activeSessionSummary || state.agentLabel || state.codingAgentId || "Chat";
+    const title = chatTabLabel({
+      name: state.chatName,
+      summary: state.activeSessionSummary,
+      agentLabel: state.agentLabel,
+      agentId: state.codingAgentId,
+    });
     setTitleRef.current(title);
-  }, [state.sessionQueryDone, state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
+  }, [
+    state.sessionQueryDone,
+    state.chatName,
+    state.activeSessionSummary,
+    state.agentLabel,
+    state.codingAgentId,
+  ]);
 
   return (
     <div

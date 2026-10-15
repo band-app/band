@@ -274,6 +274,11 @@ export class ChatPanePage {
     });
   }
 
+  /** The center tab of one chat; its text is the tab's title. */
+  chatTab(chatId: string): Locator {
+    return this.page.getByTestId(`center-chat-tab--${chatId}`).filter({ visible: true });
+  }
+
   /** Navigate to the worktree's chat view. The only place URLs are
    *  constructed in this page object. */
   async goto(worktreeId: string): Promise<void> {

@@ -49,6 +49,8 @@ export interface ChatPaneState {
   onSwitchSession: (sessionId: string | undefined, summary?: string) => Promise<void>;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
+  /** The name a user gave the chat (`chats.update { name }`). Used for tab titles. */
+  chatName: string | undefined;
   /** Key that increments on session switch to force ChatView remount. */
   paneKey: number;
 }
@@ -258,6 +260,7 @@ export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneSt
     onSessionTitle,
     onSwitchSession,
     activeSessionSummary,
+    chatName: chatQuery.data?.chat?.name,
     paneKey,
   };
 }

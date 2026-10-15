@@ -3,9 +3,9 @@
 //
 // Pure helpers (no React / no DOM) for deciding whether an arbitrary string
 // looks like a file path worth turning into a clickable link. Shared by the
-// chat renderer (`ai-elements/file-link-components.tsx`) and the terminal link
-// provider (`terminal-file-links.ts`) so both surfaces agree on what counts as
-// a file reference. Keep this module dependency-light so it can be unit-tested
+// web chat renderer (`ai-elements/file-link-components.tsx`), the web terminal
+// link provider (`terminal-file-links.ts`) and the mobile chat, so every
+// surface agrees on what counts as a file reference. Keep this module dependency-light so it can be unit-tested
 // in isolation.
 // ---------------------------------------------------------------------------
 
@@ -180,4 +180,40 @@ export function isFilePath(text: string): boolean {
   if (!hasSlash && !hasLineIndicator && !isKnownFilename) return false;
 
   return true;
+}
+
+/**
+ * Regex to match file paths with line indicators in plain text.
+ *
+ * Matches patterns like:
+ *   src/main.rs:42
+ *   app.tsx:10-20
+ *   components/Button.tsx:15:8
+ *   ./src/utils.ts:5
+ *   ../lib/index.js:100
+ *
+ * Requires a line indicator (`:number`) to avoid false positives in
+ * plain text. The path must contain a file extension.
+ */
+export const FILE_PATH_WITH_LINE_RE =
+  /(?:^|(?<=[\s(,[\]]))(?:\.{0,2}\/)?(?:[a-zA-Z0-9_@./-]*\/)?[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+:\d+(?:[-:]\d+)?(?=$|[\s),.\]!?;])/g;
+
+export interface FilePathMatch {
+  start: number;
+  end: number;
+  path: string;
+}
+
+/** The file paths with a line indicator in plain text, in order. */
+export function findFilePaths(text: string): FilePathMatch[] {
+  // Every match has `:<digit>`; most text has none, and the chat calls this per text token.
+  if (!/:\d/.test(text)) return [];
+  const re = new RegExp(FILE_PATH_WITH_LINE_RE.source, "g");
+  const found: FilePathMatch[] = [];
+  for (let match = re.exec(text); match !== null; match = re.exec(text)) {
+    if (isFilePath(match[0])) {
+      found.push({ start: match.index, end: match.index + match[0].length, path: match[0] });
+    }
+  }
+  return found;
 }
