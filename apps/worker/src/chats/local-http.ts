@@ -10,9 +10,10 @@
  * - `POST /api/chats/:chatId/stop`: stop the running turn.
  * - `POST /api/chats/:chatId/permission`, `.../elicitation`: answer a request.
  *
- * The caller has already checked the token. These routes check that the chat
- * is one this worker owns, in the worktree the token is for. A chat the
- * worker does not own answers 404, and the UI goes to the hub.
+ * The direct listener (`direct.ts`) has already checked the token. These
+ * routes check that the chat is one this worker owns, in the worktree the
+ * token is for. Only a chat the worker does not own answers 404, which tells
+ * the app to use the hub; an answer to a request that is gone is a 409.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -123,7 +124,7 @@ export async function handleChatRoute(
         const requestId = String(body.requestId ?? "");
         const optionId = typeof body.optionId === "string" ? body.optionId : null;
         const ok = owner.answerPermission(chatId, requestId, optionId);
-        return ok ? json(200, { ok: true }) : json(404, { error: "No such request" });
+        return ok ? json(200, { ok: true }) : json(409, { error: "No such request" });
       }
       case "elicitation": {
         const ok = owner.answerElicitation(
@@ -131,7 +132,7 @@ export async function handleChatRoute(
           String(body.requestId ?? ""),
           body.response as acp.CreateElicitationResponse,
         );
-        return ok ? json(200, { ok: true }) : json(404, { error: "No such request" });
+        return ok ? json(200, { ok: true }) : json(409, { error: "No such request" });
       }
     }
   } catch (err) {

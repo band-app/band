@@ -18,6 +18,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+import { ACP_STUB_AGENT_PATH } from "../e2e/helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -26,10 +27,11 @@ import {
   seedSettings,
   startServer,
 } from "../e2e/helpers/server";
+import { ChatPanePage } from "../e2e/pages/ChatPanePage";
 import { FileTreesPage } from "../e2e/pages/FileTreesPage";
 import { FileViewerPage } from "../e2e/pages/FileViewerPage";
 import { WorktreePage } from "../e2e/pages/WorktreePage";
-import { type LaunchedDesktop, launchDesktop } from "./helpers/desktop-app";
+import { isPackagedRun, type LaunchedDesktop, launchDesktop } from "./helpers/desktop-app";
 import { DesktopDashboardPage } from "./pages/DesktopDashboardPage";
 import { ThisComputerPage } from "./pages/ThisComputerPage";
 
@@ -158,7 +160,12 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   desktop = await launchDesktop({
     home,
     hubPort: localPort,
-    env: { BAND_LAUNCHCTL_BIN: FAKE_LAUNCHCTL, BAND_FAKE_LAUNCHD_DIR: join(home, "fake-launchd") },
+    env: {
+      BAND_LAUNCHCTL_BIN: FAKE_LAUNCHCTL,
+      BAND_FAKE_LAUNCHD_DIR: join(home, "fake-launchd"),
+      // The worker owns its chats and starts their agent: the scripted one, not a real Claude.
+      BAND_TEST_ACP_AGENT: ACP_STUB_AGENT_PATH,
+    },
   });
   // The tab strip below needs room: docked DevTools leave the page too narrow on the CI Mac.
   await desktop.closeDevTools();
@@ -241,6 +248,34 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   expect(hubCalls("worktree.getChanges")).toEqual([]);
   await worktreePage.selectRightPanelTab("explorer");
   expect(directCalls().every((u) => portOf(u) === portOf(directSockets()[0] as string))).toBe(true);
+
+  // Chat ownership S1: this Mac's worker runs the chat, and the message and its event stream go
+  // to the worker's port. The hub only gets the worker's copy. A packaged run has no stub agent.
+  if (!isPackagedRun()) {
+    const chatId = "direct-e2e-chat";
+    await hubCall("chats.create", { worktreeId, id: chatId, name: "Chat" });
+    const chat = new ChatPanePage(desktop.window, "app://placeholder", "");
+    await expect(async () => {
+      await worktreePage.activateTabInNarrowWindow("chat");
+      await chat.chatTab(chatId).click();
+      await expect(chat.promptInput).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    await chat.promptInput.fill("hello on this Mac");
+    await chat.submit();
+    await expect(chat.assistantMessage("hello on this Mac")).toBeVisible({ timeout: 60_000 });
+    const chatCalls = (route: string) =>
+      requests.filter((u) => new URL(u).pathname === `/api/chats/${chatId}/${route}`);
+    for (const route of ["messages", "events"]) {
+      expect(
+        chatCalls(route).some((u) => /^http:\/\/127\.0\.0\.1:\d+\//.test(u)),
+        route,
+      ).toBe(true);
+      expect(
+        chatCalls(route).filter((u) => portOf(u) === hubPort),
+        route,
+      ).toEqual([]);
+    }
+  }
 
   // Back to the terminal for the restart. The file tab is closed first: the shared tab list may
   // make an open file tab the active one again while the worker is away.
