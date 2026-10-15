@@ -1,0 +1,41 @@
+# S1: the agent asks for permission. The request is pinned above the composer with the tool, its
+# input and the options the agent sent; "Allow once" lets the turn continue.
+appId: app.getband.mobile
+name: S1 permission request, allow once
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-permit-allow
+- tapOn:
+    id: composer__input
+- inputText: "permit: run the tests"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      id: request__permission
+    timeout: 20000
+- assertVisible: ".*Run the test suite.*"
+- assertVisible: ".*command: pnpm test.*"
+- assertVisible:
+    id: request__option-allow_once
+- assertVisible:
+    id: request__option-allow_always
+- assertVisible:
+    id: request__option-reject_once
+- takeScreenshot: i1-permission-pinned
+- tapOn:
+    id: request__option-allow_once
+- extendedWaitUntil:
+    visible:
+      text: "Permission granted. Tests ran."
+    timeout: 20000
+- extendedWaitUntil:
+    notVisible:
+      id: request__permission
+    timeout: 10000
+# The transcript keeps what was answered.
+- assertVisible: "Permission: Allow once"
+- takeScreenshot: i1-permission-allowed

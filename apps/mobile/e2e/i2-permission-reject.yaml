@@ -1,0 +1,27 @@
+# S1: "Reject" stops the tool, and the turn continues the way the web's Reject does.
+appId: app.getband.mobile
+name: S1 permission request, reject
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-permit-reject
+- tapOn:
+    id: composer__input
+- inputText: "permit: run the tests"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      id: request__permission
+    timeout: 20000
+- tapOn:
+    id: request__option-reject_once
+- extendedWaitUntil:
+    visible:
+      text: "Stopped by user."
+    timeout: 20000
+- assertNotVisible: "Permission granted. Tests ran."
+- assertVisible: "Permission: Reject"
+- takeScreenshot: i2-permission-rejected

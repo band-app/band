@@ -19,7 +19,10 @@
 // not it holds any of these resources, as in orca.
 // ---------------------------------------------------------------------------
 
+import { getPowerState, subscribePowerState } from "./power-state";
 import {
+  coldParkDelayMs,
+  hotRetainMs,
   selectIdsBeyondHotRetain,
   TERMINAL_WORKTREE_COLD_PARK_DELAY_MS,
   TERMINAL_WORKTREE_HOT_RETAIN_LIMIT,
@@ -76,6 +79,21 @@ export function forgetMissingWorktrees(validWorktreeIds: ReadonlySet<string>): v
   if (changed) runColdParkPass();
 }
 
+// A move between AC and battery changes the retention times, so look again.
+let watchingPower = false;
+function watchPowerOnce(): void {
+  if (watchingPower || typeof window === "undefined") return;
+  watchingPower = true;
+  let wasOnBattery = getPowerState().onBattery;
+  subscribePowerState(() => {
+    const now = getPowerState().onBattery;
+    if (now === wasOnBattery) return;
+    wasOnBattery = now;
+    runColdParkPass();
+  });
+}
+watchPowerOnce();
+
 export function isWorktreeColdParked(worktreeId: string): boolean {
   return getState().cold.has(worktreeId);
 }
@@ -99,20 +117,20 @@ function runColdParkPass(): void {
   const nowMs = Date.now();
   let nextDeadline = Number.POSITIVE_INFINITY;
   const candidates: { id: string; hiddenSinceMs: number }[] = [];
+  const onBattery = getPowerState().onBattery;
+  const coldParkDelay = coldParkDelayMs(TERMINAL_WORKTREE_COLD_PARK_DELAY_MS, onBattery);
+  const hotRetain = hotRetainMs(TERMINAL_WORKTREE_HOT_RETAIN_MS, onBattery);
   for (const [id, hiddenSinceMs] of state.hiddenSince) {
-    for (const deadline of [
-      hiddenSinceMs + TERMINAL_WORKTREE_COLD_PARK_DELAY_MS,
-      hiddenSinceMs + TERMINAL_WORKTREE_HOT_RETAIN_MS,
-    ]) {
+    for (const deadline of [hiddenSinceMs + coldParkDelay, hiddenSinceMs + hotRetain]) {
       if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
     }
-    if (nowMs - hiddenSinceMs >= TERMINAL_WORKTREE_COLD_PARK_DELAY_MS) {
+    if (nowMs - hiddenSinceMs >= coldParkDelay) {
       candidates.push({ id, hiddenSinceMs });
     }
   }
   const cold = selectIdsBeyondHotRetain(candidates, {
     nowMs,
-    hotRetainMs: TERMINAL_WORKTREE_HOT_RETAIN_MS,
+    hotRetainMs: hotRetain,
     hotRetainLimit: TERMINAL_WORKTREE_HOT_RETAIN_LIMIT,
   });
   if (nextDeadline !== Number.POSITIVE_INFINITY) {

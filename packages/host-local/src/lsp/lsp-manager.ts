@@ -136,7 +136,7 @@ async function getOrSpawnServer(
     env: {
       ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v != null)),
       PATH: combinedPath,
-    },
+    } as unknown as NodeJS.ProcessEnv,
   });
 
   const session: LspServerSession = { process: child, subscribers: new Set() };

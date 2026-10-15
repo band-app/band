@@ -73,6 +73,7 @@
         "@xterm/addon-serialize",
         "@xterm/addon-unicode11",
         "@xterm/headless",
+        "fzf",
         "node-pty",
         "pino",
         "typescript-language-server",
@@ -92,6 +93,11 @@
       "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"],
       "ignoreBinaries": ["tsc", "electron", "electron-builder"],
       "ignoreDependencies": ["electron-builder"]
+    },
+    "apps/mobile": {
+      "entry": ["src/app/**/*.tsx", "scripts/*.mjs", "tests/**/*.test.ts"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs", "tests/**/*.ts"],
+      "ignoreDependencies": ["expo-updates", "expo-system-ui"]
     },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],
@@ -117,6 +123,10 @@
     "packages/plugin-api": {
       "entry": ["src/index.ts", "src/server.ts", "src/client.tsx"],
       "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/client": {
+      "entry": ["src/*.ts", "tests/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/shared": {
       "entry": ["src/*.ts"],

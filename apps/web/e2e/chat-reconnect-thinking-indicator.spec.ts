@@ -3,7 +3,7 @@
  * agent has finished, until a full page reload.
  *
  * Failure mechanism (see the reducer's `subscription-opened` case in
- * `components/chat/transcript.ts`):
+ * `packages/client/src/transcript.ts`):
  *   1. A turn is running → the client reducer holds `taskRunning: true`,
  *      status `streaming`, so the thinking indicator + Stop button render.
  *   2. The turn's `turn-ended` never reaches the client: the server

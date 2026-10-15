@@ -1,0 +1,24 @@
+{
+  "name": "@band-app/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-agnostic hub client logic shared by the web UI and the mobile app",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@band-app/shared": "workspace:^",
+    "@trpc/client": "^11.12.0"
+  },
+  "devDependencies": {
+    "@band-app/server": "workspace:^",
+    "@types/node": "^22.19.13",
+    "typescript": "^5.7.0"
+  }
+}

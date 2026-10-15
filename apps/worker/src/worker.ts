@@ -6,6 +6,7 @@ import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import {
   CAPABILITY_CHAT_OWNERSHIP,
+  CAPABILITY_DIRECT,
   type Channel,
   type LeaseRenewParams,
   type LifecycleIdleReply,
@@ -30,6 +31,7 @@ import { ChatStore } from "./chats/store.ts";
 import { CliCache } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
+import { registerDirectMethods } from "./direct.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { LeaseGuard } from "./lease.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
@@ -189,6 +191,8 @@ export class Worker {
           ...Object.entries(info.capabilities)
             .filter(([, on]) => on)
             .map(([name]) => name),
+          // The loopback listener for the desktop app on this machine (`direct.ts`).
+          CAPABILITY_DIRECT,
           ...(config.ownChats ? [CAPABILITY_CHAT_OWNERSHIP] : []),
         ],
         labels: config.labels,
@@ -239,6 +243,7 @@ export class Worker {
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     worker.disposers.push(registerRelayMethods(registrar, ctx));
+    worker.disposers.push(registerDirectMethods(registrar, ctx));
     // Every worker hands out its agents' session files: an ephemeral one when it sleeps, a static
     // one for the hub's checkpoints, so a restored chat resumes its session on another host.
     registerLifecycleMethods(registrar, ctx);

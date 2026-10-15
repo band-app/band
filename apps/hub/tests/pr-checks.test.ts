@@ -1,5 +1,6 @@
 /**
- * The review panel's backend: `reviews.forWorktree` and `reviews.merge`,
+ * The review panel's backend: `reviews.forWorktree`, `reviews.merge` and
+ * `reviews.rerunChecks`,
  * served by the bundled GitHub plugin through the plugin host.
  *
  * Real server, real git repos with a github.com `origin`, and a fake `gh`
@@ -90,6 +91,7 @@ const FAILING_BRANCH = "feat/gh-down";
 const DISCUSSION_BRANCH = "feat/discussion";
 const MERGE_BRANCH = "feat/merge-me";
 const MERGE_FAIL_BRANCH = "feat/merge-blocked";
+const RERUN_BRANCH = "feat/rerun";
 
 describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   let tmpHome: string;
@@ -111,6 +113,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const discussionWorktree = addWorktree(repo, tmpHome, DISCUSSION_BRANCH);
     mergeWorktree = addWorktree(repo, tmpHome, MERGE_BRANCH);
     const mergeFailWorktree = addWorktree(repo, tmpHome, MERGE_FAIL_BRANCH);
+    const rerunWorktree = addWorktree(repo, tmpHome, RERUN_BRANCH);
     const noRemote = createRepo(tmpHome, "local-only", null);
     const gitlab = createRepo(tmpHome, "on-gitlab", "https://gitlab.com/acme/widgets.git");
 
@@ -128,6 +131,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
             { name: DISCUSSION_BRANCH, branch: DISCUSSION_BRANCH, path: discussionWorktree },
             { name: MERGE_BRANCH, branch: MERGE_BRANCH, path: mergeWorktree },
             { name: MERGE_FAIL_BRANCH, branch: MERGE_FAIL_BRANCH, path: mergeFailWorktree },
+            { name: RERUN_BRANCH, branch: RERUN_BRANCH, path: rerunWorktree },
           ],
         },
         {
@@ -625,6 +629,111 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     expect(body.error.message).toBe(
       "GraphQL: Pull request is not mergeable: the base branch policy prohibits the merge.",
     );
+  });
+
+  it("marks only finished jobs of a workflow run as re-runnable", async () => {
+    stub.setReviewQuery(
+      FAKE_REPO,
+      RERUN_BRANCH,
+      reviewQueryData({
+        pullRequests: [
+          pullRequestNode({
+            number: 900,
+            contexts: [
+              checkRunNode({ id: 21, name: "Unit", workflow: "CI", runId: 700, rerunnable: true }),
+              checkRunNode({
+                id: 22,
+                name: "Build",
+                workflow: "CI",
+                runId: 700,
+                rerunnable: true,
+                status: "IN_PROGRESS",
+                conclusion: null,
+                completedAt: null,
+              }),
+              checkRunNode({ id: 23, name: "External app", workflow: null }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const data = await forWorktree(server, testWorktreeId(REPO, RERUN_BRANCH));
+
+    const checks = (
+      data as { checks: { checks: { name: string; state: string; rerun?: unknown }[] } }
+    ).checks.checks;
+    const byName = Object.fromEntries(checks.map((c) => [c.name, c]));
+    expect(byName.Unit.rerun).toEqual({ runId: "700", jobId: "21" });
+    // The panel hides the button for a running job; the data still names its run.
+    expect(byName.Build.state).toBe("running");
+    expect(byName["External app"].rerun).toBeUndefined();
+  });
+
+  it("re-runs one job, and failed jobs once per run", async () => {
+    const calls: GhInvocation[] = [];
+    stub.setRunRerun(700, { onRequest: (r) => calls.push(r) });
+    stub.setRunRerun(701, { onRequest: (r) => calls.push(r) });
+    const worktreeId = testWorktreeId(REPO, RERUN_BRANCH);
+
+    const one = await trpcMutate(
+      server.url,
+      "reviews.rerunChecks",
+      { worktreeId, targets: [{ runId: "700", jobId: "21" }] },
+      TOKEN,
+    );
+    expect(one.status).toBe(200);
+    expect(await trpcData(one)).toEqual({ ok: true });
+
+    const failed = await trpcMutate(
+      server.url,
+      "reviews.rerunChecks",
+      {
+        worktreeId,
+        targets: [
+          { runId: "700", failedOnly: true },
+          { runId: "701", failedOnly: true },
+        ],
+      },
+      TOKEN,
+    );
+    expect(failed.status).toBe(200);
+
+    expect(calls.map((c) => c.args)).toEqual([
+      ["run", "rerun", "700", "--job", "21", "--repo", "github.com/acme/widgets"],
+      ["run", "rerun", "700", "--failed", "--repo", "github.com/acme/widgets"],
+      ["run", "rerun", "701", "--failed", "--repo", "github.com/acme/widgets"],
+    ]);
+  });
+
+  it("returns gh's message when a re-run is refused", async () => {
+    stub.setRunRerun(702, {
+      stderr: "run 702 cannot be rerun; its workflow run is older than 30 days\n",
+    });
+
+    const res = await trpcMutate(
+      server.url,
+      "reviews.rerunChecks",
+      { worktreeId: testWorktreeId(REPO, RERUN_BRANCH), targets: [{ runId: "702", jobId: "9" }] },
+      TOKEN,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      "run 702 cannot be rerun; its workflow run is older than 30 days",
+    );
+  });
+
+  it("rejects a re-run that names neither a job nor the failed jobs", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "reviews.rerunChecks",
+      { worktreeId: testWorktreeId(REPO, RERUN_BRANCH), targets: [{ runId: "700" }] },
+      TOKEN,
+    );
+
+    expect(res.status).toBe(400);
   });
 
   it("refuses to merge a branch that has no open pull request", async () => {

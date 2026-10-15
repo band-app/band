@@ -10,10 +10,10 @@
  *   - the merge control: `pr-checks__merge` (with `data-merge-state`),
  *     `pr-checks__merge-menu`, `pr-checks__merge-method--<method>`,
  *     `pr-checks__merge-confirm-button`;
- *   - the failing banner `pr-checks__failing-banner` with `pr-checks__fix`;
+ *   - the failing banner `pr-checks__failing-banner` with `pr-checks__fix` and `pr-checks__rerun-failed`;
  *   - the summary `pr-checks__summary-<passing|failing|pending>`;
  *   - one `pr-checks__check` row per check (`data-check-state`), with
- *     `pr-checks__check-name`, `-state`, `-link`, `-toggle` and `-details`
+ *     `pr-checks__check-name`, `-state`, `-link`, `-toggle`, `-rerun` (with `-rerun-error`) and `-details`
  *     (with `pr-checks__check-duration`);
  *   - the overflow menu `pr-checks__menu` (`pr-checks__menu-open`, `-copy`);
  *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
@@ -62,6 +62,8 @@ export class PrChecksPanelPage {
   readonly failingBanner: Locator;
   readonly failingCount: Locator;
   readonly fixButton: Locator;
+  /** The "Open" link in the banner once the fix agent has started. */
+  readonly openAgentLink: Locator;
   readonly summaryPassing: Locator;
   readonly summaryFailing: Locator;
   readonly summaryPending: Locator;
@@ -109,6 +111,7 @@ export class PrChecksPanelPage {
     this.failingBanner = page.getByTestId("pr-checks__failing-banner");
     this.failingCount = page.getByTestId("pr-checks__failing-count");
     this.fixButton = page.getByTestId("pr-checks__fix");
+    this.openAgentLink = page.getByTestId("pr-checks__open-agent");
     this.summaryPassing = page.getByTestId("pr-checks__summary-passing");
     this.summaryFailing = page.getByTestId("pr-checks__summary-failing");
     this.summaryPending = page.getByTestId("pr-checks__summary-pending");
@@ -243,9 +246,37 @@ export class PrChecksPanelPage {
     });
   }
 
+  /** The Re-run button on the check called `name`. */
+  rerunButton(name: string): Locator {
+    return this.check(name).getByTestId("pr-checks__check-rerun");
+  }
+
+  /** The message shown under a check whose re-run was refused. */
+  rerunError(name: string): Locator {
+    return this.check(name).getByTestId("pr-checks__check-rerun-error");
+  }
+
+  async rerunCheck(name: string): Promise<void> {
+    await test.step(`Re-run the ${name} check`, async () => {
+      await this.rerunButton(name).click();
+    });
+  }
+
+  async rerunFailed(): Promise<void> {
+    await test.step("Re-run every failed job", async () => {
+      await this.page.getByTestId("pr-checks__rerun-failed").click();
+    });
+  }
+
   async startFix(): Promise<void> {
     await test.step("Start an AI fix pass for the failing checks", async () => {
       await this.fixButton.click();
+    });
+  }
+
+  async openFixAgent(): Promise<void> {
+    await test.step("Open the fix agent's tab from the banner", async () => {
+      await this.openAgentLink.click();
     });
   }
 

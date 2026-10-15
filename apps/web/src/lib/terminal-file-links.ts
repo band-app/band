@@ -9,14 +9,13 @@
 //
 // Detection reuses `isFilePath` so the terminal and chat agree on what counts
 // as a file reference (known extension, or a slash/line-indicator for bare
-// names — see `file-path-detection.ts`). A permissive tokenizer first carves
+// names — see `@band-app/client/file-path-detection`). A permissive tokenizer first carves
 // the line into path-shaped candidates; `isFilePath` then accepts or rejects
 // each one, which is what keeps `http://host:5173` and `1.2.3` from linking.
 // ---------------------------------------------------------------------------
 
+import { isFilePath } from "@band-app/client/file-path-detection";
 import type { IBufferCell, IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
-
-import { isFilePath } from "./file-path-detection";
 
 /**
  * A path candidate found within a single line of terminal text.

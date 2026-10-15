@@ -17,6 +17,8 @@ interface CheckRunInput {
   status?: "QUEUED" | "IN_PROGRESS" | "COMPLETED";
   conclusion?: string | null;
   runId?: number;
+  /** Put the workflow run id on the check suite, so the plugin offers a re-run. */
+  rerunnable?: boolean;
   startedAt?: string | null;
   completedAt?: string | null;
   title?: string | null;
@@ -38,7 +40,12 @@ export function checkRunNode(input: CheckRunInput) {
     checkSuite:
       input.workflow === null
         ? { workflowRun: null }
-        : { workflowRun: { workflow: { name: input.workflow ?? "Example workflow" } } },
+        : {
+            workflowRun: {
+              ...(input.rerunnable ? { databaseId: runId } : {}),
+              workflow: { name: input.workflow ?? "Example workflow" },
+            },
+          },
   };
 }
 

@@ -184,7 +184,7 @@ export function buildOriginRows(
 /** The name a host tag shows. */
 export function hostLabel(hostId: string, hosts: HostInfoLite[]): string {
   if (hostId === LOCAL_HOST) return "This hub";
-  return hosts.find((h) => h.id === hostId)?.name?.trim() || hostId;
+  return hosts.find((h) => h.id === hostId)?.name?.trim() || "unknown host";
 }
 
 /** True when a repo has worktrees on more than one host. */

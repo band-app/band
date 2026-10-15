@@ -1,8 +1,16 @@
 import type { CheckRun, ChecksReport, ReviewInfo } from "@band-app/plugin-api";
 import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
-import { ChevronDown, ChevronRight, CircleX, ExternalLink, WandSparkles } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleX,
+  ExternalLink,
+  Loader,
+  RotateCw,
+  WandSparkles,
+} from "lucide-react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   CheckStateIcon,
   checkDuration,
@@ -42,6 +50,18 @@ function useNow(ticking: boolean): number {
   return now;
 }
 
+// While a re-run waits to show up on GitHub, ask for the checks this often.
+const RERUN_POLL_MS = 5000;
+
+/** A finished job of a workflow run is the only kind GitHub can run again. */
+function canRerun(check: CheckRun): boolean {
+  return !!check.rerun && check.state !== "running" && check.state !== "pending";
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** The failing banner with Fix, the summary row and the list of checks. */
 export function ChecksSection({
   worktreeId,
@@ -49,6 +69,7 @@ export function ChecksSection({
   review,
   checks,
   visible,
+  refetch,
 }: {
   worktreeId: string;
   branch: string;
@@ -56,12 +77,66 @@ export function ChecksSection({
   checks: ChecksReport;
   /** Whether the tab is on screen; the elapsed-time timer only runs then. */
   visible: boolean;
+  /** Asks for fresh checks; called every few seconds while a re-run is not yet listed. */
+  refetch: () => void;
 }) {
   const host = useClientPluginHost();
   const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
+  const [fixPaneId, setFixPaneId] = useState<string | null>(null);
   const [fixError, setFixError] = useState<string | null>(null);
+  // Check ids with a re-run request in flight, and ones GitHub accepted that the list does not show yet.
+  const [rerunning, setRerunning] = useState<ReadonlySet<string>>(new Set());
+  const [requeued, setRequeued] = useState<ReadonlySet<string>>(new Set());
+  const [rerunErrors, setRerunErrors] = useState<Readonly<Record<string, string>>>({});
+  const [rerunFailedError, setRerunFailedError] = useState<string | null>(null);
+
+  // A requeued check goes back to the list's own state once GitHub reports it running or drops the old job.
+  useEffect(() => {
+    if (requeued.size === 0) return;
+    const stale = new Set(
+      checks.checks.filter((c) => requeued.has(c.id) && canRerun(c)).map((c) => c.id),
+    );
+    if (stale.size !== requeued.size) setRequeued(stale);
+  }, [checks, requeued]);
+
+  const waiting = requeued.size > 0;
+  useEffect(() => {
+    if (!waiting || !visible) return;
+    const timer = setInterval(refetch, RERUN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waiting, visible, refetch]);
+
+  const rerunChecks = host.rerunChecks;
+  const rerun = useCallback(
+    async (targets: CheckRun[], request: Parameters<typeof rerunChecks>[1]) => {
+      const ids = targets.map((c) => c.id);
+      setRerunning((prev) => new Set([...prev, ...ids]));
+      try {
+        await rerunChecks(worktreeId, request);
+        setRequeued((prev) => new Set([...prev, ...ids]));
+        setRerunErrors((prev) =>
+          Object.fromEntries(Object.entries(prev).filter(([k]) => !ids.includes(k))),
+        );
+      } finally {
+        setRerunning((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
+      }
+    },
+    [rerunChecks, worktreeId],
+  );
+
+  const rerunOne = useCallback(
+    async (check: CheckRun) => {
+      if (!check.rerun) return;
+      try {
+        await rerun([check], [{ runId: check.rerun.runId, jobId: check.rerun.jobId }]);
+      } catch (err) {
+        setRerunErrors((prev) => ({ ...prev, [check.id]: errorMessage(err) }));
+      }
+    },
+    [rerun],
+  );
 
   if (checks.checks.length === 0) {
     return (
@@ -76,11 +151,30 @@ export function ChecksSection({
   const counts = countChecks(checks.checks);
   const failing = checks.checks.filter((c) => c.state === "failure");
 
+  // One `--failed` request per workflow run, however many of its jobs failed.
+  const failedRuns = [
+    ...new Set(failing.flatMap((c) => (c.rerun && canRerun(c) ? [c.rerun.runId] : []))),
+  ];
+  const rerunnableFailing = failing.filter((c) => c.rerun && canRerun(c));
+  const rerunFailed = async () => {
+    setRerunFailedError(null);
+    try {
+      await rerun(
+        rerunnableFailing,
+        failedRuns.map((runId) => ({ runId, failedOnly: true })),
+      );
+    } catch (err) {
+      setRerunFailedError(errorMessage(err));
+    }
+  };
+  const rerunFailedBusy = rerunnableFailing.some((c) => rerunning.has(c.id));
+
   const startFix = async () => {
     setFixState("starting");
     setFixError(null);
     try {
-      await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      const started = await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      setFixPaneId(started.chatId ?? started.terminalId ?? null);
       setFixState("started");
     } catch (err) {
       setFixState("idle");
@@ -105,12 +199,42 @@ export function ChecksSection({
               {failing.length} failing {failing.length === 1 ? "check" : "checks"}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {fixError ??
+              {rerunFailedError ??
+                fixError ??
                 (fixState === "started"
-                  ? "An agent is working on the failures."
+                  ? "An agent is fixing these checks"
                   : "Inspect details or start an AI fix pass.")}
+              {!fixError && fixState === "started" && fixPaneId && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => host.openPane(worktreeId, fixPaneId)}
+                    data-testid="pr-checks__open-agent"
+                    className="underline hover:text-foreground"
+                  >
+                    Open
+                  </button>
+                </>
+              )}
             </p>
           </div>
+          {failedRuns.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void rerunFailed()}
+              disabled={rerunFailedBusy}
+              data-testid="pr-checks__rerun-failed"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+            >
+              {rerunFailedBusy ? (
+                <Loader className="size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RotateCw className="size-3.5" aria-hidden />
+              )}
+              Re-run failed
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void startFix()}
@@ -149,7 +273,10 @@ export function ChecksSection({
             {checks.checks.map((check) => (
               <CheckRow
                 key={check.id}
-                check={check}
+                check={requeued.has(check.id) ? asQueued(check) : check}
+                rerunning={rerunning.has(check.id)}
+                rerunError={rerunErrors[check.id] ?? null}
+                onRerun={rerunOne}
                 // Rows without a growing elapsed time keep a stable prop and skip the tick.
                 now={isCountingUp(check) ? now : 0}
               />
@@ -159,6 +286,11 @@ export function ChecksSection({
       </Collapsible>
     </div>
   );
+}
+
+/** The check as the list shows it right after a re-run was accepted. */
+function asQueued(check: CheckRun): CheckRun {
+  return { ...check, state: "pending", startedAt: null, completedAt: null, description: null };
 }
 
 function SummaryCount({
@@ -185,7 +317,19 @@ function SummaryCount({
   );
 }
 
-const CheckRow = memo(function CheckRow({ check, now }: { check: CheckRun; now: number }) {
+const CheckRow = memo(function CheckRow({
+  check,
+  now,
+  rerunning,
+  rerunError,
+  onRerun,
+}: {
+  check: CheckRun;
+  now: number;
+  rerunning: boolean;
+  rerunError: string | null;
+  onRerun: (check: CheckRun) => void;
+}) {
   const host = useClientPluginHost();
   const [open, setOpen] = useState(false);
   const duration = checkDuration(check) ?? checkElapsed(check, now);
@@ -224,6 +368,23 @@ const CheckRow = memo(function CheckRow({ check, now }: { check: CheckRun; now: 
               </span>
             </button>
           </CollapsibleTrigger>
+          {(canRerun(check) || rerunning) && (
+            <button
+              type="button"
+              aria-label={`Re-run ${check.name}`}
+              title="Re-run job"
+              disabled={rerunning}
+              onClick={() => onRerun(check)}
+              data-testid="pr-checks__check-rerun"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+            >
+              {rerunning ? (
+                <Loader className="size-3.5 animate-spin" />
+              ) : (
+                <RotateCw className="size-3.5" />
+              )}
+            </button>
+          )}
           {check.url && (
             <a
               href={check.url}
@@ -242,6 +403,15 @@ const CheckRow = memo(function CheckRow({ check, now }: { check: CheckRun; now: 
             </a>
           )}
         </div>
+        {rerunError && (
+          <p
+            className="px-3 pb-2 pl-[42px] text-[11px] text-red-500"
+            role="alert"
+            data-testid="pr-checks__check-rerun-error"
+          >
+            {rerunError}
+          </p>
+        )}
         <CollapsibleContent>
           <dl
             className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 pb-2.5 pl-[42px] text-[11px]"

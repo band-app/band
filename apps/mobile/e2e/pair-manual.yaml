@@ -1,0 +1,32 @@
+# Manual pairing with the hub URL and a valid token.
+appId: app.getband.mobile
+name: Manual pairing
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- takeScreenshot: manual-connect-screen
+- tapOn:
+    id: connect__manual
+- tapOn:
+    id: manual__url
+- inputText: ${HUB_URL}
+- tapOn:
+    id: manual__token
+- inputText: ${TOKEN}
+- tapOn:
+    id: manual__connect
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- takeScreenshot: manual-paired

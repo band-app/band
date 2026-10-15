@@ -27,7 +27,7 @@ import {
   WORKTREE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
-import { isRemoteLoopback, testWorktreeId } from "./helpers/test-host";
+import { isRemoteLoopback, LOOPBACK_HOST_ID, testWorktreeId } from "./helpers/test-host";
 
 let servers: ServerHandle[] = [];
 /** Homes a test seeded itself; removed even when the test fails. */
@@ -515,6 +515,51 @@ describe("chat over ACP", () => {
     const ended = events.find((e) => e.type === "turn-ended");
     expect(ended).toMatchObject({ type: "turn-ended" });
     expect(ended?.type === "turn-ended" && ended.error).toMatch(/Authentication required/);
+  });
+
+  it("sends a structured failure when the agent is killed with SIGKILL (S1)", async () => {
+    const server = await boot({
+      turns: [
+        {
+          match: "^kill",
+          steps: [{ stderr: "[session/query] sessionId=x resume=none" }, { kill: "SIGKILL" }],
+        },
+      ],
+    });
+    const events = await runTurn(server.url, newChatId(), "kill");
+    const ended = events.find((e) => e.type === "turn-ended");
+    expect(ended?.type === "turn-ended" && ended.failure).toMatchObject({
+      cause: "killed",
+      signal: "SIGKILL",
+      exitCode: null,
+      host: isRemoteLoopback ? LOOPBACK_HOST_ID : "local",
+      agent: expect.any(String),
+    });
+    expect(ended?.type === "turn-ended" && ended.failure?.stderrTail).toContain("[session/query]");
+    // Older clients still get the text.
+    expect(ended?.type === "turn-ended" && ended.error).toBeTruthy();
+  });
+
+  it("classifies a non-zero exit with the last stderr line (S2)", async () => {
+    const server = await boot({
+      turns: [
+        {
+          match: "^enospc",
+          steps: [
+            { stderr: "[session/create] sessionId=x phase=settings durationMs=4 totalMs=4" },
+            { stderr: "Error: ENOSPC: no space left on device" },
+            { exit: 1 },
+          ],
+        },
+      ],
+    });
+    const events = await runTurn(server.url, newChatId(), "enospc");
+    const ended = events.find((e) => e.type === "turn-ended");
+    expect(ended?.type === "turn-ended" && ended.failure).toMatchObject({
+      cause: "exit",
+      exitCode: 1,
+      detail: "Error: ENOSPC: no space left on device",
+    });
   });
 
   it("ends the turn with an error when the agent process dies mid-turn", async () => {

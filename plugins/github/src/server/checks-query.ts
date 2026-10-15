@@ -36,7 +36,7 @@ const CHECK_RUN_FIELDS = `
   startedAt
   completedAt
   title
-  checkSuite { workflowRun { workflow { name } } }`;
+  checkSuite { workflowRun { databaseId workflow { name } } }`;
 
 /**
  * One query for everything the review panel shows: the branch's newest pull
@@ -141,7 +141,9 @@ interface CheckRunNode {
   startedAt: string | null;
   completedAt: string | null;
   title: string | null;
-  checkSuite: { workflowRun: { workflow: { name: string } } | null } | null;
+  checkSuite: {
+    workflowRun: { databaseId: number | null; workflow: { name: string } } | null;
+  } | null;
 }
 
 interface StatusContextNode {
@@ -411,6 +413,7 @@ export function parseBranchChecks(data: ReviewQueryResponse): ChecksReport {
 }
 
 function fromCheckRun(node: CheckRunNode, workflowName: string | null): CheckRun {
+  const runId = node.checkSuite?.workflowRun?.databaseId;
   return {
     id: node.databaseId != null ? `check-run-${node.databaseId}` : `check-run-${node.name}`,
     name: node.name,
@@ -420,6 +423,10 @@ function fromCheckRun(node: CheckRunNode, workflowName: string | null): CheckRun
     startedAt: node.startedAt,
     completedAt: node.completedAt,
     description: node.title || null,
+    // Only a job of a workflow run can be run again; its check run id is the job id.
+    ...(runId != null && node.databaseId != null
+      ? { rerun: { runId: String(runId), jobId: String(node.databaseId) } }
+      : {}),
   };
 }
 

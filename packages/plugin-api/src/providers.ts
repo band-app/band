@@ -47,6 +47,20 @@ export interface CheckRun {
   completedAt: string | null;
   /** A one-line result, e.g. a check run's title or a commit status description. */
   description: string | null;
+  /**
+   * Set when the forge can run this job again: the CI run it belongs to and
+   * its own id. Absent for checks from external apps and commit statuses.
+   */
+  rerun?: { runId: string; jobId: string };
+}
+
+/** One re-run request: a single job of a run, or every failed job of it. */
+export interface RerunTarget {
+  runId: string;
+  /** The job to run again. Required unless `failedOnly` is set. */
+  jobId?: string;
+  /** Run again every failed job of the run instead of one job. */
+  failedOnly?: boolean;
 }
 
 /** The overall state of a set of checks. `none` means there are no checks. */
@@ -171,6 +185,8 @@ export interface ReviewProvider {
     ctx: ProviderContext,
   ): Promise<ReviewInfo | null>;
   merge?(repo: RepoInfo, number: number, method: MergeMethod, ctx: ProviderContext): Promise<void>;
+  /** Run CI jobs again. Rejects with the forge's message when it refuses. */
+  rerunChecks?(repo: RepoInfo, target: RerunTarget, ctx: ProviderContext): Promise<void>;
 }
 
 /** Checks for a ref that has no review, e.g. the default branch. */

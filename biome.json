@@ -70,12 +70,19 @@
       "!**/.astro",
       "!**/test-results",
       "!**/playwright-report",
-      "!**/apps/hub/src/server/infra/db/migrations"
+      "!**/apps/hub/src/server/infra/db/migrations",
+      "!**/apps/mobile/ios",
+      "!**/apps/mobile/build",
+      "!**/apps/mobile/e2e/artifacts"
     ]
   },
   "overrides": [
     {
-      "includes": ["apps/hub/src/server/services/**", "apps/hub/src/server/api/**"],
+      "includes": [
+        "apps/hub/src/server/services/**",
+        "apps/hub/src/server/api/**",
+        "packages/worktree-ops/src/**"
+      ],
       "linter": {
         "rules": {
           "style": {

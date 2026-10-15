@@ -1,3 +1,4 @@
+import { FILE_PATH_WITH_LINE_RE, isFilePath } from "@band-app/client/file-path-detection";
 import { cn } from "@band-app/ui";
 import type { ComponentProps, ReactNode } from "react";
 import { createContext, useCallback, useContext } from "react";
@@ -7,8 +8,6 @@ import {
   type ExtraProps,
   type UrlTransform,
 } from "streamdown";
-
-import { isFilePath } from "../../lib/file-path-detection";
 import { openExternalUrl } from "../../lib/open-external-url";
 
 // ---------------------------------------------------------------------------
@@ -227,22 +226,6 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
 // ---------------------------------------------------------------------------
 // Remark plugin — detect file paths with line indicators in plain text
 // ---------------------------------------------------------------------------
-
-/**
- * Regex to match file paths with line indicators in plain text.
- *
- * Matches patterns like:
- *   src/main.rs:42
- *   app.tsx:10-20
- *   components/Button.tsx:15:8
- *   ./src/utils.ts:5
- *   ../lib/index.js:100
- *
- * Requires a line indicator (`:number`) to avoid false positives in
- * plain text. The path must contain a file extension.
- */
-const FILE_PATH_WITH_LINE_RE =
-  /(?:^|(?<=[\s(,[\]]))(?:\.{0,2}\/)?(?:[a-zA-Z0-9_@./-]*\/)?[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+:\d+(?:[-:]\d+)?(?=$|[\s),.\]!?;])/g;
 
 /** Node types whose children should not be processed */
 const SKIP_PARENTS = new Set([

@@ -1,0 +1,98 @@
+# Two paired hubs: switch between them, then remove both and land on the pairing screen.
+# HUB_URL and HUB_URL_ALT are the same throwaway hub under two origins (127.0.0.1 and
+# localhost), so the app keeps them as two hubs.
+appId: app.getband.mobile
+name: Switch and remove hubs
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# A deep-link prompt left over from an earlier failed run stays on screen across launches.
+- tapOn:
+    text: Cancel
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- tapOn:
+    id: connect__manual
+- tapOn:
+    id: manual__url
+- inputText: ${HUB_URL}
+- tapOn:
+    id: manual__token
+- inputText: ${TOKEN}
+- tapOn:
+    id: manual__connect
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- tapOn:
+    id: home__hubs
+- tapOn:
+    id: hubs__add
+- tapOn:
+    id: connect__manual
+- tapOn:
+    id: manual__url
+- inputText: ${HUB_URL_ALT}
+- tapOn:
+    id: manual__token
+- inputText: ${TOKEN}
+- tapOn:
+    id: manual__connect
+- extendedWaitUntil:
+    visible:
+      id: home__hub-url
+      text: ${HUB_URL_ALT}
+    timeout: 20000
+- tapOn:
+    id: home__hubs
+- assertVisible:
+    id: hubs__row-${HUB_ID}
+- assertVisible:
+    id: hubs__row-${HUB_ID_ALT}
+- takeScreenshot: hubs-two-paired
+- tapOn:
+    id: hubs__use-${HUB_ID}
+- extendedWaitUntil:
+    visible:
+      id: home__hub-url
+      text: ${HUB_URL}
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: home__status
+      text: Connected
+    timeout: 20000
+- tapOn:
+    id: home__hubs
+- tapOn:
+    id: hubs__remove-${HUB_ID_ALT}
+# The alert's destructive button: the row buttons under the alert are also labelled Remove,
+# and only the alert's sits below its message.
+- tapOn:
+    text: Remove
+    below:
+      text: Band forgets this hub.*
+- extendedWaitUntil:
+    notVisible:
+      id: hubs__row-${HUB_ID_ALT}
+    timeout: 10000
+- assertVisible:
+    id: hubs__row-${HUB_ID}
+- takeScreenshot: hubs-one-removed
+- tapOn:
+    id: hubs__remove-${HUB_ID}
+- tapOn:
+    text: Remove
+    below:
+      text: Band forgets this hub.*
+- extendedWaitUntil:
+    visible:
+      id: connect__screen
+    timeout: 20000
+- takeScreenshot: hubs-all-removed

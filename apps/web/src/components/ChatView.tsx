@@ -1,7 +1,14 @@
 // The chat pane (issue #648): renders one chat's ACP event log. Messages,
 // session settings and requests all come from `useChatSubscription`, which
 // folds the server's event stream through `transcriptReducer`.
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import {
+  type Choice,
+  type SelectOption,
+  selectChoices,
+  sessionPickers,
+} from "@band-app/client/session-pickers";
+import { groupEntries } from "@band-app/client/tool-summary";
+import type { ChatMessage, Entry } from "@band-app/client/transcript";
 import type { SessionState } from "@band-app/shared/chat-events";
 import {
   cn,
@@ -55,12 +62,10 @@ import {
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
-import { withResolvedDefaults } from "./chat/claude-default-labels";
+import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
-import { groupEntries } from "./chat/tool-summary";
-import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatFind } from "./chat/use-chat-find";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import {
@@ -120,84 +125,6 @@ function ConversationSkeleton() {
       </Message>
     </output>
   );
-}
-
-interface Choice {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-type SelectOption = Extract<SessionConfigOption, { type: "select" }>;
-
-function selectChoices(option: SelectOption): Choice[] {
-  return option.options
-    .flatMap((o) => ("group" in o ? o.options : [o]))
-    .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
-}
-
-function findSelect(session: SessionState | null, category: "model" | "mode") {
-  return session?.configOptions.find(
-    (o): o is SelectOption => o.type === "select" && (o.category === category || o.id === category),
-  );
-}
-
-/**
- * The model and mode pickers read ACP session config options (category
- * `model` / `mode`). Agents without them expose the legacy model and mode
- * state instead; `__legacy_model` / `__legacy_mode` tell the server to use
- * `session/set_model` / `session/set_mode`.
- */
-function sessionPickers(session: SessionState | null) {
-  const modelOption = findSelect(session, "model");
-  const modeOption = findSelect(session, "mode");
-  const models: Choice[] = modelOption
-    ? selectChoices(modelOption)
-    : (session?.models?.availableModels ?? []).map((m) => ({
-        id: m.modelId,
-        name: m.name,
-        description: m.description ?? undefined,
-      }));
-  const modes: Choice[] = modeOption
-    ? selectChoices(modeOption)
-    : (session?.modes?.availableModes ?? []).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description ?? undefined,
-      }));
-  const rest = (session?.configOptions ?? []).filter(
-    (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
-  );
-  const fast = rest.find(isFastModeOption);
-  const effort = rest.find(
-    (o) => o !== fast && (o.category === "thought_level" || o.id === "effort"),
-  );
-  const model = modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId;
-  // Claude Code: name the "default" choices after what they run with.
-  const labeled = session?.resolvedDefaults
-    ? withResolvedDefaults(models, model, effort, session.resolvedDefaults)
-    : { models, effort, effortLabel: undefined };
-  return {
-    models: labeled.models,
-    model,
-    modelConfigId: modelOption?.id ?? "__legacy_model",
-    modes,
-    mode: modeOption ? String(modeOption.currentValue) : session?.modes?.currentModeId,
-    modeConfigId: modeOption?.id ?? "__legacy_mode",
-    effort: labeled.effort,
-    effortLabel: labeled.effortLabel,
-    fast,
-    // Everything else the agent lets the user choose.
-    others: rest.filter((o) => o !== effort && o !== fast),
-  };
-}
-
-/** Fast mode as an on/off select. Band doesn't advertise boolean config
- *  options, so agents (Claude Code's `fast`) fall back to this shape. */
-function isFastModeOption(option: SelectOption): boolean {
-  if (option.id !== "fast") return false;
-  const values = new Set(selectChoices(option).map((c) => c.id));
-  return values.size === 2 && values.has("off") && values.has("on");
 }
 
 interface ChatViewProps {
@@ -531,8 +458,8 @@ export function ChatView({
   // end, and the last row's thinking indicator must see that flip.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  const actionsRef = useRef({ answerPermission, answerElicitation });
-  actionsRef.current = { answerPermission, answerElicitation };
+  const actionsRef = useRef({ answerPermission, answerElicitation, send });
+  actionsRef.current = { answerPermission, answerElicitation, send };
 
   // Entrance animation only for messages appended at the end after the
   // first render; loaded history and prepended pages render instantly.
@@ -597,6 +524,23 @@ export function ChatView({
         );
       case "file":
         return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
+      case "failure": {
+        // Only the newest turn's card retries; an older card would resend a later prompt.
+        const all = messagesRef.current;
+        const last = all[all.length - 1];
+        const isNewest =
+          last?.role === "assistant" &&
+          last.entries.some((e) => e.kind === "failure" && e.id === entry.id);
+        const lastPrompt = [...all].reverse().find((m) => m.role === "user");
+        const retryText = isNewest && lastPrompt?.role === "user" ? lastPrompt.text : "";
+        return (
+          <AgentFailureCard
+            key={entry.id}
+            failure={entry.failure}
+            onRetry={retryText ? () => void actionsRef.current.send(retryText) : undefined}
+          />
+        );
+      }
       case "notice":
         return (
           <div

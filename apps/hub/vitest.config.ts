@@ -27,6 +27,9 @@ export default defineConfig({
     // the real Claude Code / Codex adapters (issue #648).
     env: {
       BAND_TEST_ACP_AGENT: resolve(import.meta.dirname, "tests/fixtures/acp-stub-agent.mjs"),
+      // Servers with no UI report no activity; keep their 5 s poll and a fixed power state.
+      BAND_ACTIVITY_DEFAULT: "active",
+      BAND_POWER_STATE: "ac",
       COREPACK_HOME: corepackHome,
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
     },

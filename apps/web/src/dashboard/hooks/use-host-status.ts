@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { usePollInterval } from "../../lib/poll-interval";
 import { trpc } from "../../lib/trpc-client";
 
 type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
@@ -10,7 +11,8 @@ export function useHostList(): HostList {
   const hosts = useQuery<HostList>({
     queryKey: HOSTS_KEY,
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
-    refetchInterval: 5_000,
+    // 30 s on battery, paused while the window is blurred or hidden.
+    refetchInterval: usePollInterval(5_000, 6),
   });
   return hosts.data ?? [];
 }

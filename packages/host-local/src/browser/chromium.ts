@@ -270,7 +270,7 @@ export class ChromiumManager {
       const proc = spawn(bin, args, {
         stdio: ["ignore", "ignore", logFd],
         detached: true,
-        env: { ...env, HOME: home },
+        env: { ...env, HOME: home } as unknown as NodeJS.ProcessEnv,
       });
       closeSync(logFd);
       const exited = new Promise<void>((resolve) => {

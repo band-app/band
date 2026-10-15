@@ -181,6 +181,21 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
     assert.equal(status.promptPending, false);
   });
 
+  test("localHostId names the installed worker only for the hub it serves", () => {
+    const w = worker();
+    assert.equal(w.localHostId(hubAccess()), null);
+    writeFileSync(
+      plistPath(home),
+      plist(["/usr/local/bin/node", "/x/band-worker.mjs"], {
+        BAND_HUB_URL: hubUrl,
+        BAND_WORKER_ID: "h-this-mac",
+      }),
+    );
+    assert.equal(w.localHostId(hubAccess()), "h-this-mac");
+    assert.equal(w.localHostId({ url: "https://other.example", token: TOKEN }), null);
+    assert.equal(w.localHostId(null), null);
+  });
+
   test("S5: a service installed from npm is detected and switched with its id, name and roots, the token only in the environment", async () => {
     writeFileSync(
       plistPath(home),

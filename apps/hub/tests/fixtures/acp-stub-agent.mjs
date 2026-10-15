@@ -67,6 +67,8 @@
  *   { "stop": "end_turn" | ... , "usage": { ...PromptResponse.usage } }
  *   { "fail": "message" }                   the prompt request errors
  *   { "exit": code }                        the process exits mid-turn
+ *   { "stderr": "text" }                    write text to the process's stderr
+ *   { "kill": "SIGKILL" }                   the process kills itself with a signal
  *   { "later": [steps], "afterMs": ms }     run steps `ms` after this point,
  *                                           outside any turn, the way an
  *                                           agent-started turn (a wakeup, a
@@ -374,6 +376,11 @@ async function runSteps(cx, sessionId, steps, signal, record) {
       throw new Cancelled();
     } else if (step.fail) {
       throw new acp.RequestError(-32603, step.fail);
+    } else if (step.stderr !== undefined) {
+      process.stderr.write(`${step.stderr}\n`);
+    } else if (step.kill) {
+      process.kill(process.pid, step.kill);
+      await new Promise(() => {});
     } else if (step.exit !== undefined) {
       process.exit(step.exit);
     } else if (step.stop) {

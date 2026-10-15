@@ -295,15 +295,12 @@ async function runTask(task: InternalTask): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn({ chatId, err: message }, "agent failed to start");
-    agentSessionService.broadcastTransient(chatId, {
-      type: "notice",
-      level: "error",
-      text: message,
-    });
+    // The card on the turn carries the error, so no separate notice.
     agentSessionService.broadcastTransient(chatId, {
       type: "turn-ended",
       taskId: task.id,
       error: message,
+      failure: agentSessionService.failureFor(chatId, err, task.startedAt),
     });
     finishTask(task, "failed");
     return;
@@ -409,6 +406,7 @@ async function runTask(task: InternalTask): Promise<void> {
       type: "turn-ended",
       taskId: task.id,
       error: message,
+      failure: agentSessionService.failureFor(chatId, err, task.startedAt),
       durationMs: Date.now() - task.startedAt,
     });
     finishTask(task, "failed");

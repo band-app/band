@@ -31,6 +31,7 @@ import type {
   StopReason,
   UsageUpdate,
 } from "@agentclientprotocol/sdk";
+import type { AgentFailure } from "./agent-failure";
 
 export type {
   AvailableCommand,
@@ -178,6 +179,9 @@ export interface TurnEndedEvent {
   taskId: string;
   stopReason?: StopReason;
   error?: string;
+  /** Structured form of `error`, set when the hub knows more than the text.
+   *  Older logs carry only `error`. */
+  failure?: AgentFailure;
   durationMs?: number;
   usage?: TurnUsage;
 }

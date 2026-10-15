@@ -90,7 +90,7 @@ function snapshotSweepMs(): number {
 }
 
 /** Matches any Band token, so a hook that echoes its environment still leaks nothing. */
-const TOKEN_PATTERN = /\b(?:bwb|bws|bdt|brt)_[A-Za-z0-9_-]{6,}/g;
+const TOKEN_PATTERN = /\b(?:bwb|bws|bdt|brt|bwd)_[A-Za-z0-9_-]{6,}/g;
 
 /** Environment names a hook receives from the hub's own environment. Nothing else is passed. */
 const PASSTHROUGH_ENV = [
@@ -1028,7 +1028,7 @@ export class RunnerService {
     repos: string[] = [],
     handle: string | null = null,
   ): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = {};
+    const env = {} as NodeJS.ProcessEnv;
     for (const name of PASSTHROUGH_ENV) {
       const v = process.env[name];
       if (v !== undefined) env[name] = v;

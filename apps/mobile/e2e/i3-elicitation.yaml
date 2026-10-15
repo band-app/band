@@ -1,0 +1,73 @@
+# S2: a form with every field type. Invalid input is rejected inline; the agent receives the values.
+appId: app.getband.mobile
+name: S2 elicitation form
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-form
+- tapOn:
+    id: composer__input
+- inputText: "form: ask me"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      id: request__elicitation
+    timeout: 20000
+- assertVisible: "1 of 5"
+- takeScreenshot: i3-form-choice
+# A single choice moves on by itself.
+- tapOn:
+    id: request__choice-blue
+- assertVisible: "2 of 5"
+# Pick any, then Next.
+- tapOn:
+    id: request__choice-ui
+- tapOn:
+    id: request__choice-api
+- takeScreenshot: i3-form-multi
+- tapOn:
+    id: request__next
+- assertVisible: "3 of 5"
+# A boolean.
+- tapOn:
+    id: request__switch
+- tapOn:
+    id: request__next
+- assertVisible: "4 of 5"
+# An integer between 1 and 5: 9 is refused under the field and the form stays on this question.
+- tapOn:
+    id: request__input
+- inputText: "9"
+- tapOn:
+    id: request__next
+- assertVisible:
+    id: request__field-error
+- assertVisible: "Must be at most 5"
+- assertVisible: "4 of 5"
+- takeScreenshot: i3-form-invalid
+- tapOn:
+    id: request__input
+- eraseText: 3
+- inputText: "3"
+- tapOn:
+    id: request__next
+- assertVisible: "5 of 5"
+# Free text, then Submit.
+- tapOn:
+    id: request__input
+- inputText: "tidy"
+- tapOn:
+    id: request__next
+- extendedWaitUntil:
+    visible:
+      text: ".*Answer:.*"
+    timeout: 20000
+- assertVisible: ".*\"color\":\"blue\".*"
+- assertVisible: ".*\"tags\":\\[\"ui\",\"api\"\\].*"
+- assertVisible: ".*\"agree\":true.*"
+- assertVisible: ".*\"count\":3.*"
+- assertVisible: ".*\"name\":\"tidy\".*"
+- takeScreenshot: i3-form-answered

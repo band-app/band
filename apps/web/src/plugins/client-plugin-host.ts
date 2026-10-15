@@ -1,12 +1,31 @@
+import type { WorktreeReview } from "@band-app/plugin-api";
 import type { ClientPluginHost } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
 import { queryClient } from "@/dashboard/query-client";
+import { AGENT_LAUNCHING_EVENT, OPEN_PANE_EVENT } from "../lib/agent-pane-events";
+import { markChatFresh, newChatId, newTerminalId } from "../lib/leaf-instance-ids";
 import { openExternalUrl } from "../lib/open-external-url";
 import { trpc } from "../lib/trpc-client";
 import { PluginMarkdown } from "./PluginMarkdown";
 
 const reviewQueryKey = (worktreeId: string) => ["worktreeReview", worktreeId] as const;
+
+/**
+ * A poller tick or another device learned a CI state for the worktree. An open
+ * Checks panel that still shows another state refetches; a closed one is only
+ * marked stale, so nothing is fetched while it is hidden. A state the panel
+ * already shows (its own load put it in the sidebar) costs no query.
+ */
+export function syncReviewWithCI(worktreeId: string, ciState: string): void {
+  const key = reviewQueryKey(worktreeId);
+  const cached = queryClient.getQueryData<WorktreeReview>(key);
+  if (cached?.status === "ok") {
+    const shown = cached.review?.state === "merged" ? "merged" : cached.checks.state;
+    if (shown === ciState) return;
+  }
+  void queryClient.invalidateQueries({ queryKey: key });
+}
 
 /** The core's side of the plugin client API, backed by tRPC and TanStack Query. */
 export const clientPluginHost: ClientPluginHost = {
@@ -40,10 +59,45 @@ export const clientPluginHost: ClientPluginHost = {
     }
   },
 
+  async rerunChecks(worktreeId, targets) {
+    try {
+      await trpc.reviews.rerunChecks.mutate({ worktreeId, targets });
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
+    }
+  },
+
   async startAgent(worktreeId, prompt) {
-    // The server announces the new chat or terminal, and the worktree's
-    // center dock adds its pane from that event.
-    await trpc.agentSessions.launch.mutate({ worktreeId, prompt, mode: readAgentMode() });
+    // The dock activates the tab of every id announced here, whether the
+    // server's `chat-created` / `terminal-created` event or this call's
+    // answer arrives first.
+    const chatId = newChatId();
+    const terminalId = newTerminalId();
+    const mode = readAgentMode();
+    if (mode !== "tui") markChatFresh(chatId);
+    window.dispatchEvent(
+      new CustomEvent(AGENT_LAUNCHING_EVENT, { detail: { worktreeId, chatId, terminalId } }),
+    );
+    const result = await trpc.agentSessions.launch.mutate({
+      worktreeId,
+      prompt,
+      mode,
+      chatId,
+      terminalId,
+    });
+    const paneId = result.mode === "tui" ? result.terminalId : result.chatId;
+    if (paneId) {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_PANE_EVENT, {
+          detail: { worktreeId, paneId, kind: result.mode === "tui" ? "term" : "chat" },
+        }),
+      );
+    }
+    return result.mode === "tui" ? { terminalId: result.terminalId } : { chatId: result.chatId };
+  },
+
+  openPane(worktreeId, paneId) {
+    window.dispatchEvent(new CustomEvent(OPEN_PANE_EVENT, { detail: { worktreeId, paneId } }));
   },
 
   openUrl(url) {

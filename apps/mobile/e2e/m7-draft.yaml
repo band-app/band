@@ -1,0 +1,35 @@
+# A draft survives leaving the screen and the app going to the background.
+appId: app.getband.mobile
+name: M7 draft per chat
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- tapOn:
+    id: composer__input
+- inputText: "unsent thought"
+- tapOn:
+    id: worktree__back
+- extendedWaitUntil:
+    visible:
+      id: home__screen
+    timeout: 10000
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- copyTextFrom:
+    id: composer__input
+- assertTrue: ${maestro.copiedText == 'unsent thought'}
+- takeScreenshot: m7-draft-restored
+- pressKey: Home
+- launchApp
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- copyTextFrom:
+    id: composer__input
+- assertTrue: ${maestro.copiedText == 'unsent thought'}

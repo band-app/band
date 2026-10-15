@@ -14,7 +14,7 @@
  * in `pages/PrChecksPanelPage.ts`.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
@@ -41,6 +41,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { ChatPanePage } from "./pages/ChatPanePage";
 import { PrChecksPanelPage } from "./pages/PrChecksPanelPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
@@ -56,6 +57,10 @@ const REFRESH_BRANCH = "feat/refresh";
 const GH_DOWN_BRANCH = "feat/gh-down";
 const RUNNING_BRANCH = "feat/running";
 const DISCUSSION_BRANCH = "feat/discussion";
+const RERUN_BRANCH = "feat/rerun";
+const RERUN_REFUSED_BRANCH = "feat/rerun-refused";
+const FIX_CHAT_BRANCH = "feat/fix-chat";
+const FIX_TERM_BRANCH = "feat/fix-term";
 const RUNNING_STARTED_AT = "2026-01-01T10:00:00Z";
 const MERGE_FAIL_MESSAGE =
   "GraphQL: Pull request is not mergeable: the base branch policy prohibits the merge.";
@@ -64,10 +69,68 @@ let server: ServerHandle;
 let stub: GhStub;
 let tmpHome: string;
 const merges: GhInvocation[] = [];
+const reruns: GhInvocation[] = [];
+// The re-run test swaps this once GitHub has started the job again.
+let rerunAnswer: unknown;
 // The refresh test swaps this between lookups.
 let refreshAnswer: unknown;
 // The elapsed-time test swaps this once the running check completes.
 let runningAnswer: unknown;
+
+const REFUSED_MESSAGE = "run 602 cannot be rerun; its workflow run is older than 30 days";
+
+/** Two failed jobs in run 600, one in run 601, a passing one, a running one and an external app's. */
+function rerunChecksData(opts: { unitStatus: "COMPLETED" | "IN_PROGRESS" }) {
+  const inProgress = opts.unitStatus === "IN_PROGRESS";
+  return reviewQueryData({
+    pullRequests: [
+      pullRequestNode({
+        number: 730,
+        contexts: [
+          checkRunNode({
+            // GitHub gives the restarted job a new id.
+            id: inProgress ? 161 : 61,
+            name: "Unit",
+            workflow: "CI",
+            runId: 600,
+            rerunnable: true,
+            status: opts.unitStatus,
+            conclusion: inProgress ? null : "FAILURE",
+            completedAt: inProgress ? null : undefined,
+          }),
+          checkRunNode({
+            id: 62,
+            name: "Lint",
+            workflow: "CI",
+            runId: 600,
+            rerunnable: true,
+            conclusion: "FAILURE",
+          }),
+          checkRunNode({
+            id: 63,
+            name: "E2E",
+            workflow: "CI",
+            runId: 601,
+            rerunnable: true,
+            conclusion: "TIMED_OUT",
+          }),
+          checkRunNode({ id: 64, name: "Build", workflow: "CI", runId: 600, rerunnable: true }),
+          checkRunNode({
+            id: 65,
+            name: "Deploy",
+            workflow: "CI",
+            runId: 600,
+            rerunnable: true,
+            status: "IN_PROGRESS",
+            conclusion: null,
+            completedAt: null,
+          }),
+          checkRunNode({ id: 66, name: "External app", workflow: null, conclusion: "FAILURE" }),
+        ],
+      }),
+    ],
+  });
+}
 
 function runningChecks(release: { completedAt: string | null }) {
   return reviewQueryData({
@@ -124,6 +187,10 @@ test.beforeAll(async () => {
     GH_DOWN_BRANCH,
     RUNNING_BRANCH,
     DISCUSSION_BRANCH,
+    RERUN_BRANCH,
+    RERUN_REFUSED_BRANCH,
+    FIX_CHAT_BRANCH,
+    FIX_TERM_BRANCH,
   ].map((branch) => {
     const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
     git(repo, ["worktree", "add", "-b", branch, path]);
@@ -162,7 +229,18 @@ test.beforeAll(async () => {
       },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  // The agent's CLI for a device in terminal mode: prints its prompt argument and stays running.
+  const agentCli = join(tmpHome, "stub-claude.sh");
+  writeFileSync(agentCli, '#!/bin/sh\necho "FIX_AGENT_STARTED $*"\nexec sleep 600\n');
+  chmodSync(agentCli, 0o755);
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code", command: agentCli },
+    ],
+    defaultCodingAgent: "claude-code",
+    useWebGLTerminalRenderer: false,
+  });
 
   stub = await ghStub.start();
   stub.setReviewQuery(
@@ -223,6 +301,31 @@ test.beforeAll(async () => {
       ],
     }),
   );
+  for (const [branch, number] of [
+    [FIX_CHAT_BRANCH, 720],
+    [FIX_TERM_BRANCH, 721],
+  ] as const) {
+    stub.setReviewQuery(
+      FAKE_REPO,
+      branch,
+      reviewQueryData({
+        pullRequests: [
+          pullRequestNode({
+            number,
+            contexts: [
+              checkRunNode({
+                id: number,
+                name: "Lint",
+                workflow: "CI",
+                runId: 900 + number,
+                conclusion: "FAILURE",
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+  }
   stub.setPrMerge(700, { onRequest: (r) => merges.push(r) });
   stub.setReviewQuery(
     FAKE_REPO,
@@ -312,6 +415,32 @@ test.beforeAll(async () => {
       ],
     }),
   );
+  rerunAnswer = rerunChecksData({ unitStatus: "COMPLETED" });
+  stub.setReviewQuery(FAKE_REPO, RERUN_BRANCH, () => rerunAnswer);
+  stub.setRunRerun(600, { onRequest: (r) => reruns.push(r) });
+  stub.setRunRerun(601, { onRequest: (r) => reruns.push(r) });
+  stub.setReviewQuery(
+    FAKE_REPO,
+    RERUN_REFUSED_BRANCH,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 731,
+          contexts: [
+            checkRunNode({
+              id: 81,
+              name: "Docs",
+              workflow: "CI",
+              runId: 602,
+              rerunnable: true,
+              conclusion: "FAILURE",
+            }),
+          ],
+        }),
+      ],
+    }),
+  );
+  stub.setRunRerun(602, { stderr: REFUSED_MESSAGE });
   stub.setReviewQueryError(FAKE_REPO, GH_DOWN_BRANCH, "HTTP 401: Bad credentials\n");
   stub.setReviewQuery(
     FAKE_REPO,
@@ -391,7 +520,9 @@ test("shows the pull request, its merge state and each check linking to its job"
 
 test("Fix starts a coding agent with the failing checks and their job links", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
   await panel.goto(toWorktreeId(REPO, PR_BRANCH, "local"));
+  await worktree.setDeviceAgentMode("gui");
   await expect(panel.failingBanner).toBeVisible();
 
   await panel.startFix();
@@ -402,6 +533,48 @@ test("Fix starts a coding agent with the failing checks and their job links", as
   expect(prompt).toContain("pull request #697");
   // Only the failing check goes to the agent.
   expect(prompt).not.toContain(jobUrl(500, 13));
+});
+
+test("Fix opens the agent as the active chat tab, and Open returns to it", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, FIX_CHAT_BRANCH, "local"));
+  await worktree.setDeviceAgentMode("gui");
+  await expect(worktree.chatTabs()).toHaveCount(0);
+
+  await panel.startFix();
+
+  await expect(worktree.chatTabs()).toHaveCount(1);
+  await expect(worktree.activeTab("chat")).toHaveCount(1);
+  await expect(new ChatPanePage(page, server.url, TOKEN).userMessage("Lint")).toBeVisible();
+  await expect(panel.openAgentLink).toBeVisible();
+
+  // Switch to the terminal tab, then use the banner's Open.
+  await worktree.tab("terminal").click();
+  await expect(worktree.activeTab("chat")).toHaveCount(0);
+  await panel.openFixAgent();
+  await expect(worktree.activeTab("chat")).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("fix-chat-tab.png") });
+});
+
+test("Fix opens the agent as the active terminal tab in terminal mode", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const id = toWorktreeId(REPO, FIX_TERM_BRANCH, "local");
+  await panel.goto(id);
+  await worktree.setDeviceAgentMode("tui");
+  await expect(worktree.terminalTabs()).toHaveCount(1);
+  const originalTab = (await worktree.terminalTabs().first().getAttribute("data-testid")) ?? "";
+
+  await panel.startFix();
+
+  await expect(worktree.terminalTabs()).toHaveCount(2);
+  await expect
+    .poll(() => worktree.readTerminalRenderedText(id), { timeout: 15_000 })
+    .toContain("FIX_AGENT_STARTED");
+  // The new terminal is the active tab, not the one that was open before.
+  await expect(worktree.activeTab("terminal")).toHaveCount(1);
+  await expect(worktree.activeTab("terminal").getByTestId(originalTab)).toHaveCount(0);
 });
 
 test("merging from the menu runs gh pr merge with the chosen method", async ({ page }) => {
@@ -621,4 +794,84 @@ test("a branch with no pull request shows only the checks", async ({ page }) => 
   await expect(panel.reviewersSummary).toHaveCount(0);
   await expect(panel.commentsSummary).toHaveCount(0);
   await expect(panel.checks).not.toHaveCount(0);
+});
+
+test("Re-run runs one failed job and shows it as queued until GitHub lists it again", async ({
+  page,
+}) => {
+  reruns.length = 0;
+  rerunAnswer = rerunChecksData({ unitStatus: "COMPLETED" });
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, RERUN_BRANCH, "local"));
+  await expect(panel.check("Unit")).toHaveAttribute("data-check-state", "failure");
+
+  await panel.rerunCheck("Unit");
+
+  await expect
+    .poll(() => reruns.map((r) => r.args))
+    .toEqual([["run", "rerun", "600", "--job", "61", "--repo", "github.com/acme/widgets"]]);
+  await expect(panel.check("Unit")).toHaveAttribute("data-check-state", "pending");
+  await expect(panel.rerunButton("Unit")).toHaveCount(0);
+
+  // The panel keeps asking until the job shows up as running.
+  rerunAnswer = rerunChecksData({ unitStatus: "IN_PROGRESS" });
+  await expect(panel.check("Unit")).toHaveAttribute("data-check-state", "running", {
+    timeout: 15_000,
+  });
+});
+
+test("a passing job can be re-run too", async ({ page }) => {
+  reruns.length = 0;
+  rerunAnswer = rerunChecksData({ unitStatus: "COMPLETED" });
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, RERUN_BRANCH, "local"));
+  await expect(panel.check("Build")).toHaveAttribute("data-check-state", "success");
+
+  await panel.rerunCheck("Build");
+
+  await expect
+    .poll(() => reruns.map((r) => r.args))
+    .toEqual([["run", "rerun", "600", "--job", "64", "--repo", "github.com/acme/widgets"]]);
+});
+
+test("running jobs and checks outside GitHub Actions have no Re-run button", async ({ page }) => {
+  rerunAnswer = rerunChecksData({ unitStatus: "COMPLETED" });
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, RERUN_BRANCH, "local"));
+  await expect(panel.check("Deploy")).toHaveAttribute("data-check-state", "running");
+
+  await expect(panel.rerunButton("Deploy")).toHaveCount(0);
+  await expect(panel.rerunButton("External app")).toHaveCount(0);
+  await expect(panel.rerunButton("Unit")).toBeVisible();
+});
+
+test("Re-run failed runs gh once per workflow run", async ({ page }) => {
+  reruns.length = 0;
+  rerunAnswer = rerunChecksData({ unitStatus: "COMPLETED" });
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, RERUN_BRANCH, "local"));
+  await expect(panel.failingBanner).toBeVisible();
+
+  await panel.rerunFailed();
+
+  await expect
+    .poll(() => reruns.map((r) => r.args).sort())
+    .toEqual([
+      ["run", "rerun", "600", "--failed", "--repo", "github.com/acme/widgets"],
+      ["run", "rerun", "601", "--failed", "--repo", "github.com/acme/widgets"],
+    ]);
+  await expect(panel.check("Unit")).toHaveAttribute("data-check-state", "pending");
+  await expect(panel.check("Lint")).toHaveAttribute("data-check-state", "pending");
+  await expect(panel.check("E2E")).toHaveAttribute("data-check-state", "pending");
+});
+
+test("a refused re-run shows gh's message and the button works again", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, RERUN_REFUSED_BRANCH, "local"));
+
+  await panel.rerunCheck("Docs");
+
+  await expect(panel.rerunError("Docs")).toHaveText(REFUSED_MESSAGE);
+  await expect(panel.check("Docs")).toHaveAttribute("data-check-state", "failure");
+  await expect(panel.rerunButton("Docs")).toBeEnabled();
 });

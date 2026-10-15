@@ -68,6 +68,7 @@ import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp
 import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
+import { isOnBattery } from "./process/power";
 import { probeTools } from "./process/tools";
 import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
@@ -75,6 +76,7 @@ import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
 import { copyWorktreeFiles } from "./setup/worktree-files";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
+import { readAccountUsage } from "./usage/account-usage";
 
 /** How long `info()` keeps the tool versions it probed. */
 const TOOLS_TTL_MS = 60_000;
@@ -175,6 +177,7 @@ export class LocalHost implements Host {
     usageReader: async (agent: AgentDescriptor) =>
       getUsageReader(agent.agentType, { command: agent.command }),
     installSkills: (options) => installSkills(options),
+    accountUsage: (options) => readAccountUsage(options),
     hooksStatus: () => checkHooks(),
     installHooks: () => installHooks(),
     removeHooks: () => removeHooks(),
@@ -294,6 +297,7 @@ export class LocalHost implements Host {
       roots: [],
       versions,
       tools: await this.toolVersions(),
+      onBattery: await isOnBattery(),
       report: this.reportValue,
       repoMappings: await this.repos.list(),
       capabilities: {
@@ -415,6 +419,7 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
   return {
     [Symbol.asyncIterator](): AsyncIterator<FileChange> {
       const queue: FileChange[] = [];
+      const ignored = options.ignore?.length ? new Set(options.ignore) : null;
       let wake: (() => void) | null = null;
       let done = false;
       const finish = () => {
@@ -428,7 +433,9 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
         { recursive: options.recursive ?? true, persistent: false },
         (kind, filename) => {
           if (done || filename === null) return;
-          queue.push({ path: filename.toString().split("\\").join("/"), kind });
+          const path = filename.toString().split("\\").join("/");
+          if (ignored && path.split("/").some((segment) => ignored.has(segment))) return;
+          queue.push({ path, kind });
           wake?.();
         },
       );

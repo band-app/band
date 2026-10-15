@@ -1,0 +1,52 @@
+# S4: the app spends 30 s in the background in the middle of a turn. When it returns, the
+# transcript catches up with nothing missing and nothing twice: the text the app copies from
+# the turn equals the hub's, with every streamed line exactly once.
+appId: app.getband.mobile
+name: S4 a turn streamed while in the background arrives complete
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-resume
+# A chat with no messages yet.
+- extendedWaitUntil:
+    visible:
+      id: chat__empty
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: stream?wt=gamma-resume
+- extendedWaitUntil:
+    visible:
+      text: "Line 03 of the stream."
+    timeout: 15000
+- takeScreenshot: s4-before-background
+- pressKey: home
+# 4 x 7.5 s: the control server answers each call in under Maestro's HTTP timeout.
+- repeat:
+    times: 4
+    commands:
+      - runScript:
+          file: scripts/hub-control.js
+          env:
+            ACTION: sleep?ms=7500
+- launchApp:
+    stopApp: false
+- takeScreenshot: s4-on-return
+- extendedWaitUntil:
+    visible:
+      text: "END of the stream."
+    timeout: 30000
+- takeScreenshot: s4-complete
+- longPressOn:
+    text: "END of the stream."
+# The long press opens the message actions; Copy puts the text on the clipboard, which the check
+# below compares with the hub's.
+- tapOn:
+    text: "Copy"
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: check-transcript?wt=gamma-resume

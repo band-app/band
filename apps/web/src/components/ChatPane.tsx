@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useWorktreeDisplay } from "../dashboard/hooks/use-worktree-display";
 import { consumeChatFresh } from "../lib/leaf-instance-ids";
 import { trpc } from "../lib/trpc-client";
 import { ChatView } from "./ChatView";
@@ -48,6 +49,8 @@ export interface ChatPaneState {
   onSwitchSession: (sessionId: string | undefined, summary?: string) => Promise<void>;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
+  /** The name a user gave the chat (`chats.update { name }`). Used for tab titles. */
+  chatName: string | undefined;
   /** Key that increments on session switch to force ChatView remount. */
   paneKey: number;
 }
@@ -257,6 +260,7 @@ export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneSt
     onSessionTitle,
     onSwitchSession,
     activeSessionSummary,
+    chatName: chatQuery.data?.chat?.name,
     paneKey,
   };
 }
@@ -276,13 +280,14 @@ interface ChatPaneProps {
 }
 
 export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatPaneProps) {
+  const displayWorktree = useWorktreeDisplay();
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ChatView
         key={state.paneKey}
         worktreeId={worktreeId}
         chatId={chatId}
-        worktreeName={worktreeId}
+        worktreeName={displayWorktree(worktreeId).label}
         initialSessionId={state.initialSessionId}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}

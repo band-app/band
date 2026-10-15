@@ -32,7 +32,6 @@ import { registerHubConfigSync } from "./ipc/hub.js";
 import { registerIpc } from "./ipc/register.js";
 import { isTrustedSender } from "./ipc/sender-guard.js";
 import { installAppMenu } from "./menu.js";
-import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
 import { electronSecretStore } from "./services/electron-secret-store.js";
 import {
   checkRemoteHub,
@@ -49,6 +48,7 @@ import { resolveWorkerLocation, ThisComputerWorker } from "./services/this-compu
 import { resolveUiDir } from "./services/ui-paths.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
+import { applyPowerToWindow } from "./services/window-power.js";
 import { isUpdaterEnabled, UpdateController } from "./updater.js";
 import { installWebviewSecurity } from "./webview-security.js";
 import { createMainWindow } from "./window.js";
@@ -70,7 +70,6 @@ interface AppState {
   unregisterIpc: (() => void) | null;
   /** Cancels the background update checks started in `bootstrap`. */
   stopUpdateChecks: (() => void) | null;
-  activityMonitor: ActivityMonitorHandle | null;
   cleanedUp: boolean;
   port: number;
   /** Empty string in dev mode where we don't own the server. */
@@ -101,7 +100,6 @@ const state: AppState = {
   certExceptions: new CertExceptionStore(),
   unregisterIpc: null,
   stopUpdateChecks: null,
-  activityMonitor: null,
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
@@ -284,14 +282,6 @@ async function connectHub(choice: HubChoice): Promise<string> {
   return `http://localhost:${state.port}/?token=${encodeURIComponent(token)}`;
 }
 
-function startActivityMonitorForLocalHub(win: BrowserWindow): void {
-  state.activityMonitor?.stop();
-  state.activityMonitor =
-    state.hubChoice.mode === "local"
-      ? startActivityMonitor({ mainWindow: win, port: state.port })
-      : null;
-}
-
 /**
  * Save the choice and reload the window against it. A failure (the local hub
  * won't start) restores the previous choice and says so.
@@ -319,14 +309,11 @@ async function switchHub(choice: HubChoice): Promise<void> {
       if (!state.uiDir) {
         throw new Error("The UI build was not found, which a remote hub needs. Run `pnpm build`.");
       }
-      state.activityMonitor?.stop();
-      state.activityMonitor = null;
       await state.managed.kill();
       if (app.isPackaged) await killPort(state.port);
     }
     const url = await connectHub(choice);
     state.hubChoice = choice;
-    startActivityMonitorForLocalHub(win);
     await win.loadURL(url);
     // Save only once the window loaded, so a failed switch is not what the
     // next launch connects to.
@@ -341,7 +328,6 @@ async function switchHub(choice: HubChoice): Promise<void> {
     try {
       state.hubChoice = previous;
       const url = await connectHub(previous);
-      startActivityMonitorForLocalHub(win);
       if (!win.isDestroyed()) await win.loadURL(url);
     } catch (restoreErr) {
       log.error({ err: String(restoreErr) }, "restoring the previous hub failed");
@@ -378,7 +364,6 @@ async function recoverUnreachableHub(win: BrowserWindow, firstError: string): Pr
       if (action === "use-local") {
         state.hubChoice = LOCAL_HUB_CHOICE;
         const url = await connectHub(LOCAL_HUB_CHOICE);
-        startActivityMonitorForLocalHub(win);
         await win.loadURL(url);
         return;
       }
@@ -408,7 +393,6 @@ async function cleanupOnce(): Promise<void> {
   // startup delay can outlive a quick Cmd+Q.
   state.stopUpdateChecks?.();
   state.stopUpdateChecks = null;
-  state.activityMonitor?.stop();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
   await state.managed.kill();
@@ -641,11 +625,6 @@ async function bootstrap(): Promise<void> {
     state.stopUpdateChecks = updates.start();
   }
 
-  // Watch focus + AC/battery state and tell the web server to widen the
-  // branch-status poller interval whenever the user isn't actively using
-  // Band. Best-effort; failures are logged but don't block startup.
-  startActivityMonitorForLocalHub(state.mainWindow);
-
   state.mainWindow.on("close", () => {
     void cleanupOnce();
   });
@@ -673,6 +652,17 @@ async function bootstrap(): Promise<void> {
     };
     powerMonitor.on("resume", sendSystemResumed);
     powerMonitor.on("unlock-screen", sendSystemResumed);
+    // AC / battery changes go to the renderer (animations, terminals and pollers slow down, and
+    // it reports to the hub) and to the window (vibrancy off on battery).
+    const sendPowerState = () => {
+      const win = state.mainWindow;
+      if (!win || win.isDestroyed()) return;
+      const onBattery = powerMonitor.isOnBatteryPower();
+      applyPowerToWindow(win, onBattery);
+      win.webContents.send(Events.powerStateChanged, { onBattery });
+    };
+    powerMonitor.on("on-ac", sendPowerState);
+    powerMonitor.on("on-battery", sendPowerState);
     // The hourly update timer doesn't advance while the Mac sleeps, so a
     // laptop woken each morning would otherwise wait up to an hour more.
     powerMonitor.on("resume", () => {

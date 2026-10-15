@@ -45,12 +45,15 @@ function discoverProcedures(): ProcedureInfo[] {
       (path.startsWith("hosts.") && path !== "hosts.forAgents") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
+      path.startsWith("accountUsage.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")
     )
       continue;
     // `worktree.previewUrl` returns a bearer URL for a worktree's files.
     if (path === "worktree.previewUrl") continue;
+    // `worktree.directAccess` mints a bearer token for a worker's loopback listener.
+    if (path === "worktree.directAccess") continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
     // `repos.addFromWorker` reads folders on a worker the caller names.

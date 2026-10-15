@@ -1,0 +1,46 @@
+# S3: the agent's plan is pinned under the transcript and changes while the turn runs; it can be collapsed.
+appId: app.getband.mobile
+name: S3 plan widget updates live
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-plan
+- tapOn:
+    id: composer__input
+- inputText: "plan: go"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      id: chat__plan
+    timeout: 20000
+- assertVisible: "Read the parser"
+- takeScreenshot: i4-plan-start
+- extendedWaitUntil:
+    visible:
+      text: "1/3"
+    timeout: 40000
+- takeScreenshot: i4-plan-1
+# Collapsing hides the entries and keeps the count.
+- tapOn:
+    id: chat__plan-toggle
+- assertNotVisible: "Patch the radix"
+- assertVisible: "1/3"
+- tapOn:
+    id: chat__plan-toggle
+- assertVisible: "Patch the radix"
+- extendedWaitUntil:
+    visible:
+      text: "2/3"
+    timeout: 40000
+- takeScreenshot: i4-plan-2
+# All done: the widget leaves.
+- extendedWaitUntil:
+    visible:
+      text: "Plan finished."
+    timeout: 60000
+- assertNotVisible:
+    id: chat__plan
+- takeScreenshot: i4-plan-done

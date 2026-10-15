@@ -3,15 +3,19 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import type { SearchOptions } from "@/dashboard";
 import { listen as desktopListen } from "./desktop-ipc";
+import { type DirectSocketTarget, directSocketClosed, directTerminalTarget } from "./direct-worker";
 import { HubWebSocket, hubWsUrl } from "./hub-config";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
+import { getPowerState, isSaver, subscribePowerState } from "./power-state";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
 import { createTerminalInputQueue } from "./terminal-input-queue";
 import { trackMouseEncoding } from "./terminal-mouse-report";
 import { attachTerminalMouseWheel } from "./terminal-mouse-wheel";
 import { createTerminalOutputQueue } from "./terminal-output-queue";
 import {
+  coldParkDelayMs,
+  hotRetainMs,
   selectIdsBeyondHotRetain,
   TERMINAL_TAB_COLD_PARK_DELAY_MS,
   TERMINAL_TAB_HOT_RETAIN_LIMIT,
@@ -419,7 +423,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     const term = new XTerm({
       allowProposedApi: true,
-      cursorBlink: true,
+      // A blinking cursor repaints the terminal twice a second. Off on battery and while blurred.
+      cursorBlink: !isSaver(getPowerState()),
       fontSize: BASE_FONT_SIZE * getCurrentZoomLevel(),
       fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
       // 1.2 row spacing is only safe under WebGL (redraws continuous glyphs at
@@ -435,6 +440,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // All output reaches xterm through this queue: paced while the terminal is
     // visible, budgeted while it is parked (terminal-output-queue.ts).
     const output = createTerminalOutputQueue((data, onParsed) => term.write(data, onParsed));
+
+    const unsubscribePower = subscribePowerState(() => {
+      term.options.cursorBlink = !isSaver(getPowerState());
+    });
 
     const themeObserver = new MutationObserver(() => {
       term.options.theme = getTerminalTheme();
@@ -739,17 +748,41 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       }, delay);
     };
 
+    // Each connect first asks whether this worktree's worker is on this computer
+    // (`direct-worker.ts`). Only the latest connect opens a socket.
+    let connectSeq = 0;
     function connect() {
       if (intentionalClose || terminated || destroyed) return;
       clearReconnectTimer();
+      // The socket being replaced is ignored from here on: its late frames and its close.
+      ws = null;
+      const seq = ++connectSeq;
+      // A pane whose first connect carries spawn options (`init`) is spawned by the hub.
+      const spawnsWithInit =
+        !didConnectOnce &&
+        Boolean(paneMetadata && (paneMetadata.command || paneMetadata.cwd || paneMetadata.env));
+      (spawnsWithInit ? Promise.resolve(null) : directTerminalTarget(worktreeId, terminalId)).then(
+        (direct) => {
+          if (seq === connectSeq) openSocket(direct);
+        },
+        () => {
+          if (seq === connectSeq) openSocket(null);
+        },
+      );
+    }
+
+    /** Opens the socket: to this computer's worker when `direct` is set, else to the hub. */
+    function openSocket(direct: DirectSocketTarget | null) {
+      if (intentionalClose || terminated || destroyed) return;
       const isReconnect = didConnectOnce;
-      const sock = new HubWebSocket(wsUrl);
+      const sock = direct ? new WebSocket(direct.url, direct.protocols) : new HubWebSocket(wsUrl);
       ws = sock;
+      let opened = false;
       sock.binaryType = "arraybuffer";
 
       // Parse acknowledgements for this connection's output (`flow: true` in
       // the attach), batched per task. The server pauses the PTY while too
-      // many bytes are unacknowledged (`api/terminals/output-flow.ts`).
+      // many bytes are unacknowledged (`packages/worktree-ops/src/output-flow.ts`).
       let unacked = 0;
       const sendAck = () => {
         const bytes = unacked;
@@ -765,6 +798,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       };
 
       sock.onopen = () => {
+        opened = true;
         reconnectAttempts = 0;
         lastPongAt = Date.now();
         // Replay state is per-connection: a reconnect must ask again.
@@ -881,6 +915,14 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         if (ws !== sock) return;
         stopHeartbeat();
         if (intentionalClose) return;
+        // The direct path failed (no listener, no such PTY there yet, a dropped
+        // connection): reconnect through the hub at once, which replays the screen.
+        if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
+          ws = null;
+          output.clear();
+          openSocket(null);
+          return;
+        }
         // Explicit, deliberate close-code handling (band-app/band#617):
         //  - 1000  → PTY exited or closed by client. Terminate: keep the pane
         //            and scrollback, print a marker, and do NOT reconnect (no
@@ -1250,6 +1292,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       document.removeEventListener("visibilitychange", handleVisibility);
       unlistenSystemResumed?.();
       themeObserver.disconnect();
+      unsubscribePower();
       resizeObserver.disconnect();
       searchResultsDisposable.dispose();
       selectionResizeDisposable.dispose();
@@ -1524,6 +1567,17 @@ function nextActivationSeq(): number {
   return state.activationSeq;
 }
 
+// A move between AC and battery changes the retention times, so look again.
+if (typeof window !== "undefined") {
+  let wasOnBattery = getPowerState().onBattery;
+  subscribePowerState(() => {
+    const now = getPowerState().onBattery;
+    if (now === wasOnBattery) return;
+    wasOnBattery = now;
+    scheduleParkingPass();
+  });
+}
+
 /** Run the pass in a microtask. A worktree switch detaches several terminals
  *  in one React commit; batching them keeps it to one pass. The pass must not
  *  run synchronously inside `detach` anyway: it can dispose entries, and
@@ -1554,6 +1608,10 @@ function runParkingPass(): void {
   }
 
   let nextDeadline = Number.POSITIVE_INFINITY;
+  // On battery a hidden terminal stays warm for less time (terminal-park-policy.ts).
+  const onBattery = getPowerState().onBattery;
+  const tabColdParkDelay = coldParkDelayMs(TERMINAL_TAB_COLD_PARK_DELAY_MS, onBattery);
+  const tabHotRetain = hotRetainMs(TERMINAL_TAB_HOT_RETAIN_MS, onBattery);
   for (const [worktreeId, entries] of byWorktree) {
     let remaining = entries;
     if (isWorktreeColdParked(worktreeId)) {
@@ -1596,19 +1654,16 @@ function runParkingPass(): void {
         lastActivatedSeq = Math.max(lastActivatedSeq, pane.getActivatedSeq());
       }
       if (attached) continue;
-      for (const deadline of [
-        hiddenSinceMs + TERMINAL_TAB_COLD_PARK_DELAY_MS,
-        hiddenSinceMs + TERMINAL_TAB_HOT_RETAIN_MS,
-      ]) {
+      for (const deadline of [hiddenSinceMs + tabColdParkDelay, hiddenSinceMs + tabHotRetain]) {
         if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
       }
-      if (nowMs - hiddenSinceMs >= TERMINAL_TAB_COLD_PARK_DELAY_MS) {
+      if (nowMs - hiddenSinceMs >= tabColdParkDelay) {
         tabCandidates.push({ id: tabId, hiddenSinceMs, lastActivatedSeq });
       }
     }
     const parkedTabs = selectIdsBeyondHotRetain(tabCandidates, {
       nowMs,
-      hotRetainMs: TERMINAL_TAB_HOT_RETAIN_MS,
+      hotRetainMs: tabHotRetain,
       hotRetainLimit: TERMINAL_TAB_HOT_RETAIN_LIMIT,
     });
     for (const tabId of parkedTabs) {
