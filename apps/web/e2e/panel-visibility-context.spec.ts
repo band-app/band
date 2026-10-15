@@ -1,14 +1,14 @@
 /**
- * Regression coverage for issue #469 — the three Dockview inner
+ * Regression coverage for issue #469 — the three Layout inner
  * containers (Chat / Terminal / Browser) share a single
  * `PanelVisibilityContext` instead of each declaring their own.
  *
  * Background
  * ----------
- * Before #469, `DockviewChatContainer`, `DockviewTerminalContainer` and
- * `DockviewBrowserContainer` each declared their own React Context with
+ * Before #469, `the old chat container`, `the old terminal container` and
+ * `the old browser container` each declared their own React Context with
  * an identical `{ visible, wsActive }` shape and wrapped their inner
- * `DockviewReact` in a per-container Provider. The refactor moved the
+ * `LayoutReact` in a per-container Provider. The refactor moved the
  * context out into `panel-visibility-context.tsx` and pointed all three
  * containers at the shared `PanelVisibilityContext` + `usePanelVisibility`.
  *
@@ -30,13 +30,13 @@
  *
  * Why we use the hidden mounted entry as the regression lever
  * -----------------------------------------------------------
- * The outer Shared Dockview's default `onlyWhenVisible` mode detaches a
+ * The outer Shared layout's default `onlyWhenVisible` mode detaches a
  * panel's content from the DOM when its outer tab is inactive — so a
  * test that just clicks outer tabs back and forth couldn't distinguish
  * "context propagated visible=false" from "container unmounted". The
  * `MultiWorktreePanelHost` keeps the inactive worktree's
  * subtree MOUNTED but passes `wsActive=false` into its
- * `DockviewChatContainer` / `DockviewTerminalContainer`. The shared
+ * `the old chat container` / `the old terminal container`. The shared
  * context is the only channel that propagates that `wsActive=false`
  * down to the leaf — making it the exact regression lever this refactor
  * could break.
@@ -44,7 +44,7 @@
  * Out of scope
  * ------------
  * The Browser container is only mounted in the Electron desktop build
- * (see `SharedDockviewLayout`'s `BrowserPanelComponent` web fallback).
+ * (see `SharedWorktreeLayout`'s `BrowserPanelComponent` web fallback).
  * The same `data-testid` marker is set on it for parity, but verifying
  * it requires desktop e2e coverage that this web-build spec can't
  * provide. The TypeScript + biome + lint pipeline catches the symbol-
@@ -80,7 +80,7 @@ const REPO_D = "delta-visibility";
 const WORKTREE_C = toWorktreeId(REPO_C, "main", "local");
 const WORKTREE_D = toWorktreeId(REPO_D, "main", "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders (>= 1024px in `apps/web/src/hooks/useIsDesktop.ts`). The chat
 // / terminal containers under test only mount in the desktop layout.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -113,7 +113,7 @@ test.afterAll(async () => {
 
 test.beforeEach(async ({ page }) => {
   // Land on the worktree URL first so localStorage is accessible
-  // (origin-scoped), clear the per-worktree dockview state for both
+  // (origin-scoped), clear the per-worktree layout state for both
   // worktrees, and start tests from a default layout.
   await page.goto(`${server.url}/worktree/${encodeURIComponent(WORKTREE_A)}?token=${TOKEN}`);
   await page.evaluate(
@@ -157,7 +157,7 @@ test.describe("Panel visibility context (issue #469)", () => {
     // A is cached → `wsActive=false` → context value becomes
     // `{ visible: false, wsActive: false }` → leaf marker flips to
     // `visible-false`. If the shared-context refactor regressed (e.g.
-    // the Provider was removed from `DockviewChatContainer`), the
+    // the Provider was removed from `the old chat container`), the
     // leaf would default to `{ visible: true, wsActive: true }` and
     // A's marker would still report `visible-true` even while cached.
     await expect(worktreePage.chatTabVisibilityMarker(WORKTREE_A, false)).toBeAttached();
@@ -175,7 +175,7 @@ test.describe("Panel visibility context (issue #469)", () => {
     // Activate the outer Terminal tab. The default layout starts with
     // Changes as the active tab in the right group; clicking Terminal
     // promotes its panel to active and mounts the
-    // `DockviewTerminalContainer`. The Chat panel is in a separate
+    // `the old terminal container`. The Chat panel is in a separate
     // group on the left and stays mounted regardless.
     await worktreePage.tab("terminal").click();
 
@@ -184,7 +184,7 @@ test.describe("Panel visibility context (issue #469)", () => {
     await expect(worktreePage.terminalTabVisibilityMarker(WORKTREE_C, true)).toBeVisible();
 
     // Switch to D — C becomes cached, D is now active. The outer
-    // Terminal tab stays selected (the outer dockview is shared across
+    // Terminal tab stays selected (the outer layout is shared across
     // worktrees), so both C's and D's terminal containers stay
     // mounted simultaneously.
     await worktreePage.switchWorktree(WORKTREE_D);

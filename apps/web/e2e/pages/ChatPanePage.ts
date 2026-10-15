@@ -303,14 +303,14 @@ export class ChatPanePage {
 
   /** Wait for the chat pane to be interactive (prompt textarea visible).
    *
-   *  The center dockview's default layout is a single TERMINAL tab (no chat),
+   *  The center layout's default layout is a single TERMINAL tab (no chat),
    *  so this first ensures a chat leaf exists + is the active tab: if a chat is
    *  already present (a seeded live chat surfaced by the default layout, just
    *  not the active tab) it's activated; otherwise a fresh chat is created via
    *  the "+" new-tab menu — the same way a user opens one. Then it waits for the
    *  prompt. */
   async waitForReady(): Promise<void> {
-    // The dockview is ready once its "+" new-tab button renders.
+    // The layout is ready once its "+" new-tab button renders.
     const addBtn = this.page
       .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true })
@@ -353,7 +353,7 @@ export class ChatPanePage {
     await expect(this.promptInput).toBeFocused();
   }
 
-  /** Open the "+" new-tab menu of the visible center dockview. */
+  /** Open the "+" new-tab menu of the visible center layout. */
   async openNewTabMenu(): Promise<void> {
     await test.step("Open the new-tab menu", async () => {
       const addBtn = this.page
@@ -644,7 +644,7 @@ export class ChatPanePage {
 
   /** Click into the Nth chat pane's prompt so it becomes the focused (active)
    *  pane — this is what the container reports to the server as the worktree's
-   *  last-focused chat. Click (not `focus()`) so dockview's focusin tracking
+   *  last-focused chat. Click (not `focus()`) so the layout's focusin tracking
    *  fires and the active panel actually switches. */
   async focusPromptAt(index: number): Promise<void> {
     await test.step(`Focus chat pane #${index}`, async () => {
@@ -661,7 +661,7 @@ export class ChatPanePage {
 
   /** Snapshot every open pane's prompt value. Order-independent assertions
    *  (which pane received the reference) sort these rather than depending on
-   *  dockview's DOM ordering of split groups. */
+   *  the layout's DOM ordering of split groups. */
   async allPromptValues(): Promise<string[]> {
     return await this.promptInputs.evaluateAll((els) =>
       els.map((el) => (el as HTMLTextAreaElement).value),

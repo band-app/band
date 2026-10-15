@@ -50,7 +50,7 @@ const MARKER = "SCATTERZEBRA";
 
 // Start narrow so the first session fits the terminal to a small column count;
 // the test widens the viewport before the reconnect (see the body). Both are
-// ≥1024px so `useIsDesktop()` stays true and the shared dockview (which hosts
+// ≥1024px so `useIsDesktop()` stays true and the shared layout (which hosts
 // the terminal) renders in each session.
 const NARROW = { width: 1024, height: 800 };
 const WIDE = { width: 1800, height: 900 };

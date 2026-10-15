@@ -55,7 +55,7 @@ const CODE_FILE = "code.ts";
 const MARKDOWN_FILE = "notes.md";
 const CHANGED_FILE = "changed.txt";
 
-// Wide viewport so `useIsDesktop()` reports true and the center dockview renders.
+// Wide viewport so `useIsDesktop()` reports true and the center layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -133,7 +133,7 @@ test("Ctrl+Tab focuses every kind of tab and can leave each one", async ({ page 
   ];
   const expectShown = async (index: number) => {
     const { tab, surface } = cycle[index];
-    await expect(tab).toHaveClass(/\bdv-active-tab\b/);
+    await expect(tab).toHaveAttribute("data-selected", "true");
     await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe(surface);
     // Focus from a tab switch doesn't put the cursor into the frontmatter:
     // it stays rendered instead of showing its source.
@@ -199,7 +199,7 @@ test("a split terminal gets focus back in the pane that had it", async ({ page }
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 
   await focus.pressPreviousTab();
-  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
   await expect.poll(() => worktreePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
 
   // The same with the second pane, which is also the split's active pane and

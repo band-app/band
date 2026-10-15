@@ -95,7 +95,7 @@ test("a hidden chat tab shows a spinner while its agent works", async ({ page })
   await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "1");
 
   await worktree.activateTab("terminal");
-  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
   await expect(worktree.tabStatus("chat")).toHaveAttribute("data-status", "working");
   await expect(worktree.tabCloseButton("chat")).toHaveCSS("opacity", "0");
 
@@ -104,7 +104,7 @@ test("a hidden chat tab shows a spinner while its agent works", async ({ page })
   await chatPane.clickStop();
   await expect(chatPane.submitButton).toBeVisible();
   await worktree.activateTab("terminal");
-  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
   await expect(worktree.tabStatus("chat")).toHaveCount(0);
 });
 
@@ -115,7 +115,7 @@ test("a hidden terminal tab shows its Claude Code session's status", async ({ pa
   await chatPane.goto(TERM_WS);
   // Opens a chat and shows it, so the default terminal tab is hidden.
   await chatPane.waitForReady();
-  await expect(worktree.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("chat")).toHaveAttribute("data-selected", "true");
   const terminalId = await worktree.firstTerminalTabId();
   expect(terminalId).not.toBe("");
   await expect(worktree.tabStatus("terminal")).toHaveCount(0);
@@ -138,7 +138,7 @@ test("a hidden terminal tab shows its Claude Code session's status", async ({ pa
 
   // Showing the terminal keeps its status in the slot.
   await worktree.activateTab("terminal");
-  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
   await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "done");
   await worktree.hoverTab("terminal");
   await expect(worktree.tabCloseButton("terminal")).toHaveCSS("opacity", "1");
@@ -185,7 +185,7 @@ test("the Ctrl+Tab list shows a chat's session title and working spinner", async
   await chatPane.submit();
   await expect(chatPane.assistantMessage("working")).toBeVisible();
   await worktree.activateTab("terminal");
-  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
 
   await focus.openSwitcher();
   const row = focus.switcherRow("start fixing the login redirect");

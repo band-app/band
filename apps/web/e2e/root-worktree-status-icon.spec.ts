@@ -119,7 +119,7 @@ test.describe("Root worktree status icon", () => {
     // Drive a live "working" status through the real mutation + SSE path.
     // `statuses.update` emits to currently-subscribed SSE listeners with no
     // replay, and the browser's status-stream subscription isn't guaranteed
-    // to be live the instant `waitForReady()` returns (it keys on the dockview
+    // to be live the instant `waitForReady()` returns (it keys on the layout
     // Maximize button, not on SSE connectivity). Re-fire the mutation — the
     // upsert is idempotent and the router re-emits on every call — until the
     // dot renders, so a lost pre-subscription event can't flake the test.

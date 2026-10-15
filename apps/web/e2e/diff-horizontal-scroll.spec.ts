@@ -14,7 +14,7 @@
  *
  * The diff is opened the way a user does in the unified layout (#643):
  * click the changed file in the right sidepanel's Changes tree, which
- * opens its `diff` leaf in the center dockview. That leaf renders
+ * opens its `diff` leaf in the center layout. That leaf renders
  * `DiffFileContent`, which builds both view modes with
  * `baseViewerExtensions(isDark, { naturalHeight: true })`, so the fix and
  * the natural-height guard apply unchanged:
@@ -44,7 +44,7 @@ import {
 } from "./helpers/server";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
-// Wide viewport so `useIsDesktop()` reports true and the center dockview
+// Wide viewport so `useIsDesktop()` reports true and the center layout
 // renders the diff leaf beside the repo sidebar and right sidepanel.
 // Kept wide so each side of the split MergeView is still far narrower
 // than the ~8000-px long line, while leaving comfortable room for a real

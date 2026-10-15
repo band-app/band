@@ -239,7 +239,7 @@ fn list_panel_states(band_dir: &Path, worktree_id: &str) -> Vec<serde_json::Valu
     parsed.as_array().cloned().unwrap_or_default()
 }
 
-/// Read a saved dockview layout panel-state row (chat, terminal, or
+/// Read a saved layout panel-state row (chat, terminal, or
 /// browser) for a worktree from the `panel_states` table. Returns
 /// `Value::Null` if no layout has been persisted.
 fn read_layout(band_dir: &Path, worktree_id: &str, panel_type: &str) -> serde_json::Value {
@@ -262,7 +262,7 @@ fn read_layout(band_dir: &Path, worktree_id: &str, panel_type: &str) -> serde_js
     serde_json::from_str(stdout_str.trim()).unwrap_or(serde_json::Value::Null)
 }
 
-/// Seed a chat layout (dockview tree) directly into the `panel_states`
+/// Seed a chat layout (layout tree) directly into the `panel_states`
 /// table. Used by tests that exercise default-chat-panel resolution
 /// without going through the dashboard UI to drive the layout.
 fn seed_chat_layout(band_dir: &Path, worktree_id: &str, layout: &serde_json::Value) {
@@ -3573,7 +3573,7 @@ fn cronjobs_list_text_output_shows_table() {
 // --- Layout persistence parity tests ---
 //
 // Every CLI-driven creation of a chat / terminal / browser must persist
-// the new pane to the worktree's saved dockview layout, not just the
+// the new pane to the worktree's saved layout, not just the
 // in-memory registry. Otherwise the dashboard renders nothing for that
 // pane until the user manually re-creates it via the UI. These tests
 // pin the contract at the CLI boundary so future refactors of the
@@ -3857,7 +3857,7 @@ fn worktrees_create_prompt_adds_chat_to_layout() {
     );
     let chat_id = chats[0]["id"].as_str().unwrap();
 
-    // ...AND it shows up in the persisted dockview chat layout. Asserting on
+    // ...AND it shows up in the persisted layout chat layout. Asserting on
     // the layout shape directly (rather than via the dashboard) is the only
     // way to catch the invisible-chat bug at the CLI layer.
     let layout = read_layout(&env.band_dir, worktree_id, "chat_layout");
@@ -3874,18 +3874,18 @@ fn worktrees_create_prompt_adds_chat_to_layout() {
         "expected chat {chat_id} in layout panels, got {panels:?}"
     );
 
-    // The grid root MUST be a `branch` — that's the shape dockview's
+    // The grid root MUST be a `branch` — that's the shape the layout's
     // `toJSON()` produces and the only shape `fromJSON()` round-trips
     // cleanly. Earlier the helper produced a bare `leaf` as root with
-    // `size: 1`, which dockview's `fromJSON` rejected. The catch in
-    // `DockviewChatContainer.onReady` then fell back to
+    // `size: 1`, which the layout's `fromJSON` rejected. The catch in
+    // `the old chat container.onReady` then fell back to
     // `createDefaultPanel`, minted a brand-new chat ID with
     // `newChatId()`, and the server-created lazy-default chat (the one
     // running the user's --prompt task) was orphaned out of the layout
     // — so opening the worktree showed an *empty* tab with a freshly-
     // generated chat ID instead of the prompt the user just submitted.
     //
-    // Pin the dockview-native shape: `grid.root.type === "branch"` with
+    // Pin the layout-native shape: `grid.root.type === "branch"` with
     // a child leaf containing the chat.
     let root_type = layout
         .pointer("/grid/root/type")
@@ -3893,7 +3893,7 @@ fn worktrees_create_prompt_adds_chat_to_layout() {
     assert_eq!(
         root_type,
         Some("branch"),
-        "expected grid.root.type=='branch' (dockview-native), got: {layout}"
+        "expected grid.root.type=='branch' (layout-native), got: {layout}"
     );
     let leaves = layout
         .pointer("/grid/root/data")
@@ -4276,7 +4276,7 @@ fn chat_targets_active_panel_from_layout() {
     // Persist a chat layout that marks `second_id` as the active view of
     // the active group — mimicking the user clicking that tab in the
     // dashboard. The layout shape mirrors what
-    // DockviewLayoutManager.addPanel writes.
+    // LayoutManager.addPanel writes.
     let group_id = format!("group_{second_id}");
     let layout = serde_json::json!({
         "grid": {

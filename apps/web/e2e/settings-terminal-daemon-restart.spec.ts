@@ -32,7 +32,7 @@ const TOKEN = "e2e-terminal-daemon-restart-token";
 const REPO = "alpha-terminal-daemon-restart";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts both the terminal container and the persistent bottom action
 // bar with the Settings button) renders.
 test.use({ viewport: { width: 1280, height: 800 } });

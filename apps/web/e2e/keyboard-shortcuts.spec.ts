@@ -49,7 +49,7 @@ const WORKTREE_B = toWorktreeId(REPO_B, BRANCH, "local");
 const WORKTREE_CHAT = toWorktreeId(REPO_CHAT, BRANCH, "local");
 const WORKTREE_SPLIT = toWorktreeId(REPO_SPLIT, BRANCH, "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the center dockview renders.
+// Wide viewport so `useIsDesktop()` reports true and the center layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -108,7 +108,7 @@ test("the new-chat chord opens a chat tab and ⌘T a terminal tab, whatever tab 
   await worktreePage.pressNewChatShortcut();
   await expect(worktreePage.chatTabs()).toHaveCount(1);
   await expect(worktreePage.terminalTabs()).toHaveCount(1);
-  await expect(worktreePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("chat")).toHaveAttribute("data-selected", "true");
 
   // The new chat is now the active tab. ⌘T used to duplicate the active tab's
   // kind and would have opened a second chat here. Clicking its tab moves focus
@@ -127,10 +127,10 @@ test("the show-chat chord activates the chat tab from a focused terminal", async
   await expect(worktreePage.chatTabs()).toHaveCount(1);
 
   await worktreePage.focusTerminal();
-  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
 
   await worktreePage.pressShowChatShortcut();
-  await expect(worktreePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("chat")).toHaveAttribute("data-selected", "true");
 });
 
 test("⌥⌘← / ⌥⌘→ step back and forward through visited worktrees", async ({ page }) => {

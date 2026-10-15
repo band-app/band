@@ -1,0 +1,58 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["term-1"],
+            "activeView": "term-1",
+            "id": "1"
+          },
+          "size": 600
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["chat-1"],
+            "activeView": "chat-1",
+            "id": "2"
+          },
+          "size": 600
+        }
+      ],
+      "size": 800
+    },
+    "width": 1200,
+    "height": 800,
+    "orientation": "HORIZONTAL",
+    "maximizedNode": {
+      "location": [1]
+    }
+  },
+  "panels": {
+    "term-1": {
+      "id": "term-1",
+      "contentComponent": "term",
+      "tabComponent": "term",
+      "params": {
+        "worktreeId": "wt",
+        "name": "term-1"
+      },
+      "title": "term-1"
+    },
+    "chat-1": {
+      "id": "chat-1",
+      "contentComponent": "chat",
+      "tabComponent": "chat",
+      "params": {
+        "worktreeId": "wt",
+        "name": "chat-1"
+      },
+      "title": "chat-1"
+    }
+  },
+  "activeGroup": "2",
+  "maximizedGroup": "2"
+}

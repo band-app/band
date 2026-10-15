@@ -32,16 +32,6 @@ import {
 import type { Extension } from "@codemirror/state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  type DockviewApi,
-  DockviewReact,
-  type DockviewReadyEvent,
-  type DockviewTheme,
-  type IDockviewHeaderActionsProps,
-  type IDockviewPanel,
-  type IDockviewPanelHeaderProps,
-  type IDockviewPanelProps,
-} from "dockview";
-import {
   AlignJustify,
   ChevronDown,
   ChevronRight,
@@ -136,15 +126,14 @@ import { clientStorage, hydrateWorktree, subscribeClientState } from "../lib/cli
 import { writeClipboardText } from "../lib/clipboard";
 import { announceIfMoved, promptOnHostOffline } from "../lib/continue-prompt";
 import { listen as desktopListen } from "../lib/desktop-ipc";
+import { hubUrl } from "../lib/hub-config";
+import { isDesktop } from "../lib/is-desktop";
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
   splitDirectionForKey,
-} from "../lib/dockview-section-actions";
-import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
-import { hubUrl } from "../lib/hub-config";
-import { isDesktop } from "../lib/is-desktop";
+} from "../lib/layout-section-actions";
 import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
   markBrowserFresh,
@@ -166,7 +155,7 @@ import { disposeTerminal, hasTerminal } from "../lib/terminal-cache";
 import {
   clearLeafOwners,
   deleteNestedLayout,
-  findFocusedTerminalSplitDockview,
+  findFocusedTerminalSplitLayout,
   isOwnedPane,
   leafOwnsAnyLive,
   ownerOfTerminal,
@@ -186,17 +175,25 @@ import {
   SidebarGutter,
   useWorktreeChrome,
 } from "./DesktopTitleBar";
+import {
+  type LayoutHeaderActionsProps,
+  type LayoutPanelProps,
+  LayoutReact,
+  type LayoutTabProps,
+} from "./layout/LayoutView";
+import type { AddPanelOptions, LayoutApi, LayoutPanel } from "./layout/model";
+import { isSavedLayout, sanitizeSavedLayout, stripParams } from "./layout/saved-layout";
 import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorktreeState } from "./per-worktree-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
-// SharedDockviewLayout. Importing it closes an ESM cycle (SharedDockviewLayout
-// → WorktreeCenterDockview → SharedDockviewLayout), but we only read it inside
+// SharedWorktreeLayout. Importing it closes an ESM cycle (SharedWorktreeLayout
+// → WorktreeCenter → SharedWorktreeLayout), but we only read it inside
 // callbacks (call time, never module eval), so the live binding is always
 // populated by then — same pattern the legacy containers use.
-import { crossPanelHandlers } from "./SharedDockviewLayout";
+import { crossPanelHandlers } from "./SharedWorktreeLayout";
 import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 import {
@@ -211,13 +208,13 @@ import {
 // Leaf kinds
 // ---------------------------------------------------------------------------
 //
-// The unified center dockview holds LEAF panels. Each panel's dockview
+// The unified center layout holds LEAF panels. Each panel's layout
 // `component` field is the leaf KIND; its `id` is the instance id
 // (chatId / terminalId / browserId) for the per-instance kinds, or the
 // prefixed `file:<path>` / `diff:<path>` for the per-path file/diff leaves
 // opened from the right sidepanel (Explorer + Changes). Keeping the instance
 // id AS the panel id means all the focus / insert / status-event plumbing
-// carries over unchanged from the legacy per-app inner dockviews.
+// carries over unchanged from the legacy per-app inner layouts.
 // ---------------------------------------------------------------------------
 
 export type LeafKind = "chat" | "term" | "browser" | "file" | "diff";
@@ -238,10 +235,10 @@ const TAB_TITLE_CLASS = "min-w-0 flex-1 truncate text-xs";
 // Inner icon+title wrapper (grows to fill, leaving the close button pinned right).
 const TAB_CONTENT_WRAP = "flex min-w-0 flex-1 items-center gap-1.5";
 
-// Tab root fills the dockview `.dv-tab` wrapper. `group` drives
-// close-on-hover; the active tab's pill background is CSS on `.dv-active-tab`
-// (see `.dockview-center-tabs` in dockview-theme.css).
-const TAB_ROOT_CLASS = "dv-default-tab group flex w-full items-center gap-1.5";
+// Tab root fills the layout's tab wrapper. `group` drives close-on-hover; the
+// active tab's pill background is CSS on `[data-selected="true"]` (see
+// `.band-layout--center` in layout/layout.css).
+const TAB_ROOT_CLASS = "band-layout-tab-root group flex w-full items-center gap-1.5";
 
 // Close button: always shown on the active tab; hidden on inactive tabs until
 // the tab is hovered (the tab root carries the `group` class). Keeps the tab
@@ -283,6 +280,7 @@ function TabEndSlot({
         className={closeButtonClass(isActive, Boolean(indicator))}
         onClick={onClose}
         title={closeTitle}
+        aria-label={closeTitle}
         data-testid={closeTestId}
       >
         <X className="size-3" />
@@ -291,8 +289,8 @@ function TabEndSlot({
   );
 }
 
-/** Track a tab's active state via its dockview panel api. */
-function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
+/** Track a tab's active state via its layout panel api. */
+function useTabActive(api: LayoutTabProps["api"]): boolean {
   const [isActive, setIsActive] = useState(api.isActive);
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setIsActive(e.isActive));
@@ -303,10 +301,10 @@ function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
 
 /** Track a leaf's `preview` param (italic tab) reactively — it flips to
  *  `false` when the preview tab is pinned via `updateParameters`. Seeds from
- *  `initialPreview` (the params dockview passes to the tab at first render)
+ *  `initialPreview` (the params layout passes to the tab at first render)
  *  because `api.getParameters()` can be empty on the very first render of a
  *  freshly-added panel's tab. */
-function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: boolean): boolean {
+function useTabPreview(api: LayoutTabProps["api"], initialPreview?: boolean): boolean {
   const [preview, setPreview] = useState(
     () => api.getParameters<{ preview?: boolean }>().preview ?? initialPreview,
   );
@@ -324,60 +322,45 @@ function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: b
  *  panel's tab. A pinned tab is never picked as the preview to replace, because
  *  the open paths re-read this param from the live panel instead of trusting
  *  their id refs. */
-function pinTab<P extends { preview?: boolean }>(
-  api: IDockviewPanelHeaderProps["api"],
-  params: P,
-): void {
+function pinTab<P extends { preview?: boolean }>(api: LayoutTabProps["api"], params: P): void {
   const cur = { ...params, ...api.getParameters<P>() };
   if (cur.preview !== false) api.updateParameters({ ...cur, preview: false });
 }
 
-const bandTheme: DockviewTheme = {
-  name: "band",
-  // `dockview-center-tabs` scopes the unified-center tab CSS (title-sized
-  // tabs, the active-tab pill) so it never touches the legacy nested
-  // chat/terminal tab strips still used by the mobile layout.
-  className: "dockview-theme-band dockview-center-tabs",
-};
-
-// Desktop layout: the tab strip doubles as the window's top row (38px, drag
-// region). See `.dockview-center-desktop` in dockview-theme.css.
-const bandDesktopTheme: DockviewTheme = {
-  ...bandTheme,
-  className: `${bandTheme.className} dockview-center-desktop`,
-};
-
+// `band-layout--center` scopes the center tab CSS (title-sized tabs, the
+// active-tab pill) so it never touches the nested terminal split.
+const CENTER_CLASS = "band-layout--center";
+// Desktop layout: the tab strip doubles as the window's top row (38px). See
+// `.band-layout--desktop` in layout/layout.css.
+const CENTER_DESKTOP_CLASS = `${CENTER_CLASS} band-layout--desktop`;
 // Mobile layout: a compact strip (34px tabs and "+" button). See
-// `.dockview-center-mobile` in dockview-theme.css.
-const bandMobileTheme: DockviewTheme = {
-  ...bandTheme,
-  className: `${bandTheme.className} dockview-center-mobile`,
-};
+// `.band-layout--mobile` in layout/layout.css.
+const CENTER_MOBILE_CLASS = `${CENTER_CLASS} band-layout--mobile`;
 
 // ---------------------------------------------------------------------------
-// Per-worktree dockview api registry
+// Per-worktree layout api registry
 // ---------------------------------------------------------------------------
 //
-// The shell (`SharedDockviewLayout`) owns global keyboard shortcuts + dialogs
-// but no longer owns a dockview. It resolves the ACTIVE worktree's dockview
+// The shell (`SharedWorktreeLayout`) owns global keyboard shortcuts + dialogs
+// but no longer owns a layout. It resolves the ACTIVE worktree's layout
 // api from this registry to route panel-activation / maximize shortcuts.
 // Registered on `onReady`, cleared on unmount.
 // ---------------------------------------------------------------------------
 
-const worktreeDockviewApis = new Map<string, DockviewApi>();
+const worktreeLayoutApis = new Map<string, LayoutApi>();
 
-export function getWorktreeDockviewApi(worktreeId: string | null): DockviewApi | undefined {
-  return worktreeId ? worktreeDockviewApis.get(worktreeId) : undefined;
+export function getWorktreeLayoutApi(worktreeId: string | null): LayoutApi | undefined {
+  return worktreeId ? worktreeLayoutApis.get(worktreeId) : undefined;
 }
 
 /** First panel of a given leaf kind (or the singleton), or undefined. */
-export function firstLeafOfKind(api: DockviewApi, kind: LeafKind) {
+export function firstLeafOfKind(api: LayoutApi, kind: LeafKind) {
   return api.panels.find((p) => (p.api.component as LeafKind) === kind);
 }
 
-// Per-worktree leaf actions, so the shell (SharedDockviewLayout) can add a
-// leaf to the active worktree's dockview (e.g. ⇧⌘N new chat) without owning
-// a dockview api. Registered on `onReady`, cleared on unmount.
+// Per-worktree leaf actions, so the shell (SharedWorktreeLayout) can add a
+// leaf to the active worktree's layout (e.g. ⇧⌘N new chat) without owning
+// a layout api. Registered on `onReady`, cleared on unmount.
 const worktreeLeafActions = new Map<string, { current: LeafActions }>();
 
 export function getWorktreeLeafActions(worktreeId: string | null): LeafActions | undefined {
@@ -434,7 +417,7 @@ function usePublishHeaderActions(
 }
 
 // Per-worktree counter for untitled scratch buffers — the file leaf isn't
-// backed by `useFileTabs` (dockview owns the tab list), so the shell mints the
+// backed by `useFileTabs` (layout owns the tab list), so the shell mints the
 // `untitled:N` path itself. An untitled buffer's text is kept on the server
 // under its path and its tab is shared with other devices, so N must not reuse
 // a number another device (or an earlier page load) still has open: it starts
@@ -470,135 +453,13 @@ export function nextUntitledPath(worktreeId: string): string {
 
 const LAYOUT_KEY_PREFIX = "band:dockview-layout-v9:";
 
-// Leaf component names this dockview can actually render. A saved layout that
+// Leaf component names this layout can actually render. A saved layout that
 // references anything else (a removed kind, a hand-edited blob) is sanitized on
 // load so `fromJSON` never instantiates a panel we can't mount.
 const KNOWN_LEAF_COMPONENTS = new Set<string>(["chat", "term", "browser", "file", "diff"]);
 
 function layoutKey(worktreeId: string): string {
   return `${LAYOUT_KEY_PREFIX}${worktreeId}`;
-}
-
-function isDockviewLayout(obj: unknown): boolean {
-  if (typeof obj !== "object" || obj === null) return false;
-  const o = obj as Record<string, unknown>;
-  return typeof o.grid === "object" && typeof o.panels === "object";
-}
-
-/** Recursively strip a set of view ids from a dockview grid branch. dockview
- *  serializes a leaf's group as an object in `data` and a branch's children as
- *  an array in `data`. */
-function pruneGridViews(node: unknown, removed: Set<string>): void {
-  if (!node || typeof node !== "object") return;
-  const n = node as Record<string, unknown>;
-  if (Array.isArray(n.data)) {
-    for (const child of n.data) pruneGridViews(child, removed);
-    return;
-  }
-  const data = n.data as { views?: string[]; activeView?: string } | undefined;
-  if (data && Array.isArray(data.views)) {
-    data.views = data.views.filter((v) => !removed.has(v));
-    if (data.activeView && removed.has(data.activeView)) data.activeView = data.views[0];
-  }
-}
-
-/** First leaf of a dockview grid branch, depth-first. */
-function firstGridLeaf(node: unknown): { views: string[]; activeView?: string } | undefined {
-  if (!node || typeof node !== "object") return undefined;
-  const n = node as { type?: string; data?: unknown };
-  if (n.type === "leaf") {
-    const data = n.data as { views?: unknown } | undefined;
-    if (data && Array.isArray(data.views)) return data as { views: string[] };
-    return undefined;
-  }
-  if (n.type === "branch" && Array.isArray(n.data)) {
-    for (const child of n.data) {
-      const leaf = firstGridLeaf(child);
-      if (leaf) return leaf;
-    }
-  }
-  return undefined;
-}
-
-/** Move the panels of any dockview edge groups (left / right / bottom docked
- *  areas, written by layouts saved before edge panels were removed) into the
- *  first grid group as tabs, then drop `edgeGroups` so `fromJSON` never
- *  recreates an edge group. dockview only builds panels a group references, so
- *  deleting `edgeGroups` alone would silently lose those panels. */
-function moveEdgePanelsIntoGrid(layout: Record<string, unknown>): void {
-  const edgeGroups = layout.edgeGroups as
-    | Record<string, { group?: { views?: unknown } } | undefined>
-    | undefined;
-  delete layout.edgeGroups;
-  if (!edgeGroups || typeof edgeGroups !== "object") return;
-  // Only move views that have a panel entry. dockview's edge restore skipped a
-  // view with no entry, but its grid restore throws on one, which would make
-  // `fromJSON` fail and reset the whole layout to the default.
-  const panels = (layout.panels ?? {}) as Record<string, unknown>;
-  const moved: string[] = [];
-  for (const edge of Object.values(edgeGroups)) {
-    const views = edge?.group?.views;
-    if (Array.isArray(views)) {
-      for (const v of views) if (typeof v === "string" && panels[v]) moved.push(v);
-    }
-  }
-  if (moved.length === 0) return;
-  const grid = layout.grid as { root?: unknown } | undefined;
-  const leaf = firstGridLeaf(grid?.root);
-  if (leaf) {
-    leaf.views.push(...moved.filter((v) => !leaf.views.includes(v)));
-    if (!leaf.activeView) leaf.activeView = leaf.views[0];
-  } else if (grid?.root && typeof grid.root === "object") {
-    // A grid with no leaf at all (every grid group closed, panels only at the
-    // edges): give the root branch a single leaf holding the moved panels.
-    const root = grid.root as { data?: unknown; size?: number };
-    root.data = [
-      {
-        type: "leaf",
-        data: { views: moved, activeView: moved[0], id: "edge-panels" },
-        size: root.size ?? 0,
-      },
-    ];
-  }
-}
-
-/** Drop panels whose `component` isn't a renderable leaf kind (e.g. a stale
- *  `files`/`changes` singleton from an older layout) so `fromJSON` can't mount
- *  an unregistered component, and fold any legacy edge-group panels into the
- *  grid. Mutates + returns the layout clone. */
-function sanitizeSavedLayout(layout: Record<string, unknown>): Record<string, unknown> {
-  moveEdgePanelsIntoGrid(layout);
-  const panels = layout.panels as Record<string, { contentComponent?: string }> | undefined;
-  if (!panels) return layout;
-  const removed = new Set<string>();
-  for (const [id, panel] of Object.entries(panels)) {
-    // dockview serializes each panel's kind as `contentComponent` (its
-    // `toJSON()` shape), NOT `component`. Reading the wrong key here strips
-    // EVERY panel as "unknown", which resets the layout on every reload.
-    if (!panel?.contentComponent || !KNOWN_LEAF_COMPONENTS.has(panel.contentComponent)) {
-      removed.add(id);
-      delete panels[id];
-    }
-  }
-  if (removed.size > 0) {
-    const grid = layout.grid as { root?: unknown } | undefined;
-    if (grid?.root) pruneGridViews(grid.root, removed);
-    if (typeof layout.activePanel === "string" && removed.has(layout.activePanel)) {
-      layout.activePanel = undefined;
-    }
-  }
-  return layout;
-}
-
-/** Serialize structure only — runtime params (callbacks, urls) are re-derived
- *  from each panel's `component` + `id` on load. */
-function stripParams(json: Record<string, unknown>): Record<string, unknown> {
-  const clone = JSON.parse(JSON.stringify(json));
-  const panels = clone.panels as Record<string, Record<string, unknown>> | undefined;
-  if (panels) {
-    for (const panel of Object.values(panels)) panel.params = {};
-  }
-  return clone;
 }
 
 /** Re-inject `{ worktreeId, <kind>Id }` (and browser `initialUrl`) into the
@@ -612,7 +473,7 @@ function reinjectParams(
   const panels = clone.panels as Record<string, Record<string, unknown>> | undefined;
   if (panels) {
     for (const [id, panel] of Object.entries(panels)) {
-      // dockview's serialized panel records its kind under `contentComponent`.
+      // the layout's serialized panel records its kind under `contentComponent`.
       const comp = panel.contentComponent as LeafKind;
       if (comp === "chat") panel.params = { worktreeId, chatId: id };
       else if (comp === "term") panel.params = { worktreeId, terminalId: id };
@@ -649,11 +510,11 @@ function viewLeafParams(
 
 /** Pin a new panel to a grid group rather than whatever `activeGroup` is (which
  *  can be a floating group). With no grid group left, `{ direction: "within" }`
- *  without a reference makes dockview create a fresh central group. */
+ *  without a reference makes layout create a fresh central group. */
 function centralPanelPosition(
-  api: DockviewApi,
+  api: LayoutApi,
 ): { referenceGroup: string } | { direction: "within" } {
-  const central = api.groups.find((g) => g.api.location.type === "grid");
+  const central = api.groups[0];
   if (central) return { referenceGroup: central.id };
   return { direction: "within" };
 }
@@ -661,17 +522,17 @@ function centralPanelPosition(
 /** Where a newly-opened file/diff leaf should go: the group the user is
  *  currently working in (the active grid group), falling back to the central
  *  group. Prevents every open from landing in the first tab group. */
-function activeOrCentralPosition(api: DockviewApi): AddPanelOptions["position"] {
+function activeOrCentralPosition(api: LayoutApi): AddPanelOptions["position"] {
   const active = api.activeGroup;
-  if (active && active.api.location.type === "grid") return { referenceGroup: active.id };
+  if (active) return { referenceGroup: active.id };
   return centralPanelPosition(api);
 }
 
 /** Collapse every grid group into the first one — mobile is tabs-only, so a
  *  default or restored (desktop-created) split must render as a single tab
  *  strip. No-op when there's already one grid group. */
-function flattenToSingleGroup(api: DockviewApi): void {
-  const grid = api.groups.filter((g) => g.api.location.type === "grid");
+function flattenToSingleGroup(api: LayoutApi): void {
+  const grid = api.groups;
   if (grid.length <= 1) return;
   const target = grid[0];
   for (const group of grid.slice(1)) {
@@ -688,7 +549,7 @@ function loadSavedLayout(worktreeId: string): Record<string, unknown> | null {
     const raw = localStorage.getItem(layoutKey(worktreeId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return isDockviewLayout(parsed) ? parsed : null;
+    return isSavedLayout(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -701,7 +562,7 @@ function loadSavedLayout(worktreeId: string): Record<string, unknown> | null {
 // fire one `settings.get` per tab header mount (N small server-side file
 // reads). A short-TTL shared promise collapses that burst into a single fetch
 // while staying fresh enough that a Settings-UI agent change is picked up on
-// the next tab mount. Ported from the legacy `DockviewChatContainer`.
+// the next tab mount. Ported from the legacy `the old chat container`.
 // ---------------------------------------------------------------------------
 
 let sharedSettingsPromise: Promise<unknown> | null = null;
@@ -806,7 +667,7 @@ function sectionDiffsId(section: ChangeSection): string {
 // Chat leaf
 // ---------------------------------------------------------------------------
 
-function ChatLeaf({ params, api }: IDockviewPanelProps<ChatLeafParams>) {
+function ChatLeaf({ params, api }: LayoutPanelProps<ChatLeafParams>) {
   const [tabActive, setTabActive] = useState(api.isActive);
   const { visible: parentVisible, wsActive } = usePanelVisibility();
 
@@ -885,7 +746,7 @@ function ChatLeafContent({
 // Terminal leaf
 // ---------------------------------------------------------------------------
 
-function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLeafParams>) {
+function TerminalLeaf({ params, api, containerApi }: LayoutPanelProps<TermLeafParams>) {
   // On screen = worktree visible AND this is the selected tab in its group.
   // Terminal leaves use `renderer: "always"`, so an unselected tab stays
   // mounted; without this fold every terminal tab in the worktree reported
@@ -914,7 +775,7 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
     if (ws && tid) getWorktreeLeafActions(ws)?.onClose(tid, "term");
   }, [ws, tid]);
 
-  // Mobile is single-pane / no-split — the worktree dockview tags itself in
+  // Mobile is single-pane / no-split — the worktree layout tags itself in
   // `mobileByApiId` on `onReady`.
   const mobile = mobileByApiId.has(containerApi.id);
 
@@ -949,7 +810,7 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
 // Browser leaf (desktop only)
 // ---------------------------------------------------------------------------
 
-function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
+function BrowserLeaf({ params, api }: LayoutPanelProps<BrowserLeafParams>) {
   const { visible } = usePanelVisibility();
 
   if (!params.worktreeId || !params.browserId) return null;
@@ -972,7 +833,7 @@ function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
       <BrowserPaneComponent
         params={paneParams}
         api={api}
-        // biome-ignore lint/suspicious/noExplicitAny: dockview panel props require matching shape
+        // biome-ignore lint/suspicious/noExplicitAny: layout panel props require matching shape
         {...({} as any)}
       />
     </div>
@@ -995,7 +856,7 @@ function basename(filePath: string): string {
 //
 // Format-compatible with mobile's `useTabState` (same `band-tab-state:<ws>`
 // key + `TabFileState` shape). But `useTabState` caches its state in a
-// per-instance `useRef` loaded once from localStorage, and dockview renders
+// per-instance `useRef` loaded once from localStorage, and layout renders
 // the tab header (`FileTab`) and the leaf content (`FileLeaf`) as SEPARATE
 // React trees — so a `useTabState` instance in one is invisible to the other.
 // These module-level helpers read/write localStorage FRESH on every call,
@@ -1163,7 +1024,7 @@ function removeFileTabState(ws: string, path: string): void {
 //     the leaf container, mirroring the terminal/chat leaf handlers), and
 //   - registering the leaf's open fn with the shell's per-worktree
 //     `crossPanelHandlers.onFindInFile` registry while the leaf is visible so
-//     the global ⌘F (SharedDockviewLayout) resolves to it.
+//     the global ⌘F (SharedWorktreeLayout) resolves to it.
 function useLeafFind(
   worktreeId: string,
   visible: boolean,
@@ -1345,7 +1206,7 @@ function useLeafLsp(
 // "outer panel visible AND worktree active"), so a hidden or cached
 // worktree's leaves never clobber the active worktree's current file.
 function useActiveFileTracking(
-  api: IDockviewPanelProps["api"],
+  api: LayoutPanelProps["api"],
   worktreeId: string,
   filePath: string,
   visible: boolean,
@@ -1362,7 +1223,7 @@ function useActiveFileTracking(
   }, [visible, tabActive, worktreeId, filePath]);
 }
 
-function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
+function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
   const worktreeIdRaw = params.worktreeId ?? "";
   const filePathRaw = params.filePath ?? "";
@@ -1402,7 +1263,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   );
 
   // FileViewer reports its Save + markdown-toggle availability here; the file
-  // leaf lifts those (plus "View changes") into the dockview group header so
+  // leaf lifts those (plus "View changes") into the layout group header so
   // the tab content carries no toolbar (#643).
   const [fileActions, setFileActions] = useState<{
     isDirty: boolean;
@@ -1531,7 +1392,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   }, [worktreeIdRaw, filePathRaw]);
 
   // Persist on unmount (the `[]`-dep cleanup below — a `file` leaf uses
-  // dockview's default `onlyWhenVisible` renderer, so closing or navigating away
+  // the layout's default `onlyWhenVisible` renderer, so closing or navigating away
   // from the tab tears the leaf down) and on page hide (covers a reload/close
   // while this leaf is the active, visible tab — its cleanup wouldn't otherwise
   // fire in time). Note this does NOT fire on a bare `visible` flip.
@@ -1827,7 +1688,7 @@ const FULL_FILE_CONTEXT = 99999;
 // keeps no direct @codemirror/view dependency.
 type DiffEditorViews = React.ComponentProps<typeof DiffOverviewRuler>["views"];
 
-function DiffLeaf(props: IDockviewPanelProps<DiffLeafParams>) {
+function DiffLeaf(props: LayoutPanelProps<DiffLeafParams>) {
   // A panel's id never changes, so neither does which of the two it renders.
   return props.params.allOf ? (
     <SectionDiffsLeaf {...props} section={props.params.allOf} />
@@ -1844,7 +1705,7 @@ function discardableSection(
   return section === "unstaged" || section === "staged" || section === "untracked" ? section : null;
 }
 
-function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
+function FileDiffLeaf({ params, api, containerApi }: LayoutPanelProps<DiffLeafParams>) {
   // Mobile leaves (tagged in `mobileByApiId`) always show a unified diff.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
@@ -2110,7 +1971,7 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
 function SectionDiffsLeaf({
   params,
   section,
-}: IDockviewPanelProps<DiffLeafParams> & { section: ChangeSection }) {
+}: LayoutPanelProps<DiffLeafParams> & { section: ChangeSection }) {
   const { worktreeId } = params;
   const { visible } = usePanelVisibility();
   const changesQuery = useWorktreeChanges(worktreeId, {
@@ -2253,14 +2114,14 @@ function SectionDiffFile({
 }
 
 // ---------------------------------------------------------------------------
-// Per-instance action registry (stable dockview header/tab components)
+// Per-instance action registry (stable layout header/tab components)
 // ---------------------------------------------------------------------------
 //
-// dockview's header + tab components must be STABLE references, but the
-// handlers they invoke are per-worktree (each mounted WorktreeCenterDockview
+// the layout's header + tab components must be STABLE references, but the
+// handlers they invoke are per-worktree (each mounted WorktreeCenter
 // has its own api). MultiWorktreePanelHost keeps several worktrees mounted
 // at once, so a module-level singleton would suffer last-writer-wins. Key the
-// handlers by the owning dockview's `api.id` (dockview passes `containerApi`
+// handlers by the owning the layout's `api.id` (layout passes `containerApi`
 // into the props), reading the latest closures via the ref holder.
 // ---------------------------------------------------------------------------
 
@@ -2304,10 +2165,10 @@ interface LeafActions {
 
 const leafActionsByApiId = new Map<string, { current: LeafActions }>();
 
-// Mobile flag keyed by the owning dockview's `api.id`. Header action components
-// must be STABLE references (dockview caches them), so they can't read a
+// Mobile flag keyed by the owning the layout's `api.id`. Header action components
+// must be STABLE references (layout caches them), so they can't read a
 // per-instance `mobile` prop directly — they look it up here by
-// `containerApi.id`. Set on `onReady`, cleared on unmount. Desktop dockviews
+// `containerApi.id`. Set on `onReady`, cleared on unmount. Desktop layouts
 // never add themselves, so `has(id)` is false → maximize toggle stays.
 const mobileByApiId = new Set<string>();
 
@@ -2315,7 +2176,7 @@ const mobileByApiId = new Set<string>();
 // Tab headers
 // ---------------------------------------------------------------------------
 
-function IconTab(props: IDockviewPanelHeaderProps) {
+function IconTab(props: LayoutTabProps) {
   const component = props.api.component;
   const Icon = PANEL_ICONS[component];
   const shortcut = PANEL_SHORTCUTS[component];
@@ -2367,7 +2228,7 @@ function IconTab(props: IDockviewPanelHeaderProps) {
 /** Coding-agent types whose CLI can resume a session in a terminal. */
 const RESUME_CAPABLE_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
 
-function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
+function ChatTab(props: LayoutTabProps<ChatLeafParams>) {
   const chatId = props.params.chatId;
   const worktreeId = props.params.worktreeId;
   const initialCache = readCachedTabMeta(chatId);
@@ -2514,7 +2375,7 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
   );
 }
 
-function TerminalTab(props: IDockviewPanelHeaderProps<TermLeafParams>) {
+function TerminalTab(props: LayoutTabProps<TermLeafParams>) {
   const [title, setTitle] = useState(props.api.title ?? "Terminal");
   const terminalId = props.params.terminalId;
   const containerApi = props.containerApi;
@@ -2576,7 +2437,7 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TermLeafParams>) {
   );
 }
 
-function BrowserTab(props: IDockviewPanelHeaderProps<BrowserLeafParams>) {
+function BrowserTab(props: LayoutTabProps<BrowserLeafParams>) {
   const [title, setTitle] = useState(props.api.title ?? "New Tab");
   const [faviconError, setFaviconError] = useState(false);
   const browserId = props.params.browserId;
@@ -2674,7 +2535,7 @@ function TabPathContextMenu({
   );
 }
 
-function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
+function FileTab(props: LayoutTabProps<FileLeafParams>) {
   const { worktreeId, filePath } = props.params;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
@@ -2684,7 +2545,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   // identically in the tree and its tab (#643).
   const FileTypeIcon = getFileIcon(title);
 
-  // Dirty indicator. `FileLeaf` (a separate dockview React tree) dispatches
+  // Dirty indicator. `FileLeaf` (a separate layout React tree) dispatches
   // `band:dirty-change` on every edited-content change; re-read the fresh
   // per-file store when that fires. Seeded synchronously so a restored dirty
   // file shows the dot immediately on mount.
@@ -2749,7 +2610,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   );
 }
 
-function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
+function DiffTab(props: LayoutTabProps<DiffLeafParams>) {
   const { worktreeId, filePath, commit, section, allOf } = props.params;
   const containerApi = props.containerApi;
   const panelId = props.api.id;
@@ -2832,17 +2693,20 @@ interface GroupEdgesStore {
 
 // One store per group, shared by the group's prefix and right header-action
 // slots so each group is measured once.
-const groupEdgesStores = new WeakMap<IDockviewHeaderActionsProps["group"], GroupEdgesStore>();
+const groupEdgesStores = new WeakMap<LayoutHeaderActionsProps["group"], GroupEdgesStore>();
 
-function getGroupEdgesStore(props: IDockviewHeaderActionsProps): GroupEdgesStore {
+function getGroupEdgesStore(props: LayoutHeaderActionsProps): GroupEdgesStore {
   const existing = groupEdgesStores.get(props.group);
   if (existing) return existing;
-  const el = props.group.element;
+  const group = props.group;
   const containerApi = props.containerApi;
   const listeners = new Set<() => void>();
   let stop: (() => void) | null = null;
   const measure = () => {
-    const root = el.closest(".dv-dockview");
+    // The group's element is set when its view mounts, so read it here and
+    // not when the store is made.
+    const el = group.element;
+    const root = el.closest("[data-layout-root]");
     if (!root) return;
     const g = el.getBoundingClientRect();
     const r = root.getBoundingClientRect();
@@ -2862,6 +2726,7 @@ function getGroupEdgesStore(props: IDockviewHeaderActionsProps): GroupEdgesStore
     subscribe(onChange) {
       listeners.add(onChange);
       if (!stop) {
+        const el = group.element;
         measure();
         const ro = new ResizeObserver(measure);
         ro.observe(el);
@@ -2882,19 +2747,19 @@ function getGroupEdgesStore(props: IDockviewHeaderActionsProps): GroupEdgesStore
       };
     },
   };
-  groupEdgesStores.set(props.group, store);
+  groupEdgesStores.set(group, store);
   return store;
 }
 
 const noopSubscribe = () => () => {};
 
-/** Which edges of the dockview this group's rect touches. Re-measured when the
+/** Which edges of the layout this group's rect touches. Re-measured when the
  *  group resizes (which covers a hidden worktree being shown again) and on
- *  every dockview layout change (a split, move, close or maximize). Also marks
- *  top-row groups with `data-band-top-row`, which makes their empty tab-strip
- *  space a window drag region (see `.dockview-center-desktop` in
- *  dockview-theme.css). Measures nothing when `enabled` is false. */
-function useGroupEdges(props: IDockviewHeaderActionsProps, enabled: boolean): GroupEdges {
+ *  every layout change (a split, move, close or maximize). Also marks
+ *  top-row groups with `data-band-top-row` (the e2e drag-region checks read it;
+ *  nothing in the center column drags the window, see `.band-layout--desktop`
+ *  in layout/layout.css). Measures nothing when `enabled` is false. */
+function useGroupEdges(props: LayoutHeaderActionsProps, enabled: boolean): GroupEdges {
   const store = enabled ? getGroupEdgesStore(props) : null;
   return useSyncExternalStore(
     store ? store.subscribe : noopSubscribe,
@@ -2902,18 +2767,14 @@ function useGroupEdges(props: IDockviewHeaderActionsProps, enabled: boolean): Gr
   );
 }
 
-const PrefixHeaderActions = memo(function PrefixHeaderActions(props: IDockviewHeaderActionsProps) {
+const PrefixHeaderActions = memo(function PrefixHeaderActions(props: LayoutHeaderActionsProps) {
   const chrome = useWorktreeChrome();
-  const isGridGroup = (props.location?.type ?? "grid") === "grid";
-  const edges = useGroupEdges(props, !!chrome && isGridGroup);
+  const edges = useGroupEdges(props, !!chrome);
   if (!edges.top || !edges.left) return null;
   return <SidebarGutter />;
 });
 
-const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
-  // Only grid groups get the "+" new-tab menu, not floating groups — mirror
-  // RightHeaderActions' guard.
-  if ((props.location?.type ?? "grid") !== "grid") return null;
+const LeftHeaderActions = memo(function LeftHeaderActions(props: LayoutHeaderActionsProps) {
   return (
     <div className="flex h-full items-center px-0.5">
       <NewTabMenu apiId={props.containerApi.id} groupId={props.group.id} />
@@ -2921,10 +2782,9 @@ const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeader
   );
 });
 
-const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHeaderActionsProps) {
-  const isGridGroup = (props.location?.type ?? "grid") === "grid";
+const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderActionsProps) {
   const chrome = useWorktreeChrome();
-  const edges = useGroupEdges(props, !!chrome && isGridGroup);
+  const edges = useGroupEdges(props, !!chrome);
 
   // Re-render when the active tab changes (in any group) or a leaf republishes
   // its header actions, so this group's active-tab actions stay current.
@@ -2941,9 +2801,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
       window.removeEventListener(HEADER_ACTIONS_EVENT, onActionsChanged);
     };
   }, [props.containerApi, props.group]);
-
-  // Floating groups don't maximize.
-  if (!isGridGroup) return null;
 
   // The active tab's own action buttons (view toggle, save, revert…).
   const activeId = props.group.activePanel?.id;
@@ -3029,8 +2886,8 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
 // Component registries
 // ---------------------------------------------------------------------------
 
-// biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
-const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
+// biome-ignore lint/suspicious/noExplicitAny: the layout registers components by name with their own params
+const components: Record<string, React.FunctionComponent<LayoutPanelProps<any>>> = {
   chat: ChatLeaf,
   term: TerminalLeaf,
   browser: BrowserLeaf,
@@ -3038,7 +2895,8 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
   diff: DiffLeaf,
 };
 
-const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
+// biome-ignore lint/suspicious/noExplicitAny: the layout registers components by name with their own params
+const tabComponents: Record<string, React.FunctionComponent<LayoutTabProps<any>>> = {
   chat: ChatTab,
   term: TerminalTab,
   browser: BrowserTab,
@@ -3054,10 +2912,8 @@ const EMPTY_STATE_BUTTON_CLASS =
 // addPanel helpers
 // ---------------------------------------------------------------------------
 
-type AddPanelOptions = Parameters<DockviewApi["addPanel"]>[0];
-
 function addChatLeaf(
-  api: DockviewApi,
+  api: LayoutApi,
   worktreeId: string,
   chatId: string,
   position?: AddPanelOptions["position"],
@@ -3069,11 +2925,11 @@ function addChatLeaf(
     title: "Chat",
     params: { worktreeId, chatId },
     position: position ?? centralPanelPosition(api),
-  } as AddPanelOptions);
+  });
 }
 
 function addTermLeaf(
-  api: DockviewApi,
+  api: LayoutApi,
   worktreeId: string,
   terminalId: string,
   extra?: Partial<TermLeafParams>,
@@ -3086,17 +2942,17 @@ function addTermLeaf(
     title: "Terminal",
     params: { worktreeId, terminalId, ...extra },
     position: position ?? centralPanelPosition(api),
-    // Keep the leaf MOUNTED when its tab is inactive (dockview hides it via CSS)
+    // Keep the leaf MOUNTED when its tab is inactive (layout hides it via CSS)
     // instead of the default `onlyWhenVisible` detach, so switching center tabs
-    // never unmounts and rebuilds the nested split dockview. The xterm itself is
+    // never unmounts and rebuilds the nested split layout. The xterm itself is
     // still parked and re-attached through the terminal cache, driven by
     // `TerminalLeaf`'s folded `visible` (selected tab AND visible worktree).
     renderer: "always",
-  } as AddPanelOptions);
+  });
 }
 
 function addBrowserLeaf(
-  api: DockviewApi,
+  api: LayoutApi,
   worktreeId: string,
   browserId: string,
   initialUrl?: string,
@@ -3109,12 +2965,12 @@ function addBrowserLeaf(
     title: "New Tab",
     params: { worktreeId, browserId, ...(initialUrl ? { initialUrl } : {}) },
     position: position ?? centralPanelPosition(api),
-    // The page is a `<webview>`, and detaching it from the DOM (dockview's
+    // The page is a `<webview>`, and detaching it from the DOM (the layout's
     // default `onlyWhenVisible` renderer does that for an unselected tab)
     // destroys its guest and reloads the page. Keep the leaf mounted and let
-    // dockview hide it with `display: none` instead.
+    // layout hide it with `display: none` instead.
     renderer: "always",
-  } as AddPanelOptions);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3127,11 +2983,11 @@ function isShownHere(tab: CenterTab): boolean {
 }
 
 /**
- * Write the dockview's tabs to the shared list. With `keepOrder` (another
+ * Write the layout's tabs to the shared list. With `keepOrder` (another
  * device's order or active tab is waiting to be applied) only this device's
  * opened and closed tabs are written, on top of the shared order.
  */
-function persistCenterTabs(api: DockviewApi, worktreeId: string, keepOrder: boolean): void {
+function persistCenterTabs(api: LayoutApi, worktreeId: string, keepOrder: boolean): void {
   const shared = readCenterTabs(worktreeId);
   const local = centerTabsFromApi(api);
   writeCenterTabs(
@@ -3144,7 +3000,7 @@ function persistCenterTabs(api: DockviewApi, worktreeId: string, keepOrder: bool
 
 /** Open a file or diff tab another device opened, next to the tab it follows. */
 function addSharedViewLeaf(
-  api: DockviewApi,
+  api: LayoutApi,
   worktreeId: string,
   tab: CenterTab & { kind: "file" | "diff" },
   afterId: string | null,
@@ -3162,7 +3018,7 @@ function addSharedViewLeaf(
         ? { referencePanel: afterId, direction: "within" }
         : centralPanelPosition(api),
     inactive: true,
-  } as AddPanelOptions);
+  });
 }
 
 function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" } {
@@ -3176,7 +3032,7 @@ function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" }
  * edits typed on this device stays open. Returns whether anything changed.
  */
 function applyCenterTabMembership(
-  api: DockviewApi,
+  api: LayoutApi,
   worktreeId: string,
   target: CenterTabs,
   added: CenterTab[],
@@ -3207,12 +3063,12 @@ function applyCenterTabMembership(
 }
 
 /**
- * Make the dockview show the shared tab list: its file and diff tabs, in its
+ * Make the layout show the shared tab list: its file and diff tabs, in its
  * order, with its active tab. Tabs this device has and the list doesn't
  * (a terminal whose record the list hasn't caught up with)
  * keep their place after the listed ones. Returns whether anything changed.
  */
-function applyCenterTabsFull(api: DockviewApi, worktreeId: string, target: CenterTabs): boolean {
+function applyCenterTabsFull(api: LayoutApi, worktreeId: string, target: CenterTabs): boolean {
   const listed = new Set(target.tabs.map((t) => t.id));
   const extra = api.panels
     .map((p) => ({ id: p.id, kind: p.api.component as CenterTab["kind"] }))
@@ -3228,7 +3084,6 @@ function applyCenterTabsFull(api: DockviewApi, worktreeId: string, target: Cente
 
   const rank = new Map(target.tabs.map((t, i) => [t.id, i]));
   for (const group of api.groups) {
-    if (group.api.location.type !== "grid") continue;
     const desired = [...group.panels].sort(
       (a, b) =>
         (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
@@ -3242,7 +3097,7 @@ function applyCenterTabsFull(api: DockviewApi, worktreeId: string, target: Cente
         moved = true;
       } catch {}
     });
-    // dockview moves a panel within its group by removing and re-adding it
+    // layout moves a panel within its group by removing and re-adding it
     // without activating it, which leaves the group showing no content.
     if (moved) {
       changed = true;
@@ -3272,7 +3127,7 @@ function orderOrActiveDiffers(a: CenterTabs, b: CenterTabs): boolean {
 // Main component
 // ---------------------------------------------------------------------------
 
-interface WorktreeCenterDockviewProps {
+interface WorktreeCenterProps {
   worktreeId: string;
   visible: boolean;
   wsActive: boolean;
@@ -3284,16 +3139,16 @@ interface WorktreeCenterDockviewProps {
 }
 
 // Memoized: every visited worktree stays mounted, so without it each render of
-// `SharedDockviewLayout` (route changes, dialog toggles, current-file changes)
-// would re-render every hidden worktree's dockview. The props are primitives.
-export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
+// `SharedWorktreeLayout` (route changes, dialog toggles, current-file changes)
+// would re-render every hidden worktree's layout. The props are primitives.
+export const WorktreeCenter = memo(function WorktreeCenter({
   worktreeId,
   visible,
   wsActive,
   mobile = false,
-}: WorktreeCenterDockviewProps) {
+}: WorktreeCenterProps) {
   const adapter = useAdapter();
-  const apiRef = useRef<DockviewApi | null>(null);
+  const apiRef = useRef<LayoutApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Ctrl+Tab switcher: per-group recency order, and the open list (if any).
   // `switcherRef` is what the key handlers read; `switcher` only drives render.
@@ -3301,12 +3156,12 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   const switcherRef = useRef<{ items: SwitcherItem[]; index: number } | null>(null);
   const [switcher, setSwitcher] = useState<{ items: SwitcherItem[]; index: number } | null>(null);
   const isRestoringRef = useRef(false);
-  // True while writeLayout runs. dockview's serialize() exits + re-adds the
+  // True while writeLayout runs. the layout's serialize() exits + re-adds the
   // maximized view, firing onDidMaximizedGroupChange mid-write — this flag stops
   // that from re-triggering a persist (which would loop forever).
   const isPersistingRef = useRef(false);
   // True while another device's tab changes are being applied, so the
-  // dockview events they fire don't write the half-applied tabs back.
+  // layout events they fire don't write the half-applied tabs back.
   const applyingSharedRef = useRef(false);
   // Another device changed the tab order or active tab while this worktree
   // was on screen. Applied the next time the worktree is shown, unless the
@@ -3316,10 +3171,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const touchTabsDisposerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // VS Code-style preview tabs: at most one previewing file leaf and one
-  // previewing diff leaf per dockview. A single-click in the sidepanel opens
+  // previewing diff leaf per layout. A single-click in the sidepanel opens
   // a leaf in "preview" mode (italic tab) that the NEXT single-click reuses
   // (closes + replaces); a double-click — or editing — pins it. These refs
   // hold the id of the current preview leaf of each kind, or null.
@@ -3334,7 +3188,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   // "Unsaved changes" dialog is open, or null when no confirm is in flight.
   const [pendingClose, setPendingClose] = useState<{ id: string; path: string } | null>(null);
 
-  // True when the dockview has zero leaves (the user closed everything). Drives
+  // True when the layout has zero leaves (the user closed everything). Drives
   // the centered "New Terminal / Chat / Browser" empty state instead of forcing
   // a leaf back — a closed-out worktree should stay closed until the user picks
   // what to open next.
@@ -3380,14 +3234,10 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     const api = apiRef.current;
     if (!api) return;
     try {
-      // Capture the maximized group BEFORE toJSON: dockview's serialize()
-      // temporarily exits the maximized view (to record un-maximized grid
-      // dimensions) and re-adds it, so reading isMaximized after toJSON misses
-      // it. dockview's toJSON also doesn't persist maximize, so we stamp it on
-      // the blob ourselves — a maximized editor should survive a reload (#490).
+      // The layout's `toJSON` doesn't record maximize, so stamp the maximized
+      // group on the blob ourselves: a maximized editor should survive a
+      // reload (#490).
       const maximizedId = api.groups.find((g) => g.api.isMaximized())?.id;
-      // Guard so the exit/re-enter serialize() fires (onDidMaximizedGroupChange)
-      // during toJSON don't re-enter writeLayout → infinite loop.
       isPersistingRef.current = true;
       const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
       if (maximizedId) json.maximizedGroup = maximizedId;
@@ -3497,11 +3347,11 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           } else if (result.chatId && !api.getPanel(result.chatId)) {
             addChatLeaf(api, worktreeId, result.chatId, position);
           }
-          if (result.notice) console.warn("[WorktreeCenterDockview]", result.notice);
+          if (result.notice) console.warn("[WorktreeCenter]", result.notice);
           announceIfMoved(worktreeId, (result as { worktreeId?: string }).worktreeId);
         })
         .catch((err) => {
-          console.error("[WorktreeCenterDockview] agent launch failed:", err);
+          console.error("[WorktreeCenter] agent launch failed:", err);
           promptOnHostOffline(err);
           // A default-agent chat pane still works without its launch: it
           // creates its chat row on the first message, the way panes did
@@ -3532,7 +3382,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           .mutate({ worktreeId, id })
           .then((created) => announceIfMoved(worktreeId, created.worktreeId))
           .catch((err) => {
-            console.error("[WorktreeCenterDockview] terminal create failed:", err);
+            console.error("[WorktreeCenter] terminal create failed:", err);
             promptOnHostOffline(err);
           });
       } else if (kind === "chat") {
@@ -3543,7 +3393,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         markBrowserFresh(id);
         addBrowserLeaf(api, worktreeId, id, undefined, position);
         trpc.browsers.create.mutate({ worktreeId, id }).catch((err) => {
-          console.error("[WorktreeCenterDockview] browser create failed:", err);
+          console.error("[WorktreeCenter] browser create failed:", err);
         });
       }
     },
@@ -3613,7 +3463,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     (id: string, kind: LeafKind) => {
       const api = apiRef.current;
       if (!api) return;
-      // Closing the LAST leaf is allowed: the dockview drops to its centered
+      // Closing the LAST leaf is allowed: the layout drops to its centered
       // empty state (New Terminal / Chat / Browser), so there's always a way back.
       // Closing a dirty file prompts first; the confirm button does the removal.
       if (kind === "file") {
@@ -3663,7 +3513,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         // clears its preview flag so the next single-click won't replace it.
         if (!preview && previewFileIdRef.current === id) previewFileIdRef.current = null;
         // Spread current params so we never drop worktreeId/filePath/external
-        // regardless of dockview's updateParameters merge semantics.
+        // regardless of the layout's updateParameters merge semantics.
         const cur = existing.api.getParameters<FileLeafParams>();
         existing.api.updateParameters({
           ...cur,
@@ -3679,7 +3529,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       // reuse the OLD preview's group so a moved preview stays where the user
       // put it (add the new leaf into that group first, then close the old one).
       let position: AddPanelOptions["position"] = activeOrCentralPosition(api);
-      let previewToRemove: IDockviewPanel | null = null;
+      let previewToRemove: LayoutPanel | null = null;
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
         // A tab pinned from its own strip (double-click, edit) only flips its
@@ -3704,7 +3554,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           preview,
         },
         position,
-      } as AddPanelOptions);
+      });
       if (previewToRemove) api.removePanel(previewToRemove);
       previewFileIdRef.current = preview ? id : previewFileIdRef.current;
     },
@@ -3741,7 +3591,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         return;
       }
       let position: AddPanelOptions["position"] = activeOrCentralPosition(api);
-      let previewToRemove: IDockviewPanel | null = null;
+      let previewToRemove: LayoutPanel | null = null;
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
         // A tab pinned from its own strip (double-click, edit) only flips its
@@ -3765,7 +3615,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           oldPath: opts?.oldPath,
         },
         position,
-      } as AddPanelOptions);
+      });
       if (previewToRemove) api.removePanel(previewToRemove);
       previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
     },
@@ -3794,7 +3644,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         title: SECTION_LABELS[section],
         params: { worktreeId, filePath: "", allOf: section },
         position: activeOrCentralPosition(api),
-      } as AddPanelOptions);
+      });
     },
     [worktreeId],
   );
@@ -3816,7 +3666,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           : p.startsWith(`${oldPath}/`)
             ? newPath + p.slice(oldPath.length)
             : null;
-      const moves: { panel: IDockviewPanel; prefix: "file" | "diff"; nextPath: string }[] = [];
+      const moves: { panel: LayoutPanel; prefix: "file" | "diff"; nextPath: string }[] = [];
       for (const panel of api.panels) {
         const prefix = panel.id.startsWith("file:")
           ? "file"
@@ -3866,7 +3716,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         if (existing) {
           // A tab for the destination path is already open (e.g. a dirty tab
           // kept after its file was deleted): reuse it rather than adding a
-          // duplicate id, which dockview rejects.
+          // duplicate id, which layout rejects.
           if (wasVisible) existing.api.setActive();
         } else {
           // Same group and tab position, so the rename doesn't reorder tabs.
@@ -3878,7 +3728,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
             params: { ...panel.params, worktreeId, filePath: nextPath },
             position: { referenceGroup: panel.group.id, index: panel.group.panels.indexOf(panel) },
             inactive: !wasVisible,
-          } as AddPanelOptions);
+          });
         }
         api.removePanel(panel);
         if (previewFileIdRef.current === panel.id) previewFileIdRef.current = nextId;
@@ -3935,7 +3785,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
 
   // ---- default layout ----
   const buildDefaultLayout = useCallback(
-    (api: DockviewApi, data: CenterLayoutData) => {
+    (api: LayoutApi, data: CenterLayoutData) => {
       // Default layout for an EMPTY worktree: a single terminal tab, full
       // width. But if the worktree already has live instances (CLI-created
       // chats/browsers/extra terminals, or a seeded session), surface THOSE and
@@ -3991,7 +3841,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
 
   // ---- reconcile a restored layout against live instances ----
   const reconcile = useCallback(
-    (api: DockviewApi, data: CenterLayoutData) => {
+    (api: LayoutApi, data: CenterLayoutData) => {
       // Remove per-instance leaves whose server record is gone.
       for (const panel of [...api.panels]) {
         const kind = panel.api.component as LeafKind;
@@ -4004,7 +3854,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           // populated before the nested leaves mount.
           // A leaf also survives if its terminal is still alive in the CLIENT
           // cache (PARKED across a worktree switch). When the worktree's
-          // dockview remounts in-app, the server's `terminal.list` can
+          // layout remounts in-app, the server's `terminal.list` can
           // momentarily omit the parked terminal; without this cache check
           // reconcile would prune the restored leaf and the empty-fallback
           // below would fabricate a phantom duplicate terminal (regression of
@@ -4022,7 +3872,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       }
       for (const terminalId of data.terminalIds) {
         // Skip terminals that are panes of an existing terminal leaf — they live
-        // inside a nested dockview, not as top-level tabs. Only genuine
+        // inside a nested layout, not as top-level tabs. Only genuine
         // top-level terminals (no owner) seed a new leaf.
         if (!isOwnedPane(terminalId) && !api.getPanel(terminalId)) {
           addTermLeaf(api, worktreeId, terminalId);
@@ -4036,7 +3886,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       }
       // Restored `file` / `diff` leaves are pure client views with no server
       // record — leave them exactly as they were persisted (do NOT prune).
-      // A dockview that ends up EMPTY here (the user closed every leaf) is left
+      // A layout that ends up EMPTY here (the user closed every leaf) is left
       // empty on purpose: the centered empty state offers New Terminal / Chat /
       // Browser rather than forcing a leaf back on the next reload (#643).
     },
@@ -4073,10 +3923,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   );
 
   const onReady = useCallback(
-    (event: DockviewReadyEvent) => {
-      const api = event.api;
+    (api: LayoutApi) => {
       apiRef.current = api;
-      worktreeDockviewApis.set(worktreeId, api);
+      worktreeLayoutApis.set(worktreeId, api);
       worktreeLeafActions.set(worktreeId, actionsRef);
       leafActionsByApiId.set(api.id, actionsRef);
       if (mobile) mobileByApiId.add(api.id);
@@ -4107,12 +3956,15 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (saved) {
         try {
           api.fromJSON(
-            // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON requires any
-            reinjectParams(sanitizeSavedLayout(saved), worktreeId, data.urls) as any,
+            reinjectParams(
+              sanitizeSavedLayout(saved, KNOWN_LEAF_COMPONENTS),
+              worktreeId,
+              data.urls,
+            ),
           );
           reconcile(api, data);
         } catch (err) {
-          console.error("[WorktreeCenterDockview] fromJSON failed, rebuilding:", err);
+          console.error("[WorktreeCenter] fromJSON failed, rebuilding:", err);
           for (const p of [...api.panels]) api.removePanel(p);
           buildDefaultLayout(api, data);
           builtDefault = true;
@@ -4134,7 +3986,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       // Take another device's tab changes made since this layout was saved.
       if (shared && applyCenterTabsFull(api, worktreeId, shared)) builtDefault = true;
 
-      // Restore a persisted maximized group (issue #490): dockview's fromJSON
+      // Restore a persisted maximized group (issue #490): the layout's fromJSON
       // preserves group ids, so re-maximize the one writeLayout recorded. Skip
       // on mobile (single group — nothing to maximize against). Deferred to the
       // next frame so the grid is laid out (maximizing a 0×0 group is a no-op).
@@ -4145,12 +3997,6 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
             api.groups.find((grp) => grp.id === maxId)?.api.maximize();
           } catch {}
         });
-      }
-
-      // Touch: a drag along the tab strip scrolls it; only a tap switches tabs.
-      touchTabsDisposerRef.current?.();
-      if (containerRef.current) {
-        touchTabsDisposerRef.current = attachTouchTabActivation(containerRef.current, api);
       }
 
       // Persistence + focus reporting. Structural changes (add/remove leaf or
@@ -4211,7 +4057,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
 
       setTimeout(() => {
         isRestoringRef.current = false;
-        // A worktree shown for the first time mounts its dockview after the
+        // A worktree shown for the first time mounts its layout after the
         // visibility effect below ran with no leaves yet.
         if (visibleRef.current) focusLeafOnDevice(true);
         // Persist a freshly-built DEFAULT layout once, immediately. It is
@@ -4316,7 +4162,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         disposeTerminal(event.terminalId);
         // Every terminal is a PANE of some terminal leaf (the primary pane's id
         // === the outer leaf id). Resolve the owning leaf, then remove the killed
-        // pane from its nested dockview — and remove the OUTER leaf only once no
+        // pane from its nested layout — and remove the OUTER leaf only once no
         // panes remain. Keying only on `api.getPanel(id)` would wrongly nuke the
         // whole leaf when the (primary) pane is closed while others survive.
         const killedId = event.terminalId;
@@ -4419,7 +4265,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         referenceGroup: source.group.id,
       });
       trpc.browsers.create.mutate({ worktreeId, id, url: event.payload.url }).catch((err) => {
-        console.error("[WorktreeCenterDockview] popup browser create failed:", err);
+        console.error("[WorktreeCenter] popup browser create failed:", err);
       });
     }).then((u) => {
       if (disposed) u();
@@ -4474,7 +4320,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
             throw err;
           }
         } catch (err) {
-          console.error("[WorktreeCenterDockview] html preview failed:", err);
+          console.error("[WorktreeCenter] html preview failed:", err);
         }
       })();
     };
@@ -4615,7 +4461,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       // so with a terminal focused the chord is left to its leaf's handler.
       const split = splitDirectionForKey(e, isMacPlatform());
       if (split) {
-        if (findFocusedTerminalSplitDockview()) return;
+        if (findFocusedTerminalSplitLayout()) return;
         const groupId = api.activeGroup?.id;
         const kind = api.activePanel?.api.component as LeafKind | undefined;
         e.preventDefault();
@@ -4627,12 +4473,12 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
-      // Defer the pane-level keys to a focused terminal leaf's nested dockview:
+      // Defer the pane-level keys to a focused terminal leaf's nested layout:
       // it owns plain ⌘[ / ⌘] (cycle panes), ⌘W / Ctrl+D (close pane). Bail
       // WITHOUT preventDefault so the nested capture handler (registered later
       // on the same window) still fires and acts.
       if (
-        findFocusedTerminalSplitDockview() &&
+        findFocusedTerminalSplitLayout() &&
         (key === "d" || key === "w" || ((key === "[" || key === "]") && !e.shiftKey))
       ) {
         return;
@@ -4652,7 +4498,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       }
 
       // ⌘T (new terminal) lives in the shell's global handler with the other
-      // new-tab chords (SharedDockviewLayout).
+      // new-tab chords (SharedWorktreeLayout).
       if (key === "w" && !e.shiftKey) {
         const active = api.activePanel;
         const kind = active?.api.component as LeafKind | undefined;
@@ -4698,7 +4544,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     return () => window.removeEventListener("band:focus-active-leaf", onFocusActiveLeaf);
   }, [worktreeId, focusLeafOnDevice]);
 
-  // Force a synchronous re-layout when this worktree's dockview becomes visible
+  // Force a synchronous re-layout when this worktree's layout becomes visible
   // (mirrors the legacy inner containers' reveal fix).
   useLayoutEffect(() => {
     if (!visible) return;
@@ -4732,13 +4578,11 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
       if (api) {
         leafActionsByApiId.delete(api.id);
         mobileByApiId.delete(api.id);
-        if (worktreeDockviewApis.get(worktreeId) === api) {
-          worktreeDockviewApis.delete(worktreeId);
+        if (worktreeLayoutApis.get(worktreeId) === api) {
+          worktreeLayoutApis.delete(worktreeId);
           worktreeLeafActions.delete(worktreeId);
         }
       }
-      touchTabsDisposerRef.current?.();
-      touchTabsDisposerRef.current = null;
       // Flush a pending debounced save rather than dropping it, so a layout
       // tweak right before a worktree switch / unmount still persists.
       if (saveTimerRef.current && api) {
@@ -4769,9 +4613,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   return (
     <div ref={containerRef} className="relative flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
-        <DockviewReact
-          theme={mobile ? bandMobileTheme : bandDesktopTheme}
-          className="h-full"
+        <LayoutReact
+          kind="center"
+          className={mobile ? CENTER_MOBILE_CLASS : CENTER_DESKTOP_CLASS}
           components={components}
           tabComponents={tabComponents}
           defaultTabComponent={IconTab}
@@ -4780,10 +4624,6 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
           rightHeaderActionsComponent={RightHeaderActions}
           // Mobile: no drag→split. Every leaf stays a tab in a single group.
           disableDnd={mobile}
-          // No "N hidden tabs" dropdown: the strip scrolls sideways instead
-          // (wheel, trackpad, touch — see `.dockview-center-tabs` in
-          // dockview-theme.css).
-          disableTabsOverflowList
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>

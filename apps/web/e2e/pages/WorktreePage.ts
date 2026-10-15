@@ -1,7 +1,7 @@
 /**
- * Page object for the worktree dockview route (`/worktree/:id`).
+ * Page object for the worktree layout route (`/worktree/:id`).
  *
- * Owns the locators for the shared dockview's header and provides high-level
+ * Owns the locators for the shared layout header and provides high-level
  * actions (`maximizePanel`, `restorePanel`, which press the ⇧⌘M shortcut: the
  * header has no Maximize button) plus helpers for reading client-side
  * persisted state out of `localStorage`.
@@ -12,10 +12,10 @@ import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY } from "@/das
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 import { FindWidget } from "./FindWidget";
 
-/** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
+/** DEAD localStorage key prefix — the legacy `SharedWorktreeLayout`
  *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
- *  The unified `WorktreeCenterDockview` (#643 Phase 1) removed it: active
- *  tab/group state now lives inside the serialized dockview blob under
+ *  The unified `WorktreeCenter` (#643 Phase 1) removed it: active
+ *  tab/group state now lives inside the serialized layout blob under
  *  `band:dockview-layout-v8:<worktreeId>`, with no separate active-state
  *  object and no `maximizedGroup` field. Retained only so the (skipped)
  *  maximize/persistence specs that still reference the active-state helpers
@@ -229,7 +229,9 @@ export class WorktreePage {
   async centerTabVisibilitiesIn(worktreeId: string): Promise<string[]> {
     return await this.cachedPanelEntries(worktreeId).evaluate((entry) =>
       Array.from(
-        entry.querySelectorAll('.dv-tab:has([data-testid^="center-"][data-testid*="-tab--"])'),
+        entry.querySelectorAll(
+          '[data-testid="layout-tab"]:has([data-testid^="center-"][data-testid*="-tab--"])',
+        ),
         (tab) => getComputedStyle(tab).visibility,
       ),
     );
@@ -237,10 +239,10 @@ export class WorktreePage {
 
   /** Locator for the chat tab panel's visibility marker inside a specific
    *  worktree's cached panel host (issue #469). The marker testid is set
-   *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
+   *  by `ChatTabContent` in `the old chat container.tsx` and encodes the
    *  visibility signal the shared `PanelVisibilityContext` propagated
    *  into the tab — so the test can observe context plumbing directly,
-   *  independent of dockview's outer detach behaviour.
+   *  independent of the layout's outer detach behaviour.
    *
    *  Scoping the locator to the worktree's cached entry lets a test
    *  query worktree A's marker and worktree B's marker independently
@@ -254,7 +256,7 @@ export class WorktreePage {
   /** Locator for the terminal tab panel's visibility marker inside a
    *  specific worktree's cached panel host (issue #469). Counterpart of
    *  `chatTabVisibilityMarker` for the terminal container — see that
-   *  method's doc comment for the rationale. The unified center dockview's
+   *  method's doc comment for the rationale. The unified center layout's
    *  terminal leaf tags its wrapper `center-term-leaf__visible-*`. */
   terminalTabVisibilityMarker(worktreeId: string, visible: boolean): Locator {
     return this.cachedPanelEntries(worktreeId).getByTestId(
@@ -709,7 +711,7 @@ export class WorktreePage {
    *
    *  Only one DashboardShell is mounted on desktop — it now lives in the
    *  sidebar `Panel` inside `AppShell` (`apps/web/src/routes/__root.tsx`),
-   *  separate from the dockview — so a single trigger / item pair is in the
+   *  separate from the layout — so a single trigger / item pair is in the
    *  DOM at any time. The Radix
    *  DropdownMenu portals its content to `document.body` with a fade
    *  animation on close, so a back-to-back reopen can briefly see the
@@ -797,7 +799,7 @@ export class WorktreePage {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Repo-list sidebar (lives left of the dockview, outside it) + its
+  // Repo-list sidebar (lives left of the layout, outside it) + its
   // header toggle button. The sidebar is a collapsible resizable-panel:
   // collapsing shrinks its width to ~0 rather than unmounting, so the
   // user-observable signal for hidden/shown is its rendered width.
@@ -924,7 +926,7 @@ export class WorktreePage {
       if (!ops.some((op) => op.drag)) throw new Error("no app-region: drag rect on the page");
       const elements = Array.from(
         document.querySelectorAll(
-          '.dv-tab, .dv-tabs-and-actions-container button, [data-testid="app-shell__nav-overlay"] button',
+          '[data-testid="layout-tab"], [data-testid="layout-header"] button, [data-testid="app-shell__nav-overlay"] button',
         ),
       ).filter((el) => {
         const rect = el.getBoundingClientRect();
@@ -938,8 +940,8 @@ export class WorktreePage {
       const dragBarShown = Array.from(
         document.querySelectorAll('[data-testid="worktree-center__drag-bar"]'),
       ).some((el) => el.checkVisibility({ visibilityProperty: true }) && !el.closest("[inert]"));
-      if (!dragBarShown && !elements.some((el) => el.classList.contains("dv-tab"))) {
-        throw new Error("no visible .dv-tab or center drag bar on the page");
+      if (!dragBarShown && !elements.some((el) => el.matches('[data-testid="layout-tab"]'))) {
+        throw new Error("no visible layout tab or center drag bar on the page");
       }
       const shownRect = (el: Element) => {
         let { left, top, right, bottom } = el.getBoundingClientRect();
@@ -970,7 +972,7 @@ export class WorktreePage {
       const sidebarTitleBar = titleRect && titleRect.width > 50 ? box(titleRect) : null;
       const stripVoids = Array.from(
         document.querySelectorAll(
-          ".band-worktree-entry:not([inert]) [data-band-top-row] > .dv-tabs-and-actions-container > .dv-void-container",
+          '.band-worktree-entry:not([inert]) [data-band-top-row] > [data-testid="layout-header"] > [data-testid="layout-header-void"]',
         ),
       )
         .map((el) => el.getBoundingClientRect())
@@ -982,7 +984,7 @@ export class WorktreePage {
       const rightPanelHeader = headerRect && headerRect.width > 50 ? box(headerRect) : null;
       const centerColumns = Array.from(
         document.querySelectorAll(
-          '.band-worktree-entry:not([inert]) .dockview-center-desktop, [data-testid="worktree-center__drag-bar"]',
+          '.band-worktree-entry:not([inert]) .band-layout--desktop, [data-testid="worktree-center__drag-bar"]',
         ),
       )
         .filter((el) => el.checkVisibility({ visibilityProperty: true }) && !el.closest("[inert]"))
@@ -1021,7 +1023,7 @@ export class WorktreePage {
   }
 
   /** How many visible `drag` boxes overlap the center column (the shown
-   *  worktree's dockview, which holds the tab strip, its empty space and the
+   *  worktree's layout, which holds the tab strip, its empty space and the
    *  empty state, and the empty-state drag bar used with no worktree). Only
    *  the sidebars drag the window, so this must be 0. The sidebar gutter the
    *  strip reserves under the nav cluster while the sidebar is collapsed is
@@ -1165,7 +1167,7 @@ export class WorktreePage {
   }
 
   /** Toggle the sidebar via the ⌘B keyboard shortcut. The keydown is caught
-   *  by a window listener in `SharedDockviewLayout.tsx` and re-dispatched as
+   *  by a window listener in `SharedWorktreeLayout.tsx` and re-dispatched as
    *  `band:toggle-sidebar`; the actual panel collapse/expand is handled in
    *  `AppShell` (`__root.tsx`). ⌘ is a meta key so it fires regardless of
    *  focus. Anchored on the always-present toggle button so the key press has
@@ -1178,7 +1180,7 @@ export class WorktreePage {
   }
 
   /** Toggle the right sidepanel via the ⌥⌘B keyboard shortcut. The keydown is
-   *  caught by the window listener in `SharedDockviewLayout.tsx` and
+   *  caught by the window listener in `SharedWorktreeLayout.tsx` and
    *  re-dispatched as `band:toggle-right-panel`, which `AppShell`
    *  (`__root.tsx`) handles. Anchored on the always-present sidebar toggle
    *  button so the key press has a stable, non-editable focus target. */
@@ -1197,7 +1199,7 @@ export class WorktreePage {
 
   /** Trigger the ⌃0 "Focus Repos" shortcut, which reveals the sidebar
    *  (`band:show-sidebar`) and focuses the list (`band:focus-repos`). The
-   *  keydown is caught by the window listener in `SharedDockviewLayout.tsx`.
+   *  keydown is caught by the window listener in `SharedWorktreeLayout.tsx`.
    *  Anchored on the always-present toggle button so the key press has a
    *  stable focus target even when the sidebar (and its list) is collapsed. */
   async focusReposViaShortcut(): Promise<void> {
@@ -1257,7 +1259,7 @@ export class WorktreePage {
   }
 
   /** Testid PREFIX that identifies a tab of the given leaf kind in the unified
-   *  center dockview (`WorktreeCenterDockview.tsx`). Every leaf kind carries an
+   *  center layout (`WorktreeCenter.tsx`). Every leaf kind carries an
    *  instance-suffixed id (`center-chat-tab--<id>` / `center-term-tab--<id>` /
    *  `center-browser-tab--<id>`), so callers that mean "the first tab of that
    *  kind" match the prefix with a regex + `.first()`.
@@ -1278,12 +1280,12 @@ export class WorktreePage {
     }
   }
 
-  /** Locate a tab in the center dockview's tab strip by leaf kind. The
+  /** Locate a tab in the center layout's tab strip by leaf kind. The
    *  per-instance kinds (chat / terminal / browser) have no single stable id, so
    *  this matches the `center-<kind>-tab--` testid PREFIX and takes `.first()`
    *  to mean "the first tab of that kind" — the worktrees these tests seed have
    *  one tab per kind. `data-testid` values are set in
-   *  `WorktreeCenterDockview.tsx`. */
+   *  `WorktreeCenter.tsx`. */
   tab(panelComponent: "chat" | "terminal" | "browser"): Locator {
     // Anchor the regex to the start so `center-term-tab--` can't match
     // `center-term-tab__context-menu` etc. Filter to VISIBLE so a multi-
@@ -1398,7 +1400,7 @@ export class WorktreePage {
   }
 
   /** Locate the per-path `file` leaf tab opened from the sidepanel Explorer
-   *  (`center-file-tab--<path>`, set in `WorktreeCenterDockview.tsx`). */
+   *  (`center-file-tab--<path>`, set in `WorktreeCenter.tsx`). */
   fileTab(path: string): Locator {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
@@ -1416,7 +1418,7 @@ export class WorktreePage {
   }
 
   /**
-   * Activate the first tab of a kind with the `pointerdown` dockview listens for, sent to the tab
+   * Activate the first tab of a kind with the `pointerdown` layout listens for, sent to the tab
    * itself. For a narrow window, where the tab can sit under the title bar's nav controls (see
    * `closeFileTab`); `activateTab` clicks like a person and is the default.
    */
@@ -1735,7 +1737,7 @@ export class WorktreePage {
     return new FindWidget(this.terminalPanes().nth(index));
   }
 
-  /** Visible center TERMINAL tabs in the outer dockview strip — used to prove a
+  /** Visible center TERMINAL tabs in the outer layout strip — used to prove a
    *  split creates PANES, not a new terminal tab. */
   terminalTabs(): Locator {
     return this.page.getByTestId(/^center-term-tab--/).filter({ visible: true });
@@ -1746,7 +1748,7 @@ export class WorktreePage {
   }
 
   /** Open a new terminal tab with ⌘T (Ctrl+T off macOS), caught by the
-   *  shell's window listener in `SharedDockviewLayout.tsx`. */
+   *  shell's window listener in `SharedWorktreeLayout.tsx`. */
   async pressNewTerminalShortcut(): Promise<void> {
     await test.step("Open a new terminal tab (⌘T)", async () => {
       await this.page.keyboard.press(`${this.modifier}+t`);
@@ -2104,9 +2106,9 @@ export class WorktreePage {
     return { actions, terminal };
   }
 
-  /** Drag one pane's header onto another pane to reorder — dockview moves the
+  /** Drag one pane's header onto another pane to reorder — layout moves the
    *  dragged pane next to the target. Uses a manual pointer-move sequence
-   *  (dockview drives its DnD off pointer events) with intermediate steps so the
+   *  (layout drives its DnD off pointer events) with intermediate steps so the
    *  drag registers. */
   async dragPaneHeaderOnto(fromIndex: number, toIndex: number): Promise<void> {
     await test.step(`Drag pane header ${fromIndex} onto pane ${toIndex}`, async () => {
@@ -2117,7 +2119,7 @@ export class WorktreePage {
       if (!fromBox || !toBox) throw new Error("pane header/target not laid out for drag");
       await this.page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
       await this.page.mouse.down();
-      // Move in steps so dockview's drag detection + overlay tracking engage.
+      // Move in steps so the layout's drag detection + overlay tracking engage.
       const tx = toBox.x + toBox.width / 2;
       const ty = toBox.y + toBox.height / 2;
       await this.page.mouse.move(fromBox.x + fromBox.width / 2 + 12, fromBox.y + 6, { steps: 4 });
@@ -2163,10 +2165,10 @@ export class WorktreePage {
     return (await this.terminalTabs().first().innerText()).trim();
   }
 
-  /** Locate the dockview-owned `.dv-tab` wrapper that contains the named
+  /** Locate the layout-owned `.dv-tab` wrapper that contains the named
    *  center tab. The `data-testid` we set on each tab lives on the inner
-   *  `.dv-default-tab` element; dockview wraps it with its own `.dv-tab`
-   *  parent, which gets `dv-active-tab` added/removed by the library as the
+   *  `.dv-default-tab` element; layout wraps it with its own `.dv-tab`
+   *  parent, which gets `layout-tab[data-selected="true"]` added/removed by the library as the
    *  active panel in the group changes. Using this wrapper is the fastest
    *  deterministic signal that a specific tab is the active view in its group —
    *  much faster than waiting for the panel's content (e.g. xterm) to boot, and
@@ -2176,37 +2178,41 @@ export class WorktreePage {
    *  `.first()` — mirroring `tab(...)`. */
   tabContainer(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
-    return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
+    return this.page.locator(`[data-testid="layout-tab"]:has([data-testid^="${prefix}"])`).first();
   }
 
   /** The visible center tab of `panelComponent` that is the active one in its
-   *  group (dockview's `dv-active-tab`). */
+   *  group (the layout's `layout-tab[data-selected="true"]`). */
   activeTab(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
     return this.page
-      .locator(`.dv-tab.dv-active-tab:has([data-testid^="${prefix}"])`)
+      .locator(`[data-testid="layout-tab"][data-selected="true"]:has([data-testid^="${prefix}"])`)
       .filter({ visible: true });
   }
 
-  /** The dockview `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
-   *  `dv-active-tab` while that file is the active view in its group. See
+  /** The layout `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
+   *  `layout-tab[data-selected="true"]` while that file is the active view in its group. See
    *  `tabContainer`. */
   fileTabContainer(path: string): Locator {
-    return this.page.locator(`.dv-tab:has([data-testid="center-file-tab--${path}"])`);
+    return this.page.locator(
+      `[data-testid="layout-tab"]:has([data-testid="center-file-tab--${path}"])`,
+    );
   }
 
-  /** The dockview `.dv-tab` wrapper of the `diff` leaf tab for `path`. See
+  /** The layout `.dv-tab` wrapper of the `diff` leaf tab for `path`. See
    *  `fileTabContainer`. */
   diffTabContainer(path: string): Locator {
-    return this.page.locator(`.dv-tab:has([data-testid="center-diff-tab--${path}"])`);
+    return this.page.locator(
+      `[data-testid="layout-tab"]:has([data-testid="center-diff-tab--${path}"])`,
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
+  // Center-layout header actions: the "+" new-tab menu (add) and per-tab
   // close (×).
   //
-  // The unified `WorktreeCenterDockview` no longer has per-container inner
-  // dockviews with their own split/+ toolbars. Every grid group's right
+  // The unified `WorktreeCenter` no longer has per-container inner
+  // layouts with their own split/+ toolbars. Every grid group's right
   // header renders a single `+` menu button (`worktree-center__new-tab-button`)
   // that opens a dropdown (`worktree-center__new-tab-menu`) with
   // `--term` / `--chat` / `--browser` items. Split is keyboard-only now
@@ -2218,7 +2224,7 @@ export class WorktreePage {
   // toolbar.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The visible "+" new-tab menu button for a worktree's center dockview. */
+  /** The visible "+" new-tab menu button for a worktree's center layout. */
   private newTabButton(worktreeId: string): Locator {
     return this.cachedPanelEntries(worktreeId)
       .getByTestId("worktree-center__new-tab-button")
@@ -2238,13 +2244,13 @@ export class WorktreePage {
       return;
     }
     // Open the Radix menu via keyboard (focus + Enter) rather than a mouse
-    // click: a dockview splitview sash (`dv-sash`) overlaps the header `+`
+    // click: a layout splitview sash (`dv-sash`) overlaps the header `+`
     // button's centre in the hit-test, so a coordinate click lands on the sash
     // (a real user click on the button body still works). Enter on the focused
     // trigger opens the menu with no hit-test.
     //
     // The menu is portalled to <body>, and with several worktrees cached each
-    // dockview contributes its own (closed) menu — so scope to the VISIBLE
+    // layout contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
     const item = this.page
       .getByTestId(`worktree-center__new-tab--${kind}`)
@@ -2339,7 +2345,7 @@ export class WorktreePage {
     ] as const);
   }
 
-  /** Visible center CHAT tabs in the outer dockview strip. */
+  /** Visible center CHAT tabs in the outer layout strip. */
   chatTabs(): Locator {
     return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
   }
@@ -2356,7 +2362,7 @@ export class WorktreePage {
     return this.newTabButton(worktreeId);
   }
 
-  /** Add a new chat leaf via the "+" menu in the given worktree's dockview. */
+  /** Add a new chat leaf via the "+" menu in the given worktree's layout. */
   async clickChatAddTab(worktreeId: string): Promise<void> {
     await test.step(`Add a chat via "+" menu in worktree ${worktreeId}`, async () => {
       await this.addLeafViaMenu(worktreeId, "chat");
@@ -2405,21 +2411,21 @@ export class WorktreePage {
     return created as string;
   }
 
-  /** Add a new terminal leaf via the "+" menu in the given worktree's dockview. */
+  /** Add a new terminal leaf via the "+" menu in the given worktree's layout. */
   async clickTerminalAddTab(worktreeId: string): Promise<void> {
     await test.step(`Add a terminal via "+" menu in worktree ${worktreeId}`, async () => {
       await this.addLeafViaMenu(worktreeId, "term");
     });
   }
 
-  // Split in the unified center dockview has no toolbar button — it's the
+  // Split in the unified center layout has no toolbar button — it's the
   // Cmd+D shortcut (split the active leaf to the right) handled in
-  // `WorktreeCenterDockview`. To split a specific kind in a specific
+  // `WorktreeCenter`. To split a specific kind in a specific
   // worktree we activate that kind's tab in the worktree's cached host
   // (which also makes the worktree visible/active, so its keydown handler is
   // the one that responds) and then press Cmd+D.
 
-  /** Activate the given kind's first tab in a worktree's center dockview and
+  /** Activate the given kind's first tab in a worktree's center layout and
    *  split it to the right via Cmd+D. */
   private async splitLeafRight(
     kind: "chat" | "terminal" | "browser",
@@ -2442,7 +2448,7 @@ export class WorktreePage {
 
   /** Split the focused terminal into a nested PANE to the right (Cmd+D) in the
    *  given worktree. A terminal split now happens INSIDE the terminal leaf's
-   *  nested dockview, so the keystroke must originate from focus inside that
+   *  nested layout, so the keystroke must originate from focus inside that
    *  worktree's xterm — activate its terminal tab, focus the xterm, then ⌘D. */
   async clickTerminalSplitRight(worktreeId: string): Promise<void> {
     await test.step(`Split the terminal pane right (Cmd+D) in worktree ${worktreeId}`, async () => {
@@ -2457,7 +2463,7 @@ export class WorktreePage {
   }
 
   /** Close the active terminal tab via its per-tab "Close terminal" (×) button
-   *  in the given worktree's center dockview. Each `TerminalTab` renders the
+   *  in the given worktree's center layout. Each `TerminalTab` renders the
    *  button with `title="Close terminal"`; scoped to the worktree's cached
    *  entry so it never targets another mounted worktree's terminal. */
   async closeTerminalTab(worktreeId: string): Promise<void> {
@@ -2470,15 +2476,15 @@ export class WorktreePage {
   }
 
   /** Count the leaves of the given kind in a worktree's unified center
-   *  dockview by counting its rendered tab headers
-   *  (`center-<kind>-tab--<id>`). dockview always renders every leaf's tab
+   *  layout by counting its rendered tab headers
+   *  (`center-<kind>-tab--<id>`). layout always renders every leaf's tab
    *  header (it only detaches inactive *content*), so this reflects the true
    *  leaf count regardless of which tab is active. Scoped to the worktree's
    *  cached panel host so it targets the right (visible) worktree — the crux
    *  of the wrong-worktree regression — not another cached-but-hidden one.
    *
    *  (Replaces the old server-side `readInnerLayout` read: #643 retired the
-   *  per-app inner layouts; the center dockview persists only to localStorage.) */
+   *  per-app inner layouts; the center layout persists only to localStorage.) */
   async countInnerPanels(
     container: "chat" | "terminal" | "browser",
     worktreeId: string,
@@ -2526,7 +2532,7 @@ export class WorktreePage {
 
   // ──────────────────────────────────────────────────────────────────────
   // Right sidepanel (#643 Phase 2). The file tree + changes tree moved out
-  // of the center dockview into a persistent right `Panel` rendered in
+  // of the center layout into a persistent right `Panel` rendered in
   // `__root.tsx` (`app-shell__right-panel`, `data-visible="true|false"`),
   // whose body is `RightSidepanel.tsx` (root `right-sidepanel`, with an
   // Explorer body `right-sidepanel__explorer` and a Changes body
@@ -2593,8 +2599,8 @@ export class WorktreePage {
   }
 
   /** The action slot at the right end of the active worktree's center tab
-   *  strip (`RightHeaderActions` in `WorktreeCenterDockview.tsx`). The seeded
-   *  worktrees have a single dockview group, so this is the top-right group,
+   *  strip (`RightHeaderActions` in `WorktreeCenter.tsx`). The seeded
+   *  worktrees have a single layout group, so this is the top-right group,
    *  and on desktop the tab strip is the window's top row. */
   get centerToolbar(): Locator {
     return this.page.getByTestId("worktree-center__toolbar").filter({ visible: true }).first();
@@ -2744,8 +2750,8 @@ export class WorktreePage {
     await expect(this.newTabButton(worktreeId).first()).toBeVisible({ timeout: 15_000 });
   }
 
-  /** Wait for the shared dockview to render its header. The app boot is
-   *  multi-stage (settings query → worktrees fetch → dockview mount) and any
+  /** Wait for the shared layout to render its header. The app boot is
+   *  multi-stage (settings query → worktrees fetch → layout mount) and any
    *  test that interacts with the header must wait for it to be in the DOM.
    *  Anchors on the header toolbar container. */
   async waitForReady(): Promise<void> {
@@ -2757,11 +2763,11 @@ export class WorktreePage {
   }
 
   /** Wait for the mobile worktree layout to be interactive. The mobile
-   *  layout (`MobileWorktreeShell`) doesn't render the dockview's header
+   *  layout (`MobileWorktreeShell`) doesn't render the layout's header
    *  Maximize buttons, so `waitForReady` won't work. Instead we anchor on the
    *  mobile header's panel menu button (`mobile-worktree__header-menu`) and
-   *  on the shown dockview's "+" new-tab button. The header renders before
-   *  the dockview has loaded its layout, and a file opened into a dockview
+   *  on the shown the layout's "+" new-tab button. The header renders before
+   *  the layout has loaded its layout, and a file opened into a layout
    *  that isn't ready yet is dropped. */
   async waitForMobileReady(): Promise<void> {
     await this.page
@@ -2781,7 +2787,7 @@ export class WorktreePage {
   // (`worktree.$worktreeId.tsx`): a top-level `WorktreeTabNav`
   // (Chat / Changes / Files / Terminal) whose buttons carry the tab label as
   // their system-controlled `aria-label`. The Terminal tab mounts the inner
-  // `DockviewTerminalContainer` DIRECTLY (not inside `MultiWorktreePanelHost`),
+  // `the old terminal container` DIRECTLY (not inside `MultiWorktreePanelHost`),
   // so its toolbar / tab markers are located globally on the page rather than
   // scoped to a `cachedPanelEntries(...)` host.
   // ──────────────────────────────────────────────────────────────────────
@@ -2797,48 +2803,6 @@ export class WorktreePage {
     await test.step(`Open mobile ${label} tab`, async () => {
       await this.mobileWorktreeTab(label).click();
     });
-  }
-
-  /** The mobile terminal container's grid-group toolbar (`RightHeaderActions`
-   *  tags only grid groups with `dockview-terminal__toolbar`). One per
-   *  rendered terminal group — its count is the observable "how many split
-   *  groups" signal. */
-  get mobileTerminalToolbar(): Locator {
-    return this.page.getByTestId("dockview-terminal__toolbar");
-  }
-
-  /** The mobile terminal "New terminal" ("+") button — the add-tab affordance
-   *  that stays available even when split is disabled. */
-  get mobileTerminalNewButton(): Locator {
-    return this.mobileTerminalToolbar.getByRole("button", { name: "New terminal" });
-  }
-
-  /** All "Split right" split buttons on the page. The label is shared across the
-   *  chat/terminal/browser toolbars, so on a mobile viewport (where only one
-   *  splittable container renders) a count of 0 proves the split affordance is
-   *  hidden. Used by both the terminal and chat mobile specs. */
-  get splitRightButtons(): Locator {
-    return this.page.getByRole("button", { name: "Split right" });
-  }
-
-  /** All "Split down" split buttons on the page (see `splitRightButtons`). */
-  get splitDownButtons(): Locator {
-    return this.page.getByRole("button", { name: "Split down" });
-  }
-
-  /** Every terminal tab HEADER, matched on the per-tab testid `TerminalTab`
-   *  sets (`terminal-tab__trigger--<id>`). Dockview always renders every tab's
-   *  header (only inactive panel *bodies* are detached under the default
-   *  `onlyWhenVisible` renderer), so the header count equals the number of
-   *  terminal tabs currently rendered. */
-  get terminalTabHeaders(): Locator {
-    return this.page.getByTestId(/^terminal-tab__trigger--/);
-  }
-
-  /** Wait for the mobile terminal container to render its toolbar (lazy import
-   *  + layout query). */
-  async waitForMobileTerminalReady(): Promise<void> {
-    await this.mobileTerminalToolbar.first().waitFor({ state: "visible", timeout: 15_000 });
   }
 
   /** Create a terminal (spawns a real PTY + registers it in the saved layout)
@@ -2874,36 +2838,11 @@ export class WorktreePage {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Mobile chat (tabs-only). The mobile Chat tab mounts `DockviewChatContainer`
+  // Mobile chat (tabs-only). The mobile Chat tab mounts `the old chat container`
   // directly with `allowSplit={false}` — same locators as the desktop chat
   // toolbar, but located globally on the page (no `cachedPanelEntries` host on
   // mobile).
   // ──────────────────────────────────────────────────────────────────────
-
-  /** The mobile chat container's grid-group toolbar (one per rendered chat
-   *  group; `dockview-chat__toolbar` tags grid groups only). */
-  get mobileChatToolbar(): Locator {
-    return this.page.getByTestId("dockview-chat__toolbar");
-  }
-
-  /** The mobile chat "New chat tab" ("+") button — the add-tab affordance that
-   *  stays available even when split is disabled. */
-  get mobileChatNewButton(): Locator {
-    return this.mobileChatToolbar.getByRole("button", { name: "New chat tab" });
-  }
-
-  /** Every chat tab HEADER, matched on the per-tab testid `ChatTab` sets
-   *  (`chat-tab__trigger--<id>`). Always rendered for every tab, so the count
-   *  equals the number of chat tabs. */
-  get chatTabHeaders(): Locator {
-    return this.page.getByTestId(/^chat-tab__trigger--/);
-  }
-
-  /** Wait for the mobile chat container to render its toolbar (lazy import +
-   *  layout query). */
-  async waitForMobileChatReady(): Promise<void> {
-    await this.mobileChatToolbar.first().waitFor({ state: "visible", timeout: 15_000 });
-  }
 
   /** Create a chat via the real `chats.create` tRPC mutation. Auth via the
    *  `band_token` cookie, matching the other tRPC HTTP helpers. */
@@ -3007,7 +2946,7 @@ export class WorktreePage {
   }
 
   /** Open the worktree picker on desktop via its ⌘K shortcut. The handler
-   *  lives on a window keydown listener in `SharedDockviewLayout.tsx`.
+   *  lives on a window keydown listener in `SharedWorktreeLayout.tsx`.
    *  Because ⌘ is a meta key the shortcut fires regardless of focus
    *  (including from inside a focused terminal), but we still route the
    *  keypress through the repo list root (focusable, non-editable) —
@@ -3056,14 +2995,14 @@ export class WorktreePage {
     return this.worktreeCard(worktreeId).and(this.page.locator("[data-active]"));
   }
 
-  /** Activate the first Terminal leaf tab in the center dockview so its
+  /** Activate the first Terminal leaf tab in the center layout so its
    *  `TerminalLeaf` becomes the active view and (on cold start) the default
    *  terminal panel boots a real PTY server-side. */
   async openTerminalTab(): Promise<void> {
     await this.activateTab("terminal");
   }
 
-  /** Activate a center-dockview tab by its leaf kind. Clicks the FIRST tab of
+  /** Activate a center-layout tab by its leaf kind. Clicks the FIRST tab of
    *  that kind (see `tab(...)`). Wraps the click in a `test.step` so spec bodies
    *  switch tabs through the page object instead of touching the `tab(...)`
    *  locator directly. */
@@ -3095,7 +3034,7 @@ export class WorktreePage {
    *  "visible"), so we wait for `attached`, not `visible`.
    *
    *  `timeoutMs` defaults to 15 s, which is the right budget for tests
-   *  that boot xterm from a freshly-mounted dockview without parallel
+   *  that boot xterm from a freshly-mounted layout without parallel
    *  CI contention. Tests running under high parallel load (or chained
    *  with worktree switches that re-mount the panel host) can pass a
    *  longer budget — see `worktree-maximize-state.spec.ts:346` and
@@ -4017,16 +3956,16 @@ export class WorktreePage {
     });
   }
 
-  /** The outer dockview group shell (`.dv-groupview`) that currently hosts the
-   *  named outer tab. dockview owns this markup — we don't render it — so, as
+  /** The outer layout group shell (`[data-testid="layout-group"]`) that currently hosts the
+   *  named outer tab. layout owns this markup — we don't render it — so, as
    *  with `tabContainer`'s `.dv-tab` wrapper, anchoring on our own
    *  `worktree__tab--*` testid and walking up to the library's shell via
    *  `:has(...)` is the only way to address a specific group. Nested (inner)
-   *  dockviews render their own `.dv-groupview`s but never carry
+   *  layouts render their own `[data-testid="layout-group"]`s but never carry
    *  `worktree__tab--*` testids, so this stays scoped to the outer layout. */
   groupContaining(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
-    return this.page.locator(`.dv-groupview:has([data-testid^="${prefix}"])`);
+    return this.page.locator(`[data-testid="layout-group"]:has([data-testid^="${prefix}"])`);
   }
 
   /** Maximize the center group that hosts the named tab (rather than the Nth
@@ -4044,11 +3983,11 @@ export class WorktreePage {
   async maximizePanel(index = 0): Promise<void> {
     await test.step(`Maximize panel at index ${index}`, async () => {
       await this.page
-        .locator(".dv-groupview")
+        .getByTestId("layout-group")
         .filter({ has: this.page.getByTestId("worktree-center__toolbar") })
         .filter({ visible: true })
         .nth(index)
-        .locator(".dv-tab")
+        .getByTestId("layout-tab")
         .first()
         .click();
       await this.page.keyboard.press("ControlOrMeta+Shift+M");
@@ -4091,9 +4030,9 @@ export class WorktreePage {
     );
   }
 
-  /** Read the persisted maximized-group id from the center-dockview layout blob
-   *  (`band:dockview-layout-v9:<ws>`). `WorktreeCenterDockview.writeLayout`
-   *  records the maximized group id there (dockview's own toJSON omits it);
+  /** Read the persisted maximized-group id from the center-layout blob
+   *  (`band:dockview-layout-v9:<ws>`). `WorktreeCenter.writeLayout`
+   *  records the maximized group id there (the layout's own toJSON omits it);
    *  `undefined` when nothing is maximized. */
   async readMaximizedGroup(worktreeId: string): Promise<string | undefined> {
     return await this.page.evaluate((key) => {
@@ -4122,15 +4061,15 @@ export class WorktreePage {
   }
 
   /** Distance in CSS px between the right edge of the given inner
-   *  container's visible header toolbar (the inner dockview's "Split
+   *  container's visible header toolbar (the inner the layout's "Split
    *  right / Split down / +" action row) and the right edge of the
    *  viewport.
    *
    *  Geometric probe for the maximize-restore "ghost panel" regression
    *  (#490's flow): the toolbar is right-aligned inside the inner
-   *  dockview's group header, so its right edge tracks the inner
-   *  dockview's laid-out width. When the outer group is maximized the
-   *  inner dockview must span the full grid — a small gap (≈ the header
+   *  the layout's group header, so its right edge tracks the inner
+   *  the layout's laid-out width. When the outer group is maximized the
+   *  inner layout must span the full grid — a small gap (≈ the header
    *  padding). If the inner splitview is stuck at a stale split width,
    *  the gap is roughly half the grid (the blank ghost region). Returns
    *  `null` while the toolbar has no box yet (callers poll). */
@@ -4138,7 +4077,7 @@ export class WorktreePage {
     worktreeId: string,
     _container: "terminal" | "browser",
   ): Promise<number | null> {
-    // The unified center dockview has a single grid-group toolbar
+    // The unified center layout has a single grid-group toolbar
     // (`worktree-center__toolbar`) rather than per-container inner toolbars.
     // Scoped to the worktree's cached host + filtered to visible so it
     // resolves the active worktree's grid group. Only referenced by the
@@ -4161,10 +4100,10 @@ export class WorktreePage {
     return state?.groups[groupId];
   }
 
-  /** Seed a worktree's persisted center-dockview layout
+  /** Seed a worktree's persisted center-layout
    *  (`band:dockview-layout-v9:<worktreeId>`) before the app mounts. Uses
    *  `addInitScript`, so it MUST run BEFORE the first `goto` — the value is
-   *  applied to `localStorage` ahead of the page script. Pass a raw dockview
+   *  applied to `localStorage` ahead of the page script. Pass a raw layout
    *  `toJSON()`-shaped blob. */
   async seedGlobalLayout(worktreeId: string, layout: unknown): Promise<void> {
     await this.page.addInitScript(
@@ -4175,7 +4114,22 @@ export class WorktreePage {
     );
   }
 
-  /** Seed a center-dockview layout holding the given `file` leaves (one group,
+  /** Seed a terminal tab's nested split layout
+   *  (`band:term-split:<worktreeId>:<leafId>`) before the app mounts. Like
+   *  `seedGlobalLayout`, it MUST run BEFORE the first `goto`. */
+  async seedTerminalSplit(worktreeId: string, leafId: string, layout: unknown): Promise<void> {
+    await this.page.addInitScript(
+      ({ key, serialized }) => {
+        localStorage.setItem(key, serialized as string);
+      },
+      {
+        key: `band:term-split:${worktreeId}:${leafId}`,
+        serialized: JSON.stringify(layout),
+      },
+    );
+  }
+
+  /** Seed a center-layout holding the given `file` leaves (one group,
    *  stacked as tabs) before the app mounts — a compact wrapper over
    *  `seedGlobalLayout` for the common "restore these open files" case. Panel
    *  ids are `file:<path>`, matching what the app persists. `activePath`
@@ -4197,7 +4151,7 @@ export class WorktreePage {
         title: p.split("/").pop() ?? p,
       };
     }
-    // The grid root must be a `branch`, the shape dockview's own `toJSON()`
+    // The grid root must be a `branch`, the shape the layout's own `toJSON()`
     // always emits (and what the app persists); a bare `leaf` root is rejected
     // on restore, so the app silently falls back to its default layout.
     const layout = {
@@ -4223,16 +4177,15 @@ export class WorktreePage {
     await this.seedGlobalLayout(worktreeId, layout);
   }
 
-  /** Every dockview edge group (the left / right / bottom docked areas that
-   *  used to sit around the grid). dockview tags each edge-group element with
-   *  a library-provided `data-testid` (`dv-edge-group-<groupId>`); it is
-   *  third-party markup, so there is no BEM testid of our own to key off.
-   *  Edge groups were removed, so this should always resolve to nothing. */
+  /** Every edge group (the left / right / bottom docked areas that used to sit
+   *  around the grid). The old layout library tagged an edge group with
+   *  `data-testid="dv-edge-group-<groupId>"`. Edge groups were removed, so this
+   *  should always resolve to nothing. */
   edgeGroups(): Locator {
     return this.page.getByTestId(/^dv-edge-group-/);
   }
 
-  /** Reset the per-worktree shared-dockview state entry in
+  /** Reset the per-worktree shared-layout state entry in
    *  `localStorage` and (re-)navigate to the worktree so the next
    *  mount runs against a clean slate. Two-step (matches
    *  `resetLabelStateAndGoto`): navigate first to land on the origin
@@ -4246,8 +4199,8 @@ export class WorktreePage {
    *  in storage at mount time. Tests that need a fully clean React
    *  state should follow up with another `goto(...)` (or `reload()`)
    *  before exercising layout behaviour. */
-  async resetDockviewActiveStateAndGoto(worktreeId: string): Promise<void> {
-    await test.step(`Reset dockview active state, navigate to ${worktreeId}`, async () => {
+  async resetLayoutActiveStateAndGoto(worktreeId: string): Promise<void> {
+    await test.step(`Reset layout active state, navigate to ${worktreeId}`, async () => {
       await this.goto(worktreeId);
       await this.page.evaluate(
         ([prefix, id]) => {
@@ -4312,7 +4265,7 @@ export class WorktreePage {
 
   /** Dispatch the `band:open-quick-open` window event — the same event the
    *  file-tree toolbar's "Quick Open" action fires (see `CodeBrowserView.tsx`).
-   *  On desktop `SharedDockviewLayout` listens for it; on mobile
+   *  On desktop `SharedWorktreeLayout` listens for it; on mobile
    *  `MobileWorktreeLayout` does. Either way it opens the QuickOpenDialog with
    *  an empty query (unlike `band:open-file`, which pre-fills a query and can
    *  auto-open a single match without ever showing the dialog). */
@@ -4326,7 +4279,7 @@ export class WorktreePage {
 
   /** Dispatch the `band:open-search-files` window event — the same event the
    *  file-tree toolbar's "Search in Files" action fires (see
-   *  `CodeBrowserView.tsx`). On desktop `SharedDockviewLayout` listens for it;
+   *  `CodeBrowserView.tsx`). On desktop `SharedWorktreeLayout` listens for it;
    *  on mobile `MobileWorktreeLayout` does. Either way it opens the
    *  SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
   async dispatchOpenSearchFiles(): Promise<void> {
@@ -4732,7 +4685,7 @@ export class WorktreePage {
   /** Dispatch a synthetic `band:editor-go-back` / `band:editor-go-forward`
    *  window event — the same events the command palette fires for the editor
    *  history "Go Back" / "Go Forward" commands (see `command-registry.ts` +
-   *  `SharedDockviewLayout.tsx`). Captures the cross-worktree routing contract
+   *  `SharedWorktreeLayout.tsx`). Captures the cross-worktree routing contract
    *  under test: an editor-history step belongs to the worktree that owns the
    *  editor, so a step addressed to worktree A must NOT also walk the (hidden)
    *  active worktree B's independent history stack. Mirrors
@@ -4775,17 +4728,17 @@ export class WorktreePage {
   }
 
   /** Read the persisted open *file* tabs for a worktree out of the unified
-   *  center-dockview layout blob (`band:dockview-layout-v9:<worktreeId>`).
+   *  center-layout blob (`band:dockview-layout-v9:<worktreeId>`).
    *
    *  In the flattened layout (#643) there is no separate `band-open-tabs`
-   *  store — file editors are ordinary dockview leaves whose panel id is
+   *  store — file editors are ordinary layout leaves whose panel id is
    *  `file:<path>`, serialized by `api.toJSON()` into `layout.panels`, with the
    *  globally-active panel recorded as the top-level `layout.activePanel`
    *  string. This reader repos that blob back to the old `{ tabs, active }`
    *  shape the file-tab specs assert on: `tabs` = every `file:` panel's path,
    *  `active` = the active panel's path when it is a file leaf (else `null`).
    *
-   *  dockview's `toJSON()` records the active *group* id (`activeGroup`), not a
+   *  the layout's `toJSON()` records the active *group* id (`activeGroup`), not a
    *  panel id, and each group's active panel is the `activeView` of the
    *  matching leaf in `grid.root`. So the globally-active panel is the
    *  active group's `activeView`; we walk the grid tree to resolve it.
@@ -4838,7 +4791,7 @@ export class WorktreePage {
 
   // ──────────────────────────────────────────────────────────────────────
   // Chat tab context menu ("Continue in terminal" / "Copy session ID").
-  // In the unified center dockview each `ChatTab` header is a
+  // In the unified center layout each `ChatTab` header is a
   // `.dv-default-tab` tagged `center-chat-tab--<chatId>`. chatIds are
   // client-generated, so the locator matches the testid PREFIX and the
   // single-chat worktrees these tests use resolve to `.first()`.
@@ -4878,7 +4831,7 @@ export class WorktreePage {
 
   // ──────────────────────────────────────────────────────────────────────
   // Terminal tab header context menu ("Copy terminal ID"). Mirrors the
-  // chat-tab surface above: in the unified center dockview each `TerminalTab`
+  // chat-tab surface above: in the unified center layout each `TerminalTab`
   // header carries a `center-term-tab--<terminalId>` testid whose suffix is
   // generated at runtime, so we match the stable PREFIX with a regex and take
   // `.first()` — the worktrees these tests seed have a single terminal tab.
@@ -5071,7 +5024,7 @@ export class WorktreePage {
    *  (focused) terminal — what the container reports to the server as the
    *  worktree's last-focused terminal. `.xterm-screen` is xterm-owned DOM (no
    *  testid to hook; same FRAGILITY carve-out as the other xterm probes here),
-   *  and clicking it routes focus through xterm → dockview's focusin tracking. */
+   *  and clicking it routes focus through xterm → the layout's focusin tracking. */
   async focusTerminalPane(index: number): Promise<void> {
     await test.step(`Focus terminal pane #${index}`, async () => {
       await this.page.locator(".xterm-screen").nth(index).click();

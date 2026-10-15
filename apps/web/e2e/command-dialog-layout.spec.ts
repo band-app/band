@@ -89,7 +89,7 @@ test.afterAll(async () => {
 });
 
 test.describe("Command dialog layout — desktop (upper third, input anchored)", () => {
-  // Wide viewport so `useIsDesktop()` is true, the shared dockview mounts, and
+  // Wide viewport so `useIsDesktop()` is true, the shared layout mounts, and
   // the ⌘K picker uses the desktop (top-anchored) branch of the variant.
   test.use({ viewport: { width: 1280, height: 800 } });
 

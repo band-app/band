@@ -1,5 +1,5 @@
 /**
- * Most-recently-used tab order per dockview group, for the Ctrl+Tab switcher.
+ * Most-recently-used tab order per layout group, for the Ctrl+Tab switcher.
  * Held in memory only; a reload starts from the strip order again.
  */
 export type TabMru = Map<string, string[]>;

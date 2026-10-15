@@ -58,7 +58,7 @@ const REPO = "alpha-terminal-reconnect";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 const MARKER = "band-reconnect-marker-7f3c";
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts the terminal container) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 

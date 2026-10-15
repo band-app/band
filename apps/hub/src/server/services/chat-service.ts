@@ -24,7 +24,7 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
+import { defaultPanelIdFromLayout, LayoutManager } from "./_utils/layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
@@ -233,7 +233,7 @@ function validateLabels(
  *   - The in-memory primary index (`chatId → ChatSession`)
  *   - The reverse index (`worktreeId → Set<chatId>`)
  *   - Lazy hydration from `panel_states` on first read
- *   - Layout integration via `DockviewLayoutManager("chat_layout")`
+ *   - Layout integration via `LayoutManager("chat_layout")`
  *   - Emitting `chat-created` / `chat-removed` events on `watcher`
  *
  * Stateful by design — there's exactly one instance (`chatService` below).
@@ -263,9 +263,7 @@ export class ChatService {
 
   constructor(
     private readonly queries: ChatQueries = new ChatQueries(),
-    private readonly layoutManager: DockviewLayoutManager = new DockviewLayoutManager(
-      "chat_layout",
-    ),
+    private readonly layoutManager: LayoutManager = new LayoutManager("chat_layout"),
   ) {}
 
   private ensureInitialized(): void {
@@ -354,7 +352,7 @@ export class ChatService {
     this.addToIndex(session);
 
     // Mirror what `terminals.create` and `browsers.create` do: register the
-    // new pane in the saved dockview layout so it shows up next time the
+    // new pane in the saved layout so it shows up next time the
     // worktree is opened. Without this, chats created via the CLI (e.g.
     // `band worktrees create --prompt`, `band chats create`, or the lazy
     // `getOrCreateDefaultChat` path) exist as records but are invisible
@@ -363,7 +361,7 @@ export class ChatService {
     // also touch the layout client-side — is unaffected.
     this.addToLayout(worktreeId, session.id, { title: session.name });
 
-    // Notify any open dashboard so it can sync its dockview without a
+    // Notify any open dashboard so it can sync its layout without a
     // page reload. Same pattern as `terminal-created` / `browser-created`.
     emit({ kind: "chat-created", worktreeId, chatId: session.id });
 
@@ -539,7 +537,7 @@ export class ChatService {
   /**
    * Remove a chat pane. Kills its agent process, removes from DB,
    * the saved layout, and in-memory maps. Emits a `chat-removed` event
-   * so any open dashboard can sync its dockview.
+   * so any open dashboard can sync its layout.
    */
   remove(chatId: string): boolean {
     this.ensureInitialized();
@@ -553,7 +551,7 @@ export class ChatService {
     // Remove from DB
     this.queries.remove(chatId);
 
-    // Drop the panel from the saved dockview layout. Mirrors what
+    // Drop the panel from the saved layout. Mirrors what
     // `terminal.kill` and `browsers.remove` do via their respective
     // `remove*FromLayout` helpers — keeps the layout in sync with
     // the registry so an open dashboard doesn't show a ghost tab.
@@ -575,7 +573,7 @@ export class ChatService {
    * Remove all chat panes for a worktree.
    * Called when a worktree is deleted.
    *
-   * Drops the saved dockview layout in the same call — mirrors `remove()`,
+   * Drops the saved layout in the same call — mirrors `remove()`,
    * which calls `removeFromLayout` so layout cleanup is part of the
    * service-level contract instead of something every caller has to
    * remember to do as a second step. Keeps `ChatService` and
@@ -755,7 +753,7 @@ export class ChatService {
     this.layoutManager.delete(worktreeId);
   }
 
-  /** Add a chat panel to the saved dockview layout. */
+  /** Add a chat panel to the saved layout. */
   addToLayout(worktreeId: string, chatId: string, opts?: { title?: string }): void {
     this.layoutManager.addPanel(worktreeId, {
       id: chatId,
@@ -769,7 +767,7 @@ export class ChatService {
     });
   }
 
-  /** Remove a chat panel from the saved dockview layout. */
+  /** Remove a chat panel from the saved layout. */
   removeFromLayout(worktreeId: string, chatId: string): void {
     this.layoutManager.removePanel(worktreeId, chatId);
   }

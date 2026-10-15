@@ -44,7 +44,7 @@ import {
 import { PrChecksPanelPage } from "./pages/PrChecksPanelPage";
 import { PullRequestBadgePage } from "./pages/PullRequestBadgePage";
 
-// Wide viewport so the right sidepanel renders beside the center dockview.
+// Wide viewport so the right sidepanel renders beside the center layout.
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-pr-badge-token";

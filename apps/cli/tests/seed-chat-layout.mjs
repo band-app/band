@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Seed a chat layout (dockview tree) directly into the panel_states table.
+// Seed a chat layout (layout tree) directly into the panel_states table.
 // Used by integration tests that exercise the default-chat-panel resolution.
 //
 // Usage: node seed-chat-layout.mjs <band_dir> <worktree_id> <layout_json>

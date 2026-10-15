@@ -1,0 +1,99 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["term-1", "file:a.ts"],
+            "activeView": "file:a.ts",
+            "id": "1"
+          },
+          "size": 700
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "views": ["chat-1", "diff:c.ts"],
+                "activeView": "diff:c.ts",
+                "id": "2"
+              },
+              "size": 550
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": ["file:b.ts"],
+                "activeView": "file:b.ts",
+                "id": "3"
+              },
+              "size": 250
+            }
+          ],
+          "size": 500
+        }
+      ],
+      "size": 800
+    },
+    "width": 1200,
+    "height": 800,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "term-1": {
+      "id": "term-1",
+      "contentComponent": "term",
+      "tabComponent": "term",
+      "params": {
+        "worktreeId": "wt",
+        "name": "term-1"
+      },
+      "title": "term-1"
+    },
+    "file:a.ts": {
+      "id": "file:a.ts",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "params": {
+        "worktreeId": "wt",
+        "name": "file:a.ts"
+      },
+      "title": "file:a.ts"
+    },
+    "chat-1": {
+      "id": "chat-1",
+      "contentComponent": "chat",
+      "tabComponent": "chat",
+      "params": {
+        "worktreeId": "wt",
+        "name": "chat-1"
+      },
+      "title": "chat-1"
+    },
+    "diff:c.ts": {
+      "id": "diff:c.ts",
+      "contentComponent": "diff",
+      "tabComponent": "diff",
+      "params": {
+        "worktreeId": "wt",
+        "name": "diff:c.ts"
+      },
+      "title": "diff:c.ts"
+    },
+    "file:b.ts": {
+      "id": "file:b.ts",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "params": {
+        "worktreeId": "wt",
+        "name": "file:b.ts"
+      },
+      "title": "file:b.ts"
+    }
+  },
+  "activeGroup": "1"
+}

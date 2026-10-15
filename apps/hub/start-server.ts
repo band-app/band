@@ -1061,7 +1061,7 @@ async function main() {
     }
 
     // CDP screencast experiment: list Band browser tabs (DB-backed) for
-    // a worktree. The web client renders one dockview panel per tab and
+    // a worktree. The web client renders one layout panel per tab and
     // streams via /cdp?bandTabId=<id> when the user picks one.
     if (req.url?.startsWith("/api/cdp/tabs")) {
       const url = new URL(req.url, `http://${req.headers.host}`);

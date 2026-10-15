@@ -45,8 +45,8 @@ const REPO = "viaproj";
 const BRANCH = "main";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared
-// dockview renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
-// The terminal pane is part of the desktop layout's dockview; the
+// layout renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
+// The terminal pane is part of the desktop layout's layout; the
 // mobile route uses a different surface and doesn't apply here.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -162,11 +162,11 @@ test.describe("worktrees.create --via terminal (issue #551)", () => {
     expect(created.terminalId).toMatch(/^.+$/);
 
     // Phase 2: drive the dashboard to the newly-created worktree and
-    // assert the terminal pane mounts. The outer shared dockview lays
+    // assert the terminal pane mounts. The outer shared layout lays
     // out a `terminal` tab unconditionally; we click it to make sure
     // the terminal container becomes the active view, then anchor on
     // xterm's input element. The element is only emitted by xterm.js
-    // once a PTY session is attached to its inner-dockview panel — so
+    // once a PTY session is attached to its inner-layout panel — so
     // its presence is the DOM-level proof that the spawned terminal
     // landed in the layout, not just an empty tab.
     await worktreePage.goto(targetWorktreeId);
