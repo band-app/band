@@ -64,6 +64,7 @@ import type {
   QueuedChatMessage,
   SessionState,
 } from "@band-app/shared/chat-events";
+import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
 import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
 import { ChatForwardQueries, type ChatForwardRow } from "../infra/db/queries/chat-forwards";
 import { TaskQueries } from "../infra/db/queries/tasks";
@@ -151,7 +152,12 @@ export class ChatOwnershipService {
     const owns = session.hello.capabilities.includes(CAPABILITY_CHAT_OWNERSHIP);
     if (owns && this.canOwn(hostId)) {
       for (const chat of chatService.all()) {
-        if (!chat.ownerHostId && worktreeService.resolve(chat.worktreeId)?.host.id === hostId) {
+        // The id names the host, so most chats are skipped without resolving their worktree.
+        if (
+          !chat.ownerHostId &&
+          worktreeIdIsOnHost(chat.worktreeId, hostId) &&
+          worktreeService.resolve(chat.worktreeId)?.host.id === hostId
+        ) {
           this.ownerFor(chat.id);
         }
       }
@@ -214,7 +220,8 @@ export class ChatOwnershipService {
       // The old owner may be running it right now; its answer decides (`deliverOne`).
       if (this.inFlight.has(row.id)) continue;
       if (row.method === METHOD_CHAT_FORWARD) this.reroute(row);
-      else this.forwards.remove(row.id);
+      // A release still waiting for an earlier owner goes out: that host must drop the chat.
+      else if (row.method !== METHOD_CHAT_RELEASE) this.forwards.remove(row.id);
     }
   }
 
@@ -281,9 +288,19 @@ export class ChatOwnershipService {
     this.live.delete(chatId);
     void agentSessionService.revokeOwnerLaunch(chatId);
     if (deleteLog) {
-      for (const row of this.forwards.pendingForChat(chatId)) this.forwards.remove(row.id);
+      for (const row of this.forwards.pendingForChat(chatId)) {
+        // An earlier owner still waiting for its release deletes its copy of the log too.
+        if (row.method === METHOD_CHAT_RELEASE) {
+          this.forwards.setParams(row.id, { chatId, deleteLog: true });
+        } else {
+          this.forwards.remove(row.id);
+        }
+      }
       this.forwards.dropHolds(chatId);
     } else {
+      // A turn the old owner was running ends here: its own end, logged as the worker stops the
+      // agent, is kept apart now that the chat has moved.
+      this.closeOpenTurn(chatId);
       // Messages that waited for the old owner (often offline after a restore) follow the chat
       // now, instead of when that host comes back. The caller has already moved the chat.
       this.rerouteAll(chatId);
@@ -688,18 +705,33 @@ export class ChatOwnershipService {
     const hostId = session.workerId;
     const rows = await readPayload<ChatEventRowWire[]>(session, p.rows);
     const now = Date.now();
+    // A worker writes only ids the hub reserved, which all lie at or below the stored sequence.
+    const reserved = this.events.reservedThrough();
     const owned: ChatEventRow[] = [];
+    const held: ChatEventRowWire[] = [];
+    let refused = 0;
     for (const row of rows) {
+      if (!isWireRow(row) || row.id > reserved) {
+        refused++;
+        continue;
+      }
       const chat = chatService.get(row.chatId);
       if (chat?.ownerHostId === hostId) {
         owned.push({ ...row, event: row.event as LoggedChatEvent });
       } else if (chat) {
         // The chat moved while this worker kept working: keep its rows apart, never in the log.
-        this.forwards.hold(hostId, row.chatId, row.id, row, now);
+        held.push(row);
       }
     }
+    if (refused > 0) {
+      log.warn(
+        { hostId, refused },
+        "refused malformed replicated rows or rows outside the reserved ids",
+      );
+    }
+    if (held.length > 0) this.forwards.holdAll(hostId, held, now);
     for (const row of this.events.insertRows(owned)) this.ingest(row);
-    const ackedThrough = rows.reduce((max, r) => Math.max(max, r.id), 0);
+    const ackedThrough = rows.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
     return { ackedThrough };
   }
 
@@ -741,6 +773,8 @@ export class ChatOwnershipService {
       case "turn-started":
         observeAgentStatus(hasRunningTask);
         this.saveTask(row, event.taskId, "running");
+        // The task row holds the prompt from here on.
+        this.prompts.delete(event.taskId);
         chatService.updateStatus(row.chatId, "running");
         beginBandTurn(worktreeId, row.chatId);
         break;
@@ -777,6 +811,10 @@ export class ChatOwnershipService {
     if (!chat) return;
     const worktree = worktreeService.resolve(chat.worktreeId);
     const existing = this.tasks.load(taskId);
+    if (existing?.chatId && existing.chatId !== row.chatId) {
+      log.warn({ taskId, chatId: row.chatId }, "a replicated turn names another chat's task");
+      return;
+    }
     try {
       this.tasks.save({
         id: taskId,
@@ -794,6 +832,22 @@ export class ChatOwnershipService {
       log.warn({ taskId, err }, "failed to persist the task of an owned chat");
     }
   }
+}
+
+/** Whether a row from a worker has the shape the log stores. */
+function isWireRow(row: ChatEventRowWire): boolean {
+  const event = row?.event as { type?: unknown } | undefined;
+  return (
+    Number.isSafeInteger(row?.id) &&
+    row.id > 0 &&
+    Number.isSafeInteger(row.revision) &&
+    row.revision > 0 &&
+    typeof row.chatId === "string" &&
+    typeof row.sessionId === "string" &&
+    row.sessionId.length > 0 &&
+    typeof row.createdAt === "number" &&
+    typeof event?.type === "string"
+  );
 }
 
 /** The task record a forwarded message stands for until the owner's turn reports its own. */

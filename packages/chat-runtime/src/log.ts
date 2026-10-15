@@ -187,6 +187,14 @@ export class ChatEventQueries {
     return row?.id ?? 0;
   }
 
+  /** The highest id this log has used or reserved for another writer. */
+  reservedThrough(): number {
+    const used = this.db().get<{ seq: number | null }>(
+      sql`select max(coalesce((select seq from sqlite_sequence where name = 'chat_events'), 0), coalesce((select max(id) from chat_events), 0)) as seq`,
+    );
+    return used?.seq ?? 0;
+  }
+
   /**
    * Reserves `size` ids for another writer: the ids after every id this
    * log has used, which its own appends then skip, because SQLite's

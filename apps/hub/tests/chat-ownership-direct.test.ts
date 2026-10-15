@@ -124,7 +124,8 @@ describe("send and stream on the direct path (S1)", () => {
       until: (e) => e.type === "history-meta",
       timeoutMs: 10_000,
     });
-    expect((await replay.events).some((e) => e.type === "prompt")).toBe(true);
+    const prompts = (await replay.events).flatMap((e) => (e.type === "prompt" ? [e.text] : []));
+    expect(prompts).toEqual(["hello on loopback"]);
   }, 30_000);
 
   it("refuses the chat routes without a token and with a token for another worktree", async () => {
@@ -190,9 +191,8 @@ describe("a cut link (S3, within the lease)", () => {
       { label: "the hub catches up", timeoutMs: 60_000 },
     );
     const hub = hubLog();
-    // Every row once, in order, none missing.
-    expect(new Set(hub.map((r) => r.id)).size).toBe(hub.length);
-    expect(hub.map((r) => r.id)).toEqual([...hub.map((r) => r.id)].sort((a, b) => a - b));
+    // Every row of the worker's log once, with the same ids: no gap, no duplicate.
+    expect(hub.map((r) => r.id)).toEqual(workerLog().map((r) => r.id));
     expect(promptsOn(hub)).toEqual([
       "hello on loopback",
       "first while offline",

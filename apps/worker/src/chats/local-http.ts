@@ -30,6 +30,8 @@ import type { ChatMessage, ChatOwner } from "./owner.ts";
 
 /** Largest request body: a message with its attached files. */
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+/** How long a stream or history read waits for the chat's log to be copied in before the hub serves it. */
+const READY_WAIT_MS = 5_000;
 
 const CHAT_ROUTE = /^\/api\/chats\/([^/]+)\/(events|history|messages|stop|permission|elicitation)$/;
 
@@ -104,14 +106,26 @@ export async function handleChatRoute(
   const wantMethod = route === "events" || route === "history" ? "GET" : "POST";
   if (req.method !== wantMethod) return json(405, { error: `Use ${wantMethod}` });
 
+  // A log still being copied from the hub after a short wait: the hub serves the stream and
+  // history until the copy is done, instead of the app waiting for it.
+  if (wantMethod === "GET" && !(await owner.readyWithin(chatId, READY_WAIT_MS))) {
+    return json(503, { error: "The chat's history is not copied from the hub yet" });
+  }
+
   try {
     if (route === "events") return await streamEvents(req, res, ctx, chatId, url);
     if (route === "history") return json(200, history(owner, chatId, url));
     const raw = await readBody(req);
-    const body = (raw.length === 0 ? {} : JSON.parse(raw.toString("utf8"))) as Record<
-      string,
-      unknown
-    >;
+    let body: Record<string, unknown>;
+    try {
+      const parsed: unknown = raw.length === 0 ? {} : JSON.parse(raw.toString("utf8"));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return json(400, { error: "The body must be a JSON object" });
+      }
+      body = parsed as Record<string, unknown>;
+    } catch {
+      return json(400, { error: "The body is not JSON" });
+    }
     switch (route) {
       case "messages": {
         const text = typeof body.text === "string" ? body.text : "";
@@ -208,7 +222,6 @@ async function streamEvents(
   url: URL,
 ): Promise<void> {
   const { owner } = ctx;
-  await owner.ready(chatId);
   const cursor =
     parseIntOrUndefined(req.headers["last-event-id"]) ??
     parseIntOrUndefined(url.searchParams.get("lastEventId"));

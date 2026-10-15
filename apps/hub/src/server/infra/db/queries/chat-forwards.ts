@@ -3,6 +3,7 @@
  * for a chat it no longer owns.
  */
 
+import type { ChatEventRowWire } from "@band-app/link";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "../connection";
 import { chatEventHolds, chatForwards } from "../schema";
@@ -78,13 +79,22 @@ export class ChatForwardQueries {
     getDb().delete(chatForwards).where(eq(chatForwards.id, id)).run();
   }
 
-  /** Keeps a row a worker sent for a chat it no longer owns. A resent row is kept once. */
-  hold(hostId: string, chatId: string, id: number, row: unknown, at: number): void {
-    getDb()
-      .insert(chatEventHolds)
-      .values({ hostId, chatId, id, row: JSON.stringify(row), receivedAt: at })
-      .onConflictDoNothing()
-      .run();
+  /** Keeps rows a worker sent for chats it no longer owns, in one transaction. */
+  holdAll(hostId: string, rows: ChatEventRowWire[], at: number): void {
+    getDb().transaction((tx) => {
+      for (const row of rows) {
+        tx.insert(chatEventHolds)
+          .values({
+            hostId,
+            chatId: row.chatId,
+            id: row.id,
+            row: JSON.stringify(row),
+            receivedAt: at,
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+    });
   }
 
   /** Drops the rows held for a removed chat. */

@@ -8,7 +8,7 @@ import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { agentText, maxId, openStream, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
 import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";
@@ -145,6 +145,14 @@ beforeAll(async () => {
   plain = await w.addWorker("plain", ["proj"]);
 }, 120_000);
 
+// A test that stops the owning worker and fails before starting it again leaves it running for
+// the next test, so one failure does not show up as another's.
+afterEach(async () => {
+  if (owner && (owner.child.exitCode !== null || owner.child.signalCode !== null)) {
+    owner = await w.restartWorker(owner);
+  }
+}, 60_000);
+
 afterAll(async () => {
   await w?.close();
 });
@@ -206,6 +214,33 @@ describe("a chat on a worker that owns its chats (S2)", () => {
       "second message",
     ]);
   }, 90_000);
+
+  it("changes a session setting on the worker's agent", async () => {
+    const chat = await getChat(chatId);
+    const { state } = await w.m<{
+      state: { configOptions: Array<{ id: string; currentValue: string }> };
+    }>("chats.setConfigOption", { chatId, configId: "model", value: "stub-large" });
+    expect(state.configOptions.find((o) => o.id === "model")?.currentValue).toBe("stub-large");
+    const asked = w.stubRequests(owner, "session/set_config_option").map((r) => r.params);
+    expect(asked).toContainEqual(
+      expect.objectContaining({
+        sessionId: chat?.activeSessionId,
+        configId: "model",
+        value: "stub-large",
+      }),
+    );
+  }, 30_000);
+
+  it("lists past sessions from the worker's agent", async () => {
+    const chat = await getChat(chatId);
+    const before = w.stubRequests(owner, "session/list").length;
+    const listed = await w.q<{ sessions: Array<{ sessionId: string }> }>("sessions.list", {
+      worktreeId: wt,
+      chatId,
+    });
+    expect(listed.sessions.map((s) => s.sessionId)).toContain(chat?.activeSessionId);
+    expect(w.stubRequests(owner, "session/list").length).toBeGreaterThan(before);
+  }, 30_000);
 });
 
 describe("a worker that does not own chats (S9)", () => {

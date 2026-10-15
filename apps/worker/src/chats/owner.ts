@@ -45,6 +45,8 @@ import {
   NOTIFY_CHAT_ACTIVITY,
   NOTIFY_CHAT_LIVE,
   NOTIFY_CHAT_TRANSIENT,
+  RPC_CANCELLED,
+  RpcError,
   readPayload,
   sendPayload,
 } from "@band-app/link";
@@ -83,6 +85,8 @@ export class ChatOwner {
   private readonly runtimes = new Map<string, ChatRuntime>();
   private readonly listeners = new Map<string, Set<ChatListener>>();
   private readonly seeding = new Map<string, Promise<void>>();
+  /** Chats the hub took back that are still replicating their last rows: nothing new runs. */
+  private readonly releasing = new Set<string>();
   /** The hub's answer to `chat.sessionState`, per chat with no session yet. */
   private readonly catalogStates = new Map<string, SessionState>();
   private readonly turns: Turns;
@@ -197,7 +201,7 @@ export class ChatOwner {
   // ---- ownership -----------------------------------------------------------
 
   isOwned(chatId: string): boolean {
-    return this.store.ownedChat(chatId) !== undefined;
+    return !this.releasing.has(chatId) && this.store.ownedChat(chatId) !== undefined;
   }
 
   private owned(chatId: string): string {
@@ -208,8 +212,15 @@ export class ChatOwner {
   private own(params: ChatOwnParams): { ok: true } {
     const existing = this.store.ownedChat(params.chat.chatId);
     this.store.saveChat(params.chat);
+    // Until the newer rows are in, readers wait and no turn starts on the stale log.
+    if (existing) this.store.setSeeded(params.chat.chatId, existing.seededThrough, false);
     this.ctx.log.info({ chatId: params.chat.chatId }, "this worker owns the chat now");
-    if (!existing?.seeded) void this.seed(params.chat.chatId);
+    // A record kept from an earlier ownership (the hub ran the chat in between) misses the rows
+    // the hub logged since. Copying resumes after the last copied row and skips rows it has.
+    void this.seed(params.chat.chatId);
+    if (existing?.seeded) {
+      this.ctx.log.info({ chatId: params.chat.chatId }, "owned again: copying newer hub rows");
+    }
     this.publishLive(params.chat.chatId);
     return { ok: true };
   }
@@ -252,6 +263,27 @@ export class ChatOwner {
     return work;
   }
 
+  /**
+   * Whether the chat's log is copied in within `ms`. A reader that gets false goes to the hub,
+   * which holds the same log, rather than wait for a long copy. Throws when it is not owned.
+   */
+  async readyWithin(chatId: string, ms: number): Promise<boolean> {
+    this.owned(chatId);
+    const record = this.store.ownedChat(chatId);
+    if (record?.seeded && this.store.peekId() > 0) return true;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+    });
+    try {
+      return await Promise.race([this.ready(chatId).then(() => true), timeout]);
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Waits until the chat's log is copied in. Rejects when it is not owned. */
   async ready(chatId: string): Promise<void> {
     this.owned(chatId);
@@ -266,11 +298,22 @@ export class ChatOwner {
   private async release(params: ChatReleaseParams): Promise<{ ok: true }> {
     const { chatId } = params;
     if (this.isOwned(chatId)) {
+      // From here nothing new runs: no send is accepted and the aborted turn's end drains no
+      // queued message, so no agent starts while the last rows replicate.
+      this.releasing.add(chatId);
+      this.store.clearQueue(chatId);
       this.turns.abort(chatId);
       this.runtimes.get(chatId)?.stop();
       this.runtimes.delete(chatId);
-      await this.flushReplication();
-      this.store.dropChat(chatId, params.deleteLog === true);
+      try {
+        await this.flushReplication();
+      } finally {
+        // A runtime made while the rows replicated (the aborted turn settling) stops too.
+        this.runtimes.get(chatId)?.stop();
+        this.runtimes.delete(chatId);
+        this.store.dropChat(chatId, params.deleteLog === true);
+        this.releasing.delete(chatId);
+      }
       this.ctx.log.info({ chatId, deleteLog: params.deleteLog === true }, "gave the chat up");
     }
     return { ok: true };
@@ -406,6 +449,8 @@ export class ChatOwner {
         this.store.saveLaunch(chatId, launch);
         return launch;
       } catch (err) {
+        // The hub answered and said no (the chat is no longer this worker's): never run it.
+        if (err instanceof RpcError && err.code !== RPC_CANCELLED) throw err;
         if (!cached) throw err;
         this.warn("the hub did not answer chat.launch; using the last launch", err);
       }

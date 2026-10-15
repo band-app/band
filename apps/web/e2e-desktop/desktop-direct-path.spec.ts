@@ -291,7 +291,7 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   }).toPass({ timeout: 60_000, intervals: [5_000] });
 
   // Chat ownership S1: this Mac's worker runs the chat, and the message and its event stream go
-  // to the worker's port. The hub only gets the worker's copy. A packaged run has no stub agent.
+  // to the worker's port, not the hub's. A packaged run has no stub agent.
   // Last, because the chat tab stays the shown tab, and once the direct path is back from the
   // restart above.
   if (!isPackagedRun()) {
@@ -303,7 +303,7 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
       await chat.chatTab(chatId).click();
       await expect(chat.promptInput).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
-    await chat.promptInput.fill("hello on this Mac");
+    await chat.typeMessage("hello on this Mac");
     await chat.submit();
     await expect(chat.assistantMessage("hello on this Mac")).toBeVisible({ timeout: 60_000 });
     const chatCalls = (route: string) =>
