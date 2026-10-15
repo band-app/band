@@ -28,7 +28,7 @@ The worker keeps `<state dir>/chats.db`, with the same `chat_events` table as th
 
 ## The local path
 
-The desktop app uses the worker's local listener ([local direct path](local-direct-path.md)) for an owned chat in a worktree on its own worker:
+The desktop app uses the worker's direct listener ([local direct path](local-direct-path.md), `apps/worker/src/direct.ts`) for an owned chat in a worktree on its own worker. The routes are in `apps/worker/src/chats/local-http.ts`, and the app reaches them through `apps/web/src/lib/direct-chat.ts`:
 
 | Route | Like the hub's |
 | --- | --- |
@@ -38,7 +38,7 @@ The desktop app uses the worker's local listener ([local direct path](local-dire
 | `POST /api/chats/:chatId/stop` | `tasks.abort` |
 | `POST /api/chats/:chatId/permission`, `/elicitation` | `chat.answer`, `chat.answerElicitation` |
 
-The token is the worktree's direct-path token. A chat the worker does not own answers 404 and the app uses the hub. A connection failure does the same, and the app tries the local path again later. Event ids are the same on both sides, so a stream can move between the worker and the hub without a reset.
+The token is the worktree's direct-path token, checked like the file and terminal calls (loopback `Host`, the desktop app's `Origin`, the worktree scope). A chat the worker does not own answers 404, and the app uses the hub for that chat for a minute. A refused token (401) makes the app ask the hub for a new one, and a connection failure or a 5xx sends the call to the hub while the direct path rests. An answer to a request that is gone is a 409, so it is never read as "not owned". Event ids are the same on both sides, so a stream moves between the worker and the hub without a reset. A chat created on the worker's worktree is owned from the start, so its first message can go direct.
 
 ## Restore
 
