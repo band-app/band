@@ -14,6 +14,7 @@ import {
   readWebhookSecret,
   verifyGithubSignature,
 } from "../infra/subscriptions/github";
+import { requestCIRefresh } from "./_utils/ci-refresh-request";
 import { withHubGhCredential } from "./_utils/hub-gh-auth";
 import { isBandPushed } from "./pushed-sha-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
@@ -158,6 +159,8 @@ export class GithubWebhookService {
       checks.push(...runs);
       if (runs.length < CHECK_RUNS_PER_PAGE) break;
     }
+    // The sidebar's CI state follows the next tick instead of waiting out its period.
+    requestCIRefresh();
     const event = aggregateChecks(checks, trigger, Date.now(), isBandPushed(trigger.sha));
     if (event) subscriptionService.ingest(event);
   }

@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { hostRegistry } from "../infra/host/registry";
+import { takeCIRefreshRequest } from "./_utils/ci-refresh-request";
 import {
   buildBatchedCIQuery,
   type CIStatus,
@@ -499,6 +500,42 @@ async function pollWorktree(ws: WorktreeInfo, newCI: CIStatus | null): Promise<v
   });
 }
 
+/**
+ * Store CI status learned outside a tick (the Checks panel's own query) on the
+ * worktree's row and emit it when it changed. Returns whether it changed. A
+ * worktree with no row yet is left to the poller, which also has its git status.
+ */
+export function applyCIStatus(worktreeId: string, ci: CIStatus): boolean {
+  const db = getDb();
+  const existing = db
+    .select()
+    .from(branchStatusesTable)
+    .where(eq(branchStatusesTable.worktreeId, worktreeId))
+    .get();
+  if (!existing) return false;
+  const git: GitStatus = {
+    dirty: existing.gitDirty,
+    conflict: existing.gitConflict,
+    ahead: existing.gitAhead,
+    behind: existing.gitBehind,
+    sync_state: existing.gitSyncState,
+  };
+  if (isSameStatus(existing, git, ci)) return false;
+  db.update(branchStatusesTable)
+    .set({ ciState: ci.state, ciUrl: ci.url ?? null, ciPr: ci.pr ?? null, updatedAt: Date.now() })
+    .where(eq(branchStatusesTable.worktreeId, worktreeId))
+    .run();
+  // A tick that already fetched CI for this worktree must not store an older answer over it.
+  pendingCIByWorktree.set(worktreeId, ci);
+  emit({
+    kind: "branch-status",
+    worktreeId,
+    git,
+    ci: { state: ci.state, url: ci.url ?? null, pr: ci.pr ?? null },
+  });
+  return true;
+}
+
 /** In-flight on-demand refreshes, so repeated requests share one git call. */
 const refreshesInFlight = new Map<string, Promise<boolean>>();
 
@@ -529,7 +566,8 @@ export function refreshWorktreeBranchStatus(worktreeId: string): Promise<boolean
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
-  const queryCI = isCITick || pollerState.queryCIOnNextTick;
+  const requested = takeCIRefreshRequest();
+  const queryCI = isCITick || pollerState.queryCIOnNextTick || requested;
   pollerState.queryCIOnNextTick = false;
 
   if (pollerState.tickCount === 1 || isCITick) {
