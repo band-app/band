@@ -1,7 +1,10 @@
+import { directOps, type WorktreeOps } from "@band-app/worktree-ops/direct";
+import { filePathSchema } from "@band-app/worktree-ops/schemas";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link";
 import { diffService } from "../../services/diff-service";
+import { directAccessService } from "../../services/direct-access-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
@@ -34,42 +37,8 @@ import { publicProcedure, t } from "../trpc";
  * `trpc.worktree.*`.
  */
 
-/**
- * Branch names accepted by diff/revert procedures. Forbids leading `-` so the
- * value can't be interpreted by git as a flag (e.g. `--upload-pack=`, `--exec=`)
- * when it lands in `git merge-base <branch> HEAD` or `git checkout <branch> -- file`.
- * The trpc server is local-only, but `execFile` doesn't pass through a shell, so
- * a leading-dash check is enough to close the only realistic injection vector.
- */
-const compareBranchSchema = z
-  .string()
-  .min(1)
-  .regex(/^[^-]/, "branch name must not start with '-'")
-  .optional();
-
-/**
- * `mergeBase` is the SHA returned by `getChanges` and threaded
- * back into `getFileDiff` as a revision argument to `git diff`. Pin to
- * a 40-character hex SHA: this closes the leading-dash injection
- * vector (`--exec=`, `--output=…`) AND enforces that `getFileDiff`
- * operates on the same revision shape `getChanges` returned. Real
- * merge-base SHAs from git are always 40-char hex; symbolic refs like
- * `HEAD`, `main`, or `@{-1}` are rejected so a client can't accidentally
- * desync from the Changes list's view of the world.
- */
-const mergeBaseSchema = z
-  .string()
-  .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
-
-/** A section of the Changes view (see `DiffService.getChanges`). */
-const changeSectionSchema = z.enum(["conflicts", "unstaged", "staged", "untracked", "branch"]);
-
-/**
- * A worktree-relative path handed to git as a pathspec. The leading-dash
- * guard keeps it from being read as a flag; the service also checks it
- * stays inside the worktree.
- */
-const filePathSchema = z.string().min(1).regex(/^[^-]/, "path must not start with '-'");
+/** The services the procedures shared with a worker's direct listener run on. */
+const worktreeOps: WorktreeOps = { files: filesService, diff: diffService, search: searchService };
 
 /** Paths for the stage / unstage / discard mutations. A header action sends
  *  every file of its section; the service hands them to git in batches. */
@@ -111,6 +80,16 @@ const commitShaSchema = z
  * rest of the router.
  */
 export const worktreeRouter = t.router({
+  /**
+   * A short-lived token for the worker that holds `worktreeId`, when that
+   * worker is `hostId`, the caller's own machine (the desktop app passes its
+   * worker's id). Null when the direct path does not apply, and the caller
+   * keeps using the hub.
+   */
+  directAccess: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1), hostId: z.string().min(1) }))
+    .mutation(({ input }) => directAccessService.issue(input.worktreeId, input.hostId)),
+
   getTerminalConfig: publicProcedure
     .input(z.object({ worktreeId: z.string() }))
     .query(async ({ input }) => {
@@ -291,50 +270,16 @@ export const worktreeRouter = t.router({
     ),
 
   getDiff: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        contextLines: z.number().int().min(0).max(99999).optional(),
-        diffMode: z.enum(["uncommitted", "branch"]).optional(),
-        compareBranch: compareBranchSchema,
-      }),
-    )
-    .query(({ input }) =>
-      diffService.getDiff(input.worktreeId, {
-        contextLines: input.contextLines,
-        diffMode: input.diffMode,
-        compareBranch: input.compareBranch,
-      }),
-    ),
+    .input(directOps["worktree.getDiff"].input)
+    .query(({ input }) => directOps["worktree.getDiff"].run(worktreeOps, input)),
 
   getChanges: publicProcedure
-    .input(z.object({ worktreeId: z.string(), compareBranch: compareBranchSchema }))
-    .query(({ input }) =>
-      diffService.getChanges(input.worktreeId, { compareBranch: input.compareBranch }),
-    ),
+    .input(directOps["worktree.getChanges"].input)
+    .query(({ input }) => directOps["worktree.getChanges"].run(worktreeOps, input)),
 
   getFileDiff: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        filePath: filePathSchema,
-        section: changeSectionSchema,
-        /** Required for the `branch` section. */
-        mergeBase: mergeBaseSchema.optional(),
-        /** The path before a rename, so git pairs the two sides. */
-        oldPath: filePathSchema.optional(),
-        contextLines: z.number().int().min(0).max(99999).optional(),
-      }),
-    )
-    .query(({ input }) =>
-      diffService.getFileDiff(input.worktreeId, {
-        filePath: input.filePath,
-        section: input.section,
-        mergeBase: input.mergeBase,
-        oldPath: input.oldPath,
-        contextLines: input.contextLines,
-      }),
-    ),
+    .input(directOps["worktree.getFileDiff"].input)
+    .query(({ input }) => directOps["worktree.getFileDiff"].run(worktreeOps, input)),
 
   stageFiles: publicProcedure
     .input(z.object({ worktreeId: z.string(), paths: pathListSchema }))
@@ -387,22 +332,16 @@ export const worktreeRouter = t.router({
     .mutation(({ input }) => worktreeService.generateCommitMessage(input.worktreeId)),
 
   listFiles: publicProcedure
-    .input(z.object({ worktreeId: z.string(), path: z.string().default("") }))
-    .query(({ input }) => filesService.listFiles(input.worktreeId, input.path)),
+    .input(directOps["worktree.listFiles"].input)
+    .query(({ input }) => directOps["worktree.listFiles"].run(worktreeOps, input)),
 
   getFile: publicProcedure
-    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
-    .query(({ input }) => filesService.getFile(input.worktreeId, input.path)),
+    .input(directOps["worktree.getFile"].input)
+    .query(({ input }) => directOps["worktree.getFile"].run(worktreeOps, input)),
 
   saveFile: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        path: z.string().min(1),
-        content: z.string(),
-      }),
-    )
-    .mutation(({ input }) => filesService.saveFile(input.worktreeId, input.path, input.content)),
+    .input(directOps["worktree.saveFile"].input)
+    .mutation(({ input }) => directOps["worktree.saveFile"].run(worktreeOps, input)),
 
   createFile: publicProcedure
     .input(
@@ -455,23 +394,8 @@ export const worktreeRouter = t.router({
     }),
 
   searchFiles: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        query: z.string().default(""),
-        // Raised from 50 → 200 to match the corpus expansion in issue
-        // #530: with files from nested git repos now visible to Quick
-        // Open, the previous 50-entry cap could push a wanted match
-        // off the result list entirely.
-        limit: z.number().default(200),
-      }),
-    )
-    .query(({ input }) =>
-      searchService.searchFiles(input.worktreeId, {
-        query: input.query,
-        limit: input.limit,
-      }),
-    ),
+    .input(directOps["worktree.searchFiles"].input)
+    .query(({ input }) => directOps["worktree.searchFiles"].run(worktreeOps, input)),
 
   // Resolve an absolute (or worktree-relative) path against this
   // worktree: does it exist, is it a regular file, and does it live inside
@@ -494,25 +418,8 @@ export const worktreeRouter = t.router({
     ),
 
   searchContent: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        query: z.string().min(1),
-        caseSensitive: z.boolean().default(false),
-        wholeWord: z.boolean().default(false),
-        regex: z.boolean().default(false),
-        limit: z.number().default(100),
-      }),
-    )
-    .query(({ input }) =>
-      searchService.searchContent(input.worktreeId, {
-        query: input.query,
-        caseSensitive: input.caseSensitive,
-        wholeWord: input.wholeWord,
-        regex: input.regex,
-        limit: input.limit,
-      }),
-    ),
+    .input(directOps["worktree.searchContent"].input)
+    .query(({ input }) => directOps["worktree.searchContent"].run(worktreeOps, input)),
 });
 
 export type WorktreeRouter = typeof worktreeRouter;

@@ -57,7 +57,8 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.raw("fs.watch", async (a) => {
     const root = await path(a, "root");
     const ch = session.openChannel("fs.watch", { root });
-    const changes = host.fs.watch(root, { recursive: optBool(a, "recursive") });
+    const ignore = Array.isArray(a.ignore) ? strArray(a, "ignore") : undefined;
+    const changes = host.fs.watch(root, { recursive: optBool(a, "recursive"), ignore });
     serve(ch, ndjson(changes), { release: activity.hold() });
     return { chan: ch.id };
   });

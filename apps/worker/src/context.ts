@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { Host, HostDirs, HostInfo } from "@band-app/host-api";
-import type { LinkSession } from "@band-app/link";
+import { type LinkSession, RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
 import type { CliCache } from "./cli.ts";
@@ -61,16 +61,38 @@ type Handler<T> = (params: Params, call: { signal: AbortSignal }) => T | Promise
 /** Registers RPC methods, each counted as activity and with errors mapped to RPC codes. */
 export class Registrar {
   readonly names: string[] = [];
+  /** The JSON and bytes methods before their reply is encoded, for {@link invoke}. */
+  private readonly local = new Map<string, Handler<unknown>>();
   constructor(private readonly ctx: WorkerContext) {}
 
   /** Replies with `fn`'s value, as JSON. */
   json(method: string, fn: Handler<unknown>): void {
+    this.local.set(method, fn);
     this.add(method, async (p, call) => encodeJson(this.ctx.session, await fn(p, call)));
   }
 
   /** Replies with the bytes `fn` returns. */
   bytes(method: string, fn: Handler<Uint8Array>): void {
+    this.local.set(method, fn);
     this.add(method, async (p, call) => encodeBytes(this.ctx.session, await fn(p, call)));
+  }
+
+  /**
+   * Runs a JSON or bytes method in this process, with the same parameter
+   * checks, path policy and activity accounting as a call from the hub, and
+   * the same RPC error a hub call would get. The direct listener uses it.
+   */
+  async invoke<T>(method: string, params: Params, signal?: AbortSignal): Promise<T> {
+    const fn = this.local.get(method);
+    if (!fn) throw new RpcError(RPC_METHOD_NOT_FOUND, `method not found: ${method}`);
+    const release = this.ctx.activity.hold({ passive: PASSIVE_METHODS.has(method) });
+    try {
+      return (await fn(params, { signal: signal ?? new AbortController().signal })) as T;
+    } catch (err) {
+      throw mapError(err);
+    } finally {
+      release();
+    }
   }
 
   /** Replies with exactly what `fn` returns, for calls that build their own reply. */

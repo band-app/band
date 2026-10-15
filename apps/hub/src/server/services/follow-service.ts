@@ -177,7 +177,7 @@ export class FollowService {
     const at = this.locate(worktreeId);
     if (!at) throw new CheckpointError("invalid", `Unknown worktree "${worktreeId}"`);
     const { repo, worktree, hostId } = at;
-    const hostName = hostNamesOf([hostId])[0] ?? hostId;
+    const hostName = hostNamesOf([hostId])[0] ?? "unknown host";
     const base: ContinueOffer = {
       worktreeId,
       repo: repo.name,
@@ -419,7 +419,7 @@ export class FollowService {
     if (!this.isOffline(worktreeId)) {
       throw new CheckpointError(
         "conflict",
-        `${hostNamesOf([at.hostId])[0] ?? at.hostId} is online. Continue on another host only when it is offline; to move the work while it is up, use "Move to host".`,
+        `${hostNamesOf([at.hostId])[0] ?? "unknown host"} is online. Continue on another host only when it is offline; to move the work while it is up, use "Move to host".`,
       );
     }
     const offer = await this.offer(worktreeId, input);
@@ -525,7 +525,10 @@ export class FollowService {
     if (!repl || !old)
       throw new CheckpointError("invalid", `${oldId} was not continued elsewhere.`);
     if (!checkpointService.isHostOnline(old.hostId)) {
-      throw new CheckpointError("offline", `Host ${old.hostId} is offline.`);
+      throw new CheckpointError(
+        "offline",
+        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} is offline.`,
+      );
     }
     const row = checkpointService.row(repl.from.checkpointId);
     if (!row) {
@@ -536,7 +539,11 @@ export class FollowService {
     }
     const host = hostRegistry.hostById(old.hostId);
     const [root] = (await host.info()).roots;
-    if (!root) throw new CheckpointError("invalid", `Host ${old.hostId} serves no directory.`);
+    if (!root)
+      throw new CheckpointError(
+        "invalid",
+        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} serves no directory.`,
+      );
     const snap = await buildSnapshot(
       host,
       old.worktree.path,
@@ -654,14 +661,21 @@ export class FollowService {
     from: ContinuedFrom,
   ): Promise<{ fromTree: string; toTree: string }> {
     if (!checkpointService.isHostOnline(old.hostId)) {
-      throw new CheckpointError("offline", `Host ${old.hostId} is offline.`);
+      throw new CheckpointError(
+        "offline",
+        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} is offline.`,
+      );
     }
     const row = checkpointService.row(from.checkpointId);
     if (!row)
       throw new CheckpointError("no-checkpoint", `The checkpoint ${from.checkpointId} is gone.`);
     const host = hostRegistry.hostById(old.hostId);
     const [root] = (await host.info()).roots;
-    if (!root) throw new CheckpointError("invalid", `Host ${old.hostId} serves no directory.`);
+    if (!root)
+      throw new CheckpointError(
+        "invalid",
+        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} serves no directory.`,
+      );
     const snap = await buildSnapshot(
       host,
       old.worktree.path,
@@ -687,7 +701,7 @@ export class FollowService {
     if (!checkpointService.isHostOnline(next.hostId)) {
       throw new CheckpointError(
         "offline",
-        `Host ${next.hostId} is offline, so the patch cannot be applied.`,
+        `${hostNamesOf([next.hostId])[0]} is offline, so the patch cannot be applied.`,
       );
     }
     const { fromTree, toTree } = await this.trees(oldId, old, repl.from);
@@ -704,7 +718,11 @@ export class FollowService {
 
     const newHost = hostRegistry.hostById(next.hostId);
     const [root] = (await newHost.info()).roots;
-    if (!root) throw new CheckpointError("invalid", `Host ${next.hostId} serves no directory.`);
+    if (!root)
+      throw new CheckpointError(
+        "invalid",
+        `${hostNamesOf([next.hostId])[0] ?? "unknown host"} serves no directory.`,
+      );
     const wipDir = posix.join(root, WIP_DIR);
     await newHost.fs.mkdir(wipDir, { recursive: true });
     const patchFile = posix.join(wipDir, `${nextId}.bring-over.patch`);

@@ -23,6 +23,7 @@ import type {
   ToolCallStatus,
   ToolKind,
 } from "@agentclientprotocol/sdk";
+import { type AgentFailure, failureFromMessage } from "@band-app/shared/agent-failure";
 import type {
   ChatEvent,
   ChatEventFile,
@@ -67,7 +68,10 @@ export type Entry =
       answer?: string;
     }
   | { kind: "file"; id: string; file: ChatEventFile }
-  | { kind: "notice"; id: string; level: "info" | "warning" | "error"; text: string };
+  | { kind: "notice"; id: string; level: "info" | "warning" | "error"; text: string }
+  /** The agent failed. Older logs carry only a string, so `failure` is then
+   *  `failureFromMessage`. */
+  | { kind: "failure"; id: string; failure: AgentFailure };
 
 export type ChatMessage =
   | {
@@ -588,10 +592,17 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
       const failed = event.error !== undefined || event.stopReason === "cancelled";
       let messages = settle(state.messages, failed, event.createdAt);
       const notice = event.error
-        ? { level: "error" as const, text: event.error }
+        ? undefined
         : event.stopReason
           ? STOP_NOTICES[event.stopReason]
           : undefined;
+      if (event.error) {
+        messages = addEntry(messages, event.eventId, {
+          kind: "failure",
+          id: `n${event.eventId}`,
+          failure: event.failure ?? failureFromMessage(event.error),
+        });
+      }
       if (notice) {
         messages = addEntry(messages, event.eventId, {
           kind: "notice",

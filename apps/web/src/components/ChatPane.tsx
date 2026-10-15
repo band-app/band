@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useWorktreeDisplay } from "../dashboard/hooks/use-worktree-display";
 import { consumeChatFresh } from "../lib/leaf-instance-ids";
 import { trpc } from "../lib/trpc-client";
 import { ChatView } from "./ChatView";
@@ -276,13 +277,14 @@ interface ChatPaneProps {
 }
 
 export function ChatPane({ worktreeId, chatId, visible, wsActive, state }: ChatPaneProps) {
+  const displayWorktree = useWorktreeDisplay();
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ChatView
         key={state.paneKey}
         worktreeId={worktreeId}
         chatId={chatId}
-        worktreeName={worktreeId}
+        worktreeName={displayWorktree(worktreeId).label}
         initialSessionId={state.initialSessionId}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}

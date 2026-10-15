@@ -1,6 +1,7 @@
 import type { AppRouter } from "@band-app/server";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
 
+import { directWorkerLink } from "./direct-worker";
 import { HubWebSocket, hubFetch, hubUrl, hubWsUrl } from "./hub-config";
 
 const wsClient = createWSClient({
@@ -12,6 +13,8 @@ const wsClient = createWSClient({
 
 export const trpc = createTRPCClient<AppRouter>({
   links: [
+    // Files, diff and search of a worktree on this computer's worker skip the hub (desktop app only).
+    directWorkerLink(),
     splitLink({
       condition: (op) => op.type === "subscription",
       true: wsLink({ client: wsClient }),

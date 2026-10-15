@@ -197,6 +197,22 @@ interface Watch {
   checkpointed?: string;
 }
 
+/**
+ * Git deletes the empty `refs/band/wip` directory when the last ref in it goes (a checkpoint of
+ * another worktree in the same repo ends), which can land between another command's lookup and
+ * its create. That command fails with "cannot lock ref", and a second try succeeds.
+ */
+async function retryRefLock<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (attempt >= 4 || !/cannot lock ref/i.test(errorText(err))) throw err;
+      await new Promise((r) => setTimeout(r, 50 * attempt));
+    }
+  }
+}
+
 export class CheckpointService {
   private readonly rows = new CheckpointQueries();
   private readonly repos = new RepoQueries();
@@ -381,7 +397,11 @@ export class CheckpointService {
     const host = hostRegistry.hostById(hostId);
     const rpc = new RemoteRpc(hostId, () => session);
     const [root] = (await host.info()).roots;
-    if (!root) throw new CheckpointError("invalid", `Host ${hostId} serves no directory.`);
+    if (!root)
+      throw new CheckpointError(
+        "invalid",
+        `${hostNamesOf([hostId])[0] ?? "unknown host"} serves no directory.`,
+      );
     const wipDir = posix.join(root, WIP_DIR);
     const cwd = found.worktree.path;
 
@@ -409,7 +429,7 @@ export class CheckpointService {
     const git = gitIn(host, cwd);
     const ref = `refs/band/wip/${worktreeId}`;
     const remoteBundle = posix.join(wipDir, `${worktreeId}.checkpoint.bundle`);
-    await git(["update-ref", ref, snap.snapshotSha]);
+    await retryRefLock(() => git(["update-ref", ref, snap.snapshotSha]));
     let hasBundle = true;
     let bundleSize = 0;
     try {
@@ -847,7 +867,10 @@ export class CheckpointService {
     const { repo, worktree } = found;
     const fromHostId = worktree.hostId ?? LOCAL_HOST_ID;
     if (fromHostId === toHostId) {
-      throw new CheckpointError("invalid", `${worktreeId} is already on ${toHostId}.`);
+      throw new CheckpointError(
+        "invalid",
+        `${worktreeId} is already on ${hostNamesOf([toHostId])[0] ?? "unknown host"}.`,
+      );
     }
     if (toHostId === LOCAL_HOST_ID) {
       throw new CheckpointError(
@@ -940,7 +963,11 @@ export class CheckpointService {
       const host = hostRegistry.hostById(toHostId);
       const rpc = new RemoteRpc(toHostId, () => target);
       const [root] = (await host.info()).roots;
-      if (!root) throw new CheckpointError("invalid", `Host ${toHostId} serves no directory.`);
+      if (!root)
+        throw new CheckpointError(
+          "invalid",
+          `${hostNamesOf([toHostId])[0] ?? "unknown host"} serves no directory.`,
+        );
       const wipDir = posix.join(root, WIP_DIR);
       await host.fs.mkdir(wipDir, { recursive: true });
       const repoPath = await worktreeService.ensureCheckoutOn(
@@ -1001,7 +1028,9 @@ export class CheckpointService {
           await readFile(join(checkpointDir(worktreeId, row.id), "bundle.pack")),
         );
         try {
-          await git(["fetch", "--force", bundle, `refs/band/wip/${worktreeId}:${local}`]);
+          await retryRefLock(() =>
+            git(["fetch", "--force", bundle, `refs/band/wip/${worktreeId}:${local}`]),
+          );
         } finally {
           await host.fs.rm(bundle, { force: true }).catch(() => undefined);
         }

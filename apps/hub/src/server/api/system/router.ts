@@ -14,6 +14,7 @@ import pkg from "../../../../package.json" with { type: "json" };
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
 // `apps/hub/src/server/api/router.ts` for the consolidated checklist.
 import { branchStatusPoller } from "../../services/branch-status-poller";
+import { clientActivityService } from "../../services/client-activity-service";
 import { loadState } from "../../services/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";
@@ -60,17 +61,35 @@ export const systemRouter = t.router({
     return result;
   }),
 
-  // Activity level controls how often the branch-status poller fires.
-  // Driven by the Electron main process based on window focus + power state.
-  // See `apps/desktop/src/main/services/activity-monitor.ts`.
+  // What this client's UI is doing, so the branch-status poller can slow down. A client names
+  // only itself (`clientId`), and the poller follows the most active live client; a client that
+  // stops reporting for BAND_ACTIVITY_TTL_MS (3 minutes) drops out. The poller never goes faster
+  // than `active`. See `apps/web/src/lib/activity-reporter.ts`.
   setActivity: publicProcedure
-    .input(z.object({ activity: z.enum(["active", "idle", "background"]) }))
+    .input(
+      z.object({
+        activity: z.enum(["active", "idle", "background"]),
+        clientId: z.string().min(1).max(64).optional(),
+      }),
+    )
     .mutation(({ input }) => {
-      branchStatusPoller.setActivity(input.activity);
+      clientActivityService.report(input.clientId ?? "default", input.activity);
       return { activity: input.activity };
     }),
 
-  getActivity: publicProcedure.query(() => ({ activity: branchStatusPoller.getActivity() })),
+  // The client closed its page; its entry no longer counts.
+  releaseActivity: publicProcedure
+    .input(z.object({ clientId: z.string().min(1).max(64) }))
+    .mutation(({ input }) => {
+      clientActivityService.release(input.clientId);
+      return { released: true };
+    }),
+
+  getActivity: publicProcedure.query(() => ({
+    activity: clientActivityService.effective(),
+    // The level the branch-status poller runs at, once a status stream has started it.
+    poller: branchStatusPoller.getActivity(),
+  })),
 
   // Resources dashboard — server CPU/memory snapshot (cheap, instant).
   // `process.cpuUsage()` is cumulative since process start; the UI labels

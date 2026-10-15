@@ -19,6 +19,7 @@ import {
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
+import { clientActivityService } from "./client-activity-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { emit } from "./watcher-service";
 import { worktreeService } from "./worktree-service";
@@ -125,7 +126,10 @@ export class TerminalService {
   /** terminalId -> exit listeners, so an exit only reaches its own viewers. */
   private readonly exitListeners = new Map<string, Set<(event: TerminalExitEvent) => void>>();
   /** Tab titles for every open terminal, from one shared poll of every host's backend. */
-  private readonly titles = new TitlePoller(() => this.listAll());
+  private readonly titles = new TitlePoller(
+    () => this.listAll(),
+    () => clientActivityService.titlePollEvery(),
+  );
 
   constructor(backend: TerminalBackend = new InProcessTerminalBackend()) {
     this.setBackend(backend);

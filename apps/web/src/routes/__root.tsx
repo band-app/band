@@ -40,6 +40,7 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTitleBarOffset } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
+import { startActivityReporter } from "../lib/activity-reporter";
 import { activateBrowserGuestWorktree } from "../lib/browser-guest-retention";
 import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
 import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/client-state";
@@ -47,6 +48,7 @@ import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import { startPowerState } from "../lib/power-state";
 import {
   loadRightPanelCollapsed,
   loadRightPanelWidth,
@@ -214,6 +216,20 @@ function TranslucentSidebarSync() {
     applyTranslucentSidebar(enabled);
   }, [enabled, loaded]);
 
+  return null;
+}
+
+/** Starts the power and focus watcher (battery, blurred or hidden) and reports it to the hub. */
+function PowerSync() {
+  useEffect(() => {
+    // Saving power must never stop the app from rendering.
+    try {
+      startPowerState();
+      startActivityReporter();
+    } catch (err) {
+      console.error("power saver failed to start", err);
+    }
+  }, []);
   return null;
 }
 
@@ -1018,6 +1034,7 @@ function RootLayout() {
     <DashboardProvider adapter={adapter} capabilities={capabilities}>
       <ThemeSync />
       <TranslucentSidebarSync />
+      <PowerSync />
       <ZoomSync />
       <ReloadSync />
       <TooltipProvider>

@@ -1,3 +1,4 @@
+import type { WorktreeReview } from "@band-app/plugin-api";
 import type { ClientPluginHost } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
@@ -9,6 +10,22 @@ import { trpc } from "../lib/trpc-client";
 import { PluginMarkdown } from "./PluginMarkdown";
 
 const reviewQueryKey = (worktreeId: string) => ["worktreeReview", worktreeId] as const;
+
+/**
+ * A poller tick or another device learned a CI state for the worktree. An open
+ * Checks panel that still shows another state refetches; a closed one is only
+ * marked stale, so nothing is fetched while it is hidden. A state the panel
+ * already shows (its own load put it in the sidebar) costs no query.
+ */
+export function syncReviewWithCI(worktreeId: string, ciState: string): void {
+  const key = reviewQueryKey(worktreeId);
+  const cached = queryClient.getQueryData<WorktreeReview>(key);
+  if (cached?.status === "ok") {
+    const shown = cached.review?.state === "merged" ? "merged" : cached.checks.state;
+    if (shown === ciState) return;
+  }
+  void queryClient.invalidateQueries({ queryKey: key });
+}
 
 /** The core's side of the plugin client API, backed by tRPC and TanStack Query. */
 export const clientPluginHost: ClientPluginHost = {

@@ -139,6 +139,8 @@ async function pumpChanges(
     for await (const change of host.fs.watch(root, {
       recursive: true,
       signal: entry.controller.signal,
+      // The host drops these before they cross the link; `isIgnoredPath` below still covers an older worker.
+      ignore: [...IGNORED_SEGMENTS],
     })) {
       const relative = change.path;
       if (!relative || isIgnoredPath(relative)) continue;

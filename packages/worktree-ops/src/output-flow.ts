@@ -1,5 +1,5 @@
+import type { TerminalAttachment } from "@band-app/host-api";
 import type { WebSocket } from "ws";
-import type { TerminalAttachment } from "../../services/terminal-service";
 
 /**
  * Unparsed output one browser may have in flight before its terminal's PTY is
