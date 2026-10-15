@@ -570,7 +570,7 @@ export function DashboardShell({
       )}
 
       {/* Persistent bottom action bar. Left: a single Settings button (gear
-          icon + label) that opens the Settings dialog. Right: the
+          icon, tooltip "Settings") that opens the Settings dialog. Right: the
           Resources/Usage icons + 3-dot overflow supplied by the caller
           (`bottomActions` — a <ToolbarActionBar />), kept outside the
           `dashboard/` seam. */}
@@ -580,16 +580,21 @@ export function DashboardShell({
         data-testid="repo-list__action-bar"
       >
         <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground"
-            data-testid="repo-list__settings-button"
-            onClick={handleSettingsClick}
-          >
-            <Settings className="size-4" />
-            Settings
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="Settings"
+                data-testid="repo-list__settings-button"
+                onClick={handleSettingsClick}
+              >
+                <Settings className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Settings</TooltipContent>
+          </Tooltip>
         </div>
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
