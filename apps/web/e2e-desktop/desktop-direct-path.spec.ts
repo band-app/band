@@ -98,7 +98,13 @@ function seedRemoteRepo(parent: string): string {
  */
 function launchctl(...args: string[]): void {
   spawnSync(FAKE_LAUNCHCTL, args, {
-    env: { ...process.env, HOME: home, BAND_FAKE_LAUNCHD_DIR: join(home, "fake-launchd") },
+    env: {
+      ...process.env,
+      HOME: home,
+      BAND_FAKE_LAUNCHD_DIR: join(home, "fake-launchd"),
+      // A worker this restarts runs owned chats with the scripted agent, as the first one did.
+      BAND_TEST_ACP_AGENT: ACP_STUB_AGENT_PATH,
+    },
   });
 }
 
