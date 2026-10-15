@@ -52,6 +52,11 @@ function start(label, plistFile) {
   const section = (key) => new RegExp(`<key>${key}</key>\\s*<(?:array|dict)>([\\s\\S]*?)</(?:array|dict)>`).exec(text)?.[1] ?? "";
   const program = [...section("ProgramArguments").matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1]));
   const env = { HOME: process.env.HOME, PATH: process.env.PATH };
+  // The scripted ACP agent a spec names reaches the worker too, as real launchd would not pass it:
+  // a worker that owns its chats starts their agent itself.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("BAND_TEST_ACP_") && value !== undefined) env[key] = value;
+  }
   for (const m of section("EnvironmentVariables").matchAll(/<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g)) {
     env[unxml(m[1])] = unxml(m[2]);
   }

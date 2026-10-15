@@ -118,6 +118,22 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // Speech-to-text for the composer mic. Admin only, because the URL is where the hub (or a
+    // worker) sends audio and the key it attaches.
+    voice: z
+      .object({
+        enabled: z.boolean().optional(),
+        baseUrl: z.string().max(500).optional(),
+        model: z.string().max(200).optional(),
+        language: z
+          .string()
+          .regex(/^([a-z]{2,3})?$/i, "use a language code such as en")
+          .optional(),
+        hostId: z.string().max(100).optional(),
+        apiKeyItemId: z.string().max(100).optional(),
+      })
+      .passthrough()
+      .optional(),
     // Where environment images are built (plan step 3.2).
     environmentBuilder: z
       .object({
@@ -223,6 +239,15 @@ export class SettingsService {
           return prev ? { ...a, ...prev } : a;
         }),
       };
+    }
+    // `pairingAddresses` is written only by `tokens.addPairingAddress` and
+    // `removePairingAddress`, which validate each URL. The schema is
+    // `.passthrough()`, so drop it here.
+    if ("pairingAddresses" in patch) {
+      const { pairingAddresses: _ignored, ...rest } = patch as SettingsUpdate & {
+        pairingAddresses?: unknown;
+      };
+      patch = rest;
     }
     this.queries.save(patch);
   }

@@ -105,7 +105,7 @@ function isSecureRequest(req: IncomingMessage): boolean {
   );
 }
 
-function buildCookieHeader(token: string, secure: boolean): string {
+export function buildCookieHeader(token: string, secure: boolean): string {
   const parts = [`band_token=${token}`, "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=31536000"];
   if (secure) parts.push("Secure");
   return parts.join("; ");

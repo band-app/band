@@ -41,11 +41,11 @@ The command prints a JSON object with the hub `url`. The device token is the `de
 
 ## Pair with a hub
 
-Use any hub you have a device token for: the throwaway one above, or your real hub (Settings > Devices > Add device shows a QR code, a link and the token).
+Use any hub you have a device token for: the throwaway one above, or your real hub (Settings > Devices > Add device shows a QR code and a one-time link, and the app exchanges it for the device token).
 
 - Manual: on the pairing screen, enter the hub URL and the token.
 - Camera: scan the QR code from Settings > Devices (a real iPhone only).
-- Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&token=<token>"` (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
+- Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&code=<pairing code>"` (an older `&token=<token>` works too) (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
 
 The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub on another machine must be `https`, or on the local network.
 
@@ -55,6 +55,26 @@ The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub 
 2. Select the Band target, then Signing & Capabilities. Pick your Team, and change the bundle identifier `app.getband.mobile` to one your team owns.
 3. Connect the iPhone and run, or use `npx expo run:ios --device`.
 4. Accept the local network prompt. The phone must reach the hub's URL.
+
+## Builds and TestFlight
+
+`apps/mobile/.eas/workflows/build.yml` is an EAS Workflow. It runs on Expo's servers on every push to `main` that changes `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml`, and has three jobs:
+
+- `build_android`: an Android `preview` build, an APK with internal distribution. Install it from the build page on expo.dev.
+- `build_ios`: an iOS `production` build.
+- `submit_ios`: submits the iOS build to TestFlight with the `production` submit profile (`ascAppId` 6823071973 in `eas.json`).
+
+Runs show under the project's Workflows page on expo.dev. To run it by hand: `npx eas-cli@latest workflow:run .eas/workflows/build.yml` from `apps/mobile`. After editing the file, check it with `npx eas-cli@latest workflow:validate .eas/workflows/build.yml`.
+
+One-time setup:
+
+1. In the Expo dashboard (owner `band-app`, project `band`), open Project settings > GitHub, link `band-app/band` and set the base directory to `apps/mobile`. Push triggers need the link.
+2. Create an App Store Connect API key, add it to the Expo account and assign it to the app for EAS Submit.
+3. Create the signing credentials once as a team member, from `apps/mobile`:
+   - `npx eas-cli@latest credentials:configure-build -p ios -e production` (distribution certificate and provisioning profile).
+   - `npx eas-cli@latest credentials:configure-build -p android -e preview` (Android keystore).
+
+The first build of each version goes through Beta App Review before external testers can install it. Internal testers get it without review.
 
 ## Tests
 

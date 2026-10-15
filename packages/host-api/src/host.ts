@@ -32,6 +32,8 @@ export interface Host {
   readonly browser: HostBrowser;
   /** The host's virtual desktop, when it has one (`capabilities.desktop`). */
   readonly desktop: HostDesktop;
+  /** Speech-to-text calls to a server this host can reach, such as one on its loopback. */
+  readonly speech: HostSpeech;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;
@@ -68,6 +70,11 @@ export interface HostCapabilities {
   acp: boolean;
   /** A display (`DISPLAY`) and a VNC server (`x11vnc`) are available, so `desktop.open` works. */
   desktop: boolean;
+  /**
+   * A worker that runs the chats of its worktrees itself and replicates them to the hub.
+   * Absent from the hub's own host and older workers.
+   */
+  chatOwnership?: boolean;
 }
 
 /** One coding agent as a host sees it: is its CLI installed, and is it logged in. */
@@ -502,6 +509,31 @@ export interface HostDesktop {
    * names the missing piece when the host has no display or no x11vnc. Closing it ends the connection.
    */
   open(): Promise<Duplex>;
+}
+
+export interface SpeechTranscribeRequest {
+  /** The hub's configured endpoint. A host never takes a URL from a client. */
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+  language?: string;
+  audio: Uint8Array;
+  mimeType: string;
+}
+
+/** A transcription, or the provider failure with its code (`SpeechErrorCode` in `@band-app/shared`). */
+export type SpeechTranscribeResult =
+  | { text: string; error?: undefined }
+  | { text?: undefined; error: { code: string; message: string } };
+
+export interface HostSpeech {
+  /**
+   * Posts one clip to `<baseUrl>/audio/transcriptions` from this host's network, so the hub
+   * can use a server that listens only on the host's loopback. Never rejects for a provider
+   * failure, which is a result with `error`; rejects with `HostOfflineError` on a worker with
+   * no link.
+   */
+  transcribe(req: SpeechTranscribeRequest): Promise<SpeechTranscribeResult>;
 }
 
 export interface HostMcp {

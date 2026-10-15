@@ -2789,17 +2789,16 @@ fn tokens_create_list_revoke() {
         "flags: {flags:?}"
     );
 
-    // `revoke` takes it out of service.
+    // `revoke` takes it out of service and removes the device from the list.
     let revoked = env.band(&["tokens", "revoke", &id]);
     assert!(revoked.status.success(), "stderr: {}", stderr(&revoked));
     let listed = json_of(&env.band(&["tokens", "list", "--output", "json"]));
-    let row = listed["tokens"]
+    let gone = listed["tokens"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|t| t["id"] == id.as_str())
-        .unwrap();
-    assert_eq!(row["state"], "revoked");
+        .all(|t| t["id"] != id.as_str());
+    assert!(gone, "revoked device is still listed: {listed}");
 
     // The shared token cannot be revoked, and an unknown id is an error.
     let shared = env.band(&["tokens", "revoke", "shared"]);

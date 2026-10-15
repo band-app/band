@@ -122,6 +122,8 @@ export interface Settings {
    * `app://h-<12 hex>` are always allowed. `file://` and `null` need an entry. `BAND_CORS_ORIGINS` and `BAND_ALLOWED_ORIGINS` (comma-separated) add to this list.
    */
   corsAllowedOrigins?: string[];
+  /** Custom hub addresses Settings > Devices offers when it shows a pairing link. Written by `tokens.addPairingAddress` only. */
+  pairingAddresses?: string[];
   autoStartTunnel?: boolean;
   /** Enable Language Server Protocol features (file preview hovers, etc.). */
   enableLSP?: boolean;
@@ -188,6 +190,20 @@ export interface Settings {
     defaultMode?: "gui" | "tui";
     /** Agents on a worker may start worktrees on other hosts. On unless false. */
     crossHostWorktrees?: boolean;
+    [key: string]: unknown;
+  };
+  /**
+   * Speech-to-text for the chat composer's mic. One hub-wide OpenAI-compatible endpoint. The key
+   * is a vault item (`apiKeyItemId`), never stored here. With `hostId` set, that worker makes the
+   * request (for a server on its loopback); otherwise the hub does.
+   */
+  voice?: {
+    enabled?: boolean;
+    baseUrl?: string;
+    model?: string;
+    language?: string;
+    hostId?: string;
+    apiKeyItemId?: string;
     [key: string]: unknown;
   };
   /**

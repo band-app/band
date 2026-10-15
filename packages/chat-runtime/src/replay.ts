@@ -12,7 +12,7 @@
  */
 
 import type { ChatEvent, SessionUpdate } from "@band-app/shared/chat-events";
-import type { ChatEventRow } from "../../infra/db/queries/chat-events";
+import type { ChatEventRow } from "./log";
 
 type ChunkUpdate = Extract<
   SessionUpdate,

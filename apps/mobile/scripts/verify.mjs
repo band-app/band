@@ -14,6 +14,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import {
   addSubscription,
@@ -195,6 +196,8 @@ function checkTabs({ tabs, chats }, params) {
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
  * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
  * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
+ * /checks-finish-build completes the running job of widgets-feat-checks, and
+ * /expect-rerun?run=<id>&failed=1|job=<id> fails unless the fake `gh` got that `gh run rerun`.
  * /subscribe?wt=<id> makes the worktree's chat listen for a timer, and
  * /expect-subscriptions?wt=<id>&n=<count> fails unless the hub holds that many for the chat.
  */
@@ -239,6 +242,28 @@ function startControlServer(hub, chats, udid, notes) {
         const subs = await chatSubscriptions(hub, chats, wt);
         notes.push(`${wt}: subscriptions.list holds ${subs.length}`);
         if (subs.length !== want) throw new Error(`the hub holds ${subs.length} subscriptions, expected ${want}`);
+      }
+      else if (url.pathname === "/checks-finish-build") finishBuild();
+      else if (url.pathname === "/expect-rerun") {
+        // `gh run rerun <run>` was called, with `--failed` (`failed=1`) or `--job <id>`.
+        const want = {
+          runId: Number(url.searchParams.get("run")),
+          failed: url.searchParams.get("failed") === "1",
+          job: url.searchParams.get("job"),
+        };
+        // The app's request may still be on its way: look for up to 10 s.
+        const deadline = Date.now() + 10_000;
+        let hit;
+        for (;;) {
+          try {
+            hit = expectRerun(want);
+            break;
+          } catch (err) {
+            if (Date.now() > deadline) throw err;
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        }
+        notes.push(`gh run rerun ${JSON.stringify(hit)}`);
       }
       else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
@@ -348,7 +373,8 @@ async function main() {
     buildForSimulator("Release", perf ? { EXPO_PUBLIC_BAND_PERF_LOG: "1" } : {});
   }
 
-  const hub = await startHub();
+  const gh = await startGhStub();
+  const hub = await startHub(gh.env);
   console.log(`Hub at ${hub.url} (home ${hub.home})`);
   const chats = await seedHub(hub);
   const device = pickSimulator();
@@ -412,6 +438,7 @@ async function main() {
   const logSearched = log.lines >= 10;
   const leaks = [...(log.found ? ["the app's log"] : []), ...results.flatMap((r) => r.leakedFiles)];
   control.close();
+  await gh.stop();
   if (!keepHub) await cleanHub();
 
   const screenshots = readdirSync(out, { recursive: true })

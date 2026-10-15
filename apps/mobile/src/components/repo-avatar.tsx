@@ -40,7 +40,8 @@ export function RepoAvatar({
       <Image
         source={{
           uri: `${base.replace(/\/$/, "")}${src}`,
-          headers: { Authorization: `Bearer ${token}` },
+          // no-store keeps iOS's URL cache from writing the request, token included, to disk.
+          headers: { Authorization: `Bearer ${token}`, "Cache-Control": "no-store" },
         }}
         style={box}
         onError={() => setFailed(true)}

@@ -12,6 +12,7 @@ import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { createTerminalBackend } from "@band-app/host-local/terminals/create-backend";
+import { VOICE_TRANSCRIBE_PATH } from "@band-app/shared/speech-transcription";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -30,9 +31,16 @@ import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
+import {
+  handlePairExchange,
+  handlePairLink,
+  isPairLinkRequest,
+  PAIR_EXCHANGE_PATH,
+} from "./src/server/api/pairing/handler.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
+import { handleVoiceTranscribe } from "./src/server/api/voice/handler";
 import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
@@ -905,6 +913,17 @@ async function main() {
       return;
     }
 
+    // A pairing link and its exchange. Before the device-token check: the one-time
+    // pairing code is the credential.
+    if (req.url?.split("?")[0] === PAIR_EXCHANGE_PATH) {
+      await handlePairExchange(req, res);
+      return;
+    }
+    if (isPairLinkRequest(req)) {
+      handlePairLink(req, res);
+      return;
+    }
+
     // OAuth consent returns here. Before the device-token check: the
     // single-use state from `vault.startOAuth` is the credential.
     if (req.method === "GET" && req.url?.split("?")[0] === OAUTH_CALLBACK_PATH) {
@@ -950,6 +969,12 @@ async function main() {
 
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
+
+    // Dictation: the audio clip goes to the hub, which calls the configured speech-to-text endpoint.
+    if (req.url?.split("?")[0] === VOICE_TRANSCRIBE_PATH) {
+      await handleVoiceTranscribe(req, res);
+      return;
+    }
 
     // Serve uploaded files (images, attachments)
     // A local upload is `/api/uploads/<name>`. One on a remote worktree's

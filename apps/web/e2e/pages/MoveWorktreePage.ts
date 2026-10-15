@@ -25,6 +25,10 @@ export class MoveWorktreePage {
     return this.dialog.getByTestId("move-worktree__ignored-files");
   }
 
+  get selectedHost(): Locator {
+    return this.dialog.getByTestId("move-worktree__host");
+  }
+
   get result(): Locator {
     return this.page.getByTestId("move-worktree__result");
   }
@@ -39,6 +43,13 @@ export class MoveWorktreePage {
   async submit(): Promise<void> {
     await test.step("Move the worktree", async () => {
       await this.dialog.getByTestId("move-worktree__submit").click();
+    });
+  }
+
+  /** Closes the dialog or its result view with Escape. */
+  async dismiss(): Promise<void> {
+    await test.step("Dismiss the move dialog", async () => {
+      await this.page.keyboard.press("Escape");
     });
   }
 }

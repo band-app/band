@@ -57,6 +57,11 @@ export interface ChatRow {
   activeSessionLastModified: number | undefined;
   status: ChatStatus;
   labels: Record<string, string>;
+  /**
+   * The worker that runs this chat and replicates it to the hub, or
+   * undefined when the hub runs it.
+   */
+  ownerHostId: string | undefined;
 }
 
 /**
@@ -75,6 +80,8 @@ export interface ChatUpdatePatch {
   activeSessionSummary?: string | null;
   activeSessionLastModified?: number | null;
   status?: ChatStatus;
+  /** `null` gives the chat back to the hub. */
+  ownerHostId?: string | null;
   /**
    * When supplied, replaces the `labels` column. Pass `{}` to clear (the
    * column is stored as SQL `NULL` to keep the on-disk representation
@@ -99,6 +106,7 @@ interface ChatStateBlob {
   activeSessionSummary?: string | null;
   activeSessionLastModified?: number | null;
   status: ChatStatus;
+  ownerHostId?: string | null;
 }
 
 function serializeState(row: {
@@ -110,6 +118,7 @@ function serializeState(row: {
   activeSessionSummary: string | undefined | null;
   activeSessionLastModified: number | undefined | null;
   status: ChatStatus;
+  ownerHostId: string | undefined | null;
 }): string {
   const blob: ChatStateBlob = {
     name: row.name,
@@ -120,6 +129,7 @@ function serializeState(row: {
     activeSessionSummary: row.activeSessionSummary ?? null,
     activeSessionLastModified: row.activeSessionLastModified ?? null,
     status: row.status,
+    ...(row.ownerHostId ? { ownerHostId: row.ownerHostId } : {}),
   };
   return JSON.stringify(blob);
 }
@@ -229,6 +239,8 @@ export class ChatQueries {
           : (patch.activeSessionLastModified ?? undefined),
       status: patch.status ?? current.status,
       labels: patch.labels ?? current.labels,
+      ownerHostId:
+        patch.ownerHostId === undefined ? current.ownerHostId : (patch.ownerHostId ?? undefined),
     };
 
     const labelsTouched = patch.labels !== undefined;
@@ -290,6 +302,7 @@ export class ChatQueries {
         activeSessionLastModified: parsed.activeSessionLastModified ?? undefined,
         status: parsed.status,
         labels: parseLabels(row.labels, row.id),
+        ownerHostId: parsed.ownerHostId ?? undefined,
       });
     }
     return out;

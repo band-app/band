@@ -45,6 +45,7 @@ export type SettingsNavId =
   | "hosts"
   | "devices"
   | "credentials"
+  | "voice"
   | "mcp"
   | "agent-hooks"
   | "context"
@@ -629,6 +630,53 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__credential-error");
   }
 
+  /** Fills the Voice page. `apiKey` is the name of a stored credential. */
+  async fillVoice(opts: {
+    baseUrl: string;
+    model: string;
+    apiKey?: string;
+    language?: string;
+    enabled?: boolean;
+  }): Promise<void> {
+    await test.step("Fill the Voice settings", async () => {
+      const dialog = this.dialog;
+      await dialog.getByTestId("settings__voice-base-url").fill(opts.baseUrl);
+      await dialog.getByTestId("settings__voice-model").fill(opts.model);
+      if (opts.language !== undefined) {
+        await dialog.getByTestId("settings__voice-language").fill(opts.language);
+      }
+      if (opts.apiKey !== undefined) {
+        await dialog.getByTestId("settings__voice-key").selectOption({ label: opts.apiKey });
+      }
+      if (opts.enabled !== undefined) {
+        const toggle = dialog.getByTestId("settings__voice-enabled");
+        if ((await toggle.getAttribute("aria-checked")) !== String(opts.enabled)) {
+          await toggle.click();
+        }
+      }
+    });
+  }
+
+  async testVoice(): Promise<void> {
+    await test.step("Press Test connection", async () => {
+      await this.dialog.getByTestId("settings__voice-test").click();
+    });
+  }
+
+  async saveVoice(): Promise<void> {
+    await test.step("Save the Voice settings", async () => {
+      await this.dialog.getByTestId("settings__voice-save").click();
+    });
+  }
+
+  get voiceOk(): Locator {
+    return this.dialog.getByTestId("settings__voice-ok");
+  }
+
+  get voiceError(): Locator {
+    return this.dialog.getByTestId("settings__voice-error");
+  }
+
   /** Fills the "Add a key" form and submits it. */
   async addCredential(
     name: string,
@@ -949,30 +997,99 @@ export class SettingsPage {
     });
   }
 
-  /** The result panel of Add device: link, QR code and token. */
-  deviceResult(): Locator {
-    return this.page.getByTestId("settings__device-result");
+  /** The Connect details dialog. */
+  pairingDialog(): Locator {
+    return this.page.getByTestId("settings__pairing-dialog");
   }
 
-  deviceSignInUrl(): Locator {
-    return this.page.getByTestId("settings__device-url");
+  /** Opens Connect details for the device with this label. */
+  async openPairing(label: string): Promise<void> {
+    await test.step(`Open connect details of "${label}"`, async () => {
+      await this.dialog.getByRole("button", { name: `Connect details ${label}` }).click();
+      await this.pairingResult().waitFor();
+    });
   }
 
-  deviceToken(): Locator {
-    return this.page.getByTestId("settings__device-token");
+  /** The link and QR panel of the Connect details dialog. */
+  pairingResult(): Locator {
+    return this.page.getByTestId("settings__pairing-result");
+  }
+
+  pairingLink(): Locator {
+    return this.page.getByTestId("settings__pairing-link");
   }
 
   /** The QR code; its `data-value` attribute holds the encoded text. */
-  deviceQr(): Locator {
-    return this.page.getByTestId("settings__device-qr");
+  pairingQr(): Locator {
+    return this.page.getByTestId("settings__pairing-qr");
   }
 
-  /** Closes the Add device dialog with Done. */
-  async closeDeviceResult(): Promise<void> {
-    await this.page
-      .getByTestId("settings__add-device-dialog")
-      .getByRole("button", { name: "Done" })
-      .click();
+  pairingAddress(): Locator {
+    return this.page.getByTestId("settings__pairing-address");
+  }
+
+  /** The options of the address picker, in order. Each has `data-source` and, for an interface, `data-kind`. */
+  pairingOptions(): Locator {
+    return this.pairingAddress().getByTestId("settings__pairing-option");
+  }
+
+  /** The `data-source` of each option, in order: public, page, interface, custom. */
+  async pairingOptionSources(): Promise<string[]> {
+    return this.pairingOptions().evaluateAll((els) =>
+      els.map((e) => e.getAttribute("data-source") ?? ""),
+    );
+  }
+
+  /** The visible text of each option. */
+  async pairingAddressOptions(): Promise<string[]> {
+    return this.pairingOptions().allTextContents();
+  }
+
+  /** Picks the first option with this `data-source`. */
+  async chooseAddress(source: "public" | "page" | "interface" | "custom"): Promise<void> {
+    const value = await this.pairingOptions()
+      .and(this.page.locator(`[data-source="${source}"]`))
+      .first()
+      .getAttribute("value");
+    await this.pairingAddress().selectOption({ value: value ?? "" });
+  }
+
+  /** The error line of the Connect details dialog, if any. */
+  pairingError(): Locator {
+    return this.page.getByTestId("settings__pairing-error");
+  }
+
+  async cancelCustomAddress(): Promise<void> {
+    await this.page.getByTestId("settings__pairing-cancel-custom").click();
+  }
+
+  async reload(): Promise<void> {
+    await this.page.reload();
+  }
+
+  async regeneratePairing(): Promise<void> {
+    await this.page.getByTestId("settings__pairing-regenerate").click();
+  }
+
+  async refreshAddresses(): Promise<void> {
+    await this.pairingDialog().getByRole("button", { name: "Refresh network interfaces" }).click();
+  }
+
+  async addCustomAddress(url: string): Promise<void> {
+    await test.step(`Add custom address ${url}`, async () => {
+      await this.page.getByTestId("settings__pairing-add-custom").click();
+      await this.pairingDialog().getByLabel("Custom address").fill(url);
+      await this.pairingDialog().getByRole("button", { name: "Save address" }).click();
+    });
+  }
+
+  async removeCustomAddress(): Promise<void> {
+    await this.page.getByTestId("settings__pairing-remove-custom").click();
+  }
+
+  /** Closes the Connect details dialog with Done. */
+  async closePairing(): Promise<void> {
+    await this.pairingDialog().getByRole("button", { name: "Done" }).click();
   }
 
   /** Revoke button of a device row. */

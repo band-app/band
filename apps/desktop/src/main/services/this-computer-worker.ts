@@ -344,6 +344,8 @@ export class ThisComputerWorker {
             "--name",
             name,
             ...roots.flatMap((r) => ["--root", r]),
+            // This Mac's worker runs the chats of its worktrees, so the app sends and reads them locally.
+            "--own-chats",
           ],
           issued.token,
         );
@@ -420,6 +422,7 @@ export class ThisComputerWorker {
       for (const root of env.BAND_WORKER_ROOTS?.split(":").filter(Boolean) ?? []) {
         args.push("--root", root);
       }
+      args.push("--own-chats");
       await this.runWorker(args, token);
       this.recordServiceVersion();
       if (hub && env.BAND_WORKER_ID && hubUrl === hub.url) {

@@ -1,5 +1,6 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { DashboardAdapter } from "../adapter";
 import { useAdapter } from "../context";
 import { readAgentMode } from "../lib/agent-mode";
 import { queryKeys } from "../query-client";
@@ -37,6 +38,66 @@ export function useReorderRepos() {
           (a, b) => names.indexOf(a.name) - names.indexOf(b.name),
         );
         queryClient.setQueryData(queryKeys.repos, reordered);
+      }
+      return { previous };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.repos, context.previous);
+      }
+      setError(err);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+    },
+  });
+}
+
+type ReorderWorktreesInput = Parameters<DashboardAdapter["reorderWorktrees"]>[0];
+
+/**
+ * Stores the order of one list of worktrees (and, in the Origin view, the new parent of the
+ * dragged one). Optimistic like the pins: the cache changes at once and rolls back on an error.
+ */
+export function useReorderWorktrees() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (input: ReorderWorktreesInput) => adapter.reorderWorktrees(input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.repos });
+      const previous = queryClient.getQueryData<RepoInfo[]>(queryKeys.repos);
+      if (previous) {
+        const hostOf = (id?: string) => id ?? "local";
+        const field = input.scope === "pins" ? "pinSortIndex" : "sortIndex";
+        const next = previous.map((repo) => ({
+          ...repo,
+          worktrees: repo.worktrees.map((wt) => {
+            const position = input.order.findIndex(
+              (ref) =>
+                ref.repo === repo.name &&
+                ref.name === wt.name &&
+                hostOf(ref.hostId) === hostOf(wt.hostId),
+            );
+            let updated = position === -1 ? wt : { ...wt, [field]: position };
+            const move = input.reparent;
+            if (
+              move &&
+              move.repo === repo.name &&
+              move.name === wt.name &&
+              hostOf(move.hostId) === hostOf(wt.hostId)
+            ) {
+              updated = {
+                ...updated,
+                origin: move.origin === null ? null : { worktreeId: move.origin, removed: false },
+              };
+            }
+            return updated;
+          }),
+        }));
+        queryClient.setQueryData(queryKeys.repos, next);
       }
       return { previous };
     },

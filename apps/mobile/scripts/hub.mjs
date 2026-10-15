@@ -78,7 +78,7 @@ function scenarioFile(home) {
  * Starts the hub detached in its own process group, with its output appended to `hub.log` in
  * the temp home, and resolves with its port once the log shows the listening banner.
  */
-function boot({ home, port, adminToken }) {
+function boot({ home, port, adminToken, env: extraEnv = {} }) {
   const entry = join(HUB_ROOT, "dist/start-server.mjs");
   if (!existsSync(entry)) {
     throw new Error(`No hub build at ${entry}. Run \`pnpm build:web\` from the repo root first.`);
@@ -99,6 +99,7 @@ function boot({ home, port, adminToken }) {
       BAND_TEST_ACP_SCENARIO: scenarioFile(home),
       BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
       BAND_TEST_ACP_LOG: join(home, "acp-requests.jsonl"),
+      ...extraEnv,
     },
     stdio: ["ignore", fd, fd],
     detached: true,
@@ -162,17 +163,18 @@ async function stop() {
   return state;
 }
 
-async function start() {
+/** `env` is added to the hub's environment, and kept for `restart` (verify.mjs passes the fake `gh`). */
+async function start(env = {}) {
   await stop();
   const previous = readState();
   if (previous?.home) rmSync(previous.home, { recursive: true, force: true });
   const home = realpathSync(mkdtempSync(join(tmpdir(), "band-mobile-verify-")));
   mkdirSync(join(home, ".band"), { recursive: true });
   const adminToken = `band_${randomBytes(24).toString("hex")}`;
-  const { pid, port } = await boot({ home, port: await freePort(), adminToken });
+  const { pid, port } = await boot({ home, port: await freePort(), adminToken, env });
   const url = `http://127.0.0.1:${port}`;
   const deviceToken = await createDeviceToken(url, adminToken);
-  const state = { url, port, home, pid, adminToken, deviceToken };
+  const state = { url, port, home, pid, adminToken, deviceToken, env };
   writeState(state);
   return state;
 }

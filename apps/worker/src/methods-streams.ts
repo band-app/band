@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { AgentStdio, McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
 import { shellPath } from "@band-app/host-local/process/path";
 import { type Channel, decodeFrames, encodeFrame } from "@band-app/link";
+import { agentSpawnEnv } from "./agent-env.ts";
 import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import { ghTokenEnv } from "./gh-token.ts";
 import {
@@ -145,11 +146,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   // Stdio is one channel (hub writes stdin, worker writes stdout) and stderr is another.
   // The hub ending its side closes stdin. Resetting the stdio channel kills the agent.
   r.raw("acp.spawn", async (a) => {
-    const env = strRecord(a, "env");
-    // The hub's `band` CLI goes first, so an agent's shell tool finds it.
-    const cliDir = await ctx.cli?.dir();
-    if (cliDir) env.PATH = [cliDir, env.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
-    Object.assign(env, await ghTokenEnv(ctx));
+    const env = await agentSpawnEnv(ctx, strRecord(a, "env"));
     const launch = {
       command: str(a, "command"),
       args: strArray(a, "args"),

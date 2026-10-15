@@ -12,6 +12,10 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { SharedTokenRevokeError, TokenNotFoundError } from "../../errors";
 import {
+  InvalidPairingAddressError,
+  pairingAddressService,
+} from "../../services/pairing-address-service";
+import {
   DEFAULT_LIST_LIMIT,
   MAX_BOOTSTRAP_TTL_MS,
   MAX_LIST_LIMIT,
@@ -42,6 +46,61 @@ export const tokensRouter = t.router({
       const { token, view } = tokenService.createDevice(input.label, input.admin);
       return { token, view };
     }),
+
+  /** A device with no token yet. Show its pairing link next (`pairing`). */
+  createUnpairedDevice: adminProcedure
+    .input(z.object({ label, admin: z.boolean().default(false) }))
+    .mutation(({ input }) => ({
+      view: tokenService.createUnpairedDevice(input.label, input.admin),
+    })),
+
+  /**
+   * The pairing code of a device: a pending one again, or a new one with `regenerate`. It works
+   * for one exchange within 15 minutes. The link is `<address>/?pair=<code>`.
+   */
+  pairing: adminProcedure
+    .input(z.object({ tokenId: z.string().min(1), regenerate: z.boolean().default(false) }))
+    .mutation(({ input }) => {
+      try {
+        return tokenService.pairing(input.tokenId, input.regenerate);
+      } catch (err) {
+        if (err instanceof TokenNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        if (err instanceof SharedTokenRevokeError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "The shared token cannot be paired. Copy it from settings.json.",
+          });
+        }
+        throw err;
+      }
+    }),
+
+  /**
+   * The addresses a pairing link may use: `BAND_PUBLIC_URL`, this machine's network interfaces
+   * (Tailscale, IPv4, IPv6, then bridges) and the custom addresses saved in settings. Read on
+   * every call, so Refresh sees a network that changed.
+   */
+  pairingAddresses: adminProcedure.query(() => pairingAddressService.list()),
+
+  /** Saves a custom address (an http(s) origin). It is not probed: the hub can't tell what another device reaches. */
+  addPairingAddress: adminProcedure
+    .input(z.object({ url: z.string().trim().min(1).max(300) }))
+    .mutation(({ input }) => {
+      try {
+        return pairingAddressService.add(input.url);
+      } catch (err) {
+        if (err instanceof InvalidPairingAddressError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  removePairingAddress: adminProcedure
+    .input(z.object({ url: z.string().min(1) }))
+    .mutation(({ input }) => pairingAddressService.remove(input.url)),
 
   issueWorkerBootstrap: adminProcedure
     .input(

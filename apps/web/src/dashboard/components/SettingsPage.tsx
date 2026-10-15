@@ -48,6 +48,7 @@ import { ReposSettings } from "./settings/ReposSettings";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsPageContext, SettingsSection } from "./settings/SettingsSection";
+import { VoiceSettings } from "./settings/VoiceSettings";
 
 const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] =
   [
@@ -82,6 +83,7 @@ type SettingsSectionId =
   | "devices"
   | "repos"
   | "credentials"
+  | "voice"
   | "mcp"
   | "agent-hooks"
   | "runners"
@@ -161,6 +163,13 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     subtitle:
       "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
     group: "AI capabilities",
+  },
+  {
+    id: "voice",
+    title: "Voice",
+    subtitle: "Dictate into the chat composer through a speech-to-text endpoint.",
+    group: "AI capabilities",
+    adminOnly: true,
   },
   {
     id: "agent-hooks",
@@ -882,6 +891,13 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   {active === "credentials" ? (
                     <SettingsSection title="Credentials">
                       <CredentialsSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Voice ──────────────────────────────────────── */}
+                  {active === "voice" ? (
+                    <SettingsSection title="Voice">
+                      <VoiceSettings />
                     </SettingsSection>
                   ) : null}
 
