@@ -397,7 +397,11 @@ export class CheckpointService {
     const host = hostRegistry.hostById(hostId);
     const rpc = new RemoteRpc(hostId, () => session);
     const [root] = (await host.info()).roots;
-    if (!root) throw new CheckpointError("invalid", `Host ${hostId} serves no directory.`);
+    if (!root)
+      throw new CheckpointError(
+        "invalid",
+        `${hostNamesOf([hostId])[0] ?? "unknown host"} serves no directory.`,
+      );
     const wipDir = posix.join(root, WIP_DIR);
     const cwd = found.worktree.path;
 
@@ -863,7 +867,10 @@ export class CheckpointService {
     const { repo, worktree } = found;
     const fromHostId = worktree.hostId ?? LOCAL_HOST_ID;
     if (fromHostId === toHostId) {
-      throw new CheckpointError("invalid", `${worktreeId} is already on ${toHostId}.`);
+      throw new CheckpointError(
+        "invalid",
+        `${worktreeId} is already on ${hostNamesOf([toHostId])[0] ?? "unknown host"}.`,
+      );
     }
     if (toHostId === LOCAL_HOST_ID) {
       throw new CheckpointError(
@@ -956,7 +963,11 @@ export class CheckpointService {
       const host = hostRegistry.hostById(toHostId);
       const rpc = new RemoteRpc(toHostId, () => target);
       const [root] = (await host.info()).roots;
-      if (!root) throw new CheckpointError("invalid", `Host ${toHostId} serves no directory.`);
+      if (!root)
+        throw new CheckpointError(
+          "invalid",
+          `${hostNamesOf([toHostId])[0] ?? "unknown host"} serves no directory.`,
+        );
       const wipDir = posix.join(root, WIP_DIR);
       await host.fs.mkdir(wipDir, { recursive: true });
       const repoPath = await worktreeService.ensureCheckoutOn(
