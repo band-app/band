@@ -808,18 +808,19 @@ function sectionDiffsId(section: ChangeSection): string {
 
 function ChatLeaf({ params, api }: IDockviewPanelProps<ChatLeafParams>) {
   const [tabActive, setTabActive] = useState(api.isActive);
-  const { visible: parentVisible, wsActive } = usePanelVisibility();
+  const { visible: parentVisible, wsActive, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? params.worktreeId;
 
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
     return () => d.dispose();
   }, [api]);
 
-  if (!params.worktreeId || !params.chatId) return null;
+  if (!worktreeId || !params.chatId) return null;
 
   return (
     <ChatLeafContent
-      worktreeId={params.worktreeId}
+      worktreeId={worktreeId}
       chatId={params.chatId}
       visible={parentVisible && tabActive}
       wsActive={wsActive}
@@ -895,7 +896,7 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
   // `isVisible` (selected in its group), NOT `isActive` (selected AND its group
   // focused): a terminal split beside a focused chat is still on screen and
   // must stay attached.
-  const { visible: parentVisible } = usePanelVisibility();
+  const { visible: parentVisible, worktreeId: hostWorktreeId } = usePanelVisibility();
   const [tabVisible, setTabVisible] = useState(api.isVisible);
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setTabVisible(e.isVisible));
@@ -906,7 +907,7 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
   // The OUTER tab title tracks the last-focused pane inside the nested split.
   const onTitleChange = useCallback((title: string) => api.setTitle(title), [api]);
 
-  const ws = params.worktreeId;
+  const ws = hostWorktreeId ?? params.worktreeId;
   const tid = params.terminalId;
   // A lone-pane close / ⌘W routes here → close the whole terminal tab (the
   // outer `doCloseLeaf` kills every pane's PTY it owns).
@@ -950,12 +951,13 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
 // ---------------------------------------------------------------------------
 
 function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
-  const { visible } = usePanelVisibility();
+  const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? params.worktreeId;
 
-  if (!params.worktreeId || !params.browserId) return null;
+  if (!worktreeId || !params.browserId) return null;
 
   const paneParams: BrowserPaneParams = {
-    worktreeId: params.worktreeId,
+    worktreeId,
     browserId: params.browserId,
     wsActive: visible,
     initialUrl: params.initialUrl,
@@ -1363,8 +1365,8 @@ function useActiveFileTracking(
 }
 
 function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
-  const { visible } = usePanelVisibility();
-  const worktreeIdRaw = params.worktreeId ?? "";
+  const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeIdRaw = hostWorktreeId ?? params.worktreeId ?? "";
   const filePathRaw = params.filePath ?? "";
 
   // FileViewer's markdown code/preview toggle and language override are
@@ -4758,8 +4760,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   }, [worktreeId]);
 
   const visibilityValue = useMemo(
-    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
-    [visible, wsActive],
+    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false, worktreeId }),
+    [visible, wsActive, worktreeId],
   );
 
   if (!initialData) {

@@ -16,3 +16,17 @@ export function useHostNames(): (hostId: string | null | undefined) => string {
     return host?.name?.trim() ? host.name : "unknown host";
   };
 }
+
+/**
+ * The name of a worktree's host for a small card label, or undefined while the hub has a single
+ * host (a single-machine install shows no label).
+ */
+export function useHostLabel(hostId: string | null | undefined): string | undefined {
+  const hosts = useQuery({
+    queryKey: ["hosts.list"],
+    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+  });
+  if (!hosts.data || hosts.data.length < 2) return undefined;
+  if (!hostId || hostId === "local") return "This hub";
+  return hosts.data.find((h) => h.id === hostId)?.name?.trim() || "unknown host";
+}

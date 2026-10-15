@@ -71,5 +71,10 @@ export function rekeyWorktreeRows(oldId: string, newId: string): void {
       key = substr(key, 1, instr(key, worktree_id) - 1) || ${newId} || substr(key, instr(key, worktree_id) + length(worktree_id)),
       worktree_id = ${newId}
       WHERE worktree_id = ${oldId} AND instr(key, worktree_id) > 0`);
+    // A saved layout also names the worktree inside its value (each panel's \`params.worktreeId\`),
+    // as a JSON string or as a string inside a string.
+    tx.run(sql`UPDATE ${clientState} SET
+      value = replace(replace(value, '"' || ${oldId} || '"', '"' || ${newId} || '"'), '\\"' || ${oldId} || '\\"', '\\"' || ${newId} || '\\"')
+      WHERE worktree_id = ${newId} AND value IS NOT NULL AND instr(value, ${oldId}) > 0`);
   });
 }
