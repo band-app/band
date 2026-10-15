@@ -15,6 +15,7 @@ import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { useHostList } from "../hooks/use-host-status";
 import { useRepos } from "../hooks/use-repos";
+import { useWorktreeDisplay } from "../hooks/use-worktree-display";
 import type { WorktreeInfo } from "../types";
 import { useIsAdmin } from "./settings/DevicesSettings";
 
@@ -36,6 +37,7 @@ interface Props {
  */
 export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: Props) {
   const { repos } = useRepos();
+  const displayWorktree = useWorktreeDisplay();
   const repo = {
     name: repoName,
     allowedHostIds: repos.find((r) => r.name === repoName)?.allowedHostIds,
@@ -102,7 +104,7 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: P
           <div className="space-y-2" data-testid="move-worktree__result">
             <p className="text-sm">
               Moved to {hostName(result.hostId)} as{" "}
-              <span className="font-mono">{result.worktreeId}</span>.
+              <span className="font-mono">{displayWorktree(result.worktreeId).name}</span>.
             </p>
             {result.warning ? (
               <p
