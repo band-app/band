@@ -5,6 +5,7 @@
 // cut shorter than that leaves the worker running (what happens past the lease is an open
 // decision, see the PR). The coding agent is the scripted ACP stub on the worker.
 
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { DirectAccess } from "@band-app/shared/direct-access";
@@ -69,6 +70,24 @@ async function directTurn(text: string, after: number) {
   return stream.events;
 }
 
+/** The scripted agent asks for a permission on a prompt starting with "ask", else echoes. */
+const SCENARIO = {
+  turns: [
+    {
+      match: "^ask",
+      steps: [
+        {
+          permission: {
+            toolCall: { toolCallId: "run-1", title: "Run tests", kind: "execute" },
+            options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+          },
+          after: { allow: [{ say: "Allowed and ran." }] },
+        },
+      ],
+    },
+  ],
+};
+
 const hostStatus = async () =>
   (await w.q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list")).hosts.find(
     (h) => h.id === owner.hostId,
@@ -80,7 +99,13 @@ beforeAll(async () => {
     env: { BAND_WORKER_LEASE_MS: "120000" },
   });
   proxy = await startCuttableProxy(w.server.url);
-  owner = await w.addWorker("owner", ["proj"], { ownChats: true, hubUrl: proxy.url });
+  const scenario = join(w.tmp("band-direct-scenario-"), "scenario.json");
+  writeFileSync(scenario, JSON.stringify(SCENARIO));
+  owner = await w.addWorker("owner", ["proj"], {
+    ownChats: true,
+    hubUrl: proxy.url,
+    env: { BAND_TEST_ACP_SCENARIO: scenario },
+  });
   wt = await w.createWorktree(owner, "proj", "feat-direct");
   await w.m("chats.create", { worktreeId: wt, id: chatId, name: "Chat" });
   const issued = await w.m<DirectAccess | null>("worktree.directAccess", {
@@ -198,5 +223,42 @@ describe("a cut link (S3, within the lease)", () => {
       "first while offline",
       "second while offline",
     ]);
+  }, 180_000);
+
+  it("shows a question the agent asked while the link was down once it is back", async () => {
+    const after = Math.max(0, ...workerLog().map((r) => r.id));
+    await proxy.cut();
+    await waitFor(async () => ((await hostStatus()) !== "online" ? true : undefined), {
+      label: "the hub sees the worker go",
+      timeoutMs: 60_000,
+    });
+    let requestId = "";
+    const stream = await openStream(direct(), chatId, {
+      lastEventId: after,
+      headers: bearer(),
+      onEvent: (e) => {
+        if (e.type === "permission") requestId = e.requestId;
+      },
+      until: (e) => turnEnded(e) && e.eventId > after,
+      timeoutMs: 90_000,
+    });
+    await sendDirect("ask while offline");
+    await waitFor(() => (requestId ? true : undefined), { label: "the permission event" });
+
+    // On reconnect the worker reports the open request before the rows of the turn reach the hub.
+    await proxy.restore();
+    await waitFor(
+      async () => {
+        const data = await w.q<{ agent?: { status: string } } | null>("statuses.get", {
+          worktreeId: wt,
+        });
+        return data?.agent?.status === "question" && hubLog().some((r) => r.kind === "permission")
+          ? true
+          : undefined;
+      },
+      { label: "status question after the catch-up", timeoutMs: 30_000 },
+    );
+    await w.m("chat.answer", { chatId, requestId, optionId: "allow" });
+    expect(agentText(await stream.events)).toContain("Allowed and ran.");
   }, 180_000);
 });

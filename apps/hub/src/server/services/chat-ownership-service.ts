@@ -72,7 +72,12 @@ import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, ownedChatInfo } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { beginBandTurn, endBandTurn, observeAgentStatus } from "./chat-status-service";
+import {
+  beginBandTurn,
+  endBandTurn,
+  observeAgentStatus,
+  setChatStatus,
+} from "./chat-status-service";
 import type { SubmitOrQueueResult, SubmitTaskOptions, TaskInfo } from "./task-service";
 import { hasRunningTask, taskService } from "./task-service";
 import { worktreeService } from "./worktree-service";
@@ -777,6 +782,9 @@ export class ChatOwnershipService {
         this.prompts.delete(event.taskId);
         chatService.updateStatus(row.chatId, "running");
         beginBandTurn(worktreeId, row.chatId);
+        // The owner reports an open request at once, but this row comes with the next batch:
+        // a request it already holds stays `question` instead of being overwritten.
+        if (this.pending(row.chatId).length > 0) setChatStatus(worktreeId, row.chatId, "question");
         break;
       case "turn-ended": {
         const failed =
