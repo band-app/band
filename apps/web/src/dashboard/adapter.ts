@@ -72,6 +72,12 @@ export interface DashboardAdapter {
   ): Promise<{ hostId?: string }>;
   removeWorktree(repo: string, name: string, hostId?: string): Promise<void>;
   setWorktreePinned(repo: string, name: string, pinned: boolean, hostId?: string): Promise<void>;
+  /** Stores the order of one list of worktrees, and optionally the new parent of one of them. */
+  reorderWorktrees(input: {
+    order: { repo: string; name: string; hostId?: string }[];
+    scope: "siblings" | "pins";
+    reparent?: { repo: string; name: string; hostId?: string; origin: string | null };
+  }): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
   gitPull(repo: string, name: string, hostId?: string): Promise<GitOpResult>;
   gitPush(repo: string, name: string, hostId?: string): Promise<GitOpResult>;

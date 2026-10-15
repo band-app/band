@@ -64,6 +64,7 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "repos.inspectFolder" || path === "repos.resolveRemote") continue;
     // Re-parenting a worktree is a person's decision, and an MCP call is not scoped to a worker.
     if (path === "worktrees.setOrigin") continue;
+    if (path === "worktrees.reorder") continue;
     // `environment.build` runs commands from the repository on the builder host.
     if (path === "environment.build") continue;
 
