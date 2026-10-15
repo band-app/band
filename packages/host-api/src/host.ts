@@ -44,6 +44,12 @@ export interface Host {
    * URL and token. A remote host's processes go through the worker's relay.
    */
   readonly relay?: HostRelay;
+  /**
+   * The worker's loopback listener for a client on the same machine (the
+   * local direct path). Only a remote host has
+   * one. The hub's own machine is served by the hub already.
+   */
+  readonly direct?: HostDirect;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +660,56 @@ export interface HooksStatus {
   version: number;
 }
 
+/** One usage window of a provider account, such as the 5 hour or the weekly limit. */
+export interface UsageWindow {
+  /** Short label for the bar: `5h`, `wk`, `Fable`. */
+  label: string;
+  /** Share of the window used, 0 to 100. */
+  percent: number;
+  /** Epoch ms when the window resets, or null when the provider does not say. */
+  resetsAt: number | null;
+}
+
+export type AccountUsageProvider = "claude" | "codex";
+
+/**
+ * Why a provider has no numbers on a host. `not-logged-in` means no login was
+ * found, `expired` that the provider refused the token, `rate-limited` that the
+ * usage endpoint refused the request, `error` anything else.
+ */
+export type AccountUsageFailure = "not-logged-in" | "expired" | "rate-limited" | "error";
+
+/**
+ * What a host knows of one provider account. Never carries a token: only
+ * percentages, reset times, the plan and a display identity.
+ */
+export type AccountUsage =
+  | {
+      provider: AccountUsageProvider;
+      status: "ok";
+      /** Email, or the account id when there is no email. Null when the login names neither. */
+      account: string | null;
+      plan: string | null;
+      windows: UsageWindow[];
+      /** Epoch ms when the host read the numbers. */
+      updatedAt: number;
+    }
+  | {
+      provider: AccountUsageProvider;
+      status: AccountUsageFailure;
+      account: string | null;
+      plan: null;
+      windows: [];
+      updatedAt: number;
+    };
+
 export interface HostAgentEnv {
+  /**
+   * Usage of the Claude and Codex accounts logged in on this host, one entry
+   * per provider. Results are cached for a few minutes on the host; `refresh`
+   * reads past the cache. A failure is an entry with a status, never a rejection.
+   */
+  accountUsage(options?: { refresh?: boolean }): Promise<AccountUsage[]>;
   /**
    * The model and effort Claude Code would use in `cwd` according to its
    * config files and environment. Without `cwd`, repo files are skipped.
@@ -723,4 +778,39 @@ export interface HostRelay {
    * limited to the host's own worktrees. Rejects when the host is offline.
    */
   issue(scope: RelayScope): Promise<RelayGrant>;
+}
+
+// ---------------------------------------------------------------------------
+// direct
+// ---------------------------------------------------------------------------
+
+/**
+ * What a direct token allows: calls about one worktree. `path` and
+ * `defaultBranch` come from the hub's records, so the worker serves the
+ * worktree the hub knows. A later scope (a chat) adds fields here.
+ */
+export interface DirectScope {
+  worktreeId: string;
+  /** The worktree's folder on the host. Every call is also checked against the host's path policy. */
+  path: string;
+  defaultBranch: string;
+  /** `git` or `plain`. */
+  repoKind?: string;
+}
+
+/** A token for the listener, and where it listens. */
+export interface DirectGrant {
+  /** The listener's port on `127.0.0.1`. */
+  port: number;
+  token: string;
+  /** Epoch ms after which the listener refuses the token. */
+  expiresAt: number;
+}
+
+export interface HostDirect {
+  /**
+   * Registers a new short-lived token for `scope` with the host's listener.
+   * Rejects when the host is offline or has no listener (an older worker).
+   */
+  issue(scope: DirectScope, ttlMs: number): Promise<DirectGrant>;
 }

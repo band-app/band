@@ -364,7 +364,7 @@ describe("transcriptReducer — send and turn lifecycle", () => {
     expect(state.status).toBe("idle");
   });
 
-  it("a failed turn shows the error as a notice and puts the chat in error", () => {
+  it("an old string-only error renders as an unknown failure holding the text", () => {
     const state = foldEvents(
       INITIAL_TRANSCRIPT,
       logged([
@@ -372,8 +372,16 @@ describe("transcriptReducer — send and turn lifecycle", () => {
         { type: "turn-ended", taskId: "t", error: "agent exited with code 3" },
       ]),
     );
-    expect(assistant(state).entries).toEqual([
-      { kind: "notice", id: "n2", level: "error", text: "agent exited with code 3" },
+    expect(assistant(state).entries).toMatchObject([
+      {
+        kind: "failure",
+        id: "n2",
+        failure: {
+          cause: "unknown",
+          stderrTail: "agent exited with code 3",
+          message: "agent exited with code 3",
+        },
+      },
     ]);
     expect(state).toMatchObject({
       status: "error",
@@ -617,5 +625,27 @@ describe("transcriptReducer — tool call times", () => {
       ]),
     );
     expect(toolDuration(tools(state))).toBeUndefined();
+  });
+
+  it("a structured failure on the turn is kept as the card's data", () => {
+    const failure = {
+      cause: "killed" as const,
+      exitCode: null,
+      signal: "SIGKILL",
+      host: "local",
+      sessionId: "s1",
+      agent: "Claude Code",
+      at: 1,
+      stderrTail: "Killed",
+      message: "Claude Code: ACP connection closed",
+    };
+    const state = foldEvents(
+      INITIAL_TRANSCRIPT,
+      logged([
+        { type: "turn-started", taskId: "t" },
+        { type: "turn-ended", taskId: "t", error: failure.message, failure },
+      ]),
+    );
+    expect(assistant(state).entries).toEqual([{ kind: "failure", id: "n2", failure }]);
   });
 });

@@ -15,6 +15,7 @@ import {
 import { Activity, BarChart3, Globe, MoreVertical, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
+import { AccountUsagePopover } from "./AccountUsagePopover";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
 import { ReportsPageContent } from "./ReportsPageContent";
@@ -187,6 +188,7 @@ export function ToolbarActionBar() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <AccountUsagePopover />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

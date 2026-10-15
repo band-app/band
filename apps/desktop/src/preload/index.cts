@@ -50,6 +50,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "worker_remove",
   "worker_switch_bundled",
   "worker_dismiss_prompt",
+  "worker_local_id",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "pick_file",

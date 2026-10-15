@@ -1,6 +1,7 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import { directWorkerLink } from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
@@ -34,6 +35,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
   // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
   protected trpc: any = createTRPCClient({
     links: [
+      // Files, diff and search of a worktree on this computer's worker skip the hub (desktop app only).
+      directWorkerLink(),
       splitLink({
         condition: (op) => op.type === "subscription",
         true: wsLink({ client: wsClient }),

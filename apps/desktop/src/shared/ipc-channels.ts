@@ -33,6 +33,9 @@ export const Channels = {
   workerRemove: "worker_remove",
   workerSwitchBundled: "worker_switch_bundled",
   workerDismissPrompt: "worker_dismiss_prompt",
+  // The host id of this Mac's worker for the current hub, or null. The UI talks to that
+  // worker directly for its own worktrees.
+  workerLocalId: "worker_local_id",
 
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",

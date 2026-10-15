@@ -115,6 +115,13 @@ import {
 } from "../hooks/useWorktreeChanges";
 import { useWorktreeColdParked } from "../hooks/useWorktreeColdParked";
 import {
+  AGENT_LAUNCHING_EVENT,
+  type AgentLaunchingDetail,
+  OPEN_PANE_EVENT,
+  type OpenPaneDetail,
+  PaneActivations,
+} from "../lib/agent-pane-events";
+import {
   type CenterTab,
   type CenterTabs,
   centerTabsFromApi,
@@ -3453,6 +3460,9 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
   // lands in the group the user picked.
   const pendingLeafPositionsRef = useRef(new Map<string, AddPanelOptions["position"]>());
 
+  // Tabs of agents a plugin started (the Checks "Fix" button) that must end up active.
+  const activationsRef = useRef(new PaneActivations());
+
   // Start a coding agent in this device's mode (issue #682). The server
   // creates the chat or spawns the agent's CLI first, so the pane never
   // mounts before its chat row (with the picked agent) or its PTY exists.
@@ -4229,6 +4239,35 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
     ],
   );
 
+  // An agent a plugin starts opens as the active tab of this worktree's dock.
+  useEffect(() => {
+    const activations = activationsRef.current;
+    const onLaunching = (e: Event) => {
+      const d = (e as CustomEvent<AgentLaunchingDetail>).detail;
+      if (d.worktreeId === worktreeId) activations.expect(d.chatId, d.terminalId);
+    };
+    const onOpenPane = (e: Event) => {
+      const d = (e as CustomEvent<OpenPaneDetail>).detail;
+      const api = apiRef.current;
+      if (d.worktreeId !== worktreeId || !api) return;
+      if (!api.getPanel(d.paneId)) {
+        // The launch answered before the creation event.
+        if (d.kind === "chat") addChatLeaf(api, worktreeId, d.paneId);
+        else if (d.kind === "term") addTermLeaf(api, worktreeId, d.paneId, { autoFocus: true });
+        else return;
+      }
+      api.getPanel(d.paneId)?.api.setActive();
+      activations.expect(d.paneId);
+      activations.activate(d.paneId, (id) => api.getPanel(id));
+    };
+    window.addEventListener(AGENT_LAUNCHING_EVENT, onLaunching);
+    window.addEventListener(OPEN_PANE_EVENT, onOpenPane);
+    return () => {
+      window.removeEventListener(AGENT_LAUNCHING_EVENT, onLaunching);
+      window.removeEventListener(OPEN_PANE_EVENT, onOpenPane);
+    };
+  }, [worktreeId]);
+
   // Live sync: add/remove leaves when instances are created/killed externally (CLI).
   useEffect(() => {
     return adapter.subscribeStatusEvents((event) => {
@@ -4241,6 +4280,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         if (!api.getPanel(event.chatId)) {
           addChatLeaf(api, worktreeId, event.chatId, pendingPositions.get(event.chatId));
         }
+        activationsRef.current.activate(event.chatId, (id) => api.getPanel(id));
       } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
         const panel = api.getPanel(event.chatId);
         if (panel) api.removePanel(panel);
@@ -4251,7 +4291,8 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
         // seed a new leaf.
         if (!isOwnedPane(event.terminalId) && !api.getPanel(event.terminalId)) {
           // A terminal this tab launched an agent into gets focus, like New terminal.
-          const launched = pendingPositions.has(event.terminalId);
+          const launched =
+            pendingPositions.has(event.terminalId) || activationsRef.current.has(event.terminalId);
           addTermLeaf(
             api,
             worktreeId,
@@ -4259,6 +4300,7 @@ export const WorktreeCenterDockview = memo(function WorktreeCenterDockview({
             launched ? { autoFocus: true } : undefined,
             pendingPositions.get(event.terminalId),
           );
+          activationsRef.current.activate(event.terminalId, (id) => api.getPanel(id));
         }
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
         disposeTerminal(event.terminalId);

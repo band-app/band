@@ -110,6 +110,7 @@ describe("app:// handler", () => {
       const csp = res.headers.get("content-security-policy") ?? "";
       assert.match(
         csp,
+        // The bundled hub's pages get no loopback wildcard: the direct path is for a remote hub.
         /connect-src 'self' http:\/\/localhost:4567 ws:\/\/localhost:4567(;|$)/,
         path,
       );
@@ -125,7 +126,8 @@ describe("app:// handler", () => {
       const csp = (await get("/")).headers.get("content-security-policy") ?? "";
       assert.match(
         csp,
-        /connect-src 'self' https:\/\/hub\.example\.com wss:\/\/hub\.example\.com(;|$)/,
+        // The hub, and this machine's worker on loopback for the local direct path.
+        /connect-src 'self' https:\/\/hub\.example\.com wss:\/\/hub\.example\.com http:\/\/127\.0\.0\.1:\* ws:\/\/127\.0\.0\.1:\*(;|$)/,
       );
       assert.ok(!csp.includes("localhost"));
       // The old host no longer answers.
@@ -153,6 +155,10 @@ describe("app hosts and CSP", () => {
     assert.match(csp, /default-src 'self'/);
     assert.match(csp, /object-src 'none'/);
     assert.match(csp, /frame-src 'self' blob: http:\/\/localhost:4567/);
+    assert.ok(!csp.includes("127.0.0.1"));
+    // The local direct path, for a remote hub: this machine's worker on a loopback port.
+    const remote = buildCsp("https://hub.example.com", { loopback: true });
+    assert.match(remote, /connect-src [^;]*http:\/\/127\.0\.0\.1:\* ws:\/\/127\.0\.0\.1:\*/);
     const none = buildCsp(null);
     assert.match(none, /connect-src 'self'(;|$)/);
   });

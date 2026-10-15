@@ -84,7 +84,13 @@ switch (command) {
     const label = labelOf(rest.at(-1));
     const plistFile = existsSync(join(dir, `${label}.plist`)) ? readFileSync(join(dir, `${label}.plist`), "utf8") : null;
     if (!plistFile) process.exit(113);
+    // launchd starts the job again only once the killed process has exited.
+    const old = pidOf(label);
     stop(label);
+    const deadline = Date.now() + 60_000;
+    while (old !== null && alive(old) && Date.now() < deadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
     start(label, plistFile);
     break;
   }

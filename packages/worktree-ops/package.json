@@ -1,0 +1,33 @@
+{
+  "name": "@band-app/worktree-ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "exports": {
+    "./files": "./src/files.ts",
+    "./diff": "./src/diff.ts",
+    "./search": "./src/search.ts",
+    "./fuzzy-score": "./src/fuzzy-score.ts",
+    "./schemas": "./src/schemas.ts",
+    "./direct": "./src/direct.ts",
+    "./terminal-socket": "./src/terminal-socket.ts",
+    "./strip-queries": "./src/strip-queries.ts",
+    "./resolver": "./src/resolver.ts"
+  },
+  "dependencies": {
+    "@band-app/host-api": "workspace:^",
+    "@band-app/logger": "workspace:^",
+    "@band-app/shared": "workspace:^",
+    "fzf": "0.5.2",
+    "ws": "^8.18.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.7.0"
+  }
+}
