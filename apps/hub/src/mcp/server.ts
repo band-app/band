@@ -46,6 +46,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
       path.startsWith("accountUsage.") ||
+      path.startsWith("voice.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")
     )

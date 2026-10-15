@@ -321,6 +321,18 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
   r.json("agentEnv.accountUsage", (a) =>
     host.agentEnv.accountUsage({ refresh: optBool(a, "refresh") }),
   );
+  // The hub names the URL from its own settings; a client never does. The link accepts the hub
+  // only, and the direct listener and the relay have no entry for this method.
+  r.json("speech.transcribe", async (a) =>
+    host.speech.transcribe({
+      baseUrl: str(a, "baseUrl"),
+      apiKey: optStr(a, "apiKey"),
+      model: str(a, "model"),
+      language: optStr(a, "language"),
+      mimeType: str(a, "mimeType"),
+      audio: await readAudio(ctx, a.audio),
+    }),
+  );
   r.json("agentEnv.hooksStatus", () => host.agentEnv.hooksStatus());
   r.json("agentEnv.installHooks", () => host.agentEnv.installHooks());
   r.json("agentEnv.removeHooks", () => host.agentEnv.removeHooks());
@@ -329,6 +341,44 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     for (const plan of plans.values()) plan.dispose();
     plans.clear();
   };
+}
+
+/** Largest clip the worker transcribes, the same cap as the hub and the clients. */
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/** The clip of a `speech.transcribe` call: `{ base64 }`, or the whole of a channel the hub opened. */
+async function readAudio(ctx: WorkerContext, audio: unknown): Promise<Uint8Array> {
+  let bytes: Uint8Array;
+  if (typeof audio === "object" && audio !== null) {
+    const d = audio as Params;
+    if (typeof d.base64 === "string") {
+      if (d.base64.length > Math.ceil((MAX_AUDIO_BYTES * 4) / 3) + 4) {
+        throw invalid("audio is over 25 MB");
+      }
+      bytes = Buffer.from(d.base64, "base64");
+    } else if (typeof d.chan === "number") {
+      const ch = ctx.session.getChannel(d.chan);
+      if (!ch || ch.id % 2 !== 0) throw invalid(`channel ${d.chan} is not open from the hub`);
+      const parts: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of ch) {
+        total += chunk.byteLength;
+        if (total > MAX_AUDIO_BYTES) {
+          ch.reset("audio over 25 MB");
+          throw invalid("audio is over 25 MB");
+        }
+        parts.push(chunk);
+      }
+      bytes = Buffer.concat(parts);
+      ch.end();
+    } else {
+      throw invalid("audio must be { base64 } or { chan }");
+    }
+  } else {
+    throw invalid("audio must be { base64 } or { chan }");
+  }
+  if (bytes.byteLength > MAX_AUDIO_BYTES) throw invalid("audio is over 25 MB");
+  return bytes;
 }
 
 /**

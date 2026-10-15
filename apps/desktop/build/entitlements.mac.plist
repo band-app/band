@@ -19,6 +19,10 @@
       localhost and the dashboard renderer talks to it over HTTP/WS.
     - files.user-selected.read-write: repo pickers (folder dialogs) read
       from arbitrary user-selected directories.
+    - device.audio-input: voice dictation in the chat composer records with
+      getUserMedia. Under the hardened runtime macOS refuses the microphone
+      without it, and never shows the permission prompt. The prompt text is
+      NSMicrophoneUsageDescription (`mac.extendInfo` in electron-builder.yml).
 
   Intentionally NOT set:
     - automation.apple-events: the Tauri shell carried this defensively, but
@@ -43,6 +47,8 @@
   <key>com.apple.security.network.server</key>
   <true/>
   <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>
 </plist>
