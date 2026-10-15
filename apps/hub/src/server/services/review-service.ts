@@ -12,7 +12,10 @@ import type {
 } from "@band-app/plugin-api";
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
+import { requestCIRefresh } from "./_utils/ci-refresh-request";
+import { ciSummaryFromChecks } from "./_utils/ci-summary";
 import { worktreeGh } from "./_utils/worktree-gh";
+import { applyCIStatus } from "./branch-status-poller";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
 import { type WorktreeService, worktreeService } from "./worktree-service";
 
@@ -63,6 +66,9 @@ export class ReviewService {
           ? await checksProvider.getChecksForRef(repo, branch, ctx)
           : { state: "none", headSha: null, checks: [] };
       }
+      // The sidebar shows the same state the panel just read. A change also
+      // makes the other worktrees' next tick worth taking now.
+      if (applyCIStatus(worktreeId, ciSummaryFromChecks(checks, review))) requestCIRefresh();
       return {
         status: "ok",
         provider: { id: provider.id, name: provider.name },
