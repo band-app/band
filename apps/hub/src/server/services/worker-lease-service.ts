@@ -46,6 +46,10 @@ interface Entry {
   lastAckAt: number;
   /** When the latest renewal was sent, acknowledged or not. */
   lastAttemptAt: number;
+  /** When the latest renewal was sent and has no answer yet. */
+  inFlight: boolean;
+  /** When the latest renewal ended without an answer (link lost, error or timeout). */
+  lastFailAt: number;
 }
 
 export class WorkerLeaseService {
@@ -66,6 +70,8 @@ export class WorkerLeaseService {
       supported: old?.supported ?? null,
       lastAckAt: old?.lastAckAt ?? 0,
       lastAttemptAt: old?.lastAttemptAt ?? 0,
+      inFlight: false,
+      lastFailAt: old?.lastFailAt ?? 0,
     });
   }
 
@@ -96,12 +102,16 @@ export class WorkerLeaseService {
     if (!entry || entry.supported === false || !entry.session.attached) return;
     const params: LeaseRenewParams = { ttlMs: leaseMs(), blockedPaths: this.blockedPaths(hostId) };
     entry.lastAttemptAt = Date.now();
+    entry.inFlight = true;
     try {
       await entry.session.request(METHOD_LEASE_RENEW, params, { timeoutMs: RENEW_TIMEOUT_MS });
       entry.supported = true;
+      entry.inFlight = false;
       entry.lastAckAt = Date.now();
       tokenService.touchHost(hostId, entry.lastAckAt);
     } catch (err) {
+      entry.inFlight = false;
+      entry.lastFailAt = Date.now();
       if (err instanceof RpcError && err.code === RPC_METHOD_NOT_FOUND) {
         entry.supported = false;
         clearInterval(entry.timer);
@@ -122,11 +132,16 @@ export class WorkerLeaseService {
     const entry = this.entries.get(hostId);
     if (entry?.supported === false) return null;
     const seen = tokenService.hostSeen(hostId)?.lastSeenAt ?? null;
-    // A renewal the worker received but whose answer was lost counts from when it was sent, plus
-    // the time the hub waits for the answer.
+    // A renewal the worker may have received but whose answer was lost counts until the hub gave
+    // up on it: the moment the link failed it, or while it is still pending, the time the hub
+    // waits for the answer.
     if (entry && entry.lastAckAt > 0) {
-      const attempt =
-        entry.lastAttemptAt > entry.lastAckAt ? entry.lastAttemptAt + RENEW_TIMEOUT_MS : 0;
+      let attempt = 0;
+      if (entry.lastAttemptAt > entry.lastAckAt) {
+        attempt = entry.inFlight
+          ? entry.lastAttemptAt + RENEW_TIMEOUT_MS
+          : Math.max(entry.lastFailAt, entry.lastAttemptAt);
+      }
       return Math.max(entry.lastAckAt, attempt, seen ?? 0) + leaseMs();
     }
     if (seen === null) return null;
