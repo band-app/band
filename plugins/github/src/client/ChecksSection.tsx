@@ -61,6 +61,7 @@ export function ChecksSection({
   const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
+  const [fixPaneId, setFixPaneId] = useState<string | null>(null);
   const [fixError, setFixError] = useState<string | null>(null);
 
   if (checks.checks.length === 0) {
@@ -80,7 +81,8 @@ export function ChecksSection({
     setFixState("starting");
     setFixError(null);
     try {
-      await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      const started = await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      setFixPaneId(started.chatId ?? started.terminalId ?? null);
       setFixState("started");
     } catch (err) {
       setFixState("idle");
@@ -107,8 +109,21 @@ export function ChecksSection({
             <p className="text-[11px] text-muted-foreground">
               {fixError ??
                 (fixState === "started"
-                  ? "An agent is working on the failures."
+                  ? "An agent is fixing these checks"
                   : "Inspect details or start an AI fix pass.")}
+              {!fixError && fixState === "started" && fixPaneId && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => host.openPane(worktreeId, fixPaneId)}
+                    data-testid="pr-checks__open-agent"
+                    className="underline hover:text-foreground"
+                  >
+                    Open
+                  </button>
+                </>
+              )}
             </p>
           </div>
           <button
