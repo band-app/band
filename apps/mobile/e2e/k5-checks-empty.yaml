@@ -1,0 +1,29 @@
+# k5 (S5): with no pull request, or a pull request with no checks, Checks says why it is empty.
+appId: app.getband.mobile
+name: k5 the empty states of the checks view
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-nopr
+- extendedWaitUntil:
+    visible:
+      id: checks__empty
+      text: "No GitHub Actions jobs ran on this branch."
+    timeout: 20000
+- takeScreenshot: k5-no-pr
+- tapOn:
+    id: checks__back
+- tapOn:
+    id: worktree__back
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-nochecks
+- extendedWaitUntil:
+    visible:
+      id: checks__empty
+      text: "No checks reported for this pull request."
+    timeout: 20000
+- takeScreenshot: k5-no-checks

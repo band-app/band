@@ -68,8 +68,11 @@ export function pickSimulator() {
   const runtimes = Object.keys(devices)
     .filter((r) => r.includes("iOS"))
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-  const phones = runtimes.flatMap((r) => devices[r].filter((d) => d.name.startsWith("iPhone")));
   const wanted = process.env.BAND_SIM_UDID;
+  // A simulator picked by UDID may have a custom name; otherwise only iPhones qualify.
+  const phones = runtimes.flatMap((r) =>
+    devices[r].filter((d) => (wanted ? d.udid === wanted : d.name.startsWith("iPhone"))),
+  );
   const device = wanted
     ? phones.find((d) => d.udid === wanted)
     : (phones.find((d) => d.state === "Booted") ?? phones[0]);
