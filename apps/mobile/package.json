@@ -41,5 +41,12 @@
     "@types/node": "^22.19.13",
     "@types/react": "~19.2.2",
     "typescript": "^5.7.0"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "typescript"
+      ]
+    }
   }
 }
