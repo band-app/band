@@ -11,16 +11,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import { before, describe, it } from "node:test";
+import xterm from "@xterm/headless";
 
 const ROOT = join(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "tests/fixtures/terminal");
 const REPLAY = join(ROOT, "modules/band-terminal/replay");
-const { Terminal } = createRequire(import.meta.url)("@xterm/headless") as {
-  Terminal: new (options: Record<string, unknown>) => XTerm;
-};
+const Terminal = xterm.Terminal as unknown as new (options: Record<string, unknown>) => XTerm;
 
 interface XCell {
   getChars(): string;

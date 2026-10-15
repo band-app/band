@@ -91,7 +91,7 @@
     "apps/mobile": {
       "entry": ["src/app/**/*.tsx", "scripts/*.mjs", "tests/**/*.test.ts"],
       "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs", "tests/**/*.ts"],
-      "ignoreDependencies": ["expo-updates", "expo-system-ui"]
+      "ignoreDependencies": ["expo-updates", "expo-system-ui", "node-pty"]
     },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],
