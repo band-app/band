@@ -19,6 +19,7 @@ import type {
   HostAgentEnv,
   HostBrowser,
   HostDesktop,
+  HostDirect,
   HostFs,
   HostGit,
   HostInfo,
@@ -40,9 +41,12 @@ import type {
 } from "@band-app/host-api";
 import {
   type Channel,
+  type DirectRegisterParams,
+  type DirectRegisterReply,
   decodeFrames,
   encodeFrame,
   type LinkSession,
+  METHOD_DIRECT_REGISTER,
   METHOD_RELAY_REGISTER,
   METHOD_RELAY_REVOKE,
   type RelayRegisterReply,
@@ -284,6 +288,16 @@ export class RemoteHost implements Host {
           await this.rpc.call(METHOD_RELAY_REVOKE, { token }).catch(() => undefined);
         },
       };
+    },
+  };
+
+  readonly direct: HostDirect = {
+    issue: async (scope, ttlMs) => {
+      const token = `bwd_${randomBytes(24).toString("base64url")}`;
+      const params: DirectRegisterParams = { token, scope, ttlMs };
+      const reply = await this.rpc.call<DirectRegisterReply>(METHOD_DIRECT_REGISTER, params);
+      // The worker's clock decides, and it is the clock of the client that renews the token.
+      return { port: reply.port, token, expiresAt: reply.expiresAt };
     },
   };
 

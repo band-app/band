@@ -67,6 +67,7 @@
         "@xterm/addon-serialize",
         "@xterm/addon-unicode11",
         "@xterm/headless",
+        "fzf",
         "node-pty",
         "pino",
         "typescript-language-server",

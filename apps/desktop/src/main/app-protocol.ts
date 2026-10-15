@@ -44,13 +44,22 @@ export function appOriginForHost(host: string): string {
 /**
  * Content-Security-Policy for `app://` pages. The page may talk only to
  * itself and to its hub (`connect-src` lists the hub's http and ws origins),
- * and load frames and media from that hub too. Inline scripts are allowed
- * because the SPA shell carries inline bootstrap scripts, and workers and wasm
+ * and load frames and media from that hub too. With a remote hub
+ * (`loopback`) it may also reach any port on `127.0.0.1`, where this
+ * machine's worker listens for the local direct path. The bundled hub runs on
+ * this machine already, so its pages get no loopback wildcard. Inline scripts
+ * are allowed because the SPA shell carries inline bootstrap scripts, and workers and wasm
  * because the editor and syntax highlighter use them. Remote images are
  * allowed for markdown. Plugins, `<base>` and form posts elsewhere are not.
  */
-export function buildCsp(hubOrigin: string | null): string {
-  const hub = hubOrigin ? [hubOrigin, hubOrigin.replace(/^http/, "ws")] : [];
+export function buildCsp(hubOrigin: string | null, opts: { loopback?: boolean } = {}): string {
+  const hub = hubOrigin
+    ? [
+        hubOrigin,
+        hubOrigin.replace(/^http/, "ws"),
+        ...(opts.loopback ? ["http://127.0.0.1:*", "ws://127.0.0.1:*"] : []),
+      ]
+    : [];
   const self = (...extra: string[]) => ["'self'", ...extra].join(" ");
   return [
     "default-src 'self'",
@@ -177,7 +186,8 @@ export function createAppHandler(
       return new Response("Method not allowed", { status: 405 });
     }
     if (url.host !== opts.host()) return new Response("Not found", { status: 404 });
-    const csp = buildCsp(opts.hubOrigin());
+    // Only a remote hub's pages may reach this machine's worker on loopback.
+    const csp = buildCsp(opts.hubOrigin(), { loopback: opts.host() !== LOCAL_APP_HOST });
 
     const file = resolveInside(uiDir, url.pathname === "/" ? `/${SHELL}` : url.pathname);
     if (!file) return new Response("Bad request", { status: 400 });

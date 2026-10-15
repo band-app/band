@@ -9,7 +9,14 @@
  */
 
 import type { AppRouter } from "@band-app/server";
-import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import {
+  createTRPCClient,
+  createWSClient,
+  httpBatchLink,
+  splitLink,
+  type TRPCLink,
+  wsLink,
+} from "@trpc/client";
 
 const WS_BASE_PROTOCOL = "band";
 const WS_TOKEN_PROTOCOL_PREFIX = "band-token.";
@@ -30,6 +37,8 @@ export interface HubClientOptions {
    * pass it.
    */
   wsUrl?: string | (() => string);
+  /** Links that run before the hub links, e.g. the desktop app's direct path to its own worker. */
+  links?: TRPCLink<AppRouter>[];
 }
 
 export function toWsUrl(httpUrl: string): string {
@@ -93,6 +102,7 @@ export function createHubConnection(options: HubClientOptions) {
 
   const client = createTRPCClient<AppRouter>({
     links: [
+      ...(options.links ?? []),
       splitLink({
         condition: (op) => op.type === "subscription",
         true: wsLink({ client: wsClient }),

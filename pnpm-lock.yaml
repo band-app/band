@@ -83,9 +83,6 @@ importers:
       '@vscode/ripgrep':
         specifier: ^1.18.0
         version: 1.18.0
-      fzf:
-        specifier: 0.5.2
-        version: 0.5.2
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -126,6 +123,9 @@ importers:
       '@band-app/shared':
         specifier: workspace:^
         version: link:../../packages/shared
+      '@band-app/worktree-ops':
+        specifier: workspace:^
+        version: link:../../packages/worktree-ops
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -572,6 +572,9 @@ importers:
       '@xterm/headless':
         specifier: 6.1.0-beta.302
         version: 6.1.0-beta.302
+      fzf:
+        specifier: 0.5.2
+        version: 0.5.2
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -606,6 +609,12 @@ importers:
       '@band-app/logger':
         specifier: workspace:^
         version: link:../../packages/logger
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
+      '@band-app/worktree-ops':
+        specifier: workspace:^
+        version: link:../../packages/worktree-ops
       '@types/node':
         specifier: ^22.19.13
         version: 22.19.13
@@ -827,6 +836,37 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/worktree-ops:
+    dependencies:
+      '@band-app/host-api':
+        specifier: workspace:^
+        version: link:../host-api
+      '@band-app/logger':
+        specifier: workspace:^
+        version: link:../logger
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../shared
+      fzf:
+        specifier: 0.5.2
+        version: 0.5.2
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

@@ -44,6 +44,12 @@ export interface Host {
    * URL and token. A remote host's processes go through the worker's relay.
    */
   readonly relay?: HostRelay;
+  /**
+   * The worker's loopback listener for a client on the same machine (the
+   * local direct path). Only a remote host has
+   * one. The hub's own machine is served by the hub already.
+   */
+  readonly direct?: HostDirect;
 }
 
 // ---------------------------------------------------------------------------
@@ -761,4 +767,39 @@ export interface HostRelay {
    * limited to the host's own worktrees. Rejects when the host is offline.
    */
   issue(scope: RelayScope): Promise<RelayGrant>;
+}
+
+// ---------------------------------------------------------------------------
+// direct
+// ---------------------------------------------------------------------------
+
+/**
+ * What a direct token allows: calls about one worktree. `path` and
+ * `defaultBranch` come from the hub's records, so the worker serves the
+ * worktree the hub knows. A later scope (a chat) adds fields here.
+ */
+export interface DirectScope {
+  worktreeId: string;
+  /** The worktree's folder on the host. Every call is also checked against the host's path policy. */
+  path: string;
+  defaultBranch: string;
+  /** `git` or `plain`. */
+  repoKind?: string;
+}
+
+/** A token for the listener, and where it listens. */
+export interface DirectGrant {
+  /** The listener's port on `127.0.0.1`. */
+  port: number;
+  token: string;
+  /** Epoch ms after which the listener refuses the token. */
+  expiresAt: number;
+}
+
+export interface HostDirect {
+  /**
+   * Registers a new short-lived token for `scope` with the host's listener.
+   * Rejects when the host is offline or has no listener (an older worker).
+   */
+  issue(scope: DirectScope, ttlMs: number): Promise<DirectGrant>;
 }

@@ -1,4 +1,5 @@
 import { createHubClient } from "@band-app/client/hub-client";
+import { directWorkerLink } from "./direct-worker";
 import { crossOriginHub, hubFetch, hubWsUrl } from "./hub-config";
 
 // Same-origin, the page's cookie authenticates and `hubUrl` is empty (relative
@@ -11,4 +12,6 @@ export const trpc = createHubClient({
   token: hub?.token,
   fetch: (url, init) => hubFetch(String(url), init),
   wsUrl: () => hubWsUrl("/trpc"),
+  // Files, diff and search of a worktree on this computer's worker skip the hub (desktop app only).
+  links: [directWorkerLink()],
 });

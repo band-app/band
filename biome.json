@@ -78,7 +78,11 @@
   },
   "overrides": [
     {
-      "includes": ["apps/hub/src/server/services/**", "apps/hub/src/server/api/**"],
+      "includes": [
+        "apps/hub/src/server/services/**",
+        "apps/hub/src/server/api/**",
+        "packages/worktree-ops/src/**"
+      ],
       "linter": {
         "rules": {
           "style": {
