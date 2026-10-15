@@ -56,20 +56,23 @@ The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub 
 3. Connect the iPhone and run, or use `npx expo run:ios --device`.
 4. Accept the local network prompt. The phone must reach the hub's URL.
 
-## TestFlight
+## Builds and TestFlight
 
-`.github/workflows/mobile-testflight.yml` runs on every push to `main` that changes `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml`. It starts an EAS iOS `production` build with `--no-wait --auto-submit`, so the job ends once the build is queued and EAS submits the finished build to TestFlight. The build URL is in the job summary. To run it by hand, use Actions > Mobile TestFlight > Run workflow.
+`apps/mobile/.eas/workflows/build.yml` is an EAS Workflow. It runs on Expo's servers on every push to `main` that changes `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml`, and has three jobs:
 
-The workflow skips with a notice until the repository variable `ASC_APP_ID` is set. It writes that value into `submit.production.ios.ascAppId` of `eas.json` at run time.
+- `build_android`: an Android `preview` build, an APK with internal distribution. Install it from the build page on expo.dev.
+- `build_ios`: an iOS `production` build.
+- `submit_ios`: submits the iOS build to TestFlight with the `production` submit profile (`ascAppId` 6823071973 in `eas.json`).
+
+Runs show under the project's Workflows page on expo.dev. To run it by hand: `npx eas-cli@latest workflow:run .eas/workflows/build.yml` from `apps/mobile`. After editing the file, check it with `npx eas-cli@latest workflow:validate .eas/workflows/build.yml`.
 
 One-time setup:
 
-1. Create the app in Expo (owner `band-app`, project `band`). Its id is `expo.extra.eas.projectId` in `app.json`.
-2. In App Store Connect, create an app record with bundle id `app.getband.mobile` under the Apple team that signs the build. Its numeric Apple ID is the `ASC_APP_ID` value.
-3. Create an App Store Connect API key, add it to the Expo account and assign it to the app for EAS Submit. EAS also uses it to create the provisioning profile in non-interactive builds.
-4. Run `eas credentials` once as a team member to create the iOS distribution certificate.
-5. Add the Expo access token as the repository secret `EXPO_TOKEN`.
-6. Set the repository variable `ASC_APP_ID`.
+1. In the Expo dashboard (owner `band-app`, project `band`), open Project settings > GitHub, link `band-app/band` and set the base directory to `apps/mobile`. Push triggers need the link.
+2. Create an App Store Connect API key, add it to the Expo account and assign it to the app for EAS Submit.
+3. Create the signing credentials once as a team member, from `apps/mobile`:
+   - `npx eas-cli@latest credentials:configure-build -p ios -e production` (distribution certificate and provisioning profile).
+   - `npx eas-cli@latest credentials:configure-build -p android -e preview` (Android keystore).
 
 The first build of each version goes through Beta App Review before external testers can install it. Internal testers get it without review.
 
