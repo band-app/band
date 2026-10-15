@@ -1777,6 +1777,23 @@ fn target_host_id(client: &api::ApiClient, given: &str) -> Result<String, String
     resolve_host_id(&known, given)
 }
 
+/// The name of a host for text output, or "unknown host" when the hub does not list it.
+fn host_display_name(client: &api::ApiClient, host_id: &str) -> String {
+    let listed = client.trpc_query("hosts.list", &serde_json::json!({})).ok();
+    listed
+        .as_ref()
+        .and_then(|l| l.get("hosts"))
+        .and_then(|v| v.as_array())
+        .and_then(|hosts| {
+            hosts
+                .iter()
+                .find(|h| h.get("id").and_then(|i| i.as_str()) == Some(host_id))
+        })
+        .and_then(|h| h.get("name").and_then(|n| n.as_str()))
+        .filter(|n| !n.trim().is_empty())
+        .map_or_else(|| "unknown host".to_string(), str::to_string)
+}
+
 /// Adds the `--add-host` hint to the hub's "only available on" refusal.
 fn with_add_host_hint(err: String) -> String {
     if err.contains("is only available on") {
@@ -1797,7 +1814,7 @@ fn cmd_worktrees_move(id: &str, to: &str, add_host: bool) -> Result<CommandResul
         .trpc_mutate("checkpoints.move", &input)
         .map_err(with_add_host_hint)?;
     Ok(CommandResult {
-        text: restore_text(&data, "Moved", id),
+        text: restore_text(&client, &data, "Moved", id),
         json: data,
     })
 }
@@ -1811,10 +1828,9 @@ fn cmd_worktrees_continue(id: &str, to: Option<&str>) -> Result<CommandResult, S
     let data = client.trpc_mutate("follow.continue", &input)?;
     let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
     let out = format!(
-        "Continued {id} as {} on {} (host {})\nThe copy {id} is left untouched on its host and listed as superseded\n",
+        "Continued {id} as {} on {}\nThe copy {id} is left untouched on its host and listed as superseded\n",
         text("worktreeId"),
-        text("hostName"),
-        text("hostId")
+        text("hostName")
     );
     Ok(CommandResult {
         text: out,
@@ -1871,18 +1887,18 @@ fn cmd_worktrees_restore(
         .trpc_mutate("checkpoints.restore", &input)
         .map_err(with_add_host_hint)?;
     Ok(CommandResult {
-        text: restore_text(&data, "Restored", id),
+        text: restore_text(&client, &data, "Restored", id),
         json: data,
     })
 }
 
 #[allow(clippy::format_push_string)]
-fn restore_text(data: &serde_json::Value, verb: &str, id: &str) -> String {
+fn restore_text(client: &api::ApiClient, data: &serde_json::Value, verb: &str, id: &str) -> String {
     let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
     let mut out = format!(
         "{verb} {id} as {} on {}\n",
         text("worktreeId"),
-        text("hostId")
+        host_display_name(client, text("hostId"))
     );
     if let Some(old) = data.get("supersededId").and_then(|v| v.as_str()) {
         out.push_str(&format!(
