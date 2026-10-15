@@ -19,6 +19,7 @@ const NO_HUB: ThisComputerResult = {
 export function workerHandlers(deps: WorkerIpcDeps): Array<[string, (args: unknown) => unknown]> {
   return [
     [Channels.workerStatus, () => deps.worker.status(deps.getHub())],
+    [Channels.workerLocalId, () => deps.worker.localHostId(deps.getHub())],
     [
       Channels.workerAdd,
       async (args): Promise<ThisComputerResult> => {

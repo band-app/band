@@ -1403,6 +1403,29 @@ export class WorktreePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /**
+   * Close the `file` leaf tab for `path` with its "Close file" (×) button. The click is sent to
+   * the button itself, because in a narrow window the start of the tab strip sits under the
+   * title bar's nav controls and a pointer click there lands on them.
+   */
+  async closeFileTab(path: string): Promise<void> {
+    await test.step(`Close the tab of ${path}`, async () => {
+      await this.fileTab(path).getByRole("button", { name: "Close file" }).dispatchEvent("click");
+      await expect(this.fileTab(path)).toHaveCount(0);
+    });
+  }
+
+  /**
+   * Activate the first tab of a kind with the `pointerdown` dockview listens for, sent to the tab
+   * itself. For a narrow window, where the tab can sit under the title bar's nav controls (see
+   * `closeFileTab`); `activateTab` clicks like a person and is the default.
+   */
+  async activateTabInNarrowWindow(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
+    await test.step(`Activate the ${panelComponent} tab`, async () => {
+      await this.tab(panelComponent).dispatchEvent("pointerdown", { button: 0, isPrimary: true });
+    });
+  }
+
   /** Double-click the `file` leaf tab for `path` (pins a preview tab). */
   async doubleClickFileTab(path: string): Promise<void> {
     await test.step(`Double-click the tab of ${path}`, async () => {

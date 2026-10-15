@@ -16,6 +16,20 @@ export class DesktopDashboardPage {
     this.chat = new ChatPanePage(page, "app://placeholder", "");
   }
 
+  /** The URLs of the WebSockets the window opens from now on, in order. */
+  watchSockets(): string[] {
+    const urls: string[] = [];
+    this.page.on("websocket", (ws) => urls.push(ws.url()));
+    return urls;
+  }
+
+  /** The URLs of the requests the window makes from now on, in order. */
+  watchRequests(): string[] {
+    const urls: string[] = [];
+    this.page.on("request", (req) => urls.push(req.url()));
+    return urls;
+  }
+
   /** The window's current `app://` URL. */
   url(): string {
     return this.page.url();
@@ -59,6 +73,25 @@ export class DesktopDashboardPage {
       const emptyStateTerminal = this.page.getByTestId("worktree-center__empty-new-term");
       await expect(terminal.input.or(emptyStateTerminal).first()).toBeVisible({ timeout: 30_000 });
       if (await emptyStateTerminal.isVisible()) await emptyStateTerminal.click();
+      await expect(terminal.input).toBeAttached({ timeout: 30_000 });
+      return terminal;
+    });
+  }
+
+  /** Open a new terminal tab from the "+" menu, beside whatever tabs the worktree has. */
+  async openNewTerminalTab(worktreeId: string): Promise<TerminalSurface> {
+    return await test.step("Open a new terminal tab", async () => {
+      await this.gotoDeepLink(worktreeId);
+      const terminal = new TerminalSurface(this.page, worktreeId);
+      const emptyState = this.page.getByTestId("worktree-center__empty-new-term");
+      const plus = this.page.getByTestId("worktree-center__new-tab-button").first();
+      await expect(plus.or(emptyState).first()).toBeVisible({ timeout: 30_000 });
+      if (await emptyState.isVisible()) {
+        await emptyState.click();
+      } else {
+        await plus.click();
+        await this.page.getByTestId("worktree-center__new-tab--term").click();
+      }
       await expect(terminal.input).toBeAttached({ timeout: 30_000 });
       return terminal;
     });

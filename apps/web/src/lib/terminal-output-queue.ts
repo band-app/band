@@ -22,7 +22,7 @@
 // xterm's write buffer, and a keystroke's echo parsed only after all of it.
 // Each chunk's `onConsumed` fires once xterm has parsed it (or it is
 // dropped); the caller acknowledges those bytes to the server, which pauses
-// the PTY while too many are unparsed (`api/terminals/output-flow.ts`).
+// the PTY while too many are unparsed (`packages/worktree-ops/src/output-flow.ts`).
 //
 // DEC 2026 synchronized output: xterm skips any render that comes while a
 // frame is open and tries again on the next animation frame. A TUI redrawing

@@ -44,6 +44,13 @@ Negative:
 - Every worker is a code-execution endpoint, so the tokens and the worker-side relay must be scoped tightly.
 - A large refactor: the server code moves out of `apps/web`, and all git and file access goes through `Host`.
 
+Later amendment, the local direct path ([local-direct-path.md](../local-direct-path.md)):
+
+- A worker also listens on `127.0.0.1` for the desktop app on its own machine, so terminals, files, diff and search for its worktrees skip the hub. Decision 3 still holds: the listener takes no connection from another machine.
+- The hub stays the authority. It issues each direct token for one worktree, and the worker serves only what the token names, through the same method handlers and path policy as a link call.
+- The file, diff and search services moved from the hub to `packages/worktree-ops`, so the hub and the worker run one implementation. The terminal WebSocket protocol moved there too.
+- A worker is now a second entry point for the desktop app's calls, which is why its tokens are short-lived, hashed, scoped to one worktree and refused from any page that is not the desktop app's.
+
 ## Alternatives considered
 
 **Peer mesh (`federation.md`).** Symmetric Band installs, each the authority for its own worktrees, joined over Tailscale. It was rejected because the mesh has no always-on place for the coordinator, subscriptions, the OAuth vault or the runners. Each would have to live on one chosen peer, which makes that peer a hub without the design saying so. The mesh would also need state exchange, proxying of tRPC calls to the owning peer, discovery and settings replication, all of which the hub avoids.
