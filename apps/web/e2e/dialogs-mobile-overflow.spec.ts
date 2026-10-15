@@ -240,14 +240,13 @@ for (const width of WIDTHS) {
       await expectFits(await measureDialogOverflow(settingsPage.dialog));
     });
 
-    test("Add device fits the screen", async ({ page }) => {
+    test("Connect details fit the screen", async ({ page }) => {
       const settingsPage = new SettingsPage(page, server.url, TOKEN);
       await settingsPage.goto();
       await settingsPage.openDialog("devices");
       await settingsPage.addDevice("a-phone-with-a-rather-long-device-label");
-      await expect(settingsPage.deviceResult()).toBeVisible();
-      const dialog = page.getByTestId("settings__add-device-dialog");
-      await expectFits(await measureDialogOverflow(dialog));
+      await expect(settingsPage.pairingResult()).toBeVisible();
+      await expectFits(await measureDialogOverflow(settingsPage.pairingDialog()));
     });
   });
 }

@@ -41,11 +41,11 @@ The command prints a JSON object with the hub `url`. The device token is the `de
 
 ## Pair with a hub
 
-Use any hub you have a device token for: the throwaway one above, or your real hub (Settings > Devices > Add device shows a QR code, a link and the token).
+Use any hub you have a device token for: the throwaway one above, or your real hub (Settings > Devices > Add device shows a QR code and a one-time link, and the app exchanges it for the device token).
 
 - Manual: on the pairing screen, enter the hub URL and the token.
 - Camera: scan the QR code from Settings > Devices (a real iPhone only).
-- Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&token=<token>"` (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
+- Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&code=<pairing code>"` (an older `&token=<token>` works too) (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
 
 The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub on another machine must be `https`, or on the local network.
 

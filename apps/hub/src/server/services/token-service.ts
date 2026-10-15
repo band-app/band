@@ -23,6 +23,7 @@ import {
   type TokenRow,
 } from "../infra/db/queries/tokens";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
+import { decrypt, encrypt, loadKey } from "./_utils/vault-crypto";
 
 const log = createLogger("token-service");
 
@@ -31,6 +32,14 @@ export const DEFAULT_LIST_LIMIT = 200;
 export const MAX_LIST_LIMIT = 500;
 export const DEFAULT_BOOTSTRAP_TTL_MS = 60 * 60 * 1000;
 export const MAX_BOOTSTRAP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_PAIRING_TTL_MS = 15 * 60 * 1000;
+
+/** `BAND_PAIRING_TTL_MS` replaces the pairing code lifetime, read on every code. */
+function pairingTtlMs(): number {
+  const ms = Number(process.env.BAND_PAIRING_TTL_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_PAIRING_TTL_MS;
+}
+
 /** A token's `lastUsedAt` is written at most this often, so a busy client isn't a write per request. */
 const TOUCH_INTERVAL_MS = 60_000;
 
@@ -38,6 +47,7 @@ const PREFIX: Record<TokenKind, string> = {
   device: "bdt_",
   worker_bootstrap: "bwb_",
   worker_session: "bws_",
+  device_pairing: "bdp_",
 };
 
 export type TokenState = "active" | "revoked" | "expired" | "used";
@@ -144,6 +154,21 @@ export class TokenExchangeError extends Error {
   }
 }
 
+/** Why `exchangePairing` refused. Callers show one message for all of them. */
+export class PairingExchangeError extends Error {
+  constructor(readonly reason: "invalid" | "expired" | "used") {
+    super(`Pairing code refused: ${reason}`);
+    this.name = "PairingExchangeError";
+  }
+}
+
+/** A pairing code for a device: shown as a link, valid until `expiresAt` for one exchange. */
+export interface PairingCode {
+  deviceId: string;
+  code: string;
+  expiresAt: number;
+}
+
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -205,6 +230,8 @@ export class TokenService {
         kind: "device",
         hash,
         hostId: null,
+        deviceId: null,
+        sealed: null,
         label: "Shared token",
         admin: true,
         createdAt: this.now(),
@@ -248,6 +275,89 @@ export class TokenService {
     const token = newToken("device");
     const row = this.insert("device", token, { label, admin });
     return { token, view: toView(row, this.now()) };
+  }
+
+  /**
+   * A device that has no token yet. Its secret is a random value nobody holds, so it
+   * can't sign in until a pairing code is exchanged (`pairing`, then `exchangePairing`).
+   */
+  createUnpairedDevice(label: string, admin = false): TokenView {
+    const row = this.insert("device", newToken("device"), { label, admin });
+    return toView(row, this.now());
+  }
+
+  /**
+   * The pairing code of a device. A pending one is returned again (it is kept sealed with the
+   * vault key until it is spent or expires), unless `regenerate` is set, which revokes it and
+   * makes a new one. The code works for one exchange within `BAND_PAIRING_TTL_MS` (15 minutes).
+   */
+  pairing(deviceId: string, regenerate = false): PairingCode {
+    const device = this.queries.findById(deviceId);
+    if (!device || device.kind !== "device") throw new TokenNotFoundError(deviceId);
+    if (device.id === SHARED_TOKEN_ID) throw new SharedTokenRevokeError();
+    if (device.revokedAt != null) throw new TokenNotFoundError(deviceId);
+    const at = this.now();
+    this.queries.deleteDeadPairings(at);
+    const pending = this.queries.findPendingPairing(deviceId, at);
+    if (pending && !regenerate && pending.sealed && pending.expiresAt != null) {
+      try {
+        return {
+          deviceId,
+          code: decrypt(loadKey(), pending.id, pending.sealed),
+          expiresAt: pending.expiresAt,
+        };
+      } catch {
+        // The vault key changed since. Fall through to a new code.
+      }
+    }
+    if (pending) this.queries.revoke(pending.id, at);
+    const code = newToken("device_pairing");
+    const row = this.build("device_pairing", code, {
+      label: device.label,
+      expiresAt: at + pairingTtlMs(),
+    });
+    row.deviceId = deviceId;
+    row.sealed = encrypt(loadKey(), row.id, code);
+    this.queries.insert(row);
+    log.info(`issued pairing code ${row.id} for device ${deviceId}`);
+    return { deviceId, code, expiresAt: row.expiresAt as number };
+  }
+
+  /**
+   * Trades a pairing code for a new secret for its device (same id, label and admin flag).
+   * The code works once: the spend is guarded in SQL, so of two concurrent exchanges only one
+   * wins. The device's old secret and its open sockets stop working at this moment, not before.
+   */
+  exchangePairing(code: string): {
+    token: string;
+    deviceId: string;
+    label: string;
+    admin: boolean;
+  } {
+    const row = this.queries.findByHash(hashToken(code));
+    if (!row || row.kind !== "device_pairing" || row.deviceId == null) {
+      throw new PairingExchangeError("invalid");
+    }
+    const at = this.now();
+    if (row.revokedAt != null) {
+      throw new PairingExchangeError(row.lastUsedAt != null ? "used" : "invalid");
+    }
+    if (row.expiresAt != null && row.expiresAt <= at) throw new PairingExchangeError("expired");
+    const device = this.queries.findById(row.deviceId);
+    if (!device || device.kind !== "device" || device.revokedAt != null) {
+      throw new PairingExchangeError("invalid");
+    }
+    const token = newToken("device");
+    const done = this.queries.transaction((q) => {
+      if (!q.spendPairing(row.id, at)) return "used" as const;
+      if (!q.replaceDeviceHash(device.id, hashToken(token))) return "invalid" as const;
+      return "ok" as const;
+    });
+    if (done !== "ok") throw new PairingExchangeError(done);
+    this.sockets.closeAll(device.id);
+    this.lastTouch.delete(device.id);
+    log.info(`exchanged pairing code ${row.id} for device ${device.id}`);
+    return { token, deviceId: device.id, label: device.label, admin: device.admin };
   }
 
   /**
@@ -401,9 +511,14 @@ export class TokenService {
     }
   };
 
-  /** The newest `limit` tokens. */
+  /**
+   * The newest `limit` tokens. Revoked and expired device tokens are deleted first, so the list
+   * holds only live devices. Worker tokens are left alone.
+   */
   list(limit: number = DEFAULT_LIST_LIMIT): TokenView[] {
     const at = this.now();
+    this.queries.deleteDeadDevices(at, SHARED_TOKEN_ID);
+    this.queries.deleteDeadPairings(at);
     return this.queries.list(limit).map((row) => toView(row, at));
   }
 
@@ -473,7 +588,10 @@ export class TokenService {
     return id;
   }
 
-  /** Revokes a token and closes the sockets it opened. Revoking a revoked token is a no-op. */
+  /**
+   * Revokes a token and closes the sockets it opened. Revoking a revoked token is a no-op. A
+   * device token is deleted after it is revoked, with its pairing codes, so it leaves the list.
+   */
   revoke(id: string): TokenView {
     const row = this.queries.findById(id);
     if (!row) throw new TokenNotFoundError(id);
@@ -484,7 +602,12 @@ export class TokenService {
       log.info(`revoked token ${id}`);
       for (const listener of this.revokeListeners) listener(row);
     }
-    return toView(this.queries.findById(id) ?? row, this.now());
+    const view = toView(this.queries.findById(id) ?? row, this.now());
+    if (row.kind === "device") {
+      this.queries.deletePairings(id);
+      this.queries.delete(id);
+    }
+    return view;
   }
 
   /** Calls `listener` after a token is revoked, with its row. The worker link uses it to cut a revoked worker off. */
@@ -529,6 +652,8 @@ export class TokenService {
       kind,
       hash: hashToken(token),
       hostId: extra.hostId ?? null,
+      deviceId: null,
+      sealed: null,
       label: extra.label,
       admin: extra.admin ?? false,
       createdAt: this.now(),

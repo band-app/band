@@ -730,9 +730,17 @@ export const tokens = sqliteTable(
   "tokens",
   {
     id: text("id").primaryKey(),
-    kind: text("kind", { enum: ["device", "worker_bootstrap", "worker_session"] }).notNull(),
+    kind: text("kind", {
+      enum: ["device", "worker_bootstrap", "worker_session", "device_pairing"],
+    }).notNull(),
     hash: text("hash").notNull(),
     hostId: text("host_id").references(() => hosts.id, { onDelete: "cascade" }),
+    // A `device_pairing` row names the device row it pairs. No foreign key: the hub deletes the
+    // pairing rows itself when it deletes the device.
+    deviceId: text("device_id"),
+    // A pending `device_pairing` code, sealed with the vault key (AAD is the row id) so Settings
+    // can show the same link again. Cleared when the code is spent. Never returned by an API.
+    sealed: text("sealed"),
     label: text("label").notNull().default(""),
     // Only an admin device token may call `tokens.*`. The shared token is one.
     admin: integer("admin", { mode: "boolean" }).notNull().default(false),
@@ -744,6 +752,7 @@ export const tokens = sqliteTable(
   (t) => [
     uniqueIndex("tokens_hash_idx").on(t.hash),
     index("tokens_host_idx").on(t.hostId),
+    index("tokens_device_idx").on(t.deviceId),
     index("tokens_created_at_idx").on(t.createdAt),
   ],
 );

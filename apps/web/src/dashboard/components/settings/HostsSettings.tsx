@@ -72,6 +72,7 @@ const KIND_LABEL: Record<TokenView["kind"], string> = {
   device: "Device",
   worker_bootstrap: "Worker bootstrap",
   worker_session: "Worker session",
+  device_pairing: "Pairing code",
 };
 
 function formatTime(at: number | null): string {

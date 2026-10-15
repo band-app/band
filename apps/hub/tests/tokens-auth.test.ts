@@ -23,6 +23,8 @@ import {
 const SHARED_TOKEN = "tokens-auth-shared-secret";
 const migrationsDir = join(import.meta.dirname, "../src/server/infra/db/migrations");
 const TOKENS_MIGRATION = "20261004022553_tokens";
+// Later migrations that alter `tokens` can't run before it exists.
+const LATER_TOKENS_MIGRATIONS = ["20261015143017_device_pairing"];
 
 let home: string;
 let server: ServerHandle;
@@ -46,7 +48,9 @@ beforeAll(async () => {
   const before = join(home, "migrations-before");
   cpSync(migrationsDir, before, { recursive: true });
   expect(readdirSync(before)).toContain(TOKENS_MIGRATION);
-  rmSync(join(before, TOKENS_MIGRATION), { recursive: true });
+  for (const name of [TOKENS_MIGRATION, ...LATER_TOKENS_MIGRATIONS]) {
+    rmSync(join(before, name), { recursive: true });
+  }
   const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
   migrate(drizzle({ client: sqlite }), { migrationsFolder: before });
   sqlite.exec(
@@ -177,8 +181,8 @@ describe("device tokens", () => {
     expect(await wsOutcome(token)).toBe("closed");
     expect(await wsOutcome(token, "/terminal?worktreeId=none&terminalId=none")).toBe("closed");
 
-    const state = (await listTokens()).find((t) => t.id === view.id)?.state;
-    expect(state).toBe("revoked");
+    // A revoked device leaves the list.
+    expect((await listTokens()).find((t) => t.id === view.id)).toBeUndefined();
   });
 
   it("answers an unknown token id with 404", async () => {

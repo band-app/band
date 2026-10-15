@@ -6,19 +6,23 @@ import { resetTo } from "../lib/navigation";
 import { parsePairLink } from "../lib/pairing";
 
 /**
- * The deep link `band://pair?url=<hub URL>&token=<token>`: the same pairing as a scan. Any
+ * The deep link `band://pair?url=<hub URL>&code=<pairing code>` (or the older `&token=<token>`): the same pairing as a scan. Any
  * page or app can open the link, so the person confirms the hub before Band pairs with it
  * and makes it the active hub.
  */
 export default function Pair() {
-  const { url, token } = useLocalSearchParams<{ url?: string; token?: string }>();
+  const { url, token, code } = useLocalSearchParams<{
+    url?: string;
+    token?: string;
+    code?: string;
+  }>();
   const { pair, active } = useHubs();
   // A second link can reuse this screen with new params, so an error belongs to the link it
   // came from.
-  const link = `${url ?? ""}\n${token ?? ""}`;
+  const link = `${url ?? ""}\n${token ?? ""}\n${code ?? ""}`;
   const [failure, setFailure] = useState<{ link: string; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const parsed = parsePairLink({ url, token });
+  const parsed = parsePairLink({ url, token, code });
   const error = failure?.link === link ? failure.error : null;
 
   const leave = () => resetTo(active ? "/home" : "/connect");
