@@ -32,7 +32,7 @@
  *   - NO tRPC mocking. The session is seeded in the ACP stub agent's
  *     store; the server imports it with `session/load` into Band's event
  *     log, and the chat-events SSE stream replays it from there.
- *   - The chat row + chat dockview layout are seeded through real
+ *   - The chat row + chat layout are seeded through real
  *     tRPC calls (`chats.create` + `chats.setActiveSession`) BEFORE
  *     the user navigates — that way the dashboard's saved layout
  *     reflects our chosen `chatId` and we don't fight with the
@@ -75,7 +75,7 @@ const TURNS = 500;
 // Cold-subscribe replay window, in turns.
 const WINDOW_TURNS = HISTORY_PAGE_SIZE;
 
-// Wide viewport so useIsDesktop() reports true and the shared dockview
+// Wide viewport so useIsDesktop() reports true and the shared layout
 // renders the chat pane in its desktop layout (mobile layout has a
 // different DOM structure).
 test.use({ viewport: { width: 1280, height: 800 } });

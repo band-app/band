@@ -3,7 +3,7 @@
  * `CodeMirrorEditor`).
  *
  * The viewer's root carries a `data-testid="file-viewer__root"` (set on
- * the `FileViewer` root element — distinct from the dockview panel's own
+ * the `FileViewer` root element — distinct from the layout panel's own
  * `file-viewer` test id) so we can scope the editor lookup to it and never
  * collide with the diff editors rendered in the Changes panel.
  *

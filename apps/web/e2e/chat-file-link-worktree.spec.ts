@@ -7,7 +7,7 @@
  *
  * Pre-fix, `dispatchOpenFile` in `file-link-components.tsx` carried only
  * `{ filename }`. The single window-event listener in
- * `SharedDockviewLayout.tsx` was bound to the currently-active worktree,
+ * `SharedWorktreeLayout.tsx` was bound to the currently-active worktree,
  * so any chat-link click anywhere in the tree (A's chat or B's chat or
  * any hidden mounted worktree's chat) opened the file against whichever
  * worktree happened to be focused — typically NOT the intended one —
@@ -18,7 +18,7 @@
  *      so `dispatchOpenFile` reads the *owning* worktree id at click
  *      time and attaches it to the event detail.
  *   2. The two `band:open-file` listeners
- *      (`SharedDockviewLayout`, `worktree.$worktreeId.tsx`) filter on
+ *      (`SharedWorktreeLayout`, `worktree.$worktreeId.tsx`) filter on
  *      `detail.worktreeId`: ignore the event unless it's addressed to
  *      this listener's worktree.
  *   3. `QuickOpenDialog`'s auto-open captures the worktree id at
@@ -71,7 +71,7 @@ const BRANCH_B = "feature-b";
 const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
 const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders. The bug only manifests in the desktop layout where multiple
 // worktrees can be alive at once under `MultiWorktreePanelHost`. The mobile layout mounts one worktree at a time, so there's no
 // cross-worktree event leak to guard against there in the same way.
@@ -250,7 +250,7 @@ test.describe("chat file-link worktree scoping (issue #539)", () => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     // Both worktrees have a file at `shared.ts`. Without the fix, the
-    // SharedDockviewLayout listener would catch a worktree-agnostic
+    // SharedWorktreeLayout listener would catch a worktree-agnostic
     // `band:open-file` event addressed to A while B is active, route
     // it through QuickOpenDialog.autoOpen, find `shared.ts` in B's
     // index, and write the path into `band-open-tabs:<B>` — the

@@ -2,7 +2,7 @@
  * Mobile-route coverage for the `band:open-file` listener filter
  * added in issue #539. The desktop spec
  * (`chat-file-link-worktree.spec.ts`) only exercises the
- * `SharedDockviewLayout` listener, which mounts on viewports >=
+ * `SharedWorktreeLayout` listener, which mounts on viewports >=
  * 1024 px. The mobile route in `worktree.$worktreeId.tsx` has the
  * SAME shape of listener — same worktreeId filter, same
  * backwards-compat fall-through — but is wired separately.
@@ -47,7 +47,7 @@ const WORKTREE_OTHER = "some-other-worktree/main";
 // Narrow viewport — `useIsDesktop()` reports false (the threshold is
 // 1024 px in `apps/web/src/hooks/useIsDesktop.ts`), so the mobile
 // branch of `worktree.$worktreeId.tsx` mounts and registers its
-// own `band:open-file` listener. The shared dockview never mounts at
+// own `band:open-file` listener. The shared layout never mounts at
 // this viewport.
 test.use({ viewport: { width: 800, height: 900 } });
 
@@ -115,7 +115,7 @@ test.describe("mobile chat file-link worktree scoping (issue #539)", () => {
   }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     await worktreePage.goto(WORKTREE_A);
-    // Mobile layout has no maximize button (no dockview), so
+    // Mobile layout has no maximize button (no layout), so
     // `waitForReady` from the desktop helper isn't usable. Wait
     // instead for the mobile-specific surface — the chat tab is the
     // default landing view. README.md exists on disk, so the

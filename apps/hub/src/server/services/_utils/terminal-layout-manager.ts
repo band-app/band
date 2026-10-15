@@ -1,19 +1,19 @@
 /**
  * Terminal layout persistence.
  *
- * Thin wrapper around DockviewLayoutManager for terminal tab layouts.
+ * Thin wrapper around LayoutManager for terminal tab layouts.
  * Each worktree gets one row in the `panel_states` table with
  * `panelType = "terminal_layout"`.
  */
 
-import { DockviewLayoutManager } from "./dockview-layout-manager";
+import { LayoutManager } from "./layout-manager";
 
-const manager = new DockviewLayoutManager("terminal_layout");
+const manager = new LayoutManager("terminal_layout");
 
 export const deleteTerminalLayout = (worktreeId: string) => manager.delete(worktreeId);
 
 /**
- * Add a terminal panel to the saved dockview layout.
+ * Add a terminal panel to the saved layout.
  */
 export function addTerminalToLayout(
   worktreeId: string,
@@ -36,7 +36,7 @@ export function addTerminalToLayout(
 }
 
 /**
- * Remove a terminal panel from the saved dockview layout.
+ * Remove a terminal panel from the saved layout.
  */
 export function removeTerminalFromLayout(worktreeId: string, terminalId: string): void {
   manager.removePanel(worktreeId, terminalId);

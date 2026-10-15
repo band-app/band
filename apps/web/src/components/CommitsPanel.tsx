@@ -24,7 +24,7 @@ import { trpc } from "../lib/trpc-client";
 // The Commits section at the bottom of the Changes tab: the worktree's
 // HEAD history as a swimlane graph (after Orca's source-control sidebar),
 // with ref pills, and commits that expand to their changed files. A file
-// click opens that file's diff for the commit in the center dockview.
+// click opens that file's diff for the commit in the center layout.
 
 type HistoryPage = Awaited<ReturnType<typeof trpc.worktree.getCommitHistory.query>>;
 type HistoryCommit = HistoryPage["commits"][number];

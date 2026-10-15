@@ -55,7 +55,7 @@ const WS_GAMMA = toWorktreeId(REPO_GAMMA, "main", "local");
 const ALPHA_FEATURE_BRANCH = "feat/switcher-home";
 const WS_ALPHA_FEATURE = toWorktreeId(REPO_ALPHA, ALPHA_FEATURE_BRANCH, "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
+// Wide viewport so `useIsDesktop()` reports true and the shared layout (which
 // owns the ⌘K picker shortcut and the repo-list sidebar) mounts, along with
 // the desktop title bar whose worktree name opens the same picker.
 test.use({ viewport: { width: 1280, height: 800 } });

@@ -7,9 +7,9 @@ import { forgetMissingWorktrees } from "../lib/worktree-cold-park";
 import { clearPerWorktreeState } from "./per-worktree-state-store";
 
 // ---------------------------------------------------------------------------
-// Keeps every visited worktree's center dockview mounted, so switching back to
+// Keeps every visited worktree's center layout mounted, so switching back to
 // any of them is instant: no remount, no chat replay, no layout restore, no
-// refetch. Used by both layouts: `SharedDockviewLayout` (desktop) and
+// refetch. Used by both layouts: `SharedWorktreeLayout` (desktop) and
 // `MobileWorktreeShell` (mobile). Mirrors
 // orca's `mountedWorktreeIdsRef` (use-terminal-worktree-foundation.ts): a
 // worktree joins the set on first activation and leaves it only when it stops
@@ -37,7 +37,7 @@ const HIDDEN_ENTRY_STYLE: React.CSSProperties = {
 interface MultiWorktreePanelHostProps {
   /**
    * Rendered when no worktree is selected (index route). Each panel gets a
-   * Lucide-icon empty state — see `NoWorktreeMessage` in SharedDockviewLayout.
+   * Lucide-icon empty state — see `NoWorktreeMessage` in SharedWorktreeLayout.
    */
   emptyState: React.ReactNode;
   /**
@@ -49,7 +49,7 @@ interface MultiWorktreePanelHostProps {
 }
 
 /**
- * Keeps the per-worktree center dockview of every visited worktree mounted.
+ * Keeps the per-worktree center layout of every visited worktree mounted.
  *
  * Active worktree is derived synchronously from the URL (no useEffect lag)
  * so the correct content is visible from the first paint after a route
@@ -57,7 +57,7 @@ interface MultiWorktreePanelHostProps {
  *
  * Each mounted entry renders inside an absolutely-positioned div that is shown
  * or hidden. The inactive entries keep their React subtrees (chat
- * subscriptions, editor state, dockview layout), which is what makes the
+ * subscriptions, editor state, layout), which is what makes the
  * switch instant.
  *
  * The swap is a hard cut on purpose. An opacity fade on the incoming entry
@@ -171,7 +171,7 @@ export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePa
   }, [mounted]);
 
   // The outer wrapper is `relative` (not `absolute`) so the inner absolute
-  // entries anchor to THIS box — the dockview panel content area we live
+  // entries anchor to THIS box — the layout panel content area we live
   // inside isn't guaranteed to be `position: relative`, so without this
   // wrapper the inner divs would escape to the nearest positioned ancestor
   // (typically the AppShell) and stack on top of each other at the top-left
@@ -210,7 +210,7 @@ export function MultiWorktreePanelHost({ emptyState, children }: MultiWorktreePa
             //
             // Why both, and not `display: none`:
             //   • `visibility: hidden` hides a subtree while keeping it laid
-            //     out, so a hidden dockview keeps its size and does not
+            //     out, so a hidden layout keeps its size and does not
             //     re-lay-out on reveal. Pointer events are also blocked on
             //     the subtree automatically.
             //   • `content-visibility: hidden` additionally tells the

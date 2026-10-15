@@ -25,7 +25,7 @@ No CORS change is needed. `classifyOrigin` in `apps/hub/cors.ts` returns `none` 
 - `transcript.ts`: the pure chat transcript reducer.
 - `sse.ts` and `chat-stream.ts`: an SSE reader over a streaming `Response`, reconnect with backoff, resume from the last event id and log revision, and the history load. `useChatSubscription` in `apps/web` is a thin React wrapper over it.
 - `client-state.ts`: the client-state store with a pluggable storage backend. `createCachedStorage` wraps an async backend such as AsyncStorage in the synchronous interface the store reads.
-- `center-tabs.ts`: parsing, key names and the merge rules ("a device keeps the entries it doesn't show"). Code that touches the dockview stays in `apps/web`.
+- `center-tabs.ts`: parsing, key names and the merge rules ("a device keeps the entries it doesn't show"). Code that touches the layout stays in `apps/web`.
 
 The dashboard store and adapter in `apps/web/src/dashboard/` stay where they are until the mobile app needs them.
 

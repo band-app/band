@@ -51,7 +51,7 @@ const WORKTREE = toWorktreeId(REPO, "main", "local");
 const REL_PATH = "zz/link-target.ts";
 const LINK_PATH = `${REL_PATH}:7`;
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts the terminal container) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -90,10 +90,10 @@ test.afterAll(async () => {
 });
 
 // #643: the file explorer moved to the right sidepanel and desktop file
-// editors are now per-path `file` leaves in the unified center dockview. A
+// editors are now per-path `file` leaves in the unified center layout. A
 // terminal file link therefore opens a `center-file-tab--<path>` leaf; the
 // open is observable through that tab and through the file's presence in the
-// persisted center-dockview layout (`readOpenTabPaths` → the `file:` panels).
+// persisted center-layout (`readOpenTabPaths` → the `file:` panels).
 test.describe("Terminal file links", () => {
   test("clicking a file path printed in the terminal opens it in the file browser", async ({
     page,

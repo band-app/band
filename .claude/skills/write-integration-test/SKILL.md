@@ -209,7 +209,7 @@ import { catalogStub } from "./fixtures/catalog";
 const TOKEN = "e2e-maximize-state-token";
 const WORKTREE_A = toWorktreeId("alpha", "main");
 
-// Wide viewport so useIsDesktop() reports true and the shared dockview renders.
+// Wide viewport so useIsDesktop() reports true and the shared layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;

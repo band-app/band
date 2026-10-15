@@ -29,7 +29,7 @@ export type AddToChatDetail = SelectionToChatDetail | TextToChatDetail;
  * Payload dispatched via the `band:add-to-terminal` window CustomEvent when the
  * user picks "Add to Terminal" on a text selection. This is the *intent*
  * event: the selection context menu doesn't know which worktree it belongs to, so
- * the shared dockview layout (which does) listens, surfaces the terminal panel
+ * the shared layout (which does) listens, surfaces the terminal panel
  * for the active worktree, and re-dispatches the scoped `band:terminal-insert`
  * delivery event below. The reference string is pre-built so consumers stay
  * decoupled from the formatting logic.
@@ -46,7 +46,7 @@ export interface AddToTerminalDetail {
 
 /**
  * Payload dispatched via the `band:terminal-insert` window CustomEvent by the
- * shared dockview layout after it has surfaced the active worktree's terminal.
+ * shared layout after it has surfaced the active worktree's terminal.
  * Carries the resolved `worktreeId` so each mounted `TerminalPanel` (one per
  * terminal session × one per cached worktree) only reacts when the delivery
  * targets its own worktree — preventing a reference from leaking into a cached
@@ -63,7 +63,7 @@ export interface TerminalInsertDetail {
   worktreeId: string;
   /**
    * The specific terminal that should receive the reference — the worktree's
-   * last-focused terminal, resolved by `SharedDockviewLayout` from the server's
+   * last-focused terminal, resolved by `SharedWorktreeLayout` from the server's
    * panel-focus record. When absent (no focus recorded yet), each mounted
    * `TerminalPanel` falls back to accepting the reference if it's the currently
    * *visible* terminal, preserving the pre-focus-tracking behavior.
@@ -73,7 +73,7 @@ export interface TerminalInsertDetail {
 
 /**
  * Payload dispatched via the `band:chat-insert` window CustomEvent by
- * `SharedDockviewLayout` after it has resolved the worktree's last-focused
+ * `SharedWorktreeLayout` after it has resolved the worktree's last-focused
  * chat and surfaced the Chat panel. The chat mirror of
  * {@link TerminalInsertDetail}: each mounted `PromptInput` (one per chat pane ×
  * one per cached worktree) only appends the reference when the delivery

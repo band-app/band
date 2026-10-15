@@ -3,7 +3,7 @@
  *
  * Navigating by opening worktree URLs directly (full-page loads), A → B → A,
  * wipes the per-renderer xterm cache each time. The terminal must therefore be
- * restored from the persisted dockview layout (SAME terminalId) and reconnect to
+ * restored from the persisted layout (SAME terminalId) and reconnect to
  * the server-kept PTY, replaying scrollback (#613) — it must NOT seed a fresh
  * terminal. This is the reload / catch-up path the parking model must not
  * regress (parking only removes replay for in-session switches).

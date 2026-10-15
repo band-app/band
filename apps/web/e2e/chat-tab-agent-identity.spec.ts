@@ -154,7 +154,7 @@ test("the Ctrl+Tab list shows a chat's icon, title and spinner and a terminal's 
   });
   await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "question");
   await worktree.activateTab("terminal");
-  await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
 
   await focus.openSwitcher();
   const chatRow = focus.switcherRow("start fixing the login redirect");

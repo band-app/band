@@ -2,7 +2,7 @@
  * End-to-end coverage for the desktop layout's top row now that there is no
  * title bar over the center column.
  *
- * The center dockview's tab strip is the window's top row, level with the
+ * The center layout's tab strip is the window's top row, level with the
  * sidebar's title bar and the right sidepanel's header row (tabs, open in
  * editor, collapse). The worktree name no longer shows on desktop (⌘K still
  * opens the picker; the mobile header keeps its name). The sidepanel's
@@ -40,7 +40,7 @@ const TOKEN = "e2e-right-panel-header-token";
 const REPO = "alpha-right-header";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
-// Wide viewport so the desktop layout (sidebars + dockview)
+// Wide viewport so the desktop layout (sidebars + layout)
 // renders (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1400, height: 800 } });
 

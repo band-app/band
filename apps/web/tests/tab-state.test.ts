@@ -393,7 +393,7 @@ describe("useTabState – language override", () => {
   // available seam where this contract can be pinned in isolation.
   // The minimal `Parent → Child` rig below is the smallest reproduction
   // of the bug — reproducing it at the full-component level would
-  // require mounting CodeBrowserView with its worktree/adapter/dockview
+  // require mounting CodeBrowserView with its worktree/adapter/layout
   // dependencies, well past the value of the regression guard. Move
   // this test (and only this test) if/when CodeBrowserView grows its
   // own integration-style suite.

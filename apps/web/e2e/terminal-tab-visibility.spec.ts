@@ -2,7 +2,7 @@
  * A terminal tab counts as visible only while it is the selected tab of its
  * group (#643).
  *
- * Terminal leaves use dockview's `renderer: "always"`, so an unselected
+ * Terminal leaves use the layout's `renderer: "always"`, so an unselected
  * terminal tab stays mounted. `TerminalLeaf` used to pass the worktree-level
  * visibility straight through, so EVERY terminal tab in the active worktree
  * believed it was on screen: all stayed attached (never parked, so the
