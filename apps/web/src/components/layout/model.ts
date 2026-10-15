@@ -965,8 +965,10 @@ export class LayoutApi {
       this.batch(() => {
         this.clear();
         this.nextGroupId = 1;
-        this.width = parsed.grid.width > 0 ? parsed.grid.width : this.width;
-        this.height = parsed.grid.height > 0 ? parsed.grid.height : this.height;
+        // Keep the container size the view measured; the saved size only
+        // stands in until then.
+        if (this.width <= 0) this.width = parsed.grid.width;
+        if (this.height <= 0) this.height = parsed.grid.height;
         this.rootNode = this.buildBranch(parsed, parsed.grid.root, parsed.grid.orientation);
         const wanted = parsed.activeGroup ? this.groupMap.get(parsed.activeGroup) : undefined;
         this._activeGroup = wanted ?? this.groupMap.values().next().value;

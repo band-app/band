@@ -3979,6 +3979,11 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         builtDefault = true;
       }
 
+      // A saved layout from before the shared tab list existed: write the
+      // list once, so other devices see these tabs. Skipped with a maximized
+      // group, whose re-apply below a flush would race.
+      if (saved && !shared && typeof saved.maximizedGroup !== "string") builtDefault = true;
+
       // Mobile is tabs-only: collapse any split (default or a restored desktop
       // layout) into a single group.
       if (mobile) flattenToSingleGroup(api);
