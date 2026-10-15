@@ -107,6 +107,13 @@ function EntryView({ entry }: { entry: Entry }) {
           {entry.text}
         </Text>
       );
+    case "failure":
+      // The web shows a card; the phone shows the error line, without the appended stderr.
+      return (
+        <Text style={[styles.notice, { color: tones.failure }]} testID="chat__notice">
+          {entry.failure.message.split("\n")[0]}
+        </Text>
+      );
   }
 }
 
