@@ -1,5 +1,5 @@
 import { type ComponentType, createContext, useContext } from "react";
-import type { MergeMethod, WorktreeReview } from "./providers";
+import type { MergeMethod, RerunTarget, WorktreeReview } from "./providers";
 
 export interface WorktreeReviewQuery {
   data: WorktreeReview | undefined;
@@ -22,6 +22,11 @@ export interface WorktreeReviewQueryOptions {
 export interface ClientPluginHost {
   useWorktreeReview(worktreeId: string, options: WorktreeReviewQueryOptions): WorktreeReviewQuery;
   mergeReview(worktreeId: string, method: MergeMethod): Promise<void>;
+  /**
+   * Run CI jobs again, one request per target, and refetch the review. Stops
+   * at the first target the forge refuses and rejects with its message.
+   */
+  rerunChecks(worktreeId: string, targets: RerunTarget[]): Promise<void>;
   /**
    * Start a coding agent in the worktree with a first prompt, in this device's
    * agent mode. The agent's tab opens and becomes the active one in the center

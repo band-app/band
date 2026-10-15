@@ -92,6 +92,7 @@ export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) 
         review={data.review}
         checks={data.checks}
         visible={visible}
+        refetch={query.refetch}
       />
       {data.review?.discussion && (
         <CommentsSection worktreeId={worktreeId} discussion={data.review.discussion} />

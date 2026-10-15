@@ -59,6 +59,14 @@ export const clientPluginHost: ClientPluginHost = {
     }
   },
 
+  async rerunChecks(worktreeId, targets) {
+    try {
+      await trpc.reviews.rerunChecks.mutate({ worktreeId, targets });
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
+    }
+  },
+
   async startAgent(worktreeId, prompt) {
     // The dock activates the tab of every id announced here, whether the
     // server's `chat-created` / `terminal-created` event or this call's

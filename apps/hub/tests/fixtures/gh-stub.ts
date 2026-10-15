@@ -93,6 +93,14 @@ export interface GhStub {
     number: number,
     opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
   ) => void;
+  /**
+   * Answer `gh run rerun <runId>` (any flags). `stderr` makes it fail. Each
+   * call is in `requests`, so a test reads the flags from `flags`.
+   */
+  setRunRerun: (
+    runId: number,
+    opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
+  ) => void;
   stop: () => Promise<void>;
 }
 
@@ -236,6 +244,21 @@ export const ghStub = {
             opts?.stderr
               ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
               : { stdout: `✓ Merged pull request #${number}\n` },
+          );
+        });
+      },
+      setRunRerun(runId, opts) {
+        app.post("/run/rerun", (req, res, next) => {
+          const body = req.body as GhInvocation;
+          if (body.positional[2] !== String(runId)) {
+            next();
+            return;
+          }
+          opts?.onRequest?.(body);
+          res.json(
+            opts?.stderr
+              ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
+              : { stdout: `✓ Requested rerun of run ${runId}\n` },
           );
         });
       },
