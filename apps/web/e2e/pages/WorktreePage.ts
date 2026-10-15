@@ -2156,6 +2156,15 @@ export class WorktreePage {
     return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
+  /** The visible center tab of `panelComponent` that is the active one in its
+   *  group (dockview's `dv-active-tab`). */
+  activeTab(panelComponent: "chat" | "terminal" | "browser"): Locator {
+    const prefix = this.centerTabTestidPrefix(panelComponent);
+    return this.page
+      .locator(`.dv-tab.dv-active-tab:has([data-testid^="${prefix}"])`)
+      .filter({ visible: true });
+  }
+
   /** The dockview `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
    *  `dv-active-tab` while that file is the active view in its group. See
    *  `tabContainer`. */
