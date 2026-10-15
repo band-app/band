@@ -4,6 +4,14 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "preview": {
+      "node": "24.14.1",
+      "pnpm": "10.34.7",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "node": "24.14.1",
       "pnpm": "10.34.7",
@@ -15,7 +23,9 @@
   },
   "submit": {
     "production": {
-      "ios": {}
+      "ios": {
+        "ascAppId": "6823071973"
+      }
     }
   }
 }
