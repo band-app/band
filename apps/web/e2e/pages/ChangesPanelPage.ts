@@ -8,7 +8,7 @@
  *     rows).
  *   - A section's "View all" tab (`center-section-diffs--<section>`).
  *   - The per-file `diff` leaf a changed-file click opens in the center
- *     dockview (`center-diff-leaf__visible-*`), with its unified / split
+ *     layout (`center-diff-leaf__visible-*`), with its unified / split
  *     toggle (`center-diff-leaf__view--unified|split`).
  *
  * This replaces the page object for the retired monolithic `DiffView`, which
@@ -157,7 +157,7 @@ export class ChangesPanelPage {
       .getByTestId(`commits-panel__file--${path}`);
   }
 
-  /** The dockview tab of a file's diff. A commit's diff tab carries the
+  /** The layout tab of a file's diff. A commit's diff tab carries the
    *  commit SHA in `data-commit`; a working-tree diff tab has none. */
   diffTab(path: string): Locator {
     return this.worktree.diffTab(path);

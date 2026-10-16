@@ -1,6 +1,6 @@
 # Web App Architecture
 
-> **Status: shipped.** The 3-tier migration completed in Phase 8 (issue #319). Server logic now lives under `apps/hub/src/server/{api,services,infra}/`, with the canonical tRPC entry point at `apps/hub/src/server/api/router.ts`. The legacy `apps/web/src/trpc/` directory has been removed, and the only remaining content under `apps/web/src/lib/` is browser-side utilities (clipboard helpers, dockview state, the tRPC client wrapper, etc.). New code MUST follow this layout — see the per-tier rules below.
+> **Status: shipped.** The 3-tier migration completed in Phase 8 (issue #319). Server logic now lives under `apps/hub/src/server/{api,services,infra}/`, with the canonical tRPC entry point at `apps/hub/src/server/api/router.ts`. The legacy `apps/web/src/trpc/` directory has been removed, and the only remaining content under `apps/web/src/lib/` is browser-side utilities (clipboard helpers, layout state, the tRPC client wrapper, etc.). New code MUST follow this layout — see the per-tier rules below.
 
 The hub (`apps/hub`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
 
@@ -112,7 +112,7 @@ apps/hub/src/server/
       sse-writer.ts
       jsonl-message-to-events.ts
       queued-message-store.ts
-      dockview-layout-manager.ts
+      layout-manager.ts
       terminal-layout-manager.ts
   shared/
     chat-events.ts           # SSE wire schema shared by server + client halves

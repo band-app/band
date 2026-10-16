@@ -17,6 +17,7 @@ import type { ContinuedFrom } from "@band-app/shared/continuation";
 import { ContinueGateError } from "../server/errors";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveWorktreeUploads } from "../server/services/_utils/upload-utils";
+import { chatOwnershipService } from "../server/services/chat-ownership-service";
 import { chatService } from "../server/services/chat-service";
 import { followService } from "../server/services/follow-service";
 import {
@@ -80,7 +81,10 @@ export async function handleChatSubmit(
   // choices are, so it can show the prompt and send again.
   let continued: ContinuedFrom | undefined;
   try {
-    const gate = await followService.gate(worktreeId, { chatId, agentId: codingAgentId });
+    // A chat its worker owns waits for that worker instead: the message goes to the outbox.
+    const gate = chatOwnershipService.isOwned(chatId)
+      ? { worktreeId, continued: undefined }
+      : await followService.gate(worktreeId, { chatId, agentId: codingAgentId });
     worktreeId = gate.worktreeId;
     continued = gate.continued;
   } catch (err) {

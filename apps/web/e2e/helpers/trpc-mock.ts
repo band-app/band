@@ -121,7 +121,7 @@ export function createTrpcMock() {
   }
 
   /**
-   * Register baseline mocks for all HTTP tRPC calls that the dockview-based
+   * Register baseline mocks for all HTTP tRPC calls that the layout-based
    * chat UI makes on load. Without these, any unmocked procedure returns a
    * 404 error from the mock handler, preventing the chat from rendering.
    *
@@ -129,11 +129,11 @@ export function createTrpcMock() {
    * overrides (test-specific mocks registered later will take precedence
    * because they overwrite the handler in the map).
    */
-  function addDockviewMocks(): void {
-    // DockviewChatContainer: fetches saved layout (null = no saved layout)
+  function addLayoutMocks(): void {
+    // the old chat container: fetches saved layout (null = no saved layout)
     query("chatLayout.get" as ProcedurePath, (() => ({ tree: null })) as Handler<ProcedurePath>);
 
-    // DockviewChatContainer + ChatPane: agent config
+    // the old chat container + ChatPane: agent config
     query(
       "settings.get" as ProcedurePath,
       (() => ({ codingAgents: [], defaultCodingAgent: undefined })) as Handler<ProcedurePath>,
@@ -142,10 +142,10 @@ export function createTrpcMock() {
     // ChatPane: chat record for agent info (null = no record)
     query("chats.get" as ProcedurePath, (() => ({ chat: null })) as Handler<ProcedurePath>);
 
-    // DockviewChatContainer: agent list for tab dropdown
+    // the old chat container: agent list for tab dropdown
     query("chats.list" as ProcedurePath, (() => ({ chats: [] })) as Handler<ProcedurePath>);
 
-    // DockviewChatContainer: persist layout (no-op)
+    // the old chat container: persist layout (no-op)
     mutation("chatLayout.save" as ProcedurePath, (() => ({ ok: true })) as Handler<ProcedurePath>);
 
     // ChatPane: persist active session (no-op)
@@ -181,7 +181,7 @@ export function createTrpcMock() {
    * pane no longer reads `sessions.list` to decide whether to render
    * the history affordance — the capability is computed from the
    * configured agent type. Tests that exercise the session-history UI
-   * must call this after `addDockviewMocks` (or override the same two
+   * must call this after `addLayoutMocks` (or override the same two
    * procedures themselves).
    */
   function addSupportedAgentMocks(): void {
@@ -209,5 +209,5 @@ export function createTrpcMock() {
     );
   }
 
-  return { query, mutation, install, addDockviewMocks, addSupportedAgentMocks };
+  return { query, mutation, install, addLayoutMocks, addSupportedAgentMocks };
 }

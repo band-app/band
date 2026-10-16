@@ -24,11 +24,13 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
+import { defaultPanelIdFromLayout, LayoutManager } from "./_utils/layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
 import { agentSessionService } from "./agent-session-service";
+// FRAGILE: ESM cycle leg, used only inside method bodies like the import above.
+import { chatOwnershipService } from "./chat-ownership-service";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 
@@ -233,7 +235,7 @@ function validateLabels(
  *   - The in-memory primary index (`chatId → ChatSession`)
  *   - The reverse index (`worktreeId → Set<chatId>`)
  *   - Lazy hydration from `panel_states` on first read
- *   - Layout integration via `DockviewLayoutManager("chat_layout")`
+ *   - Layout integration via `LayoutManager("chat_layout")`
  *   - Emitting `chat-created` / `chat-removed` events on `watcher`
  *
  * Stateful by design — there's exactly one instance (`chatService` below).
@@ -263,9 +265,7 @@ export class ChatService {
 
   constructor(
     private readonly queries: ChatQueries = new ChatQueries(),
-    private readonly layoutManager: DockviewLayoutManager = new DockviewLayoutManager(
-      "chat_layout",
-    ),
+    private readonly layoutManager: LayoutManager = new LayoutManager("chat_layout"),
   ) {}
 
   private ensureInitialized(): void {
@@ -347,6 +347,7 @@ export class ChatService {
       activeSessionLastModified: undefined,
       status: "idle",
       labels,
+      ownerHostId: undefined,
     };
 
     this.queries.insert({ ...session, createdAt: now, updatedAt: now });
@@ -354,7 +355,7 @@ export class ChatService {
     this.addToIndex(session);
 
     // Mirror what `terminals.create` and `browsers.create` do: register the
-    // new pane in the saved dockview layout so it shows up next time the
+    // new pane in the saved layout so it shows up next time the
     // worktree is opened. Without this, chats created via the CLI (e.g.
     // `band worktrees create --prompt`, `band chats create`, or the lazy
     // `getOrCreateDefaultChat` path) exist as records but are invisible
@@ -363,18 +364,27 @@ export class ChatService {
     // also touch the layout client-side — is unaffected.
     this.addToLayout(worktreeId, session.id, { title: session.name });
 
-    // Notify any open dashboard so it can sync its dockview without a
+    // Notify any open dashboard so it can sync its layout without a
     // page reload. Same pattern as `terminal-created` / `browser-created`.
     emit({ kind: "chat-created", worktreeId, chatId: session.id });
 
     log.info({ chatId: session.id, worktreeId, agent: session.agent }, "chat pane created");
-    return session;
+    // A new chat on a worker that owns its chats runs there from the start, so the desktop app
+    // on that machine can send its first message directly.
+    chatOwnershipService.ownerFor(session.id);
+    return this.chatSessions.get(session.id) ?? session;
   }
 
   /** Get a chat session by ID. */
   get(chatId: string): ChatSession | undefined {
     this.ensureInitialized();
     return this.chatSessions.get(chatId);
+  }
+
+  /** Every chat, of every worktree. */
+  all(): ChatSession[] {
+    this.ensureInitialized();
+    return [...this.chatSessions.values()];
   }
 
   /** List all chat sessions for a worktree. */
@@ -454,6 +464,22 @@ export class ChatService {
     // a phantom "field change".
     const updatedFields = Object.keys(updates).filter((k) => k !== "allowReservedLabels");
     log.info({ chatId, updatedFields }, "chat pane updated");
+    return merged;
+  }
+
+  /**
+   * Records which worker runs the chat, or `null` for the hub. Only `chat-ownership-service` calls it.
+   */
+  setOwner(chatId: string, hostId: string | null): ChatSession | undefined {
+    this.ensureInitialized();
+    const session = this.chatSessions.get(chatId);
+    if (!session) return undefined;
+    const merged = this.queries.update(chatId, session, {
+      ownerHostId: hostId,
+      updatedAt: Date.now(),
+    });
+    this.chatSessions.set(chatId, merged);
+    log.info({ chatId, owner: hostId ?? "hub" }, "chat owner changed");
     return merged;
   }
 
@@ -539,21 +565,22 @@ export class ChatService {
   /**
    * Remove a chat pane. Kills its agent process, removes from DB,
    * the saved layout, and in-memory maps. Emits a `chat-removed` event
-   * so any open dashboard can sync its dockview.
+   * so any open dashboard can sync its layout.
    */
   remove(chatId: string): boolean {
     this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
-    // Stop the agent process and drop the chat's event log
+    // Stop the agent process and drop the chat's event log, here and on the worker that owns it
     agentSessionService.stop(chatId);
     agentSessionService.deleteLog(chatId);
+    if (session.ownerHostId) chatOwnershipService.release(chatId, session.ownerHostId, true);
 
     // Remove from DB
     this.queries.remove(chatId);
 
-    // Drop the panel from the saved dockview layout. Mirrors what
+    // Drop the panel from the saved layout. Mirrors what
     // `terminal.kill` and `browsers.remove` do via their respective
     // `remove*FromLayout` helpers — keeps the layout in sync with
     // the registry so an open dashboard doesn't show a ghost tab.
@@ -575,7 +602,7 @@ export class ChatService {
    * Remove all chat panes for a worktree.
    * Called when a worktree is deleted.
    *
-   * Drops the saved dockview layout in the same call — mirrors `remove()`,
+   * Drops the saved layout in the same call — mirrors `remove()`,
    * which calls `removeFromLayout` so layout cleanup is part of the
    * service-level contract instead of something every caller has to
    * remember to do as a second step. Keeps `ChatService` and
@@ -605,6 +632,8 @@ export class ChatService {
       for (const chatId of [...ids]) {
         agentSessionService.stop(chatId);
         agentSessionService.deleteLog(chatId);
+        const owner = this.chatSessions.get(chatId)?.ownerHostId;
+        if (owner) chatOwnershipService.release(chatId, owner, true);
         this.removeFromIndex(chatId);
       }
 
@@ -630,10 +659,16 @@ export class ChatService {
     const ids = [...(this.worktreeChats.get(oldId) ?? [])];
     for (const chatId of ids) {
       agentSessionService.stop(chatId);
-      const session = this.chatSessions.get(chatId);
-      if (!session) continue;
+      const current = this.chatSessions.get(chatId);
+      if (!current) continue;
+      // The chat leaves the worker that ran it. Who runs it on the new host is decided afresh.
+      const session = current.ownerHostId
+        ? this.queries.update(chatId, current, { ownerHostId: null, updatedAt: Date.now() })
+        : current;
       this.removeFromIndex(chatId);
       this.addToIndex({ ...session, worktreeId: newId });
+      // After the index has the new worktree and no owner, so waiting messages follow the chat.
+      if (current.ownerHostId) chatOwnershipService.release(chatId, current.ownerHostId, false);
     }
     return ids;
   }
@@ -755,7 +790,7 @@ export class ChatService {
     this.layoutManager.delete(worktreeId);
   }
 
-  /** Add a chat panel to the saved dockview layout. */
+  /** Add a chat panel to the saved layout. */
   addToLayout(worktreeId: string, chatId: string, opts?: { title?: string }): void {
     this.layoutManager.addPanel(worktreeId, {
       id: chatId,
@@ -769,7 +804,7 @@ export class ChatService {
     });
   }
 
-  /** Remove a chat panel from the saved dockview layout. */
+  /** Remove a chat panel from the saved layout. */
   removeFromLayout(worktreeId: string, chatId: string): void {
     this.layoutManager.removePanel(worktreeId, chatId);
   }

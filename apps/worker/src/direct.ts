@@ -31,7 +31,9 @@ import {
   type TerminalSocketBackend,
 } from "@band-app/worktree-ops/terminal-socket";
 import { WebSocketServer } from "ws";
-import type { Registrar, WorkerContext } from "./context.ts";
+import { handleChatRoute, isChatRoute } from "./chats/local-http.ts";
+import type { ChatOwner } from "./chats/owner.ts";
+import { hostDirs, type Registrar, type WorkerContext } from "./context.ts";
 import { mapError, num, type Params, str } from "./rpc-util.ts";
 
 /** Largest request body, a saved file included. The editor opens files of up to 1 MB. */
@@ -91,6 +93,8 @@ export class DirectListener {
   constructor(
     private readonly ctx: WorkerContext,
     registrar: Registrar,
+    /** The chats this worker owns, served on the same token. */
+    private readonly chats: ChatOwner | null = null,
   ) {
     this.host = checkedHost(ctx, registrar);
     const pty = ctx.host.pty;
@@ -206,7 +210,8 @@ export class DirectListener {
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
         ...cors,
-        "Access-Control-Allow-Methods": "POST",
+        // GET is the chat event stream, read with fetch so it can carry the token.
+        "Access-Control-Allow-Methods": "GET, POST",
         "Access-Control-Allow-Headers": "authorization, content-type",
         // Chrome's private network access preflight, for a page calling loopback.
         ...(req.headers["access-control-request-private-network"] === "true" && {
@@ -219,6 +224,27 @@ export class DirectListener {
     }
 
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (this.chats && isChatRoute(url.pathname)) {
+      const scope = this.scopeOf(bearerToken(req));
+      if (!scope) return fail(401, "UNAUTHORIZED", "Unauthorized");
+      const release = this.ctx.activity.hold();
+      try {
+        await handleChatRoute(req, res, {
+          owner: this.chats,
+          worktreeId: scope.worktreeId,
+          uploadsDir: hostDirs(this.ctx.policy.rootPaths)?.uploads,
+          headers: cors,
+        });
+      } catch (err) {
+        // Never let one request reject out of the server's handler and take the worker down.
+        this.ctx.log.warn({ err: err instanceof Error ? err.message : String(err) }, "chat route");
+        if (!res.headersSent) fail(500, "INTERNAL", "Internal error");
+        else res.destroy();
+      } finally {
+        release();
+      }
+      return;
+    }
     if (!url.pathname.startsWith(DIRECT_CALL_PREFIX)) return fail(404, "NOT_FOUND", "Not found");
     const procedure = url.pathname.slice(DIRECT_CALL_PREFIX.length);
     if (!isDirectProcedure(procedure)) return fail(404, "NOT_FOUND", "Not found");
@@ -456,8 +482,12 @@ function toRpcError(err: unknown): RpcError {
  * Registers `direct.register`, which the hub calls to issue a token for one
  * worktree. Returns a function that stops the listener.
  */
-export function registerDirectMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
-  const listener = new DirectListener(ctx, r);
+export function registerDirectMethods(
+  r: Registrar,
+  ctx: WorkerContext,
+  chats: ChatOwner | null = null,
+): () => Promise<void> {
+  const listener = new DirectListener(ctx, r, chats);
   r.json(METHOD_DIRECT_REGISTER, async (a): Promise<DirectRegisterReply> => {
     const token = str(a, "token");
     if (!token.startsWith(DIRECT_TOKEN_PREFIX)) throw new Error("not a direct token");

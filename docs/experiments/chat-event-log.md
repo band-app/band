@@ -346,12 +346,12 @@ a separate, larger repo.
 
 ### Risk: subscription connection limits
 
-Browsers cap concurrent SSE connections per origin around 6. Dockview
+Browsers cap concurrent SSE connections per origin around 6. Layout
 keeps multiple chat panes alive simultaneously, plus terminals, browser
 preview, etc.
 
 **Mitigation**: the hook only opens the subscription when
-`document.visibilityState === 'visible'` AND the pane is the dockview's
+`document.visibilityState === 'visible'` AND the pane is the layout's
 active tab (today's `wsActive` semantic). When hidden, the subscription
 closes; on show, it reopens with `Last-Event-ID`. This is what we
 already do today via `transport.close()` — the new code does it the

@@ -196,6 +196,8 @@ export interface CollectOptions {
   /** Runs for every event before `until`, e.g. to answer a permission. */
   onEvent?: (event: ChatEvent) => void;
   timeoutMs?: number;
+  /** Request headers, for a stream from somewhere other than the hub (a worker's direct port). */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -214,7 +216,7 @@ export async function collectEvents(
   if (opts.revision !== undefined) params.set("revision", String(opts.revision));
   const res = await fetch(
     `${url}/api/chats/${encodeURIComponent(chatId)}/events?${params.toString()}`,
-    { headers: authHeaders, signal: ac.signal },
+    { headers: opts.headers ?? authHeaders, signal: ac.signal },
   );
   if (res.status !== 200 || !res.body) throw new Error(`events: HTTP ${res.status}`);
   const reader = res.body.getReader();

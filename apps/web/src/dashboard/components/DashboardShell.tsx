@@ -37,6 +37,16 @@ import {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
+import {
+  buildOriginTree,
+  buildPinnedTree,
+  entriesOf,
+  HOST_COLLAPSE_KEY,
+  hostIdOf,
+  ORIGIN_COLLAPSE_KEY,
+  sortRepoWorktrees,
+  useGroupBy,
+} from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
 import type { RepoInfo } from "../types";
 import { AddRepoDialog } from "./AddRepoDialog";
@@ -140,11 +150,41 @@ export function DashboardShell({
   const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
+  const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
+  const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
+  const [groupBy] = useGroupBy();
+  // Collapses what the current view shows: its groups, the Pinned section, and every worktree
+  // with children (the Origin view's parents and the pins' subtrees share one collapsed set).
   const collapseAll = useCallback(() => {
-    repoCollapse.setAll(repos.map((p) => p.name));
-    labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
     pinnedCollapse.setAll([PINNED_SECTION_ID]);
-  }, [repoCollapse, labelCollapse, pinnedCollapse, repos, labels]);
+    const sorted = sortRepoWorktrees(repos);
+    const parents = new Set(buildPinnedTree(sorted).childrenOf.keys());
+    if (groupBy === "repo") {
+      repoCollapse.setAll(repos.map((p) => p.name));
+      labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
+    } else if (groupBy === "origin") {
+      for (const [id, kids] of buildOriginTree(entriesOf(sorted)).childrenOf) {
+        if (kids.length > 0) parents.add(id);
+      }
+    } else {
+      const keys: string[] = [];
+      for (const entry of entriesOf(sorted)) {
+        const host = hostIdOf(entry.worktree);
+        keys.push(`host:${host}`, `host:${host}/${entry.repo.name}`);
+      }
+      hostCollapse.addAll(keys);
+    }
+    originCollapse.addAll(parents);
+  }, [
+    pinnedCollapse,
+    repoCollapse,
+    labelCollapse,
+    originCollapse,
+    hostCollapse,
+    groupBy,
+    repos,
+    labels,
+  ]);
 
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
@@ -341,7 +381,7 @@ export function DashboardShell({
       // by the live app zoom factor (`--app-zoom`, set by applyZoomLevel in
       // apps/web/src/lib/zoom.ts) so the rendered height always matches the
       // actual viewport. The `hideTitleBar` branch is sized by its parent
-      // (a dockview panel with explicit pixel height) so it doesn't need
+      // (a layout panel with explicit pixel height) so it doesn't need
       // the compensation. See band-app/band#463.
       //
       // NOTE: `--app-zoom` is hardcoded here because the `dashboard` module

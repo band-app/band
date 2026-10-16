@@ -116,6 +116,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.worktrees.setPinned.mutate({ repo, name, pinned, hostId });
   }
 
+  async reorderWorktrees(
+    input: Parameters<DashboardAdapter["reorderWorktrees"]>[0],
+  ): Promise<void> {
+    await this.trpc.worktrees.reorder.mutate(input);
+  }
+
   async clearNeedsAttention(worktreeId: string): Promise<void> {
     await this.trpc.statuses.clearNeedsAttention.mutate({ worktreeId });
   }
@@ -577,7 +583,7 @@ export class WebCapabilities implements PlatformCapabilities {
 
   // The worktree URL no longer carries a sub-path for the active tab —
   // tab state lives entirely inside `MobileWorktreeLayout`, and the
-  // desktop dockview at AppShell renders every panel regardless of URL.
+  // desktop layout at AppShell renders every panel regardless of URL.
   // See issue #467 for the refactor that removed the `band-tab:` session
   // store and the `/changes` / `/code` / `/terminal` child routes.
   getWorktreeHref(worktreeId: string): string {

@@ -28,6 +28,8 @@ export interface ServiceOptions {
   roots: string[];
   stateDir?: string;
   workerId?: string;
+  /** The worker runs its worktrees' chats (`--own-chats`). */
+  ownChats?: boolean;
 }
 
 export type Runner = (cmd: string, args: string[]) => string;
@@ -70,6 +72,7 @@ const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap
   --labels k=v,...   Placement labels.
   --worker-id <id>   The id the hub issued with the token.
   --state-dir <dir>  Where the worker keeps its id and session token.
+  --own-chats        Run the chats of this worker's worktrees here and copy them to the hub.
 `;
 
 export function serviceUsage(): string {
@@ -99,6 +102,7 @@ export function parseServiceOptions(
     roots: (values.root ?? []).map((r) => resolve(r)),
     stateDir: values["state-dir"] ? resolve(values["state-dir"]) : undefined,
     workerId: values["worker-id"],
+    ownChats: values["own-chats"] === true,
   };
 }
 
@@ -113,6 +117,7 @@ function parse(argv: string[]) {
       root: { type: "string", multiple: true },
       "state-dir": { type: "string" },
       "worker-id": { type: "string" },
+      "own-chats": { type: "boolean" },
     },
     strict: true,
   });
@@ -129,6 +134,7 @@ export function serviceVariables(opts: ServiceOptions): Record<string, string> {
   if (opts.labels) vars.BAND_WORKER_LABELS = opts.labels;
   if (opts.roots.length > 0) vars.BAND_WORKER_ROOTS = opts.roots.join(delimiter);
   if (opts.stateDir) vars.BAND_WORKER_STATE_DIR = opts.stateDir;
+  if (opts.ownChats) vars.BAND_WORKER_OWN_CHATS = "1";
   return vars;
 }
 

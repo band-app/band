@@ -110,6 +110,12 @@ export interface WorktreeState {
   path: string;
   head?: string;
   pinned: boolean;
+  /**
+   * Position among siblings and inside the Pinned section. Read-only here like `origin`:
+   * `saveAll` keeps what the database holds, and `RepoQueries.setSortIndexes` writes them.
+   */
+  sortIndex?: number;
+  pinSortIndex?: number;
   /** Host the worktree lives on. Absent means `local`. */
   hostId?: string;
   /**
@@ -227,6 +233,8 @@ export class RepoQueries {
         head: row.head ?? undefined,
         pinned: row.pinned,
         hostId: row.hostId,
+        ...(row.sortIndex === null ? {} : { sortIndex: row.sortIndex }),
+        ...(row.pinSortIndex === null ? {} : { pinSortIndex: row.pinSortIndex }),
         ...(row.originWorktreeId
           ? {
               origin: {
@@ -324,6 +332,8 @@ export class RepoQueries {
             supersededBy: worktreesTable.supersededBy,
             continuedFrom: worktreesTable.continuedFrom,
             divergence: worktreesTable.divergence,
+            sortIndex: worktreesTable.sortIndex,
+            pinSortIndex: worktreesTable.pinSortIndex,
           })
           .from(worktreesTable)
           .all()
@@ -380,6 +390,8 @@ export class RepoQueries {
               supersededBy: carried?.supersededBy ?? null,
               continuedFrom: carried?.continuedFrom ?? null,
               divergence: carried?.divergence ?? null,
+              sortIndex: carried?.sortIndex ?? null,
+              pinSortIndex: carried?.pinSortIndex ?? null,
             })
             .run();
         }
@@ -643,6 +655,26 @@ export class RepoQueries {
       .where(eq(reposTable.name, name))
       .get();
     return row ? (row.autoContinue ?? null) : undefined;
+  }
+
+  /**
+   * Writes each listed worktree's position in the list (0, 1, 2 ...) to `sortIndex`, or to
+   * `pinSortIndex` for the Pinned section. One transaction. Focused UPDATEs, because `saveAll`
+   * keeps the stored values.
+   */
+  setSortIndexes(
+    refs: { repoName: string; name: string; hostId: string }[],
+    field: "sortIndex" | "pinSortIndex",
+  ): void {
+    const db = getDb();
+    db.transaction((tx) => {
+      refs.forEach((ref, index) => {
+        tx.update(worktreesTable)
+          .set({ [field]: index })
+          .where(worktreeKey(ref.repoName, ref.name, ref.hostId))
+          .run();
+      });
+    });
   }
 
   /** Records on the copy on `hostId` where its work came from. Focused UPDATE, because `saveAll` keeps the stored value. */

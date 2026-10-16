@@ -254,6 +254,10 @@ export class RepoService {
                 path: wt.path,
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
+                ...(tracked?.sortIndex === undefined ? {} : { sortIndex: tracked.sortIndex }),
+                ...(tracked?.pinSortIndex === undefined
+                  ? {}
+                  : { pinSortIndex: tracked.pinSortIndex }),
               };
             });
           worktrees = [

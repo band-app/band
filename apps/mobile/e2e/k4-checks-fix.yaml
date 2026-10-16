@@ -1,0 +1,35 @@
+# k4 (S4): Fix starts an agent chat with the failing checks and shows it as the active tab.
+appId: app.getband.mobile
+name: k4 the Fix agent opens as the active tab
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-checks
+- extendedWaitUntil:
+    visible:
+      id: checks__fix
+    timeout: 20000
+- takeScreenshot: k4-failing-banner
+- tapOn:
+    id: checks__fix
+- extendedWaitUntil:
+    visible:
+      id: worktree__screen
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+      text: ".*2 of 2.*"
+    timeout: 20000
+- takeScreenshot: k4-fix-chat
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: check-tabs?wt=widgets-feat-checks&chats=2&active=new
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: These CI checks are failing on pull request #42 (Add the checks view)

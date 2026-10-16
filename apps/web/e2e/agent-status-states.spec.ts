@@ -161,7 +161,7 @@ test("a hidden terminal tab shows each hook state", async ({ page }, testInfo) =
   await chatPane.goto(WORKTREE);
   // Opens a chat and shows it, so the default terminal tab is hidden.
   await chatPane.waitForReady();
-  await expect(worktree.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktree.tabContainer("chat")).toHaveAttribute("data-selected", "true");
   const terminalId = await worktree.firstTerminalTabId();
   expect(terminalId).not.toBe("");
 

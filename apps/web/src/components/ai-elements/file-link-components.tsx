@@ -19,7 +19,7 @@ import { openExternalUrl } from "../../lib/open-external-url";
 // mounted), and `dispatchOpenFile` is a window-scoped CustomEvent.
 // Without a worktree label on the event, every mounted layout's listener
 // races to open the file against its OWN active worktree — and the
-// `SharedDockviewLayout` listener (the only one for the desktop dockview)
+// `SharedWorktreeLayout` listener (the only one for the desktop layout)
 // is bound to whichever worktree is currently focused, not the one whose
 // chat actually fired the click. The result is a cross-worktree leak:
 // click a `band-file:` link in worktree A's chat while worktree B is the

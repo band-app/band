@@ -63,7 +63,7 @@ const SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 // cost. Each turn writes one user + one assistant message.
 const TURNS = 300;
 
-// Wide viewport so useIsDesktop() reports true and the shared dockview
+// Wide viewport so useIsDesktop() reports true and the shared layout
 // renders the chat pane in its desktop layout.
 test.use({ viewport: { width: 1280, height: 800 } });
 

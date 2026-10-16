@@ -84,8 +84,8 @@ function createGitRepo(parentDir: string, name: string): string {
 // SQLite peek — direct `panel_states` reads so a test can prove
 // `chats.create` actually wrote the saved chat-layout row to disk.
 //
-// The dockview layout row is keyed `${panelType}_${worktreeId}` per
-// `DockviewLayoutManager.layoutId` — mirrored here rather than re-derived
+// The layout row is keyed `${panelType}_${worktreeId}` per
+// `LayoutManager.layoutId` — mirrored here rather than re-derived
 // through tRPC so a regression that breaks the persistence path (and not
 // just the read path) is caught.
 // ---------------------------------------------------------------------------

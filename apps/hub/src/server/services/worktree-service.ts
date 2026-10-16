@@ -244,6 +244,23 @@ export const worktreeSetOriginInput = z.object({
 });
 export type WorktreeSetOriginInput = z.infer<typeof worktreeSetOriginInput>;
 
+const worktreeRefInput = z.object({
+  repo: z.string(),
+  // Worktree identity (immutable `name`), not the live git branch.
+  name: z.string(),
+  hostId: z.string().optional(),
+});
+
+export const worktreeReorderInput = z.object({
+  // The worktrees of one list in their new order.
+  order: z.array(worktreeRefInput).min(1).max(500),
+  // `siblings` is the order shared by every view, `pins` the order inside the Pinned section.
+  scope: z.enum(["siblings", "pins"]),
+  // Changes the parent of one worktree in the same call, so a drop in the Origin view is one write.
+  reparent: worktreeRefInput.extend({ origin: z.string().min(1).nullable() }).optional(),
+});
+export type WorktreeReorderInput = z.infer<typeof worktreeReorderInput>;
+
 export const worktreeGitInput = z.object({
   repo: z.string(),
   // Worktree identity (immutable `name`), not the live git branch.
@@ -885,7 +902,7 @@ export class WorktreeService {
     const terminalId = randomUUID();
     await terminalService.spawn(chat.worktreeId, terminalId, { command });
     // Broadcast so an already-open dashboard adds the pane to its terminal
-    // dockview without a reload — same pattern as `terminal.create` and the
+    // layout without a reload — same pattern as `terminal.create` and the
     // `via=terminal` create path.
     emit({ kind: "terminal-created", worktreeId: chat.worktreeId, terminalId });
 
@@ -1389,6 +1406,29 @@ export class WorktreeService {
       targetHostId,
     );
     emit({ kind: "worktree-origin-changed", worktreeId });
+    return { ok: true };
+  }
+
+  /**
+   * Stores the order of one list of worktrees, and optionally the new parent of one of them. The
+   * parent change goes first, so a refused parent leaves the order untouched.
+   */
+  reorder(input: WorktreeReorderInput): { ok: true } {
+    // Resolve every ref before the first write, so an unknown ref changes nothing.
+    const state = loadState();
+    const refs = input.order.map((item) => {
+      const repo = state.repos.find((p) => p.name === item.repo);
+      if (!repo) throw new RepoNotFoundError(item.repo);
+      const row = findWorktreeRow(repo.worktrees, item.name, item.hostId);
+      if (!row) throw new WorktreeNotFoundError(item.name);
+      return { repoName: repo.name, name: row.name, hostId: row.hostId ?? "local" };
+    });
+    if (input.reparent) {
+      const { origin, ...ref } = input.reparent;
+      this.setOrigin({ ...ref, origin });
+    }
+    this.repoQueries.setSortIndexes(refs, input.scope === "pins" ? "pinSortIndex" : "sortIndex");
+    emit({ kind: "worktree-origin-changed", worktreeId: "" });
     return { ok: true };
   }
 

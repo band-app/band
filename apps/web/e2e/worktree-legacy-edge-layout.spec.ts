@@ -1,13 +1,13 @@
 /**
- * End-to-end coverage for loading a saved layout that still holds dockview
+ * End-to-end coverage for loading a saved layout that still holds layout
  * edge groups.
  *
- * The center dockview used to dock panels into left / right / bottom edge
+ * The center layout used to dock panels into left / right / bottom edge
  * groups around the grid. Edge groups were removed, but layouts saved before
  * that still carry an `edgeGroups` entry in `band:dockview-layout-v9:<ws>`.
  * Loading one must keep every panel: `sanitizeSavedLayout` moves the edge
  * groups' panels into the first grid group as tabs and drops `edgeGroups`, so
- * dockview never recreates an edge group.
+ * layout never recreates an edge group.
  *
  * File leaves are used because they are pure client views with no server
  * record. The onReady reconcile re-adds missing chats / terminals / browsers
@@ -44,7 +44,7 @@ const GRID_FILE = "README.md";
 const BOTTOM_EDGE_FILE = "notes.md";
 const LEFT_EDGE_FILE = "guide.md";
 
-// Wide viewport so the desktop layout (and the split-capable dockview) renders
+// Wide viewport so the desktop layout (and the split-capable layout) renders
 // (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1400, height: 800 } });
 
@@ -58,7 +58,7 @@ function filePanel(path: string) {
   };
 }
 
-// A v9 layout as dockview's `toJSON()` wrote it while edge groups existed: one
+// A v9 layout as the layout's `toJSON()` wrote it while edge groups existed: one
 // grid group with a file tab, a populated bottom edge, a populated (collapsed)
 // left edge, and an empty right edge. The bottom edge also lists a view with
 // no panel entry, and the left edge holds a `terminal` singleton, a panel kind
@@ -178,7 +178,7 @@ test("a saved layout with edge groups loads with the edge panels as tabs in the 
 }) => {
   const wp = new WorktreePage(page, server.url, TOKEN);
   // Seed BEFORE navigating: `addInitScript` writes localStorage ahead of the
-  // page script, so the dockview restores this layout on its first onReady.
+  // page script, so the layout restores this layout on its first onReady.
   await wp.seedGlobalLayout(WORKTREE, LAYOUT_WITH_EDGE_GROUPS);
   await wp.goto(WORKTREE);
   await wp.waitForReady();

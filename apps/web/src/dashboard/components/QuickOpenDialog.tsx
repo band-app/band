@@ -336,7 +336,7 @@ export function QuickOpenDialog({
     // Bail if the worktree switched while we were waiting for the
     // search. `onOpenFile` is bound to the parent's *current* worktree
     // (e.g. `handleOpenFile(activeWorktreeId, filename)` in
-    // `SharedDockviewLayout`), so firing it after a switch would write
+    // `SharedWorktreeLayout`), so firing it after a switch would write
     // the file into the wrong worktree's tab state — exactly the leak
     // path described in issue #539. Closing the dialog cleanly returns
     // the parent to the pre-open state without a bogus tab append.

@@ -55,6 +55,14 @@ export interface ChatFindHighlights {
 }
 
 export class ChatPanePage {
+  /** The dictation mic in the composer. Absent until the hub has voice set up. */
+  readonly mic: Locator;
+  /** The "Listening" state with the elapsed timer, shown while recording. */
+  readonly micListening: Locator;
+  readonly micTimer: Locator;
+  readonly micCancel: Locator;
+  /** The dictation error line (a denied microphone, a failed transcription). */
+  readonly micError: Locator;
   /** The prompt textarea — placeholder is stable, hard-coded in
    *  `ChatView.tsx` and not user-localised. */
   readonly promptInput: Locator;
@@ -201,6 +209,11 @@ export class ChatPanePage {
     private readonly hubUrl?: string,
   ) {
     this.promptInput = page.getByPlaceholder("Type a message...");
+    this.mic = page.getByTestId("prompt-input__mic").filter({ visible: true });
+    this.micListening = page.getByTestId("prompt-input__mic-listening").filter({ visible: true });
+    this.micTimer = page.getByTestId("prompt-input__mic-timer").filter({ visible: true });
+    this.micCancel = page.getByTestId("prompt-input__mic-cancel").filter({ visible: true });
+    this.micError = page.getByTestId("prompt-input__mic-error").filter({ visible: true });
     this.promptForm = page.getByTestId("prompt-input__form").filter({ visible: true });
     this.root = page.getByTestId("chat-pane").filter({ visible: true });
     this.find = new FindWidget(this.root);
@@ -303,14 +316,14 @@ export class ChatPanePage {
 
   /** Wait for the chat pane to be interactive (prompt textarea visible).
    *
-   *  The center dockview's default layout is a single TERMINAL tab (no chat),
+   *  The center layout's default layout is a single TERMINAL tab (no chat),
    *  so this first ensures a chat leaf exists + is the active tab: if a chat is
    *  already present (a seeded live chat surfaced by the default layout, just
    *  not the active tab) it's activated; otherwise a fresh chat is created via
    *  the "+" new-tab menu — the same way a user opens one. Then it waits for the
    *  prompt. */
   async waitForReady(): Promise<void> {
-    // The dockview is ready once its "+" new-tab button renders.
+    // The layout is ready once its "+" new-tab button renders.
     const addBtn = this.page
       .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true })
@@ -353,7 +366,7 @@ export class ChatPanePage {
     await expect(this.promptInput).toBeFocused();
   }
 
-  /** Open the "+" new-tab menu of the visible center dockview. */
+  /** Open the "+" new-tab menu of the visible center layout. */
   async openNewTabMenu(): Promise<void> {
     await test.step("Open the new-tab menu", async () => {
       const addBtn = this.page
@@ -624,6 +637,28 @@ export class ChatPanePage {
     });
   }
 
+  /** Puts the caret at the end of the draft, as a user clicking after the last word does. */
+  async placeCaretAtEnd(): Promise<void> {
+    await test.step("Put the caret at the end of the prompt", async () => {
+      await this.promptInput.focus();
+      await this.promptInput.press("End");
+    });
+  }
+
+  /** Taps the mic: starts recording, or stops and sends the clip when already recording. */
+  async tapMic(): Promise<void> {
+    await test.step("Tap the mic", async () => {
+      await this.mic.click();
+    });
+  }
+
+  /** Cancels the recording in progress. */
+  async cancelDictation(): Promise<void> {
+    await test.step("Cancel the dictation", async () => {
+      await this.micCancel.click();
+    });
+  }
+
   /** Read the current value of the prompt textarea. Used to assert that an
    *  "Add to Chat" file reference was appended to the chat input. */
   async promptValue(): Promise<string> {
@@ -644,7 +679,7 @@ export class ChatPanePage {
 
   /** Click into the Nth chat pane's prompt so it becomes the focused (active)
    *  pane — this is what the container reports to the server as the worktree's
-   *  last-focused chat. Click (not `focus()`) so dockview's focusin tracking
+   *  last-focused chat. Click (not `focus()`) so the layout's focusin tracking
    *  fires and the active panel actually switches. */
   async focusPromptAt(index: number): Promise<void> {
     await test.step(`Focus chat pane #${index}`, async () => {
@@ -661,7 +696,7 @@ export class ChatPanePage {
 
   /** Snapshot every open pane's prompt value. Order-independent assertions
    *  (which pane received the reference) sort these rather than depending on
-   *  dockview's DOM ordering of split groups. */
+   *  the layout's DOM ordering of split groups. */
   async allPromptValues(): Promise<string[]> {
     return await this.promptInputs.evaluateAll((els) =>
       els.map((el) => (el as HTMLTextAreaElement).value),

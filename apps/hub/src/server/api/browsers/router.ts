@@ -64,7 +64,7 @@ export const browsersRouter = t.router({
         rethrowProfileNotFound(err);
       }
       // `browserService.create` also registers the tab in the saved
-      // dockview layout — see `chatService.create` for the same pattern.
+      // layout — see `chatService.create` for the same pattern.
       const browser = browserService.create(input.worktreeId, {
         id: input.id,
         name: input.name,

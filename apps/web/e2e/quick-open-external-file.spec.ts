@@ -10,7 +10,7 @@
  * OUTSIDE opens as an *external* tab (contents read via `host.readFile`,
  * same pipeline the CLI's `band open <abs>` uses). See `QuickOpenDialog.tsx`,
  * `worktree.resolvePath` / `editorService.resolvePath`, and
- * `SharedDockviewLayout.handleOpenExternalFile`.
+ * `SharedWorktreeLayout.handleOpenExternalFile`.
  *
  * Test architecture (per the repo's integration-test doctrine):
  *   - Boots the real production server against a fresh tmp home — no
@@ -57,7 +57,7 @@ const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 // unambiguous.
 const TS_MARKER = "band-external-note-marker";
 
-// Desktop viewport so `useIsDesktop()` is true and `SharedDockviewLayout`
+// Desktop viewport so `useIsDesktop()` is true and `SharedWorktreeLayout`
 // (which mounts QuickOpenDialog + owns the external-open wiring) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -121,7 +121,7 @@ test.afterAll(async () => {
 
 // #643: Quick Open resolves an absolute path to a single file and opens it as a
 // per-path `file` leaf (center-file-tab--<path>) in the unified center
-// dockview; the open is observable through that tab and the persisted layout.
+// layout; the open is observable through that tab and the persisted layout.
 test.describe("Quick Open — open a file outside the worktree by absolute path", () => {
   test("typing an existing absolute path offers to open it and lands an external tab", async ({
     page,

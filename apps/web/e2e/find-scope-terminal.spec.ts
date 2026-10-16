@@ -5,8 +5,8 @@
  *
  * Root cause: `useSearch` registered its OWN window-level, unscoped Cmd/Ctrl+F
  * handler that opened the bar on ANY find keypress, regardless of focus or
- * visibility. In the unified center dockview several leaves are mounted at once
- * (dockview keeps inactive tabs alive), and with split groups several are even
+ * visibility. In the unified center layout several leaves are mounted at once
+ * (layout keeps inactive tabs alive), and with split groups several are even
  * visible — so a single Cmd+F pressed from a focused terminal opened every
  * mounted file/diff leaf's bar. `useLeafFind`'s focus-scoped handler only
  * stopped the event when focus was inside its own container, so a keypress
@@ -49,7 +49,7 @@ const BRANCH = "main";
 const FILE = "app.ts";
 const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared center dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared center layout
 // (with its per-leaf find + terminal) renders — matches >= 1024px.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -100,7 +100,7 @@ test("Cmd+F opens the find bar for the focused surface, not another leaf", async
   // whichever surface holds focus, and never cross-opens the other leaf's bar. (The retired global
   // handler ignored focus and fired for every mounted leaf — the bug fixed by
   // `use-search`'s `registerGlobalFindKey` opt-out + the terminal-focus guard in
-  // `SharedDockviewLayout`.)
+  // `SharedWorktreeLayout`.)
   await worktreePage.openFileLeaf(FILE, WORKTREE);
 
   // Focus the terminal → Cmd+F opens the TERMINAL's own find bar, and never the

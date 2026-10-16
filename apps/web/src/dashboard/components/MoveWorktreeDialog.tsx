@@ -28,6 +28,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   repoName: string;
   worktree: Pick<WorktreeInfo, "name" | "hostId">;
+  /** The host to select when the dialog opens, from a drop on that host's group. */
+  initialTarget?: string;
 }
 
 /**
@@ -35,7 +37,13 @@ interface Props {
  * is not allowed on is offered with "add it to the allowed hosts", which needs an admin token. An
  * offline host goes through `ContinueOnHostDialog` instead.
  */
-export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: Props) {
+export function MoveWorktreeDialog({
+  open,
+  onOpenChange,
+  repoName,
+  worktree,
+  initialTarget,
+}: Props) {
   const { repos } = useRepos();
   const displayWorktree = useWorktreeDisplay();
   const repo = {
@@ -52,7 +60,7 @@ export function MoveWorktreeDialog({ open, onOpenChange, repoName, worktree }: P
     (h) => h.status === "online" && h.id !== currentHost && h.id !== "local",
   );
 
-  const [target, setTarget] = useState("");
+  const [target, setTarget] = useState(initialTarget ?? "");
   const [addHost, setAddHost] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

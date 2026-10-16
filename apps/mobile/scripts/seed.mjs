@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { seedExplorer } from "./seed-explorer.mjs";
+import { CHECKS_BRANCHES, CHECKS_REPO } from "./checks.mjs";
 
 /** The showcase turn's reply: every markdown construct the chat renders natively. */
 export const SHOWCASE_MARKDOWN = [
@@ -287,6 +288,11 @@ export const WORKTREES = {
   DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
   GAMMA_TABS: "gamma-tabs",
+  /** acme/widgets, a repo with a GitHub origin: PR checks to read, re-run and fix (k1-k5). */
+  WIDGETS_CHECKS: "widgets-feat-checks",
+  WIDGETS_RERUN: "widgets-feat-rerun",
+  WIDGETS_NO_CHECKS: "widgets-feat-nochecks",
+  WIDGETS_NO_PR: "widgets-feat-nopr",
 };
 
 /** The chats of `gamma-tabs`, in the shared tab order; the second is the active tab. */
@@ -345,6 +351,25 @@ function gitRepo(dir) {
   git("commit", "-q", "-m", "init");
 }
 
+/**
+ * `widgets`, a repo whose `origin` is github.com/acme/widgets, so the hub's GitHub plugin asks
+ * the fake `gh` (`checks.mjs`) for each branch's pull request and checks. The worktrees are made
+ * with git, because `worktrees.create` would fetch from the fake origin.
+ */
+async function seedChecks(state) {
+  const dir = join(state.home, "repos", CHECKS_REPO);
+  gitRepo(dir);
+  execFileSync("git", ["remote", "add", "origin", `https://github.com/acme/${CHECKS_REPO}.git`], {
+    cwd: dir,
+  });
+  for (const branch of Object.values(CHECKS_BRANCHES)) {
+    execFileSync("git", ["worktree", "add", "-q", "-b", branch, join(state.home, "wt", branch.replace("/", "-"))], {
+      cwd: dir,
+    });
+  }
+  await trpc(state, "repos.add", { path: dir });
+}
+
 /** Adds the repos and worktrees. Returns the chat id of each worktree. */
 export async function seedHub(state) {
   const root = join(state.home, "repos");
@@ -352,6 +377,7 @@ export async function seedHub(state) {
     gitRepo(join(root, name));
     await trpc(state, "repos.add", { path: join(root, name) });
   }
+  await seedChecks(state);
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });

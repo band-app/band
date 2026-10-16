@@ -22,7 +22,7 @@ A laptop that sleeps cannot host these. A mesh of peers has no natural owner for
 2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a worktree runs on that worktree's host, through a `Host` interface. The hub never touches a worker's disk directly.
 3. **Workers dial out.** Each worker keeps one outbound WebSocket to the hub and opens no inbound ports. This works behind NAT and tunnels without a VPN.
 4. **Local mode is unchanged.** The hub runs a `LocalHost` in-process, so a single-machine user sees no difference.
-5. **Chat stays on the hub, and only agent stdio is remote.** The hub keeps the ACP client and the event log. The worker spawns the agent and relays its stdio. Replay, queueing and subscriptions stay independent of where the agent runs.
+5. **Chat stays on the hub, and only agent stdio is remote.** The hub keeps the ACP client and the event log. The worker spawns the agent and relays its stdio. Replay, queueing and subscriptions stay independent of where the agent runs. Amended by [chat-ownership.md](chat-ownership.md): a worker that offers chat ownership runs the ACP client and the log for the chats of its worktrees, and the hub keeps a replicated copy.
 6. **Runners only spawn.** A runner is a spawn hook script that receives env vars and starts `band-worker`. Ephemeral workers exit when idle, and attached workers (a laptop, a home server) stay connected.
 
 ## Consequences
@@ -42,6 +42,7 @@ Negative:
 - Chatty operations (diffs, search, file trees) cross a network link and need batching, streaming and caching.
 - Hub and worker versions can drift, so the handshake carries a protocol version and the hub rejects a mismatch.
 - Every worker is a code-execution endpoint, so the tokens and the worker-side relay must be scoped tightly.
+- A worker that owns its chats ([chat-ownership.md](chat-ownership.md)) holds the live copy of their logs. The hub's copy follows by replication, so while that worker is offline the hub shows the chat only up to the last replicated event.
 - A large refactor: the server code moves out of `apps/web`, and all git and file access goes through `Host`.
 
 Later amendment, the local direct path ([local-direct-path.md](../local-direct-path.md)):

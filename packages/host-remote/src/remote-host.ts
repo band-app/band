@@ -29,10 +29,12 @@ import type {
   HostRepos,
   HostScripts,
   HostSearch,
+  HostSpeech,
   HostWorktree,
   InstallSkillsResult,
   ScriptPlan,
   SearchMatch,
+  SpeechTranscribeResult,
   Stream,
   TerminalExitEvent,
   WatchOptions,
@@ -194,6 +196,34 @@ export class RemoteHost implements Host {
     open: async (): Promise<Duplex> => {
       const reply = await this.rpc.request<{ chan: number }>("desktop.open", {});
       return duplexOf(this.rpc.channel(reply.chan));
+    },
+  };
+
+  readonly speech: HostSpeech = {
+    transcribe: async (req) => {
+      const { audio, ...rest } = req;
+      if (audio.byteLength <= INLINE_WRITE_BYTES) {
+        return this.rpc.call("speech.transcribe", {
+          ...rest,
+          audio: { base64: Buffer.from(audio).toString("base64") },
+        });
+      }
+      // Over the message limit: the worker reads the channel to its end.
+      const ch = this.rpc.session().openChannel("speech.audio", {});
+      const done = this.rpc.call<SpeechTranscribeResult>("speech.transcribe", {
+        ...rest,
+        audio: { chan: ch.id },
+      });
+      done.catch(() => undefined);
+      try {
+        await ch.send(audio);
+        ch.end();
+      } catch (err) {
+        ch.reset("send failed");
+        await done.catch(() => undefined);
+        throw err;
+      }
+      return done;
     },
   };
 
