@@ -33,7 +33,7 @@ export function HostVersionLine({ host, isAdmin }: { host: HostView; isAdmin: bo
           <span
             data-testid="settings__host-version-state"
             data-state={host.versionState}
-            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-700 dark:text-amber-300"
+            className="rounded bg-warning-bg px-1.5 py-0.5 text-warning"
           >
             {label}
           </span>

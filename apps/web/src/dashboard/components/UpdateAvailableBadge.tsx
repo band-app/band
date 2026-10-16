@@ -18,7 +18,7 @@ export function UpdateAvailableBadge() {
       <Button
         size="sm"
         variant="ghost"
-        className="text-blue-600 dark:text-blue-300"
+        className="text-primary"
         aria-label={`Update available, version ${status.data.latest}`}
         data-testid="repo-list__update-badge"
         onClick={() => setOpen(true)}
