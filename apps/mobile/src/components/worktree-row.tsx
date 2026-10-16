@@ -1,3 +1,4 @@
+import { CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
@@ -49,14 +50,32 @@ export function PullRequestTag({ row }: { row: WorktreeRow }) {
   );
 }
 
+const CI_ICON: Record<CiTone, typeof CircleCheck> = {
+  failure: CircleAlert,
+  pending: Loader,
+  success: CircleCheck,
+  merged: GitMerge,
+};
+
+/** The CI mark of a branch with no PR, the same lucide icons the web's CI indicator uses. */
 export function CiDot({ row }: { row: WorktreeRow }) {
   if (!row.ciTone) return null;
+  const Icon = CI_ICON[row.ciTone];
   return (
-    <View
-      style={[styles.ciDot, { backgroundColor: CI_COLOR[row.ciTone] }]}
-      accessibilityLabel={CI_LABEL[row.ciTone]}
-      testID={`worktree__ci-${row.id}`}
-    />
+    <View accessibilityLabel={CI_LABEL[row.ciTone]} testID={`worktree__ci-${row.id}`}>
+      <Icon size={14} color={CI_COLOR[row.ciTone]} />
+    </View>
+  );
+}
+
+/** The sleeping or waking mark of a worktree on an ephemeral worker, as the web card draws it. */
+function LifecycleIcon({ row }: { row: WorktreeRow }) {
+  if (!row.lifecycle) return null;
+  const Icon = row.lifecycle === "waking" ? Loader : Moon;
+  return (
+    <View accessibilityLabel={row.lifecycle} testID={`worktree__lifecycle-${row.id}`}>
+      <Icon size={14} color={colors.mutedForeground} />
+    </View>
   );
 }
 
@@ -70,6 +89,7 @@ export function RowMeta({ row, showHost = true }: { row: WorktreeRow; showHost?:
         </Text>
       ) : null}
       {row.dirty ? <View style={styles.dirty} accessibilityLabel="Uncommitted changes" /> : null}
+      <LifecycleIcon row={row} />
       <PullRequestTag row={row} />
       <CiDot row={row} />
       {showHost && row.remote ? (
@@ -86,11 +106,14 @@ export function RowMeta({ row, showHost = true }: { row: WorktreeRow; showHost?:
 export function WorktreeRowView({
   row,
   onPress,
+  onLongPress,
   first,
   last,
 }: {
   row: WorktreeRow;
   onPress: () => void;
+  /** Opens the row's actions (Pin / Unpin). */
+  onLongPress?: () => void;
   /** First row of a card with no header of its own (Pinned): round the top. */
   first?: boolean;
   last?: boolean;
@@ -99,8 +122,10 @@ export function WorktreeRowView({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel={rowLabel(row)}
+      accessibilityHint={onLongPress ? "Long press for pin options" : undefined}
       testID={`home__worktree-${row.id}`}
       style={({ pressed }) => [
         styles.row,
@@ -111,7 +136,7 @@ export function WorktreeRowView({
       ]}
     >
       <View style={{ width: row.depth * 16 }} />
-      <StateIcon state={row.shown} />
+      <StateIcon state={row.shown} main={row.main} />
       <View style={styles.body}>
         <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>
           {row.name}

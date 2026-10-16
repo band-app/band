@@ -60,8 +60,9 @@ name: S1 repos and worktrees on the home screen
     id: home__group-by
 - tapOn:
     text: Origin
+# Origin is one flat tree with no repo headers, as on the web.
 - assertVisible:
-    id: home__repo-alpha
+    id: home__worktree-beta-main
 - takeScreenshot: s1-group-by-origin
 - tapOn:
     id: home__group-by

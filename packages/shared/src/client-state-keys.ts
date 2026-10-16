@@ -180,6 +180,8 @@ const RULES: KeyRule[] = [
   exact("band.mobile.collapsed-repos", [jsonPart("device")]),
   // How the mobile worktree list is grouped: repo, origin or host.
   exact("band.mobile.group-by", [rawPart("device")]),
+  // The label the mobile worktree list is filtered to (a label id; unset means All).
+  exact("band.mobile.label-filter", [rawPart("device")]),
 ];
 
 export interface MatchedKey {
