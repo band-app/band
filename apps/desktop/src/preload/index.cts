@@ -41,6 +41,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "get_window_fullscreen",
   "get_app_metrics",
   "get_power_state",
+  "keep_awake_get",
+  "keep_awake_set",
   // Hub picker
   "hub_get_choice",
   "hub_set_choice",
