@@ -33,6 +33,7 @@ import type {
   RevealInFinderArgs,
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
+import type { KeepAwakeController } from "../services/keep-awake.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
 import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
@@ -74,6 +75,7 @@ export interface RegisterOptions {
   cliPaths: CliPathOptions;
   /** The bootstrap's auto-update controller, which the update toast drives. */
   updates: UpdateController;
+  keepAwake: KeepAwakeController;
 }
 
 /**
@@ -118,6 +120,10 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Pass the dashboard window's webContents id so the mapper can label its
   // renderer "Dashboard" and not confuse it with other top-level windows.
   handle(Channels.getPowerState, () => ({ onBattery: powerMonitor.isOnBatteryPower() }));
+  handle(Channels.keepAwakeGet, () => ({ enabled: opts.keepAwake.isEnabled() }));
+  handle(Channels.keepAwakeSet, (args: { enabled?: unknown }) => ({
+    enabled: opts.keepAwake.set(args?.enabled === true),
+  }));
   handle(Channels.getAppMetrics, () => getAppMetrics(opts.mainWindow.webContents.id));
 
   // ---- macOS shell ----
