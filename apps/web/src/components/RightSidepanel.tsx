@@ -125,7 +125,7 @@ function TabButton({
       <Icon className="size-3.5 shrink-0" />
       {!iconsOnly && <span className="whitespace-nowrap">{label}</span>}
       {badge != null && badge > 0 && (
-        <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+        <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-info-bg px-1 text-[10px] font-medium text-info">
           {badge}
         </span>
       )}

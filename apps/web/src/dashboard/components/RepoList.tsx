@@ -1313,7 +1313,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
           <div
             role="status"
             data-testid="repo-list__drop-refused"
-            className="mx-2 mb-1 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[12px] text-foreground"
+            className="mx-2 mb-1 flex items-start gap-2 rounded-md border border-warning/40 bg-warning-bg px-2 py-1.5 text-[12px] text-foreground"
           >
             <span className="flex-1">{dropNotice}</span>
             <button

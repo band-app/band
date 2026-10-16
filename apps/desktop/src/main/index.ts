@@ -13,7 +13,15 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  powerMonitor,
+  powerSaveBlocker,
+  protocol,
+  session,
+} from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserGuestManager } from "../browser/guest-manager.js";
 import { Events } from "../shared/ipc-channels.js";
@@ -40,6 +48,7 @@ import {
   loadHubChoice,
   saveHubChoice,
 } from "./services/hub-choice.js";
+import { KeepAwakeController } from "./services/keep-awake.js";
 import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
@@ -83,6 +92,9 @@ interface AppState {
   /** What the preload tells the UI (`window.__BAND_HUB__`). Null: the page is its hub's own. */
   rendererHub: { url: string; token?: string } | null;
 }
+
+/** One per process: the blocker outlives the window and is released on quit. */
+const keepAwake = new KeepAwakeController(powerSaveBlocker);
 
 /** powerMonitor listeners survive window close; wire them at most once. */
 let powerEventsWired = false;
@@ -583,6 +595,7 @@ async function bootstrap(): Promise<void> {
   // (default or browser profile) it uses.
   session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
 
+  keepAwake.restore();
   const unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,
     getWebDir: () => state.webDir,
@@ -609,6 +622,7 @@ async function bootstrap(): Promise<void> {
       appPath: app.getAppPath(),
     },
     updates,
+    keepAwake,
   });
   state.unregisterIpc = () => {
     unregisterIpc();

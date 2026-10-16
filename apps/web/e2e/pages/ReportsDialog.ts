@@ -2,7 +2,7 @@
  * Page object for the Reports dialog (issue #425).
  *
  * Same shape as `ResourcesPage` — no dedicated route, the dialog is
- * opened from the Usage icon in the repo-list bottom action bar.
+ * opened from the Usage item in the repo-list overflow (⋮) menu.
  * Owns the locators for the stat cards, the recharts SVG container, and
  * the four breakdown tables.
  *
@@ -11,7 +11,7 @@
  *   - `getByTestId(...)` for owned card / chart / table / button
  *     elements. The BEM-style `reports__*` prefix matches the
  *     `data-testid` attributes set in `ReportsPageContent.tsx`; the
- *     `repo-list__usage-button` testid rides on the Usage icon button.
+ *     `repo-list__usage-item` testid rides on the Usage menu item.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -37,8 +37,12 @@ export class ReportsDialog {
   readonly byWorktree: Locator;
   /** Period select. */
   readonly periodSelect: Locator;
-  /** Usage icon button in the repo-list bottom action bar. */
-  readonly reportsButton: Locator;
+  /** Overflow (⋮) menu trigger and its Usage item in the repo-list bottom action bar. */
+  readonly overflowTrigger: Locator;
+  readonly reportsItem: Locator;
+  /** The removed standalone Usage button, and the desktop-only keep-awake toggle. */
+  readonly legacyUsageButton: Locator;
+  readonly keepAwakeButton: Locator;
 
   constructor(
     private readonly page: Page,
@@ -57,29 +61,45 @@ export class ReportsDialog {
     this.byAgent = page.getByTestId("reports__by-agent");
     this.byWorktree = page.getByTestId("reports__by-worktree");
     this.periodSelect = page.getByTestId("reports__period-select");
-    this.reportsButton = page.getByTestId("repo-list__usage-button");
+    this.overflowTrigger = page.getByTestId("repo-list__overflow-trigger");
+    this.reportsItem = page.getByTestId("repo-list__usage-item");
+    this.legacyUsageButton = page.getByTestId("repo-list__usage-button");
+    this.keepAwakeButton = page.getByTestId("repo-list__keep-awake-button");
   }
 
-  /** Navigate to the dashboard, then click the Usage icon in the repo-list
-   *  bottom action bar. The button is wrapped in a Radix Tooltip trigger whose
-   *  hover/pointer handling can swallow the first click during a fast run, so
-   *  re-click until the dialog actually opens. */
+  /** Navigate to the dashboard, then pick Usage from the repo-list overflow
+   *  menu. The trigger sits in a Radix Tooltip whose hover handling can swallow
+   *  the first click during a fast run, so retry until the dialog opens. */
   async open(): Promise<void> {
-    await test.step("Open Reports via the bottom action bar", async () => {
+    await test.step("Open Reports via the overflow menu", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
       await this.page.waitForLoadState("networkidle");
-      await expect(this.reportsButton).toBeVisible();
+      await expect(this.overflowTrigger).toBeVisible();
       await expect
         .poll(
           async () => {
             if (await this.dialog.isVisible().catch(() => false)) return true;
-            await this.reportsButton.click();
+            if (!(await this.reportsItem.isVisible().catch(() => false))) {
+              await this.overflowTrigger.click();
+            }
+            await this.reportsItem.click({ timeout: 2_000 }).catch(() => {});
             return await this.dialog.isVisible().catch(() => false);
           },
           { timeout: 10_000 },
         )
         .toBe(true);
     });
+  }
+
+  /** Load the dashboard and wait for the footer's overflow trigger. */
+  async gotoDashboard(): Promise<void> {
+    await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
+    await expect(this.overflowTrigger).toBeVisible();
+  }
+
+  async openOverflowMenu(): Promise<void> {
+    await this.overflowTrigger.click();
+    await expect(this.reportsItem).toBeVisible();
   }
 
   async waitForReady(): Promise<void> {

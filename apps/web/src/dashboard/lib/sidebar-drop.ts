@@ -261,9 +261,6 @@ export function moveRefusal(
     return `${hostName(fromHostId)} is offline. Use "Open on another host" in the worktree's menu.`;
   }
   if (repo.kind === "plain") return "A plain folder can't be moved to another host.";
-  if (worktree.name === repo.defaultBranch) {
-    return "The default branch can't be moved while its host is online.";
-  }
   if (repo.allowedHostIds?.every((id) => id === fromHostId)) {
     return `Only available on ${hostName(fromHostId)}`;
   }

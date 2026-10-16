@@ -12,8 +12,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Activity, BarChart3, Globe, MoreVertical, Timer } from "lucide-react";
+import { Activity, BarChart3, Coffee, Globe, MoreVertical, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { useKeepAwake } from "@/hooks/use-keep-awake";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { AccountUsagePopover } from "./AccountUsagePopover";
 import { CronjobsPageContent } from "./CronjobsPageContent";
@@ -138,8 +139,9 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 /**
  * Bottom action row cluster for the repo list (right-hand side).
  *
- * Surfaces Resources and Usage as standalone icon buttons and tucks the
- * remaining actions (Cronjobs, tunnel) behind a 3-dot overflow menu.
+ * Surfaces Resources and the keep-awake switch (desktop app only) as standalone
+ * icon buttons and tucks the remaining actions (Cronjobs, Usage, tunnel) behind
+ * a 3-dot overflow menu.
  * Rendered inside `DashboardShell`'s persistent footer; passed in as a
  * `ReactNode` prop because the `dashboard/` module must not import from
  * `components/`. Must be mounted inside a <ToolbarOverflowProvider>.
@@ -149,6 +151,8 @@ export function ToolbarActionBar() {
   if (!ctx) {
     throw new Error("ToolbarActionBar must be used inside ToolbarOverflowProvider");
   }
+
+  const keepAwake = useKeepAwake();
 
   return (
     <>
@@ -174,13 +178,17 @@ export function ToolbarActionBar() {
             <Timer className="size-4" />
             Cronjobs
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openReports} data-testid="repo-list__usage-item">
+            <BarChart3 className="size-4" />
+            Usage
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={ctx.openTunnel}>
             <Globe
               className={
                 ctx.tunnelStatus === "error"
-                  ? "size-4 text-red-500"
+                  ? "size-4 text-danger"
                   : ctx.tunnelStatus === "running"
-                    ? "size-4 text-green-500"
+                    ? "size-4 text-success"
                     : "size-4"
               }
             />
@@ -204,21 +212,28 @@ export function ToolbarActionBar() {
         </TooltipTrigger>
         <TooltipContent side="top">Resources</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            className="text-muted-foreground"
-            aria-label="Usage"
-            data-testid="repo-list__usage-button"
-            onClick={ctx.openReports}
-          >
-            <BarChart3 className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">Usage</TooltipContent>
-      </Tooltip>
+      {keepAwake.available && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className={keepAwake.enabled ? "text-warning" : "text-muted-foreground"}
+              aria-label="Keep this Mac awake"
+              aria-pressed={keepAwake.enabled}
+              data-testid="repo-list__keep-awake-button"
+              onClick={keepAwake.toggle}
+            >
+              <Coffee className="size-4" fill={keepAwake.enabled ? "currentColor" : "none"} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {keepAwake.enabled
+              ? "Keeping this Mac awake (until Band quits)"
+              : "Keep this Mac awake while Band runs"}
+          </TooltipContent>
+        </Tooltip>
+      )}
     </>
   );
 }

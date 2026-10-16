@@ -253,10 +253,10 @@ test("Repo mode lists each worktree under its repo, and Host mode groups by work
   await expect(sidebar.repoModeCard("svc-alpha")).toBeVisible();
   await expect(sidebar.repoModeCard("lib-gamma")).toBeVisible();
   await expect(sidebar.metaBadge("borko")).toBeVisible();
-  // svc lives on two hosts, so its cards carry a host tag. lib is on one, so its cards don't.
+  // The hub has more than one host, so every card carries its host's name.
   await expect(sidebar.hostTag(sidebar.repoModeCard("svc-alpha"))).toHaveText("This hub");
   await expect(sidebar.hostTag(sidebar.repoModeCard(remote1))).toHaveText("e2e-box");
-  await expect(sidebar.hostTag(sidebar.repoModeCard("lib-gamma"))).toHaveCount(0);
+  await expect(sidebar.hostTag(sidebar.repoModeCard("lib-gamma"))).toHaveText("This hub");
 
   await sidebar.selectMode("host");
   await expect(sidebar.hostHeader("local")).toBeVisible();

@@ -67,7 +67,7 @@ export function ReinstallHomeScreenNotice() {
   return (
     <ToastCard testId="reinstall-home-screen-notice" onClose={dismiss}>
       <div className="flex gap-2.5 pr-6">
-        <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
+        <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
         <div className="min-w-0">
           <p className="font-medium">Add Band to your Home Screen again</p>
           <p className="mt-0.5 text-xs text-muted-foreground">

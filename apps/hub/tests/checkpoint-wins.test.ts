@@ -126,11 +126,6 @@ describe("the default branch", () => {
     writeFileSync(join(bRoot, "b-root.txt"), "B's own local state\n");
     await w.m("checkpoints.take", { worktreeId: mainA });
 
-    // Not moved while its host is up.
-    const refused = await w.mFail("checkpoints.move", { worktreeId: mainA, toHostId: b.hostId });
-    expect(refused.status).toBeGreaterThanOrEqual(400);
-    expect(refused.body).toContain("own checkout");
-
     await w.killWorker(a);
     const moved = await w.m<ContinueReply>("follow.continue", {
       worktreeId: mainA,

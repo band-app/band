@@ -669,18 +669,19 @@ function sectionDiffsId(section: ChangeSection): string {
 
 function ChatLeaf({ params, api }: LayoutPanelProps<ChatLeafParams>) {
   const [tabActive, setTabActive] = useState(api.isActive);
-  const { visible: parentVisible, wsActive } = usePanelVisibility();
+  const { visible: parentVisible, wsActive, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? params.worktreeId;
 
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
     return () => d.dispose();
   }, [api]);
 
-  if (!params.worktreeId || !params.chatId) return null;
+  if (!worktreeId || !params.chatId) return null;
 
   return (
     <ChatLeafContent
-      worktreeId={params.worktreeId}
+      worktreeId={worktreeId}
       chatId={params.chatId}
       visible={parentVisible && tabActive}
       wsActive={wsActive}
@@ -756,7 +757,7 @@ function TerminalLeaf({ params, api, containerApi }: LayoutPanelProps<TermLeafPa
   // `isVisible` (selected in its group), NOT `isActive` (selected AND its group
   // focused): a terminal split beside a focused chat is still on screen and
   // must stay attached.
-  const { visible: parentVisible } = usePanelVisibility();
+  const { visible: parentVisible, worktreeId: hostWorktreeId } = usePanelVisibility();
   const [tabVisible, setTabVisible] = useState(api.isVisible);
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setTabVisible(e.isVisible));
@@ -767,7 +768,7 @@ function TerminalLeaf({ params, api, containerApi }: LayoutPanelProps<TermLeafPa
   // The OUTER tab title tracks the last-focused pane inside the nested split.
   const onTitleChange = useCallback((title: string) => api.setTitle(title), [api]);
 
-  const ws = params.worktreeId;
+  const ws = hostWorktreeId ?? params.worktreeId;
   const tid = params.terminalId;
   // A lone-pane close / ⌘W routes here → close the whole terminal tab (the
   // outer `doCloseLeaf` kills every pane's PTY it owns).
@@ -811,12 +812,13 @@ function TerminalLeaf({ params, api, containerApi }: LayoutPanelProps<TermLeafPa
 // ---------------------------------------------------------------------------
 
 function BrowserLeaf({ params, api }: LayoutPanelProps<BrowserLeafParams>) {
-  const { visible } = usePanelVisibility();
+  const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? params.worktreeId;
 
-  if (!params.worktreeId || !params.browserId) return null;
+  if (!worktreeId || !params.browserId) return null;
 
   const paneParams: BrowserPaneParams = {
-    worktreeId: params.worktreeId,
+    worktreeId,
     browserId: params.browserId,
     wsActive: visible,
     initialUrl: params.initialUrl,
@@ -1224,8 +1226,8 @@ function useActiveFileTracking(
 }
 
 function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
-  const { visible } = usePanelVisibility();
-  const worktreeIdRaw = params.worktreeId ?? "";
+  const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeIdRaw = hostWorktreeId ?? params.worktreeId ?? "";
   const filePathRaw = params.filePath ?? "";
 
   // FileViewer's markdown code/preview toggle and language override are
@@ -2078,12 +2080,8 @@ function SectionDiffFile({
           <span className="truncate font-medium" title={entry.path}>
             {entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
           </span>
-          {!!entry.additions && (
-            <span className="shrink-0 text-green-600 dark:text-green-400">+{entry.additions}</span>
-          )}
-          {!!entry.deletions && (
-            <span className="shrink-0 text-red-600 dark:text-red-400">-{entry.deletions}</span>
-          )}
+          {!!entry.additions && <span className="shrink-0 text-success">+{entry.additions}</span>}
+          {!!entry.deletions && <span className="shrink-0 text-danger">-{entry.deletions}</span>}
         </button>
         <button
           type="button"
@@ -2206,7 +2204,7 @@ function IconTab(props: LayoutTabProps) {
       )}
       <span className={TAB_TITLE_CLASS}>{title}</span>
       {hasBadge && (
-        <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+        <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-info-bg px-1.5 text-xs font-medium text-info">
           {badge}
         </span>
       )}
@@ -4607,8 +4605,8 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   }, [worktreeId]);
 
   const visibilityValue = useMemo(
-    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
-    [visible, wsActive],
+    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false, worktreeId }),
+    [visible, wsActive, worktreeId],
   );
 
   if (!initialData) {

@@ -162,6 +162,9 @@ jobs:
       - name: Check worktree ids are built by toWorktreeId
         run: ./scripts/check-worktree-ids.sh
 
+      - name: Check UI code uses theme tokens, not hardcoded colors
+        run: node scripts/check-theme-tokens.mjs
+
       - name: Check unused exports & dependencies (knip)
         run: pnpm knip
 

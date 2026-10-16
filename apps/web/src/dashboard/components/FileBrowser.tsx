@@ -275,7 +275,7 @@ function EntryNameInput({
         <Icon
           className={
             kind === "directory"
-              ? "size-4 shrink-0 text-blue-600 dark:text-blue-400"
+              ? "size-4 shrink-0 text-highlight"
               : "size-4 shrink-0 text-muted-foreground"
           }
         />
@@ -500,10 +500,12 @@ function TreeNode({
         compact ? "h-[28px] gap-1 pr-3 text-[13px]" : "h-[32px] gap-1.5 pr-4 text-[15px]"
       } ${
         isSelected
-          ? "bg-blue-500/30 text-foreground outline outline-1 -outline-offset-1 outline-blue-400/60 hover:bg-blue-500/30 dark:bg-blue-500/40 dark:outline-blue-400/70 dark:hover:bg-blue-500/40"
+          ? "bg-selection text-selection-foreground outline outline-1 -outline-offset-1 outline-selection-border hover:bg-selection"
           : ""
       } ${isCut ? "opacity-50" : ""} ${
-        isDropTarget ? "bg-blue-500/20 outline outline-1 -outline-offset-1 outline-blue-400/60" : ""
+        isDropTarget
+          ? "bg-drop-target outline outline-1 -outline-offset-1 outline-selection-border"
+          : ""
       }`}
       style={{ paddingLeft: `${depth * indent + basePad}px` }}
     >
@@ -1705,7 +1707,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
             }}
             className={`min-h-0 flex-1 overflow-y-auto py-1 pl-px ${
               dropTarget === ""
-                ? "bg-blue-500/10 outline outline-1 -outline-offset-1 outline-blue-400/60"
+                ? "bg-drop-target outline outline-1 -outline-offset-1 outline-selection-border"
                 : ""
             }`}
           >
@@ -1842,8 +1844,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
           </DialogHeader>
           <div className="flex flex-col gap-2 text-sm">
             {pendingDelete?.kind === "directory" && (
-              <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-                <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
+              <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3">
+                <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
                 <span>
                   The folder and all of its contents will be deleted from disk. This cannot be
                   undone.
@@ -1851,8 +1853,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
               </div>
             )}
             {pendingDelete?.kind === "file" && (
-              <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-                <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
+              <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3">
+                <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
                 <span>The file will be deleted from disk. This cannot be undone.</span>
               </div>
             )}

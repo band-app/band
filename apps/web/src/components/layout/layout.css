@@ -112,7 +112,7 @@
 }
 
 .band-layout-tab:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -180,7 +180,7 @@
 }
 .band-layout-sash:hover::after,
 .band-layout-sash[data-active]::after {
-  background: var(--ring);
+  background: var(--highlight);
 }
 
 /* ---- dragging a tab ---- */
@@ -190,12 +190,12 @@
   z-index: 30;
   pointer-events: none;
   box-sizing: border-box;
-  border: 1px solid var(--ring);
-  background: color-mix(in oklch, var(--ring) 25%, transparent);
+  border: 1px solid var(--focus-ring);
+  background: var(--drop-target);
 }
 .band-layout-drop[data-zone="tabs"] {
   border: none;
-  background: var(--ring);
+  background: var(--focus-ring);
 }
 
 .band-layout-ghost {

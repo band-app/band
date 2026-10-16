@@ -14,13 +14,18 @@ import { createContext, useContext } from "react";
  *                native webview for reasons external to the inner
  *                layout.
  *
- * Both default to `true` so leaf components that mount outside a
+ * - `worktreeId` — the worktree whose dockview hosts the panel. Leaves
+ *                use it instead of the id saved in their params, which
+ *                names the old worktree after a move or continue.
+ *
+ * `visible` and `wsActive` default to `true` so leaf components that mount outside a
  * Provider (e.g. in tests, or Storybook) behave like they're fully
  * visible.
  */
 export interface PanelVisibility {
   visible: boolean;
   wsActive: boolean;
+  worktreeId?: string;
 }
 
 export const PanelVisibilityContext = createContext<PanelVisibility>({

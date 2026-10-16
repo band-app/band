@@ -1,9 +1,10 @@
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
+import { createCodePlugin } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { AnchorHTMLAttributes } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+import { BAND_SHIKI_THEMES } from "./shiki-band-theme";
 
 /**
  * Custom `<a>` element for Streamdown that opens external links in the system
@@ -50,7 +51,7 @@ export const streamdownComponents = { a: ExternalLink };
  */
 export const streamdownPlugins = {
   cjk,
-  code,
+  code: createCodePlugin({ themes: BAND_SHIKI_THEMES }),
   math: createMathPlugin({ singleDollarTextMath: true }),
   mermaid,
 };

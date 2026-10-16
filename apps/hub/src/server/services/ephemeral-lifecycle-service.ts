@@ -653,7 +653,7 @@ export class EphemeralLifecycleService {
     await host.scripts.copyFiles(repoPath, worktreePath).catch((err) => {
       log.warn(`${row.worktreeId}: could not copy worktree files: ${errorText(err)}`);
     });
-    await this.restoreSessions(host, rpc, row, wipDir);
+    await this.restoreSessions(host, rpc, row, wipDir, worktreePath);
     if (worktreePath !== row.worktreePath) this.moveWorktree(row, worktreePath);
 
     this.forget(row);
@@ -699,6 +699,7 @@ export class EphemeralLifecycleService {
     rpc: RemoteRpc,
     row: WorktreeSleepRow,
     wipDir: string,
+    toCwd: string = row.worktreePath,
   ): Promise<void> {
     if (row.sessionIds.length === 0) return;
     let files: SessionFile[];
@@ -719,7 +720,11 @@ export class EphemeralLifecycleService {
       await host.fs.mkdir(posix.dirname(target), { recursive: true });
       await host.fs.writeFile(target, Buffer.from(file.data, "base64"));
     }
-    await rpc.call(METHOD_LIFECYCLE_IMPORT_SESSIONS, { dir: stage });
+    await rpc.call(METHOD_LIFECYCLE_IMPORT_SESSIONS, {
+      dir: stage,
+      fromCwd: row.worktreePath,
+      toCwd,
+    });
   }
 
   /** The checkout moved to another path on the new worker. */

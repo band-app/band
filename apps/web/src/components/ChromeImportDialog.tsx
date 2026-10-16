@@ -264,10 +264,7 @@ export function ChromeImportDialog({
             </div>
 
             {running ? (
-              <p
-                className="text-sm text-amber-600 dark:text-amber-400"
-                data-testid="chrome-import__running-hint"
-              >
+              <p className="text-sm text-warning" data-testid="chrome-import__running-hint">
                 Close Google Chrome completely before importing
               </p>
             ) : null}

@@ -28,12 +28,7 @@ import {
   indentMore,
 } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import {
-  HighlightStyle,
-  LanguageDescription,
-  syntaxHighlighting,
-  syntaxTree,
-} from "@codemirror/language";
+import { LanguageDescription, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import {
   EditorState,
   type Extension,
@@ -51,8 +46,8 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import { loadLanguage } from "./codemirror-setup";
+import { bandCodeHighlightStyle, codeFontSize } from "./codemirror-theme";
 import type { MarkdownPreviewWidth } from "./markdown-preview-width";
 import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
 import { quietFocus } from "./quiet-focus";
@@ -693,52 +688,13 @@ function inlineDecorations(opts: InlineOptions): Extension {
 // Styling
 // ---------------------------------------------------------------------------
 
-/**
- * Syntax colours for fenced code only. Markdown's own tags (heading,
- * emphasis, …) are left unstyled here because the decorations above render
- * them.
- */
-function codeHighlightStyle(isDark: boolean): HighlightStyle {
-  const c = isDark
-    ? {
-        kw: "#c586c0",
-        str: "#ce9178",
-        num: "#b5cea8",
-        cmt: "#6a9955",
-        fn: "#dcdcaa",
-        type: "#4ec9b0",
-        prop: "#9cdcfe",
-      }
-    : {
-        kw: "#af00db",
-        str: "#a31515",
-        num: "#098658",
-        cmt: "#008000",
-        fn: "#795e26",
-        type: "#267f99",
-        prop: "#001080",
-      };
-  return HighlightStyle.define([
-    {
-      tag: [tags.keyword, tags.controlKeyword, tags.moduleKeyword, tags.operatorKeyword],
-      color: c.kw,
-    },
-    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: c.str },
-    { tag: [tags.number, tags.bool, tags.null, tags.atom], color: c.num },
-    { tag: [tags.comment, tags.lineComment, tags.blockComment], color: c.cmt, fontStyle: "italic" },
-    { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: c.fn },
-    { tag: [tags.typeName, tags.className, tags.namespace], color: c.type },
-    { tag: [tags.propertyName, tags.attributeName], color: c.prop },
-  ]);
-}
-
 function livePreviewTheme(isDark: boolean): Extension {
-  const muted = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.45)";
-  const codeBg = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
-  const border = isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)";
+  const muted = "color-mix(in oklab, var(--foreground) 45%, transparent)";
+  const codeBg = "color-mix(in oklab, var(--foreground) 6%, transparent)";
+  const border = "color-mix(in oklab, var(--foreground) 15%, transparent)";
   return EditorView.theme(
     {
-      "&": { height: "100%", fontSize: "14px", backgroundColor: "var(--background)" },
+      "&": { height: "100%", fontSize: codeFontSize(14), backgroundColor: "var(--background)" },
       "&.cm-focused": { outline: "none" },
       ".cm-scroller": {
         overflow: "auto",
@@ -754,10 +710,10 @@ function livePreviewTheme(isDark: boolean): Extension {
       ".cm-line": { padding: "0" },
       "&.cm-focused .cm-cursor": { borderLeftColor: "var(--foreground)" },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-        backgroundColor: isDark ? "rgba(120,160,255,0.25)" : "rgba(0,90,255,0.15)",
+        backgroundColor: "var(--selection)",
       },
-      ".cm-searchMatch": { backgroundColor: "rgba(255, 213, 0, 0.4)", borderRadius: "2px" },
-      ".cm-searchMatch-selected": { backgroundColor: "rgba(255, 150, 50, 0.55)" },
+      ".cm-searchMatch": { backgroundColor: "var(--search-match)", borderRadius: "2px" },
+      ".cm-searchMatch-selected": { backgroundColor: "var(--search-match-current)" },
 
       ".cm-md-heading": { fontWeight: "600", lineHeight: "1.3" },
       ".cm-md-h1": { fontSize: "1.9em", paddingTop: "0.6em", paddingBottom: "0.2em" },
@@ -769,13 +725,13 @@ function livePreviewTheme(isDark: boolean): Extension {
       ".cm-md-em": { fontStyle: "italic" },
       ".cm-md-strike": { textDecoration: "line-through" },
       ".cm-md-code": {
-        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontFamily: "var(--font-code)",
         fontSize: "0.9em",
         backgroundColor: codeBg,
         borderRadius: "4px",
         padding: "0.1em 0.3em",
       },
-      ".cm-md-link": { color: isDark ? "#6cb6ff" : "#0969da", textDecoration: "underline" },
+      ".cm-md-link": { color: "var(--link)", textDecoration: "underline" },
       ".cm-md-syntax": { color: muted },
       ".cm-md-bullet": { color: muted, display: "inline-block", width: "1ch" },
       ".cm-md-task": { margin: "0 0.35em 0 0", verticalAlign: "middle", cursor: "pointer" },
@@ -785,14 +741,14 @@ function livePreviewTheme(isDark: boolean): Extension {
         color: muted,
       },
       ".cm-md-codeblock": {
-        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontFamily: "var(--font-code)",
         fontSize: "0.88em",
         backgroundColor: codeBg,
         padding: "0 1em !important",
       },
       ".cm-md-fence": { color: muted },
       ".cm-md-source-block": {
-        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontFamily: "var(--font-code)",
         fontSize: "0.88em",
       },
       ".cm-md-hr": {
@@ -857,15 +813,15 @@ function livePreviewTheme(isDark: boolean): Extension {
       },
       ".cm-md-table-cell[data-editing=true]": {
         boxShadow: "inset 0 0 0 2px var(--ring)",
-        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontFamily: "var(--font-code)",
         fontSize: "0.92em",
       },
-      ".cm-md-table-cell[aria-invalid=true]": { boxShadow: "inset 0 0 0 2px #e5484d" },
+      ".cm-md-table-cell[aria-invalid=true]": { boxShadow: "inset 0 0 0 2px var(--danger)" },
       ".cm-md-table-strong": { fontWeight: "700" },
       ".cm-md-table-em": { fontStyle: "italic" },
       ".cm-md-table-del": { textDecoration: "line-through" },
       ".cm-md-table-code": {
-        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontFamily: "var(--font-code)",
         fontSize: "0.9em",
         backgroundColor: codeBg,
         borderRadius: "4px",
@@ -922,7 +878,7 @@ function livePreviewTheme(isDark: boolean): Extension {
         borderRadius: "6px",
         backgroundColor: "var(--popover)",
         color: "var(--popover-foreground)",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+        boxShadow: "0 6px 20px var(--shadow-color)",
         fontSize: "13px",
       },
       ".cm-md-table-menu-item": {
@@ -1024,7 +980,7 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
     // Adds GFM (tables, task lists, strikethrough, autolinks) and the
     // list-continuing Enter / marker-aware Backspace keymap.
     markdown({ base: markdownLanguage, codeLanguages }),
-    syntaxHighlighting(codeHighlightStyle(opts.isDark)),
+    syntaxHighlighting(bandCodeHighlightStyle),
     inlineDecorations({ renderBlocks: !!opts.renderBlock, resolveImageUrl: opts.resolveImageUrl }),
     ...(opts.renderBlock
       ? [renderedBlocks({ render: opts.renderBlock, onSave: opts.onSave })]

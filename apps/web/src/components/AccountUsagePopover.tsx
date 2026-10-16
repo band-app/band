@@ -40,9 +40,9 @@ const DANGER_PERCENT = 95;
 const STALE_MS = 60_000;
 
 function toneClass(percent: number): string {
-  if (percent >= DANGER_PERCENT) return "bg-red-500";
-  if (percent >= WARN_PERCENT) return "bg-amber-500";
-  return "bg-emerald-500";
+  if (percent >= DANGER_PERCENT) return "bg-danger";
+  if (percent >= WARN_PERCENT) return "bg-warning";
+  return "bg-success";
 }
 
 /** "2h 7m", "3d 4h" or "12m". */
@@ -159,9 +159,9 @@ export function AccountUsagePopover() {
               variant="ghost"
               className={`gap-1 px-1.5 ${
                 highest >= DANGER_PERCENT
-                  ? "text-red-500"
+                  ? "text-danger"
                   : highest >= WARN_PERCENT
-                    ? "text-amber-500"
+                    ? "text-warning"
                     : "text-muted-foreground"
               }`}
               aria-label="Account limits"

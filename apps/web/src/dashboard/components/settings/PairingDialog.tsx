@@ -263,6 +263,7 @@ export function PairingDialog({
           ) : null}
           {link ? (
             <div className="space-y-3" data-testid="settings__pairing-result">
+              {/* theme-lint-ignore-line: a QR code needs a white quiet zone to scan */}
               <div className="flex justify-center rounded-lg bg-white p-3">
                 <QRCodeSVG
                   value={link}

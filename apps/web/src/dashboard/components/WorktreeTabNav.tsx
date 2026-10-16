@@ -40,7 +40,7 @@ export function WorktreeTabNav({ activeTab, onTabChange, diffFileCount }: Worktr
           >
             <Icon className="size-4" />
             {badge && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-info-bg text-info px-1.5 text-xs font-medium">
                 {diffFileCount}
               </span>
             )}

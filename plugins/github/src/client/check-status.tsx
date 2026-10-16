@@ -6,11 +6,11 @@ const CHECK_STATE: Record<
   CheckState,
   { label: string; icon: typeof CircleCheck; className: string; spin?: boolean }
 > = {
-  failure: { label: "Failed", icon: CircleX, className: "text-red-500" },
-  running: { label: "In progress", icon: Loader, className: "text-amber-500", spin: true },
-  pending: { label: "Queued", icon: CircleDashed, className: "text-amber-500" },
+  failure: { label: "Failed", icon: CircleX, className: "text-danger" },
+  running: { label: "In progress", icon: Loader, className: "text-warning", spin: true },
+  pending: { label: "Queued", icon: CircleDashed, className: "text-warning" },
   cancelled: { label: "Cancelled", icon: CircleSlash, className: "text-muted-foreground" },
-  success: { label: "Successful", icon: CircleCheck, className: "text-green-500" },
+  success: { label: "Successful", icon: CircleCheck, className: "text-success" },
   neutral: { label: "Neutral", icon: CircleMinus, className: "text-muted-foreground" },
   skipped: { label: "Skipped", icon: CircleMinus, className: "text-muted-foreground" },
 };
@@ -43,10 +43,10 @@ export function countChecks(checks: CheckRun[]): CheckCounts {
 }
 
 const REVIEW_STATE: Record<ReviewInfo["state"], { label: string; className: string }> = {
-  open: { label: "Open", className: "border-green-600/40 bg-green-600/10 text-green-600" },
+  open: { label: "Open", className: "border-success/40 bg-success-bg text-success" },
   draft: { label: "Draft", className: "border-border bg-muted text-muted-foreground" },
-  merged: { label: "Merged", className: "border-violet-500/40 bg-violet-500/10 text-violet-500" },
-  closed: { label: "Closed", className: "border-red-500/40 bg-red-500/10 text-red-500" },
+  merged: { label: "Merged", className: "border-merged/40 bg-merged-bg text-merged" },
+  closed: { label: "Closed", className: "border-danger/40 bg-danger-bg text-danger" },
 };
 
 export function ReviewStateBadge({ state }: { state: ReviewInfo["state"] }) {

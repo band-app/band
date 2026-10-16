@@ -33,6 +33,12 @@ export class MoveWorktreePage {
     return this.page.getByTestId("move-worktree__result");
   }
 
+  async openCardMenu(worktreeId: string): Promise<void> {
+    await test.step(`Open the context menu of ${worktreeId}`, async () => {
+      await this.card(worktreeId).click({ button: "right" });
+    });
+  }
+
   async openFromCard(worktreeId: string): Promise<void> {
     await test.step(`Open the move dialog of ${worktreeId}`, async () => {
       await this.card(worktreeId).click({ button: "right" });
