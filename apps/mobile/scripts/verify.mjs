@@ -29,6 +29,7 @@ import {
   stopTurn,
   webEditTabs,
 } from "./seed.mjs";
+import { explorerChange } from "./seed-explorer.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 import { buildRows, copyText } from "../src/lib/chat/rows.ts";
@@ -196,6 +197,7 @@ function checkTabs({ tabs, chats }, params) {
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
  * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
  * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
+ * /explorer-change?name=<file> writes an untracked file into the delta repo's root, as an agent would.
  * /checks-finish-build completes the running job of widgets-feat-checks, and
  * /expect-rerun?run=<id>&failed=1|job=<id> fails unless the fake `gh` got that `gh run rerun`.
  * /subscribe?wt=<id> makes the worktree's chat listen for a timer, and
@@ -236,6 +238,7 @@ function startControlServer(hub, chats, udid, notes) {
         execFileSync("xcrun", ["simctl", "ui", udid, "appearance", mode]);
       }
       else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
+      else if (url.pathname === "/explorer-change") explorerChange(hub, url.searchParams.get("name") ?? undefined);
       else if (url.pathname === "/subscribe") await addSubscription(hub, chats, wt);
       else if (url.pathname === "/expect-subscriptions") {
         const want = Number(url.searchParams.get("n") ?? 0);

@@ -74,7 +74,9 @@ export function pickSimulator() {
     devices[r].filter((d) => (wanted ? d.udid === wanted : d.name.startsWith("iPhone"))),
   );
   const device = wanted
-    ? phones.find((d) => d.udid === wanted)
+    ? Object.values(devices)
+        .flat()
+        .find((d) => d.udid === wanted)
     : (phones.find((d) => d.state === "Booted") ?? phones[0]);
   if (!device) throw new Error("No iPhone simulator found. Install an iOS runtime in Xcode.");
   if (device.state !== "Booted") {

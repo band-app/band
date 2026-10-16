@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { seedExplorer } from "./seed-explorer.mjs";
 import { CHECKS_BRANCHES, CHECKS_REPO } from "./checks.mjs";
 
 /** The showcase turn's reply: every markdown construct the chat renders natively. */
@@ -283,6 +284,8 @@ export const WORKTREES = {
   GAMMA_LISTEN: "gamma-listen",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
+  /** The files, search and changes flows: a repo with a big folder and a dirty working tree (`seed-explorer.mjs`). */
+  DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
   GAMMA_TABS: "gamma-tabs",
   /** acme/widgets, a repo with a GitHub origin: PR checks to read, re-run and fix (k1-k5). */
@@ -320,7 +323,7 @@ async function trpcResult(procedure, res) {
 async function trpcQuery(state, procedure, input) {
   const query = encodeURIComponent(JSON.stringify(input));
   const res = await fetch(`${state.url}/trpc/${procedure}?input=${query}`, {
-    headers: { Authorization: `Bearer ${state.adminToken}` },
+    headers: { Authorization: `Bearer ${state.adminToken}`, Connection: "close" },
   });
   return trpcResult(procedure, res);
 }
@@ -328,7 +331,7 @@ async function trpcQuery(state, procedure, input) {
 async function trpc(state, procedure, input) {
   const res = await fetch(`${state.url}/trpc/${procedure}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
     body: JSON.stringify(input),
   });
   return trpcResult(procedure, res);
@@ -408,6 +411,7 @@ export async function seedHub(state) {
     await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
   }
   await seedTabs(state);
+  await seedExplorer(state, root, { trpc, png: pngBytes() });
   return chats;
 }
 
@@ -467,6 +471,11 @@ export async function sharedTabs(state, worktreeId) {
 
 /** A 96x64 PNG with a stripe, as a `data:` URL, for a prompt's attached image. */
 function pngFile(filename) {
+  return { mediaType: "image/png", filename, url: `data:image/png;base64,${pngBytes().toString("base64")}` };
+}
+
+/** The bytes of a 96x64 PNG with a stripe. */
+export function pngBytes() {
   const width = 96;
   const height = 64;
   const rows = [];
@@ -496,7 +505,7 @@ function pngFile(filename) {
     chunk("IDAT", deflateSync(Buffer.concat(rows))),
     chunk("IEND", Buffer.alloc(0)),
   ]);
-  return { mediaType: "image/png", filename, url: `data:image/png;base64,${png.toString("base64")}` };
+  return png;
 }
 
 function crc32(buf) {
@@ -530,7 +539,7 @@ export async function startTurn(state, chats, worktreeId, text, files) {
   if (!chatId) throw new Error(`No chat for ${worktreeId}`);
   const res = await fetch(`${state.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
     body: JSON.stringify({ worktreeId, text, ...(files && { files }) }),
   });
   if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`);
