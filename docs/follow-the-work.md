@@ -42,7 +42,7 @@ Accepting calls `follow.continue`. The chat then sends the message again to the 
 
 The restore is the same as [Restore on another host](checkpoints.md#restore-on-another-host): the branch, the uncommitted and untracked files, the agent sessions and the chats, terminal records, tasks and subscriptions move to the new worktree id `<repo>-<branch>@<host>`. Then:
 
-1. The move is recorded on the new copy: the host it came from, the host it runs on, the reason (`manual` or `auto`), the checkpoint id and its time. The worktree header and the Host and Origin views show it ("Continued from `<host>`").
+1. The move is recorded on the new copy: the host it came from, the host it runs on, the reason (`manual` or `auto`), the checkpoint id and its time. The sidebar card shows it as an icon whose tooltip reads "Continued from `<host>`". Cards show state as icons with tooltips, not text, and carry the host's name as a small label when the hub has more than one host.
 2. The repo's setup runs on the new copy, the way it does for a new worktree.
 3. The old copy stays where it is, marked superseded.
 
@@ -80,7 +80,7 @@ The result lists them as `backupRefs`. Nothing else is deleted. A live worktree 
 
 ## The default branch
 
-The default-branch worktree of a host is the repo's own folder, and other worktrees depend on it. It can be opened on another host when its host is offline. On the target the repo's checkout is backed up as above, put on the checkpoint's commit, and given the checkpoint's changes. It is not moved while its host is online (`band worktrees move` refuses). Discarding the old copy does not remove the folder: it resets the default branch to the latest of its remote (local changes and untracked files dropped, ignored files kept) and the folder is the repo's checkout again.
+The default-branch worktree of a host is the repo's own folder, and other worktrees depend on it. It can be opened on another host when its host is offline, or moved while its host is online and the folder is idle. On the target the repo's checkout is backed up as above, put on the checkpoint's commit, and given the checkpoint's changes. A move refuses while it has a running agent, a queued message or a terminal, and leaves the source folder in place, superseded and untouched. Discarding the old copy does not remove the folder: it resets the default branch to the latest of its remote (local changes and untracked files dropped, ignored files kept) and the folder is the repo's checkout again.
 
 ## When the original host comes back
 

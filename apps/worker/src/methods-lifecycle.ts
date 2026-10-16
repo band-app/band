@@ -1,9 +1,10 @@
-import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
 import type { SessionFile } from "@band-app/link";
+import { claudeProjectSlug } from "@band-app/shared/claude-session";
 import type { Registrar, WorkerContext } from "./context.ts";
-import { type Params, str, strArray } from "./rpc-util.ts";
+import { optStr, type Params, str, strArray } from "./rpc-util.ts";
 
 /** The most file data one `exportSessions` call returns. Past it the file is left out. */
 const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
@@ -47,6 +48,48 @@ async function walk(dir: string, depth = 0): Promise<string[]> {
   return out;
 }
 
+/** Rewrites `cwd` in one JSON line (Claude's top level, Codex's `payload`). Lines that are not JSON stay as they are. */
+function rewriteCwdLine(line: string, fromCwd: string, toCwd: string): string {
+  if (!line.includes(fromCwd)) return line;
+  try {
+    const obj = JSON.parse(line) as Record<string, unknown>;
+    const payload = obj.payload as Record<string, unknown> | undefined;
+    if (obj.cwd === fromCwd) obj.cwd = toCwd;
+    if (payload && typeof payload === "object" && payload.cwd === fromCwd) payload.cwd = toCwd;
+    return JSON.stringify(obj);
+  } catch {
+    return line;
+  }
+}
+
+/**
+ * A session file as it should sit on this worker when its worktree moved from `fromCwd` to
+ * `toCwd`: Claude's file goes under the slug of the new path, and the recorded `cwd` of both
+ * agents reads the new path. The new relative path comes from a slug that holds only letters,
+ * digits and `-`, so it cannot leave the session root.
+ */
+function rehome(
+  rootName: string,
+  rel: string,
+  data: Uint8Array,
+  fromCwd: string,
+  toCwd: string,
+): { rel: string; data: Uint8Array } {
+  let newRel = rel;
+  if (rootName === "claude") {
+    const slash = rel.indexOf("/");
+    if (slash > 0 && rel.slice(0, slash) === claudeProjectSlug(fromCwd)) {
+      newRel = `${claudeProjectSlug(toCwd)}${rel.slice(slash)}`;
+    }
+  }
+  const text = Buffer.from(data)
+    .toString("utf8")
+    .split("\n")
+    .map((line) => rewriteCwdLine(line, fromCwd, toCwd))
+    .join("\n");
+  return { rel: newRel, data: Buffer.from(text, "utf8") };
+}
+
 /** The files of one session: those whose name holds its id (`<id>.jsonl`, `rollout-...-<id>.jsonl`, `<id>.json`). */
 async function filesOf(sessionId: string): Promise<SessionFile[]> {
   const out: SessionFile[] = [];
@@ -85,6 +128,8 @@ export function registerLifecycleMethods(r: Registrar, ctx: WorkerContext): void
   // The hub stages files with `fs.writeFile` under `dir` as `<root>/<rel>`, then asks for them to be moved.
   r.json("lifecycle.importSessions", async (a: Params) => {
     const stage = await ctx.policy.resolve(str(a, "dir"));
+    const fromCwd = optStr(a, "fromCwd");
+    const toCwd = optStr(a, "toCwd");
     const roots = sessionRoots();
     let moved = 0;
     for (const rootName of await readdir(stage).catch(() => [])) {
@@ -92,9 +137,14 @@ export function registerLifecycleMethods(r: Registrar, ctx: WorkerContext): void
       if (!target) continue;
       const base = join(stage, rootName);
       for (const file of await walk(base)) {
-        const dest = join(target, relative(base, file));
+        const rel = relative(base, file).split(sep).join("/");
+        let out: { rel: string; data: Uint8Array } = { rel, data: await readFile(file) };
+        if (fromCwd && toCwd && fromCwd !== toCwd) {
+          out = rehome(rootName, rel, out.data, fromCwd, toCwd);
+        }
+        const dest = join(target, out.rel);
         await mkdir(dirname(dest), { recursive: true });
-        await cp(file, dest);
+        await writeFile(dest, out.data);
         moved++;
       }
     }

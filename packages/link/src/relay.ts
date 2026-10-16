@@ -124,6 +124,16 @@ export const METHOD_LIFECYCLE_EXPORT_SESSIONS = "lifecycle.exportSessions";
 /** Hub to worker: moves staged session files into the agent session directories. */
 export const METHOD_LIFECYCLE_IMPORT_SESSIONS = "lifecycle.importSessions";
 
+/** `lifecycle.importSessions` parameters. Without the cwds the files land where they were exported from. */
+export interface ImportSessionsParams {
+  /** Worker path of the staged files, as `<root>/<rel>`. */
+  dir: string;
+  /** The worktree path the sessions were recorded in. */
+  fromCwd?: string;
+  /** The worktree path on this worker. With `fromCwd`, session files are re-homed to it. */
+  toCwd?: string;
+}
+
 export interface SessionFile {
   /** The agent session directory the file came from, such as `claude` or `extra0`. */
   root: string;

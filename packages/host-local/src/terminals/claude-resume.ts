@@ -1,6 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { claudeProjectSlug } from "@band-app/shared/claude-session";
 
 /**
  * Cold-restore agent resume, scoped to Claude Code only (see the terminal
@@ -30,9 +31,9 @@ export function isResumableClaudeCommand(command: string | undefined): boolean {
   return CLAUDE_COMMAND_PATTERN.test(trimmed) && !CLAUDE_RESUME_FLAG_PATTERN.test(trimmed);
 }
 
-/** Claude Code's own convention: `~/.claude/projects/<cwd with "/" -> "-">/<uuid>.jsonl`. */
+/** Claude Code's own convention: `~/.claude/projects/<slug of cwd>/<uuid>.jsonl`. */
 function claudeProjectDir(cwd: string): string {
-  return join(homedir(), ".claude", "projects", cwd.replaceAll("/", "-"));
+  return join(homedir(), ".claude", "projects", claudeProjectSlug(cwd));
 }
 
 /** The newest Claude Code session transcript for `cwd`, if any. */

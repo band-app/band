@@ -4,8 +4,7 @@ import type { WorktreeEntry } from "../src/dashboard/lib/sidebar-grouping";
 import type { RepoInfo, WorktreeInfo } from "../src/dashboard/types";
 
 // Pure functions with no state to fake: the rules that decide whether a worktree dropped on a host
-// may open the "Open on another host" dialog. A repo's default branch with its host up has no
-// worktree in the e2e setup (a worker's main is a hidden cache), so the rule is checked here.
+// may open the "Open on another host" dialog.
 
 const hosts = [
   { id: "a", name: "box-a", status: "online" },
@@ -26,10 +25,8 @@ describe("moveRefusal", () => {
     expect(moveRefusal(entry({}), "b", { hosts, isAdmin: false })).toBeNull();
   });
 
-  it("refuses the default branch while its host is up", () => {
-    expect(moveRefusal(entry({ name: "main" }), "b", { hosts, isAdmin: true })).toContain(
-      "default branch",
-    );
+  it("allows the default branch while its host is up", () => {
+    expect(moveRefusal(entry({ name: "main" }), "b", { hosts, isAdmin: true })).toBeNull();
   });
 
   it("refuses a worktree on the hub's own machine and a drop onto it", () => {

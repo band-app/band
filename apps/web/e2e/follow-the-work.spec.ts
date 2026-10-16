@@ -426,10 +426,74 @@ test("the sidebar card and the Host view show where the work came from, the work
   await app.waitForReady();
 
   await expect(follow.headerContinuedFrom).toHaveCount(0);
-  await expect(follow.cardContinuedFrom(continuedId)).toContainText("Continued from box-a");
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
+    "aria-label",
+    /^Continued from box-a/,
+  );
 
   await grouping.selectMode("host");
-  await expect(follow.cardContinuedFrom(continuedId)).toContainText("Continued from box-a");
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
+    "aria-label",
+    /^Continued from box-a/,
+  );
+});
+
+test("the continued worktree opens its chat on the new host with its history, even from a stale saved layout (S5, S6, S8)", async ({
+  page,
+}) => {
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  const app = new WorktreePage(page, server.url, TOKEN);
+  const checkpoints = new CheckpointsPage(page);
+  const grouping = new SidebarGroupingPage(page);
+  const { chats } = await trpcQuery<{ chats: Array<{ id: string }> }>(
+    server.url,
+    TOKEN,
+    "chats.list",
+    { worktreeId: continuedId },
+  );
+  const chatId = chats[0]?.id ?? "";
+  expect(chatId).not.toBe("");
+
+  // A layout saved before the move names the old worktree in the panel's params.
+  await app.seedGlobalLayout(continuedId, {
+    grid: {
+      root: {
+        type: "branch",
+        data: [
+          { type: "leaf", data: { views: [chatId], activeView: chatId, id: "1" }, size: 1000 },
+        ],
+        size: 800,
+      },
+      width: 1000,
+      height: 800,
+      orientation: "HORIZONTAL",
+    },
+    panels: {
+      [chatId]: {
+        id: chatId,
+        contentComponent: "chat",
+        tabComponent: "chat",
+        title: "Chat",
+        params: { worktreeId: `app-feat-one@${a.hostId}`, chatId },
+      },
+    },
+    activeGroup: "1",
+  });
+  await app.goto(continuedId);
+  await app.waitForReady();
+
+  await expect(chat.chatTab(chatId)).toBeVisible();
+  await expect(chat.userMessage("first message")).toBeVisible({ timeout: 30_000 });
+
+  // The cards show icons with names, not status text, and each carries its host's name.
+  await grouping.selectMode("repo");
+  await expect(checkpoints.supersededBadge(openId)).toHaveAttribute(
+    "aria-label",
+    `Superseded by ${continuedId}`,
+  );
+  await expect(checkpoints.card(openId)).not.toContainText("Superseded");
+  await expect(checkpoints.card(continuedId)).not.toContainText("Continued from");
+  await expect(grouping.hostTag(checkpoints.card(continuedId))).toHaveText("box-b");
 });
 
 test("when A returns with a newer change, the old copy is Diverged and the change can be brought over (S4)", async ({
@@ -454,11 +518,11 @@ test("when A returns with a newer change, the old copy is Diverged and the chang
   await app.waitForReady();
   await expect(follow.divergedBadge(oldId)).toBeVisible();
 
-  // With A online again, its own checkout of main is not offered for a move.
+  // With A online again, its own checkout of main is offered for a move too.
   const checkpoints = new CheckpointsPage(page);
   await checkpoints.openCardMenu(soloMainId);
   await expect(checkpoints.cardMenu).toBeVisible();
-  await expect(checkpoints.moveItem()).toHaveCount(0);
+  await expect(checkpoints.moveItem()).toBeVisible();
   await checkpoints.closeCardMenu();
   await follow.openDivergence(oldId);
   await expect(follow.panelFile("after.txt")).toBeVisible();
