@@ -12,6 +12,7 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 import { subscribeToastObstructions, toastObstructions } from "../../lib/toast-obstructions";
 import { INFO_NOTICE_MS, type Notice } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
+import { HubVersionNotice } from "./HubVersionNotice";
 import { ReinstallHomeScreenNotice } from "./ReinstallHomeScreenNotice";
 import { ThisComputerWorkerPrompt } from "./ThisComputerWorkerPrompt";
 import { ToastCard } from "./ToastCard";
@@ -42,6 +43,7 @@ export function ToastHost() {
       className="pointer-events-none fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 z-50 flex flex-col-reverse gap-2 sm:left-auto sm:w-80"
     >
       <UpdateToast />
+      <HubVersionNotice />
       <ThisComputerWorkerPrompt />
       <ReinstallHomeScreenNotice />
       {notices.map((notice) => (
