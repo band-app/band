@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { claudeProjectSlug } from "@band-app/shared/claude-session";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -131,10 +132,10 @@ describe("terminal cold restore", () => {
 
     // A fake Claude Code session transcript for this cwd — Claude Code's own
     // convention: one file per session under
-    // ~/.claude/projects/<cwd with "/" -> "-">/<uuid>.jsonl. `homedir()`
+    // ~/.claude/projects/<slug of cwd>/<uuid>.jsonl. `homedir()`
     // inside the daemon resolves to `tmpHome`, same as the server.
     const sessionId = "11111111-2222-3333-4444-555555555555";
-    const claudeProjectDir = join(tmpHome, ".claude", "projects", claudeCwd.replaceAll("/", "-"));
+    const claudeProjectDir = join(tmpHome, ".claude", "projects", claudeProjectSlug(claudeCwd));
     mkdirSync(claudeProjectDir, { recursive: true });
     writeFileSync(join(claudeProjectDir, `${sessionId}.jsonl`), "");
 
