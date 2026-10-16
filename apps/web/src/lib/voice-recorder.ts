@@ -6,6 +6,8 @@
  * `startRecording()` call, which the mic button's click makes, never earlier.
  */
 
+import { isDesktop } from "./is-desktop";
+
 const MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
@@ -44,14 +46,48 @@ export class MicError extends Error {
   }
 }
 
+export interface MicPlatform {
+  userAgent: string;
+  maxTouchPoints: number;
+  desktopApp: boolean;
+}
+
+const BLOCKED = "Microphone access is blocked.";
+
+/** The "blocked" text for the shell and platform the page runs in. */
+export function micBlockedMessageFor({
+  userAgent,
+  maxTouchPoints,
+  desktopApp,
+}: MicPlatform): string {
+  if (desktopApp) {
+    return `${BLOCKED} Allow Band in System Settings > Privacy & Security > Microphone, then tap the mic again.`;
+  }
+  // iPadOS Safari reports a Mac user agent, so touch support tells it apart.
+  const ios =
+    /iPhone|iPad|iPod/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1);
+  if (ios) {
+    return `${BLOCKED} Allow it for this site from the address bar's site settings, and check Settings > your browser app > Microphone. Then tap the mic again.`;
+  }
+  if (/Android/.test(userAgent)) {
+    return `${BLOCKED} Tap the lock icon in the address bar > Permissions > Microphone and allow it. Then tap the mic again.`;
+  }
+  return `${BLOCKED} Allow the microphone for this site in your browser's settings (the lock icon in the address bar), then tap the mic again.`;
+}
+
+function micBlockedMessage(): string {
+  return micBlockedMessageFor({
+    userAgent: navigator.userAgent,
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
+    desktopApp: isDesktop,
+  });
+}
+
 export function describeMicError(err: unknown): MicError {
   if (err instanceof MicError) return err;
   const name = err instanceof DOMException || err instanceof Error ? err.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return new MicError(
-      "denied",
-      "Microphone access is blocked. Allow the microphone for this site in your browser's settings (the lock icon in the address bar). In the desktop app, allow Band in System Settings > Privacy & Security > Microphone. Then tap the mic again.",
-    );
+    return new MicError("denied", micBlockedMessage());
   }
   if (name === "NotFoundError" || name === "OverconstrainedError") {
     return new MicError("no-device", "No microphone was found on this device.");

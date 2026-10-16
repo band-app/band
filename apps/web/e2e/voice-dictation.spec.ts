@@ -214,3 +214,25 @@ test.describe("a denied microphone", () => {
     await expect(chat.micListening).toHaveCount(0);
   });
 });
+
+test.describe("a denied microphone on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("the error takes its own line and the composer's button row keeps its height", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () =>
+        Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+    });
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    await chat.goto(WS);
+    await chat.waitForReady();
+    const before = await chat.micRowHeight();
+    await chat.tapMic();
+    await expect(chat.micError).toBeVisible();
+    expect(await chat.micRowHeight()).toBe(before);
+    expect(await chat.micErrorWidth()).toBeGreaterThan(300);
+    await page.screenshot({ path: testInfo.outputPath("mic-blocked-390.png") });
+  });
+});
