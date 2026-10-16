@@ -8,7 +8,7 @@
  * Code keeps reading `localStorage` (or `clientStorage.getItem`) at mount, and
  * writes through `clientStorage.setItem` / `removeItem`. Before the first read,
  * the dashboard hydrates: `hydrateGlobal()` before the app shell mounts and
- * `hydrateWorktree(id)` before a worktree's dockview mounts.
+ * `hydrateWorktree(id)` before a worktree's layout mounts.
  */
 
 import {

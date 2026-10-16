@@ -133,7 +133,7 @@ function perWorktreeLeaf(prefix: string, parts: KeyPart[]): KeyRule {
   };
 }
 
-/** The center dockview's tab list, shared by every device. */
+/** The center layout's tab list, shared by every device. */
 export const CENTER_TABS_PREFIX = "band:center-tabs:";
 
 const RULES: KeyRule[] = [

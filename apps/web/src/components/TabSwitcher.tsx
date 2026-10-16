@@ -11,7 +11,7 @@ import {
 export interface SwitcherItem {
   id: string;
   title: string;
-  /** Dockview component name: chat, term, browser, file or diff. */
+  /** Layout component name: chat, term, browser, file or diff. */
   kind: string;
   /** The panel's params: the owning worktree and the chat or terminal id. */
   params?: { worktreeId?: string; chatId?: string; terminalId?: string };

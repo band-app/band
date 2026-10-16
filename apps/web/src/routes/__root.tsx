@@ -34,7 +34,7 @@ import {
 } from "../components/DesktopTitleBar";
 import { MobileWorktreeShell } from "../components/MobileWorktreeShell";
 import { RightSidepanel } from "../components/RightSidepanel";
-import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
+import { crossPanelHandlers, SharedWorktreeLayout } from "../components/SharedWorktreeLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTitleBarOffset } from "../hooks/useIsFullscreen";
@@ -482,7 +482,7 @@ function AppShell() {
   // Listen for `band open` events from the SSE stream and route the
   // dashboard to the requested file. The actual dispatch logic lives
   // in `lib/dispatch-open-file.ts` so it can be tested in isolation
-  // without spinning up the dockview.
+  // without spinning up the layout.
   //
   // Mobile / narrow web: short-circuit here. `band open` is a desktop
   // developer affordance — the mobile worktree layout's tab + file
@@ -513,10 +513,10 @@ function AppShell() {
   }, [worktreePath]);
 
   // ──────────────────────────────────────────────────────────────────────
-  // Repo-list sidebar (separate from the dockview). Collapsing/expanding
+  // Repo-list sidebar (separate from the layout). Collapsing/expanding
   // the sidebar Panel via its imperative handle hides/shows the list WITHOUT
-  // unmounting the sibling Panel that holds <SharedDockviewLayout /> — so the
-  // dockview (and every cached worktree's chat/terminal/browser + live PTYs)
+  // unmounting the sibling Panel that holds <SharedWorktreeLayout /> — so the
+  // layout (and every cached worktree's chat/terminal/browser + live PTYs)
   // survives a toggle. Width is persisted as a percentage; the last-left
   // visibility is persisted separately.
   // ──────────────────────────────────────────────────────────────────────
@@ -568,7 +568,7 @@ function AppShell() {
   );
 
   // The right sidepanel lives in a NESTED [center | rightpanel] group inside the
-  // main column, BELOW the worktree title bar — so it aligns with the dockview
+  // main column, BELOW the worktree title bar — so it aligns with the layout
   // content, not the title-bar row. This is that inner group's initial layout.
   const centerDefaultLayout = useMemo(() => {
     if (rightInit.current.collapsed) return { center: 100, rightpanel: 0 };
@@ -844,7 +844,7 @@ function AppShell() {
 
   // Mobile: the route's own page (the full-screen repo list on `/`) and,
   // over it, the worktree layout, which keeps every visited worktree
-  // mounted across route changes the way `SharedDockviewLayout` does below.
+  // mounted across route changes the way `SharedWorktreeLayout` does below.
   if (!useDesktopLayout) {
     return (
       <>
@@ -911,9 +911,9 @@ function AppShell() {
               />
               <Panel id="main" elementRef={mainElRef} minSize="20%">
                 {/* Stays mounted across sidebar toggles — never unmount this
-                  subtree or the dockview tears down all cached worktrees. */}
-                {/* The dockview column and the right sidepanel share one
-                  full-height row. There is no title bar over the dockview
+                  subtree or the layout tears down all cached worktrees. */}
+                {/* The layout column and the right sidepanel share one
+                  full-height row. There is no title bar over the layout
                   column: its tab strip is the top row, level with the
                   sidepanel's own header row (tabs, open in editor, collapse).
                   With no worktree active there is no tab strip, so a plain
@@ -931,11 +931,11 @@ function AppShell() {
                     <Panel id="center" elementRef={centerElRef} minSize="30%">
                       <div className="h-full flex flex-col min-w-0 overflow-hidden">
                         {!activeWorktreeId && <CenterDragBar />}
-                        {/* `relative` anchors SharedDockviewLayout's `absolute
-                          inset-0` overlay to the dockview area. */}
+                        {/* `relative` anchors SharedWorktreeLayout's `absolute
+                          inset-0` overlay to the layout area. */}
                         <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
                           <Outlet />
-                          <SharedDockviewLayout />
+                          <SharedWorktreeLayout />
                           <BrowserHostBridge />
                           <BrowserProfileSweeper />
                         </div>

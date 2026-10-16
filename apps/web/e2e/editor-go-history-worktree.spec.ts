@@ -70,7 +70,7 @@ const B_TWO = "b-two.ts";
 const B_ONE_TEXT = "worktree B file one";
 const B_TWO_TEXT = "worktree B file two";
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders. The bug only manifests in the desktop layout, where multiple
 // worktrees are alive at once under `MultiWorktreePanelHost`.
 test.use({ viewport: { width: 1280, height: 800 } });

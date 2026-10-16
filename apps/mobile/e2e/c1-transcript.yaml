@@ -81,7 +81,7 @@ name: S1 chat transcript renders the seeded history
 - assertVisible:
     text: "Readers learn the radix is always ten"
 - takeScreenshot: s1-table-scrolled
-# A file path opens the placeholder for the file viewer.
+# A file path opens the file viewer on that file.
 # A link inside a paragraph is its own element on iOS, named by its text. Maestro counts text
 # clipped under the headers above the list as visible, so the scroll above can stop with the
 # heading and this link hidden there; a short swipe brings them into the middle of the list.
@@ -91,11 +91,16 @@ name: S1 chat transcript renders the seeded history
     duration: 600
 - tapOn:
     text: "src/parser\\.ts:12"
+- extendedWaitUntil:
+    visible:
+      id: file__screen
+    timeout: 10000
 - assertVisible:
-    text: ".*file viewer comes in a later version.*"
+    id: file__title
+    text: parser.ts
 - takeScreenshot: s1-file-link
 - tapOn:
-    text: OK
+    id: file__back
 - scrollUntilVisible:
     element:
       id: chat__image

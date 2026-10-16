@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -14,9 +15,11 @@ import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
 import { StateIcon } from "../../components/state-icon";
+import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
 import { ViewsSheet, type ViewsSheetItem } from "../../components/views-sheet";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
+import { openChanges, openExplorer } from "../../lib/files/open";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
 import { findRow, type WorktreeRow } from "../../lib/worktree-list";
@@ -89,10 +92,10 @@ const WorktreeChats = memo(function WorktreeChats({
   openChat?: string;
 }) {
   const tabs = useWorktreeTabs(worktreeId);
-  const { select, close, move, rename, create } = tabs;
+  const { select, close, move, rename, create, createTerminal } = tabs;
   const actions = useMemo(
-    () => ({ select, close, move, rename, create }),
-    [select, close, move, rename, create],
+    () => ({ select, close, move, rename, create, createTerminal }),
+    [select, close, move, rename, create, createTerminal],
   );
   const [sheet, setSheet] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -153,18 +156,20 @@ const WorktreeChats = memo(function WorktreeChats({
         router.push({ pathname: "/worktree/[id]/checks", params: { id: worktreeId, branch } }),
       ),
     },
+    { key: "explorer", title: "Explorer", onPress: afterSheet(() => openExplorer(worktreeId)) },
+    { key: "changes", title: "Changes", onPress: afterSheet(() => openChanges(worktreeId)) },
   ];
   const actionItems: ViewsSheetItem[] = [
     { key: "new-chat", title: "New chat", onPress: afterSheet(() => setPicker(true)) },
     {
       key: "rename-chat",
       title: "Rename chat",
-      disabled: !current,
+      disabled: !current || current.kind === "term",
       onPress: afterSheet(() => current && renameTab(current, actions)),
     },
     {
-      key: "close-chat",
-      title: "Close chat",
+      key: "close-tab",
+      title: "Close tab",
       destructive: true,
       disabled: !current,
       onPress: afterSheet(() => current && closeTab(actions, current.id)),
@@ -241,7 +246,7 @@ const WorktreeChats = memo(function WorktreeChats({
               <NeighbourPage tab={prevTab} direction="prev" width={width} height={pageHeight} />
             ) : null}
             <View style={{ width, height: pageHeight }}>
-              {mounted.map(({ id }) => {
+              {mounted.map(({ id, kind }) => {
                 const shown = id === tabs.active;
                 return (
                   <View
@@ -251,12 +256,16 @@ const WorktreeChats = memo(function WorktreeChats({
                     accessibilityElementsHidden={!shown}
                     importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
                   >
-                    <ChatView
-                      chatId={id}
-                      worktreeId={worktreeId}
-                      active={shown}
-                      chips={shown ? chips : null}
-                    />
+                    {kind === "term" ? (
+                      <TerminalPane terminalId={id} worktreeId={worktreeId} active={shown} />
+                    ) : (
+                      <ChatView
+                        chatId={id}
+                        worktreeId={worktreeId}
+                        active={shown}
+                        chips={shown ? chips : null}
+                      />
+                    )}
                   </View>
                 );
               })}
@@ -272,7 +281,7 @@ const WorktreeChats = memo(function WorktreeChats({
       ) : (
         <Centered>
           <Body testID="worktree__no-chat">
-            This worktree has no chat yet. Open the tab sheet to start one.
+            This worktree has no tab yet. Open the tab sheet to start a chat or a terminal.
           </Body>
         </Centered>
       )}
@@ -287,6 +296,10 @@ const WorktreeChats = memo(function WorktreeChats({
         onNew={() => {
           pickerAfterSheet.current = true;
           setSheet(false);
+        }}
+        onNewTerminal={() => {
+          setSheet(false);
+          actions.createTerminal().catch(() => Alert.alert("Couldn't open a terminal"));
         }}
         onDismiss={() => {
           if (!pickerAfterSheet.current) return;

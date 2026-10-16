@@ -1,11 +1,3 @@
-import {
-  type DockviewApi,
-  DockviewReact,
-  type DockviewReadyEvent,
-  type DockviewTheme,
-  type IDockviewPanelHeaderProps,
-  type IDockviewPanelProps,
-} from "dockview";
 import { Columns2, Rows2, X } from "lucide-react";
 import type React from "react";
 import {
@@ -24,30 +16,32 @@ import {
   cycleGridGroups,
   selectNeighbourBeforeRemove,
   splitDirectionForKey,
-} from "../lib/dockview-section-actions";
+} from "../lib/layout-section-actions";
 import { newTerminalId } from "../lib/leaf-instance-ids";
 import { disposeTerminal } from "../lib/terminal-cache";
 import {
   readNestedLayout,
   registerPaneOwner,
-  registerTerminalSplitDockview,
+  registerTerminalSplitLayout,
   unregisterPaneOwner,
   writeNestedLayout,
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
+import { type LayoutPanelProps, LayoutReact, type LayoutTabProps } from "./layout/LayoutView";
+import type { AddPanelOptions, LayoutApi } from "./layout/model";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR (mirrors the
-// outer dockview's lazy import).
+// outer layout's lazy import).
 const TerminalPanel = lazy(() =>
   import("./TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
 );
 
 // ---------------------------------------------------------------------------
-// A nested dockview per terminal LEAF. Each pane is a single-panel group that
+// A nested layout per terminal LEAF. Each pane is a single-panel group that
 // renders one `TerminalPanel` (its own terminalId + PTY). Splits create new
 // GROUPS (never tabs), so no group ever holds >1 tab — panes, not tabs. Panes
-// are drag-reorderable (dockview's native tab drag) and resizable (sashes);
+// are drag-reorderable (the layout's native tab drag) and resizable (sashes);
 // ⌘D / ⌘⇧D split right / below, ⌘[ / ⌘] cycle. The OUTER terminal tab's title
 // tracks the last-focused pane's title.
 // ---------------------------------------------------------------------------
@@ -61,15 +55,12 @@ interface PaneParams {
   autoFocus?: boolean;
 }
 
-const nestedTheme: DockviewTheme = {
-  name: "band",
-  className: "dockview-theme-band dockview-terminal-split",
-};
+const NESTED_CLASS = "band-layout--split";
 
 // Per-pane header actions (close + split-in-direction), keyed by the nested
-// dockview's `api.id` so the STABLE pane-header component resolves to the right
+// the layout's `api.id` so the STABLE pane-header component resolves to the right
 // leaf's handlers (mirrors the `leafActionsByApiId` pattern in the outer
-// dockview). Split acts on the pane the icon belongs to, not the active pane.
+// layout). Split acts on the pane the icon belongs to, not the active pane.
 interface PaneActions {
   close: (terminalId: string) => void;
   split: (terminalId: string, direction: "right" | "below") => void;
@@ -80,8 +71,8 @@ const paneActionsByApiId = new Map<string, { current: PaneActions }>();
 // Pane content
 // ---------------------------------------------------------------------------
 
-function TerminalPanePanel({ params, api }: IDockviewPanelProps<PaneParams>) {
-  // The nested dockview lives inside the outer TerminalLeaf, which lives inside
+function TerminalPanePanel({ params, api }: LayoutPanelProps<PaneParams>) {
+  // The nested layout lives inside the outer TerminalLeaf, which lives inside
   // the outer panel's `PanelVisibilityContext` — so this reports the OUTER
   // leaf's visibility. Panes are 1-per-group, so a pane is visible exactly when
   // the terminal tab is the shown leaf; that's the right gate for attach/park.
@@ -116,15 +107,15 @@ function TerminalPanePanel({ params, api }: IDockviewPanelProps<PaneParams>) {
 
 // ---------------------------------------------------------------------------
 // Pane header (the nested `tabComponent`). No title — just a thin, transparent
-// strip that IS dockview's drag source (grab it to reorder the pane). A small
+// strip that IS the layout's drag source (grab it to reorder the pane). A small
 // action cluster sits in the top-left corner: split right (vertical), split
 // down (horizontal), and close. The cluster is hidden by default and revealed
 // when the pane is active OR the header is hovered (CSS in
-// `dockview-theme.css`). When there's a single pane the whole header is hidden
-// via CSS (`.dockview-terminal-split--single`).
+// `layout/layout.css`). When there's a single pane the whole header is hidden
+// via CSS (`.band-layout-split--single`).
 // ---------------------------------------------------------------------------
 
-function TerminalPaneHeader(props: IDockviewPanelHeaderProps<PaneParams>) {
+function TerminalPaneHeader(props: LayoutTabProps<PaneParams>) {
   const apiId = props.containerApi.id;
   const terminalId = props.params.terminalId;
 
@@ -136,7 +127,7 @@ function TerminalPaneHeader(props: IDockviewPanelHeaderProps<PaneParams>) {
     const actions = paneActionsByApiId.get(apiId)?.current;
     if (actions) fn(actions);
   };
-  // A mousedown on a button must not start a dockview tab drag.
+  // A mousedown on a button must not start a layout tab drag.
   const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
 
   // This pane's own agent state, keyed by its terminal id.
@@ -200,7 +191,7 @@ const nestedTabComponents = { pane: TerminalPaneHeader };
 // ---------------------------------------------------------------------------
 // Layout (de)serialization for the nested split — params are re-derived from
 // the panel id on restore (panel id === terminalId), so no stale callbacks or
-// metadata persist. Mirrors the outer dockview's strip/reinject dance.
+// metadata persist. Mirrors the outer layout's strip/reinject dance.
 // ---------------------------------------------------------------------------
 
 function isNestedLayout(obj: unknown): boolean {
@@ -234,7 +225,7 @@ interface TerminalSplitLeafProps {
   /** The OUTER leaf id (=== the primary/first pane's terminalId). */
   leafId: string;
   /** The primary pane's terminalId — its PTY was already spawned by the outer
-   *  dockview when the terminal tab was created, so the nested dockview only
+   *  layout when the terminal tab was created, so the nested layout only
    *  RENDERS it (no `terminal.create`). */
   primaryTerminalId: string;
   /** Metadata for the primary pane (from worktree terminal config). */
@@ -253,12 +244,12 @@ interface TerminalSplitLeafProps {
 }
 
 function addPane(
-  api: DockviewApi,
+  api: LayoutApi,
   params: PaneParams,
-  position?: Parameters<DockviewApi["addPanel"]>[0]["position"],
+  position?: AddPanelOptions["position"],
   // `inactive` adds the pane WITHOUT activating/focusing it. Crucial for the
   // initial seed/restore: an active add focuses the nested group, and that
-  // focus bubbles up so the OUTER dockview activates the terminal panel —
+  // focus bubbles up so the OUTER layout activates the terminal panel —
   // stealing default-active from the chat leaf. Only a user-initiated split
   // (or an explicit new-terminal autoFocus) should grab focus.
   inactive?: boolean,
@@ -271,8 +262,7 @@ function addPane(
     params,
     ...(position ? { position } : {}),
     ...(inactive ? { inactive: true } : {}),
-    // biome-ignore lint/suspicious/noExplicitAny: dockview addPanel position typing
-  } as any);
+  });
 }
 
 export function TerminalSplitLeaf({
@@ -288,7 +278,7 @@ export function TerminalSplitLeaf({
   onActivePaneTitleChange,
   onCloseLeaf,
 }: TerminalSplitLeafProps) {
-  const apiRef = useRef<DockviewApi | null>(null);
+  const apiRef = useRef<LayoutApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isRestoringRef = useRef(false);
   const normalizingRef = useRef(false);
@@ -334,7 +324,7 @@ export function TerminalSplitLeaf({
     const el = containerRef.current;
     const api = apiRef.current;
     if (!el || !api) return;
-    el.classList.toggle("dockview-terminal-split--single", api.groups.length <= 1);
+    el.classList.toggle("band-layout-split--single", api.groups.length <= 1);
   }, []);
 
   // ---- title propagation ----
@@ -363,9 +353,7 @@ export function TerminalSplitLeaf({
     unregisterPaneOwner(terminalId);
     requestAnimationFrame(() => {
       const active = api.activePanel;
-      active?.view.content.element
-        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-        ?.focus();
+      active?.element.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")?.focus();
     });
   }, []);
   const closePaneRef = useRef(closePane);
@@ -424,11 +412,10 @@ export function TerminalSplitLeaf({
   }, []);
 
   const onReady = useCallback(
-    (event: DockviewReadyEvent) => {
-      const api = event.api;
+    (api: LayoutApi) => {
       apiRef.current = api;
       // Register this leaf's pane actions (close + split) under the nested
-      // dockview's id. Forward through the refs rather than snapshotting them:
+      // the layout's id. Forward through the refs rather than snapshotting them:
       // `splitPane` is re-created when `mobile` flips, so a captured closure
       // would leave the header icons calling a stale callback after a viewport
       // crossing.
@@ -444,8 +431,7 @@ export function TerminalSplitLeaf({
       let restored = false;
       if (saved && isNestedLayout(saved)) {
         try {
-          // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON typing
-          api.fromJSON(reinjectParams(saved, worktreeId) as any);
+          api.fromJSON(reinjectParams(saved, worktreeId));
           restored = api.panels.length > 0;
         } catch {
           api.clear();
@@ -454,8 +440,8 @@ export function TerminalSplitLeaf({
       // Ensure the primary pane exists; seed a fresh single pane when there was
       // no (valid) saved layout. Add it INACTIVE then programmatically
       // `setActive()`: an active `addPanel` calls `focusContent()`, moving DOM
-      // focus into the nested dockview — that focusin bubbles so the OUTER
-      // dockview activates the terminal panel, stealing default-active from the
+      // focus into the nested layout — that focusin bubbles so the OUTER
+      // layout activates the terminal panel, stealing default-active from the
       // chat leaf on a fresh worktree. The inactive-add + `setActive` shows the
       // pane's content without the DOM focus grab. When the leaf was created with
       // an explicit autoFocus (⌘T new terminal), keep the focus.
@@ -509,7 +495,7 @@ export function TerminalSplitLeaf({
       // routing.
       splitDisposerRef.current?.();
       if (containerRef.current) {
-        splitDisposerRef.current = registerTerminalSplitDockview(containerRef.current, api, leafId);
+        splitDisposerRef.current = registerTerminalSplitLayout(containerRef.current, api, leafId);
       }
 
       refreshSingleClass();
@@ -567,15 +553,13 @@ export function TerminalSplitLeaf({
   );
 
   // Section-scoped keyboard shortcuts (only when focus is inside this leaf's
-  // nested dockview). The OUTER handler defers d / [ / ] / w to us via
-  // `findFocusedTerminalSplitDockview`, so we own them here.
+  // nested layout). The OUTER handler defers d / [ / ] / w to us via
+  // `findFocusedTerminalSplitLayout`, so we own them here.
   useEffect(() => {
     if (!visible) return;
     const refocusActive = () => {
       const panel = apiRef.current?.activePanel;
-      panel?.view.content.element
-        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-        ?.focus();
+      panel?.element.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")?.focus();
     };
     const handler = (e: KeyboardEvent) => {
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -655,15 +639,15 @@ export function TerminalSplitLeaf({
       activeTitleDisposerRef.current?.dispose();
       // Flush a pending debounced save rather than dropping it — otherwise the
       // last pane-resize geometry is lost on a worktree switch / unmount.
-      // (`flushPersist` clears the timer itself.) Mirrors the outer dockview.
+      // (`flushPersist` clears the timer itself.) Mirrors the outer layout.
       if (persistTimerRef.current) flushPersistRef.current();
     };
   }, []);
 
   // Force a synchronous re-layout when the outer terminal panel becomes visible
-  // / resizes (dockview-core defers its own ResizeObserver by one rAF, which
+  // / resizes (the layout view defers its own ResizeObserver by one rAF, which
   // otherwise paints the inner splitview at a stale width). Ported verbatim from
-  // the pre-#643 DockviewTerminalContainer.
+  // the old terminal container.
   //
   // The panes are told they are visible only after this effect has applied the
   // layout for the reveal. Otherwise a pane's own layout effect (children run
@@ -712,32 +696,19 @@ export function TerminalSplitLeaf({
   );
 
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full w-full flex-col overflow-hidden"
-      // Hide the pane action clusters for the duration of a tab drag (the only
-      // draggable here is a pane header). Capture-phase + a direct class toggle
-      // (no React state) so it can't re-render / disrupt the nested dockview
-      // mid-drag; `dragend` always fires on the source, so it self-clears.
-      onDragStartCapture={() =>
-        containerRef.current?.classList.add("dockview-terminal-split--dragging")
-      }
-      onDragEndCapture={() =>
-        containerRef.current?.classList.remove("dockview-terminal-split--dragging")
-      }
-    >
+    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
-        <DockviewReact
-          theme={nestedTheme}
-          className="h-full"
+        <LayoutReact
+          kind="split"
+          className={NESTED_CLASS}
           components={nestedComponents}
           tabComponents={nestedTabComponents}
           defaultTabComponent={TerminalPaneHeader}
           onReady={onReady}
           disableDnd={mobile}
-          // One pane per group → make its header span the full width so it
-          // reads as a pane title bar rather than a lone left-aligned tab.
-          singleTabMode="fullwidth"
+          // One pane per group: the header spans the pane, and a drop always
+          // splits instead of adding a tab.
+          paneMode
         />
       </PanelVisibilityContext.Provider>
     </div>

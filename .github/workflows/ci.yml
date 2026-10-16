@@ -1288,6 +1288,11 @@ jobs:
       - name: Build for the iOS simulator
         run: node apps/mobile/scripts/build-ios-sim.mjs Release
 
+      # The Linux jobs skip this test: it replays recorded terminal sessions through SwiftTerm
+      # and compares the screens with xterm.js, which needs the Swift toolchain.
+      - name: Replay recorded terminals through SwiftTerm
+        run: node --experimental-strip-types --test apps/mobile/tests/terminal-replay.test.ts
+
   # Drives the real Electron app with Playwright's `_electron`: the bundled UI
   # over app://, the local hub it spawns, a remote hub on another port, the hub
   # picker, the CSP and the navigation guard. Needs a display, which the macOS

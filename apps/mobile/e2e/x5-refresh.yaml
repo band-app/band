@@ -1,0 +1,57 @@
+# S5: a file that appears on the hub's disk shows up after a pull to refresh, in the explorer
+# and in the changes list.
+appId: app.getband.mobile
+name: S5 pull to refresh
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-src
+    timeout: 15000
+- assertNotVisible:
+    id: explorer__row-fresh-a.txt
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: explorer-change?name=fresh-a.txt
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-fresh-a.txt
+    timeout: 15000
+- takeScreenshot: x5-explorer-refreshed
+- tapOn:
+    id: explorer__back
+- extendedWaitUntil:
+    visible:
+      id: worktree__more
+    timeout: 10000
+- tapOn:
+    id: worktree__more
+- tapOn:
+    text: Changes
+- extendedWaitUntil:
+    visible:
+      id: changes__row-untracked-fresh-a.txt
+    timeout: 15000
+- assertNotVisible:
+    id: changes__row-untracked-fresh-b.txt
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: explorer-change?name=fresh-b.txt
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- extendedWaitUntil:
+    visible:
+      id: changes__row-untracked-fresh-b.txt
+    timeout: 15000
+- takeScreenshot: x5-changes-refreshed

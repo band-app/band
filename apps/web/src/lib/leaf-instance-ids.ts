@@ -1,17 +1,17 @@
 // ---------------------------------------------------------------------------
 // Leaf instance id generators + "freshly created" trackers.
 //
-// Shared by the unified center dockview (`WorktreeCenterDockview`) and the
-// legacy per-app inner dockviews still used by the mobile layout
-// (`DockviewChatContainer` / `DockviewTerminalContainer` /
-// `DockviewBrowserContainer`). Extracted here so both worlds mint ids the
+// Shared by the unified center layout (`WorktreeCenter`) and the
+// legacy per-app inner layouts still used by the mobile layout
+// (`the old chat container` / `the old terminal container` /
+// `the old browser container`). Extracted here so both worlds mint ids the
 // same way and so `ChatPane` / `BrowserPanel` can consume the fresh-flag
 // without importing from a specific container.
 //
 // - chat ids are prefixed `chat_`, browser ids `browser_`, terminal ids are
 //   bare uuids (matches the server's `randomUUID()` fallback — see
 //   `apps/hub/src/server/api/terminals/router.ts`). Don't change the shapes:
-//   they are the dockview panel ids AND the server-side record ids.
+//   they are the layout panel ids AND the server-side record ids.
 // - "fresh" trackers let an add-tab action tell the freshly-mounted renderer
 //   to skip loading server-side session/history and start blank.
 // ---------------------------------------------------------------------------

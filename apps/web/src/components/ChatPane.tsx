@@ -268,7 +268,7 @@ export function useChatPaneState(worktreeId: string, chatId: string): ChatPaneSt
 // ---------------------------------------------------------------------------
 // ChatPane — headless wrapper that renders ChatView with loaded state.
 // The pane titlebar (with agent info, session buttons, split/close) is
-// rendered by the tab header in DockviewChatContainer.
+// rendered by the tab header in the old chat container.
 // ---------------------------------------------------------------------------
 
 interface ChatPaneProps {

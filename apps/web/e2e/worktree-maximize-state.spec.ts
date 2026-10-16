@@ -10,7 +10,7 @@
  *   - No tRPC mocking. The dashboard renders against the real backend
  *     serving real procedures. Two repos (with no real worktrees on
  *     disk) are seeded directly into the SQLite DB; background git
- *     calls fail gracefully but the dockview header still mounts and
+ *     calls fail gracefully but the layout header still mounts and
  *     the maximize feature — which is purely client-side state in
  *     `localStorage` — works regardless.
  *   - All UI is driven through `WorktreePage` (no raw `getByRole`,
@@ -45,8 +45,8 @@ const WORKTREE_A = toWorktreeId(REPO_A, "main", "local");
 const WORKTREE_B = toWorktreeId(REPO_B, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared
-// dockview renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
-// The dockview layout — and therefore the maximize shortcut — only exists
+// layout renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
+// The layout — and therefore the maximize shortcut — only exists
 // in the desktop layout.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -94,12 +94,12 @@ test.afterAll(async () => {
 
 // Each test starts on a clean slate so it doesn't observe state another test
 // wrote. `beforeEach` clears each worktree's persisted center layout — which
-// now carries the maximize state — so a test rebuilds the default dockview on
+// now carries the maximize state — so a test rebuilds the default layout on
 // first load rather than inheriting a prior test's maximized/persisted layout.
 test.beforeEach(async ({ page }) => {
   // The page hasn't navigated yet so localStorage isn't accessible
   // until we go to ANY page in the origin. Land on the worktree URL
-  // first, then clear and reload so the dockview reads the cleared
+  // first, then clear and reload so the layout reads the cleared
   // state on its onReady.
   await page.goto(`${server.url}/worktree/${encodeURIComponent(WORKTREE_A)}?token=${TOKEN}`);
   await page.evaluate(
@@ -140,7 +140,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
 
     // B must NOT inherit A's maximize. The reviewer flagged this
     // contamination path explicitly during review of the first
-    // implementation — see thread on `apps/web/src/components/SharedDockviewLayout.tsx:1500`.
+    // implementation — see thread on `apps/web/src/components/SharedWorktreeLayout.tsx:1500`.
     await worktreePage.expectNotMaximized(WORKTREE_B);
     expect(await worktreePage.readMaximizedGroup(WORKTREE_B)).toBeUndefined();
 
@@ -270,8 +270,8 @@ test.describe("Worktree maximize state (issue #490)", () => {
     //      emit) to settle and drifted past four successive timeout
     //      budgets (15 s → 25 s → 45 s → 75 s) under 2-worker CI
     //      contention.
-    //   2. The next iteration switched the positive to dockview's own
-    //      `.dv-active-tab` class on the outer Terminal tab — synchronous
+    //   2. The next iteration switched the positive to the layout's own
+    //      `.layout-tab[data-selected="true"]` class on the outer Terminal tab — synchronous
     //      with `setActive` and free of xterm-boot timing — but the
     //      SETUP still wrote A's active state directly to `localStorage`
     //      between maximize and the next navigation. That write raced
@@ -281,13 +281,13 @@ test.describe("Worktree maximize state (issue #490)", () => {
     //      `g2=terminal` back to `g2=changes` (the live activeView).
     //      Reproduced locally at `--workers=2 --repeat-each=10`.
     //   3. The current shape drives the setup through the UI: click the
-    //      Terminal tab BEFORE maximizing so the live dockview state
+    //      Terminal tab BEFORE maximizing so the live layout state
     //      has `g2=terminal`. Now any `saveLayout` fires after the click
     //      capture the same value the test expects, so the race window
     //      collapses — there's no test write that could be overwritten.
     //
     // This test guards the second bug the reviewer surfaced on PR #491
-    // (`SharedDockviewLayout.tsx:1473`): an earlier fix attempt skipped
+    // (`SharedWorktreeLayout.tsx:1473`): an earlier fix attempt skipped
     // `setActive` on hidden groups to avoid exiting maximize as a side
     // effect, which then silently dropped the saved active-view for
     // those hidden groups. When the user later exited maximize, the
@@ -299,18 +299,18 @@ test.describe("Worktree maximize state (issue #490)", () => {
     //     by clicking the outer Terminal tab), then maximize on the
     //     first group.
     //   - Visit B (default layout has changes in g2, so the live
-    //     dockview's g2 active view is "changes" while B is mounted).
+    //     the layout's g2 active view is "changes" while B is mounted).
     //   - Return to A → exit max.
     //
     // Expectation: in A after exit-max, the second group's active view
     // is "terminal" again (A's saved value), not "changes" (B's last
-    // active that the live dockview was previously showing).
+    // active that the live layout was previously showing).
 
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     // First trip to A: take the default layout and click the outer
     // Terminal tab BEFORE maximizing. Doing it this order means the
-    // live dockview's g2 active view is `terminal` when the maximize
+    // live the layout's g2 active view is `terminal` when the maximize
     // fires, so the subsequent `saveLayout` captures `terminal` — no
     // direct localStorage write that could race with a delayed save.
     await worktreePage.goto(WORKTREE_A);
@@ -339,7 +339,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
       .toBeTruthy();
 
     // Read the stable state and pull out group ids. We can't hard-code
-    // "1" / "2" because dockview assigns ids when the layout is built
+    // "1" / "2" because layout assigns ids when the layout is built
     // and the order can shift if the default panel set changes.
     const aStateAfterMax = await worktreePage.readActiveState(WORKTREE_A);
     expect(aStateAfterMax).toBeDefined();
@@ -350,7 +350,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
     expect(aStateAfterMax!.groups[hiddenGroupId]).toBe("terminal");
 
     // Visit B (with its own default layout where changes is active in
-    // g2). The hard navigation pumps the dockview's live state to
+    // g2). The hard navigation pumps the layout's live state to
     // "changes in g2", which is exactly the contaminated state we need
     // the return-to-A overlay to override.
     await worktreePage.goto(WORKTREE_B);
@@ -365,7 +365,7 @@ test.describe("Worktree maximize state (issue #490)", () => {
 
     // Exit max — the hidden group becomes visible. The active view
     // should be "terminal" (A's saved value), not "changes" (B's last
-    // active that the live dockview was previously showing).
+    // active that the live layout was previously showing).
     await worktreePage.restorePanel();
     await worktreePage.expectNotMaximized(WORKTREE_A);
 
@@ -373,20 +373,20 @@ test.describe("Worktree maximize state (issue #490)", () => {
     // check — if the wrong tab (Changes) leaked across the worktree
     // switch, its "Files changed" heading renders quickly and fails
     // the test deterministically. Phase 2 is the positive: the outer
-    // Terminal tab carries dockview's `.dv-active-tab` class. That
-    // class is added synchronously by dockview as soon as `setActive`
+    // Terminal tab carries the layout's `.layout-tab[data-selected="true"]` class. That
+    // class is added synchronously by layout as soon as `setActive`
     // runs on the panel, so it's the cheapest reliable proof that A's
     // saved active view ("terminal") was restored on the hidden group
     // — without depending on xterm's downstream boot timing.
     await expect(worktreePage.changesHeading).not.toBeVisible();
-    // Generous timeout (vs. the 5 s default): the `.dv-active-tab` class
-    // is applied synchronously by dockview the moment the worktree-switch
+    // Generous timeout (vs. the 5 s default): the `.layout-tab[data-selected="true"]` class
+    // is applied synchronously by layout the moment the worktree-switch
     // effect's `setActive("terminal")` runs, but that effect can be
     // scheduler-starved under 2-worker CI contention — the B→A navigation,
     // its `setActive` pass, and the exit-maximize all queue behind other
     // workers' work. 15 s absorbs that variance without reintroducing a
     // dependency on xterm's (much slower) boot pipeline.
-    await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
+    await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true", {
       timeout: 15_000,
     });
   });

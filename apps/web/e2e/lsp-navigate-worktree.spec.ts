@@ -75,7 +75,7 @@ const ONLY_IN_A = "only-in-a.ts";
 const SHARED = "shared.ts";
 const ONLY_IN_B = "only-in-b.ts";
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders. The bug only manifests in the desktop layout, where multiple
 // worktrees are alive at once under `MultiWorktreePanelHost`.
 // The mobile layout mounts one worktree at a time, so there's no
@@ -171,7 +171,7 @@ test.describe("Files-panel LSP navigate worktree scoping (cross-worktree file le
     // cached (its listener still alive) while B becomes active.
     await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeVisible();
     await worktreePage.switchWorktree(WORKTREE_B);
-    // B's center dockview registers its leaf actions a moment after the switch,
+    // B's center layout registers its leaf actions a moment after the switch,
     // while its Explorer can already render. A file row clicked before then
     // opens nothing, so wait for B's center to be ready first.
     await worktreePage.waitForWorktreeReady(WORKTREE_B);

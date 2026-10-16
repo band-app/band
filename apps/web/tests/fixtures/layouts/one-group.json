@@ -1,0 +1,55 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["term-1", "chat-1", "file:README.md"],
+            "activeView": "chat-1",
+            "id": "1"
+          },
+          "size": 1200
+        }
+      ],
+      "size": 800
+    },
+    "width": 1200,
+    "height": 800,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "term-1": {
+      "id": "term-1",
+      "contentComponent": "term",
+      "tabComponent": "term",
+      "params": {
+        "worktreeId": "wt",
+        "name": "term-1"
+      },
+      "title": "term-1"
+    },
+    "chat-1": {
+      "id": "chat-1",
+      "contentComponent": "chat",
+      "tabComponent": "chat",
+      "params": {
+        "worktreeId": "wt",
+        "name": "chat-1"
+      },
+      "title": "chat-1"
+    },
+    "file:README.md": {
+      "id": "file:README.md",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "params": {
+        "worktreeId": "wt",
+        "name": "file:README.md"
+      },
+      "title": "file:README.md"
+    }
+  },
+  "activeGroup": "1"
+}

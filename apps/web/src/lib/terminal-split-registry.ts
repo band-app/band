@@ -1,16 +1,16 @@
-import type { DockviewApi } from "dockview";
+import type { LayoutApi } from "../components/layout/model";
 import { clientStorage } from "./client-state";
 
 /**
  * Registry + persistence helpers for **nested terminal panes** — the tmux-style
  * split-within-a-terminal-tab feature (issue #643 follow-up).
  *
- * A `term` leaf in the main center dockview
- * (`WorktreeCenterDockview.tsx`) is no longer a single terminal: it hosts a
- * NESTED, headerless-per-pane `DockviewReact` (`TerminalSplitLeaf`) whose panels
+ * A `term` leaf in the main center layout
+ * (`WorktreeCenter.tsx`) is no longer a single terminal: it hosts a
+ * NESTED, headerless-per-pane `LayoutReact` (`TerminalSplitLeaf`) whose panels
  * are individual terminals (each its own bare-UUID id + PTY). This module is the
- * small amount of shared, module-level state that the nested dockview and the
- * OUTER dockview need to agree on:
+ * small amount of shared, module-level state that the nested layout and the
+ * OUTER layout need to agree on:
  *
  *   1. **Ownership** (`terminalLeafOwner`) — which OUTER leaf owns each pane
  *      terminalId. The outer reconcile / status-event handlers key terminals by
@@ -19,9 +19,9 @@ import { clientStorage } from "./client-state";
  *      the pre-#643 behaviour this replaces). The primary pane's terminalId ===
  *      the outer leaf id, and it owns itself.
  *
- *   2. **Focus routing** (`registerTerminalSplitDockview` /
- *      `findFocusedTerminalSplitDockview`) — so the OUTER keydown handler can
- *      DEFER ⌘D / ⌘⇧D / ⌘[ / ⌘] to a terminal leaf's nested dockview when focus
+ *   2. **Focus routing** (`registerTerminalSplitLayout` /
+ *      `findFocusedTerminalSplitLayout`) — so the OUTER keydown handler can
+ *      DEFER ⌘D / ⌘⇧D / ⌘[ / ⌘] to a terminal leaf's nested layout when focus
  *      is inside it.
  *
  *   3. **Nested layout persistence** — the split geometry per leaf, in
@@ -30,7 +30,7 @@ import { clientStorage } from "./client-state";
  *      retired in #643 and must not be reintroduced.
  *
  * Everything here is a per-module-instance singleton (not per React tree) —
- * one entry per mounted nested dockview.
+ * one entry per mounted nested layout.
  */
 
 // ---------------------------------------------------------------------------
@@ -97,12 +97,12 @@ export function leafOwnsAnyLive(leafId: string, liveTerminalIds: Set<string>): b
 }
 
 // ---------------------------------------------------------------------------
-// Focus routing + status-event routing: leafId → nested DockviewApi
+// Focus routing + status-event routing: leafId → nested LayoutApi
 // ---------------------------------------------------------------------------
 
 interface SplitRegistration {
   containerEl: HTMLElement;
-  api: DockviewApi;
+  api: LayoutApi;
   leafId: string;
 }
 
@@ -110,14 +110,14 @@ interface SplitRegistration {
 const splitRegistrations = new Map<string, SplitRegistration>();
 
 /**
- * Register a terminal leaf's nested dockview (its container element + api).
+ * Register a terminal leaf's nested layout (its container element + api).
  * Returns a disposer to unregister on unmount. Idempotent: the disposer only
  * removes the entry if it's still the one this call installed (guards against a
  * later re-register for the same leafId).
  */
-export function registerTerminalSplitDockview(
+export function registerTerminalSplitLayout(
   containerEl: HTMLElement,
-  api: DockviewApi,
+  api: LayoutApi,
   leafId: string,
 ): () => void {
   const registration: SplitRegistration = { containerEl, api, leafId };
@@ -128,12 +128,12 @@ export function registerTerminalSplitDockview(
 }
 
 /**
- * The nested dockview whose container currently holds `document.activeElement`,
+ * The nested layout whose container currently holds `document.activeElement`,
  * or `null` when focus isn't inside any terminal leaf. The OUTER keydown handler
  * calls this to decide whether to defer split / cycle / close to the nested
  * handler.
  */
-export function findFocusedTerminalSplitDockview(): DockviewApi | null {
+export function findFocusedTerminalSplitLayout(): LayoutApi | null {
   const active = document.activeElement;
   if (!active) return null;
   for (const reg of splitRegistrations.values()) {
@@ -142,9 +142,9 @@ export function findFocusedTerminalSplitDockview(): DockviewApi | null {
   return null;
 }
 
-/** The nested dockview api for a given outer leaf, if mounted — used to route a
+/** The nested layout api for a given outer leaf, if mounted — used to route a
  *  server-side `terminal-killed` for a non-primary pane to the owning leaf. */
-export function terminalSplitApiForLeaf(leafId: string): DockviewApi | undefined {
+export function terminalSplitApiForLeaf(leafId: string): LayoutApi | undefined {
   return splitRegistrations.get(leafId)?.api;
 }
 
@@ -169,7 +169,7 @@ export function readNestedLayout(worktreeId: string, leafId: string): unknown | 
   }
 }
 
-/** Persist a nested split layout (a dockview `toJSON()` blob). */
+/** Persist a nested split layout (a layout `toJSON()` blob). */
 export function writeNestedLayout(worktreeId: string, leafId: string, layout: unknown): void {
   try {
     clientStorage.setItem(nestedLayoutKey(worktreeId, leafId), JSON.stringify(layout));
@@ -185,7 +185,7 @@ export function deleteNestedLayout(worktreeId: string, leafId: string): void {
 
 /**
  * Pre-seed `terminalLeafOwner` from all persisted nested layouts for a
- * worktree, BEFORE the outer dockview reconciles. Each blob's `panels` keys are
+ * worktree, BEFORE the outer layout reconciles. Each blob's `panels` keys are
  * the pane terminalIds; the leafId is in the storage key. Without this, the
  * outer reconcile (which runs as soon as the layout restores, before the
  * `TerminalSplitLeaf`s mount and register ownership) would see a pane terminalId

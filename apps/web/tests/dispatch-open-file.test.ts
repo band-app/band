@@ -7,7 +7,7 @@ import { consumeExternalOpen } from "../src/lib/pending-external-open";
 
 // ---------------------------------------------------------------------------
 // dispatchOpenFileEvent — pure dispatcher for `band open` SSE events on
-// the desktop dockview.
+// the desktop layout.
 //
 //   in-worktree   →  onOpenFile
 //   external       →  enqueue + onActivateFilesPanel
@@ -18,7 +18,7 @@ import { consumeExternalOpen } from "../src/lib/pending-external-open";
 // covers the dispatcher's own contract.
 //
 // The dispatcher is the contract between the SSE event boundary and the
-// dockview; verifying it here means future regressions in `__root.tsx`'s
+// layout; verifying it here means future regressions in `__root.tsx`'s
 // listener (which is now just a thin shim) can't silently break
 // `band open` end-to-end. The CLI integration tests cover the server-
 // side event shape; this file covers the renderer-side dispatch.
