@@ -14,7 +14,7 @@ import { parseWorktreeFromPath } from "../lib/parse-worktree";
  * Uses `capabilities.getWorktreeHref()` to build the destination URL.
  * Post-#467, that's always the canonical `/worktree/$id` — there is no
  * per-tab sub-path to restore anymore, since tab state lives in the
- * mobile layout's local React state and the desktop dockview renders
+ * mobile layout's local React state and the desktop layout renders
  * every panel regardless of URL.
  *
  * Returns the `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`

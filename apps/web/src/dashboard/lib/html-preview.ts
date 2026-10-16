@@ -17,7 +17,7 @@ export function isHtmlFile(path: string): boolean {
   return /\.html?$/i.test(path);
 }
 
-/** Ask the worktree's center dockview to show `path` in a Band browser tab. */
+/** Ask the worktree's center layout to show `path` in a Band browser tab. */
 export function previewHtmlInBrowser(detail: HtmlPreviewDetail): void {
   window.dispatchEvent(new CustomEvent(HTML_PREVIEW_EVENT, { detail }));
 }

@@ -48,9 +48,9 @@ const DEFAULT_BRANCH = "main";
 const WORKTREE = toWorktreeId(REPO, DEFAULT_BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` returns true and the shared
-// dockview renders — the chat pane lives in the dockview, and
+// layout renders — the chat pane lives in the layout, and
 // `FileLinkWorktreeProvider` wraps the chat tree at the
-// dockview level.
+// layout level.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {

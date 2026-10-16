@@ -132,7 +132,7 @@ test("a restart reopens the worktree, label, active tab and right sidepanel tab"
   await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
   await worktreePage.waitForReady();
   await expect(worktreePage.labelFilterTrigger()).toHaveText("Beta");
-  await expect(worktreePage.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
+  await expect(worktreePage.fileTabContainer(FILE)).toHaveAttribute("data-selected", "true");
   await expect(worktreePage.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
   await expect.poll(() => worktreePage.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
 
@@ -143,7 +143,7 @@ test("a restart reopens the worktree, label, active tab and right sidepanel tab"
     await fresh.launch();
     await fresh.waitForReady();
     await expect(fresh.labelFilterTrigger()).toHaveText("Beta");
-    await expect(fresh.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
+    await expect(fresh.fileTabContainer(FILE)).toHaveAttribute("data-selected", "true");
     await expect(fresh.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
     await expect.poll(() => fresh.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
   } finally {

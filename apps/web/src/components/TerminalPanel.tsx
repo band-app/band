@@ -62,7 +62,7 @@ export function TerminalPanel({
 
   // Resolve (or create) the stable cache entry for this terminal. Kept in a ref
   // so `subscribe`/`getSnapshot` identities stay stable across renders; only a
-  // terminalId change (never happens for a given dockview panel) re-resolves.
+  // terminalId change (never happens for a given layout panel) re-resolves.
   const entryRef = useRef<TerminalCacheEntry | null>(null);
   // Re-resolve when the terminalId changes (never for a given panel) OR when the
   // held entry was disposed out from under us — the parking policy cold-parks a
@@ -101,7 +101,7 @@ export function TerminalPanel({
   }, [visible, entry, autoFocus]);
   useLayoutEffect(() => () => entry.detach(), [entry]);
 
-  // Route title changes to the dockview tab; replays the last known title so a
+  // Route title changes to the layout tab; replays the last known title so a
   // title set while this panel was unmounted/parked isn't lost.
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;

@@ -44,7 +44,7 @@ import { FileTreesPage } from "./pages/FileTreesPage";
 import { FileViewerPage } from "./pages/FileViewerPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
-// Wide viewport so `useIsDesktop()` reports true and the dockview Files
+// Wide viewport so `useIsDesktop()` reports true and the layout Files
 // panel + viewer render the desktop layout (same reasoning as the other
 // file-tree specs).
 test.use({ viewport: { width: 2400, height: 900 } });

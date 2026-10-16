@@ -31,6 +31,12 @@ import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
+import {
+  handlePairExchange,
+  handlePairLink,
+  isPairLinkRequest,
+  PAIR_EXCHANGE_PATH,
+} from "./src/server/api/pairing/handler.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
@@ -907,6 +913,17 @@ async function main() {
       return;
     }
 
+    // A pairing link and its exchange. Before the device-token check: the one-time
+    // pairing code is the credential.
+    if (req.url?.split("?")[0] === PAIR_EXCHANGE_PATH) {
+      await handlePairExchange(req, res);
+      return;
+    }
+    if (isPairLinkRequest(req)) {
+      handlePairLink(req, res);
+      return;
+    }
+
     // OAuth consent returns here. Before the device-token check: the
     // single-use state from `vault.startOAuth` is the credential.
     if (req.method === "GET" && req.url?.split("?")[0] === OAUTH_CALLBACK_PATH) {
@@ -1069,7 +1086,7 @@ async function main() {
     }
 
     // CDP screencast experiment: list Band browser tabs (DB-backed) for
-    // a worktree. The web client renders one dockview panel per tab and
+    // a worktree. The web client renders one layout panel per tab and
     // streams via /cdp?bandTabId=<id> when the user picks one.
     if (req.url?.startsWith("/api/cdp/tabs")) {
       const url = new URL(req.url, `http://${req.headers.host}`);

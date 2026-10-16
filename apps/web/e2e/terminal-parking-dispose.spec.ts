@@ -41,7 +41,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-terminal-parking-dispose-token";
 
-// Each test uses its own worktree(s): server-side PTYs + persisted dockview
+// Each test uses its own worktree(s): server-side PTYs + persisted layout
 // layouts survive across tests in a file, so a test that mutates a worktree
 // (e.g. the split in the close-tab test) must not share it with another.
 const REPO_A = "alpha-parking-dispose";

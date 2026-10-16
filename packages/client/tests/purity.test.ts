@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 const ROOT = join(import.meta.dirname, "..");
-const BANNED_DEPENDENCIES = /^(react|react-dom|react-native|expo|dockview)(\/|$)/;
+const BANNED_DEPENDENCIES = /^(react|react-dom|react-native|expo|layout)(\/|$)/;
 const BANNED_GLOBALS = /\b(window|document|localStorage|sessionStorage|EventSource)\b/;
 
 function sources(dir: string): string[] {

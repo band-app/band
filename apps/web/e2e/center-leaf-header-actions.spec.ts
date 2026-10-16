@@ -1,5 +1,5 @@
 /**
- * The unified center dockview renders each active leaf's actions in the group
+ * The unified center layout renders each active leaf's actions in the group
  * header, not inside the tab content (#643). This guards the
  * file leaf's side of that: opening a markdown file publishes its preview/source
  * toggle to the header, and doing so must NOT trigger an infinite render loop

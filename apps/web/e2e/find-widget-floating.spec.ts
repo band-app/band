@@ -44,7 +44,7 @@ const COMMITTED = "const needle = 1;\n// needle again\n";
 const WORKING = "const needle = 1;\n// needle again\n// needle three\n";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared center
-// dockview (file, diff and terminal leaves) renders.
+// layout (file, diff and terminal leaves) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;

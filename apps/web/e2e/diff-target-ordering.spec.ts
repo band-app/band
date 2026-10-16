@@ -39,7 +39,7 @@ import {
 import { BRANCH_OPTION_TESTID, ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the right sidepanel
-// renders beside the center dockview — matching the other diff e2e specs.
+// renders beside the center layout — matching the other diff e2e specs.
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-diff-target-order-token";

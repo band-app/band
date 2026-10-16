@@ -3,11 +3,11 @@
  * worktree switching (issue #456 follow-up).
  *
  * Regression guard for the bug we hit while refactoring to the single
- * shared dockview layout: navigating BACK to a previously-visited
+ * shared layout: navigating BACK to a previously-visited
  * worktree reset the repo-list scroll to the top AND dropped DOM
  * focus to <body>, breaking keyboard nav. Root cause was an
  * unconditional `panel.api.setActive()` on the repos edge group in
- * `SharedDockviewLayout`, which triggered dockview's focus dance even
+ * `SharedWorktreeLayout`, which triggered the layout's focus dance even
  * when the panel was already active.
  *
  * Expected behaviour (verified here):
@@ -41,7 +41,7 @@ import { createTrpcMock } from "./helpers/trpc-mock";
 const TOKEN = "e2e-worktree-switch-token";
 const REPO_COUNT = 25;
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders (matches >= 1024px in apps/web/src/hooks/useIsDesktop.ts).
 test.use({ viewport: { width: 1280, height: 700 } });
 
@@ -142,7 +142,7 @@ async function readListState(page: Page): Promise<{
 
 async function setupMocks(page: Page): Promise<void> {
   const mock = createTrpcMock();
-  mock.addDockviewMocks();
+  mock.addLayoutMocks();
   mock.query("repos.list", { repos: makeRepos() });
   await mock.install(page);
 }

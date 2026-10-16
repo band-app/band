@@ -71,7 +71,7 @@ interface FileViewerProps {
    * format, markdown toggle, language) but hides only the redundant
    * path/size/(modified) label, replacing it with a flex spacer so the
    * action buttons stay right-aligned. Used by the center `file` leaf,
-   * where the dockview tab already shows the filename. Additive/default-
+   * where the layout tab already shows the filename. Additive/default-
    * false so mobile `CodeBrowserView` is unchanged.
    */
   hidePathLabel?: boolean;
@@ -147,7 +147,7 @@ interface FileViewerProps {
   /**
    * Reports the viewer's current title-bar action state (save + markdown
    * toggle availability) whenever it changes. Lets a host that renders its own
-   * chrome — the center `file` leaf, which lifts these into the dockview group
+   * chrome — the center `file` leaf, which lifts these into the layout group
    * header — drive Save and the markdown toggle from outside while the viewer's
    * own title bar is hidden (`hideTitleBar`).
    */
@@ -206,7 +206,7 @@ function detectLanguage(filePath: string, serverHint?: string): string {
  * Should this FileViewer respond to a worktree-scoped event whose
  * `detail.filePath` may or may not match the currently-viewed file?
  *
- * The dispatcher in `DockviewWorktreeLayout` reads
+ * The dispatcher in `the old worktree layout` reads
  * `currentFileRef.current`, which is updated only through
  * `notifySelectFile` — and that path deliberately filters out
  * untitled / external paths (they can't round-trip through the
@@ -997,7 +997,7 @@ export function FileViewer({
           )}
           {hidePathLabel ? (
             // Keep the action buttons right-aligned without the redundant
-            // path label (the dockview tab already shows the filename).
+            // path label (the layout tab already shows the filename).
             <span className="min-w-0 flex-1" />
           ) : (
             <span

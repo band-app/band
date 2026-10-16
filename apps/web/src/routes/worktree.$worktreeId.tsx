@@ -32,7 +32,7 @@ function WorktreeLayout() {
   useWorktreeRoute(decoded);
 
   // Both layouts render every worktree from AppShell: the desktop
-  // `SharedDockviewLayout` and the mobile `MobileWorktreeShell` keep each
+  // `SharedWorktreeLayout` and the mobile `MobileWorktreeShell` keep each
   // visited worktree mounted, so switching back to one is instant (no chat
   // replay, no layout restore, no refetch). This route has nothing of its own
   // to render; keeping the URL canonical at `/worktree/$id` (no sub-paths)

@@ -86,7 +86,7 @@ async function openABC(worktreePage: WorktreePage): Promise<void> {
   await worktreePage.openFileViaQuickOpen(FILE_A);
   await worktreePage.openFileViaQuickOpen(FILE_B);
   await worktreePage.openFileViaQuickOpen(FILE_C);
-  await expect(worktreePage.fileTabContainer(FILE_C)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_C)).toHaveAttribute("data-selected", "true");
 }
 
 test("holding Ctrl+Tab lists tabs by recency and releasing opens the highlighted one, a tap toggles", async ({
@@ -108,11 +108,11 @@ test("holding Ctrl+Tab lists tabs by recency and releasing opens the highlighted
 
   await focus.releaseControl();
   await expect(focus.switcher()).toBeHidden();
-  await expect(worktreePage.fileTabContainer(FILE_B)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_B)).toHaveAttribute("data-selected", "true");
 
   // B is active and C was active before it: a quick tap goes back to C.
   await focus.pressNextTab();
-  await expect(worktreePage.fileTabContainer(FILE_C)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_C)).toHaveAttribute("data-selected", "true");
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 });
 
@@ -143,7 +143,7 @@ test("Tab and Shift+Tab move the highlight and wrap, Escape cancels", async ({ p
   await focus.pressTabWhileHeld();
   await expect.poll(highlighted).toBe(2);
   await focus.releaseControl();
-  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveAttribute("data-selected", "true");
 
   // Escape closes the list and leaves the active tab alone.
   await focus.openSwitcher();
@@ -151,13 +151,13 @@ test("Tab and Shift+Tab move the highlight and wrap, Escape cancels", async ({ p
   await focus.pressEscapeWhileHeld();
   await expect(focus.switcher()).toBeHidden();
   await focus.releaseControl();
-  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveAttribute("data-selected", "true");
 
   // Shift opens on the least recently used tab, the terminal.
   await focus.openSwitcher({ shift: true });
   await expect(focus.switcher()).toBeVisible();
   await focus.releaseControl();
-  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
 });
 
 test("the list shows only the active split group's tabs", async ({ page }) => {
@@ -172,7 +172,7 @@ test("the list shows only the active split group's tabs", async ({ page }) => {
   await expect(worktreePage.chatTabs()).toHaveCount(2);
   await worktreePage.chatTabs().nth(1).click();
   await worktreePage.openFileViaQuickOpen(FILE_A);
-  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.fileTabContainer(FILE_A)).toHaveAttribute("data-selected", "true");
 
   await focus.openSwitcher();
   await expect(focus.switcherItems()).toHaveCount(2);
@@ -194,14 +194,14 @@ test("the list opens with focus in a terminal or a chat composer", async ({ page
   await focus.openSwitcher();
   await expect(focus.switcher()).toBeVisible();
   await focus.releaseControl();
-  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 
   // From the terminal, the Tab does not reach the shell and the list opens.
   await focus.openSwitcher();
   await expect(focus.switcher()).toBeVisible();
   await focus.releaseControl();
-  await expect(worktreePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("chat")).toHaveAttribute("data-selected", "true");
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("chat-composer");
 });
 
@@ -214,7 +214,7 @@ test("a group with one tab shows no list", async ({ page }) => {
   await focus.openSwitcher();
   await expect(focus.switcher()).toBeHidden();
   await focus.releaseControl();
-  await expect(worktreePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+  await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
 
   // The handler was live all along: with a second tab the list does open.
   await worktreePage.openFileViaQuickOpen(FILE_A);

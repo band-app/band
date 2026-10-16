@@ -100,8 +100,8 @@ function readPanelState(
 }
 
 function readBrowserLayoutRow(tmpHome: string, worktreeId: string): { state: string } | undefined {
-  // `DockviewLayoutManager` stores the layout under `${panelType}_${worktreeId}`
-  // (see `dockview-layout-manager.ts::layoutId`). Mirror that shape here
+  // `LayoutManager` stores the layout under `${panelType}_${worktreeId}`
+  // (see `layout-manager.ts::layoutId`). Mirror that shape here
   // rather than re-deriving it through tRPC so we can prove the row is
   // physically gone after `removeAllForWorktree`, not just hidden behind
   // a service-level cache.
@@ -183,7 +183,7 @@ describe("browsers — CRUD round-trip", () => {
     expect(parsed.url).toBe("https://docs.test/start");
 
     // `browserService.create` also registers the panel in the saved
-    // dockview layout (see `BrowserService.create` comment). Without
+    // layout (see `BrowserService.create` comment). Without
     // this, reopening the worktree after a restart would leave a
     // ghost browser record with no tab. Prove the layout row is
     // present and references the new id.

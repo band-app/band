@@ -52,7 +52,7 @@ const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 const HAYSTACK = "haystack.txt";
 const LINE_COUNT = 40;
 
-// Desktop viewport so `SharedDockviewLayout` (which mounts SearchFilesDialog
+// Desktop viewport so `SharedWorktreeLayout` (which mounts SearchFilesDialog
 // and listens for `band:open-search-files`) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
