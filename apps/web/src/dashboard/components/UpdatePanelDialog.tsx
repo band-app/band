@@ -51,7 +51,10 @@ export function UpdatePanelDialog({ open, onOpenChange }: Props) {
                   <div className="min-w-0">
                     <div className="truncate font-medium">{host.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      <span data-testid="update-panel__host-version">
+                      <span
+                        data-testid="update-panel__host-version"
+                        data-version={host.workerVersion ?? "unknown"}
+                      >
                         {host.workerVersion ?? "unknown version"}
                       </span>
                       {host.updateTarget ? (

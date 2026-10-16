@@ -41,7 +41,55 @@ export class UpdatePanelPage {
   }
 
   workerRow(hostId: string): Locator {
-    return this.panel.locator(`[data-testid="update-panel__host"][data-host-id="${hostId}"]`);
+    return this.panel
+      .getByTestId("update-panel__host")
+      .and(this.page.locator(`[data-host-id="${hostId}"]`));
+  }
+
+  /** The dashboard behind the badge has loaded. */
+  async expectDashboardLoaded(): Promise<void> {
+    await expect(this.page.getByTestId("repo-list__settings-button")).toBeVisible();
+  }
+
+  hubVersion(): Locator {
+    return this.hubRow().getByTestId("update-panel__hub-version");
+  }
+
+  hubTarget(): Locator {
+    return this.hubRow().getByTestId("update-panel__hub-target");
+  }
+
+  hubCommand(): Locator {
+    return this.hubRow().getByTestId("update-panel__hub-command");
+  }
+
+  workerVersion(hostId: string): Locator {
+    return this.workerRow(hostId).getByTestId("update-panel__host-version");
+  }
+
+  workerTarget(hostId: string): Locator {
+    return this.workerRow(hostId).getByTestId("update-panel__host-target");
+  }
+
+  workerError(hostId: string): Locator {
+    return this.workerRow(hostId).getByTestId("update-panel__host-error");
+  }
+
+  workerManualCommand(hostId: string): Locator {
+    return this.workerRow(hostId).getByTestId("update-panel__host-manual-command");
+  }
+
+  updateButton(hostId: string): Locator {
+    return this.workerRow(hostId).getByTestId("update-worker__button");
+  }
+
+  /** The version line of a host on Settings > Hosts, and its behind/unknown marker. */
+  hostsVersion(hostRow: Locator): Locator {
+    return hostRow.getByTestId("settings__host-version");
+  }
+
+  hostsVersionState(hostRow: Locator): Locator {
+    return hostRow.getByTestId("settings__host-version-state");
   }
 
   /** Copies the hub command with its button and returns what the clipboard holds. */
@@ -54,9 +102,9 @@ export class UpdatePanelPage {
   }
 
   /** Clicks Update on a worker's panel row, which opens the confirm dialog. */
-  async clickUpdate(row: Locator): Promise<void> {
+  async clickUpdate(hostId: string): Promise<void> {
     await test.step("Click Update", async () => {
-      await row.getByTestId("update-worker__button").click();
+      await this.updateButton(hostId).click();
       await expect(this.confirmDialog).toBeVisible();
     });
   }

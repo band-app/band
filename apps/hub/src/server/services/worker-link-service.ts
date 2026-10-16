@@ -113,6 +113,8 @@ export class WorkerLinkService {
    * it waits instead of redialing. A worker that sent no version is let in.
    */
   private authenticate(hello: Hello): AuthResult {
+    // A hello that carries a bootstrap token spends it here, so a refusal costs that token. The
+    // worker's own exchange (`/api/workers/exchange`) happens first and keeps the session token.
     const auth = this.tokens.authenticate(hello);
     if (!auth.ok) return auth;
     const version = workerVersionOf(hello);
@@ -128,6 +130,11 @@ export class WorkerLinkService {
     log.warn(`worker ${hello.workerId} refused: ${problem}`);
     // A second hello for a worker that is connected must not rewrite its row or flip it offline.
     if (this.server.getSession(hello.workerId)?.attached) {
+      return { ok: false, reason: problem, code: VERSION_REFUSED_CODE };
+    }
+    // A worker that redials every few seconds must not rewrite the row and notify every client each time.
+    const known = this.queries.findHost(hello.workerId);
+    if (known?.info?.updateRequired === problem && known.status !== "online") {
       return { ok: false, reason: problem, code: VERSION_REFUSED_CODE };
     }
     try {

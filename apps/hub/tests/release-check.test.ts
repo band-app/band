@@ -61,6 +61,12 @@ afterEach(async () => {
 });
 
 describe("release check", () => {
+  it("answers the update status only to a signed-in caller", async () => {
+    await boot({});
+    const res = await fetch(`${server?.url}/trpc/hosts.updateStatus`);
+    expect(res.status).toBe(401);
+  });
+
   it("reports a newer release and the compose update command", async () => {
     await boot({ BAND_INSTALL_METHOD: "compose" });
     await waitFor(async () => ((await status()).latest === "9.0.0" ? true : undefined), {
@@ -86,7 +92,7 @@ describe("release check", () => {
     );
   });
 
-  it("maps helm and plain docker installs to their own commands", async () => {
+  it("maps a helm install to its command", async () => {
     await boot({ BAND_INSTALL_METHOD: "helm" });
     await waitFor(async () => ((await status()).latest === "9.0.0" ? true : undefined), {
       label: "the release check",
@@ -118,8 +124,10 @@ describe("release check", () => {
 
   it("does not ask GitHub when BAND_UPDATE_CHECK=off", async () => {
     await boot({ BAND_UPDATE_CHECK: "off" });
-    // The check would have run at startup.
-    await new Promise((r) => setTimeout(r, 1_500));
+    // The check runs at startup when it is on, before the server listens.
+    await waitFor(async () => ((await status()).checkEnabled === false ? true : undefined), {
+      label: "the status",
+    });
     expect(stub?.requests()).toBe(0);
     expect(await status()).toMatchObject({
       checkEnabled: false,

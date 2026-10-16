@@ -27,6 +27,8 @@ interface HostView {
   workerVersion: string | null;
   versionState: string;
   updateRequired: string | null;
+  updateTarget: string | null;
+  canUpdate: boolean;
 }
 
 let home: string;
@@ -70,6 +72,9 @@ describe("a hub run from source", () => {
       workerVersion: "0.47.0",
       versionState: "ahead",
       updateRequired: null,
+      // A hub run from source has no release to move a worker to.
+      updateTarget: null,
+      canUpdate: false,
     });
     expect(server.output()).toContain("version checks are skipped");
   });

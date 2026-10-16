@@ -86,7 +86,19 @@ export function WorkerUpdateButton({ host }: Props) {
               on this host, and a turn in progress is lost.
             </DialogDescription>
           </DialogHeader>
-          <div className="text-sm" data-testid="update-worker__agents">
+          <div
+            className="text-sm"
+            data-testid="update-worker__agents"
+            data-state={
+              interruptions.isLoading
+                ? "loading"
+                : interruptions.isError
+                  ? "error"
+                  : agents.length === 0
+                    ? "none"
+                    : "some"
+            }
+          >
             {interruptions.isLoading ? (
               <span className="text-muted-foreground">Checking running agents…</span>
             ) : interruptions.isError ? (

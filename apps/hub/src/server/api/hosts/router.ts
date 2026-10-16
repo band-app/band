@@ -10,7 +10,6 @@ import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
-import { agentSessionService } from "../../services/agent-session-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
 import { agentHostView } from "../../services/relay-scope";
 import { releaseCheckService } from "../../services/release-check-service";
@@ -23,7 +22,6 @@ import {
 } from "../../services/token-service";
 import { emit } from "../../services/watcher-service";
 import { WorkerUpdateError, workerUpdateService } from "../../services/worker-update-service";
-import { worktreeService } from "../../services/worktree-service";
 import { repoErrorToTrpc } from "../repos/errors";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
@@ -42,6 +40,14 @@ async function agentTypesOn(host: Host): Promise<string[]> {
   return found;
 }
 
+/** npm's output can name paths and registries, so only an admin sees it; others see that the update failed. */
+function redactUpdateError<T extends { error: string | null } | null>(
+  update: T,
+  admin: boolean,
+): T {
+  return update && !admin && update.error ? { ...update, error: "The update failed." } : update;
+}
+
 export const hostsRouter = t.router({
   list: publicProcedure
     .input(
@@ -49,7 +55,7 @@ export const hostsRouter = t.router({
         .object({ limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT) })
         .default({ limit: DEFAULT_LIST_LIMIT }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const all = tokenService.listHosts(input.limit);
       // With `BAND_LOCAL_HOST=off` the hub's own machine takes no work, so the list leaves it out.
       // It stays a host inside the hub.
@@ -79,7 +85,7 @@ export const hostsRouter = t.router({
           ...h,
           sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
           ...describeHostVersion(h, HUB_VERSION, latest),
-          update: workerUpdateService.statusOf(h.id),
+          update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
         })),
       };
     }),
@@ -137,16 +143,7 @@ export const hostsRouter = t.router({
   /** The agents on a host that restarting its worker would end, for the confirm dialog. */
   interruptions: adminProcedure
     .input(z.object({ hostId: z.string().min(1) }))
-    .query(({ input }) => {
-      const agents = agentSessionService.liveAgents().filter((a) => {
-        try {
-          return worktreeService.resolve(a.worktreeId)?.host.id === input.hostId;
-        } catch {
-          return false;
-        }
-      });
-      return { agents };
-    }),
+    .query(({ input }) => ({ agents: workerUpdateService.interruptions(input.hostId) })),
 
   /**
    * Starts updating a worker to its target version and restarting it through its service manager.

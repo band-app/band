@@ -26,7 +26,9 @@ export function HostVersionLine({ host, isAdmin }: { host: HostView; isAdmin: bo
       data-testid="settings__host-version-block"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span data-testid="settings__host-version">Version: {host.workerVersion ?? "unknown"}</span>
+        <span data-testid="settings__host-version" data-version={host.workerVersion ?? "unknown"}>
+          Version: {host.workerVersion ?? "unknown"}
+        </span>
         {label ? (
           <span
             data-testid="settings__host-version-state"

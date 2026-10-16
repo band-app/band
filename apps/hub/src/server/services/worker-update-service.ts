@@ -13,9 +13,11 @@ import { workerUpdateCommand } from "@band-app/shared/versions";
 import { TokenQueries } from "../infra/db/queries/tokens";
 import { describeHostVersion } from "./_utils/host-version";
 import { HUB_VERSION } from "./_utils/hub-version";
+import { agentSessionService } from "./agent-session-service";
 import { releaseCheckService } from "./release-check-service";
 import { emit } from "./watcher-service";
 import { workerLinkService } from "./worker-link-service";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("worker-update");
 
@@ -111,6 +113,7 @@ export class WorkerUpdateService {
     const wait = Number(process.env.BAND_WORKER_UPDATE_RESTART_TIMEOUT_MS);
     const timer = setTimeout(
       () => {
+        this.timers.delete(hostId);
         const now = this.updates.get(hostId);
         if (now?.state !== "restarting") return;
         // The reply or the reconnect may have been missed while the worker did come back.
@@ -154,6 +157,22 @@ export class WorkerUpdateService {
         "online",
       );
     }
+  }
+
+  /** The agents on a host that restarting its worker would end. */
+  interruptions(hostId: string): { chatId: string; worktreeId: string; busy: boolean }[] {
+    const hostOf = new Map<string, string | null>();
+    const hostIdOf = (worktreeId: string): string | null => {
+      if (!hostOf.has(worktreeId)) {
+        try {
+          hostOf.set(worktreeId, worktreeService.resolve(worktreeId)?.host.id ?? null);
+        } catch {
+          hostOf.set(worktreeId, null);
+        }
+      }
+      return hostOf.get(worktreeId) ?? null;
+    };
+    return agentSessionService.liveAgents().filter((a) => hostIdOf(a.worktreeId) === hostId);
   }
 
   /** Dismisses a failed update, so the Update button is offered again. */

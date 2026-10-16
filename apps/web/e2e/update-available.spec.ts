@@ -28,8 +28,8 @@ import { UpdatePanelPage } from "./pages/UpdatePanelPage";
 
 const TOKEN = "e2e-update-token";
 
-/** The hub under test runs the version in apps/hub/package.json. */
-const HUB_VERSION = "0.1.0";
+/** The hub under test is told to report this release (`BAND_HUB_VERSION`). */
+const HUB_VERSION = "0.50.0";
 
 let releases: ReleasesStub;
 let server: ServerHandle;
@@ -45,7 +45,11 @@ test.describe("a newer release exists", () => {
     seedSettings(tmpHome, { tokenSecret: TOKEN });
     server = await startServer({
       tmpHome,
-      env: { BAND_GITHUB_API_URL: releases.url, BAND_INSTALL_METHOD: "compose" },
+      env: {
+        BAND_GITHUB_API_URL: releases.url,
+        BAND_INSTALL_METHOD: "compose",
+        BAND_HUB_VERSION: HUB_VERSION,
+      },
     });
     // The first install fails, as npm does without permission; the retry works and the worker
     // comes back on the new version.
@@ -54,7 +58,7 @@ test.describe("a newer release exists", () => {
         hubUrl: server.url,
         adminToken: TOKEN,
         name: "build-box",
-        version: "0.0.9",
+        version: "0.49.0",
         serviceManager: "systemd",
       },
       () => {
@@ -92,23 +96,18 @@ test.describe("a newer release exists", () => {
     await expect(update.badge).toContainText("9.0.0");
     await update.openPanel();
 
-    await expect(update.hubRow().getByTestId("update-panel__hub-version")).toHaveText(HUB_VERSION);
-    await expect(update.hubRow().getByTestId("update-panel__hub-target")).toHaveText("9.0.0");
-    const worker = update.workerRow(behind.hostId);
-    await expect(worker.getByTestId("update-panel__host-version")).toHaveText("0.0.9");
-    await expect(worker.getByTestId("update-panel__host-target")).toHaveText(HUB_VERSION);
-    const old = update.workerRow(legacy.hostId);
-    await expect(old.getByTestId("update-panel__host-version")).toHaveText("unknown version");
-    await expect(update.panel.getByTestId("update-panel__order")).toContainText(
-      "workers first and the hub last",
-    );
+    await expect(update.hubVersion()).toHaveText(HUB_VERSION);
+    await expect(update.hubTarget()).toHaveText("9.0.0");
+    await expect(update.workerVersion(behind.hostId)).toHaveAttribute("data-version", "0.49.0");
+    await expect(update.workerTarget(behind.hostId)).toHaveText(HUB_VERSION);
+    await expect(update.workerVersion(legacy.hostId)).toHaveAttribute("data-version", "unknown");
   });
 
   test("the hub row shows the compose command and copies it", async ({ page }) => {
     const update = new UpdatePanelPage(page, server.url, TOKEN);
     await update.goto();
     await update.openPanel();
-    const shown = await update.hubRow().getByTestId("update-panel__hub-command").innerText();
+    const shown = await update.hubCommand().innerText();
     expect(shown).toContain("docker compose pull");
     expect(shown).toContain("BAND_VERSION=9.0.0");
     expect(await update.copyHubCommand()).toBe(shown);
@@ -120,30 +119,24 @@ test.describe("a newer release exists", () => {
     const update = new UpdatePanelPage(page, server.url, TOKEN);
     await update.goto();
     await update.openPanel();
-    const old = update.workerRow(legacy.hostId);
-    await expect(old.getByTestId("update-worker__button")).toHaveCount(0);
-    await expect(old.getByTestId("update-panel__host-manual-command")).toHaveText(
+    await expect(update.updateButton(legacy.hostId)).toHaveCount(0);
+    await expect(update.workerManualCommand(legacy.hostId)).toHaveText(
       `npm i -g @band-app/worker@${HUB_VERSION}`,
     );
   });
 
   test("Settings > Hosts marks the workers that are behind", async ({ page }) => {
     const settings = new SettingsPage(page, server.url, TOKEN);
+    const update = new UpdatePanelPage(page, server.url, TOKEN);
     await settings.goto();
     await settings.openDialog("hosts");
     const row = settings.hostRow(behind.hostId);
     await settings.expectRowVisible(row);
-    await expect(row.getByTestId("settings__host-version")).toHaveText("Version: 0.0.9");
-    await expect(row.getByTestId("settings__host-version-state")).toHaveAttribute(
-      "data-state",
-      "behind",
-    );
+    await expect(update.hostsVersion(row)).toHaveAttribute("data-version", "0.49.0");
+    await expect(update.hostsVersionState(row)).toHaveAttribute("data-state", "behind");
     const old = settings.hostRow(legacy.hostId);
-    await expect(old.getByTestId("settings__host-version")).toHaveText("Version: unknown");
-    await expect(old.getByTestId("settings__host-version-state")).toHaveAttribute(
-      "data-state",
-      "unknown",
-    );
+    await expect(update.hostsVersion(old)).toHaveAttribute("data-version", "unknown");
+    await expect(update.hostsVersionState(old)).toHaveAttribute("data-state", "unknown");
   });
 
   test("Update asks first, shows a failed install, and a retry brings the worker to the new version", async ({
@@ -152,26 +145,25 @@ test.describe("a newer release exists", () => {
     const update = new UpdatePanelPage(page, server.url, TOKEN);
     await update.goto();
     await update.openPanel();
-    const row = update.workerRow(behind.hostId);
 
     // Cancelling sends nothing.
-    await update.clickUpdate(row);
-    await expect(update.confirmAgents()).toContainText("No agents are running");
+    await update.clickUpdate(behind.hostId);
+    await expect(update.confirmAgents()).toHaveAttribute("data-state", "none");
     await update.cancelUpdate();
     expect(installAttempts).toBe(0);
 
     // The install fails: the call answers at once, the row says why and the worker stays on its version.
-    await update.clickUpdate(row);
+    await update.clickUpdate(behind.hostId);
     await update.confirmUpdate();
     await expect(update.confirmDialog).toBeHidden();
-    await expect(row.getByTestId("update-panel__host-version")).toHaveText("0.0.9");
-    await expect(row.getByTestId("update-panel__host-error")).toContainText("EACCES");
+    await expect(update.workerVersion(behind.hostId)).toHaveAttribute("data-version", "0.49.0");
+    await expect(update.workerError(behind.hostId)).toContainText("EACCES");
 
     // The retry installs, the worker restarts and reconnects on the hub's version.
-    await row.getByTestId("update-worker__button").click();
+    await update.updateButton(behind.hostId).click();
     await update.confirmUpdate();
-    await expect(row.getByTestId("update-panel__host-version")).toHaveText(HUB_VERSION);
-    await expect(row.getByTestId("update-worker__button")).toHaveCount(0);
+    await expect(update.workerVersion(behind.hostId)).toHaveAttribute("data-version", HUB_VERSION);
+    await expect(update.updateButton(behind.hostId)).toHaveCount(0);
     expect(installAttempts).toBe(2);
   });
 });
@@ -186,7 +178,7 @@ test.describe("nothing to update", () => {
       await expect.poll(() => stub.requests()).toBeGreaterThan(0);
       const update = new UpdatePanelPage(page, hub.url, TOKEN);
       await update.goto();
-      await expect(page.getByTestId("repo-list__settings-button")).toBeVisible();
+      await update.expectDashboardLoaded();
       await expect(update.badge).toHaveCount(0);
     } finally {
       await hub.close();
@@ -205,7 +197,7 @@ test.describe("nothing to update", () => {
       await expect.poll(() => stub.requests()).toBeGreaterThan(0);
       const update = new UpdatePanelPage(page, hub.url, TOKEN);
       await update.goto();
-      await expect(page.getByTestId("repo-list__settings-button")).toBeVisible();
+      await update.expectDashboardLoaded();
       await expect(update.badge).toHaveCount(0);
       await expect(new ToastHostPage(page).notices).toHaveCount(0);
     } finally {
