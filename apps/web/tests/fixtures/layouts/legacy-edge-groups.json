@@ -1,0 +1,87 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["file:README.md"],
+            "activeView": "file:README.md",
+            "id": "1"
+          },
+          "size": 1000
+        }
+      ],
+      "size": 700
+    },
+    "width": 1000,
+    "height": 700,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "file:README.md": {
+      "id": "file:README.md",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "title": "README.md",
+      "params": {}
+    },
+    "file:notes.md": {
+      "id": "file:notes.md",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "title": "notes.md",
+      "params": {}
+    },
+    "file:guide.md": {
+      "id": "file:guide.md",
+      "contentComponent": "file",
+      "tabComponent": "file",
+      "title": "guide.md",
+      "params": {}
+    },
+    "terminal": {
+      "id": "terminal",
+      "contentComponent": "terminal",
+      "tabComponent": "props.defaultTabComponent",
+      "title": "Terminal",
+      "params": {}
+    }
+  },
+  "activeGroup": "1",
+  "edgeGroups": {
+    "left": {
+      "size": 200,
+      "visible": true,
+      "collapsed": true,
+      "group": {
+        "views": ["file:guide.md", "terminal"],
+        "activeView": "file:guide.md",
+        "id": "edge-left",
+        "headerPosition": "left"
+      }
+    },
+    "right": {
+      "size": 200,
+      "visible": false,
+      "collapsed": true,
+      "group": {
+        "views": [],
+        "id": "edge-right",
+        "headerPosition": "right"
+      }
+    },
+    "bottom": {
+      "size": 200,
+      "visible": true,
+      "collapsed": false,
+      "group": {
+        "views": ["file:notes.md", "file:missing-panel-entry.md"],
+        "activeView": "file:notes.md",
+        "id": "edge-bottom",
+        "headerPosition": "bottom"
+      }
+    }
+  }
+}

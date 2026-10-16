@@ -1,5 +1,5 @@
 /**
- * Pure dispatcher for `band open` SSE events on the desktop dockview.
+ * Pure dispatcher for `band open` SSE events on the desktop layout.
  *
  * Extracted from `__root.tsx` so it's testable in isolation. Given an
  * `open-file` event, decides which side-effecting handler to call:
@@ -19,7 +19,7 @@ import { enqueueExternalOpen } from "./pending-external-open";
 
 export interface OpenFileDispatchHandlers {
   /**
-   * Dockview path for in-worktree files. Writes
+   * Layout path for in-worktree files. Writes
    * `currentFile`/`openFilePath` to the per-worktree state store AND
    * activates the Files panel. `filePath` may carry a
    * `:line[:col]` / `:line-end` suffix; the handler is responsible for
@@ -27,7 +27,7 @@ export interface OpenFileDispatchHandlers {
    */
   onOpenFile: (worktreeId: string, filePath: string) => void;
   /**
-   * Dockview path for external files. Activates the Files panel
+   * Layout path for external files. Activates the Files panel
    * without touching its current-file state (the actual file open is
    * driven by the pending-external-open queue, which the always-mounted
    * `CodeBrowserView` drains).

@@ -2,7 +2,7 @@
  * `panelFocus.*` sub-router — records and exposes the last-focused panel per
  * type (chat, terminal, browser) for a worktree.
  *
- * The dashboard's inner dockview containers call `set` when the user switches
+ * The dashboard's inner layout containers call `set` when the user switches
  * the active chat/terminal/browser tab; the "Add to Chat" / "Add to Terminal"
  * selection context menu actions call `get` to resolve which pane should receive the
  * pasted reference. Thin pass-through to `PanelFocusService`.

@@ -16,7 +16,7 @@ import {
   WorktreePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
-import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
+import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
@@ -25,12 +25,12 @@ import { OfflineWorktreeNotice } from "./OfflineCheckpoint";
 import { getPerWorktreeState, subscribePerWorktreeState } from "./per-worktree-state-store";
 import {
   firstLeafOfKind,
-  getWorktreeDockviewApi,
+  getWorktreeLayoutApi,
   getWorktreeLeafActions,
   type LeafKind,
   nextUntitledPath,
-  WorktreeCenterDockview,
-} from "./WorktreeCenterDockview";
+  WorktreeCenter,
+} from "./WorktreeCenter";
 
 // ---------------------------------------------------------------------------
 // Per-worktree cross-panel context
@@ -38,8 +38,8 @@ import {
 //
 // Cross-panel state (currentFile, openFilePath, find-in-file registration) is
 // per-worktree but read/written by leaves that live inside the per-worktree
-// dockviews cached by `MultiWorktreePanelHost`. We use module-level handlers
-// wired by `SharedDockviewLayout`'s render so per-worktree callbacks always
+// layouts cached by `MultiWorktreePanelHost`. We use module-level handlers
+// wired by `SharedWorktreeLayout`'s render so per-worktree callbacks always
 // reference the latest closure without re-rendering every cached child.
 // ---------------------------------------------------------------------------
 
@@ -58,8 +58,8 @@ interface CrossPanelHandlers {
   onActivateTerminalPanel: (worktreeId: string) => void;
 }
 
-// Mutable module-level handlers — `SharedDockviewLayout` writes them on every
-// render. Exported so non-dockview call sites (the SSE listener in
+// Mutable module-level handlers — `SharedWorktreeLayout` writes them on every
+// render. Exported so non-layout call sites (the SSE listener in
 // `__root.tsx`, the legacy chat container) can drive the layout.
 export const crossPanelHandlers: CrossPanelHandlers = {
   onOpenFile: () => {},
@@ -71,13 +71,13 @@ export const crossPanelHandlers: CrossPanelHandlers = {
 };
 
 // ---------------------------------------------------------------------------
-// Helpers: resolve + drive the ACTIVE worktree's dockview
+// Helpers: resolve + drive the ACTIVE worktree's layout
 // ---------------------------------------------------------------------------
 
-/** Activate the first leaf of `kind` in a worktree's dockview; returns
+/** Activate the first leaf of `kind` in a worktree's layout; returns
  *  whether a matching leaf was found. */
 function activateLeafOfKind(worktreeId: string | null, kind: LeafKind): boolean {
-  const api = getWorktreeDockviewApi(worktreeId);
+  const api = getWorktreeLayoutApi(worktreeId);
   const panel = api ? firstLeafOfKind(api, kind) : undefined;
   if (panel) {
     panel.api.setActive();
@@ -86,22 +86,17 @@ function activateLeafOfKind(worktreeId: string | null, kind: LeafKind): boolean 
   return false;
 }
 
-/** Add a new leaf of `kind` to the active group of a worktree's dockview.
- *  An edge group collapses to zero size when empty, so when one is active the
- *  leaf goes to the first grid group instead (same rule as the "+" menu). */
+/** Add a new leaf of `kind` to the active group of a worktree's layout, or to
+ *  the first group when none is active (same rule as the "+" menu). */
 function addLeafToActiveGroup(worktreeId: string | null, kind: LeafKind): void {
-  const api = getWorktreeDockviewApi(worktreeId);
-  const active = api?.activeGroup;
-  const group =
-    active?.api.location.type === "grid"
-      ? active
-      : api?.groups.find((g) => g.api.location.type === "grid");
+  const api = getWorktreeLayoutApi(worktreeId);
+  const group = api?.activeGroup ?? api?.groups[0];
   getWorktreeLeafActions(worktreeId)?.onAdd(kind, group?.id);
 }
 
-/** Maximize the active group of a worktree's dockview, or restore it. */
+/** Maximize the active group of a worktree's layout, or restore it. */
 function toggleMaximizeActiveGroup(worktreeId: string | null): void {
-  const active = getWorktreeDockviewApi(worktreeId)?.activeGroup;
+  const active = getWorktreeLayoutApi(worktreeId)?.activeGroup;
   if (!active) return;
   if (active.api.isMaximized()) {
     active.api.exitMaximized();
@@ -110,8 +105,8 @@ function toggleMaximizeActiveGroup(worktreeId: string | null): void {
   }
 }
 
-/** Move focus into the active leaf of a worktree's dockview, after a palette
- *  command activated it. `WorktreeCenterDockview` listens for
+/** Move focus into the active leaf of a worktree's layout, after a palette
+ *  command activated it. `WorktreeCenter` listens for
  *  `band:focus-active-leaf`. */
 function focusActiveLeaf(worktreeId: string | null): void {
   if (!worktreeId) return;
@@ -141,19 +136,19 @@ function NoWorktreeMessage() {
 }
 
 // ---------------------------------------------------------------------------
-// Main SharedDockviewLayout — a thin host around one per-worktree dockview
+// Main SharedWorktreeLayout — a thin host around one per-worktree layout
 // ---------------------------------------------------------------------------
 
 /**
- * The app-shell layout. No longer owns a dockview: it renders a single
- * `MultiWorktreePanelHost` whose child is a `WorktreeCenterDockview` per
+ * The app-shell layout. No longer owns a layout: it renders a single
+ * `MultiWorktreePanelHost` whose child is a `WorktreeCenter` per
  * visited worktree (all stay mounted for instant switching). This
  * component keeps the shell-level concerns: the command dialogs, the global
  * keyboard shortcuts, and the cross-panel handler registry. Panel-activation
- * shortcuts resolve the active worktree's dockview from
- * `getWorktreeDockviewApi`.
+ * shortcuts resolve the active worktree's layout from
+ * `getWorktreeLayoutApi`.
  */
-export function SharedDockviewLayout() {
+export function SharedWorktreeLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeWorktreeId = parseWorktreeFromPath(pathname);
 
@@ -270,12 +265,12 @@ export function SharedDockviewLayout() {
     () =>
       buildCommands({
         // Adapt the command registry's `getPanel(id)` (id = "chat" /
-        // "terminal" / "browser") to the active worktree's dockview by
+        // "terminal" / "browser") to the active worktree's layout by
         // resolving the first leaf of that kind. "files" / "changes" moved to
         // the right sidepanel and no longer map to a center leaf — return
         // undefined so the command falls through to its reveal path.
         getApi: () => {
-          const api = getWorktreeDockviewApi(activeWorktreeIdRef.current);
+          const api = getWorktreeLayoutApi(activeWorktreeIdRef.current);
           if (!api) return null;
           return {
             getPanel: (id: string) => {
@@ -332,19 +327,19 @@ export function SharedDockviewLayout() {
         openWorktreePicker: () => setWorktreePickerOpen(true),
         closeActiveTab: () => {
           const ws = activeWorktreeIdRef.current;
-          const active = getWorktreeDockviewApi(ws)?.activePanel;
+          const active = getWorktreeLayoutApi(ws)?.activePanel;
           if (!active) return;
           getWorktreeLeafActions(ws)?.onClose(active.id, active.api.component as LeafKind);
         },
         splitActiveTab: (direction) => {
           const ws = activeWorktreeIdRef.current;
-          const api = getWorktreeDockviewApi(ws);
+          const api = getWorktreeLayoutApi(ws);
           const active = api?.activePanel;
           const groupId = api?.activeGroup?.id;
           if (!active || !groupId) return;
           const kind = active.api.component as LeafKind;
           if (kind === "term") {
-            // Terminals split into nested panes, owned by the leaf's own dockview.
+            // Terminals split into nested panes, owned by the leaf's own layout.
             window.dispatchEvent(
               new CustomEvent("band:split-terminal-pane", {
                 detail: { leafId: active.id, direction },
@@ -356,13 +351,13 @@ export function SharedDockviewLayout() {
         },
         cycleTabs: (direction) => {
           const ws = activeWorktreeIdRef.current;
-          cycleTabsInActiveGroup(getWorktreeDockviewApi(ws) ?? null, direction, () =>
+          cycleTabsInActiveGroup(getWorktreeLayoutApi(ws) ?? null, direction, () =>
             focusActiveLeaf(ws),
           );
         },
         cycleGroups: (direction) => {
           const ws = activeWorktreeIdRef.current;
-          cycleGridGroups(getWorktreeDockviewApi(ws) ?? null, direction, () => focusActiveLeaf(ws));
+          cycleGridGroups(getWorktreeLayoutApi(ws) ?? null, direction, () => focusActiveLeaf(ws));
         },
 
         toggleMaximize: () => toggleMaximizeActiveGroup(activeWorktreeIdRef.current),
@@ -685,7 +680,7 @@ export function SharedDockviewLayout() {
 
   // ⌘N → New Untitled File. The shell already dispatches
   // `band:new-untitled-tab` on ⌘N (and from the command palette); open a fresh
-  // untitled `file` leaf in the active worktree's dockview. The desktop
+  // untitled `file` leaf in the active worktree's layout. The desktop
   // Save-As flow lives in `FileLeaf` (`onSaveAs` → `capabilities.pickSaveFile`).
   // Web builds without `pickSaveFile` still get a scratch buffer they can edit;
   // only persistence is desktop-only (same as CodeBrowserView).
@@ -745,11 +740,7 @@ export function SharedDockviewLayout() {
               <div className="flex h-full w-full flex-col">
                 <OfflineWorktreeNotice worktreeId={worktreeId} active={wsActive} />
                 <div className="relative min-h-0 flex-1">
-                  <WorktreeCenterDockview
-                    worktreeId={worktreeId}
-                    visible={wsActive}
-                    wsActive={wsActive}
-                  />
+                  <WorktreeCenter worktreeId={worktreeId} visible={wsActive} wsActive={wsActive} />
                 </div>
               </div>
             </WindowDragContext.Provider>

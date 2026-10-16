@@ -63,7 +63,7 @@ export interface NavControlsProps {
 }
 
 /** Window chrome the center tab strip needs from `AppShell`. The desktop
- *  layout has no title bar over the center column: the dockview tab strip is
+ *  layout has no title bar over the center column: the layout tab strip is
  *  the top row, so its top-left group leaves room for the nav cluster while the
  *  sidebar is collapsed, and its top-right group hosts the right sidepanel's
  *  expand button while that panel is collapsed. `null` outside the desktop

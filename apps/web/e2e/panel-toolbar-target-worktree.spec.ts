@@ -1,5 +1,5 @@
 /**
- * Regression coverage: the inner-dockview header toolbar buttons ("+" /
+ * Regression coverage: the inner-layout header toolbar buttons ("+" /
  * split) in the Chat panel must create the new panel in the VISIBLE
  * worktree — never in a different, cached-but-hidden one.
  *
@@ -7,19 +7,19 @@
  * -------
  * `MultiWorktreePanelHost` keeps every visited worktree mounted at
  * once; inactive ones are only
- * `visibility: hidden`, so several `DockviewChatContainer` instances are
+ * `visibility: hidden`, so several `the old chat container` instances are
  * live simultaneously and all keep re-rendering. The add/split handlers
  * used to live in a MODULE-LEVEL singleton ref that every instance
  * overwrote on render — last-writer-wins. Whichever (possibly hidden)
- * instance rendered most recently left ITS `worktreeId` + dockview api
+ * instance rendered most recently left ITS `worktreeId` + layout api
  * baked into the global, so clicking "+" / split in the visible worktree
- * could create the chat in the wrong worktree's dockview.
+ * could create the chat in the wrong worktree's layout.
  *
  * Keyboard shortcuts were unaffected (each instance handles its own
  * focus-scoped keydown and calls its own closures), so only the toolbar
  * buttons misfired — and only intermittently, depending on render order.
  *
- * The fix keys the handlers by the owning dockview's `api.id` (dockview
+ * The fix keys the handlers by the owning the layout's `api.id` (layout
  * passes the owning `containerApi` into the header-action component), so a
  * click always routes to the worktree that owns the clicked group.
  *
@@ -47,7 +47,7 @@
  *     in the test body).
  *   - Assertions read the server-persisted inner layout via
  *     `chatLayout.get` / `terminalLayout.get` (`countChatPanels` /
- *     `countTerminalPanels`) so they observe WHICH worktree's dockview
+ *     `countTerminalPanels`) so they observe WHICH worktree's layout
  *     the click actually mutated — the exact bug surface — rather than
  *     something cosmetic.
  *
@@ -69,11 +69,11 @@
  *
  * Out of scope: browser container
  * -------------------------------
- * `DockviewBrowserContainer` got the SAME keyed-by-`api.id` fix (add /
+ * `the old browser container` got the SAME keyed-by-`api.id` fix (add /
  * split / close), but it is only mounted in the Electron DESKTOP build:
- * `BrowserPanelComponent` in `SharedDockviewLayout.tsx` renders a
+ * `BrowserPanelComponent` in `SharedWorktreeLayout.tsx` renders a
  * "desktop only" web fallback under `if (!isDesktop)` and mounts
- * `DockviewBrowserContainer` solely on desktop. This Playwright suite
+ * `the old browser container` solely on desktop. This Playwright suite
  * boots the WEB build (`dist/start-server.mjs` driven by Chromium), where
  * `isDesktop` is false, so the browser container never mounts and a
  * runtime browser test can't run here — identical reasoning and exemption
@@ -120,7 +120,7 @@ function repo(name: string) {
   };
 }
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts the inner chat container under test) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -256,11 +256,11 @@ async function mountBothTerminalsAndSettle(
 }
 
 // TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The whole premise
-// (per-container inner-dockview add/split toolbars + a module-level singleton
+// (per-container inner-layout add/split toolbars + a module-level singleton
 // bug + server-side per-container layout counts) is gone: the unified center
-// dockview has one `+` menu and split is keyboard-only, and layout persists to
+// layout has one `+` menu and split is keyboard-only, and layout persists to
 // localStorage (band:dockview-layout-v8:<id>), not chatLayout/terminalLayout.
-test.describe("Inner-dockview toolbar targets the visible worktree", () => {
+test.describe("Inner-layout toolbar targets the visible worktree", () => {
   test("clicking the chat '+' creates the tab in the VISIBLE worktree, not the cached one", async ({
     page,
   }) => {

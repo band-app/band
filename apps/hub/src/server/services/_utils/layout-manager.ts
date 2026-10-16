@@ -1,12 +1,12 @@
 /**
- * Generic dockview layout persistence and mutation.
+ * Generic layout persistence and mutation.
  *
- * Provides get/save/delete for dockview layout trees stored in the
+ * Provides get/save/delete for layout trees stored in the
  * `panel_states` table, plus server-side helpers to add/remove panels
- * without needing a live dockview instance.
+ * without needing a live layout instance.
  *
  * Usage:
- *   const browserLayouts = new DockviewLayoutManager("browser_layout");
+ *   const browserLayouts = new LayoutManager("browser_layout");
  *   browserLayouts.get(worktreeId);
  *   browserLayouts.addPanel(worktreeId, panelId, { ... });
  */
@@ -19,9 +19,9 @@ import {
 } from "../../infra/db/queries/panel-states";
 
 // ---------------------------------------------------------------------------
-// Dockview layout types
+// Layout layout types
 //
-// The dockview `toJSON()` output has this shape:
+// The layout `toJSON()` output has this shape:
 //   {
 //     grid: {
 //       root: GridNode (tree of branch/leaf nodes),
@@ -38,7 +38,7 @@ import {
 // `views` references panel IDs in the `panels` map.
 // ---------------------------------------------------------------------------
 
-export interface DockviewLayout {
+export interface SavedLayout {
   grid: {
     root: GridNode;
     height: number;
@@ -126,7 +126,7 @@ function leafContainsView(node: GridNode, panelId: string): boolean {
  * Returns null if no panel can be resolved (empty/invalid layout).
  */
 export function defaultPanelIdFromLayout(layout: unknown): string | null {
-  if (!layout || !isDockviewLayout(layout)) return null;
+  if (!layout || !isSavedLayout(layout)) return null;
 
   if (layout.activeGroup) {
     const leaf = findLeafById(layout.grid.root, layout.activeGroup);
@@ -162,17 +162,17 @@ function removeFromGrid(node: GridNode, panelId: string): void {
   }
 }
 
-export function isDockviewLayout(obj: unknown): obj is DockviewLayout {
+export function isSavedLayout(obj: unknown): obj is SavedLayout {
   if (typeof obj !== "object" || obj === null) return false;
   const o = obj as Record<string, unknown>;
   return typeof o.grid === "object" && typeof o.panels === "object";
 }
 
 // ---------------------------------------------------------------------------
-// DockviewLayoutManager
+// LayoutManager
 // ---------------------------------------------------------------------------
 
-export class DockviewLayoutManager {
+export class LayoutManager {
   constructor(private readonly panelType: string) {}
 
   private layoutId(worktreeId: string): string {
@@ -224,7 +224,7 @@ export class DockviewLayoutManager {
   }
 
   /**
-   * Add a panel to the saved dockview layout.
+   * Add a panel to the saved layout.
    *
    * Appends the panel to the first group's `views` array and adds the panel
    * entry to the `panels` map. If no layout exists, creates a fresh one-tab layout.
@@ -232,11 +232,11 @@ export class DockviewLayoutManager {
   addPanel(worktreeId: string, panel: PanelState): void {
     const raw = this.get(worktreeId);
 
-    if (raw && isDockviewLayout(raw)) {
+    if (raw && isSavedLayout(raw)) {
       // Idempotent: if the panel is already in the layout (registered in
       // `panels` AND present in some leaf's `views`), refresh its metadata
       // and bail. Otherwise we'd push a duplicate id into `views` on a
-      // re-add and dockview would render two tabs for one panel.
+      // re-add and layout would render two tabs for one panel.
       const alreadyInGrid = leafContainsView(raw.grid.root, panel.id);
       if (raw.panels[panel.id] && alreadyInGrid) {
         raw.panels[panel.id] = panel;
@@ -254,19 +254,19 @@ export class DockviewLayoutManager {
 
       this.save(worktreeId, raw);
     } else {
-      // Match dockview's `toJSON()` shape exactly so the dashboard's
+      // Match the layout's `toJSON()` shape exactly so the dashboard's
       // `fromJSON` round-trip succeeds. Specifically: the grid root must
-      // be a `branch` containing the leaf — dockview rejects a bare
-      // `leaf` as the grid root and the catch in `DockviewChatContainer`
+      // be a `branch` containing the leaf — layout rejects a bare
+      // `leaf` as the grid root and the catch in `the old chat container`
       // (and its sibling containers) falls back to `createDefaultPanel`,
       // which mints a brand-new chat ID and orphans whatever pane the
       // CLI just lazy-created. The pixel sizes are nominal placeholders;
-      // dockview reflows them on first paint based on the real container
+      // layout reflows them on first paint based on the real container
       // dimensions.
       const groupId = `group_${panel.id}`;
       const width = 500;
       const height = 500;
-      const layout: DockviewLayout = {
+      const layout: SavedLayout = {
         grid: {
           root: {
             type: "branch",
@@ -291,13 +291,13 @@ export class DockviewLayoutManager {
   }
 
   /**
-   * Remove a panel from the saved dockview layout.
+   * Remove a panel from the saved layout.
    *
    * Removes the panel from the `panels` map and from any group's `views` array.
    */
   removePanel(worktreeId: string, panelId: string): void {
     const raw = this.get(worktreeId);
-    if (!raw || !isDockviewLayout(raw)) return;
+    if (!raw || !isSavedLayout(raw)) return;
 
     delete raw.panels[panelId];
     removeFromGrid(raw.grid.root, panelId);
@@ -311,7 +311,7 @@ export class DockviewLayoutManager {
    */
   listPanelIds(worktreeId: string): string[] {
     const raw = this.get(worktreeId);
-    if (!raw || !isDockviewLayout(raw)) return [];
+    if (!raw || !isSavedLayout(raw)) return [];
     return Object.keys(raw.panels);
   }
 }

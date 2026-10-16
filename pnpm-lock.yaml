@@ -482,9 +482,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      dockview:
-        specifier: ^6.0.6
-        version: 6.0.6(react@19.2.4)
       drizzle-orm:
         specifier: 1.0.0-rc.1
         version: 1.0.0-rc.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(bun-types@1.3.13)(zod@4.6.5)
@@ -5746,14 +5743,6 @@ packages:
 
   dnssd-advertise@1.1.6:
     resolution: {integrity: sha512-Ndrrf6BMPalkQPd/zubL+4YghH2J9NspapQ09uDXwYbvOPkP0oaqf5CkcwJ0b50kS2O3ul6yVu+jz+RY62Cejg==}
-
-  dockview-core@6.0.6:
-    resolution: {integrity: sha512-d7MA42recquehve/52nC3yIbnFBHicRNbkHYX7bFepw3TlQF0XRHEOBnyYIT9OlVLkVRkv7aEOy5yIzZw5wyyA==}
-
-  dockview@6.0.6:
-    resolution: {integrity: sha512-NLhW6J7T5aUhNHAct9c67TmaLej7Tp4f6jY43Ke/Ibs7sNXEGGNtAncg2d/mSjX5uM92BIMXzqZxkkWAFxQI+w==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   doctypes@1.1.0:
     resolution: {integrity: sha512-LLBi6pEqS6Do3EKQ3J0NqHWV5hhb78Pi8vvESYwyOy2c31ZEZVdtitdzsQsKb7878PEERhzUk0ftqGhG6Mz+pQ==}
@@ -15697,13 +15686,6 @@ snapshots:
     optional: true
 
   dnssd-advertise@1.1.6: {}
-
-  dockview-core@6.0.6: {}
-
-  dockview@6.0.6(react@19.2.4):
-    dependencies:
-      dockview-core: 6.0.6
-      react: 19.2.4
 
   doctypes@1.1.0: {}
 

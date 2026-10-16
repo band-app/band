@@ -381,7 +381,7 @@ export function DashboardShell({
       // by the live app zoom factor (`--app-zoom`, set by applyZoomLevel in
       // apps/web/src/lib/zoom.ts) so the rendered height always matches the
       // actual viewport. The `hideTitleBar` branch is sized by its parent
-      // (a dockview panel with explicit pixel height) so it doesn't need
+      // (a layout panel with explicit pixel height) so it doesn't need
       // the compensation. See band-app/band#463.
       //
       // NOTE: `--app-zoom` is hardcoded here because the `dashboard` module

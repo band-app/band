@@ -7,7 +7,7 @@
  *   - Changes view → `ChangesFileTree` (the Changes section of the right
  *     sidepanel).
  *
- * Both trees moved out of the center dockview and into the persistent right
+ * Both trees moved out of the center layout and into the persistent right
  * sidepanel in #643 Phase 2 (`RightSidepanel.tsx`, rendered in `__root.tsx`).
  * The sidepanel is visible by default; `openFilesTab` / `openChangesTab`
  * therefore reveal it (via `WorktreePage.revealRightPanel`) and interact with

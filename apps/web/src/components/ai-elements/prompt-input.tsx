@@ -234,7 +234,7 @@ export const PromptInput = ({
   }, []);
 
   // Deliver an "Add to Chat" reference from the selection context menu.
-  // SharedDockviewLayout owns the worktree-agnostic `band:add-to-chat` intent:
+  // SharedWorktreeLayout owns the worktree-agnostic `band:add-to-chat` intent:
   // it resolves the active worktree's last-focused chat and re-dispatches the
   // scoped `band:chat-insert` handled here. Many PromptInput instances are
   // mounted at once (one per chat pane × one per cached worktree), so we only

@@ -1,36 +1,27 @@
 /**
- * Pure-function tests for the per-section Dockview shortcut helpers used by
- * DockviewTerminalContainer, DockviewChatContainer, and DockviewBrowserContainer.
- *
- * These helpers were extracted from the three containers so all of them share
- * one cycling / neighbour-select implementation — these tests pin that
- * implementation. Each section then layers its own focus-target callback on
- * top, which the containers cover via manual QA.
+ * Pure-function tests for the keyboard helpers of a layout: cycling tabs and
+ * groups, and picking the neighbour that takes focus before a tab closes.
+ * The center area and the split panes of a terminal tab share them.
  *
  * The bugs these guard against:
  *   - Cycling firing the refocus callback when the underlying api is missing
  *     (would null-deref inside the section).
- *   - cycleGridGroups picking up floating / popout groups (only grid groups
- *     should be cyclable via Cmd+[ / Cmd+]).
+ *   - cycleGridGroups visiting a group with no on-screen box (hidden or
+ *     detached), which would sort first at (0, 0).
  *   - cycleGridGroups visiting groups in creation order, or in the order
- *     dictated by the split tree, rather than the on-screen reading order
- *     — splitting right-then-down vs down-then-right produces identical
- *     pixels but opposite traversal orders, so the cycle must depend on
- *     measured pixel position, not tree shape.
+ *     dictated by the split tree, rather than the on-screen reading order:
+ *     splitting right-then-down vs down-then-right produces identical pixels
+ *     but opposite traversal orders, so the cycle must depend on measured
+ *     pixel position, not tree shape.
  *   - Closing the leftmost tab snapping focus to the *next* leftmost instead
  *     of the panel on its right.
  *   - Closing a single-tab group still trying to pre-select a neighbour.
  *
- * Note on the stub `DockviewApi`: CLAUDE.md prefers black-box integration tests
- * over mock-based unit tests, but Dockview is a DOM-driven library — building
- * a real `DockviewApi` requires mounting a Dockview container against a live
- * DOM, manipulating splits via user-style drag interactions, and running this
- * in vitest + jsdom (which doesn't implement layout). The helpers under test
- * are also pure functions over the `DockviewApi` interface: no I/O, no state,
- * no async — exactly the shape where stub-based contract tests give the
- * highest signal-to-noise. Per-container behaviour (the focus-target callbacks
- * + visibility wiring) is covered by manual QA against the running app, same
- * as the rest of the dockview UI.
+ * The helpers read `group.element.getBoundingClientRect()`, which needs a
+ * laid-out DOM, so they run here against stubs that model only the
+ * `LayoutApi` surface they touch. The model itself is covered by
+ * `layout-model.test.ts`, and the layout in a real browser by the Playwright
+ * specs (`terminal-nested-panes`, `center-tab-cycle-focus`).
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -40,11 +31,11 @@ import {
   type GroupRect,
   selectNeighbourBeforeRemove,
   sortGroupsInReadingOrder,
-} from "../src/lib/dockview-section-actions";
+} from "../src/lib/layout-section-actions";
 
 // ---------------------------------------------------------------------------
-// Minimal stub builders. We only model the DockviewApi surface our helpers
-// touch — anything more would just lock us into dockview's full type.
+// Minimal stub builders. We only model the LayoutApi surface our helpers
+// touch — anything more would just lock us into the layout's full type.
 // ---------------------------------------------------------------------------
 
 interface StubPanel {
@@ -67,8 +58,7 @@ interface StubGroup {
     moveToNext: ReturnType<typeof vi.fn>;
     moveToPrevious: ReturnType<typeof vi.fn>;
   };
-  api: { location: { type: "grid" | "floating" | "popout" } };
-  /** Stand-in for the runtime `element` getter dockview exposes via
+  /** Stand-in for the runtime `element` getter the layout exposes via
    * `BasePanelView`. `cycleGridGroups` reads this through an
    * `unknown`-cast so we don't need to fake the rest of HTMLElement. */
   element: {
@@ -81,7 +71,6 @@ function makePanel(id: string): StubPanel {
 }
 
 interface MakeGroupOpts {
-  location?: "grid" | "floating" | "popout";
   activeIndex?: number;
   rect?: StubRect;
 }
@@ -94,7 +83,6 @@ function makeGroup(id: string, panelIds: string[], opts?: MakeGroupOpts): StubGr
     panels,
     activePanel: panels[opts?.activeIndex ?? 0],
     model: { moveToNext: vi.fn(), moveToPrevious: vi.fn() },
-    api: { location: { type: opts?.location ?? "grid" } },
     element: { getBoundingClientRect: () => rect },
   };
 }
@@ -106,7 +94,7 @@ interface StubApi {
   getPanel: (id: string) => (StubPanel & { group?: StubGroup }) | undefined;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: stub fed to functions typed against the real DockviewApi
+// biome-ignore lint/suspicious/noExplicitAny: stub fed to functions typed against the real LayoutApi
 function asApi(stub: StubApi): any {
   return stub;
 }
@@ -234,7 +222,7 @@ describe("sortGroupsInReadingOrder", () => {
   });
 
   it("groups visually-aligned rows even with sub-pixel top differences", () => {
-    // Dockview's flex sizing can give panels on the same row slightly
+    // the layout's flex sizing can give panels on the same row slightly
     // different `top` values (e.g. 199.5 vs 200). Without row snapping
     // the BR panel below would sort between TR and BL, producing
     // TL, TR, BR, BL — wrong.
@@ -288,9 +276,9 @@ describe("cycleGridGroups", () => {
     expect(refocus).not.toHaveBeenCalled();
   });
 
-  it("ignores floating and popout groups when counting", () => {
+  it("ignores groups with no size when counting", () => {
     const grid = makeGroup("g0", ["a"]);
-    const floating = makeGroup("g1", ["b"], { location: "floating" });
+    const floating = makeGroup("g1", ["b"], { rect: { left: 0, top: 0, width: 0, height: 0 } });
     const refocus = vi.fn();
     cycleGridGroups(asApi(makeApi([grid, floating])), 1, refocus);
     expect(floating.panels[0].api.setActive).not.toHaveBeenCalled();
@@ -299,7 +287,7 @@ describe("cycleGridGroups", () => {
   });
 
   it("does not refocus when the next group has no active panel", () => {
-    // An empty group is unusual but possible (dockview can briefly hold a
+    // An empty group is unusual but possible (the layout can briefly hold a
     // group with no active panel between operations). Without the guard the
     // refocus callback would fire even though setActive() was a no-op, which
     // re-focuses whatever was already active and causes a confusing flicker.
@@ -353,7 +341,7 @@ describe("cycleGridGroups", () => {
     expect(g3.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
-  it("enters the cycle from the first group when active group is floating/popout (direction 1)", () => {
+  it("enters the cycle from the first group when the active group has no size (direction 1)", () => {
     // `getNavigableGroupsInVisualOrder` excludes floating/popout, so a floating
     // active group has `idx === -1`. The naive `(-1 + 1 + n) % n` formula
     // gives 0 (first group, ok), but the corresponding backward case
@@ -362,7 +350,7 @@ describe("cycleGridGroups", () => {
     const grid1 = makeGroup("grid1", ["b"], {
       rect: { left: 200, top: 0, width: 200, height: 200 },
     });
-    const floating = makeGroup("float", ["c"], { location: "floating" });
+    const floating = makeGroup("float", ["c"], { rect: { left: 0, top: 0, width: 0, height: 0 } });
     const api = makeApi([grid0, grid1, floating]);
     // Override activeGroup to the floating one so `findIndex` against the
     // grid-only list returns -1.
@@ -371,7 +359,7 @@ describe("cycleGridGroups", () => {
     expect(grid0.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
-  it("enters the cycle from the last group when active group is floating/popout (direction -1)", () => {
+  it("enters the cycle from the last group when the active group has no size (direction -1)", () => {
     // The bug we're fixing: `(-1 + -1 + n) % n = n - 2` — backward from a
     // non-grid active group used to land on the second-to-last group,
     // silently skipping the last one. Should land on the last grid group.
@@ -382,7 +370,7 @@ describe("cycleGridGroups", () => {
     const grid2 = makeGroup("grid2", ["c"], {
       rect: { left: 400, top: 0, width: 200, height: 200 },
     });
-    const floating = makeGroup("float", ["d"], { location: "floating" });
+    const floating = makeGroup("float", ["d"], { rect: { left: 0, top: 0, width: 0, height: 0 } });
     const api = makeApi([grid0, grid1, grid2, floating]);
     api.activeGroup = floating;
     cycleGridGroups(asApi(api), -1);
