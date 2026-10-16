@@ -34,6 +34,7 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import type { KeepAwakeController } from "../services/keep-awake.js";
+import { createLogger } from "../services/log.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
 import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
@@ -49,6 +50,7 @@ import {
   pickSaveFile,
   revealInFinder,
 } from "./macos-shell.js";
+import { createRendererErrorReporter, type RendererErrorReport } from "./renderer-errors.js";
 import { guardedHandler } from "./sender-guard.js";
 import { getAppTitle } from "./window-title.js";
 import { type WorkerIpcDeps, workerHandlers } from "./worker.js";
@@ -124,6 +126,10 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.keepAwakeSet, (args: { enabled?: unknown }) => ({
     enabled: opts.keepAwake.set(args?.enabled === true),
   }));
+  const reportRendererError = createRendererErrorReporter(createLogger("renderer"));
+  handle(Channels.reportRendererError, (args: RendererErrorReport) => {
+    reportRendererError(args);
+  });
   handle(Channels.getAppMetrics, () => getAppMetrics(opts.mainWindow.webContents.id));
 
   // ---- macOS shell ----

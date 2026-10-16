@@ -22,6 +22,8 @@ export const Channels = {
   // Keep-awake switch (powerSaveBlocker, saved in ~/.band/desktop-keep-awake.json).
   keepAwakeGet: "keep_awake_get",
   keepAwakeSet: "keep_awake_set",
+  // The web UI reports an uncaught error; main logs it to desktop.log.
+  reportRendererError: "report_renderer_error",
 
   // Hub picker: which hub the app talks to (local, or a remote URL + token).
   // `hubGetChoice` returns the saved choice without its token; `hubSetChoice`

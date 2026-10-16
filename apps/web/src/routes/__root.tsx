@@ -49,6 +49,7 @@ import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { startPowerState } from "../lib/power-state";
+import { installRendererErrorReporting } from "../lib/renderer-error-reporting";
 import {
   loadRightPanelCollapsed,
   loadRightPanelWidth,
@@ -184,6 +185,9 @@ function TranslucentSidebarSync() {
 
   return null;
 }
+
+// Installed at module load, not in an effect, so errors thrown while the shell is still loading are logged too.
+if (typeof window !== "undefined") installRendererErrorReporting(window);
 
 /** Starts the power and focus watcher (battery, blurred or hidden) and reports it to the hub. */
 function PowerSync() {
