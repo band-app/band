@@ -4044,6 +4044,20 @@ fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
 
 // --- Hosts commands ---
 
+/// The VERSION column of `hosts list`: the worker's version, and what to do when it is not current.
+fn host_version_cell(host: &serde_json::Value) -> String {
+    let version = host
+        .get("workerVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    match host.get("versionState").and_then(|v| v.as_str()) {
+        Some("behind") => format!("{version} (behind)"),
+        Some("unknown") => "unknown (update)".to_string(),
+        Some("refused") => format!("{version} (update required)"),
+        _ => version.to_string(),
+    }
+}
+
 fn cmd_hosts_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let data = client.trpc_query("hosts.list", &serde_json::json!({}))?;
@@ -4053,7 +4067,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
         .cloned()
         .unwrap_or_default();
 
-    let rows: Vec<[String; 7]> = hosts
+    let rows: Vec<[String; 8]> = hosts
         .iter()
         .map(|host| {
             let text = |key: &str| host.get(key).and_then(|v| v.as_str()).unwrap_or("");
@@ -4090,6 +4104,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
                 text("id").to_string(),
                 text("name").to_string(),
                 text("status").to_string(),
+                host_version_cell(host),
                 labels,
                 list("agents"),
                 list("roots"),
@@ -4104,6 +4119,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
                 "ID",
                 "NAME",
                 "STATUS",
+                "VERSION",
                 "LABELS",
                 "AGENTS",
                 "ROOTS",
@@ -5534,7 +5550,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "hosts list",
             "description": "List the hosts worktrees can run on",
             "parameters": [],
-            "notes": "Text output: `ID  NAME  STATUS  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. AGENTS are the coding agents the host can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null}]}`."
+            "notes": "Text output: `ID  NAME  STATUS  VERSION  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. VERSION is the Band version the worker runs (the hub's for the local host), followed by `(behind)` when it is lower than the hub's, `(update)` when the worker never reported one, or `(update required)` when the hub refused its link for being too far from the hub's version. AGENTS are the coding agents the host can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null, \"workerVersion\": \"0.50.0\", \"versionState\": \"current\", \"updateTarget\": null}]}`. `versionState` is current, behind, ahead, unknown or refused."
         }),
         serde_json::json!({
             "name": "hosts remove",

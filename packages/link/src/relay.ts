@@ -204,3 +204,11 @@ export interface LeaseRenewReply {
   /** How many worktrees got a local snapshot when it did. */
   snapshots: number;
 }
+
+/**
+ * Hub to worker: install `{ version }` of `@band-app/worker` with npm and restart through the
+ * worker's service manager. The reply `{ ok: true }` comes once the install has succeeded, just
+ * before the restart; a failed install is an RPC error and the worker keeps running. Only a worker
+ * that reported a `serviceManager` in its hello accepts it. See `apps/worker/src/update.ts`.
+ */
+export const METHOD_WORKER_UPDATE = "worker.update";

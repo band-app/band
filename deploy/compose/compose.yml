@@ -25,6 +25,8 @@ services:
     ports:
       - "${BAND_BIND:-127.0.0.1}:${BAND_PORT:-3456}:3456"
     environment:
+      # How this hub was installed, so the update panel shows the right command.
+      BAND_INSTALL_METHOD: compose
       # Empty means the hub mints an admin token on the first run and prints it once.
       BAND_ADMIN_TOKEN: ${BAND_ADMIN_TOKEN:-}
       # off: every worktree runs on a worker and no sample repo is created.

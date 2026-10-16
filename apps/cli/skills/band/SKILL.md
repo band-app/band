@@ -257,7 +257,7 @@ Stops the remote tunnel.
 band hosts list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), Band version, labels, agents, roots and last contact. The version is followed by `(behind)` when the worker runs an older Band than the hub, `(update)` when it never reported one, and `(update required)` when the hub refused its link for being more than one minor version away. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities`, `home`, `workerVersion`, `versionState` (`current`, `behind`, `ahead`, `unknown` or `refused`) and `updateTarget`. Updating a worker is a click on Settings > Hosts, or `npm i -g @band-app/worker@<version>` on the worker. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
 
 ### Move every worktree off a host
 

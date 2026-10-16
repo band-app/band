@@ -40,6 +40,13 @@ RUN apt-get update \
 RUN npm install -g pnpm@10 node-gyp
 WORKDIR /app
 COPY . .
+# The hub reports this version (apps/hub/package.json is bundled into it), and the Hosts screen
+# compares workers against it. The repo's package.json files carry no release version: the release
+# workflow bumps them on its runner. A plain `docker build` keeps whatever the file says.
+ARG BAND_VERSION=dev
+RUN if echo "$BAND_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then \
+      (cd apps/hub && npm pkg set version="$BAND_VERSION"); \
+    fi
 RUN pnpm install --frozen-lockfile
 RUN pnpm build:web
 
@@ -97,7 +104,8 @@ ENV NODE_ENV=production \
     PORT=3456 \
     BAND_LOCAL_HOST=off \
     BAND_CLI_PATH=/opt/band/binaries/band \
-    HOME=/data
+    HOME=/data \
+    BAND_INSTALL_METHOD=docker
 EXPOSE 3456
 ARG BAND_VERSION=dev
 LABEL org.opencontainers.image.title="band-hub" \

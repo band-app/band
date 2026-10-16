@@ -13,6 +13,7 @@ import {
   type LifecyclePolicy,
   LinkClient,
   type LinkClientOptions,
+  LinkRejectedError,
   METHOD_LEASE_RENEW,
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_POLICY,
@@ -48,6 +49,7 @@ import {
   writeWorkerId,
 } from "./state.ts";
 import { createWorkerTerminalBackend } from "./terminals.ts";
+import { detectServiceManager, registerUpdateMethods, type ServiceManager } from "./update.ts";
 
 const log = createLogger("band-worker");
 
@@ -78,7 +80,15 @@ export interface WorkerOptions {
    * `terminals.ts`). Off by default: a worker started in a test process would leave a daemon behind.
    */
   persistentTerminals?: boolean;
+  /** The service manager that supervises this worker. Defaults to what the environment says. */
+  serviceManager?: ServiceManager | null;
+  /** How long a worker the hub refused for its version waits before it gives up. Default 5 minutes. */
+  versionRetryMs?: number;
 }
+
+/** The hub refused this worker's version. It waits, so a service manager's restart does not redial every few seconds. */
+const VERSION_REFUSED_CODE = "version-incompatible";
+const VERSION_RETRY_MS = 5 * 60_000;
 
 /** Git repos that are a root or sit directly in one. A repo with no remote URL has no mapping, so this finds it. */
 async function gitReposAtRoots(roots: string[]): Promise<string[]> {
@@ -178,6 +188,8 @@ export class Worker {
     await host.awaitReport();
     const info = await host.info();
 
+    const serviceManager =
+      options.serviceManager === undefined ? detectServiceManager() : options.serviceManager;
     const client = new LinkClient({
       url: linkUrl(config.hubUrl),
       token,
@@ -186,6 +198,8 @@ export class Worker {
       hello: {
         workerId,
         buildId: `band-worker@${WORKER_VERSION}`,
+        version: WORKER_VERSION,
+        ...(serviceManager ? { serviceManager } : {}),
         mode: config.ephemeral ? "ephemeral" : "attached",
         capabilities: [
           ...Object.entries(info.capabilities)
@@ -257,6 +271,9 @@ export class Worker {
     // Every worker hands out its agents' session files: an ephemeral one when it sleeps, a static
     // one for the hub's checkpoints, so a restored chat resumes its session on another host.
     registerLifecycleMethods(registrar, ctx);
+    registerUpdateMethods(registrar, serviceManager, (level, fields, msg) =>
+      level === "error" ? log.error(fields, msg) : log.info(fields, msg),
+    );
     if (options.gitCredentialHelper) {
       const broker = new GitCredentialBroker(ctx);
       const socketPath = await broker.start();
@@ -271,10 +288,30 @@ export class Worker {
     try {
       await client.connect();
     } catch (err) {
+      if (err instanceof LinkRejectedError && err.code === VERSION_REFUSED_CODE) {
+        const fromEnv = Number(process.env.BAND_WORKER_VERSION_RETRY_MS);
+        await worker.waitOutRefusal(
+          err.message.replace(/^rejected: /, ""),
+          options.versionRetryMs ?? (fromEnv > 0 ? fromEnv : undefined),
+        );
+      }
       await worker.stop(1);
       throw err;
     }
     return worker;
+  }
+
+  private connectedOnce = false;
+  private versionRetryMs = VERSION_RETRY_MS;
+
+  /** Logs why the hub refused this version and waits before the process exits, which is when a service manager would redial. */
+  private async waitOutRefusal(reason: string, retryMs = VERSION_RETRY_MS): Promise<void> {
+    this.versionRetryMs = retryMs;
+    log.error(
+      { reason, retryInMs: retryMs },
+      `the hub refused this worker: ${reason}. Update it with: npm i -g @band-app/worker, then restart it`,
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, retryMs));
   }
 
   async stop(code = 0): Promise<void> {
@@ -324,6 +361,7 @@ export class Worker {
     let disconnectedSince: number | null = null;
     client.on("connected", (ready: Ready, resumed: boolean) => {
       disconnectedSince = null;
+      this.connectedOnce = true;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
       void ctx.cli?.sync();
       this.chats?.onConnected();
@@ -350,9 +388,14 @@ export class Worker {
       disconnectedSince = Date.now();
       log.warn("lost the hub link, redialing");
     });
-    client.on("rejected", (reason: string) => {
+    client.on("rejected", (reason: string, code?: string) => {
       log.error({ reason }, "the hub rejected this worker");
-      void this.stop(1);
+      // The first connect handles its own refusal, in `start`.
+      if (code === VERSION_REFUSED_CODE && this.connectedOnce) {
+        void this.waitOutRefusal(reason, this.versionRetryMs).then(() => this.stop(1));
+      } else if (this.connectedOnce || code !== VERSION_REFUSED_CODE) {
+        void this.stop(1);
+      }
     });
     client.on("mismatch", (need: number) => {
       log.error({ need }, "the hub speaks another link protocol version");

@@ -4,11 +4,16 @@
  */
 
 import type { Host } from "@band-app/host-api";
+import { hubUpdateCommand } from "@band-app/shared/versions";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
+import { describeHostVersion } from "../../services/_utils/host-version";
+import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
+import { agentSessionService } from "../../services/agent-session-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
 import { agentHostView } from "../../services/relay-scope";
+import { releaseCheckService } from "../../services/release-check-service";
 import { repoService } from "../../services/repo-service";
 import {
   DEFAULT_LIST_LIMIT,
@@ -17,6 +22,8 @@ import {
   tokenService,
 } from "../../services/token-service";
 import { emit } from "../../services/watcher-service";
+import { WorkerUpdateError, workerUpdateService } from "../../services/worker-update-service";
+import { worktreeService } from "../../services/worktree-service";
 import { repoErrorToTrpc } from "../repos/errors";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
@@ -66,10 +73,13 @@ export const hostsRouter = t.router({
         }
       }
       // An ephemeral worker the hub could not store before it exits stays up, and says why.
+      const latest = releaseCheckService.status().latest;
       return {
         hosts: hosts.map((h) => ({
           ...h,
           sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+          ...describeHostVersion(h, HUB_VERSION, latest),
+          update: workerUpdateService.statusOf(h.id),
         })),
       };
     }),
@@ -104,6 +114,68 @@ export const hostsRouter = t.router({
       }),
     };
   }),
+
+  /**
+   * The hub's version, the newest release GitHub reported and the command that updates the hub for
+   * how it was installed. Any device token may read it: the sidebar badge uses it.
+   */
+  updateStatus: publicProcedure.query(() => {
+    const release = releaseCheckService.status();
+    const method = hubInstallMethod();
+    const target = release.latest ?? HUB_VERSION;
+    return {
+      hubVersion: HUB_VERSION,
+      latest: release.latest,
+      updateAvailable: release.updateAvailable,
+      checkEnabled: release.enabled,
+      checkedAt: release.checkedAt,
+      installMethod: method,
+      hubCommand: hubUpdateCommand(method, target),
+    };
+  }),
+
+  /** The agents on a host that restarting its worker would end, for the confirm dialog. */
+  interruptions: adminProcedure
+    .input(z.object({ hostId: z.string().min(1) }))
+    .query(({ input }) => {
+      const agents = agentSessionService.liveAgents().filter((a) => {
+        try {
+          return worktreeService.resolve(a.worktreeId)?.host.id === input.hostId;
+        } catch {
+          return false;
+        }
+      });
+      return { agents };
+    }),
+
+  /**
+   * Starts updating a worker to its target version and restarting it through its service manager.
+   * Answers at once; the host row (`update`) shows installing, restarting and then the result. A
+   * failed install keeps npm's message there and the worker running as it was. Restarting ends the agents on that host, so the UI asks first.
+   */
+  update: adminProcedure
+    .input(z.object({ hostId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await workerUpdateService.update(input.hostId);
+      } catch (err) {
+        if (err instanceof WorkerUpdateError) {
+          throw new TRPCError({
+            code: err.reason === "not-found" ? "NOT_FOUND" : "CONFLICT",
+            message: err.message,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  /** Dismisses a failed update, so the Update button is offered again. */
+  dismissUpdate: adminProcedure
+    .input(z.object({ hostId: z.string().min(1) }))
+    .mutation(({ input }) => {
+      workerUpdateService.clear(input.hostId);
+      return { hostId: input.hostId };
+    }),
 
   /**
    * Lists the directories in a folder on a host, for the folder picker of "Add repo from a

@@ -18,13 +18,25 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { HostInfo } from "@band-app/host-api";
 import { RemoteHost } from "@band-app/host-remote";
-import { LinkServer, MAX_MESSAGE_BYTES, type ServerSession } from "@band-app/link";
+import {
+  type AuthResult,
+  type Hello,
+  LinkServer,
+  MAX_MESSAGE_BYTES,
+  type ServerSession,
+} from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import {
+  compatibilityProblem,
+  VERSION_REFUSED_CODE,
+  workerVersionOf,
+} from "@band-app/shared/versions";
 import { type WebSocket, WebSocketServer } from "ws";
 import { selectWsProtocol } from "../../../auth";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
+import { HUB_VERSION, HUB_VERSION_UNRELEASED } from "./_utils/hub-version";
 import { chatOwnershipService } from "./chat-ownership-service";
 import { checkpointService } from "./checkpoint-service";
 import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
@@ -37,6 +49,7 @@ import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
 import { workerLeaseService } from "./worker-lease-service";
 import { workerRelayService } from "./worker-relay-service";
+import { workerUpdateService } from "./worker-update-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("worker-link");
@@ -76,7 +89,7 @@ export class WorkerLinkService {
     this.queries = options.queries ?? new TokenQueries();
     this.registry = options.registry ?? hostRegistry;
     this.now = options.now ?? Date.now;
-    this.server = new LinkServer({ authenticate: this.tokens.authenticate });
+    this.server = new LinkServer({ authenticate: (hello) => this.authenticate(hello) });
     this.server.on("session", (session: ServerSession) => this.onSession(session));
     this.server.on("connected", (session: ServerSession) => void this.onConnected(session));
     this.server.on("disconnected", (session: ServerSession) =>
@@ -92,6 +105,38 @@ export class WorkerLinkService {
         this.setStatus(session.workerId, "offline");
       }
     });
+  }
+
+  /**
+   * The credential first, so only a worker that holds one can have its refusal recorded. Then the
+   * version: a worker more than one minor from the hub is turned away with the reason and a code, so
+   * it waits instead of redialing. A worker that sent no version is let in.
+   */
+  private authenticate(hello: Hello): AuthResult {
+    const auth = this.tokens.authenticate(hello);
+    if (!auth.ok) return auth;
+    const version = workerVersionOf(hello);
+    const problem = compatibilityProblem(version, HUB_VERSION);
+    if (!problem) return auth;
+    // A hub run from source reports the unreleased default, so it has no version to hold workers to.
+    if (HUB_VERSION_UNRELEASED) {
+      log.info(
+        `worker ${hello.workerId} runs ${version}, which would be refused by a released hub, but this hub runs from source (${HUB_VERSION}), so version checks are skipped`,
+      );
+      return auth;
+    }
+    log.warn(`worker ${hello.workerId} refused: ${problem}`);
+    // A second hello for a worker that is connected must not rewrite its row or flip it offline.
+    if (this.server.getSession(hello.workerId)?.attached) {
+      return { ok: false, reason: problem, code: VERSION_REFUSED_CODE };
+    }
+    try {
+      this.queries.setHostRefusal(hello.workerId, { version, reason: problem });
+    } catch (err) {
+      log.warn(`could not record the refusal: ${err instanceof Error ? err.message : err}`);
+    }
+    this.publish(hello.workerId, "offline");
+    return { ok: false, reason: problem, code: VERSION_REFUSED_CODE };
   }
 
   /** Makes every known worker resolvable, so a worktree on an offline host still finds its host. */
@@ -221,8 +266,12 @@ export class WorkerLinkService {
       agents: hello.agents,
       tools: info?.tools ?? hello.tools ?? {},
       mode: hello.mode,
+      ...(hello.serviceManager ? { serviceManager: hello.serviceManager } : {}),
     };
-    this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
+    // A worker from before version reporting has neither field, and its build id is all there is.
+    const version = workerVersionOf(hello);
+    this.queries.markHostOnline(workerId, at, { info: stored, version: version ?? hello.buildId });
+    workerUpdateService.onConnected(workerId, version);
     log.info(`worker ${workerId} is online`);
     workerLeaseService.onConnected(session);
     try {
