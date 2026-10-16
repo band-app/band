@@ -17,6 +17,7 @@ import { WorktreeHeader } from "../../components/chat/worktree-header";
 import { StateIcon } from "../../components/state-icon";
 import { Body, Centered } from "../../components/ui";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
+import { openChanges, openExplorer } from "../../lib/files/open";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
 import { findRow, type WorktreeRow } from "../../lib/worktree-list";
@@ -120,18 +121,22 @@ const WorktreeChats = memo(function WorktreeChats({
 
   const current = tabs.tabs.find((t) => t.id === tabs.active);
   const showMore = () => {
-    const options = ["New chat", "Rename chat", "Close chat", "Cancel"];
+    // The views of the worktree come first, then what the chat tab offers.
+    const options = ["Explorer", "Changes", "New chat", "Rename chat", "Close chat", "Cancel"];
     ActionSheetIOS.showActionSheetWithOptions(
       {
+        title: "Views",
         options,
-        destructiveButtonIndex: 2,
-        cancelButtonIndex: 3,
-        disabledButtonIndices: current ? [] : [1, 2],
+        destructiveButtonIndex: 4,
+        cancelButtonIndex: 5,
+        disabledButtonIndices: current ? [] : [3, 4],
       },
       (choice) => {
-        if (choice === 0) setPicker(true);
-        else if (choice === 1 && current) renameTab(current, actions);
-        else if (choice === 2 && current) closeTab(actions, current.id);
+        if (choice === 0) openExplorer(worktreeId);
+        else if (choice === 1) openChanges(worktreeId);
+        else if (choice === 2) setPicker(true);
+        else if (choice === 3 && current) renameTab(current, actions);
+        else if (choice === 4 && current) closeTab(actions, current.id);
       },
     );
   };

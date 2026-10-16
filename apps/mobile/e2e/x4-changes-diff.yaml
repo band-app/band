@@ -1,0 +1,87 @@
+# S4: Views > Changes groups the dirty worktree like the web's Changes panel, with counts, and a
+# row opens a native diff.
+appId: app.getband.mobile
+name: S4 changes and diffs
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Changes
+- extendedWaitUntil:
+    visible:
+      id: changes__screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: changes__section-unstaged
+    timeout: 15000
+- assertVisible:
+    id: changes__count-unstaged
+    text: "2"
+- assertVisible:
+    id: changes__count-staged
+    text: "2"
+- assertVisible:
+    id: changes__count-untracked
+    text: "1"
+- assertVisible:
+    id: changes__row-unstaged-src/index.ts
+- assertVisible:
+    id: changes__row-unstaged-src/old.ts
+- assertVisible:
+    id: changes__row-staged-src/helpers.js
+- assertVisible:
+    id: changes__row-staged-src/staged-new.ts
+- assertVisible:
+    id: changes__row-untracked-notes.txt
+- takeScreenshot: x4-changes
+# A modified file: hunk header, added lines, highlighted code.
+- tapOn:
+    id: changes__row-unstaged-src/index.ts
+- extendedWaitUntil:
+    visible:
+      id: diff__list
+    timeout: 10000
+- assertVisible:
+    text: "@@.*"
+- assertVisible:
+    text: ".*Number.isNaN.*"
+- takeScreenshot: x4-diff-modified
+- tapOn:
+    id: diff__back
+# A deleted file.
+- tapOn:
+    id: changes__row-unstaged-src/old.ts
+- extendedWaitUntil:
+    visible:
+      id: diff__list
+    timeout: 10000
+- assertVisible:
+    text: ".*obsolete.*"
+- takeScreenshot: x4-diff-deleted
+- tapOn:
+    id: diff__back
+# A renamed file (staged), paired with its old path.
+- tapOn:
+    id: changes__row-staged-src/helpers.js
+- extendedWaitUntil:
+    visible:
+      id: diff__list
+    timeout: 10000
+- assertVisible:
+    text: ".*question.*"
+- takeScreenshot: x4-diff-renamed
+- tapOn:
+    id: diff__back
+# An untracked file is all added lines.
+- tapOn:
+    id: changes__row-untracked-notes.txt
+- extendedWaitUntil:
+    visible:
+      id: diff__list
+    timeout: 10000
+- assertVisible:
+    text: ".*remember the milk.*"
+- takeScreenshot: x4-diff-untracked

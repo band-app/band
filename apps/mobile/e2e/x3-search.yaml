@@ -1,0 +1,75 @@
+# S3: search by file name (fuzzy, like quick open) and by content. A content match opens the
+# file at its line.
+appId: app.getband.mobile
+name: S3 search files and content
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__search
+    timeout: 15000
+- tapOn:
+    id: explorer__search
+# A fuzzy query: the letters are in order but not next to each other.
+- inputText: indx
+- extendedWaitUntil:
+    visible:
+      id: explorer__result-src/index.ts
+    timeout: 15000
+- takeScreenshot: x3-name-search
+- tapOn:
+    id: explorer__result-src/index.ts
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 10000
+- tapOn:
+    id: file__back
+# Content: the matching lines, and a tap opens the file at that line.
+- tapOn:
+    id: explorer__mode-content
+- tapOn:
+    id: explorer__search
+- eraseText: 20
+- inputText: isNaN
+- extendedWaitUntil:
+    visible:
+      id: explorer__match-src/index.ts:6
+    timeout: 15000
+- takeScreenshot: x3-content-search
+- tapOn:
+    id: explorer__match-src/index.ts:6
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 10000
+- assertVisible:
+    text: ".*Number.isNaN.*"
+- takeScreenshot: x3-opened-at-line
+- tapOn:
+    id: file__back
+# The match is on line 400 of 500, so it is on screen only when the viewer jumped to it.
+- tapOn:
+    id: explorer__search
+- eraseText: 20
+- inputText: needle400
+- extendedWaitUntil:
+    visible:
+      id: explorer__match-docs/long.txt:400
+    timeout: 15000
+- tapOn:
+    id: explorer__match-docs/long.txt:400
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 10000
+- assertVisible:
+    text: ".*needle400 is here.*"
+- assertNotVisible:
+    text: ".*row 1 of the long file.*"
+- takeScreenshot: x3-jumped-to-line-400
