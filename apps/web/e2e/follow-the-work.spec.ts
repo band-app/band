@@ -416,42 +416,6 @@ test("messaging a worktree on an offline host offers B, continues there and deli
   expect((await worktreeRow("app", "feat-one", a.hostId))?.supersededBy).toBe(continuedId);
 });
 
-test("the sidebar clock shows until the continued worktree is opened, then only the menu line remains (S1, S3, S4, S5)", async ({
-  page,
-}) => {
-  const follow = new FollowPage(page);
-  const app = new WorktreePage(page, server.url, TOKEN);
-  const grouping = new SidebarGroupingPage(page);
-  // Open another worktree, so the continued one is unseen.
-  await app.goto(openId);
-  await app.waitForReady();
-
-  await expect(follow.headerContinuedFrom).toHaveCount(0);
-  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
-    "aria-label",
-    /^Continued from box-a/,
-  );
-
-  await grouping.selectMode("host");
-  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
-    "aria-label",
-    /^Continued from box-a/,
-  );
-
-  // Opening it marks the continuation seen, and the mark survives a reload.
-  await app.goto(continuedId);
-  await app.waitForReady();
-  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
-  await app.reload();
-  await app.waitForReady();
-  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
-
-  // The record stays reachable from the context menu.
-  await expect(await follow.openCardContinuedFromLine(continuedId)).toContainText(
-    /^Continued from box-a/,
-  );
-});
-
 test("the continued worktree opens its chat on the new host with its history, even from a stale saved layout (S5, S6, S8)", async ({
   page,
 }) => {
@@ -508,6 +472,42 @@ test("the continued worktree opens its chat on the new host with its history, ev
   await expect(checkpoints.card(openId)).not.toContainText("Superseded");
   await expect(checkpoints.card(continuedId)).not.toContainText("Continued from");
   await expect(grouping.hostTag(checkpoints.card(continuedId))).toHaveText("box-b");
+});
+
+test("the sidebar clock shows until the continued worktree is opened, then only the menu line remains (S1, S3, S4, S5)", async ({
+  page,
+}) => {
+  const follow = new FollowPage(page);
+  const app = new WorktreePage(page, server.url, TOKEN);
+  const grouping = new SidebarGroupingPage(page);
+  // Open another worktree, so the continued one is unseen.
+  await app.goto(openId);
+  await app.waitForReady();
+
+  await expect(follow.headerContinuedFrom).toHaveCount(0);
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
+    "aria-label",
+    /^Continued from box-a/,
+  );
+
+  await grouping.selectMode("host");
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
+    "aria-label",
+    /^Continued from box-a/,
+  );
+
+  // Opening it marks the continuation seen, and the mark survives a reload.
+  await app.goto(continuedId);
+  await app.waitForReady();
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
+  await app.reload();
+  await app.waitForReady();
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
+
+  // The record stays reachable from the context menu.
+  await expect(await follow.openCardContinuedFromLine(continuedId)).toContainText(
+    /^Continued from box-a/,
+  );
 });
 
 test("when A returns with a newer change, the old copy is Diverged and the change can be brought over (S4)", async ({
