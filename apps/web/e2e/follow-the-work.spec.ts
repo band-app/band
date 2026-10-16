@@ -416,13 +416,14 @@ test("messaging a worktree on an offline host offers B, continues there and deli
   expect((await worktreeRow("app", "feat-one", a.hostId))?.supersededBy).toBe(continuedId);
 });
 
-test("the sidebar card and the Host view show where the work came from, the worktree view has no bar (S5)", async ({
+test("the sidebar clock shows until the continued worktree is opened, then only the menu line remains (S1, S3, S4, S5)", async ({
   page,
 }) => {
   const follow = new FollowPage(page);
   const app = new WorktreePage(page, server.url, TOKEN);
   const grouping = new SidebarGroupingPage(page);
-  await app.goto(continuedId);
+  // Open another worktree, so the continued one is unseen.
+  await app.goto(openId);
   await app.waitForReady();
 
   await expect(follow.headerContinuedFrom).toHaveCount(0);
@@ -434,6 +435,19 @@ test("the sidebar card and the Host view show where the work came from, the work
   await grouping.selectMode("host");
   await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
     "aria-label",
+    /^Continued from box-a/,
+  );
+
+  // Opening it marks the continuation seen, and the mark survives a reload.
+  await app.goto(continuedId);
+  await app.waitForReady();
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
+  await app.reload();
+  await app.waitForReady();
+  await expect(follow.cardContinuedFrom(continuedId)).toHaveCount(0);
+
+  // The record stays reachable from the context menu.
+  await expect(await follow.openCardContinuedFromLine(continuedId)).toContainText(
     /^Continued from box-a/,
   );
 });
