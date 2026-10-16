@@ -902,7 +902,7 @@ export class WorktreeService {
     const terminalId = randomUUID();
     await terminalService.spawn(chat.worktreeId, terminalId, { command });
     // Broadcast so an already-open dashboard adds the pane to its terminal
-    // dockview without a reload — same pattern as `terminal.create` and the
+    // layout without a reload — same pattern as `terminal.create` and the
     // `via=terminal` create path.
     emit({ kind: "terminal-created", worktreeId: chat.worktreeId, terminalId });
 

@@ -1,4 +1,3 @@
-import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
@@ -18,6 +17,7 @@ import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
 import { BrowserProfileMenu } from "./BrowserProfileMenu";
 import { HistoryPopover } from "./HistoryPopover";
+import type { LayoutPanelProps } from "./layout/LayoutView";
 import { NotSecureBadge } from "./NotSecureBadge";
 
 const DEFAULT_URL = "";
@@ -115,10 +115,10 @@ function initialSrc(url: string): string {
 // Pitfalls this component is built around (same as orca's webview panes):
 //
 //   - Removing a `<webview>` from the DOM, or moving it to another parent,
-//     destroys its guest. The leaf therefore uses dockview's
+//     destroys its guest. The leaf therefore uses the layout's
 //     `renderer: "always"` so switching tabs toggles `display` instead of
 //     detaching the panel, and the element is created imperatively and never
-//     re-parented by React. A guest that is replaced anyway (a dockview group
+//     re-parented by React. A guest that is replaced anyway (a layout group
 //     merge re-parents panels) re-registers with the main process and
 //     reloads the tab's last URL.
 //   - Chromium stops painting a guest inside a `display: none`,
@@ -131,7 +131,7 @@ function initialSrc(url: string): string {
 //     can't see an outside click; `lib/browser-webview-dom-bridge.ts`
 //     synthesises one when focus moves into a webview.
 //   - Keys typed inside the page never reach this document either. The main
-//     process forwards the pane shortcuts and `WorktreeCenterDockview`
+//     process forwards the pane shortcuts and `WorktreeCenter`
 //     re-dispatches them on the webview.
 // ---------------------------------------------------------------------------
 
@@ -140,7 +140,7 @@ export function BrowserPaneComponent({
   api,
 }: {
   params: BrowserPaneParams;
-  api: IDockviewPanelProps<BrowserPaneParams>["api"];
+  api: LayoutPanelProps<BrowserPaneParams>["api"];
 }) {
   const { browserId, initialUrl, worktreeId: worktreeIdParam } = params;
   const wsActive = params.wsActive !== false;
@@ -336,7 +336,7 @@ export function BrowserPaneComponent({
   // shortcuts (find, new tabs, close, split, cycle) and forwards them; replay
   // each one as a `keydown` on the webview, where it bubbles through this
   // pane's `onKeyDown` and reaches the window listeners of
-  // `WorktreeCenterDockview` exactly like a key typed in Band's own UI.
+  // `WorktreeCenter` exactly like a key typed in Band's own UI.
   useEffect(() => {
     if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
@@ -743,7 +743,7 @@ export function BrowserPaneComponent({
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
-          // Stable hook for `WorktreeCenterDockview` to focus the address
+          // Stable hook for `WorktreeCenter` to focus the address
           // bar via `[data-band-address-input]` — more durable than
           // `input[type='text']`, which would also match the find-bar's
           // search input.

@@ -32,9 +32,9 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 // Force the mobile layout (viewport < 1024 px) so the worktree route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
-// tree rather than going through the dockview panel manager. The find
+// tree rather than going through the layout panel manager. The find
 // bar's behaviour is identical in either layout — but the mobile path
-// keeps the test focused on the preview and skips deep dockview /
+// keeps the test focused on the preview and skips deep layout /
 // chat-pane setup that would otherwise need to be coaxed.
 test.use({ viewport: { width: 800, height: 900 } });
 
@@ -114,7 +114,7 @@ async function openMarkdownPreview(page: Page): Promise<void> {
   await worktree.waitForMobileReady();
 
   // Open the Explorer sheet and tap the markdown file — it opens as a `file`
-  // leaf in the center dockview (markdown files default to the rendered preview).
+  // leaf in the center layout (markdown files default to the rendered preview).
   await layout.openSheet("explorer");
   await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
@@ -141,7 +141,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // Explorer sheet leaves focus on the tree row, outside the leaf.)
   await viewer.clickIntoPreview("Test Document");
 
-  // Cmd+F goes through `DockviewWorktreeLayout`'s capture-phase
+  // Cmd+F goes through `the old worktree layout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
   // SearchBar, which searches the preview's editor view.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";

@@ -10,7 +10,7 @@
  * Lived in `apps/web/src/lib/panel-state-store.ts` until issue #316 (Phase 5
  * of the 3-tier refactor); moved here so chat-service / browser-service can
  * import a sibling infra module instead of crossing back into `lib/`. The
- * `dockview-layout-manager.ts` helper (still in `lib/`) imports from this
+ * `layout-manager.ts` helper (still in `lib/`) imports from this
  * path until terminals land in their own phase.
  */
 

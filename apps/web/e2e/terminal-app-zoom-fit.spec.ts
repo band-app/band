@@ -5,13 +5,13 @@
  * (Claude Code's prompt and status line) were cut off at the bottom of the
  * window. Zooming out left the terminal short of the pane instead.
  *
- * Root cause: terminal leaves use dockview's `renderer: "always"`, which
- * renders the panel in a `.dv-render-overlay` positioned by writing
- * getBoundingClientRect() values (zoomed, visual px) into inline
- * left/top/width/height. The CSS `zoom` the app sets on `<html>` then scaled
- * those values a second time, so at 110% the overlay came out 10% too tall
- * and ran past the window. Fix: a global rule in `globals.css` counter-zooms
- * the overlay and zooms its content back to the app zoom.
+ * The old layout library drew a `renderer: "always"` panel (every terminal
+ * leaf) in an overlay it positioned by writing getBoundingClientRect() values
+ * (zoomed, visual px) into inline left/top/width/height. The CSS `zoom` the
+ * app sets on `<html>` then scaled those values a second time, so at 110% the
+ * overlay came out 10% too tall and ran past the window. Band's own layout puts
+ * a panel's element inside its group's content area and sizes groups in
+ * percent, so a terminal leaf follows its pane at any zoom.
  *
  * The test draws a TUI-style screen whose last row carries a marker (redrawn
  * on SIGWINCH, like a real TUI), then zooms in and out through the real

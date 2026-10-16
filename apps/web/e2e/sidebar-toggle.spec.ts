@@ -2,7 +2,7 @@
  * End-to-end coverage for the repo-list sidebar toggle.
  *
  * The repo list now lives in a standalone left sidebar, SEPARATE from the
- * dockview (it used to be the dockview's `edge-left` "repos" panel). A
+ * layout (it used to be the layout's `edge-left` "repos" panel). A
  * header button — plus the ⌘B shortcut and the ⌃0 "Focus Repos" path —
  * toggles its visibility, and the last-left state persists across reloads.
  *
@@ -11,11 +11,11 @@
  *   - No tRPC mocking — the dashboard renders against the real backend. One
  *     repo (no real worktree on disk) is seeded into SQLite so a
  *     worktree route mounts; background git calls fail gracefully but the
- *     dockview + sidebar still render.
+ *     layout + sidebar still render.
  *   - All UI is driven through `WorktreePage` (no raw `page.*` in the body).
  *
  * The sidebar is a collapsible resizable-panel: collapsing shrinks its width
- * to ~0 rather than unmounting the sibling panel that holds the dockview
+ * to ~0 rather than unmounting the sibling panel that holds the layout
  * (which must stay mounted so cached worktrees survive a toggle). So the
  * user-observable signal for hidden/shown is the sidebar's rendered width,
  * cross-checked against the toggle button's `aria-pressed` state.
@@ -41,7 +41,7 @@ const REPO = "alpha-sidebar";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the desktop layout
-// (sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
+// (sidebar + layout) renders (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;

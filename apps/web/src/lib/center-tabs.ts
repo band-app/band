@@ -1,7 +1,7 @@
 /**
- * The center dockview's tab list in this browser's client state. The pure
+ * The center layout's tab list in this browser's client state. The pure
  * parsing and merge rules live in `@band-app/client/center-tabs`; this file
- * is the part that reads `clientStorage` and the dockview.
+ * is the part that reads `clientStorage` and the layout.
  */
 
 import {
@@ -12,7 +12,7 @@ import {
   centerTabsKey,
   parseCenterTabs,
 } from "@band-app/client/center-tabs";
-import type { DockviewApi } from "dockview";
+import type { LayoutApi } from "../components/layout/model";
 import { clientStorage } from "./client-state";
 
 export function readCenterTabs(worktreeId: string): CenterTabs | null {
@@ -25,11 +25,10 @@ export function readCenterTabs(worktreeId: string): CenterTabs | null {
   }
 }
 
-/** The dockview's top-level tabs, group by group, left to right. */
-export function centerTabsFromApi(api: DockviewApi): CenterTabs {
+/** The layout's top-level tabs, group by group, left to right. */
+export function centerTabsFromApi(api: LayoutApi): CenterTabs {
   const tabs: CenterTab[] = [];
   for (const group of api.groups) {
-    if (group.api.location.type !== "grid") continue;
     for (const panel of group.panels) {
       const kind = panel.api.component;
       if (CENTER_TAB_KINDS.has(kind)) tabs.push({ id: panel.id, kind: kind as CenterTabKind });

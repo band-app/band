@@ -45,7 +45,7 @@ import { ChatPanePage } from "./pages/ChatPanePage";
 import { PrChecksPanelPage } from "./pages/PrChecksPanelPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
-// Wide viewport so the right sidepanel renders beside the center dockview.
+// Wide viewport so the right sidepanel renders beside the center layout.
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-pr-checks-token";

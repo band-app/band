@@ -8,23 +8,20 @@ export interface TabStripScroll {
 }
 
 /**
- * The visible center dockview's tab strip (`WorktreeCenterDockview`).
+ * The visible center layout's tab strip (`WorktreeCenter`).
  *
- * The strip itself is dockview's markup (`.dv-tabs-container`, its
- * `.dv-scrollable > .dv-scrollbar` custom scrollbar, and the
- * `.dv-tabs-overflow-dropdown-root` "N hidden tabs" control dockview renders
- * when it is enabled; these class names checked against dockview-core 6.0.6),
- * not an element Band owns, so it is located by dockview's own class names,
- * like xterm's textarea elsewhere. Tabs are Band's: callers pass tab locators
- * from `WorktreePage` (`fileTab`, …) so the testid format lives in one place.
+ * The strip is Band's own markup (`layout/LayoutView.tsx`) and carries
+ * `data-testid` hooks: `layout-tab-list` is the scrolling list of tabs,
+ * `layout-header` the row with the actions on either side. The center layout is
+ * told apart from a terminal tab's split panes by `data-layout-kind="center"`.
+ * Tabs are located by callers from `WorktreePage` (`fileTab`, …) so the testid
+ * format lives in one place.
  */
 export class CenterTabStrip {
-  /** The scrollable list of tabs in the visible worktree's dockview. */
+  /** The scrollable list of tabs in the visible worktree's center layout. */
   readonly list: Locator;
-  /** dockview's hidden-tabs dropdown in the visible worktree's dockview. */
+  /** A hidden-tabs dropdown: the strip scrolls instead, so there is none. */
   readonly overflowDropdown: Locator;
-  /** dockview's custom 4px scrollbar over the list, in the visible strip. */
-  readonly scrollbar: Locator;
   /** The strip row: the tabs plus the header actions on either side. */
   readonly strip: Locator;
   /** The "+" button that opens the new-tab menu. */
@@ -33,20 +30,22 @@ export class CenterTabStrip {
   readonly tabActionsButton: Locator;
 
   constructor(private readonly page: Page) {
-    this.list = page.locator(".dockview-center-tabs .dv-tabs-container").filter({ visible: true });
-    this.strip = page
-      .locator(".dockview-center-tabs .dv-tabs-and-actions-container")
+    const center = page.locator('[data-layout-kind="center"]');
+    this.list = center
+      .locator(
+        ':scope > [data-testid="layout-group"] > [data-testid="layout-header"] > [data-testid="layout-tab-list"]',
+      )
       .filter({ visible: true });
-    this.scrollbar = this.strip.locator(".dv-scrollable > .dv-scrollbar");
+    this.strip = center
+      .locator(':scope > [data-testid="layout-group"] > [data-testid="layout-header"]')
+      .filter({ visible: true });
     this.newTabButton = page
       .getByTestId("worktree-center__new-tab-button")
       .filter({ visible: true });
     this.tabActionsButton = page
       .getByTestId("worktree-center__tab-actions-button")
       .filter({ visible: true });
-    this.overflowDropdown = page
-      .locator(".dockview-center-tabs .dv-tabs-overflow-dropdown-root")
-      .filter({ visible: true });
+    this.overflowDropdown = center.getByTestId("layout-tab-overflow").filter({ visible: true });
   }
 
   async readScroll(): Promise<TabStripScroll> {
@@ -56,13 +55,34 @@ export class CenterTabStrip {
     }));
   }
 
-  /** The height of the area a finger can tap to pick `tab`: dockview's
-   *  `.dv-tab` wrapper around the tab Band renders. */
+  /** The height of the area a finger can tap to pick `tab`: the layout's
+   *  tab wrapper around the tab Band renders. */
   async readTabTapHeight(tab: Locator): Promise<number> {
     return await tab.evaluate((el) => {
-      const wrapper = el.closest(".dv-tab");
-      if (!wrapper) throw new Error("tab is not inside a dockview .dv-tab");
+      const wrapper = el.closest('[data-testid="layout-tab"]');
+      if (!wrapper) throw new Error("tab is not inside a layout tab wrapper");
       return wrapper.getBoundingClientRect().height;
+    });
+  }
+
+  /** Whether the list hides its own scroll bar (a phone strip has no use for one). */
+  async hasHiddenScrollbar(): Promise<boolean> {
+    return await this.list.evaluate((el) => getComputedStyle(el).scrollbarWidth === "none");
+  }
+
+  /** How the browser would treat a swipe past the strip's end: `contain` stops
+   *  it from becoming back/forward navigation. */
+  async overscrollBehaviorX(): Promise<string> {
+    return await this.list.evaluate((el) => getComputedStyle(el).overscrollBehaviorX);
+  }
+
+  /** Scroll the strip the way a mouse wheel does: a vertical delta only. */
+  async mouseWheel(deltaY: number): Promise<void> {
+    await test.step(`Wheel the tab strip by ${deltaY}px`, async () => {
+      const box = await this.list.boundingBox();
+      if (!box) throw new Error("tab strip has no bounding box — not visible");
+      await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await this.page.mouse.wheel(0, deltaY);
     });
   }
 

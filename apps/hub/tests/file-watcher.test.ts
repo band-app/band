@@ -325,7 +325,7 @@ describe("file-watcher — external file change events", () => {
   });
 
   it("delivers a file-change event to every subscriber of the same worktree", async () => {
-    // Two browser tabs / dockview panels viewing the same worktree should
+    // Two browser tabs / layout panels viewing the same worktree should
     // share one underlying `fs.watch` handle but each receive every event.
     // If a future change accidentally replaced (instead of accumulated) the
     // listener set on second subscribe, only one sub would receive events.

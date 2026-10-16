@@ -28,7 +28,7 @@ interface UseSearchOptions {
    * no outer focus-scoping layer.
    *
    * Set to `false` when a parent already owns a focus-scoped find keybind
-   * (e.g. `useLeafFind` in the unified center dockview). Multiple leaves are
+   * (e.g. `useLeafFind` in the unified center layout). Multiple leaves are
    * mounted — and, with split groups, several are visible — at once, so an
    * unscoped opener would open EVERY mounted leaf's bar on a single Cmd+F
    * (including leaves whose tab isn't focused, e.g. when focus is in a

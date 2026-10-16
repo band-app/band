@@ -1,7 +1,7 @@
 /**
  * Switching worktrees on a phone keeps every visited worktree mounted, the
  * way the desktop layout does (`MobileWorktreeShell` hosts the center
- * dockviews in a `MultiWorktreePanelHost`). Before, the mobile layout was
+ * layouts in a `MultiWorktreePanelHost`). Before, the mobile layout was
  * keyed by worktree, so each switch unmounted the chat, and coming back
  * replayed its whole event log.
  *

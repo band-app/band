@@ -1,5 +1,5 @@
 /**
- * The center dockview's tab list, shared by every device through client
+ * The center layout's tab list, shared by every device through client
  * state (`band:center-tabs:<ws>`, scope `all`).
  *
  * Only which tabs are open, their order and the active tab are shared. Split

@@ -9,7 +9,7 @@
  * order whose `visibility` is `visible`, whether or not it shows (z-index,
  * `inert` and `pointer-events` don't count), so any drag rect that lands on a
  * tab makes clicking the tab start a window drag in the desktop app, and
- * dockview never sees the click or the tab's HTML5 drag. That happened with
+ * the layout never sees the click or the tab's drag. That happened with
  * several worktrees open: hidden worktrees stay mounted at the same place
  * as the visible one, and their strips' empty space covered the visible
  * worktree's tabs. With no drag box in the center, that can't recur.
@@ -20,12 +20,11 @@
  * union-and-subtract walk over the computed `app-region` values and returns
  * every tab, tab close button, header button or nav button it covers.
  *
- * A hidden entry's panes must also compute `visibility: hidden`. Dockview's
- * `dv-view visible` state class used to match Tailwind's `.visible` utility,
- * so they computed `visible`. In the desktop app with the CDP screencast
- * setting on, a hidden worktree holding a browser pane keeps painting, and
- * its whole tab strip then covered the shown worktree's. The e2e build has
- * no `<webview>`, so the test checks the computed visibility.
+ * A hidden entry's groups must also compute `visibility: hidden`. In the
+ * desktop app with the CDP screencast setting on, a hidden worktree holding a
+ * browser pane keeps painting, and a group that computed `visible` there put
+ * its whole tab strip over the shown worktree's. The e2e build has no
+ * `<webview>`, so the test checks the computed visibility.
  *
  * Architecture: the real production server against a fresh tmp `~/.band/`,
  * one seeded repo with two worktrees, no tRPC mocking, driven through `WorktreePage`.
@@ -52,7 +51,7 @@ const REPO = "drag-region-repo";
 const WORKTREE_A = toWorktreeId(REPO, "main", "local");
 const WORKTREE_B = toWorktreeId(REPO, "second", "local");
 
-// Wide viewport so the desktop layout (sidebar + dockview) renders
+// Wide viewport so the desktop layout (sidebar + layout) renders
 // (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1400, height: 800 } });
 

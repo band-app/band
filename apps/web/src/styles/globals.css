@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "./dockview-theme.css";
+@import "../components/layout/layout.css";
 
 @source "../../../../packages/dashboard-core/src";
 @source "../../../../packages/ui/src";
@@ -542,27 +542,6 @@ html[data-on-battery][data-translucent-sidebar] {
 }
 
 /*
- * Same doubled scaling for dockview's `renderer: "always"` panels (terminal
- * leaves). dockview positions each panel's `.dv-render-overlay` by writing
- * getBoundingClientRect() deltas (visual pixels) into its inline
- * left/top/width/height, which the <html> zoom then scales again. At 110% the
- * overlay came out 10% too big, so its bottom rows (a TUI's prompt and status
- * line) fell outside the clipped group; below 100% it came out too small.
- *
- * Counter-zoom the overlay so those inline pixel values apply 1:1, then zoom
- * its content back to the app zoom. `zoom` (not `scale`) so the content's
- * layout box really has the corrected size: xterm fits to it and hit-tests in
- * it. No-op when --app-zoom is unset or 1.
- */
-.dv-render-overlay {
-  zoom: calc(1 / var(--app-zoom, 1));
-}
-
-.dv-render-overlay > * {
-  zoom: var(--app-zoom, 1);
-}
-
-/*
  * Browser tabs are Electron <webview>s, and a guest page renders at its
  * host element's effective zoom: at 125% app zoom every page would be
  * zoomed 125% on top of its own per-origin zoom. Undo the app zoom on the
@@ -594,14 +573,14 @@ html[data-on-battery][data-translucent-sidebar] {
 /*
  * Paint retention for the CDP screencast experiment. Chromium stops painting
  * a <webview> guest inside a display:none, visibility:hidden or
- * content-visibility:hidden subtree, which is how inactive dockview tabs and
+ * content-visibility:hidden subtree, which is how inactive layout tabs and
  * hidden worktrees are hidden, so a remote viewer of that tab gets no
  * frames. A hidden browser pane that must keep painting carries
  * `data-band-browser-paint-retained` (see `BrowserPanel.tsx`). Then:
  *   - its worktree entry keeps `visibility: hidden` but drops the
  *     `content-visibility` skip, which no descendant can override;
- *   - its dockview overlay is laid out again (dockview writes an inline
- *     `display: none`) but stays `visibility: hidden`;
+ *   - its panel element is laid out again (the group writes an inline
+ *     `display: none`) but stays `visibility: hidden` (see layout.css);
  *   - only the page host opts back into visibility, at opacity 0 and
  *     without pointer events, so the page paints but nothing shows.
  * The pane root is `inert` while hidden, so its page can't take focus.
@@ -609,13 +588,6 @@ html[data-on-battery][data-translucent-sidebar] {
 .band-worktree-entry:has([data-band-browser-paint-retained]) {
   /* biome-ignore lint/complexity/noImportantStyles: must beat the entry's inline content-visibility. */
   content-visibility: visible !important;
-}
-
-.dv-render-overlay:has([data-band-browser-paint-retained]) {
-  /* biome-ignore lint/complexity/noImportantStyles: must beat dockview's inline display: none. */
-  display: block !important;
-  /* biome-ignore lint/complexity/noImportantStyles: dockview writes an inline visibility on first attach. */
-  visibility: hidden !important;
 }
 
 [data-band-browser-paint-retained] .band-browser-guest-host {
@@ -627,7 +599,7 @@ html[data-on-battery][data-translucent-sidebar] {
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize tw-animate-css movement; opacity fades
      (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
-  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper or dockview overlay `zoom` rules. */
+  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper `zoom` rules. */
   * {
     --tw-enter-translate-x: 0;
     --tw-enter-translate-y: 0;

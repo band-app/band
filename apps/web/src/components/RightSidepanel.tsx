@@ -42,7 +42,7 @@ import {
   useOfflineCheckpoint,
 } from "./OfflineCheckpoint";
 import { usePerWorktreeState } from "./per-worktree-state-store";
-import { getWorktreeLeafActions } from "./WorktreeCenterDockview";
+import { getWorktreeLeafActions } from "./WorktreeCenter";
 
 // ---------------------------------------------------------------------------
 // Active-tab persistence (Explorer | Changes | plugin tabs, one at a time)
@@ -114,8 +114,8 @@ function TabButton({
       aria-label={tooltip ?? label}
       data-testid={testid}
       style={NO_DRAG_STYLE}
-      // Same pill as the center tab strip (`.dockview-center-tabs` in
-      // dockview-theme.css): grey when selected, lighter on hover.
+      // Same pill as the center tab strip (`.band-layout--center` in
+      // layout/layout.css): grey when selected, lighter on hover.
       className={`flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors ${
         active
           ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
@@ -372,7 +372,7 @@ function RightSidepanelInner({
   const { compareBranch, setCompareBranch } = useDiffTarget(worktreeId);
 
   // The active file/diff leaf publishes its path here (see
-  // WorktreeCenterDockview's `useActiveFileTracking`); use it to highlight the
+  // WorktreeCenter's `useActiveFileTracking`); use it to highlight the
   // open file in the Explorer tree and the open diff in the Changes tree.
   const { currentFile } = usePerWorktreeState(worktreeId);
 
