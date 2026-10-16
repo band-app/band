@@ -136,6 +136,9 @@ const AGENT_SETTABLE_SETTINGS = new Set([
   "usagePollingEnabled",
 ]);
 
+/** The id of the hub's own machine. */
+const HUB_HOST_ID = "local";
+
 const allowedFor = (trust: HostTrust): ReadonlySet<string> =>
   trust === "restricted"
     ? RESTRICTED_PROCEDURES
@@ -322,13 +325,19 @@ export function agentHostView(host: Record<string, unknown>): AgentHostView {
   };
 }
 
-/** A `settings.get` answer without the voice endpoint, which the hub's own token would otherwise show an agent. */
+/**
+ * A `settings.get` answer cut down to `AGENT_SETTABLE_SETTINGS`. The hub replays the call with its
+ * own token, so the full reply holds runner `env` (provider credentials), agent commands, CORS
+ * origins, pairing addresses and the voice endpoint, none of which an agent may read.
+ */
 export function redactSettingsReply(data: unknown): unknown {
   if (data === null || typeof data !== "object") return data;
   const result = (data as { result?: { data?: Record<string, unknown> } }).result;
   if (!result?.data || typeof result.data !== "object") return data;
-  const { voice: _voice, tokenSecret: _tokenSecret, ...rest } = result.data;
-  return { ...data, result: { ...result, data: rest } };
+  const kept = Object.fromEntries(
+    Object.entries(result.data).filter(([key]) => AGENT_SETTABLE_SETTINGS.has(key)),
+  );
+  return { ...data, result: { ...result, data: kept } };
 }
 
 /** Cuts a `hosts.list` answer down to `agentHostView` rows. A reply of another shape becomes empty. */
@@ -468,7 +477,8 @@ function checkNamed(
   /** Whether a target on `hostId` may be used: this host always, any known host for an admin. */
   const reach = (hostId: string | null, target: string): boolean => {
     if (hostId === workerId) return true;
-    if (!wide || hostId === null) return false;
+    // The hub's own machine holds the hub's tokens and vault key, so no agent reaches it.
+    if (!wide || hostId === null || hostId === HUB_HOST_ID) return false;
     crossHosts.push({ hostId, target });
     return true;
   };
@@ -557,7 +567,7 @@ function checkRepoCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdic
   }
   if (procedure === "repos.addFromWorker") {
     const { hostId, name, allowedHostIds, addRoot } = record;
-    if (addRoot === true && admin) {
+    if (addRoot === true) {
       return deny(403, `${procedure}: Adding a folder root needs a person's confirmation`);
     }
     if (typeof hostId !== "string") return deny(400, `${procedure} needs a hostId`);
@@ -597,6 +607,9 @@ function checkSettingsCall(procedure: string, input: unknown, ctx: Ctx): RelayVe
 /** The cronjobs of an admin host: any key, any scope. Repo-scoped jobs and jobs on other hosts are audited. */
 function checkAdminCronjob(procedure: string, key: string, ctx: Ctx): RelayVerdict {
   const host = ctx.lookups.hostOfWorktree(key);
+  if (host === HUB_HOST_ID) {
+    return deny(403, `${procedure}: Agents cannot schedule work on the hub's own machine`);
+  }
   if (host !== ctx.workerId) {
     ctx.audit.push({ procedure, targetHostId: host, target: key });
   }
@@ -644,7 +657,10 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
     // (any existing worktree for an admin host).
     if (origin !== undefined) {
       const originHost = typeof origin === "string" ? lookups.hostOfWorktree(origin) : null;
-      if (originHost === null || (originHost !== workerId && !admin)) {
+      if (
+        originHost === null ||
+        (originHost !== workerId && (!admin || originHost === HUB_HOST_ID))
+      ) {
         return deny(403, `${procedure}: The origin is not a worktree on this host`);
       }
     }
@@ -675,6 +691,9 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
         );
       }
       if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
+      if (hostId === HUB_HOST_ID) {
+        return deny(403, `${procedure}: Agents cannot remove worktrees on the hub's own machine`);
+      }
       // The worktree id of a name on another host carries that host's id.
       const { repo, name } = rest;
       if (typeof repo === "string" && typeof name === "string") {
@@ -693,7 +712,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
     if (typeof id !== "string") return deny(400, `${procedure} needs an id`);
     const owner = lookups.worktreeOfSubscription(id);
     const ownerHost = owner === null ? null : lookups.hostOfWorktree(owner);
-    if (ownerHost === null || (ownerHost !== workerId && !admin)) {
+    if (ownerHost === null || (ownerHost !== workerId && (!admin || ownerHost === HUB_HOST_ID))) {
       return deny(403, `${procedure}: That subscription is not on this host`);
     }
     if (ownerHost !== workerId) {

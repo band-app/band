@@ -29,7 +29,7 @@ export function restrictedHostRefusal(callerHostId: string): string | null {
 /**
  * A message saying why an agent on `callerHostId` cannot create a worktree of `repo` on
  * `targetHostId`, or null when it may. A target equal to the caller's host is always fine for
- * a standard or admin host. An admin host skips the setting and may use the hub's own machine;
+ * a standard or admin host. An admin host skips the setting, but no agent may target the hub's own machine;
  * a restricted host may not create worktrees anywhere.
  */
 export function crossHostRefusal(
@@ -44,7 +44,7 @@ export function crossHostRefusal(
   if (!admin && !crossHostWorktreesEnabled()) {
     return "Agents may not start worktrees on other hosts. An admin can turn this on in Settings > Agents.";
   }
-  if (!admin && targetHostId === "local") {
+  if (targetHostId === "local") {
     return "Agents on a worker cannot start worktrees on the hub's own machine";
   }
   const host = tokenService.listHosts(1000).find((h) => h.id === targetHostId);

@@ -542,6 +542,75 @@ describe("trust levels", () => {
       expect(await hostTrust(b.hostId)).toBe("standard");
     });
 
+    it("reads only the agent-settable settings, none of the hub's credentials or endpoints", async () => {
+      await m("settings.update", { corsAllowedOrigins: ["https://secret-origin.example"] });
+      const got = await shell.call("trpc", query("settings.get"), undefined, "GET");
+      expect(got.status).toBe(200);
+      for (const leaked of [
+        "secret-origin.example",
+        "corsAllowedOrigins",
+        "codingAgents",
+        "runners",
+        "voice",
+        "tokenSecret",
+        "environmentBuilder",
+        TEST_TOKEN,
+      ]) {
+        expect(got.body, leaked).not.toContain(leaked);
+      }
+      expect(got.body).toContain('"agents"');
+    });
+
+    it("never reaches the hub's own machine", async () => {
+      const hubWorktree = wt("proj", "main", { hostId: "local" } as Worker);
+      const refusals: Array<[string, string, unknown, "POST" | "GET"]> = [
+        ["chats.list", query("chats.list", { worktreeId: hubWorktree }), undefined, "GET"],
+        [
+          "worktrees.create",
+          "/trpc/worktrees.create",
+          { repo: "proj", branch: "to-hub", hostId: "local" },
+          "POST",
+        ],
+        [
+          "worktrees.remove",
+          "/trpc/worktrees.remove",
+          { repo: "proj", name: "main", hostId: "local" },
+          "POST",
+        ],
+        [
+          "cronjobs.create",
+          "/trpc/cronjobs.create",
+          {
+            key: hubWorktree,
+            worktreeId: hubWorktree,
+            name: "hub job",
+            prompt: "p",
+            cronExpression: "0 0 1 1 *",
+            scope: "worktree",
+          },
+          "POST",
+        ],
+      ];
+      for (const [name, path, body, method] of refusals) {
+        const res = await shell.call("trpc", path, body, method);
+        expect(res.status, `${name}: ${res.body}`).toBe(403);
+      }
+    });
+
+    it("refuses a folder root added from a worker, at every level", async () => {
+      for (const level of ["standard", "admin"] as const) {
+        await setTrust(a.hostId, level);
+        const res = await shell.call("trpc", "/trpc/repos.addFromWorker", {
+          hostId: b.hostId,
+          path: join(b.root, "proj"),
+          addRoot: true,
+        });
+        expect(res.status, level).toBe(403);
+        expect(message(res)).toContain("person");
+      }
+      await setTrust(a.hostId, "admin");
+    });
+
     it("takes effect when lowered, on the next call", async () => {
       await setTrust(a.hostId, "standard");
       const list = await shell.call(

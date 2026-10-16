@@ -708,10 +708,11 @@ describe("what an agent may call, and which ids it may take", () => {
     expect(call("h-a", "repos.addByUrl", { remoteUrl: "https://example.com/o/r.git" }).ok).toBe(
       true,
     );
-    // Adding from another host, and outside its roots, is fine.
+    // Adding from another host is fine. Widening its roots needs a person, so addRoot is refused.
+    expect(call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x" }).ok).toBe(true);
     expect(
       call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x", addRoot: true }).ok,
-    ).toBe(true);
+    ).toBe(false);
     expect(call("h-a", "repos.inspectFolder", { hostId: "h-b", path: "/x" }).ok).toBe(true);
     // A repo limited to hosts that exclude the folder's host is refused.
     const limitedAdd = call("h-a", "repos.addFromWorker", {
@@ -1079,11 +1080,13 @@ describe("the band CLI through the relay (S2)", () => {
       // A worker looks under its home as well as its roots, so this folder is outside the roots only.
       const outside = join(a.home, "outside-roots", "agent-outside");
       makeRepo(outside);
-      await ok("repos", "add", "--from", a.hostId, outside, "--add-root");
+      const widened = await run("repos", "add", "--from", a.hostId, outside, "--add-root");
+      expect(widened.code, widened.out).not.toBe(0);
+      expect(widened.out).toContain("needs a person's confirmation");
       const after = (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map(
         (r) => r.name,
       );
-      for (const name of ["agent-added-a", "agent-added-b", "agent-outside"]) {
+      for (const name of ["agent-added-a", "agent-added-b"]) {
         expect(after, name).toContain(name);
         expect(names).not.toContain(name);
       }
@@ -1106,7 +1109,6 @@ describe("the band CLI through the relay (S2)", () => {
       // A repo open to every host can be changed and removed from any host.
       await ok("repos", "set", "agent-added-a", "--meta", "true");
       await ok("repos", "remove", "agent-added-a");
-      await ok("repos", "remove", "agent-outside");
       await m("repos.remove", { name: "agent-added-b" });
     },
     120_000,
