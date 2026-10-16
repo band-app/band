@@ -58,7 +58,7 @@ const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 // condition under which cmdk would otherwise keep it selected.
 const TARGET = "reports-really-long-target-name-file.ts";
 
-// Desktop viewport so `useIsDesktop()` is true and `SharedDockviewLayout`
+// Desktop viewport so `useIsDesktop()` is true and `SharedWorktreeLayout`
 // (which mounts QuickOpenDialog and listens for `band:open-quick-open`) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 

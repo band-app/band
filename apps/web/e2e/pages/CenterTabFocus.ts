@@ -1,6 +1,6 @@
 import { type Locator, type Page, test } from "@playwright/test";
 
-/** What holds keyboard focus in the center dockview, by the kind of surface. */
+/** What holds keyboard focus in the center layout, by the kind of surface. */
 export type FocusedSurface =
   | "terminal"
   | "editor"
@@ -11,8 +11,8 @@ export type FocusedSurface =
   | `other:${string}`;
 
 /**
- * Keyboard tab cycling in the visible worktree's center dockview
- * (`WorktreeCenterDockview`), and which surface ends up focused.
+ * Keyboard tab cycling in the visible worktree's center layout
+ * (`WorktreeCenter`), and which surface ends up focused.
  *
  * The leaves' focus targets are partly third-party markup: xterm's
  * `.xterm-helper-textarea` and CodeMirror's `.cm-content` (both used the same

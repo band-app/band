@@ -1,0 +1,101 @@
+# S2: a file opens by its kind. Code with line numbers (and a long line that scrolls sideways),
+# markdown rendered with a toggle to the source, an image, a binary file and a file over 1 MB.
+appId: app.getband.mobile
+name: S2 the file viewer
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-src
+    timeout: 15000
+- tapOn:
+    id: explorer__row-src
+- tapOn:
+    id: explorer__row-src/index.ts
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 10000
+- assertVisible:
+    text: ".*Number.isNaN.*"
+- assertVisible:
+    id: file__copy
+- takeScreenshot: x2-code
+# A long line scrolls sideways.
+- tapOn:
+    id: file__back
+- tapOn:
+    id: explorer__row-src/long-line.ts
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 10000
+- swipe:
+    start: 85%, 45%
+    end: 10%, 45%
+- takeScreenshot: x2-long-line-scrolled
+- tapOn:
+    id: file__back
+# Markdown shows rendered, with a toggle to the source.
+- tapOn:
+    id: explorer__row-README.md
+- extendedWaitUntil:
+    visible:
+      id: file__markdown
+    timeout: 10000
+- assertVisible:
+    text: "Delta"
+- takeScreenshot: x2-markdown-rendered
+- tapOn:
+    id: file__show-source
+- assertVisible:
+    id: file__code
+- assertVisible:
+    text: "# Delta"
+- takeScreenshot: x2-markdown-source
+- tapOn:
+    id: file__back
+# An image, with its size.
+- tapOn:
+    id: explorer__row-assets
+- tapOn:
+    id: explorer__row-assets/pixel.png
+- extendedWaitUntil:
+    visible:
+      id: file__image-size
+    timeout: 15000
+- assertVisible:
+    id: file__image-size
+    text: "96 × 64"
+- takeScreenshot: x2-image
+- tapOn:
+    id: file__back
+# A binary file.
+- tapOn:
+    id: explorer__row-assets/blob.bin
+- extendedWaitUntil:
+    visible:
+      id: file__unavailable-title
+    timeout: 10000
+- assertVisible:
+    text: "Can't preview this file"
+- takeScreenshot: x2-binary
+- tapOn:
+    id: file__back
+# A file over the hub's 1 MB limit.
+- tapOn:
+    id: explorer__row-data
+- tapOn:
+    id: explorer__row-data/big.txt
+- extendedWaitUntil:
+    visible:
+      id: file__unavailable-title
+    timeout: 10000
+- assertVisible:
+    text: ".*over the 1 MB.*"
+- takeScreenshot: x2-too-large

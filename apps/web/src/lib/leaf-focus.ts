@@ -1,9 +1,9 @@
-import type { DockviewApi, IDockviewPanel } from "dockview";
+import type { LayoutApi, LayoutPanel } from "../components/layout/model";
 import { focusEditorQuietly } from "../dashboard/lib/quiet-focus";
 import { terminalSplitApiForLeaf } from "./terminal-split-registry";
 
 /**
- * Keyboard focus for the center dockview's leaves.
+ * Keyboard focus for the center layout's leaves.
  *
  * When a leaf becomes the active one (Ctrl+Tab, ⌘⇧[ / ⌘⇧], the palette's
  * Next / Previous Tab, a tab click, closing the tab before it, a worktree
@@ -23,7 +23,7 @@ import { terminalSplitApiForLeaf } from "./terminal-split-registry";
  * A leaf's content can mount late: the xterm attaches after React commits the
  * leaf's visibility, a file or chat renders after its query. Until the target
  * exists, focus sits on the leaf root (`[data-band-leaf-root]`, tabindex -1),
- * which keeps it inside the dockview so Ctrl+Tab keeps working.
+ * which keeps it inside the layout so Ctrl+Tab keeps working.
  */
 
 /** Marks the element a leaf wants focused (chat composer, diff scroller). */
@@ -53,15 +53,15 @@ if (typeof document !== "undefined") {
 
 /** The element that should hold focus while `panel` is the active leaf, or
  *  `null` when its content hasn't mounted (or has nothing focusable). */
-export function leafFocusTarget(panel: IDockviewPanel): HTMLElement | null {
-  const root = panel.view.content.element;
+export function leafFocusTarget(panel: LayoutPanel): HTMLElement | null {
+  const root = panel.element;
   switch (panel.api.component) {
     case "term": {
       // A parked xterm's wrapper is outside the leaf until it re-attaches.
       const leafRoot = root.querySelector(`[${LEAF_ROOT_ATTR}]`);
       const last = leafRoot ? lastTerminalInput.get(leafRoot) : undefined;
       if (last && root.contains(last)) return last;
-      const pane = terminalSplitApiForLeaf(panel.id)?.activePanel?.view.content.element ?? root;
+      const pane = terminalSplitApiForLeaf(panel.id)?.activePanel?.element ?? root;
       return pane.querySelector<HTMLElement>(".xterm-helper-textarea");
     }
     case "browser":
@@ -80,19 +80,19 @@ function inModal(el: Element): boolean {
   );
 }
 
-/** Focus that was left behind in the dockview: on a tab header, a leaf root,
+/** Focus that was left behind in the layout: on a tab header, a leaf root,
  *  or a leaf that is now hidden. Not a header button like the "+" menu. */
 function isStrandedIn(container: HTMLElement, el: Element): boolean {
   if (!container.contains(el)) return false;
   return (
-    el.closest(".dv-tab") != null ||
+    el.closest('[data-testid="layout-tab"]') != null ||
     el.hasAttribute(LEAF_ROOT_ATTR) ||
     el.getClientRects().length === 0
   );
 }
 
 export interface FocusLeafOptions {
-  /** The dockview's container. Focus stranded in it (see `isStrandedIn`) is
+  /** The layout's container. Focus stranded in it (see `isStrandedIn`) is
    *  moved. */
   container: HTMLElement;
   /** Take focus from anywhere outside a dialog or menu, not only from the
@@ -104,16 +104,16 @@ export interface FocusLeafOptions {
 }
 
 /**
- * Move focus into the dockview's active leaf, retrying each frame until the
+ * Move focus into the layout's active leaf, retrying each frame until the
  * leaf's target exists or 2 s pass. It never takes focus from something the
  * user focused inside the leaf, and stops when another leaf becomes active.
  * Returns a cancel function.
  */
-export function focusActiveLeaf(api: DockviewApi, opts: FocusLeafOptions): () => void {
+export function focusActiveLeaf(api: LayoutApi, opts: FocusLeafOptions): () => void {
   const panel = api.activePanel;
   if (!panel) return () => {};
   const deadline = performance.now() + FOCUS_DEADLINE_MS;
-  const root = panel.view.content.element;
+  const root = panel.element;
   // Force covers only the first move. After that, a click on the sidebar
   // while the leaf is still loading must not be undone.
   let force = opts.force === true;

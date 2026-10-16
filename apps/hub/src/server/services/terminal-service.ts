@@ -97,7 +97,7 @@ function skipUnreachable(err: unknown): undefined {
  * Business logic for the terminal domain.
  *
  * Services tier — coordinates each host's {@link TerminalBackend} (`host.pty`:
- * PTY lifecycle, in this process or in the terminal daemon), the dockview layout store (so
+ * PTY lifecycle, in this process or in the terminal daemon), the layout store (so
  * a freshly spawned terminal survives a reload), and the worktree status
  * event bus. The backend stays oblivious to the worktree registry; the
  * service is the one that resolves a worktreeId to a worktree path and
@@ -226,7 +226,7 @@ export class TerminalService {
    * Spawn a new PTY for the given worktree + terminalId.
    *
    * Resolves `worktreeId` to a worktree path before delegating to the
-   * backend, and registers the new terminal in the saved dockview layout so
+   * backend, and registers the new terminal in the saved layout so
    * it survives a server restart (mirrors `chatService.create` /
    * `browserService.create`). Does NOT emit a `terminal-created` event —
    * the API entry points decide whether to broadcast (the WebSocket handler
@@ -314,7 +314,7 @@ export class TerminalService {
     }
 
     // Mirror what `createChat` and `createBrowser` do: register the new
-    // terminal in the saved dockview layout so it survives a server
+    // terminal in the saved layout so it survives a server
     // restart and renders the moment the worktree is opened. Without
     // this, terminals spawned via the WebSocket handler would be
     // invisible in the dashboard. `addPanel` is idempotent, so the tRPC
@@ -334,7 +334,7 @@ export class TerminalService {
   }
 
   /**
-   * Kill a single terminal. Removes it from the saved dockview layout and
+   * Kill a single terminal. Removes it from the saved layout and
    * emits `terminal-killed` so the dashboard's status stream prunes the
    * panel. Safe to call with an unknown terminalId — no-op.
    */
@@ -350,7 +350,7 @@ export class TerminalService {
   }
 
   /**
-   * Drop a terminal from the saved dockview layout and broadcast
+   * Drop a terminal from the saved layout and broadcast
    * `terminal-killed` so an open dashboard prunes the panel. Shared by the
    * explicit {@link kill} path and the `cleanupOnExit` natural-exit path in
    * {@link handleExit}. Idempotent: `removeTerminalFromLayout` is a no-op when
@@ -571,7 +571,7 @@ export class TerminalService {
   }
 
   // -------------------------------------------------------------------------
-  // Layout persistence (dockview tree)
+  // Layout persistence (layout tree)
   //
   // Only the worktree-deletion cleanup remains: `deleteLayout` drops the
   // saved `terminal_layout` row so a deleted worktree doesn't leak it. The
@@ -661,7 +661,7 @@ function addKeyed<T>(map: Map<string, Set<T>>, key: string, listener: T): () => 
 /**
  * Process-wide singleton consumed by the API tier (terminals router +
  * terminal WS handler), the worktree cleanup paths, and `start-server.ts`.
- * Sharing one instance keeps the backend, the dockview layout writes, and the
+ * Sharing one instance keeps the backend, the layout writes, and the
  * event bus emissions in lock-step across every entry point.
  */
 export const terminalService = new TerminalService();

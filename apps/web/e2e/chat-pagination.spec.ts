@@ -256,7 +256,7 @@ test.describe("Chat scroll-back pagination", () => {
 
 // Issue #572 acceptance criterion: "verified on both desktop and mobile
 // viewports." The mobile layout has a different DOM shell than the desktop
-// dockview, so re-run the core windowing + pagination + stick-to-bottom path at
+// layout, so re-run the core windowing + pagination + stick-to-bottom path at
 // a phone viewport to prove the data-layer behaviour is layout-independent.
 test.describe("Chat scroll-back pagination — mobile viewport", () => {
   test.use({ viewport: { width: 390, height: 844 } });

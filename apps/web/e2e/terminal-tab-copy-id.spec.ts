@@ -38,7 +38,7 @@ const TOKEN = "e2e-terminal-copy-id-token";
 const REPO = "alpha-terminal-copy-id";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts the terminal container) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 

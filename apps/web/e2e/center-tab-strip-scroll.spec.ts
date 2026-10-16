@@ -3,14 +3,13 @@
  * dropdown, and on a touch screen a finger drag scrolls it rather than
  * switching tabs.
  *
- *  1. Desktop: with more tabs than fit, dockview's "N hidden tabs" dropdown is
- *     gone and a horizontal trackpad swipe scrolls the strip. dockview's own
- *     scroller hid the list's overflow and read only vertical wheel deltas, so
- *     the swipe used to do nothing.
+ *  1. Desktop: with more tabs than fit, there is no "N hidden tabs" dropdown.
+ *     A horizontal trackpad swipe, a vertical mouse wheel and keyboard
+ *     selection all scroll the strip, which is a plain overflow list. A swipe
+ *     past the end does not turn into browser back/forward navigation.
  *  2. Phone (touch emulation): a finger drag that starts on a tab scrolls the
- *     strip and leaves the active tab alone; a tap still switches tabs.
- *     dockview activates a tab on pointerdown, so the drag used to switch to
- *     the tab under the finger and never scrolled.
+ *     strip and leaves the active tab alone; a tap still switches tabs. A touch
+ *     selects a tab on click, not on touch-down.
  *  3. Size: on a phone the strip is compact (34px tabs, "+" and ⋮ buttons, a
  *     41px strip); the desktop strip stays 38px, the height of the window's
  *     title bar row.
@@ -93,7 +92,7 @@ test.describe("desktop", () => {
     await worktreePage.waitForReady();
     for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
 
-    // Anchor: the tabs really overflow the strip, so dockview would have shown
+    // Anchor: the tabs really overflow the strip, so layout would have shown
     // its dropdown here.
     await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(200);
     await expect(strip.overflowDropdown).toHaveCount(0);
@@ -107,6 +106,66 @@ test.describe("desktop", () => {
       .poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[FILES.length - 1])))
       .toBe(true);
     await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(false);
+  });
+
+  test("a vertical mouse wheel scrolls the strip sideways, and a horizontal delta scrolls it natively", async ({
+    page,
+  }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
+    await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(200);
+
+    // The last opened tab is active and in view: the strip starts at its end.
+    await strip.mouseWheel(-5000);
+    await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBe(0);
+    await strip.mouseWheel(300);
+    await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBeGreaterThan(100);
+
+    // A horizontal-only delta (a trackpad) moves it back, one for one.
+    const mid = (await strip.readScroll()).scrollLeft;
+    await strip.trackpadSwipe(-80);
+    await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBe(mid - 80);
+  });
+
+  test("a swipe at the end of the strip stays inside it", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
+    await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(200);
+
+    // `contain` keeps the browser from turning the overscroll into history navigation.
+    expect(await strip.overscrollBehaviorX()).toBe("contain");
+    await strip.trackpadSwipe(5000);
+    await strip.waitForScrollSettled();
+    const { scrollLeft, maxScrollLeft } = await strip.readScroll();
+    expect(maxScrollLeft - scrollLeft).toBeLessThan(1);
+  });
+
+  test("selecting a tab scrolls it into view", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+    for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
+    await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(200);
+    // Select the first tab (the strip scrolls to it), so the last one is out of view.
+    await worktreePage.openFileViaQuickOpen(FILES[0]);
+    await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(true);
+    await expect
+      .poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[FILES.length - 1])))
+      .toBe(false);
+
+    // Opening a file that is already open selects its tab, wherever it is.
+    await worktreePage.openFileViaQuickOpen(FILES[FILES.length - 1]);
+
+    await expect
+      .poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[FILES.length - 1])))
+      .toBe(true);
   });
 
   test("the tab strip keeps the window's 38px title bar height", async ({ page }) => {
@@ -199,7 +258,7 @@ test.describe("phone", () => {
       .toBe(0);
 
     // At the end: the strip rests on its maximum and fires no further scroll
-    // events (no snap-back write from dockview's scrollbar).
+    // events (nothing writes the scroll position back).
     await expect
       .poll(async () => {
         await strip.touchSwipeAcross(200);
@@ -208,9 +267,8 @@ test.describe("phone", () => {
       }, SWIPE_POLL)
       .toBeLessThan(1);
     expect(await strip.countScrollEventsWhileIdle(300)).toBe(0);
-    // Anchor: the bar is in the DOM (one per visible group's strip), just hidden.
-    await expect(strip.scrollbar.first()).toBeAttached();
-    await expect(strip.scrollbar.first()).toBeHidden();
+    // Anchor: the strip draws no scroll bar of its own on a phone.
+    expect(await strip.hasHiddenScrollbar()).toBe(true);
   });
 
   test("tapping a tab's close button closes that tab", async ({ page }) => {

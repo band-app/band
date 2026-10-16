@@ -49,9 +49,11 @@ export class HtmlPreviewPage {
     return this.page.getByTestId(/^center-browser-tab--/);
   }
 
-  /** The dockview wrapper of the first browser tab; it has `dv-active-tab` while that tab is shown. */
+  /** The layout wrapper of the first browser tab; it has `layout-tab[data-selected="true"]` while that tab is shown. */
   private get browserTabContainer(): Locator {
-    return this.page.locator('.dv-tab:has([data-testid^="center-browser-tab--"])').first();
+    return this.page
+      .locator('[data-testid="layout-tab"]:has([data-testid^="center-browser-tab--"])')
+      .first();
   }
 
   async clickPreview(): Promise<void> {
@@ -65,7 +67,7 @@ export class HtmlPreviewPage {
   }
 
   async expectBrowserTabActive(): Promise<void> {
-    await expect(this.browserTabContainer).toHaveClass(/dv-active-tab/);
+    await expect(this.browserTabContainer).toHaveAttribute("data-selected", "true");
   }
 
   async reload(): Promise<void> {

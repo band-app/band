@@ -29,13 +29,13 @@ import { DesktopDragRegion } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
 import { OfflineWorktreeNotice } from "./OfflineCheckpoint";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "./ToolbarButtons";
-import { getWorktreeLeafActions, WorktreeCenterDockview } from "./WorktreeCenterDockview";
+import { getWorktreeLeafActions, WorktreeCenter } from "./WorktreeCenter";
 
 // ---------------------------------------------------------------------------
 // The mobile worktree layout (narrow viewport, not the desktop app). Mounted
-// once by AppShell, like the desktop `SharedDockviewLayout`, so it outlives
+// once by AppShell, like the desktop `SharedWorktreeLayout`, so it outlives
 // route changes:
-//   - the center dockview of every visited worktree stays mounted in a
+//   - the center layout of every visited worktree stays mounted in a
 //     `MultiWorktreePanelHost`, so switching back to a worktree doesn't
 //     replay its chats, restore its layout or refetch anything;
 //   - the header, the Explorer / Changes / plugin sheets and the dialogs exist
@@ -122,7 +122,7 @@ function useWorktreeNames(worktreeId: string): { name: string; repoName: string 
   }, [repos, worktreeId]);
 }
 
-// Which mobile view is showing. "editor" is the dockview; the others open a
+// Which mobile view is showing. "editor" is the layout; the others open a
 // bottom sheet over it: "menu" lists the panels below, "explorer" / "changes"
 // hold a tree and return to "editor" on select or dismiss, and
 // `plugin:<pluginId>.<tabId>` holds a plugin's `worktree.sideTabs` tab (named
@@ -145,7 +145,7 @@ interface SheetRequest {
 }
 
 // Hoisted so the root div gets a reference-equal style while no worktree is
-// shown. It stays mounted and laid out (so hidden dockviews keep their size)
+// shown. It stays mounted and laid out (so hidden layouts keep their size)
 // under the route's own page, but never paints or takes a tap.
 const NO_WORKTREE_STYLE: React.CSSProperties = {
   height: "100dvh",
@@ -215,7 +215,7 @@ export function MobileWorktreeShell() {
           onRequestedViewShown={clearSheetRequest}
         />
       )}
-      {/* The unified center dockview is the ONLY editor surface on mobile —
+      {/* The unified center layout is the ONLY editor surface on mobile —
        *  chat / terminal / browser leaves plus per-path file / diff leaves,
        *  all as tabs (mobile mode disables drag→split and the maximize
        *  toggle). One per visited worktree, the shown one visible and the
@@ -234,7 +234,7 @@ export function MobileWorktreeShell() {
             <div className="flex h-full w-full flex-col">
               <OfflineWorktreeNotice worktreeId={worktreeId} active={wsActive} />
               <div className="relative min-h-0 flex-1">
-                <WorktreeCenterDockview
+                <WorktreeCenter
                   worktreeId={worktreeId}
                   visible={wsActive}
                   wsActive={wsActive}
@@ -342,7 +342,7 @@ function MobileWorktreeChrome({
   const { name, repoName } = useWorktreeNames(worktreeId);
   const pluginTabs = useWorktreeSideTabs();
 
-  // The dockview is always the main editor surface. The header menu opens
+  // The layout is always the main editor surface. The header menu opens
   // Explorer / Changes / plugin tabs as a bottom sheet; closing it returns to
   // the editor.
   const [view, setView] = useState<MobileView>("editor");
@@ -373,7 +373,7 @@ function MobileWorktreeChrome({
     ),
   ];
 
-  // Open a file leaf in the center dockview, then close the tree sheet.
+  // Open a file leaf in the center layout, then close the tree sheet.
   // Used by the Explorer sheet + the file-link / Quick Open flows.
   const openFileLeaf = useCallback(
     (filePath: string, opts?: { line?: number; column?: number }) => {
@@ -383,7 +383,7 @@ function MobileWorktreeChrome({
     [worktreeId],
   );
 
-  // Open a diff leaf in the center dockview, then close the tree sheet.
+  // Open a diff leaf in the center layout, then close the tree sheet.
   const openDiffLeaf = useCallback(
     (section: ChangeSection, entry: ChangeEntry) => {
       getWorktreeLeafActions(worktreeId)?.openDiff(entry.path, {
@@ -421,11 +421,11 @@ function MobileWorktreeChrome({
   // Quick Open state for file link clicks from chat
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
-  // Search-in-Files state for the file-tree toolbar (mobile / non-dockview).
+  // Search-in-Files state for the file-tree toolbar (mobile / non-layout).
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
 
   // Open a file (from Quick Open / Search in Files / a chat file link) as a
-  // file leaf in the center dockview. `filename` may carry a `:line[:column]`
+  // file leaf in the center layout. `filename` may carry a `:line[:column]`
   // suffix — parse it into a jump target before opening.
   const handleOpenFile = useCallback(
     (filename: string) => {
@@ -559,7 +559,7 @@ function MobileWorktreeChrome({
         </ul>
       </MobileSheet>
       {/* Explorer sheet — the file tree. Selecting a file opens it as a leaf in
-       *  the dockview and closes the sheet (openFileLeaf resets view to
+       *  the layout and closes the sheet (openFileLeaf resets view to
        *  "editor"). Single vs pinned map to preview vs pinned leaves. */}
       <MobileSheet
         open={view === "explorer"}
@@ -577,7 +577,7 @@ function MobileWorktreeChrome({
         />
       </MobileSheet>
       {/* Changes sheet — the diff tree. Selecting a file opens its diff leaf in
-       *  the dockview and closes the sheet. */}
+       *  the layout and closes the sheet. */}
       <MobileSheet
         open={view === "changes"}
         onOpenChange={sheetOpenChange("changes")}

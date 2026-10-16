@@ -44,7 +44,7 @@ const TOKEN = "e2e-chat-continue-terminal-token";
 const REPO = "continueproj";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
-// Wide viewport so the desktop dockview layout (with the outer Terminal tab)
+// Wide viewport so the desktop layout (with the outer Terminal tab)
 // renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -137,9 +137,9 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
     await expect(worktree.continueInTerminalItem).toBeEnabled();
     await worktree.continueInTerminalItem.click();
 
-    // Explicit timeout: the dockview setActive effect can be starved under
+    // Explicit timeout: the layout setActive effect can be starved under
     // parallel-worker CI contention (mirrors worktree-maximize-state.spec.ts).
-    await expect(worktree.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
+    await expect(worktree.tabContainer("terminal")).toHaveAttribute("data-selected", "true", {
       timeout: 15_000,
     });
     await worktree.waitForTerminalReady(75_000);

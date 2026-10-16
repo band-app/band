@@ -1,0 +1,12 @@
+# Opens a worktree (TARGET) and then one of its views (VIEW: Explorer or Changes) from the header's
+# More menu.
+appId: app.getband.mobile
+---
+- runFlow:
+    file: open-gamma.yaml
+    env:
+      WT: ${TARGET}
+- tapOn:
+    id: worktree__more
+- tapOn:
+    text: ${VIEW}

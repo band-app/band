@@ -1,6 +1,6 @@
 /**
  * Returning to any previously visited worktree is instant: its center
- * dockview was never unmounted, so there is no layout restore, no refetch and
+ * layout was never unmounted, so there is no layout restore, no refetch and
  * no terminal reconnect. `MultiWorktreePanelHost` keeps every visited
  * worktree mounted (orca's mounted-worktree set); it used to keep an LRU of 3,
  * so visiting five others and coming back remounted the first.

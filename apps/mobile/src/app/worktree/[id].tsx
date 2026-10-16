@@ -19,6 +19,7 @@ import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
 import { ViewsSheet, type ViewsSheetItem } from "../../components/views-sheet";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
+import { openChanges, openExplorer } from "../../lib/files/open";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
 import { findRow, type WorktreeRow } from "../../lib/worktree-list";
@@ -155,6 +156,8 @@ const WorktreeChats = memo(function WorktreeChats({
         router.push({ pathname: "/worktree/[id]/checks", params: { id: worktreeId, branch } }),
       ),
     },
+    { key: "explorer", title: "Explorer", onPress: afterSheet(() => openExplorer(worktreeId)) },
+    { key: "changes", title: "Changes", onPress: afterSheet(() => openChanges(worktreeId)) },
   ];
   const actionItems: ViewsSheetItem[] = [
     { key: "new-chat", title: "New chat", onPress: afterSheet(() => setPicker(true)) },

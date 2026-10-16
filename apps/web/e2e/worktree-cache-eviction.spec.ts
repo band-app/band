@@ -54,9 +54,9 @@ const BRANCH_B = "feature-cache-b";
 const WORKTREE_A = toWorktreeId(REPO, BRANCH_A, "local");
 const WORKTREE_B = toWorktreeId(REPO, BRANCH_B, "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // renders (matches >= 1024px in `apps/web/src/hooks/useIsDesktop.ts`).
-// Without the dockview the repo-list sidebar — and therefore the
+// Without the layout the repo-list sidebar — and therefore the
 // per-worktree context menu — is not visible.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -172,7 +172,7 @@ test.describe("MultiWorktreePanelHost cache eviction (issue #508)", () => {
     await expect(worktreePage.cachedPanelEntries(WORKTREE_B).first()).toBeVisible();
 
     // Positive anchor: BOTH worktrees are cached at this point.
-    // `MultiWorktreePanelHost` is mounted once per outer dockview panel
+    // `MultiWorktreePanelHost` is mounted once per outer layout panel
     // (chat, changes, files, terminal, browser = 5 hosts), so every
     // cached worktreeId produces multiple matching elements — assert
     // ">= 1" to stay robust to layout-config changes.
