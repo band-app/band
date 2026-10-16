@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Read a saved dockview layout panel-state row (chat, terminal, or browser)
+// Read a saved layout panel-state row (chat, terminal, or browser)
 // for a worktree and emit it as JSON on stdout. Used by integration tests
 // that need to assert what's persisted in a worktree's panel layout.
 //

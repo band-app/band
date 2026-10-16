@@ -56,7 +56,7 @@ const WS_ICON = toWorktreeId(REPO_ICON, BRANCH, "local");
 const WS_CHAT = toWorktreeId(REPO_CHAT, BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the split-capable center
-// dockview renders (mobile is single-pane / no split).
+// layout renders (mobile is single-pane / no split).
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -243,7 +243,7 @@ test("⌘D in a chat leaf still splits chat into a sibling group (regression)", 
   await expect(chatTabs()).toHaveCount(1);
 
   // Focus the chat pane via its prompt input (in the content area — clicking the
-  // tab strip can be intercepted by a dockview sash), then ⌘D → a second chat
+  // tab strip can be intercepted by a layout sash), then ⌘D → a second chat
   // leaf in a SIBLING group (terminals nest instead; chat/browser still split).
   await page.getByPlaceholder("Type a message...").first().click();
   await worktreePage.pressSplitRight();

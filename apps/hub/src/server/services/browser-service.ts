@@ -27,7 +27,7 @@ import {
   type BrowserUpdatePatch,
 } from "../infra/db/queries/browsers";
 import { hostRegistry } from "../infra/host/registry";
-import { DockviewLayoutManager } from "./_utils/dockview-layout-manager";
+import { LayoutManager } from "./_utils/layout-manager";
 
 const log = createLogger("browser-service");
 
@@ -70,7 +70,7 @@ export interface UpdateBrowserOptions {
  *   - The in-memory primary index (`browserId → BrowserTab`)
  *   - The reverse index (`worktreeId → Set<browserId>`)
  *   - Lazy hydration from `panel_states` on first read
- *   - Layout integration via `DockviewLayoutManager("browser_layout")`
+ *   - Layout integration via `LayoutManager("browser_layout")`
  *
  * Stateful by design — there's exactly one instance (`browserService` below).
  * The `lib/browser-manager.ts` back-compat shim delegates every call here so
@@ -103,9 +103,7 @@ export class BrowserService {
 
   constructor(
     private readonly queries: BrowserQueries = new BrowserQueries(),
-    private readonly layoutManager: DockviewLayoutManager = new DockviewLayoutManager(
-      "browser_layout",
-    ),
+    private readonly layoutManager: LayoutManager = new LayoutManager("browser_layout"),
   ) {}
 
   private ensureInitialized(): void {
@@ -168,7 +166,7 @@ export class BrowserService {
     this.addToIndex(tab);
 
     // Mirror what `chatService.create` does: register the new tab in the
-    // saved dockview layout so it survives a server restart and renders
+    // saved layout so it survives a server restart and renders
     // the moment the worktree is opened. `addPanel` is idempotent, so any
     // mutation/handler that also calls `addToLayout` after `create` (the
     // `browsers.create` tRPC mutation does, transitively) is unaffected —
@@ -285,7 +283,7 @@ export class BrowserService {
   /**
    * Remove a browser tab. Removes from DB, the saved layout, and in-memory maps.
    *
-   * Mirrors `ChatService.remove`: dropping the panel from the saved dockview
+   * Mirrors `ChatService.remove`: dropping the panel from the saved layout
    * layout is part of the service-level "remove" contract, not something the
    * API tier has to remember to do as a second step. Keeps the two pane
    * domains symmetric so callers (the tRPC router today, future direct
@@ -303,7 +301,7 @@ export class BrowserService {
 
     this.queries.remove(browserId);
 
-    // Drop the panel from the saved dockview layout. Done before the
+    // Drop the panel from the saved layout. Done before the
     // in-memory removal so the worktreeId is still available without a
     // second lookup. `removePanel` is a no-op if the panel was never
     // registered (e.g. a browser created before `create()` started auto-
@@ -320,7 +318,7 @@ export class BrowserService {
    * Remove all browser tabs for a worktree.
    * Called when a worktree is deleted.
    *
-   * Drops the saved dockview layout in the same call — mirrors `remove()`,
+   * Drops the saved layout in the same call — mirrors `remove()`,
    * which calls `removeFromLayout` so layout cleanup is part of the
    * service-level contract instead of something every caller has to
    * remember to do as a second step. Keeps `BrowserService` and
@@ -397,7 +395,7 @@ export class BrowserService {
     this.layoutManager.delete(worktreeId);
   }
 
-  /** Add a browser panel to the saved dockview layout. */
+  /** Add a browser panel to the saved layout. */
   addToLayout(
     worktreeId: string,
     browserId: string,
@@ -416,7 +414,7 @@ export class BrowserService {
     });
   }
 
-  /** Remove a browser panel from the saved dockview layout. */
+  /** Remove a browser panel from the saved layout. */
   removeFromLayout(worktreeId: string, browserId: string): void {
     this.layoutManager.removePanel(worktreeId, browserId);
   }

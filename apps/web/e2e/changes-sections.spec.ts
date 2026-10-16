@@ -35,7 +35,7 @@ import {
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the right sidepanel
-// renders beside the center dockview.
+// renders beside the center layout.
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-changes-sections-token";

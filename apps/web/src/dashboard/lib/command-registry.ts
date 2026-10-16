@@ -28,7 +28,7 @@ export interface PaletteCommand {
 }
 
 export interface CommandRegistryDeps {
-  /** Returns the current DockviewApi (reads from a ref at call time). */
+  /** Returns the current LayoutApi (reads from a ref at call time). */
   getApi: () => { getPanel(id: string): { api: { setActive(): void } } | undefined } | null;
   /** Returns the current list of hidden panel ids (reads from a ref). */
   getHiddenPanels: () => string[];
@@ -42,7 +42,7 @@ export interface CommandRegistryDeps {
    * Format the file in the currently-active editor tab. Implementations
    * read the current `{worktreeId, filePath}` from their own refs at call
    * time and dispatch the `band:format-current-file` event with that detail
-   * — the keyboard shortcut handler in DockviewWorktreeLayout does the
+   * — the keyboard shortcut handler in the old worktree layout does the
    * same thing, so the palette and shortcut paths stay symmetric.
    */
   formatCurrentFile: () => void;
@@ -72,7 +72,7 @@ export interface CommandRegistryDeps {
   editorGoForward: () => void;
   /**
    * Add a new leaf of the given kind to the active worktree's active group.
-   * Mirrors the ⌘T / ⌥⌘T / ⇧⌘B shortcuts in SharedDockviewLayout.
+   * Mirrors the ⌘T / ⌥⌘T / ⇧⌘B shortcuts in SharedWorktreeLayout.
    */
   newLeaf: (kind: "term" | "chat" | "browser") => void;
   /** Open the worktree picker (⌘K). */
@@ -185,7 +185,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.newUntitledTab(),
     },
     {
-      // New-tab chords copied from Orca (see SharedDockviewLayout).
+      // New-tab chords copied from Orca (see SharedWorktreeLayout).
       id: "new-terminal",
       label: "New Terminal",
       shortcut: "Cmd+T",
@@ -232,7 +232,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     },
     {
       // Format the file in the currently-active editor tab via Prettier.
-      // The deps callback (wired in DockviewWorktreeLayout) reads the
+      // The deps callback (wired in the old worktree layout) reads the
       // current `{worktreeId, filePath}` from refs and dispatches the
       // event with detail, so the matching FileViewer responds. The
       // keyboard handler dispatches the same event with the same detail
@@ -422,7 +422,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       : []),
     {
       // ⌃0 — reveal the repo-list sidebar (which lives outside the
-      // dockview) and move keyboard focus into the list. `band:show-sidebar`
+      // layout) and move keyboard focus into the list. `band:show-sidebar`
       // expands the sidebar if it's collapsed; DashboardShell's
       // `band:focus-repos` listener then focuses the list.
       id: "focus-repos",

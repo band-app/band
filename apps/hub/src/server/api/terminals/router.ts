@@ -16,7 +16,7 @@ import { publicProcedure, t } from "../trpc";
  * The wire shape (procedure names + input/output) is preserved exactly to
  * keep the dashboard and any external consumers backwards-compatible
  * across the lift. The router covers the `terminal` key — PTY lifecycle,
- * scrollback, and the live stream. (The former `terminalLayout` dockview
+ * scrollback, and the live stream. (The former `terminalLayout` layout
  * layout-tree CRUD was retired once clients moved center-layout
  * persistence into localStorage — issue #643 Phase 4.)
  */
@@ -54,7 +54,7 @@ const terminalRouter = t.router({
       }
       // `terminalService.spawn` resolves the worktree, asks the backend to
       // fork the PTY, and registers the new terminal in the saved
-      // dockview layout. The event emit stays here so the WebSocket
+      // layout. The event emit stays here so the WebSocket
       // spawn path (which goes through the same service method) doesn't
       // double-broadcast.
       const entry = await terminalService.spawn(worktreeId, terminalId, {

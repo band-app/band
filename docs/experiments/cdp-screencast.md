@@ -84,8 +84,8 @@ ensure roundtrip.
 - ✅ Single-adapter architecture: the desktop is the canonical chromium
   host. Web client streams through the Band server, which proxies to the
   desktop's `--remote-debugging-port=9223` endpoint.
-- ✅ Layout matches the desktop Browser pane: `DockviewReact` with the
-  same `dockview-theme-band dockview-browser-tabs` theme. Each Band
+- ✅ Layout matches the desktop Browser pane: `LayoutReact` with the
+  same the old browser tabs theme. Each Band
   browser tab is a panel with an address bar above the live stream.
 - ✅ Tab list comes from Band's DB (`browsers.list`), exposed via
   `/api/cdp/tabs?worktreeId=X`. No URL-based filtering, no
@@ -93,7 +93,7 @@ ensure roundtrip.
   "filter `/json/list`" approach.
 - ✅ Lazy view materialisation: when the web client opens a stream for a
   Band tab whose `WebContentsView` doesn't exist yet on the desktop
-  (e.g. the desktop's dockview hasn't placed the panel), the
+  (e.g. the desktop's layout hasn't placed the panel), the
   `browserHost.ensureView` bridge spawns one. The web sees a brief
   "Connecting…" before the first frame arrives.
 - ✅ Within-session persistence: the same `WebContentsView` survives

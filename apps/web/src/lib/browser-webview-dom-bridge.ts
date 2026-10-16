@@ -16,7 +16,7 @@
 //    an HTML5 drag (a file-tree row, a chat attachment) stalls the moment it
 //    crosses a browser pane. While any drag is in progress every webview gets
 //    `pointer-events: none`, which hands those events back to Band's DOM.
-//    Dockview does the same for its own tab and sash drags.
+//    Layout does the same for its own tab and sash drags.
 // ---------------------------------------------------------------------------
 
 let started = false;

@@ -1,0 +1,54 @@
+# Terminals S5: the app spends 30 s in the background while a command prints. On return the
+# terminal reconnects and shows the screen as it is now, with the lines printed meanwhile.
+appId: app.getband.mobile
+name: term3 background and return
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-open?wt=gamma-term-bg&n=3
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-term-bg
+- runFlow:
+    file: subflows/select-tab.yaml
+    env:
+      CHAT: 7e57a1e1-0000-4000-8000-000000000003
+- extendedWaitUntil:
+    visible:
+      id: terminal__keybar
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-send?n=3
+      VALUE: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do echo tick-$i; sleep 2; done; echo tick-END\r"
+- extendedWaitUntil:
+    visible:
+      text: ".*tick-2.*"
+    timeout: 15000
+- takeScreenshot: term3-before
+- pressKey: home
+- repeat:
+    times: 4
+    commands:
+      - runScript:
+          file: scripts/hub-control.js
+          env:
+            ACTION: sleep?ms=7500
+- launchApp:
+    stopApp: false
+- takeScreenshot: term3-return
+- extendedWaitUntil:
+    visible:
+      text: ".*tick-END.*"
+    timeout: 60000
+- takeScreenshot: term3-end
+# The last numbered line reached the hub's terminal.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-expect?n=3&count=1
+      VALUE: "tick-20"

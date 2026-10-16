@@ -62,6 +62,7 @@
       "!**/dist",
       "!**/dist-builder",
       "!**/build",
+      "!**/.build",
       "!**/target",
       "!**/.next",
       "!**/.vinxi",

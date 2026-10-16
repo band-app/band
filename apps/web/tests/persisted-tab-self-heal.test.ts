@@ -9,7 +9,7 @@
  * self-heals" test can't (the spec can prove the POSITIVE branch
  * — stale tab gets closed — but driving the three negative branches
  * end-to-end requires user-initiated tab navigation that the
- * dockview layout doesn't expose a stable locator for).
+ * layout doesn't expose a stable locator for).
  *
  * The truth table:
  *

@@ -6,6 +6,7 @@ import { listen as desktopListen } from "./desktop-ipc";
 import { type DirectSocketTarget, directSocketClosed, directTerminalTarget } from "./direct-worker";
 import { HubWebSocket, hubWsUrl } from "./hub-config";
 import { isDesktop } from "./is-desktop";
+import { isLayoutResizing, onLayoutResizeEnd } from "./layout-resizing";
 import { openExternalUrl } from "./open-external-url";
 import { getPowerState, isSaver, subscribePowerState } from "./power-state";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
@@ -543,7 +544,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Custom key bindings (sticky-Ctrl, Cmd+F, Shift+Enter, Alt+Arrow) ---
     term.attachCustomKeyEventHandler((e) => {
-      // Ctrl+Tab / Ctrl+Shift+Tab cycle center tabs (WorktreeCenterDockview's
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle center tabs (WorktreeCenter's
       // window handler). Never send them to the shell as a Tab.
       if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) return false;
       if (e.type === "keydown") {
@@ -1178,9 +1179,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       remeasureAndReattach();
       return true;
     };
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
+    const refitToBox = () => {
       // Only react when attached to a visible live box — never fit to the
       // parking container's size.
       if (!attached || !hostIsVisible()) return;
@@ -1202,6 +1201,18 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (!dprChanged && !boxResizedSinceFit()) return;
       if (!dprChanged) fitToBox();
       sendPtyResize();
+    };
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
+      // A split is being dragged: the box changes on every pointer move. Fit
+      // once when the drag ends (below) instead of sending the PTY each size.
+      if (isLayoutResizing()) return;
+      refitToBox();
+    });
+    const unsubscribeLayoutResizeEnd = onLayoutResizeEnd(() => {
+      if (wrapper.clientWidth === 0 || wrapper.clientHeight === 0) return;
+      refitToBox();
     });
     resizeObserver.observe(wrapper);
 
@@ -1294,6 +1305,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       themeObserver.disconnect();
       unsubscribePower();
       resizeObserver.disconnect();
+      unsubscribeLayoutResizeEnd();
       searchResultsDisposable.dispose();
       selectionResizeDisposable.dispose();
       fileLinkProviderDisposable.dispose();

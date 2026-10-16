@@ -43,7 +43,7 @@ const TOKEN = "e2e-terminal-external-file-link-token";
 const REPO = "alpha-terminal-external-link";
 const WORKTREE = toWorktreeId(REPO, "main", "local");
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
+// Wide viewport so `useIsDesktop()` reports true and the shared layout
 // (which hosts the terminal container) renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -96,7 +96,7 @@ test.afterAll(async () => {
 });
 
 // #643: a terminal link to a file outside the worktree opens a per-path `file`
-// leaf (center-file-tab--<path>) in the unified center dockview; the open is
+// leaf (center-file-tab--<path>) in the unified center layout; the open is
 // observable through that tab and the persisted layout (readOpenTabPaths).
 test.describe("Terminal links to files outside the worktree", () => {
   test("clicking an absolute path printed in the terminal opens it as an external tab", async ({
