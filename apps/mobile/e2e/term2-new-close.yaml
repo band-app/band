@@ -1,0 +1,35 @@
+# Terminals S3: "Terminal" in the tab sheet opens a shell in this worktree and lists it in the
+# shared tabs; closing the tab from the sheet kills it.
+appId: app.getband.mobile
+name: term2 new terminal and close it
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-term-new
+- tapOn:
+    id: tabs__switcher
+- tapOn:
+    id: tabs__new-terminal
+- extendedWaitUntil:
+    visible:
+      id: terminal__keybar
+    timeout: 15000
+- takeScreenshot: term2-new
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-count?wt=gamma-term-new&n=1
+- tapOn:
+    id: tabs__switcher
+- longPressOn:
+    text: "Terminal 1.*"
+- takeScreenshot: term2-menu
+- tapOn:
+    text: Close tab
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-count?wt=gamma-term-new&n=0
+- takeScreenshot: term2-closed

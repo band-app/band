@@ -1,0 +1,106 @@
+# Terminals S2, S4: a terminal the hub already runs shows in the tab sheet next to the chat, with
+# the output the hub sent; typing with the keyboard and the key bar reaches the shell, and the
+# keyboard changes the size the shell sees.
+appId: app.getband.mobile
+name: term1 open a terminal, type and resize
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-open?wt=gamma-term&n=1
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-send?n=1
+      VALUE: "echo from-hub\r"
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-term
+- tapOn:
+    id: tabs__switcher
+- assertVisible:
+    id: tabs__sheet
+- takeScreenshot: term1-tab-sheet
+- tapOn:
+    id: tabs__sheet-tab-7e57a1e1-0000-4000-8000-000000000001
+- extendedWaitUntil:
+    notVisible:
+      id: tabs__sheet
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: terminal__keybar
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: ".*from-hub.*"
+    timeout: 15000
+- takeScreenshot: term1-hub-output
+# Live output: a line the hub sends now shows in the app.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-send?n=1
+      VALUE: "echo live-from-hub\r"
+- extendedWaitUntil:
+    visible:
+      text: ".*live-from-hub.*"
+    timeout: 15000
+# The size with no keyboard.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-size?n=1&tag=a
+# Type on the iOS keyboard: tapping the terminal opens it.
+- tapOn:
+    id: terminal__key-keyboard
+- inputText: "echo from-app"
+- pressKey: Enter
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-expect?n=1&count=2
+      VALUE: "from-app"
+- takeScreenshot: term1-typed
+# The keyboard took room, so the terminal has fewer rows and the shell was told.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-size?n=1&tag=b&smaller=a
+# Up arrow recalls the last line the shell ran (the size check above), and Enter runs it again:
+# "size-b-" was printed twice (the command and its output) and now four times.
+- tapOn:
+    id: terminal__key-up
+- takeScreenshot: term1-up
+- pressKey: Enter
+- takeScreenshot: term1-rerun
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-expect?n=1&count=4
+      VALUE: "size-b-"
+# Ctrl-C: sticky Ctrl then c interrupts a running command; the shell echoes ^C.
+- inputText: "sleep 60"
+- pressKey: Enter
+- tapOn:
+    id: terminal__key-ctrl
+- inputText: "c"
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-expect?n=1
+      VALUE: "^C"
+# Tab completes: "ech" and Tab leaves "echo " on the line, so the next word runs echo.
+- inputText: "ech"
+- tapOn:
+    id: terminal__key-tab
+- inputText: "tab-done"
+- pressKey: Enter
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: term-expect?n=1&count=2
+      VALUE: "tab-done"
+- takeScreenshot: term1-keys

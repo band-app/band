@@ -23,10 +23,11 @@ export interface TabActions {
   move: (id: string, delta: number) => void;
   rename: (id: string, name: string) => Promise<void>;
   create: (agentId: string | undefined) => Promise<void>;
+  createTerminal: () => Promise<void>;
 }
 
 export function closeTab(actions: TabActions, id: string) {
-  actions.close(id).catch(() => Alert.alert("Couldn't close the chat"));
+  actions.close(id).catch(() => Alert.alert("Couldn't close the tab"));
 }
 
 export function renameTab(tab: ChatTab, actions: TabActions) {
@@ -50,7 +51,11 @@ export function showTabMenu(tab: ChatTab, index: number, count: number, actions:
       options,
       destructiveButtonIndex: 3,
       cancelButtonIndex: 4,
-      disabledButtonIndices: [...(index === 0 ? [1] : []), ...(index === count - 1 ? [2] : [])],
+      disabledButtonIndices: [
+        ...(tab.kind === "term" ? [0] : []),
+        ...(index === 0 ? [1] : []),
+        ...(index === count - 1 ? [2] : []),
+      ],
     },
     (choice) => {
       if (choice === 0) renameTab(tab, actions);
@@ -123,7 +128,7 @@ function TabRow({
           testID={`tabs__sheet-tab-${tab.id}`}
         >
           <View style={styles.tabIcon}>
-            <Text style={styles.tabGlyph}>◌</Text>
+            <Text style={styles.tabGlyph}>{tab.kind === "term" ? ">_" : "◌"}</Text>
           </View>
           <View style={styles.tx}>
             <Text style={styles.txName} numberOfLines={1} testID={`tabs__label-${tab.id}`}>
@@ -153,6 +158,7 @@ export function TabSwitcher({
   hidden,
   actions,
   onNew,
+  onNewTerminal,
   onDismiss,
 }: {
   visible: boolean;
@@ -164,6 +170,8 @@ export function TabSwitcher({
   actions: TabActions;
   /** "+ Chat" was tapped; the caller closes the sheet and opens its agent picker. */
   onNew: () => void;
+  /** "+ Terminal" was tapped; the caller opens a shell and closes the sheet. */
+  onNewTerminal: () => void;
   /** The sheet finished closing. */
   onDismiss?: () => void;
 }) {
@@ -186,7 +194,7 @@ export function TabSwitcher({
         <View style={styles.sheet} testID="tabs__sheet">
           <View style={styles.grab} />
           <Text style={styles.sheetTitle} accessibilityRole="header">
-            {tabs.length === 1 ? "1 chat" : `${tabs.length} chats`}
+            {tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}
           </Text>
           <Text style={styles.sheetSub} numberOfLines={1}>
             {title}
@@ -212,16 +220,28 @@ export function TabSwitcher({
               </Text>
             ) : null}
           </ScrollView>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New chat"
-            onPress={onNew}
-            style={styles.newChat}
-            testID="tabs__new"
-          >
-            <PlusGlyph size={14} />
-            <Text style={styles.newChatText}>Chat</Text>
-          </Pressable>
+          <View style={styles.newRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New chat"
+              onPress={onNew}
+              style={styles.newChat}
+              testID="tabs__new"
+            >
+              <PlusGlyph size={14} />
+              <Text style={styles.newChatText}>Chat</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New terminal"
+              onPress={onNewTerminal}
+              style={styles.newChat}
+              testID="tabs__new-terminal"
+            >
+              <PlusGlyph size={14} />
+              <Text style={styles.newChatText}>Terminal</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </Modal>
@@ -368,9 +388,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
     height: 44,
+    flex: 1,
     justifyContent: "center",
-    marginTop: 12,
   },
+  newRow: { flexDirection: "row", gap: 10, marginTop: 12 },
   newChatText: { color: colors.foreground, fontSize: 14, fontWeight: "500" },
   pageSheet: { backgroundColor: colors.background, flex: 1 },
   pageHeader: {

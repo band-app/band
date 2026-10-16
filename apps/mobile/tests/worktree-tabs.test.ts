@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { CenterTabs } from "@band-app/client/center-tabs";
+import type { CenterTab, CenterTabs } from "@band-app/client/center-tabs";
 import {
   chatStatuses,
   keepAlive,
@@ -23,28 +23,40 @@ const shared: CenterTabs = {
   active: "c2",
 };
 
+const chatTabs = (...ids: string[]): CenterTab[] => ids.map((id) => ({ id, kind: "chat" }));
+
 describe("phone tabs", () => {
   it("shows the chat tabs in the shared order with the shared active tab", () => {
-    assert.deepEqual(phoneTabs(shared, ["c3", "c2", "c1"]), {
-      chats: ["c1", "c2", "c3"],
-      active: "c2",
-      hidden: 2,
-    });
+    const view = phoneTabs(shared, ["c3", "c2", "c1"]);
+    assert.deepEqual(view.ids, ["c1", "c2", "c3"]);
+    assert.equal(view.active, "c2");
+    assert.equal(view.hidden, 2);
   });
 
   it("adds chats the list lacks after the listed ones and skips tabs of unknown chats", () => {
     const view = phoneTabs(shared, ["c1", "c3", "c9"]);
-    assert.deepEqual(view.chats, ["c1", "c3", "c9"]);
+    assert.deepEqual(view.ids, ["c1", "c3", "c9"]);
     assert.equal(view.active, null);
   });
 
-  it("has no active tab when the shared one is a terminal", () => {
-    assert.equal(phoneTabs({ ...shared, active: "t1" }, ["c1", "c2", "c3"]).active, null);
-    assert.deepEqual(phoneTabs(null, ["a"]), { chats: ["a"], active: null, hidden: 0 });
+  it("shows terminals among the chats and keeps a terminal active", () => {
+    const view = phoneTabs({ ...shared, active: "t1" }, ["c1", "c2", "c3"], ["t1", "t2"]);
+    assert.deepEqual(view.ids, ["c1", "t1", "c2", "c3", "t2"]);
+    assert.deepEqual(view.tabs[1], { id: "t1", kind: "term" });
+    assert.equal(view.active, "t1");
+    assert.equal(view.hidden, 1);
+  });
+
+  it("skips a terminal the hub doesn't have, and a tab of the wrong kind", () => {
+    assert.deepEqual(phoneTabs(shared, ["c1", "c2", "c3"], []).ids, ["c1", "c2", "c3"]);
+    assert.deepEqual(phoneTabs(shared, ["t1"], []).ids, ["t1"]);
+    assert.equal(phoneTabs({ ...shared, active: "t1" }, ["c1"]).active, null);
+    const none = phoneTabs(null, ["a"]);
+    assert.deepEqual([none.ids, none.active, none.hidden], [["a"], null, 0]);
   });
 
   it("closing a chat keeps the terminal and browser tabs where they were", () => {
-    const next = writePhoneTabs(shared, ["c1", "c2", "c3"], ["c1", "c3"], "c3");
+    const next = writePhoneTabs(shared, ["c1", "c2", "c3"], chatTabs("c1", "c3"), "c3");
     assert.deepEqual(next, {
       tabs: [
         { id: "c1", kind: "chat" },
@@ -56,9 +68,32 @@ describe("phone tabs", () => {
     });
   });
 
+  it("a terminal tab the phone shows is written back, one it didn't show stays", () => {
+    const withTerms: CenterTabs = {
+      tabs: [...shared.tabs, { id: "t2", kind: "term" }],
+      active: "c1",
+    };
+    const next = writePhoneTabs(
+      withTerms,
+      ["c1", "c2", "c3", "t1"],
+      [
+        { id: "t1", kind: "term" },
+        { id: "c1", kind: "chat" },
+        { id: "c2", kind: "chat" },
+        { id: "c3", kind: "chat" },
+      ],
+      "t1",
+    );
+    assert.deepEqual(
+      next.tabs.map((t) => t.id),
+      ["t1", "c1", "c2", "b1", "c3", "t2"],
+    );
+    assert.equal(next.active, "t1");
+  });
+
   it("keeps a chat tab the phone didn't show yet", () => {
     // c3 is a chat the phone doesn't know yet: it stays, after the tab it followed (b1).
-    const next = writePhoneTabs(shared, ["c1", "c2"], ["c2", "c1"], "c1");
+    const next = writePhoneTabs(shared, ["c1", "c2"], chatTabs("c2", "c1"), "c1");
     assert.deepEqual(
       next.tabs.map((t) => t.id),
       ["c2", "b1", "c3", "c1", "t1"],
@@ -66,7 +101,7 @@ describe("phone tabs", () => {
   });
 
   it("adds a new chat at the end and makes it active", () => {
-    const next = writePhoneTabs(shared, ["c1", "c2", "c3"], ["c1", "c2", "c3", "c4"], "c4");
+    const next = writePhoneTabs(shared, ["c1", "c2", "c3"], chatTabs("c1", "c2", "c3", "c4"), "c4");
     assert.deepEqual(next.tabs.at(-1), { id: "c4", kind: "chat" });
     assert.equal(next.active, "c4");
     assert.equal(next.tabs.length, 6);
