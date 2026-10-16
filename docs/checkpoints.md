@@ -72,7 +72,9 @@ A checkpoint is stored only for a worktree's current owner: its row is not super
 4. The agent session files are written on the target. The next message in each chat resumes the session (`session/resume`, or `session/load` when the agent cannot resume).
 5. The worktree on the new host gets the id `<repo>-<branch>@<new host>`. Chats, terminal records, tasks, cron jobs, subscriptions and browser history move to it. A chat the old worker owned leaves it: the new host runs it if it owns chats, else the hub does, and the old worker gets a release for when it reconnects ([chat ownership](chat-ownership.md)).
 
-If the target already holds a copy under that name, the checkpoint replaces it and the old state is kept under `refs/band/backup/<worktree id>/<time>` (see [Follow the work](follow-the-work.md#when-the-target-already-has-a-copy)). Restoring from an offline host waits until its lease is over. The old copy is marked superseded and nothing is deleted on the old host. When that host comes back, Band does not run both: it takes no checkpoints of the superseded copy, lists it as "Superseded by <id>" and leaves the files untouched. Remove it from its card when you no longer need it. That is the only step that deletes files.
+If the target already holds a copy under that name, the checkpoint replaces it and the old state is kept under `refs/band/backup/<worktree id>/<time>` (see [Follow the work](follow-the-work.md#when-the-target-already-has-a-copy)). Restoring from an offline host waits until its lease is over. The old copy is marked superseded and nothing is deleted on the old host. When that host comes back, Band does not run both: it takes no checkpoints of the superseded copy, marks its card with a superseded icon (the tooltip says "Superseded by <id>") and leaves the files untouched. "Remove this copy" in the card's context menu is the only step that deletes files.
+
+The agent session files are re-homed on the way. The hub sends the old and the new worktree path with `lifecycle.importSessions` (`fromCwd`, `toCwd`). The worker moves Claude's `~/.claude/projects/<slug of path>/<id>.jsonl` under the slug of the new path and rewrites the recorded `cwd` of Claude and Codex files, so `session/resume` finds the session. A worker that does not know the two fields writes the files where they were exported from, as before. When the restored worktree is the repo's default branch, its host becomes the repo's primary host, so the sidebar lists the live copy and hides the superseded one.
 
 If a repo has no remote URL, the target must already know the repo, or the call must name where it keeps it (`hostRepoPath` in tRPC).
 
@@ -84,7 +86,7 @@ If a repo has no remote URL, the target must already know the repo, or the call 
 2. Restore it on the target, as above.
 3. Remove the source worktree, only after the target checked out the same files. If the removal fails, the result carries a warning and the old copy stays listed as superseded.
 
-`band hosts evacuate <host> --to <host>` (Move all worktrees on this host in Settings > Hosts, admin) does this for every worktree on a host, one after the other, and prints a summary. One failure does not stop the others. A repo's own clone is not moved. An offline source host restores from the last checkpoints and leaves its copies superseded.
+`band hosts evacuate <host> --to <host>` (Move all worktrees on this host in Settings > Hosts, admin) does this for every worktree on a host, one after the other, and prints a summary. One failure does not stop the others. A repo's own clone is not moved by it (`band worktrees move` on one does move it, and leaves the source folder superseded). An offline source host restores from the last checkpoints and leaves its copies superseded.
 
 ## Continue when a host is offline
 

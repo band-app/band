@@ -1083,7 +1083,7 @@ export class CheckpointService {
             `The restored copy on ${toHostId} does not match the checkpoint.`,
           );
         }
-        await this.restoreSessions(host, rpc, row, wipDir);
+        await this.restoreSessions(host, rpc, row, wipDir, worktree.path, worktreePath);
       } catch (err) {
         // Only what this call changed on the target is undone, from the backup it just made.
         if (isRoot) {
@@ -1125,6 +1125,14 @@ export class CheckpointService {
       }
       if (worktree.origin) this.repos.setOrigin(repo.name, worktree.name, worktree.origin);
       this.repos.setSupersededBy(repo.name, worktree.name, fromHostId, newId);
+      if (isRoot) {
+        // The repo lists its default branch from the primary host, which is now the live copy's.
+        try {
+          repoService.setHostPolicy(repo.name, { primaryHostId: toHostId });
+        } catch (err) {
+          log.warn({ repo: repo.name, err: errorText(err) }, "could not set the primary host");
+        }
+      }
       rekeyWorktreeRows(worktreeId, newId);
       const chatIds = chatService.reassignWorktree(worktreeId, newId);
       log.info(
@@ -1157,6 +1165,8 @@ export class CheckpointService {
     rpc: RemoteRpc,
     row: CheckpointRow,
     wipDir: string,
+    fromCwd: string,
+    toCwd: string,
   ): Promise<void> {
     if (row.sessionIds.length === 0) return;
     let files: SessionFile[];
@@ -1183,7 +1193,8 @@ export class CheckpointService {
       await host.fs.mkdir(posix.dirname(target), { recursive: true });
       await host.fs.writeFile(target, Buffer.from(file.data, "base64"));
     }
-    await rpc.call(METHOD_LIFECYCLE_IMPORT_SESSIONS, { dir: stage });
+    // An older worker ignores the cwds and writes the files where they were exported from.
+    await rpc.call(METHOD_LIFECYCLE_IMPORT_SESSIONS, { dir: stage, fromCwd, toCwd });
   }
 
   /**
@@ -1209,11 +1220,25 @@ export class CheckpointService {
         `Host ${fromHostId} is offline. Restore ${worktreeId} from its last checkpoint instead.`,
       );
     }
-    if (found.worktree.name === found.repo.defaultBranch) {
-      throw new CheckpointError(
-        "invalid",
-        `${worktreeId} is the repo's own checkout of ${found.repo.defaultBranch} on ${fromHostId}, so it is not moved while ${fromHostId} is up. It can be opened on another host once ${fromHostId} is offline.`,
-      );
+    const isRoot = found.worktree.name === found.repo.defaultBranch;
+    if (isRoot) {
+      // The repo's own clone stays where it is, so nothing is lost, but a running agent or
+      // terminal would keep working in a copy that is about to be superseded.
+      const busy =
+        chatService
+          .list(worktreeId)
+          .some(
+            (chat) =>
+              hasRunningTask(chat.id) ||
+              agentSessionService.isActive(chat.id) ||
+              hasQueuedMessages(chat.id),
+          ) || (await terminalService.list(worktreeId).catch(() => [])).length > 0;
+      if (busy) {
+        throw new CheckpointError(
+          "conflict",
+          `${worktreeId} has a running agent, queued message or terminal on ${fromHostId}. Stop it first: moving it leaves that copy superseded.`,
+        );
+      }
     }
     const enabled = checkpointsEnabledFor(found.repo.checkpointsEnabled, found.repo.allowedHostIds);
     const taken = await this.take(worktreeId, "move", { ignoreSetting: !enabled });
@@ -1227,8 +1252,10 @@ export class CheckpointService {
       throw err;
     }
 
-    // The target confirmed (restoreFrom compared the trees). Now the source goes.
+    // The target confirmed (restoreFrom compared the trees). The repo's own clone stays,
+    // superseded; any other source goes.
     const out: RestoreResult = { ...result };
+    if (isRoot) return out;
     try {
       await worktreeService.remove({
         repo: found.repo.name,

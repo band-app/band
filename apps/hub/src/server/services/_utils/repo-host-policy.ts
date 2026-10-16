@@ -36,6 +36,18 @@ interface ListedRow {
   name: string;
   branch: string;
   hostId?: string | null;
+  /** Set on a copy that was continued or moved to another host. */
+  supersededBy?: string | null;
+}
+
+/**
+ * The hosts holding a default-branch checkout. A superseded copy counts only while no live copy
+ * exists, so a main continued off its primary host lists the new copy and not the old one.
+ */
+function defaultCheckoutHosts(repo: { defaultBranch: string; worktrees: ListedRow[] }): string[] {
+  const all = repo.worktrees.filter((wt) => isDefaultCheckout(repo, wt));
+  const live = all.filter((wt) => !wt.supersededBy);
+  return (live.length > 0 ? live : all).map((wt) => wt.hostId || "local");
 }
 
 /** Whether a row is the checkout of the repo's default branch on its host. */
@@ -53,11 +65,7 @@ export function primaryHostOf(repo: {
   primaryHostId?: string | null;
   worktrees: ListedRow[];
 }): string | null {
-  return effectivePrimaryHost(
-    repo.primaryHostId,
-    repo.allowedHostIds,
-    repo.worktrees.filter((wt) => isDefaultCheckout(repo, wt)).map((wt) => wt.hostId || "local"),
-  );
+  return effectivePrimaryHost(repo.primaryHostId, repo.allowedHostIds, defaultCheckoutHosts(repo));
 }
 
 /**
@@ -71,9 +79,7 @@ export function listedMainHostOf(repo: {
   primaryHostId?: string | null;
   worktrees: ListedRow[];
 }): string | null {
-  const withMain = repo.worktrees
-    .filter((wt) => isDefaultCheckout(repo, wt))
-    .map((wt) => wt.hostId || "local");
+  const withMain = defaultCheckoutHosts(repo);
   const primary = primaryHostOf(repo);
   if (primary && withMain.includes(primary)) return primary;
   return effectivePrimaryHost(null, repo.allowedHostIds, withMain);

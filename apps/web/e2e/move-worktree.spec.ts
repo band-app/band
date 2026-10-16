@@ -103,6 +103,8 @@ test.afterAll(async () => {
   for (const dir of scratch) cleanupTmpHome(dir);
 });
 
+test.describe.configure({ mode: "serial" });
+
 test("the card menu moves a worktree on an online host to another host", async ({ page }) => {
   const a = await addWorker("box-a");
   const b = await addWorker("box-b");
@@ -150,4 +152,27 @@ test("the card menu moves a worktree on an online host to another host", async (
   expect(readFileSync(join(moved?.path ?? "", "notes.md"), "utf8")).toBe(
     "moves with the worktree\n",
   );
+});
+
+test("the default branch on an online host offers Open on another host too (S13)", async ({
+  page,
+}) => {
+  const a = workers[0];
+  expect(a).toBeDefined();
+  await trpcMutateData(server.url, TOKEN, "repos.addFromWorker", {
+    hostId: a?.hostId,
+    path: join(a?.root ?? "", "app"),
+  });
+  await trpcMutateData(server.url, TOKEN, "repos.update", {
+    name: "app",
+    primaryHostId: a?.hostId,
+  });
+  const mainId = `app-main@${a?.hostId}`;
+  const app = new WorktreePage(page, server.url, TOKEN);
+  const move = new MoveWorktreePage(page);
+  await app.goto(mainId);
+  await app.waitForReady();
+
+  await move.openCardMenu(mainId);
+  await expect(move.menuItem).toBeEnabled();
 });

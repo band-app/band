@@ -1,0 +1,51 @@
+# S1: Views > Explorer shows the file tree. Folders expand and collapse, and a folder of 3,000
+# files lists in full.
+appId: app.getband.mobile
+name: S1 the file tree
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-src
+    timeout: 15000
+- assertVisible:
+    id: explorer__row-README.md
+- takeScreenshot: x1-tree-closed
+# A folder opens, and its files show one level deeper.
+- tapOn:
+    id: explorer__row-src
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-src/index.ts
+    timeout: 10000
+- takeScreenshot: x1-src-open
+# And closes again.
+- tapOn:
+    id: explorer__row-src
+- assertNotVisible:
+    id: explorer__row-src/index.ts
+# The big folder lists every file.
+- tapOn:
+    id: explorer__row-bulk
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-bulk/f0001.txt
+    timeout: 10000
+- repeat:
+    times: 12
+    commands:
+      - scroll
+- assertNotVisible:
+    id: explorer__row-bulk/f0001.txt
+- assertVisible:
+    id: explorer__row-bulk/f0[1-9][0-9][0-9]\.txt
+- takeScreenshot: x1-bulk-scrolled

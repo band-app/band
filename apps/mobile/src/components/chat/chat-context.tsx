@@ -70,6 +70,7 @@ export function ChatProvider({
   onCopied,
   onToggle,
   rowFor,
+  onOpenFile,
   children,
 }: {
   hubUrl: string;
@@ -82,6 +83,8 @@ export function ChatProvider({
    * message that is still growing doesn't re-render, but copies the whole message.
    */
   rowFor: (key: string) => ChatRow | undefined;
+  /** Opens a file path the chat shows (`src/a.ts` or `src/a.ts:12`). Without it a tap says so. */
+  onOpenFile?: (path: string) => void;
   children: ReactNode;
 }) {
   const openSet = useRef(new OpenSet()).current;
@@ -91,6 +94,8 @@ export function ChatProvider({
   toggledRef.current = onToggle;
   const rowForRef = useRef(rowFor);
   rowForRef.current = rowFor;
+  const openFileRef = useRef(onOpenFile);
+  openFileRef.current = onOpenFile;
   const value = useMemo<ChatContextValue>(() => {
     const copy = (text: string) => {
       if (!text) return;
@@ -124,7 +129,10 @@ export function ChatProvider({
           },
         );
       },
-      openFile: (path) => Alert.alert(path, "The file viewer comes in a later version."),
+      openFile: (path) => {
+        if (openFileRef.current) openFileRef.current(path);
+        else Alert.alert(path, "This file can't be opened here.");
+      },
     };
   }, [hubUrl, token, openSet]);
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

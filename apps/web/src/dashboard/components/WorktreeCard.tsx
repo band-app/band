@@ -14,18 +14,22 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Ban,
   Clipboard,
   CloudOff,
   CornerUpLeft,
   Folder,
   FolderOpen,
+  GitCompareArrows,
   Home,
+  Link2Off,
   Loader,
   Moon,
   MoveRight,
   Pin,
   PinOff,
   Play,
+  Replace,
   Square,
   Trash2,
   Unlink,
@@ -33,6 +37,7 @@ import {
 import { memo, useEffect, useRef, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
+import { useHostLabel } from "../hooks/use-host-names";
 import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
@@ -50,7 +55,7 @@ import type {
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
-import { ContinuedFromLine } from "./ContinuedFromLine";
+import { ContinuedFromIcon } from "./ContinuedFromLine";
 import { ContinueOnHostDialog } from "./ContinueOnHostDialog";
 import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
@@ -101,6 +106,40 @@ function consumeRecentActivation(worktreeId: string): boolean {
     recentlyActivatedTimer = null;
   }
   return true;
+}
+
+/** A status mark on a card: an icon with an accessible name and a tooltip, no visible text. */
+function StatusIcon({
+  testId,
+  label,
+  details,
+  attrs,
+  children,
+}: {
+  testId: string;
+  label: string;
+  details?: React.ReactNode;
+  attrs?: Record<string, string | undefined>;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>
+        <span
+          data-testid={testId}
+          role="img"
+          aria-label={label}
+          {...attrs}
+          className="flex shrink-0 items-center ml-auto pl-2 text-muted-foreground"
+        >
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" data-testid={`${testId}-details`}>
+        {details ?? label}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 interface Props {
@@ -157,6 +196,8 @@ export const WorktreeCard = memo(function WorktreeCard({
   onTogglePinned,
 }: Props) {
   const isPlain = repoKind === "plain";
+  const hubHostLabel = useHostLabel(worktree.hostId);
+  const hostTagText = hostTag ?? hubHostLabel;
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
 
@@ -364,7 +405,7 @@ export const WorktreeCard = memo(function WorktreeCard({
                     name={worktree.name}
                     repoName={repoName}
                     isActive={isActive}
-                    hostTag={hostTag}
+                    hostTag={hostTagText}
                     repoIcon={
                       <RepoAvatar
                         avatar={repoAvatar}
@@ -386,12 +427,12 @@ export const WorktreeCard = memo(function WorktreeCard({
                     >
                       {worktree.name}
                     </span>
-                    {hostTag && (
+                    {hostTagText && (
                       <span
                         data-testid="worktree-label__host"
                         className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
                       >
-                        {hostTag}
+                        {hostTagText}
                       </span>
                     )}
                   </>
@@ -413,28 +454,23 @@ export const WorktreeCard = memo(function WorktreeCard({
             <TooltipContent side="right">{`${repoName}/${worktree.name}`}</TooltipContent>
           </Tooltip>
           {isDeleting && (
-            <span
-              data-testid="worktree-card__deleting"
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
-            >
+            <StatusIcon testId="worktree-card__deleting" label="Deleting">
               <Loader className="size-3.5 animate-spin" />
-              Deleting…
-            </span>
+            </StatusIcon>
           )}
           {/* The worktree's ephemeral worker exited (sleeping) or is coming back (waking). */}
           {worktree.lifecycle && !isDeleting && (
-            <span
-              data-testid="worktree-card__lifecycle"
-              data-lifecycle={worktree.lifecycle}
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            <StatusIcon
+              testId="worktree-card__lifecycle"
+              label={worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
+              attrs={{ "data-lifecycle": worktree.lifecycle }}
             >
               {worktree.lifecycle === "waking" ? (
                 <Loader className="size-3.5 animate-spin" />
               ) : (
                 <Moon className="size-3.5" />
               )}
-              {worktree.lifecycle === "waking" ? "Waking" : "Sleeping"}
-            </span>
+            </StatusIcon>
           )}
           {/* The host is offline: an icon only, the details are in its tooltip. */}
           {hostOffline && !superseded && !isDeleting && (
@@ -467,90 +503,56 @@ export const WorktreeCard = memo(function WorktreeCard({
           )}
           {/* The work of this worktree continued here from another host's checkpoint. */}
           {worktree.continuedFrom && !isDeleting && (
-            <ContinuedFromLine
+            <ContinuedFromIcon
               from={worktree.continuedFrom}
               testId="worktree-card__continued-from"
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
             />
           )}
           {/* This copy was restored on another host. Its files are untouched until a person removes it. */}
           {superseded && !isDeleting && (
-            <span
-              data-testid="worktree-card__superseded"
-              data-superseded-by={superseded}
-              title={`Restored as ${superseded}. The files on this host are untouched.`}
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            <StatusIcon
+              testId="worktree-card__superseded"
+              label={`Superseded by ${superseded}`}
+              details={`Restored as ${superseded}. The files on this host are untouched.`}
+              attrs={{ "data-superseded-by": superseded }}
             >
-              Superseded by {superseded}
-              {diverged && (
-                <button
-                  type="button"
-                  data-testid="worktree-card__diverged"
-                  className="rounded bg-destructive/15 px-1 text-destructive underline"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setDivergenceOpen(true);
-                  }}
-                >
-                  Diverged
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid="worktree-card__remove-superseded"
-                className="underline hover:text-foreground"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (
-                    window.confirm(
-                      `Remove this copy? The files of ${worktree.name} on its host are deleted. The restored worktree ${superseded} is not touched.`,
-                    )
-                  ) {
-                    removeWorktreeMutation.mutate({
-                      repo: repoName,
-                      name: worktree.name,
-                      hostId: worktree.hostId,
-                    });
-                  }
-                }}
-              >
-                Remove
-              </button>
-            </span>
+              <Replace className="size-3.5" />
+            </StatusIcon>
+          )}
+          {superseded && diverged && !isDeleting && (
+            <button
+              type="button"
+              data-testid="worktree-card__diverged"
+              aria-label="Diverged: this copy changed after the checkpoint"
+              title="Diverged: this copy changed after the checkpoint"
+              className="flex shrink-0 items-center pl-2 text-destructive"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDivergenceOpen(true);
+              }}
+            >
+              <GitCompareArrows className="size-3.5" />
+            </button>
           )}
           {/* The repo was limited to other hosts after this worktree was made. Nothing is deleted. */}
           {worktree.hostNotAllowed && !isDeleting && (
-            <span
-              data-testid="worktree-card__not-allowed"
-              title="This repo is no longer allowed on this host. The worktree is kept and still opens."
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            <StatusIcon
+              testId="worktree-card__not-allowed"
+              label="Not allowed on this host"
+              details="This repo is no longer allowed on this host. The worktree is kept and still opens."
             >
-              Not allowed on this host
-            </span>
+              <Ban className="size-3.5" />
+            </StatusIcon>
           )}
-          {/* The host no longer has the worktree's folder. Remove drops the record. */}
+          {/* The host no longer has the worktree's folder. Remove, in the context menu, drops the record. */}
           {worktree.missing && !isDeleting && (
-            <span
-              data-testid="worktree-card__missing"
-              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            <StatusIcon
+              testId="worktree-card__missing"
+              label="Missing"
+              details="The host no longer has this worktree's folder. Remove drops the record."
             >
-              Missing
-              <button
-                type="button"
-                data-testid="worktree-card__remove-missing"
-                className="underline hover:text-foreground"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  removeWorktreeMutation.mutate({
-                    repo: repoName,
-                    name: worktree.name,
-                    hostId: worktree.hostId,
-                  });
-                }}
-              >
-                Remove
-              </button>
-            </span>
+              <Link2Off className="size-3.5" />
+            </StatusIcon>
           )}
           <div
             className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
@@ -636,8 +638,7 @@ export const WorktreeCard = memo(function WorktreeCard({
         {/* Plain repos have a single implicit worktree; removing it
             would orphan the repo, so the user is steered toward
             removing the repo itself instead. */}
-        {/* The default branch is the repo's own checkout: it is not moved while its host is up. */}
-        {moveMode && !isPlain && (moveMode === "offline" || worktree.name !== defaultBranch) && (
+        {moveMode && !isPlain && (
           <ContextMenuItem
             data-testid="worktree-card__move"
             disabled={moveDisabledReason !== null}
@@ -652,6 +653,53 @@ export const WorktreeCard = memo(function WorktreeCard({
                 </span>
               ) : null}
             </span>
+          </ContextMenuItem>
+        )}
+        {superseded && (
+          <ContextMenuItem
+            variant="destructive"
+            data-testid="worktree-card__remove-superseded"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Remove this copy? The files of ${worktree.name} on its host are deleted. The restored worktree ${superseded} is not touched.`,
+                )
+              ) {
+                removeWorktreeMutation.mutate({
+                  repo: repoName,
+                  name: worktree.name,
+                  hostId: worktree.hostId,
+                });
+              }
+            }}
+          >
+            <Trash2 />
+            Remove this copy
+          </ContextMenuItem>
+        )}
+        {superseded && diverged && (
+          <ContextMenuItem
+            data-testid="worktree-card__review-divergence"
+            onClick={() => setDivergenceOpen(true)}
+          >
+            <GitCompareArrows />
+            Review changes made after the checkpoint
+          </ContextMenuItem>
+        )}
+        {worktree.missing && !superseded && (
+          <ContextMenuItem
+            variant="destructive"
+            data-testid="worktree-card__remove-missing"
+            onClick={() =>
+              removeWorktreeMutation.mutate({
+                repo: repoName,
+                name: worktree.name,
+                hostId: worktree.hostId,
+              })
+            }
+          >
+            <Trash2 />
+            Remove missing worktree
           </ContextMenuItem>
         )}
         {!isPlain && worktree.name !== defaultBranch && (

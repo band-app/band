@@ -95,7 +95,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `w2-status-live.yaml` | A row shows "working" within 2 s of the agent starting a turn and "needs you" when it asks for permission. |
 | `w3-foreground.yaml` | After a minute in the background the list shows what changed meanwhile. |
 | `w4-open.yaml` | Tapping a worktree opens its screen with the right name and branch; Back returns to the same place in a long list. |
-| `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link shows the "file viewer comes later" notice. |
+| `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link opens the file viewer on that file (here an error state, because `gamma` has no `src/parser.ts`) and Back returns. |
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
 | `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
 | `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
@@ -117,8 +117,14 @@ Check each tool first and install only what is missing. All of it is user space 
 | `t6-tabs-live.yaml` | While the worktree is open, the web starts a chat and reorders the shared list (`/web-tabs`); the phone's tabs follow without reopening the screen. |
 | `t7-tabs-swipe.yaml` | A swipe left or right on the transcript moves to the next or previous tab and "N of M" follows; a drag from the left edge leaves the tab alone, for the system back swipe. |
 | `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
+| `x1-explorer-tree.yaml` | Views > Explorer lists the tree; a folder opens and closes; the 3,000-file `bulk` folder expands and scrolls. |
+| `x2-file-viewer.yaml` | Code with line numbers and Copy, markdown Rendered/Source, an image, and "Can't preview this file" for a binary, a file over 1 MB and a PDF. |
+| `x3-search.yaml` | Name search (fuzzy) and content search; a content match opens the file at its line. |
+| `x4-changes-diff.yaml` | Changes shows the web's sections with counts; a change opens its native diff. |
+| `x5-refresh.yaml` | Pull to refresh picks up a file the control server's `/explorer-change` adds, and Changes re-reads on its own. |
+| `perf-explorer-fling.yaml` | Flings through the open 3,000-file folder; fails when the frame log's longest JS gap is over 100 ms. Runs only with `--perf`. |
 
-The hub is seeded after it starts (`scripts/seed.mjs`): repos `alpha` and `beta`, the worktrees
+The hub is seeded after it starts (`scripts/seed.mjs`; `scripts/seed-explorer.mjs` adds the repo `delta` for the Explorer flows: a 3,000-file `bulk` folder, a 1.3 MB file, a binary, a PNG, markdown, a long-line file and one file of each change kind): repos `alpha` and `beta`, the worktrees
 `alpha-main`, `alpha-feat-mobile` and `beta-main`, and one chat each. The repo `gamma` holds the
 chat flows' worktrees: `gamma-main` (a finished "showcase" turn with an attached image),
 `gamma-long` (a finished turn of 1,610 replayed events), `gamma-history` (24 short turns, more

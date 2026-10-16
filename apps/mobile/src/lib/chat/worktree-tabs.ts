@@ -1,8 +1,8 @@
 /**
  * The phone's tab strip for one worktree, read from and written to the center tabs every device
- * shares (`band:center-tabs:<ws>`, `@band-app/client/center-tabs`). The phone shows chat tabs
- * only. When it writes the list it keeps the other kinds (terminal, file, diff, browser) where
- * they were, through `keepHiddenTabs`, so closing a chat here never drops the desktop's terminal.
+ * shares (`band:center-tabs:<ws>`, `@band-app/client/center-tabs`). The phone shows chat and
+ * terminal tabs. When it writes the list it keeps the other kinds (file, diff, browser) where
+ * they were, through `keepHiddenTabs`, so closing a chat here never drops the desktop's browser.
  *
  * A chat the hub has but the list lacks (created by the CLI, or before the list existed) is shown
  * after the listed ones, the way the web's reconcile adds it. A chat tab whose chat the phone
@@ -14,41 +14,65 @@ import { keepHiddenTabs } from "@band-app/client/center-tabs";
 import { isAttention, isRunning } from "../status-state.ts";
 
 export interface PhoneTabs {
-  /** Chat ids in the shared order. */
-  chats: string[];
-  /** The shared active tab when it is one of `chats`, else null. */
+  /** Chat and terminal tabs in the shared order. */
+  tabs: CenterTab[];
+  /** The ids of `tabs`. */
+  ids: string[];
+  /** The shared active tab when it is one of `tabs`, else null. */
   active: string | null;
   /** How many tabs of other kinds the list holds (shown as "N more on desktop"). */
   hidden: number;
 }
 
-/** What the phone shows of `shared`, given the chats the hub has (`known`). */
-export function phoneTabs(shared: CenterTabs | null, known: readonly string[]): PhoneTabs {
-  const knownSet = new Set(known);
-  const listed = (shared?.tabs ?? []).filter((t) => t.kind === "chat" && knownSet.has(t.id));
-  const listedIds = new Set(listed.map((t) => t.id));
-  const chats = [...listed.map((t) => t.id), ...known.filter((id) => !listedIds.has(id))];
-  const active = shared?.active && listedIds.has(shared.active) ? shared.active : null;
-  const hidden = (shared?.tabs ?? []).filter((t) => t.kind !== "chat").length;
-  return { chats, active, hidden };
+/** The kinds the phone shows. */
+export function isPhoneKind(kind: string): boolean {
+  return kind === "chat" || kind === "term";
 }
 
 /**
- * The shared list after the phone changed its own tabs to `chats` with `active`. Tabs of other
- * kinds, and chat tabs the phone didn't show (`shown` lacks them), stay where they were.
+ * What the phone shows of `shared`, given the chats and terminals the hub has. A tab the hub
+ * doesn't know is skipped. Chats and terminals the list lacks come after the listed ones.
+ */
+export function phoneTabs(
+  shared: CenterTabs | null,
+  knownChats: readonly string[],
+  knownTerminals: readonly string[] = [],
+): PhoneTabs {
+  const kindOf = new Map<string, CenterTab["kind"]>();
+  for (const id of knownChats) kindOf.set(id, "chat");
+  for (const id of knownTerminals) kindOf.set(id, "term");
+  const listed = (shared?.tabs ?? []).filter((t) => kindOf.get(t.id) === t.kind);
+  const listedIds = new Set(listed.map((t) => t.id));
+  const tabs: CenterTab[] = [
+    ...listed.map((t): CenterTab => ({ id: t.id, kind: t.kind })),
+    ...knownChats.filter((id) => !listedIds.has(id)).map((id): CenterTab => ({ id, kind: "chat" })),
+    ...knownTerminals
+      .filter((id) => !listedIds.has(id))
+      .map((id): CenterTab => ({ id, kind: "term" })),
+  ];
+  const active = shared?.active && listedIds.has(shared.active) ? shared.active : null;
+  // Tabs the phone cannot show: other kinds, and chats or terminals the hub no longer has.
+  const hidden = (shared?.tabs ?? []).filter((t) => !listedIds.has(t.id)).length;
+  return { tabs, ids: tabs.map((t) => t.id), active, hidden };
+}
+
+/**
+ * The shared list after the phone changed its own tabs to `tabs` with `active`. Tabs of other
+ * kinds, and chat or terminal tabs the phone didn't show (`shown` lacks them), stay where they
+ * were.
  */
 export function writePhoneTabs(
   shared: CenterTabs | null,
   shown: readonly string[],
-  chats: readonly string[],
+  tabs: readonly CenterTab[],
   active: string | null,
 ): CenterTabs {
   const shownSet = new Set(shown);
   const next: CenterTabs = {
-    tabs: chats.map((id): CenterTab => ({ id, kind: "chat" })),
+    tabs: tabs.map((t): CenterTab => ({ id: t.id, kind: t.kind })),
     active,
   };
-  return keepHiddenTabs(next, shared, (t) => t.kind === "chat" && shownSet.has(t.id));
+  return keepHiddenTabs(next, shared, (t) => isPhoneKind(t.kind) && shownSet.has(t.id));
 }
 
 /** The tab to show after `closed` goes: the one after it, else the one before. */

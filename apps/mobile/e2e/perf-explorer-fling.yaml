@@ -1,0 +1,54 @@
+# S1 performance: flings through the 3,000-file folder leave no blank cells, and the JS thread
+# never stalls over 100 ms. Needs the perf build (`verify.mjs --perf`).
+appId: app.getband.mobile
+name: S1 flinging through 3,000 files
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-view.yaml
+    env:
+      TARGET: delta-main
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-bulk
+    timeout: 15000
+- tapOn:
+    id: explorer__row-bulk
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-bulk/f0001.txt
+    timeout: 10000
+- tapOn:
+    id: perf__frame-log
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          start: 50%, 85%
+          end: 50%, 25%
+          duration: 120
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+- takeScreenshot: x1-perf-after-flings-down
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          start: 50%, 25%
+          end: 50%, 85%
+          duration: 120
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+- takeScreenshot: x1-perf-after-flings-up
+- copyTextFrom:
+    id: perf__frame-log-text
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: note?name=explorer-flings&max-gap=100
+      VALUE: ${maestro.copiedText}
