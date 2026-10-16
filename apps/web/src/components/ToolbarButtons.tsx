@@ -218,7 +218,7 @@ export function ToolbarActionBar() {
             <Button
               size="icon-sm"
               variant="ghost"
-              className={keepAwake.enabled ? "text-amber-500" : "text-muted-foreground"}
+              className={keepAwake.enabled ? "text-warning" : "text-muted-foreground"}
               aria-label="Keep this Mac awake"
               aria-pressed={keepAwake.enabled}
               data-testid="repo-list__keep-awake-button"
