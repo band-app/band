@@ -39,10 +39,54 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --color-status-working: oklch(0.795 0.184 86.047);
-  --color-status-question: oklch(0.769 0.188 70.08);
-  --color-status-done: oklch(0.723 0.19 149.6);
-  --color-status-failed: oklch(0.637 0.237 25.331);
+  --color-highlight: var(--highlight);
+  --color-selection: var(--selection);
+  --color-selection-border: var(--selection-border);
+  --color-selection-foreground: var(--selection-foreground);
+  --color-drop-target: var(--drop-target);
+  --color-focus-ring: var(--focus-ring);
+  --color-git-added: var(--git-added);
+  --color-git-modified: var(--git-modified);
+  --color-git-deleted: var(--git-deleted);
+  --color-git-renamed: var(--git-renamed);
+  --color-git-untracked: var(--git-untracked);
+  --color-git-conflict: var(--git-conflict);
+  --color-git-ahead: var(--git-ahead);
+  --color-git-behind: var(--git-behind);
+  --color-git-diverged: var(--git-diverged);
+  --color-diff-added-bg: var(--diff-added-bg);
+  --color-diff-removed-bg: var(--diff-removed-bg);
+  --color-diff-added-marker: var(--diff-added-marker);
+  --color-diff-removed-marker: var(--diff-removed-marker);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-bg: var(--info-bg);
+  --color-merged: var(--merged);
+  --color-merged-foreground: var(--merged-foreground);
+  --color-merged-bg: var(--merged-bg);
+  --color-search-match: var(--search-match);
+  --color-search-match-current: var(--search-match-current);
+  --color-editor-active-line: var(--editor-active-line);
+  --color-terminal-background: var(--terminal-background);
+  --color-terminal-foreground: var(--terminal-foreground);
+  --color-scrim: var(--scrim);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-status-foreground: var(--status-foreground);
+  --color-status-working: var(--status-working);
+  --color-status-question: var(--status-question);
+  --color-status-done: var(--status-done);
+  --color-status-failed: var(--status-failed);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -89,6 +133,107 @@
   --chart-3: oklch(0.398 0 0);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  /* Fonts and sizes. The Appearance settings override these on <html>
+     (lib/theme/apply.ts). */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-code:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  /* The code font size is unset by default: each surface (chat, editor, diff,
+     terminal) keeps its own size until the user picks one. */
+  /* Accent: selection, links, focus. One source for every "this is the
+     chosen thing" look, so lists, trees and the sidebar match. */
+  --highlight: oklch(0.546 0.245 262.881);
+  --selection: color-mix(in oklab, var(--highlight) 15%, transparent);
+  --selection-border: color-mix(in oklab, var(--highlight) 45%, transparent);
+  --selection-foreground: var(--foreground);
+  --drop-target: color-mix(in oklab, var(--highlight) 20%, transparent);
+  --focus-ring: var(--highlight);
+  --scrim: oklch(0 0 0 / 0.5);
+  --shadow-color: oklch(0 0 0 / 0.18);
+  /* Status colors. Each has a foreground for text on the solid color and a
+     low-alpha fill for badges. */
+  --success: oklch(0.627 0.194 149.214);
+  --warning: oklch(0.666 0.179 58.318);
+  --danger: oklch(0.577 0.245 27.325);
+  --info: oklch(0.546 0.245 262.881);
+  --merged: oklch(0.541 0.281 293.009);
+  --success-foreground: oklch(0.985 0 0);
+  --warning-foreground: oklch(0.985 0 0);
+  --danger-foreground: oklch(0.985 0 0);
+  --info-foreground: oklch(0.985 0 0);
+  --merged-foreground: oklch(0.985 0 0);
+  --success-bg: color-mix(in oklab, var(--success) 12%, transparent);
+  --warning-bg: color-mix(in oklab, var(--warning) 12%, transparent);
+  --danger-bg: color-mix(in oklab, var(--danger) 12%, transparent);
+  --info-bg: color-mix(in oklab, var(--info) 12%, transparent);
+  --merged-bg: color-mix(in oklab, var(--merged) 12%, transparent);
+  --destructive-foreground: oklch(0.985 0 0);
+  /* Text on a solid status-colored badge. */
+  --status-foreground: oklch(0.145 0 0);
+  --status-working: oklch(0.795 0.184 86.047);
+  --status-question: oklch(0.769 0.188 70.08);
+  --status-done: oklch(0.723 0.19 149.6);
+  --status-failed: oklch(0.637 0.237 25.331);
+  /* Git. A file's letter, the +N/-N counts, the sync arrows. */
+  --git-added: var(--success);
+  --git-modified: var(--info);
+  --git-deleted: var(--danger);
+  --git-renamed: var(--merged);
+  --git-untracked: oklch(0.681 0.162 75.834);
+  --git-conflict: var(--danger);
+  --git-ahead: var(--info);
+  --git-behind: oklch(0.681 0.162 75.834);
+  --git-diverged: oklch(0.646 0.222 41.116);
+  --diff-added-bg: oklch(0.723 0.219 149.579 / 0.1);
+  --diff-removed-bg: oklch(0.637 0.237 25.331 / 0.1);
+  --diff-added-marker: oklch(0.723 0.219 149.579 / 0.8);
+  --diff-removed-marker: oklch(0.637 0.237 25.331 / 0.8);
+  /* Find matches (chat, editor) and the editor's current line. */
+  --search-match: oklch(0.852 0.199 91.936 / 0.35);
+  --search-match-current: oklch(0.705 0.213 47.604 / 0.8);
+  --editor-active-line: oklch(0 0 0 / 0.03);
+  /* Terminal. --terminal-background is xterm's background, and chrome
+     floating over a terminal paints with it. */
+  --terminal-foreground: #1e1e1e;
+  --terminal-selection: rgba(0, 0, 0, 0.15);
+  --ansi-0: #000000;
+  --ansi-1: #cd3131;
+  --ansi-2: #0a8043;
+  --ansi-3: #946800;
+  --ansi-4: #0451a5;
+  --ansi-5: #bc05bc;
+  --ansi-6: #0598bc;
+  --ansi-7: #555555;
+  --ansi-8: #666666;
+  --ansi-9: #cd3131;
+  --ansi-10: #0a8043;
+  --ansi-11: #946800;
+  --ansi-12: #0451a5;
+  --ansi-13: #bc05bc;
+  --ansi-14: #0598bc;
+  --ansi-15: #1e1e1e;
+  /* Syntax. Editor, diff, markdown preview and chat code blocks. */
+  --syntax-comment: #008000;
+  --syntax-keyword: #0000ff;
+  --syntax-control: #af00db;
+  --syntax-string: #a31515;
+  --syntax-number: #098658;
+  --syntax-function: #795e26;
+  --syntax-variable: #001080;
+  --syntax-type: #267f99;
+  --syntax-property: #001080;
+  --syntax-operator: #000000;
+  --syntax-tag: #800000;
+  --syntax-attribute: #e50000;
+  --syntax-punctuation: #000000;
+  --syntax-constant: #0070c1;
+  --syntax-regexp: #811f3f;
+  --syntax-heading: #800000;
+  --syntax-inserted: #098658;
+  --syntax-deleted: #a31515;
+  --syntax-invalid: #cd3131;
 }
 
 .dark {
@@ -132,6 +277,66 @@
   --chart-3: oklch(0.398 0 0);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  --highlight: oklch(0.707 0.165 254.624);
+  --selection: color-mix(in oklab, var(--highlight) 22%, transparent);
+  --selection-border: color-mix(in oklab, var(--highlight) 55%, transparent);
+  --drop-target: color-mix(in oklab, var(--highlight) 25%, transparent);
+  --success: oklch(0.792 0.209 151.711);
+  --warning: oklch(0.828 0.189 84.429);
+  --danger: oklch(0.704 0.191 22.216);
+  --info: oklch(0.707 0.165 254.624);
+  --merged: oklch(0.702 0.183 293.541);
+  --success-foreground: oklch(0.205 0 0);
+  --warning-foreground: oklch(0.205 0 0);
+  --danger-foreground: oklch(0.205 0 0);
+  --info-foreground: oklch(0.205 0 0);
+  --merged-foreground: oklch(0.205 0 0);
+  --success-bg: color-mix(in oklab, var(--success) 15%, transparent);
+  --warning-bg: color-mix(in oklab, var(--warning) 15%, transparent);
+  --danger-bg: color-mix(in oklab, var(--danger) 15%, transparent);
+  --info-bg: color-mix(in oklab, var(--info) 15%, transparent);
+  --merged-bg: color-mix(in oklab, var(--merged) 15%, transparent);
+  --git-untracked: oklch(0.852 0.199 91.936);
+  --git-behind: oklch(0.852 0.199 91.936);
+  --git-diverged: oklch(0.75 0.183 55.934);
+  --editor-active-line: oklch(1 0 0 / 0.03);
+  --terminal-foreground: #e8e8e8;
+  --terminal-selection: rgba(255, 255, 255, 0.2);
+  --ansi-0: #000000;
+  --ansi-1: #cd3131;
+  --ansi-2: #0dbc79;
+  --ansi-3: #e5e510;
+  --ansi-4: #2472c8;
+  --ansi-5: #bc3fbc;
+  --ansi-6: #11a8cd;
+  --ansi-7: #e5e5e5;
+  --ansi-8: #666666;
+  --ansi-9: #f14c4c;
+  --ansi-10: #23d18b;
+  --ansi-11: #f5f543;
+  --ansi-12: #3b8eea;
+  --ansi-13: #d670d6;
+  --ansi-14: #29b8db;
+  --ansi-15: #e5e5e5;
+  --syntax-comment: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-control: #c586c0;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa;
+  --syntax-variable: #9cdcfe;
+  --syntax-type: #4ec9b0;
+  --syntax-property: #9cdcfe;
+  --syntax-operator: #d4d4d4;
+  --syntax-tag: #569cd6;
+  --syntax-attribute: #9cdcfe;
+  --syntax-punctuation: #d4d4d4;
+  --syntax-constant: #4fc1ff;
+  --syntax-regexp: #d16969;
+  --syntax-heading: #569cd6;
+  --syntax-inserted: #b5cea8;
+  --syntax-deleted: #ce9178;
+  --syntax-invalid: #f44747;
 }
 
 button,
@@ -229,15 +434,23 @@ button,
 
 /* Find in the chat pane (components/chat/use-chat-find.ts). */
 ::highlight(chat-find) {
-  background-color: rgb(250 204 21 / 0.35);
+  background-color: var(--search-match);
 }
 ::highlight(chat-find-current) {
-  background-color: rgb(249 115 22 / 0.8);
+  background-color: var(--search-match-current);
   color: black;
 }
 
 pre {
   overflow-x: auto;
+}
+
+/* Appearance > Code font size, for code in chat messages. With no size chosen
+   the fallback is Streamdown's own text-sm. */
+[data-streamdown="code-block-body"] pre,
+[data-streamdown="code-block-body"] code,
+[data-streamdown="inline-code"] {
+  font-size: var(--code-font-size, 0.875rem);
 }
 
 html,
@@ -248,8 +461,9 @@ body {
   overscroll-behavior: none;
   background: var(--background);
   color: var(--foreground);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-ui);
+  /* Appearance > UI font size sets --font-size-ui on <html>; rem units follow it. */
+  font-size: var(--font-size-ui, 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

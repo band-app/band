@@ -249,7 +249,7 @@ export function VoiceSettings() {
             Save
           </Button>
           {tested ? (
-            <span role="status" className="text-xs text-green-600" data-testid="settings__voice-ok">
+            <span role="status" className="text-xs text-success" data-testid="settings__voice-ok">
               {tested}
             </span>
           ) : null}

@@ -79,6 +79,38 @@ export class TerminalSurface {
     }, this.worktreeId);
   }
 
+  /** xterm's live options: its background and foreground, font size and family. */
+  async readOptions(): Promise<{
+    background: string | undefined;
+    foreground: string | undefined;
+    fontSize: number | undefined;
+    fontFamily: string | undefined;
+  } | null> {
+    return await this.page.evaluate((id) => {
+      type Term = {
+        options: {
+          theme?: { background?: string; foreground?: string };
+          fontSize?: number;
+          fontFamily?: string;
+        };
+      };
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
+      const term = entry?.getTerminal() as Term | null;
+      if (!term) return null;
+      return {
+        background: term.options.theme?.background,
+        foreground: term.options.theme?.foreground,
+        fontSize: term.options.fontSize,
+        fontFamily: term.options.fontFamily,
+      };
+    }, this.worktreeId);
+  }
+
   /** Where the terminal's cells are on the page. */
   async readGrid(): Promise<TerminalGrid> {
     const grid = await this.page.evaluate((id) => {

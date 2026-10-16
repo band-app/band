@@ -35,8 +35,8 @@ export function PromoteToGitDialog({ open, onOpenChange, onConfirm, repoName }: 
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2 text-sm">
-          <div className="flex items-start gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 p-3">
-            <GitBranch className="size-4 shrink-0 text-blue-500 mt-0.5" />
+          <div className="flex items-start gap-2 rounded-md border border-info/30 bg-info-bg p-3">
+            <GitBranch className="size-4 shrink-0 text-info mt-0.5" />
             <span>
               After promotion you'll be able to create branches, view diffs, and use git pull / push
               for this repo. The existing worktree stays in place.

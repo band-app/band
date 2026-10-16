@@ -62,6 +62,8 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 
 ### Exceptions
 
+- `apps/web/tests/theme-derive.test.ts` calls the pure functions in `apps/web/src/lib/theme/` (color math, surface derivation, contrast) with colors in and CSS variables out. There is no state to fake, and the 4.5:1 contrast guarantee for arbitrary user colors can only be checked across many inputs at this level. The e2e suite `apps/web/e2e/appearance.spec.ts` covers what the user sees.
+
 - `apps/web/tests/hub-boundary.test.ts` scans the UI sources (`apps/web/src`, `vite.config.ts`) for a value import from the hub. The rule is about what the UI bundle may contain, so there is no server or client surface to drive. It stays a source scan because a lint rule cannot tell `import type` from a value import of the same module.
 
 - `apps/hub/tests/branch-status-poller-ci-throttle.test.ts` drives the exported `getBatchedCIStatuses` directly instead of booting the full server. It covers an internal, non-user-observable throttle: the CI poller must log a persistent `gh` GraphQL failure only once per host until it recovers, rather than every ~5–60 s tick. The throttle state has no HTTP/DB projection to assert against, and a hermetic `gh` *success* (needed to observe the recovery reset) would require network + auth, so a full real-server test is impractical. Instead the test exercises the real batching function through its public surface with real `git` + real (offline-failing) `gh` subprocesses — the same direct-function style as `git.test.ts` — which is why `getBatchedCIStatuses` is exported. This is the allowed alternative to a mocked-out fake; do not add a tRPC/`console` mock layer or a `NODE_ENV` test branch to the poller.
@@ -135,6 +137,10 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 - `apps/desktop/tests/hub-unreachable.test.ts` covers the pure half of the "hub unreachable" page: the `data:` URL's links, escaping and which navigations count as an action. The click flow (Retry, Use local) is covered in `apps/web/e2e-desktop/desktop-hub-picker.spec.ts`.
 
 - `apps/desktop/tests/app-protocol.test.ts`, `navigation-guard.test.ts`, `hub-choice.test.ts` and `ui-paths.test.ts` cover the `app://` handler (hosts, CSP, deep links, traversal), the navigation rules, the hub choice storage and validation (against a real HTTP server on another port) and the UI path lookup, with no Electron. The Electron-bound code is covered by `apps/web/e2e-desktop/desktop-hub-picker.spec.ts` (local hub, remote hub with no local spawn, live switching, per-hub storage, CSP, navigation guard, `<webview>` attach). Still untested: the macOS folder picker and the other macOS shell IPC, terminals and browser-pane page loads over `app://` in the e2e (the app spawns real PTYs only in the hub's own tests), cookie import (`ChromeImportDialog.tsx`, Keychain), and the updater toast, which needs a packaged app. The existing desktop unit tests for guest policy, chrome-import and the updater still pass and none of their code changed.
+
+## UI colors
+
+Use the semantic tokens in `apps/web/src/styles/globals.css` (`bg-selection`, `text-success`, `text-git-added`, `var(--syntax-keyword)`), not Tailwind palette classes or color literals, so Settings > Appearance restyles every surface. `scripts/check-theme-tokens.mjs` fails `pnpm lint` and CI on `bg-blue-500`, `dark:text-red-400`, `#ff0000` or `rgba(...)` in `.ts` and `.tsx` files. A color that must stay fixed takes `theme-lint-ignore-line: <reason>` or `theme-lint-ignore-file: <reason>`. The token list and the theme runtime are in `docs/appearance.md`.
 
 ## Git Hooks & CI
 

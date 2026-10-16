@@ -39,20 +39,20 @@ export function DeleteWorktreeDialog({
         </DialogHeader>
         <div className="flex flex-col gap-2 text-sm">
           {isUnmerged && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-              <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3">
+              <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
               <span>This branch has not been merged to main.</span>
             </div>
           )}
           {hasUnpushedCommits && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-              <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3">
+              <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
               <span>This branch has unpushed commits that will be lost.</span>
             </div>
           )}
           {isDirty && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-              <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-bg p-3">
+              <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
               <span>There are uncommitted changes that will be lost.</span>
             </div>
           )}

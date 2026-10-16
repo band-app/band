@@ -62,7 +62,7 @@ export function AgentFailureCard({
   const [copied, setCopied] = useState(false);
   const amber = failureTone(failure.cause) === "amber";
   const Icon = amber ? TriangleAlert : OctagonAlert;
-  const tone = amber ? "text-amber-600 dark:text-amber-400" : "text-destructive";
+  const tone = amber ? "text-warning" : "text-destructive";
   const { headline, line } = describeFailure(failure, hostLabel(failure.host));
   const output = filterOutput(failure.stderrTail || failure.message, relevant);
 
@@ -79,7 +79,7 @@ export function AgentFailureCard({
       data-tone={amber ? "amber" : "red"}
       className={cn(
         "rounded-lg border p-3 text-sm",
-        amber ? "border-amber-500/40 bg-amber-500/5" : "border-destructive/40 bg-destructive/5",
+        amber ? "border-warning/40 bg-warning-bg" : "border-destructive/40 bg-destructive/5",
       )}
     >
       <div className={cn("flex items-center gap-2 font-medium", tone)}>

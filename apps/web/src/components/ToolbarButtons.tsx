@@ -186,9 +186,9 @@ export function ToolbarActionBar() {
             <Globe
               className={
                 ctx.tunnelStatus === "error"
-                  ? "size-4 text-red-500"
+                  ? "size-4 text-danger"
                   : ctx.tunnelStatus === "running"
-                    ? "size-4 text-green-500"
+                    ? "size-4 text-success"
                     : "size-4"
               }
             />
@@ -218,7 +218,7 @@ export function ToolbarActionBar() {
             <Button
               size="icon-sm"
               variant="ghost"
-              className={keepAwake.enabled ? "text-amber-500" : "text-muted-foreground"}
+              className={keepAwake.enabled ? "text-warning" : "text-muted-foreground"}
               aria-label="Keep this Mac awake"
               aria-pressed={keepAwake.enabled}
               data-testid="repo-list__keep-awake-button"

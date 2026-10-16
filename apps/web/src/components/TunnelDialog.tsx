@@ -147,6 +147,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
                 href={tunnelUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                // theme-lint-ignore-line: QR code needs a white quiet zone to scan
                 className="rounded-lg bg-white p-3 block cursor-pointer hover:opacity-80 transition-opacity"
               >
                 <QRCodeSVG value={tunnelUrl} size={200} />

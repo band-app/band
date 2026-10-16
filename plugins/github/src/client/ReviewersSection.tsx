@@ -10,10 +10,10 @@ const STATE_LABEL: Record<ReviewerState, string> = {
 };
 
 const STATE_COLOR: Record<ReviewerState, string> = {
-  approved: "text-green-500",
-  changes_requested: "text-red-500",
+  approved: "text-success",
+  changes_requested: "text-danger",
   commented: "text-muted-foreground",
-  pending: "text-yellow-500",
+  pending: "text-warning",
   dismissed: "text-muted-foreground",
 };
 

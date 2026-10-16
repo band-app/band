@@ -73,12 +73,12 @@ function LineCounts({ entry }: { entry: ChangeEntry }) {
   return (
     <span className="flex shrink-0 gap-1 text-[11px] tabular-nums">
       {!!additions && (
-        <span className="text-green-600 dark:text-green-400" data-testid="changes-tree__additions">
+        <span className="text-git-added" data-testid="changes-tree__additions">
           +{additions}
         </span>
       )}
       {!!deletions && (
-        <span className="text-red-600 dark:text-red-400" data-testid="changes-tree__deletions">
+        <span className="text-git-deleted" data-testid="changes-tree__deletions">
           -{deletions}
         </span>
       )}
@@ -140,7 +140,7 @@ function ChangesTreeNode({
       data-testid={`changes-tree__item--${node.path}`}
       className={`group flex h-[28px] w-full items-center pr-2 hover:bg-accent/50 ${
         isActive
-          ? "bg-blue-500/30 text-foreground outline outline-1 -outline-offset-1 outline-blue-400/60 hover:bg-blue-500/30 dark:bg-blue-500/40 dark:outline-blue-400/70 dark:hover:bg-blue-500/40"
+          ? "bg-selection text-selection-foreground outline outline-1 -outline-offset-1 outline-selection-border hover:bg-selection"
           : ""
       }`}
     >

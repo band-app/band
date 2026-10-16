@@ -45,7 +45,7 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
     className={cn(
       "flex min-w-0 max-w-full flex-col gap-px break-words [overflow-wrap:anywhere] text-base lg:text-sm group-[.is-assistant]:gap-2",
       "group-[.is-assistant]:w-full group-[.is-user]:w-fit",
-      "group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-md group-[.is-user]:border-2 group-[.is-user]:border-white/20 group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-md group-[.is-user]:border-2 group-[.is-user]:border-border group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       "group-[.is-assistant]:text-foreground",
       className,
     )}
@@ -117,7 +117,9 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
             alt={filename}
             className="rounded-md transition-opacity group-hover/img:opacity-90"
           />
+          {/* theme-lint-ignore-line: image hover tint stays black whatever the theme */}
           <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/img:bg-black/20">
+            {/* theme-lint-ignore-line: white icon over the dark hover tint */}
             <Expand className="size-6 text-white opacity-0 drop-shadow-md transition-opacity group-hover/img:opacity-100" />
           </div>
         </button>

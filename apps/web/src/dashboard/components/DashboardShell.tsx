@@ -561,8 +561,8 @@ export function DashboardShell({
       />
 
       {(cliState.status === "manual" || cliState.status === "conflict") && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-blue-700 dark:text-blue-200">
+        <div className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2">
+          <span className="text-info">
             {cliState.status === "conflict"
               ? "A different `band` binary exists — replace it to use the bundled CLI"
               : `Install band CLI${cliState.status === "manual" && cliState.reason ? ` — ${cliState.reason}` : ""}`}
@@ -577,9 +577,9 @@ export function DashboardShell({
         <div
           role="status"
           data-testid="hooks-banner"
-          className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2"
+          className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2"
         >
-          <span className="text-blue-700 dark:text-blue-200">
+          <span className="text-info">
             To get notifications from agents running in a terminal, Claude Code hooks need to be
             installed.
             {hooksSetup.error ? ` ${hooksSetup.error}` : ""}

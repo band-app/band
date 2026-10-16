@@ -71,7 +71,7 @@ function NoticeToast({ notice }: { notice: Notice }) {
         {isError ? (
           <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
         ) : (
-          <Info className="mt-0.5 size-4 shrink-0 text-blue-500" />
+          <Info className="mt-0.5 size-4 shrink-0 text-info" />
         )}
         <p className="min-w-0 line-clamp-4 break-words">{notice.message}</p>
       </div>

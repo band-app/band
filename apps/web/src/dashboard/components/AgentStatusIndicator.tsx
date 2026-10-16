@@ -56,7 +56,7 @@ export function AgentStateDot({ status, testId, withTitle }: DotProps) {
       return (
         <span
           {...common}
-          className="inline-flex size-3 shrink-0 animate-status-pulse items-center justify-center rounded-full bg-status-question text-[9px] font-bold leading-none text-black"
+          className="inline-flex size-3 shrink-0 animate-status-pulse items-center justify-center rounded-full bg-status-question text-[9px] font-bold leading-none text-status-foreground"
         >
           ?
         </span>

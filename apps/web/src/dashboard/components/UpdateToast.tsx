@@ -26,7 +26,7 @@ export function UpdateToast() {
     case "up-to-date":
       body = (
         <ToastHeader
-          icon={<CircleCheck className="size-4 text-emerald-500" />}
+          icon={<CircleCheck className="size-4 text-success" />}
           title="You're on the latest version"
           detail={`Band v${status.currentVersion}`}
         />
@@ -36,7 +36,7 @@ export function UpdateToast() {
       body = (
         <>
           <ToastHeader
-            icon={<Download className="size-4 text-blue-500" />}
+            icon={<Download className="size-4 text-info" />}
             title={`Band v${status.version} is available`}
             detail={`You have v${status.currentVersion}.`}
           />
@@ -81,7 +81,7 @@ export function UpdateToast() {
       body = (
         <>
           <ToastHeader
-            icon={<CircleCheck className="size-4 text-emerald-500" />}
+            icon={<CircleCheck className="size-4 text-success" />}
             title={`Band v${status.version} is ready`}
             detail="Restart Band to finish updating. It also installs when you quit."
           />

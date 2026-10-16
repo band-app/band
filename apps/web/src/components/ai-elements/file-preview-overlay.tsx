@@ -1,3 +1,4 @@
+// theme-lint-ignore-file: light text over a dark image scrim stays white in every theme
 import { cn } from "@band-app/ui";
 import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
@@ -31,7 +32,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm",
+            "fixed inset-0 z-50 bg-scrim backdrop-blur-sm",
             "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0",
           )}

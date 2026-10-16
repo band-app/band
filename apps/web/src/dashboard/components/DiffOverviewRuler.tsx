@@ -35,9 +35,9 @@ const MIN_SLIDER_PX = 20;
 const MARKER_HIT_SLOP_PX = 4;
 
 const MARKER_CLASS: Record<ChangeKind, string> = {
-  added: "bg-green-500/80",
-  removed: "bg-red-500/80",
-  modified: "bg-blue-500/80",
+  added: "bg-diff-added-marker",
+  removed: "bg-diff-removed-marker",
+  modified: "bg-info/80",
 };
 
 /** The block widgets (deleted-lines chunk, split-view spacer) attached to a

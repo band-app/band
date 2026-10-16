@@ -9,14 +9,12 @@ import {
 } from "@codemirror/commands";
 import {
   bracketMatching,
-  defaultHighlightStyle,
   foldGutter,
   foldKeymap,
   indentOnInput,
   indentUnit,
   LanguageSupport,
   StreamLanguage,
-  syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, SearchQuery } from "@codemirror/search";
 import {
@@ -36,7 +34,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
+import { bandEditorTheme, codeFontSize } from "./codemirror-theme";
 
 /**
  * Lazy-loads a CodeMirror LanguageSupport for the given language name.
@@ -169,15 +167,8 @@ export function baseViewerExtensions(
   opts?: { skipLineNumbers?: boolean; naturalHeight?: boolean },
 ): Extension[] {
   const naturalHeight = opts?.naturalHeight ?? false;
-  const rootDarkStyles: Record<string, string> = { fontSize: "13px" };
-  const rootLightStyles: Record<string, string> = {
-    fontSize: "13px",
-    backgroundColor: "var(--background)",
-  };
-  if (!naturalHeight) {
-    rootDarkStyles.height = "100%";
-    rootLightStyles.height = "100%";
-  }
+  const rootStyles: Record<string, string> = { fontSize: codeFontSize(13) };
+  if (!naturalHeight) rootStyles.height = "100%";
   // Natural-height callers need `.cm-scroller` to flow with its content
   // *vertically* (no fixed scrolling container) but still let long lines
   // scroll *horizontally* — otherwise minified JS, generated SQL, or any
@@ -212,59 +203,17 @@ export function baseViewerExtensions(
     ...(opts?.skipLineNumbers ? [] : [lineNumbers()]),
     bracketMatching(),
     highlightSelectionMatches(),
-    ...(isDark
-      ? [
-          vscodeDarkInit({
-            settings: {
-              background: "var(--background)",
-              gutterBackground: "var(--background)",
-              lineHighlight: "transparent",
-            },
-          }),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        ]
-      : [syntaxHighlighting(defaultHighlightStyle)]),
+    bandEditorTheme(isDark),
     keymap.of([...defaultKeymap]),
     // Viewer-specific overrides
     EditorView.theme(
-      isDark
-        ? {
-            "&": rootDarkStyles,
-            ".cm-scroller": scrollerStyles,
-            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
-            ".cm-activeLineGutter": { backgroundColor: "transparent" },
-            ".cm-searchMatch": {
-              backgroundColor: "rgba(255, 213, 0, 0.35)",
-              borderRadius: "2px",
-            },
-            ".cm-searchMatch-selected": {
-              backgroundColor: "rgba(255, 150, 50, 0.5)",
-            },
-          }
-        : {
-            "&": rootLightStyles,
-            ".cm-scroller": scrollerStyles,
-            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
-            ".cm-gutters": {
-              backgroundColor: "var(--background)",
-              border: "none",
-              color: "#6e7781",
-            },
-            ".cm-activeLineGutter": { backgroundColor: "transparent" },
-            ".cm-activeLine": { backgroundColor: "transparent" },
-            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
-            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-              backgroundColor: "rgba(0, 0, 0, 0.07)",
-            },
-            ".cm-line": { color: "#24292f" },
-            ".cm-searchMatch": {
-              backgroundColor: "rgba(255, 213, 0, 0.4)",
-              borderRadius: "2px",
-            },
-            ".cm-searchMatch-selected": {
-              backgroundColor: "rgba(255, 150, 50, 0.55)",
-            },
-          },
+      {
+        "&": rootStyles,
+        ".cm-scroller": scrollerStyles,
+        ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+        ".cm-activeLineGutter": { backgroundColor: "transparent" },
+        ".cm-activeLine": { backgroundColor: "transparent" },
+      },
       { dark: isDark },
     ),
   ];
@@ -376,17 +325,7 @@ export function baseEditorExtensions(
     indentUnit.of(indent),
     EditorState.tabSize.of(tabSize),
     highlightSelectionMatches(),
-    ...(isDark
-      ? [
-          vscodeDarkInit({
-            settings: {
-              background: "var(--background)",
-              gutterBackground: "var(--background)",
-            },
-          }),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        ]
-      : [syntaxHighlighting(defaultHighlightStyle)]),
+    bandEditorTheme(isDark),
     keymap.of([
       ...customKeyBindings,
       { key: "Enter", run: smartNewlineAndIndent },
@@ -421,45 +360,11 @@ export function baseEditorExtensions(
       },
     }),
     EditorView.theme(
-      isDark
-        ? {
-            "&": { height: "100%", fontSize: "13px" },
-            ".cm-scroller": { overflow: "auto" },
-            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
-            ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.03)" },
-            ".cm-activeLineGutter": { backgroundColor: "rgba(255,255,255,0.03)" },
-            ".cm-searchMatch": {
-              backgroundColor: "rgba(255, 213, 0, 0.35)",
-              borderRadius: "2px",
-            },
-            ".cm-searchMatch-selected": {
-              backgroundColor: "rgba(255, 150, 50, 0.5)",
-            },
-          }
-        : {
-            "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
-            ".cm-scroller": { overflow: "auto" },
-            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
-            ".cm-gutters": {
-              backgroundColor: "var(--background)",
-              border: "none",
-              color: "#6e7781",
-            },
-            ".cm-activeLine": { backgroundColor: "rgba(0,0,0,0.03)" },
-            ".cm-activeLineGutter": { backgroundColor: "rgba(0,0,0,0.03)" },
-            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
-            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-              backgroundColor: "rgba(0, 0, 0, 0.07)",
-            },
-            ".cm-line": { color: "#24292f" },
-            ".cm-searchMatch": {
-              backgroundColor: "rgba(255, 213, 0, 0.4)",
-              borderRadius: "2px",
-            },
-            ".cm-searchMatch-selected": {
-              backgroundColor: "rgba(255, 150, 50, 0.55)",
-            },
-          },
+      {
+        "&": { height: "100%", fontSize: codeFontSize(13) },
+        ".cm-scroller": { overflow: "auto" },
+        ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+      },
       { dark: isDark },
     ),
   ];
@@ -651,7 +556,7 @@ export function lineHighlightExtension(isDark = true): Extension[] {
     EditorView.theme(
       {
         ".cm-highlighted-line": {
-          backgroundColor: isDark ? "rgba(255, 213, 79, 0.12)" : "rgba(255, 213, 79, 0.25)",
+          backgroundColor: "color-mix(in oklab, var(--search-match) 50%, transparent)",
         },
       },
       { dark: isDark },

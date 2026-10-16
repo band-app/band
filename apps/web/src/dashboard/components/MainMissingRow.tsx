@@ -52,7 +52,7 @@ export function MainMissingRow({ repo, hosts }: Props) {
       data-primary-host={missing.hostId}
     >
       <div className="flex items-start gap-2">
-        <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-500" aria-hidden />
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
         <div className="min-w-0">
           <div className="truncate font-medium">{repo.defaultBranch}</div>
           <div className="text-foreground/60" data-testid="repo-main-missing__text">

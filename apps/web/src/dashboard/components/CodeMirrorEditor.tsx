@@ -321,7 +321,7 @@ export function CodeMirrorEditor({
 
   return (
     <CodeSelectionContextMenu>
-      <div ref={containerRef} className={className} />
+      <div ref={containerRef} className={className} data-testid="code-editor" />
     </CodeSelectionContextMenu>
   );
 }

@@ -254,7 +254,7 @@ function CountBadge({ count, testid }: { count: number; testid: string }) {
   return (
     <span
       data-testid={testid}
-      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[9px] font-medium text-blue-600 dark:text-blue-400"
+      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-info-bg px-1 text-[9px] font-medium text-info"
     >
       {count}
     </span>

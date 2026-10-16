@@ -1,12 +1,12 @@
 import type { ConflictKind, FileStatus } from "../types";
 
 const statusColors: Record<FileStatus, string> = {
-  A: "text-green-600 dark:text-green-400",
-  M: "text-blue-600 dark:text-blue-400",
-  D: "text-red-600 dark:text-red-400",
-  R: "text-purple-600 dark:text-purple-400",
-  C: "text-purple-600 dark:text-purple-400",
-  U: "text-yellow-600 dark:text-yellow-400",
+  A: "text-git-added",
+  M: "text-git-modified",
+  D: "text-git-deleted",
+  R: "text-git-renamed",
+  C: "text-git-renamed",
+  U: "text-git-untracked",
 };
 
 const statusLabels: Record<FileStatus, string> = {
@@ -41,7 +41,7 @@ export function FileStatusBadge({
       <span
         title={conflictLabels[conflict]}
         data-testid="changes-tree__conflict-badge"
-        className="w-3 shrink-0 text-center text-xs font-bold text-red-600 dark:text-red-400"
+        className="w-3 shrink-0 text-center text-xs font-bold text-git-conflict"
       >
         !
       </span>
@@ -51,6 +51,7 @@ export function FileStatusBadge({
   return (
     <span
       title={statusLabels[status]}
+      data-testid="changes-tree__status"
       className={`w-3 shrink-0 text-center text-xs font-bold ${statusColors[status]}`}
     >
       {status}
