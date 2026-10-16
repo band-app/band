@@ -1,6 +1,22 @@
-import { toWorktreeId } from "@band-app/shared/worktree-id";
+import {
+  buildOriginTree,
+  buildPinnedTree,
+  entriesOf,
+  hostIdOf,
+  type OriginTree as SharedOriginTree,
+  type PinnedTree as SharedPinnedTree,
+  type WorktreeEntry as SharedWorktreeEntry,
+  sortRepoWorktrees,
+  withoutPinned,
+} from "@band-app/shared/sidebar-tree";
 import { useSyncExternalStore } from "react";
-import type { RepoInfo, WorktreeInfo } from "../types";
+import type { RepoInfo } from "../types";
+
+// The ordering and nesting rules live in shared so the mobile list applies the same ones.
+export { buildOriginTree, buildPinnedTree, entriesOf, hostIdOf, sortRepoWorktrees, withoutPinned };
+export type WorktreeEntry = SharedWorktreeEntry<RepoInfo>;
+export type OriginTree = SharedOriginTree<RepoInfo>;
+export type PinnedTree = SharedPinnedTree<RepoInfo>;
 
 export type GroupBy = "repo" | "origin" | "host";
 
@@ -56,12 +72,6 @@ export function useGroupBy(): [GroupBy, (value: GroupBy) => void] {
   return [value, setGroupBy];
 }
 
-export interface WorktreeEntry {
-  worktreeId: string;
-  repo: RepoInfo;
-  worktree: WorktreeInfo;
-}
-
 export interface HostInfoLite {
   id: string;
   name?: string | null;
@@ -102,98 +112,6 @@ export type GroupedRow =
 
 export type WorktreeRow = Extract<GroupedRow, { kind: "worktree" }>;
 
-export function entriesOf(repos: RepoInfo[]): WorktreeEntry[] {
-  return repos.flatMap((repo) =>
-    repo.worktrees.map((worktree) => ({
-      worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
-      repo,
-      worktree,
-    })),
-  );
-}
-
-type SortField = "sortIndex" | "pinSortIndex";
-
-/** Orders by the stored index, worktrees with none after those with one. Ties keep their order. */
-function bySortIndex(field: SortField) {
-  return (a: WorktreeEntry, b: WorktreeEntry): number => {
-    const x = a.worktree[field];
-    const y = b.worktree[field];
-    if (x == null && y == null) return 0;
-    if (x == null) return 1;
-    if (y == null) return -1;
-    return x - y;
-  };
-}
-
-/** Each repo's worktrees in the order the user dragged them to. Without an index the order stays. */
-export function sortRepoWorktrees(repos: RepoInfo[]): RepoInfo[] {
-  const compare = bySortIndex("sortIndex");
-  return repos.map((repo) => {
-    const entries = repo.worktrees.map((worktree) => ({
-      worktreeId: "",
-      repo,
-      worktree,
-    }));
-    entries.sort(compare);
-    return { ...repo, worktrees: entries.map((e) => e.worktree) };
-  });
-}
-
-export interface OriginTree {
-  entries: WorktreeEntry[];
-  byId: Map<string, WorktreeEntry>;
-  roots: WorktreeEntry[];
-  /** Children shown under each worktree, in order. */
-  childrenOf: Map<string, WorktreeEntry[]>;
-  /** The worktree a row is nested under, or undefined for a top-level row. */
-  parentOf: Map<string, string>;
-  hasLiveOrigin: (entry: WorktreeEntry) => boolean;
-  /** A repo's main worktree: where work with no origin is listed. */
-  isMain: (entry: WorktreeEntry) => boolean;
-}
-
-/**
- * The Origin tree: each repo's main worktree at the top level, with everything started from it
- * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
- * on the same host. Siblings are ordered by their sort index.
- */
-export function buildOriginTree(entries: WorktreeEntry[]): OriginTree {
-  const byId = new Map(entries.map((e) => [e.worktreeId, e]));
-  const childrenOf = new Map<string, WorktreeEntry[]>();
-  const parentOf = new Map<string, string>();
-  const addChild = (parentId: string, entry: WorktreeEntry) => {
-    childrenOf.set(parentId, [...(childrenOf.get(parentId) ?? []), entry]);
-    parentOf.set(entry.worktreeId, parentId);
-  };
-  const hasLiveOrigin = (entry: WorktreeEntry) => {
-    const parentId = entry.worktree.origin?.worktreeId;
-    return !!parentId && parentId !== entry.worktreeId && byId.has(parentId);
-  };
-  const isMain = (entry: WorktreeEntry) =>
-    entry.repo.kind !== "plain" && entry.worktree.name === entry.repo.defaultBranch;
-  const mains = new Map<string, WorktreeEntry>();
-  for (const entry of entries) {
-    if (isMain(entry) && !hasLiveOrigin(entry)) {
-      mains.set(`${entry.repo.name}@${hostIdOf(entry.worktree)}`, entry);
-    }
-  }
-  const roots: WorktreeEntry[] = [];
-  for (const entry of entries) {
-    if (hasLiveOrigin(entry)) {
-      addChild(entry.worktree.origin!.worktreeId, entry);
-      continue;
-    }
-    const main = mains.get(`${entry.repo.name}@${hostIdOf(entry.worktree)}`);
-    if (main && main !== entry) addChild(main.worktreeId, entry);
-    else roots.push(entry);
-  }
-  const compare = bySortIndex("sortIndex");
-  roots.sort(compare);
-  for (const list of childrenOf.values()) list.sort(compare);
-  return { entries, byId, roots, childrenOf, parentOf, hasLiveOrigin, isMain };
-}
-
 /** True when `candidate` is `id` itself or sits anywhere below it in the tree. */
 export function isInSubtree(
   childrenOf: Map<string, WorktreeEntry[]>,
@@ -210,47 +128,6 @@ export function isInSubtree(
     for (const kid of childrenOf.get(current) ?? []) stack.push(kid.worktreeId);
   }
   return false;
-}
-
-export interface PinnedTree {
-  /** The pins in their own order. */
-  pins: WorktreeEntry[];
-  /** The worktrees started from each pin or from one of its descendants, in order. */
-  childrenOf: Map<string, WorktreeEntry[]>;
-  /** Every id the Pinned section shows: the pins and their descendants. */
-  ids: Set<string>;
-}
-
-/**
- * The Pinned section's contents. A pin keeps the worktrees whose origin is that worktree, all the
- * way down, so they leave the normal tree. A descendant that is pinned itself stays its own pin.
- * Plain repos have no pins.
- */
-export function buildPinnedTree(repos: RepoInfo[]): PinnedTree {
-  const entries = entriesOf(repos);
-  const byId = new Map(entries.map((e) => [e.worktreeId, e]));
-  const pins = entries
-    .filter((e) => e.worktree.pinned && e.repo.kind !== "plain")
-    .sort(bySortIndex("pinSortIndex"));
-  const pinIds = new Set(pins.map((e) => e.worktreeId));
-  const childrenOf = new Map<string, WorktreeEntry[]>();
-  for (const entry of entries) {
-    const parentId = entry.worktree.origin?.worktreeId;
-    if (!parentId || parentId === entry.worktreeId || !byId.has(parentId)) continue;
-    if (pinIds.has(entry.worktreeId)) continue;
-    childrenOf.set(parentId, [...(childrenOf.get(parentId) ?? []), entry]);
-  }
-  const compare = bySortIndex("sortIndex");
-  for (const list of childrenOf.values()) list.sort(compare);
-  const ids = new Set<string>();
-  const stack = pins.map((e) => e.worktreeId);
-  while (stack.length > 0) {
-    const id = stack.pop()!;
-    if (ids.has(id)) continue;
-    ids.add(id);
-    for (const kid of childrenOf.get(id) ?? []) stack.push(kid.worktreeId);
-  }
-  return { pins, childrenOf, ids };
 }
 
 /** The Pinned section's rows, a pin followed by its subtree unless it is collapsed. */
@@ -280,24 +157,6 @@ export function buildPinnedRows(
   };
   for (const pin of tree.pins) visit(pin, 0);
   return rows;
-}
-
-/** The repos without the worktrees the Pinned section shows. Plain repos are left alone. */
-export function withoutPinned(
-  repos: RepoInfo[],
-  tree: PinnedTree,
-): { repos: RepoInfo[]; reposWithPinned: Set<string> } {
-  const reposWithPinned = new Set<string>();
-  const result = repos.map((repo) => {
-    if (repo.kind === "plain") return repo;
-    const kept = repo.worktrees.filter(
-      (wt) => !tree.ids.has(toWorktreeId(repo.name, wt.name, wt.hostId)),
-    );
-    if (kept.length === repo.worktrees.length) return repo;
-    reposWithPinned.add(repo.name);
-    return { ...repo, worktrees: kept };
-  });
-  return { repos: result, reposWithPinned };
 }
 
 /**
@@ -356,10 +215,6 @@ export function hostLabel(hostId: string, hosts: HostInfoLite[]): string {
 /** True when a repo has worktrees on more than one host. */
 export function repoSpansHosts(repo: RepoInfo): boolean {
   return new Set(repo.worktrees.map(hostIdOf)).size > 1;
-}
-
-export function hostIdOf(worktree: WorktreeInfo): string {
-  return worktree.hostId || LOCAL_HOST;
 }
 
 /** The Host view: a group per worker (the hub's own machine first), then a subgroup per repo. */

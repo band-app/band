@@ -1,4 +1,5 @@
 import { Redirect, router } from "expo-router";
+import { Layers, Tag } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
@@ -20,11 +21,19 @@ import { Button } from "../components/ui";
 import { WorktreeRowView } from "../components/worktree-row";
 import { SessionGate, useHubSession } from "../lib/hub-session";
 import { useHubs } from "../lib/hubs-context";
+import { effectiveLabelFilter } from "../lib/label-filter";
 import { resetTo } from "../lib/navigation";
+import { pinRequest } from "../lib/pinning";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupBy } from "../lib/use-group-by";
-import { useHosts, useRepos, useStatusFeed } from "../lib/use-hub-data";
-import { buildSections, GROUP_BY_OPTIONS, type RepoSection } from "../lib/worktree-list";
+import { useHosts, useLabels, usePinWorktree, useRepos, useStatusFeed } from "../lib/use-hub-data";
+import { useLabelFilter } from "../lib/use-label-filter";
+import {
+  buildSections,
+  GROUP_BY_OPTIONS,
+  type RepoSection,
+  type WorktreeRow,
+} from "../lib/worktree-list";
 import { colors, tones, useScheme } from "../theme";
 
 export default function Home() {
@@ -47,6 +56,9 @@ function WorktreeList() {
   const { state: statuses, connection: stream } = useStatusFeed();
   const { collapsed, toggle } = useCollapsedRepos();
   const [groupBy, setGroupBy] = useGroupBy();
+  const labels = useLabels();
+  const [storedLabel, setLabelFilter] = useLabelFilter();
+  const pin = usePinWorktree();
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -72,6 +84,11 @@ function WorktreeList() {
 
   const repoList = repos.data;
   const hostList = hosts.data;
+  const labelList = labels.data;
+  const labelFilter = useMemo(
+    () => effectiveLabelFilter(storedLabel, labelList ?? []),
+    [storedLabel, labelList],
+  );
   const sections = useMemo(
     () =>
       buildSections(repoList ?? [], {
@@ -80,8 +97,10 @@ function WorktreeList() {
         collapsed,
         query,
         groupBy,
+        labels: labelList ?? [],
+        labelFilter,
       }),
-    [repoList, hostList, statuses, collapsed, query, groupBy],
+    [repoList, hostList, statuses, collapsed, query, groupBy, labelList, labelFilter],
   );
 
   const refresh = useCallback(async () => {
@@ -104,9 +123,35 @@ function WorktreeList() {
     );
   }, [setGroupBy]);
 
+  const chooseLabel = useCallback(() => {
+    const defined = labelList ?? [];
+    const options = ["All", ...defined.map((l) => l.name), "Cancel"];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: "Filter by label", options, cancelButtonIndex: options.length - 1 },
+      (index) => {
+        if (index === 0) setLabelFilter(null);
+        else if (index <= defined.length) setLabelFilter(defined[index - 1]?.id ?? null);
+      },
+    );
+  }, [labelList, setLabelFilter]);
+
+  const rowActions = useCallback(
+    (row: WorktreeRow) => {
+      const options = [row.pinned ? "Unpin" : "Pin", "Cancel"];
+      ActionSheetIOS.showActionSheetWithOptions(
+        { title: row.name, options, cancelButtonIndex: 1 },
+        (index) => {
+          if (index === 0) pin.mutate(pinRequest(row, !row.pinned));
+        },
+      );
+    },
+    [pin],
+  );
+
   const loading = repos.isPending || !clientStateReady;
   const filtering = query.trim() !== "";
   const groupLabel = GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? "Repo";
+  const activeLabel = labelList?.find((l) => l.id === labelFilter) ?? null;
   const hubLabel = active?.label ?? "Band";
 
   return (
@@ -206,19 +251,22 @@ function WorktreeList() {
             section={section}
             first={section === sections.find((s) => s.kind !== "pinned")}
             groupLabel={groupLabel}
+            labelName={labelList && labelList.length > 0 ? (activeLabel?.name ?? "All") : null}
             filtering={filtering}
             avatarBase={hub.url}
             token={hub.token}
             onToggle={() => toggle(section.name)}
             onGroupBy={chooseGroupBy}
+            onLabel={chooseLabel}
           />
         )}
         renderItem={({ item, index, section }) => (
           <WorktreeRowView
             row={item}
-            first={section.kind === "pinned" && index === 0}
+            first={(section.kind === "pinned" || section.kind === "origin") && index === 0}
             last={index === section.data.length - 1}
             onPress={() => router.push({ pathname: "/worktree/[id]", params: { id: item.id } })}
+            onLongPress={() => rowActions(item)}
           />
         )}
         ListEmptyComponent={
@@ -255,20 +303,25 @@ function SectionHeader({
   section,
   first,
   groupLabel,
+  labelName,
   filtering,
   avatarBase,
   token,
   onToggle,
   onGroupBy,
+  onLabel,
 }: {
   section: RepoSection;
   first: boolean;
   groupLabel: string;
+  /** The filter's current name, or null when the hub defines no labels. */
+  labelName: string | null;
   filtering: boolean;
   avatarBase: string;
   token: string;
   onToggle: () => void;
   onGroupBy: () => void;
+  onLabel: () => void;
 }) {
   if (section.kind === "pinned") {
     return (
@@ -281,51 +334,84 @@ function SectionHeader({
     <View>
       {first ? (
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionLabel}>{groupLabel === "Host" ? "Hosts" : "Repos"}</Text>
-          <Pressable
-            onPress={onGroupBy}
-            accessibilityRole="button"
-            accessibilityLabel={`Group by ${groupLabel}`}
-            testID="home__group-by"
-            style={styles.groupBy}
-          >
-            <Text style={styles.groupByText}>{groupLabel}</Text>
-            <ChevronGlyph direction="down" size={7} color={colors.foreground} />
-          </Pressable>
+          <Text style={styles.sectionLabel}>
+            {groupLabel === "Host" ? "Hosts" : groupLabel === "Origin" ? "Origin" : "Repos"}
+          </Text>
+          <View style={styles.controls}>
+            {labelName !== null ? (
+              <Pressable
+                onPress={onLabel}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter by label, ${labelName}`}
+                testID="home__label-filter"
+                style={styles.groupBy}
+              >
+                <Tag size={13} color={colors.foreground} />
+                <Text style={styles.groupByText}>{labelName}</Text>
+                <ChevronGlyph direction="down" size={7} color={colors.foreground} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={onGroupBy}
+              accessibilityRole="button"
+              accessibilityLabel={`Group by ${groupLabel}`}
+              testID="home__group-by"
+              style={styles.groupBy}
+            >
+              <Layers size={13} color={colors.foreground} />
+              <Text style={styles.groupByText}>{groupLabel}</Text>
+              <ChevronGlyph direction="down" size={7} color={colors.foreground} />
+            </Pressable>
+          </View>
         </View>
       ) : null}
-      <Pressable
-        onPress={onToggle}
-        disabled={filtering}
-        accessibilityRole="button"
-        accessibilityLabel={`${section.title}, ${section.total} worktrees, ${section.collapsed ? "collapsed" : "expanded"}`}
-        accessibilityState={{ expanded: !section.collapsed }}
-        testID={`home__repo-${section.name}`}
-        style={[styles.repoHeader, section.collapsed && styles.repoHeaderCollapsed]}
-      >
-        {section.kind === "repo" ? (
-          <RepoAvatar
-            name={section.title}
-            src={section.avatar?.src}
-            base={avatarBase}
-            token={token}
+      {section.labelHeader ? (
+        <View
+          style={styles.labelRow}
+          testID={`home__label-group-${section.labelHeader.id ?? "none"}`}
+        >
+          {section.labelHeader.color ? (
+            <View style={[styles.labelDot, { backgroundColor: section.labelHeader.color }]} />
+          ) : (
+            <View style={[styles.labelDot, styles.labelDotEmpty]} />
+          )}
+          <Text style={styles.labelName}>{section.labelHeader.name}</Text>
+        </View>
+      ) : null}
+      {section.kind === "origin" ? null : (
+        <Pressable
+          onPress={onToggle}
+          disabled={filtering}
+          accessibilityRole="button"
+          accessibilityLabel={`${section.title}, ${section.total} worktrees, ${section.collapsed ? "collapsed" : "expanded"}`}
+          accessibilityState={{ expanded: !section.collapsed }}
+          testID={`home__repo-${section.name}`}
+          style={[styles.repoHeader, section.collapsed && styles.repoHeaderCollapsed]}
+        >
+          {section.kind === "repo" ? (
+            <RepoAvatar
+              name={section.title}
+              src={section.avatar?.src}
+              base={avatarBase}
+              token={token}
+            />
+          ) : null}
+          <Text style={styles.repoTitle} numberOfLines={1}>
+            {section.title}
+          </Text>
+          {section.collapsed && section.attention > 0 ? (
+            <View style={styles.repoAttention} testID={`home__repo-attention-${section.name}`}>
+              <Text style={styles.repoAttentionText}>{section.attention} need you</Text>
+            </View>
+          ) : null}
+          <Text style={styles.repoCount}>{section.total}</Text>
+          <ChevronGlyph
+            direction={section.collapsed ? "right" : "down"}
+            size={7}
+            color={colors.faint}
           />
-        ) : null}
-        <Text style={styles.repoTitle} numberOfLines={1}>
-          {section.title}
-        </Text>
-        {section.collapsed && section.attention > 0 ? (
-          <View style={styles.repoAttention} testID={`home__repo-attention-${section.name}`}>
-            <Text style={styles.repoAttentionText}>{section.attention} need you</Text>
-          </View>
-        ) : null}
-        <Text style={styles.repoCount}>{section.total}</Text>
-        <ChevronGlyph
-          direction={section.collapsed ? "right" : "down"}
-          size={7}
-          color={colors.faint}
-        />
-      </Pressable>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -423,7 +509,19 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   sectionLabel: { color: colors.mutedForeground, fontSize: 14 },
+  controls: { alignItems: "center", flexDirection: "row", gap: 14 },
   groupBy: { alignItems: "center", flexDirection: "row", gap: 5 },
+  labelRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 2,
+    marginHorizontal: 20,
+    marginTop: 14,
+  },
+  labelDot: { borderRadius: 5, height: 10, width: 10 },
+  labelDotEmpty: { borderColor: colors.faint, borderWidth: 1.5 },
+  labelName: { color: colors.foreground, fontSize: 13, fontWeight: "600" },
   groupByText: { color: colors.foreground, fontSize: 13 },
   repoHeader: {
     alignItems: "center",

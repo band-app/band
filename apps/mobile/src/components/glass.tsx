@@ -1,4 +1,12 @@
 import { BlurView } from "expo-blur";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Plus,
+  Search,
+} from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { colors, floating } from "../theme";
@@ -69,34 +77,9 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
 });
 
-/** Glyphs drawn from views and text, so the app needs no icon font. */
+/** Search, plus and chevron are lucide icons (react-native-svg). The mic and dots are drawn from views. */
 export function SearchGlyph({ size = 20 }: { size?: number }) {
-  const ring = size * 0.68;
-  return (
-    <View style={{ width: size, height: size }}>
-      <View
-        style={{
-          width: ring,
-          height: ring,
-          borderRadius: ring / 2,
-          borderWidth: 2,
-          borderColor: colors.foreground,
-        }}
-      />
-      <View
-        style={{
-          position: "absolute",
-          right: size * 0.04,
-          bottom: size * 0.12,
-          width: size * 0.36,
-          height: 2,
-          borderRadius: 1,
-          backgroundColor: colors.foreground,
-          transform: [{ rotate: "45deg" }],
-        }}
-      />
-    </View>
-  );
+  return <Search size={size} color={colors.foreground} />;
 }
 
 export function PlusGlyph({
@@ -106,17 +89,7 @@ export function PlusGlyph({
   size?: number;
   color?: ViewStyle["backgroundColor"];
 }) {
-  const bar = {
-    position: "absolute" as const,
-    backgroundColor: color ?? colors.foreground,
-    borderRadius: 1,
-  };
-  return (
-    <View style={{ width: size, height: size }}>
-      <View style={[bar, { left: 0, right: 0, top: size / 2 - 1, height: 2 }]} />
-      <View style={[bar, { top: 0, bottom: 0, left: size / 2 - 1, width: 2 }]} />
-    </View>
-  );
+  return <Plus size={size} color={color ?? colors.foreground} />;
 }
 
 /** A microphone drawn from views: a capsule, a cradle and a stand. */
@@ -177,6 +150,14 @@ export function DotsGlyph() {
   );
 }
 
+const CHEVRONS = {
+  down: ChevronDown,
+  left: ChevronLeft,
+  right: ChevronRight,
+  up: ChevronUp,
+};
+
+/** The lucide chevron; `size` is the old drawn glyph's edge, so the icon is drawn at twice that. */
 export function ChevronGlyph({
   direction,
   size = 9,
@@ -186,19 +167,8 @@ export function ChevronGlyph({
   size?: number;
   color?: ViewStyle["backgroundColor"];
 }) {
-  const rotate = { down: "45deg", left: "135deg", up: "225deg", right: "-45deg" }[direction];
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRightWidth: 2,
-        borderBottomWidth: 2,
-        borderColor: color ?? colors.mutedForeground,
-        transform: [{ rotate }],
-      }}
-    />
-  );
+  const Icon = CHEVRONS[direction];
+  return <Icon size={Math.round(size * 2)} color={color ?? colors.mutedForeground} />;
 }
 
 export function BackGlyph() {

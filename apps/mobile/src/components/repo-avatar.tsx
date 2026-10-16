@@ -1,5 +1,7 @@
+import { Folder } from "lucide-react-native";
 import { useState } from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, View } from "react-native";
+import { colors } from "../theme";
 
 /** Up to two letters of a name, for an avatar with no picture. */
 export function initials(name: string): string {
@@ -17,10 +19,9 @@ export function avatarColor(name: string): string {
 
 /**
  * A repo's icon: the GitHub owner's avatar the hub serves (with the device token), else a colored
- * square with the repo's first letter.
+ * lucide folder, as on the web.
  */
 export function RepoAvatar({
-  name,
   src,
   base,
   token,
@@ -49,16 +50,14 @@ export function RepoAvatar({
       />
     );
   }
+  // The web falls back to the lucide folder when a repo has no avatar.
   return (
-    <View style={[styles.letter, box, { backgroundColor: avatarColor(name) }]}>
-      <Text style={[styles.letterText, { fontSize: size * 0.55 }]}>
-        {initials(name).slice(0, 1)}
-      </Text>
+    <View style={[styles.letter, box]}>
+      <Folder size={size * 0.8} color={colors.mutedForeground} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   letter: { alignItems: "center", justifyContent: "center" },
-  letterText: { color: "#fff", fontWeight: "700" },
 });

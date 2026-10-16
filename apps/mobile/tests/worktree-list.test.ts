@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { sortRepoWorktrees, withoutPinned } from "@band-app/shared/sidebar-tree";
+import {
+  buildOriginRows,
+  buildPinnedTree as webPinnedTree,
+} from "../../web/src/dashboard/lib/sidebar-grouping.ts";
 import { applyStatusEvent, emptyStatusState, type StatusEvent } from "../src/lib/status-state.ts";
 import {
   buildSections,
@@ -177,6 +182,122 @@ describe("buildSections", () => {
     const beta = sections[2]?.data[0];
     assert.equal(beta?.pr, null);
     assert.equal(beta?.ciTone, "success");
+  });
+});
+
+const webPins = (repos: RepoLike[]) => ({
+  pins: webPinnedTree(sortRepoWorktrees(repos as never) as never),
+});
+
+describe("pinned, labels and origin like the web", () => {
+  const labels = [
+    { id: "l1", name: "Epic", color: "#ef4444" },
+    { id: "l2", name: "Private", color: "#3b82f6" },
+  ];
+  const fixture: RepoLike[] = [
+    {
+      name: "alpha",
+      label: "l2",
+      defaultBranch: "main",
+      worktrees: [
+        { name: "main", branch: "main", pinned: false },
+        { name: "second", branch: "second", pinned: true, pinSortIndex: 2 },
+        { name: "first", branch: "first", pinned: true, pinSortIndex: 1 },
+        {
+          name: "started-from-first",
+          branch: "s",
+          pinned: false,
+          origin: { worktreeId: "alpha-first", removed: false },
+        },
+        { name: "loose", branch: "loose", pinned: false, sortIndex: 1 },
+      ],
+    },
+    {
+      name: "beta",
+      label: "l1",
+      defaultBranch: "main",
+      worktrees: [{ name: "main", branch: "main", pinned: false }],
+    },
+    {
+      name: "gamma",
+      defaultBranch: "main",
+      worktrees: [{ name: "main", branch: "main", pinned: false }],
+    },
+  ];
+  const opts = { ...base, labels };
+
+  it("S2: Pinned lists the pins in the web's order with what started from each", () => {
+    const pinned = buildSections(fixture, opts)[0];
+    assert.equal(pinned?.kind, "pinned");
+    assert.deepEqual(
+      pinned?.data.map((r) => [r.id, r.depth]),
+      [
+        ["alpha-first", 0],
+        ["alpha-started-from-first", 1],
+        ["alpha-second", 0],
+      ],
+    );
+  });
+
+  it("S4: repos sit under label headers in label order, unlabeled last", () => {
+    const sections = buildSections(fixture, opts).filter((s) => s.kind === "repo");
+    assert.deepEqual(
+      sections.map((s) => [s.name, s.labelHeader?.name ?? null, s.labelHeader?.color ?? null]),
+      [
+        ["beta", "Epic", "#ef4444"],
+        ["alpha", "Private", "#3b82f6"],
+        ["gamma", "Unlabeled", null],
+      ],
+    );
+  });
+
+  it("S4: no label headers without labels or while a filter is on", () => {
+    assert.ok(buildSections(fixture, base).every((s) => !s.labelHeader));
+    assert.ok(buildSections(fixture, { ...opts, labelFilter: "l1" }).every((s) => !s.labelHeader));
+  });
+
+  it("S5: the filter keeps only that label's repos, the pins and the other views included", () => {
+    const names = (groupBy: "repo" | "origin" | "host") =>
+      buildSections(fixture, { ...opts, labelFilter: "l1", groupBy }).flatMap((s) =>
+        s.data.map((r) => r.repo),
+      );
+    assert.deepEqual(names("repo"), ["beta"]);
+    assert.deepEqual(names("origin"), ["beta"]);
+    assert.deepEqual(names("host"), ["beta"]);
+    assert.deepEqual(
+      buildSections(fixture, { ...opts, labelFilter: "l1" }).map((s) => s.kind),
+      ["repo"],
+    );
+    assert.equal(buildSections(fixture, { ...opts, labelFilter: null }).length, 4);
+  });
+
+  it("S6: Origin matches the web's Origin view for the same data, Pinned on top", () => {
+    const sections = buildSections(fixture, { ...opts, groupBy: "origin" });
+    assert.equal(sections[0]?.kind, "pinned");
+    const mine = sections[1]?.data.map((r) => [r.id, r.depth]);
+
+    const { pins } = webPins(fixture);
+    const webRows = buildOriginRows(
+      withoutPinned(sortRepoWorktrees(fixture as never), pins as never).repos as never,
+      () => false,
+    ).flatMap((row) => (row.kind === "worktree" ? [[row.entry.worktreeId, row.depth]] : []));
+    assert.deepEqual(mine, webRows);
+  });
+
+  it("S6: Host groups the hub first and keeps Pinned on top", () => {
+    const withHost: RepoLike[] = [
+      ...fixture,
+      {
+        name: "delta",
+        defaultBranch: "main",
+        worktrees: [{ name: "x", branch: "x", pinned: false, hostId: "h-1" }],
+      },
+    ];
+    const sections = buildSections(withHost, { ...opts, groupBy: "host" });
+    assert.deepEqual(
+      sections.map((s) => s.title),
+      ["Pinned", "This hub", "builder"],
+    );
   });
 });
 

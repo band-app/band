@@ -1,4 +1,5 @@
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { GitBranch, House } from "lucide-react-native";
+import { StyleSheet, Text, View } from "react-native";
 import type { ShownState } from "../lib/status-state";
 import { colors, tones } from "../theme";
 
@@ -11,33 +12,37 @@ export const SHOWN_LABEL: Record<ShownState, string> = {
   idle: "idle",
 };
 
-/** The agent's state as the design draws it: spinner, ? disc, check ring, x disc, dashed ring, dot. */
-export function StateIcon({ state, testID }: { state: ShownState; testID?: string }) {
+/**
+ * The agent's state as the web sidebar draws it: a solid dot for working, done and failed, a ring
+ * for monitoring, a "?" disc for a question, and the lucide branch icon (a house on the repo's
+ * main worktree) when the agent is idle.
+ */
+export function StateIcon({
+  state,
+  main = false,
+  testID,
+}: {
+  state: ShownState;
+  main?: boolean;
+  testID?: string;
+}) {
+  const Idle = main ? House : GitBranch;
   return (
     <View style={styles.box} accessibilityLabel={SHOWN_LABEL[state]} testID={testID}>
       {state === "working" ? (
-        <ActivityIndicator size="small" color={tones.running} style={styles.spinner} />
+        <View style={[styles.dot, { backgroundColor: tones.pending }]} />
+      ) : state === "monitoring" ? (
+        <View style={[styles.dot, styles.ring, { borderColor: tones.pending }]} />
       ) : state === "question" ? (
         <View style={[styles.disc, { backgroundColor: tones.attention }]}>
           <Text style={styles.discText}>?</Text>
         </View>
       ) : state === "done" ? (
-        <View style={[styles.ring, { borderColor: tones.success }]}>
-          <Text style={[styles.check, { color: tones.success }]}>✓</Text>
-        </View>
+        <View style={[styles.dot, { backgroundColor: tones.success }]} />
       ) : state === "failed" ? (
-        <View style={[styles.disc, { backgroundColor: tones.failure }]}>
-          <Text style={styles.discText}>✕</Text>
-        </View>
-      ) : state === "monitoring" ? (
-        <View
-          style={[
-            styles.ring,
-            { borderColor: tones.merged, borderStyle: "dashed", borderWidth: 2 },
-          ]}
-        />
+        <View style={[styles.dot, { backgroundColor: tones.failure }]} />
       ) : (
-        <View style={styles.idle} />
+        <Idle size={14} color={colors.mutedForeground} />
       )}
     </View>
   );
@@ -45,17 +50,8 @@ export function StateIcon({ state, testID }: { state: ShownState; testID?: strin
 
 const styles = StyleSheet.create({
   box: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
-  spinner: { transform: [{ scale: 0.7 }] },
-  disc: { width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
-  discText: { color: "#fff", fontSize: 11, fontWeight: "800" },
-  ring: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1.6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  check: { fontSize: 10, fontWeight: "800", marginTop: -1 },
-  idle: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.grab },
+  dot: { width: 9, height: 9, borderRadius: 5 },
+  ring: { backgroundColor: "transparent", borderWidth: 1.5 },
+  disc: { width: 14, height: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+  discText: { color: "#000", fontSize: 10, fontWeight: "800" },
 });
