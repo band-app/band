@@ -18,6 +18,7 @@ import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useChatActions } from "../../lib/chat/use-chat-actions";
 import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
+import { openFile } from "../../lib/files/open";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
 import { ChatProvider } from "./chat-context";
@@ -152,6 +153,11 @@ export const ChatView = memo(function ChatView({
       onCopied={onCopied}
       onToggle={onToggle}
       rowFor={rowFor}
+      onOpenFile={(path) => {
+        // A path the agent wrote may end in `:line` or `:line:column`.
+        const at = /^(.*?):(\d+)(?::\d+)?$/.exec(path);
+        openFile(worktreeId, at ? at[1] : path, at ? Number(at[2]) : undefined);
+      }}
     >
       <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
         <View style={styles.root} testID="chat__view">

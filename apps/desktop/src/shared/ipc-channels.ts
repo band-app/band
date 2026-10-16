@@ -19,6 +19,9 @@ export const Channels = {
   // AC / battery state from Electron's powerMonitor. The renderer reads it once and then
   // follows `power-state-changed`.
   getPowerState: "get_power_state",
+  // Keep-awake switch (powerSaveBlocker, saved in ~/.band/desktop-keep-awake.json).
+  keepAwakeGet: "keep_awake_get",
+  keepAwakeSet: "keep_awake_set",
 
   // Hub picker: which hub the app talks to (local, or a remote URL + token).
   // `hubGetChoice` returns the saved choice without its token; `hubSetChoice`

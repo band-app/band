@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { seedExplorer } from "./seed-explorer.mjs";
 import { CHECKS_BRANCHES, CHECKS_REPO } from "./checks.mjs";
 
 /** The showcase turn's reply: every markdown construct the chat renders natively. */
@@ -283,8 +284,15 @@ export const WORKTREES = {
   GAMMA_LISTEN: "gamma-listen",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
+  /** The files, search and changes flows: a repo with a big folder and a dirty working tree (`seed-explorer.mjs`). */
+  DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
   GAMMA_TABS: "gamma-tabs",
+  /** Terminal flows: open and type (S2, S4), new and close (S3), background (S5), scroll and copy (S6). */
+  GAMMA_TERM: "gamma-term",
+  GAMMA_TERM_NEW: "gamma-term-new",
+  GAMMA_TERM_BG: "gamma-term-bg",
+  GAMMA_TERM_SCROLL: "gamma-term-scroll",
   /** acme/widgets, a repo with a GitHub origin: PR checks to read, re-run and fix (k1-k5). */
   WIDGETS_CHECKS: "widgets-feat-checks",
   WIDGETS_RERUN: "widgets-feat-rerun",
@@ -320,7 +328,7 @@ async function trpcResult(procedure, res) {
 async function trpcQuery(state, procedure, input) {
   const query = encodeURIComponent(JSON.stringify(input));
   const res = await fetch(`${state.url}/trpc/${procedure}?input=${query}`, {
-    headers: { Authorization: `Bearer ${state.adminToken}` },
+    headers: { Authorization: `Bearer ${state.adminToken}`, Connection: "close" },
   });
   return trpcResult(procedure, res);
 }
@@ -328,7 +336,7 @@ async function trpcQuery(state, procedure, input) {
 async function trpc(state, procedure, input) {
   const res = await fetch(`${state.url}/trpc/${procedure}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
     body: JSON.stringify(input),
   });
   return trpcResult(procedure, res);
@@ -378,7 +386,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -408,6 +416,7 @@ export async function seedHub(state) {
     await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
   }
   await seedTabs(state);
+  await seedExplorer(state, root, { trpc, png: pngBytes() });
   return chats;
 }
 
@@ -467,6 +476,11 @@ export async function sharedTabs(state, worktreeId) {
 
 /** A 96x64 PNG with a stripe, as a `data:` URL, for a prompt's attached image. */
 function pngFile(filename) {
+  return { mediaType: "image/png", filename, url: `data:image/png;base64,${pngBytes().toString("base64")}` };
+}
+
+/** The bytes of a 96x64 PNG with a stripe. */
+export function pngBytes() {
   const width = 96;
   const height = 64;
   const rows = [];
@@ -496,7 +510,7 @@ function pngFile(filename) {
     chunk("IDAT", deflateSync(Buffer.concat(rows))),
     chunk("IEND", Buffer.alloc(0)),
   ]);
-  return { mediaType: "image/png", filename, url: `data:image/png;base64,${png.toString("base64")}` };
+  return png;
 }
 
 function crc32(buf) {
@@ -530,7 +544,7 @@ export async function startTurn(state, chats, worktreeId, text, files) {
   if (!chatId) throw new Error(`No chat for ${worktreeId}`);
   const res = await fetch(`${state.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
     body: JSON.stringify({ worktreeId, text, ...(files && { files }) }),
   });
   if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`);
@@ -592,4 +606,38 @@ export async function fillWorktrees(state, count) {
   for (let i = 1; i <= count; i++) {
     await trpc(state, "worktrees.create", { repo: "alpha", branch: `bulk-${i}` });
   }
+}
+
+/** The id of the terminal a flow starts on the hub, per number, so the flow can name it. */
+export const termId = (n) => `7e57a1e1-0000-4000-8000-00000000000${n}`;
+
+/** Starts terminal `n` in a worktree, as the web's "New terminal" does. */
+export async function termOpen(state, worktreeId, n) {
+  await trpc(state, "terminal.create", { worktreeId, id: termId(n) });
+  // A shell prints its prompt shortly after it starts.
+  await waitFor(async () => (await termOutput(state, n)).length > 0, "the shell to print a prompt");
+}
+
+export async function termSend(state, n, data) {
+  await trpc(state, "terminal.send", { terminalId: termId(n), data });
+}
+
+/** Everything terminal `n` has printed (the hub's scrollback). */
+export async function termOutput(state, n) {
+  return (await trpcQuery(state, "terminal.output", { terminalId: termId(n) })).output;
+}
+
+/** The terminals the hub holds for a worktree. */
+export async function termList(state, worktreeId) {
+  return (await trpcQuery(state, "terminal.list", { worktreeId })).terminals;
+}
+
+/** Waits up to `timeoutMs` for `check` to be true. */
+export async function waitFor(check, what, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }

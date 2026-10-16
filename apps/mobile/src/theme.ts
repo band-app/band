@@ -105,6 +105,21 @@ export const chatColors = {
   addedText: dynamic("#16a34a", "#22c55e"),
 };
 
+/**
+ * The terminal is dark in both appearances, like the web's. These are plain `#rrggbb` strings
+ * because the native view parses them.
+ */
+export const terminalColors = {
+  background: "#0c0a09",
+  foreground: "#e7e5e4",
+  bar: "#1c1917",
+  key: "#292524",
+  keyOn: "#e7e5e4",
+  keyOnLabel: "#0c0a09",
+  keyLabel: "#e7e5e4",
+  status: "#a8a29e",
+};
+
 /** highlight.js scopes in GitHub's light and dark palettes. */
 export const codeColors: Record<string, ColorValue> = {
   keyword: dynamic("#cf222e", "#ff7b72"),

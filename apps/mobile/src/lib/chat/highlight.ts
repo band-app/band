@@ -65,9 +65,21 @@ function walk(node: Node, scope: string | undefined, out: CodeRun[]): void {
 const cache = new Map<string, CodeRun[]>();
 const CACHE_SIZE = 64;
 
-export function highlight(code: string, lang: string): CodeRun[] {
+function highlightUncached(code: string, name: string): CodeRun[] {
+  const out: CodeRun[] = [];
+  try {
+    walk(lowlight.highlight(name, code) as Node, undefined, out);
+  } catch {
+    return [{ text: code }];
+  }
+  return out;
+}
+
+export function highlight(code: string, lang: string, limit = HIGHLIGHT_LIMIT): CodeRun[] {
   const name = languageOf(lang);
-  if (!name || code.length > HIGHLIGHT_LIMIT) return [{ text: code }];
+  if (!name || code.length > limit) return [{ text: code }];
+  // A whole file would crowd the cache's small entries out, and is never asked for twice.
+  if (code.length > HIGHLIGHT_LIMIT) return highlightUncached(code, name);
   const key = `${name}\n${code}`;
   const hit = cache.get(key);
   if (hit) {
@@ -75,12 +87,7 @@ export function highlight(code: string, lang: string): CodeRun[] {
     cache.set(key, hit);
     return hit;
   }
-  let out: CodeRun[] = [];
-  try {
-    walk(lowlight.highlight(name, code) as Node, undefined, out);
-  } catch {
-    out = [{ text: code }];
-  }
+  const out = highlightUncached(code, name);
   cache.set(key, out);
   if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
   return out;
