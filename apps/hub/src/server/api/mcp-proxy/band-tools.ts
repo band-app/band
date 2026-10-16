@@ -14,7 +14,8 @@ import { z } from "zod";
 import { BranchOnOtherHostError } from "../../errors";
 import { hostRegistry } from "../../infra/host/registry";
 import { chatService } from "../../services/chat-service";
-import { crossHostRefusal } from "../../services/cross-host-policy";
+import { crossHostRefusal, restrictedHostRefusal } from "../../services/cross-host-policy";
+import { hostTrustService } from "../../services/host-trust-service";
 import { worktreeService } from "../../services/worktree-service";
 
 const createInput = z.object({
@@ -69,15 +70,27 @@ function createServer(chatId: string): McpServer {
         // A chat on a worker acts for that worker. Another host is the hub's call to make, not the worker's.
         const callerHost = hostRegistry.hostIdOfScope(chat.worktreeId) ?? hostRegistry.local.id;
         if (callerHost !== hostRegistry.local.id) {
+          const restricted = restrictedHostRefusal(callerHost);
+          if (restricted !== null) return jsonText({ error: restricted }, true);
           if (input.hostId !== undefined && input.hostId !== callerHost) {
             const refusal = crossHostRefusal(input.repo, input.hostId, callerHost);
             if (refusal !== null) return jsonText({ error: refusal }, true);
+            if (hostTrustService.trustOf(callerHost) === "admin") {
+              hostTrustService.recordAudit({
+                callerHostId: callerHost,
+                chatId,
+                procedure: "worktrees.create",
+                targetHostId: input.hostId,
+                target: `${input.repo}:${input.branch}`,
+              });
+            }
           } else {
             input.hostId = callerHost;
           }
           if (
             input.origin !== undefined &&
-            hostRegistry.hostIdOfScope(input.origin) !== callerHost
+            hostRegistry.hostIdOfScope(input.origin) !== callerHost &&
+            hostTrustService.trustOf(callerHost) !== "admin"
           ) {
             return jsonText(
               { error: "A chat on a worker can only link to worktrees on that worker" },

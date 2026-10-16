@@ -689,6 +689,21 @@ enum SubscriptionsCmd {
 enum HostsCmd {
     /// List hosts with their status, labels, agents, roots and last contact
     List,
+    /// Set how far a host's agents reach through the relay (admin token only)
+    Trust {
+        /// Host (id or name)
+        host: String,
+        /// restricted: own worktrees only. standard: own host, plus worktrees on other hosts
+        /// when Settings allows it. admin: any host, settings, repos and cronjobs
+        #[arg(value_parser = ["restricted", "standard", "admin"])]
+        level: String,
+    },
+    /// Show what admin hosts did across hosts (admin token only)
+    Audit {
+        /// How many of the newest entries to show
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
     /// Remove an offline worker host that has no worktrees, and revoke its tokens
     Remove {
         /// Host ID (from `band hosts list`)
@@ -1178,6 +1193,8 @@ fn main() {
         Commands::Env { .. } => unreachable!("handled before the match"),
         Commands::Hosts { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
+            HostsCmd::Trust { host, level } => cmd_hosts_trust(&host, &level),
+            HostsCmd::Audit { limit } => cmd_hosts_audit(limit),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
             HostsCmd::Evacuate { host, to, add_host } => cmd_hosts_evacuate(&host, &to, add_host),
         },
@@ -4053,7 +4070,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
         .cloned()
         .unwrap_or_default();
 
-    let rows: Vec<[String; 7]> = hosts
+    let rows: Vec<[String; 8]> = hosts
         .iter()
         .map(|host| {
             let text = |key: &str| host.get(key).and_then(|v| v.as_str()).unwrap_or("");
@@ -4090,6 +4107,10 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
                 text("id").to_string(),
                 text("name").to_string(),
                 text("status").to_string(),
+                host.get("trust")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-")
+                    .to_string(),
                 labels,
                 list("agents"),
                 list("roots"),
@@ -4104,6 +4125,7 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
                 "ID",
                 "NAME",
                 "STATUS",
+                "TRUST",
                 "LABELS",
                 "AGENTS",
                 "ROOTS",
@@ -4112,6 +4134,59 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
             &rows,
         ),
         json: serde_json::json!({"hosts": hosts}),
+    })
+}
+
+fn cmd_hosts_trust(host: &str, level: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let host_id = target_host_id(&client, host)?;
+    client.trpc_mutate(
+        "hosts.setTrust",
+        &serde_json::json!({"hostId": host_id, "trust": level}),
+    )?;
+    Ok(CommandResult {
+        text: format!("Host {host_id} is now {level}\n"),
+        json: serde_json::json!({"ok": true, "hostId": host_id, "trust": level}),
+    })
+}
+
+fn cmd_hosts_audit(limit: u32) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("hosts.audit", &serde_json::json!({"limit": limit}))?;
+    let entries = data
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 5]> = entries
+        .iter()
+        .map(|entry| {
+            let text = |key: &str| {
+                entry
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-")
+                    .to_string()
+            };
+            let when = entry
+                .get("at")
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(
+                    || "-".to_string(),
+                    |at| format!("{} ago", format_span(now_ms().saturating_sub(at))),
+                );
+            [
+                when,
+                text("callerHostId"),
+                text("procedure"),
+                text("targetHostId"),
+                text("target"),
+            ]
+        })
+        .collect();
+    Ok(CommandResult {
+        text: format_table(&["WHEN", "FROM", "CALL", "TARGET HOST", "TARGET"], &rows),
+        json: serde_json::json!({"entries": entries}),
     })
 }
 

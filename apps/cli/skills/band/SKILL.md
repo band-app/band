@@ -257,7 +257,23 @@ Stops the remote tunnel.
 band hosts list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
+Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), trust level (`restricted`, `standard`, `admin`), labels, agents, roots and last contact. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities` and `home`. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
+
+### Set a host's trust level
+
+```sh
+band hosts trust <host> restricted|standard|admin
+```
+
+Sets how far the agents on a host reach through the relay. `restricted` keeps them to their own worktrees (no worktree creation, repo changes or cronjobs). `standard` is the default for a static host: its own host, plus worktrees on other hosts when Settings > Agents allows it. `admin` lets them work on any host (chats, terminals, worktrees, cronjobs), change hub settings and manage repos; tokens, the vault and trust levels stay out of every agent's reach. A runner-started or ephemeral host starts at `restricted`. Needs a person's admin token, never an agent's.
+
+### Show what admin hosts did
+
+```sh
+band hosts audit [--limit <n>]
+```
+
+Lists the newest cross-host and admin-only calls agents made: when, the calling host, the call and the target host and worktree. Needs an admin token.
 
 ### Move every worktree off a host
 

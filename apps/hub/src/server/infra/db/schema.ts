@@ -28,9 +28,27 @@ export const hosts = sqliteTable(
     lastSeenAt: integer("last_seen_at"),
     info: text("info", { mode: "json" }).$type<Record<string, unknown>>(),
     version: text("version"),
+    // How far the host's agents reach through the relay. Null means nobody set it: the effective
+    // level is then `restricted` for an ephemeral or runner-started host and `standard` otherwise.
+    trust: text("trust", { enum: ["restricted", "standard", "admin"] }),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("hosts_created_at_idx").on(t.createdAt)],
+);
+
+// Cross-host and admin-only calls an agent made through the relay (host trust levels).
+export const hostAudit = sqliteTable(
+  "host_audit",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    at: integer("at").notNull(),
+    callerHostId: text("caller_host_id").notNull(),
+    chatId: text("chat_id"),
+    procedure: text("procedure").notNull(),
+    targetHostId: text("target_host_id"),
+    target: text("target"),
+  },
+  (t) => [index("host_audit_at_idx").on(t.at)],
 );
 
 const hostId = () => text("host_id").notNull().default("local");

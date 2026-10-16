@@ -4,10 +4,12 @@
  */
 
 import type { Host } from "@band-app/host-api";
+import { HOST_TRUST_LEVELS } from "@band-app/shared/host-trust";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import { hostTrustService } from "../../services/host-trust-service";
 import { agentHostView } from "../../services/relay-scope";
 import { repoService } from "../../services/repo-service";
 import {
@@ -120,6 +122,27 @@ export const hostsRouter = t.router({
         throw repoErrorToTrpc(err);
       }
     }),
+
+  /**
+   * Sets how far a host's agents reach through the relay. Admin device tokens only: an agent's
+   * relay call can never get here (`relay-scope.ts` refuses it whatever the host's level).
+   */
+  setTrust: adminProcedure
+    .input(z.object({ hostId: z.string().min(1), trust: z.enum(HOST_TRUST_LEVELS) }))
+    .mutation(({ input }) => {
+      if (!hostTrustService.setTrust(input.hostId, input.trust)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No host "${input.hostId}"` });
+      }
+      emit({ kind: "host-status-changed", hostId: input.hostId });
+      return { hostId: input.hostId, trust: input.trust };
+    }),
+
+  /** What admin hosts did across hosts: time, calling host, chat, procedure and target. Newest first. */
+  audit: adminProcedure
+    .input(
+      z.object({ limit: z.number().int().min(1).max(500).default(100) }).default({ limit: 100 }),
+    )
+    .query(({ input }) => ({ entries: hostTrustService.listAudit(input.limit) })),
 
   /**
    * Removes a worker host: only when it is offline and has no worktrees.
