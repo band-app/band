@@ -1,5 +1,6 @@
-# S9: an image on the clipboard is pasted from the + menu and from the hint chip, then sent; the
-# agent gets an image part. With no image on the clipboard the menu item is disabled and no hint shows.
+# S9: text on the clipboard pastes as text with no chip. An image on the clipboard, pasted with
+# long-press > Paste in the field, becomes an attachment chip with no text inserted, and is sent;
+# the agent gets an image part.
 appId: app.getband.mobile
 name: S9 paste an image
 ---
@@ -10,23 +11,23 @@ name: S9 paste an image
     file: subflows/open-gamma.yaml
     env:
       WT: gamma-paste
-# Text on the clipboard: no hint on focus, and Paste image is disabled in the + menu.
+# Text on the clipboard pastes as text and adds no chip.
 - tapOn:
     id: composer__input
 - inputText: "plain text"
 - copyTextFrom:
     id: composer__input
 - eraseText: 20
-- assertNotVisible:
-    id: composer__paste-image
-- tapOn:
-    id: composer__attach
+- longPressOn:
+    id: composer__input
+- tapOn: "Paste"
 - assertVisible:
-    id: plus-drawer__paste
-    enabled: false
-# The backdrop is outside the modal sheet's accessibility tree, so tap by position.
-- tapOn:
-    point: "50%,10%"
+    id: composer__input
+    text: "plain text"
+- assertNotVisible:
+    id: composer__attachment
+- eraseText: 20
+- hideKeyboard
 # Copy the newest photo in Photos, which puts an image on the clipboard.
 - launchApp:
     appId: com.apple.mobileslideshow
@@ -47,13 +48,9 @@ name: S9 paste an image
       WT: gamma-paste
 - tapOn:
     id: composer__input
-- extendedWaitUntil:
-    visible:
-      id: composer__paste-image
-    timeout: 10000
-- takeScreenshot: m9-hint
-- tapOn:
-    id: composer__paste-image
+- longPressOn:
+    id: composer__input
+- tapOn: "Paste"
 - runFlow:
     when:
       visible: "Allow Paste"
@@ -63,8 +60,9 @@ name: S9 paste an image
     visible:
       id: composer__attachment
     timeout: 20000
-- assertNotVisible:
-    id: composer__paste-image
+- assertVisible:
+    id: composer__input
+    text: "Follow up…"
 - takeScreenshot: m9-pasted
 - tapOn:
     id: composer__input

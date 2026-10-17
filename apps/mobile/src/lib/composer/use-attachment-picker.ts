@@ -4,7 +4,7 @@
  */
 
 import { ACCEPTED_MEDIA_TYPES } from "@band-app/client/composer";
-import * as Clipboard from "expo-clipboard";
+import type { PastedFile } from "@mattermost/react-native-paste-input";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback } from "react";
@@ -12,7 +12,7 @@ import { Alert } from "react-native";
 import {
   type Attachment,
   makeAttachment,
-  pastedImageResult,
+  pastedFileName,
   rejectionFor,
   rejectionMessage,
   resolveMediaType,
@@ -94,19 +94,22 @@ export function useAttachmentPicker() {
     return out;
   }, []);
 
-  /** Reads the clipboard image. Only call this from a tap: reading it may show iOS's "Allow Paste" prompt. */
-  const pasted = useCallback(async (): Promise<Attachment[]> => {
-    const image = await Clipboard.getImageAsync({ format: "png" });
-    if (!image) {
-      Alert.alert("Nothing to paste", "The clipboard no longer holds an image.");
-      return [];
+  /** Turns the files the composer field reports from a paste into attachments, with a picked photo's limits. */
+  const pasted = useCallback(async (pasted: PastedFile[]): Promise<Attachment[]> => {
+    const out: Attachment[] = [];
+    const now = Date.now();
+    for (const [index, file] of pasted.entries()) {
+      const mediaType = resolveMediaType(file.type, file.fileName);
+      const isImage = mediaType.startsWith("image/");
+      // Rich text and other data a text paste carries is not an attachment, so it is skipped quietly.
+      if (!isImage && !ACCEPTED_MEDIA_TYPES.includes(mediaType)) continue;
+      const name = isImage ? pastedFileName(now, mediaType, index) : file.fileName;
+      // Refuse before reading, like a picked file.
+      const why = rejectionFor(mediaType, file.fileSize);
+      if (why) Alert.alert("Can't attach", rejectionMessage(name, why));
+      else accept(out, name, mediaType, file.fileSize, await readBase64(file.uri));
     }
-    const result = pastedImageResult(image.data, Date.now());
-    if ("why" in result) {
-      Alert.alert("Can't attach", rejectionMessage(result.name, result.why));
-      return [];
-    }
-    return [result.attachment];
+    return out;
   }, []);
 
   return { photos, camera, files, pasted };

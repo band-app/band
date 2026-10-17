@@ -15,6 +15,7 @@
   "dependencies": {
     "@band-app/client": "workspace:^",
     "@band-app/shared": "workspace:^",
+    "@mattermost/react-native-paste-input": "2.0.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@shopify/flash-list": "2.0.2",
     "@tanstack/react-query": "^5.90.21",

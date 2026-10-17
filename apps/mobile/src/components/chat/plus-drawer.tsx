@@ -29,8 +29,6 @@ export function PlusDrawer({
   onPhotos,
   onCamera,
   onFiles,
-  canPaste,
-  onPaste,
   pickers,
   onChooseMode,
 }: {
@@ -41,9 +39,6 @@ export function PlusDrawer({
   onPhotos: () => void;
   onCamera: () => void;
   onFiles: () => void;
-  /** The clipboard holds an image. Reading it waits for the tap on Paste image. */
-  canPaste: boolean;
-  onPaste: () => void;
   pickers: Pickers;
   onChooseMode: (configId: string, value: string) => void;
 }) {
@@ -116,13 +111,6 @@ export function PlusDrawer({
             />
             <Action label="Take photo" glyph="📷" onPress={onCamera} testID="plus-drawer__camera" />
             <Action label="Choose file" glyph="📄" onPress={onFiles} testID="plus-drawer__files" />
-            <Action
-              label="Paste image"
-              glyph="📋"
-              onPress={onPaste}
-              disabled={!canPaste}
-              testID="plus-drawer__paste"
-            />
           </View>
           {pickers.modes.length > 0 ? (
             <View style={styles.section} testID="plus-drawer__modes">
@@ -160,23 +148,19 @@ function Action({
   label,
   glyph,
   onPress,
-  disabled,
   testID,
 }: {
   label: string;
   glyph: string;
   onPress: () => void;
-  disabled?: boolean;
   testID: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: !!disabled }}
-      disabled={disabled}
       onPress={onPress}
-      style={[styles.action, disabled && styles.actionDisabled]}
+      style={styles.action}
       testID={testID}
     >
       <Text style={styles.glyph}>{glyph}</Text>
@@ -215,7 +199,6 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 16,
   },
-  actionDisabled: { opacity: 0.4 },
   glyph: { fontSize: 26 },
   actionLabel: { color: colors.foreground, fontSize: 13 },
   section: { gap: 6 },
