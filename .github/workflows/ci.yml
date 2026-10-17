@@ -488,7 +488,7 @@ jobs:
         run: pnpm --filter @band-app/web exec playwright install --with-deps chromium
 
       - name: Test hub (remote-loopback)
-        run: pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
+        run: pnpm --filter @band-app/server exec vp test run --shard=${{ matrix.shard }}/${{ matrix.total }}
         env:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
@@ -920,7 +920,7 @@ jobs:
       # The snapshot and restore hooks (plan step 3.10) run in the same job: a container worktree
       # sleeps, its /work is snapshotted into an image, and the restored container has an untracked file.
       - name: Docker runner hook
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
+        run: pnpm --filter @band-app/server exec vp test run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
         env:
           BAND_DOCKER_TEST_IMAGE: band-worker-check
           BAND_DOCKER_TEST_NETWORK: host
@@ -930,7 +930,7 @@ jobs:
       # xdpyinfo in a terminal on the worker.
       - name: Desktop worker
         run: |
-          pnpm --filter @band-app/server exec vitest run tests/desktop-docker.test.ts \
+          pnpm --filter @band-app/server exec vp test run tests/desktop-docker.test.ts \
             --reporter=default --reporter=json --outputFile.json=/tmp/desktop-docker.json
           # 7.1 S1, S2 and 7.2 S1 must run with the real image: a skipped or missing test fails the job.
           node -e '
@@ -1021,7 +1021,7 @@ jobs:
         run: pnpm --filter @band-app/server build
 
       - name: k8s runner hook on kind (S2)
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-k8s-kind.test.ts
+        run: pnpm --filter @band-app/server exec vp test run tests/runner-k8s-kind.test.ts
         env:
           BAND_K8S_TEST_IMAGE: band-worker:ci
           BAND_K8S_TEST_KUBECONFIG: ${{ github.workspace }}/kind-kubeconfig
