@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
+import { BottomSheet } from "../bottom-sheet";
 import { PlusGlyph } from "../glass";
 import { StateIcon } from "../state-icon";
 
@@ -176,75 +177,65 @@ export function TabSwitcher({
   onDismiss?: () => void;
 }) {
   return (
-    <Modal
+    <BottomSheet
       visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
+      onClose={onClose}
       onDismiss={onDismiss}
+      style={styles.sheet}
+      testID="tabs__sheet"
+      backdropTestID="tabs__sheet-done"
+      backdropLabel="Close tabs"
     >
-      <View style={styles.modal}>
+      <Text style={styles.sheetTitle} accessibilityRole="header">
+        {tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}
+      </Text>
+      <Text style={styles.sheetSub} numberOfLines={1}>
+        {title}
+      </Text>
+      <ScrollView style={styles.list} bounces={false}>
+        {tabs.map((tab, i) => (
+          <TabRow
+            key={tab.id}
+            tab={tab}
+            index={i}
+            count={tabs.length}
+            current={tab.id === active}
+            actions={actions}
+            onSelect={() => {
+              actions.select(tab.id);
+              onClose();
+            }}
+          />
+        ))}
+        {hidden > 0 ? (
+          <Text style={styles.note} testID="tabs__hidden">
+            {hidden} more on desktop
+          </Text>
+        ) : null}
+      </ScrollView>
+      <View style={styles.newRow}>
         <Pressable
-          style={styles.scrim}
-          onPress={onClose}
-          accessibilityLabel="Close tabs"
           accessibilityRole="button"
-          testID="tabs__sheet-done"
-        />
-        <View style={styles.sheet} testID="tabs__sheet">
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle} accessibilityRole="header">
-            {tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}
-          </Text>
-          <Text style={styles.sheetSub} numberOfLines={1}>
-            {title}
-          </Text>
-          <ScrollView style={styles.list} bounces={false}>
-            {tabs.map((tab, i) => (
-              <TabRow
-                key={tab.id}
-                tab={tab}
-                index={i}
-                count={tabs.length}
-                current={tab.id === active}
-                actions={actions}
-                onSelect={() => {
-                  actions.select(tab.id);
-                  onClose();
-                }}
-              />
-            ))}
-            {hidden > 0 ? (
-              <Text style={styles.note} testID="tabs__hidden">
-                {hidden} more on desktop
-              </Text>
-            ) : null}
-          </ScrollView>
-          <View style={styles.newRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New chat"
-              onPress={onNew}
-              style={styles.newChat}
-              testID="tabs__new"
-            >
-              <PlusGlyph size={14} />
-              <Text style={styles.newChatText}>Chat</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New terminal"
-              onPress={onNewTerminal}
-              style={styles.newChat}
-              testID="tabs__new-terminal"
-            >
-              <PlusGlyph size={14} />
-              <Text style={styles.newChatText}>Terminal</Text>
-            </Pressable>
-          </View>
-        </View>
+          accessibilityLabel="New chat"
+          onPress={onNew}
+          style={styles.newChat}
+          testID="tabs__new"
+        >
+          <PlusGlyph size={14} />
+          <Text style={styles.newChatText}>Chat</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New terminal"
+          onPress={onNewTerminal}
+          style={styles.newChat}
+          testID="tabs__new-terminal"
+        >
+          <PlusGlyph size={14} />
+          <Text style={styles.newChatText}>Terminal</Text>
+        </Pressable>
       </View>
-    </Modal>
+    </BottomSheet>
   );
 }
 
@@ -320,25 +311,7 @@ export function AgentPicker({
 }
 
 const styles = StyleSheet.create({
-  modal: { flex: 1, justifyContent: "flex-end" },
-  scrim: { backgroundColor: colors.scrim, flex: 1 },
-  sheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    maxHeight: "75%",
-    paddingBottom: 34,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  grab: {
-    alignSelf: "center",
-    backgroundColor: colors.grab,
-    borderRadius: 3,
-    height: 5,
-    marginBottom: 12,
-    width: 38,
-  },
+  sheet: { maxHeight: "75%" },
   sheetTitle: { color: colors.foreground, fontSize: 20, fontWeight: "600", marginHorizontal: 4 },
   sheetSub: { color: colors.mutedForeground, fontSize: 13, marginBottom: 12, marginHorizontal: 4 },
   list: { flexGrow: 0 },
