@@ -128,6 +128,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `m9-paste-image.yaml` | An image copied in Photos is pasted from the hint chip above the input and the + menu (disabled with no image on the clipboard) and sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
 | `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
+| `m9-session-history.yaml`, `m10-session-history-empty.yaml` | The History button lists a chat's sessions newest first, switches to the older one, starts a new one, and says so on a chat with none. Uses `gamma-sessions` and `gamma-no-sessions`. |
 | `m6-keyboard.yaml` | With the keyboard open, the last message and the composer are both on screen. Run it on other simulators with `BAND_SIM_UDID`. |
 | `m7-draft.yaml` | An unsent draft survives leaving the screen and the app going to the background. |
 | `m8-composer-expanded.yaml` | Focused, the composer expands with the attach button and the model and mode pills, and sending still works. |

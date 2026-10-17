@@ -257,6 +257,9 @@ export const SCENARIO = {
   ],
 };
 
+export const SESSION_ONE_PROMPT = "first session: alpha";
+export const SESSION_TWO_PROMPT = "second session: beta";
+
 /** The worktree ids the flows use, as the hub names them. */
 export const WORKTREES = {
   ALPHA_MAIN: "alpha-main",
@@ -276,6 +279,10 @@ export const WORKTREES = {
   GAMMA_PASTE: "gamma-paste",
   GAMMA_SUGGEST: "gamma-suggest",
   GAMMA_SESSION: "gamma-session",
+  /** A chat that has had two agent sessions, for the Sessions sheet (m9). */
+  GAMMA_SESSIONS: "gamma-sessions",
+  /** An empty chat that never ran a session (m10). */
+  GAMMA_NO_SESSIONS: "gamma-no-sessions",
   /** The + drawer flow (attachment actions and the mode). */
   GAMMA_DRAWER: "gamma-drawer",
   GAMMA_KEYBOARD: "gamma-keyboard",
@@ -389,7 +396,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -411,6 +418,13 @@ export async function seedHub(state) {
     pngFile("screenshot.png"),
   ]);
   await seedTurn(state, chats, WORKTREES.GAMMA_LONG, "long: check every module");
+  // Two sessions: a turn, then "new session" (no active session), then a turn that starts another.
+  await seedTurn(state, chats, WORKTREES.GAMMA_SESSIONS, SESSION_ONE_PROMPT);
+  await trpc(state, "chats.setActiveSession", {
+    worktreeId: WORKTREES.GAMMA_SESSIONS,
+    chatId: chats[WORKTREES.GAMMA_SESSIONS],
+  });
+  await seedTurn(state, chats, WORKTREES.GAMMA_SESSIONS, SESSION_TWO_PROMPT);
   for (let i = 1; i <= HISTORY_TURNS; i++) {
     const n = String(i).padStart(2, "0");
     await seedTurn(state, chats, WORKTREES.GAMMA_HISTORY, `turn ${n}: say done`);
