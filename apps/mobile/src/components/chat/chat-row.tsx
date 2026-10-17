@@ -1,9 +1,9 @@
 import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
-import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react-native";
-import { memo } from "react";
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react-native";
+import { memo, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import type { ChatRow } from "../../lib/chat/rows";
+import { type ChatRow, copyText } from "../../lib/chat/rows";
 import { chatColors, colors, tones } from "../../theme";
 import { Icon } from "../icon";
 import { useAssetSource, useChat, useOpen } from "./chat-context";
@@ -127,19 +127,30 @@ function time(ms: number | undefined): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/** The message's actions (Copy, when it was sent). Long-pressing the text selects it instead. */
-function MessageMenu({ rowKey }: { rowKey: string }) {
-  const { showActions } = useChat();
+/** Copies the message, then shows a check for as long as the web's copy button does. */
+function CopyButton({ row }: { row: ChatRow }) {
+  const { copyRow } = useChat();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  if (!copyText(row)) return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Message actions"
-      onPress={() => showActions(rowKey)}
+      accessibilityLabel={copied ? "Copied" : "Copy message"}
+      onPress={() => {
+        void copyRow(row.key).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1500);
+        });
+      }}
       hitSlop={10}
       style={styles.menu}
-      testID="chat__message-menu"
+      testID="chat__message-copy"
     >
-      <MoreHorizontal size={16} color={colors.mutedForeground} />
+      <Icon icon={copied ? Check : Copy} size="sm" color={colors.mutedForeground} />
     </Pressable>
   );
 }
@@ -158,7 +169,7 @@ function Body({ row }: { row: ChatRow }) {
             ))}
             {row.message.text.trim() ? <Markdown text={row.message.text} /> : null}
           </View>
-          <MessageMenu rowKey={row.key} />
+          <CopyButton row={row} />
         </View>
       );
     case "part":
@@ -179,7 +190,7 @@ function Body({ row }: { row: ChatRow }) {
       return (
         <View style={styles.footer} testID="chat__turn-end">
           <Text style={styles.footerText}>{time(row.message.createdAt)}</Text>
-          <MessageMenu rowKey={row.key} />
+          <CopyButton row={row} />
         </View>
       );
     case "thinking":
