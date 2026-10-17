@@ -257,10 +257,10 @@ export const SCENARIO = {
   ],
 };
 
-/** The worktree ids the flows use, as the hub names them. */
 export const SESSION_ONE_PROMPT = "first session: alpha";
 export const SESSION_TWO_PROMPT = "second session: beta";
 
+/** The worktree ids the flows use, as the hub names them. */
 export const WORKTREES = {
   ALPHA_MAIN: "alpha-main",
   ALPHA_FEATURE: "alpha-feat-mobile",
