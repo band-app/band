@@ -1,6 +1,6 @@
 import { Button } from "@band-app/ui";
 import { Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { writeClipboardText } from "../../lib/clipboard";
 
 interface Props {
@@ -13,10 +13,13 @@ interface Props {
 /** A command to run by hand, with a button that copies it. */
 export function CopyCommand({ command, testId, label }: Props) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
   const copy = async () => {
     if (await writeClipboardText(command)) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1500);
     }
   };
   return (

@@ -63,14 +63,14 @@ export class WorkerUpdateService {
     if (row.status !== "online") {
       throw new WorkerUpdateError("not-updatable", "The worker is not connected");
     }
+    if (!view.updateTarget) {
+      throw new WorkerUpdateError("not-updatable", "The worker is already up to date");
+    }
     if (!view.serviceManager) {
       throw new WorkerUpdateError(
         "not-updatable",
-        `This worker does not run under launchd or a systemd user unit. Update it by hand: ${workerUpdateCommand(view.updateTarget ?? HUB_VERSION)}`,
+        `This worker does not run under launchd or a systemd user unit. Update it by hand: ${workerUpdateCommand(view.updateTarget)}`,
       );
-    }
-    if (!view.updateTarget) {
-      throw new WorkerUpdateError("not-updatable", "The worker is already up to date");
     }
     const current = this.updates.get(hostId);
     if (current && current.state !== "failed") {

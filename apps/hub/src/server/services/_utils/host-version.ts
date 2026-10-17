@@ -75,7 +75,9 @@ export function describeHostVersion(
       manualCommand: null,
     };
   }
-  const workerVersion = parseSemver(host.version) ? host.version : null;
+  const parsed = parseSemver(host.version);
+  // Normalized, so a suffix a worker sent never reaches the UI or the CLI table.
+  const workerVersion = parsed ? `${parsed.major}.${parsed.minor}.${parsed.patch}` : null;
   const relation = relationToHub(workerVersion, hubVersion);
   const required = typeof host.info?.updateRequired === "string" ? host.info.updateRequired : null;
   const refused = required !== null && host.status !== "online";

@@ -6,14 +6,10 @@
 
 import { execFile } from "node:child_process";
 import { RpcError } from "@band-app/link";
+import { isStrictSemver } from "@band-app/shared/versions";
 import type { Registrar } from "./context.ts";
 import { RPC_INVALID_PARAMS, str } from "./rpc-util.ts";
 import { LAUNCHD_LABEL, SYSTEMD_UNIT } from "./service.ts";
-
-/** Same rule as `isStrictSemver` in `@band-app/shared`: exactly MAJOR.MINOR.PATCH, nothing else reaches npm. */
-const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const isStrictSemver = (v: unknown): v is string =>
-  typeof v === "string" && v.length <= 32 && STRICT_SEMVER.test(v);
 
 export type ServiceManager = "launchd" | "systemd";
 
@@ -24,9 +20,12 @@ export const RPC_UPDATE_FAILED = -32020;
 export function detectServiceManager(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
+  uid: number | undefined = process.getuid?.(),
 ): ServiceManager | null {
   if (platform === "darwin" && env.XPC_SERVICE_NAME === LAUNCHD_LABEL) return "launchd";
-  if (platform === "linux" && env.INVOCATION_ID) return "systemd";
+  // `INVOCATION_ID` is set for system units too (a root-run unit, a runner's VM). Only a user unit
+  // can be restarted with `systemctl --user`, and that never runs as root.
+  if (platform === "linux" && env.INVOCATION_ID && uid !== 0) return "systemd";
   return null;
 }
 

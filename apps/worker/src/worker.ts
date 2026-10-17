@@ -24,6 +24,7 @@ import {
   RpcError,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import { VERSION_REFUSED_CODE } from "@band-app/shared/versions";
 import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
@@ -87,7 +88,6 @@ export interface WorkerOptions {
 }
 
 /** The hub refused this worker's version. It waits, so a service manager's restart does not redial every few seconds. */
-const VERSION_REFUSED_CODE = "version-incompatible";
 const VERSION_RETRY_MS = 5 * 60_000;
 
 /** Git repos that are a root or sit directly in one. A repo with no remote URL has no mapping, so this finds it. */
@@ -189,7 +189,11 @@ export class Worker {
     const info = await host.info();
 
     const serviceManager =
-      options.serviceManager === undefined ? detectServiceManager() : options.serviceManager;
+      options.serviceManager !== undefined
+        ? options.serviceManager
+        : config.ephemeral
+          ? null
+          : detectServiceManager();
     const client = new LinkClient({
       url: linkUrl(config.hubUrl),
       token,
@@ -302,6 +306,7 @@ export class Worker {
   }
 
   private connectedOnce = false;
+  private refusalWaiting = false;
   private versionRetryMs = VERSION_RETRY_MS;
 
   /** Logs why the hub refused this version and waits before the process exits, which is when a service manager would redial. */
@@ -392,6 +397,8 @@ export class Worker {
       log.error({ reason }, "the hub rejected this worker");
       // The first connect handles its own refusal, in `start`.
       if (code === VERSION_REFUSED_CODE && this.connectedOnce) {
+        if (this.refusalWaiting) return;
+        this.refusalWaiting = true;
         void this.waitOutRefusal(reason, this.versionRetryMs).then(() => this.stop(1));
       } else if (this.connectedOnce || code !== VERSION_REFUSED_CODE) {
         void this.stop(1);

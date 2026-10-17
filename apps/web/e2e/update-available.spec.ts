@@ -39,6 +39,7 @@ let legacy: StandInWorker;
 let installAttempts = 0;
 
 test.describe("a newer release exists", () => {
+  test.describe.configure({ mode: "serial" });
   test.beforeAll(async () => {
     releases = await startReleasesStub("v9.0.0");
     tmpHome = createTmpHome();

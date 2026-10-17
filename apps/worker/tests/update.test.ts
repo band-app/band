@@ -54,7 +54,8 @@ describe("service manager detection", () => {
       "launchd",
     );
     assert.equal(detectServiceManager({ XPC_SERVICE_NAME: "0" }, "darwin"), null);
-    assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "linux"), "systemd");
+    assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "linux", 1000), "systemd");
+    assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "linux", 0), null);
     assert.equal(detectServiceManager({}, "linux"), null);
     assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "darwin"), null);
   });
