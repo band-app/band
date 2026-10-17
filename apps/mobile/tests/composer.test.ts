@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { MAX_ATTACHMENT_BYTES } from "@band-app/client/composer";
 import {
   makeAttachment,
+  pastedImageResult,
   rejectionFor,
+  rejectionMessage,
   resolveMediaType,
   toWireFiles,
 } from "../src/lib/composer/attachments.ts";
@@ -48,5 +51,23 @@ describe("queue order", () => {
         { id: "2", text: "b", files: [{ mediaType: "image/png", url: "data:x" }] },
       ],
     );
+  });
+});
+
+describe("pasted images", () => {
+  it("attaches a small pasted PNG as an image", () => {
+    const result = pastedImageResult("data:image/png;base64,QUJD", 42);
+    assert.ok("attachment" in result);
+    assert.equal(result.attachment.file.mediaType, "image/png");
+    assert.equal(result.attachment.file.filename, "pasted-42.png");
+    assert.equal(result.attachment.size, 3);
+  });
+
+  it("refuses a pasted image over the limit with the picked-photo message", () => {
+    const big = "A".repeat(Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 8);
+    const result = pastedImageResult(big, 1);
+    assert.ok("why" in result);
+    assert.equal(result.why, "too-large");
+    assert.match(rejectionMessage(result.name, result.why), /larger than/);
   });
 });
